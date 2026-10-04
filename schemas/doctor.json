@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/doctor.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "status",
+    "accounts",
+    "general",
+    "fixes"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "status": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "ok"
+        },
+        {
+          "type": "string",
+          "const": "issues"
+        }
+      ]
+    },
+    "accounts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "ref",
+          "family",
+          "name",
+          "kind",
+          "dir",
+          "shared",
+          "backups",
+          "findings"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "family": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "subscription"
+              },
+              {
+                "type": "string",
+                "const": "api"
+              }
+            ]
+          },
+          "dir": {
+            "type": "string"
+          },
+          "shared": {
+            "type": "object",
+            "required": [
+              "ok",
+              "total"
+            ],
+            "properties": {
+              "ok": {
+                "type": "number"
+              },
+              "total": {
+                "type": "number"
+              }
+            }
+          },
+          "backups": {
+            "type": "number"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "level",
+                "account",
+                "item",
+                "code",
+                "message",
+                "source",
+                "fixable"
+              ],
+              "properties": {
+                "level": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "ok"
+                    },
+                    {
+                      "type": "string",
+                      "const": "warn"
+                    },
+                    {
+                      "type": "string",
+                      "const": "fail"
+                    }
+                  ]
+                },
+                "account": {
+                  "type": "string"
+                },
+                "item": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "hint": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "fixable": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "general": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "level",
+          "account",
+          "item",
+          "code",
+          "message",
+          "source",
+          "fixable"
+        ],
+        "properties": {
+          "level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "ok"
+              },
+              {
+                "type": "string",
+                "const": "warn"
+              },
+              {
+                "type": "string",
+                "const": "fail"
+              }
+            ]
+          },
+          "account": {
+            "type": "string"
+          },
+          "item": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "hint": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "fixable": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "fixes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "account",
+          "item",
+          "code",
+          "ok",
+          "message"
+        ],
+        "properties": {
+          "account": {
+            "type": "string"
+          },
+          "item": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "title": "sideby doctor --json"
+}

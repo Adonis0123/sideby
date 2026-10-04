@@ -1,0 +1,77 @@
+# sideby
+
+> Run every AI coding account side by side. sideby is a Node CLI (npm package `sideby`, Node 22.18+) that starts Claude Code, Codex, Grok Build and pi with one isolated config directory per account, keeps skills, hooks and rules shared with the Main Account, repairs drift with `doctor`, and shows each account's quota and 7-day token usage from local records only (built in; no ccusage).
+
+Key facts:
+
+- One account = one directory. claude: `~/.claude` (main), `~/.claude-<name>`, selected by `CLAUDE_CONFIG_DIR`. codex: `~/.codex`, `~/.codex-<name>`, `CODEX_HOME`. grok: `~/.grok`, `~/.grok-<name>`, `GROK_HOME`. pi: `~/.pi/agent`, `~/.pi-<name>/agent`, `PI_CODING_AGENT_DIR`. The Main Account is named `main` and runs without the variable.
+- Account ref: `<family>:<name>`; a bare `<name>` works when unique. Names match `^[a-z0-9][a-z0-9-]{0,31}$`.
+- Discovery: a directory matching the pattern is an account only if it holds `proxy.env` or at least one of the family's Shared Items (so `~/.claude-code-router` is not an account). Config `ignore` skips refs.
+- API account: an account directory containing `proxy.env` (dotenv subset, mode exactly 600). Its variables reach only the launched Host. Login state is `not-needed` (`key` in `sideby list`). Exception: pi loads `proxy.env` for provider keys, but a pi account stays a subscription account and signs in with `/login`.
+- sideby never switches a global active account, never rotates accounts, never reads credentials to call a model, and never calls private quota endpoints.
+- Agents must not read `proxy.env`, `auth.json` or `.claude.json`, and must let the user run `sideby login <ref>` themselves.
+
+## Commands
+
+- `sideby` / `sideby list [--json]`: list accounts (TYPE `main`|`sub`|`api`, LOGIN `✓`|`login needed`|`key`|`?`, MODEL, DIR). Problems plugins hit while reading an account go to stderr. Exit 0.
+- `sideby run <acct> [-- args]`: start the Host for one account. Exit: Host's code; 128+n if killed by signal n; 1 on sideby error. Argument order: family defaults, `accounts.<ref>.args` from config, then user args.
+- `sideby new <family> <name> [--api] [--json]`: create an account. Exit 0; 1 partly failed or invalid name.
+- `sideby login <acct>`: run the family's sign-in command with the account selected; for pi, start pi and print "type /login". Exit: Host's code.
+- `sideby doctor [acct|family] [--fix] [--force] [--json]`: check Shared Items, credential modes, leftovers. Exit 0 when no `fail` Finding (warnings allowed); 1 otherwise.
+- `sideby quota [acct] [--json]`: quota windows and 7-day usage. Exit 0.
+- `sideby quota setup claude [--yes] [--json]`: without `--yes`, print the diff and change nothing; with `--yes`, wrap `statusLine.command` in `~/.claude/settings.json` as `sideby statusline-tap --orig-b64 <base64>` (or `sideby statusline-tap` when there was none). Refused (exit 1) if `sideby` is not on PATH or comes from the npx cache: needs `npm i -g sideby`. Exit 0 ready, applied or already enabled; 1 blocked or failed.
+- `sideby quota teardown claude [--json]`: restore the original bytes, only if the file is unchanged since setup; otherwise refuse with a diff. Exit 0; 1 refused or failed.
+- `sideby ui [--port n] [--no-open]`: local panel on `127.0.0.1:17420`; reuses a running sideby panel, shifts past busy ports.
+- `sideby shell-init zsh|bash`: one shell function per account (`sideby-<family>-<name>`) plus config `aliases`. Use `eval "$(sideby shell-init zsh)"`.
+- `sideby plugins [--json]`: loaded plugins and load errors. Exit 0; 1 if any failed.
+- Any command: exit 2 on a usage error (unknown option, missing argument); 1 when sideby fails (unknown account, invalid config).
+
+## JSON contract
+
+- `list`, `new`, `doctor`, `quota` (with `setup`/`teardown`) and `plugins` accept `--json`; `run`, `login`, `ui` and `shell-init` do not.
+- Every JSON output has `schemaVersion: 1`. Adding fields keeps the version; removing, renaming or changing meaning bumps it. With `--json`, errors print `{ "schemaVersion": 1, "error": "..." }`.
+- JSON Schemas for each output and for the config file ship in the package under `schemas/` (`list`, `new`, `doctor`, `quota`, `quota-setup`, `quota-teardown`, `plugins`, `error`, `config`).
+- `list --json`: `families[]` (`id`, `title`, `bin`, `installUrl`, `installed`, `plugin`), `accounts[]` (`family`, `name`, `ref`, `dir`, `isMain`, `kind` `subscription`|`api`, `secretFile?`, `familyTitle`, `hostInstalled`, `login` `logged-in`|`logged-out`|`unknown`|`not-needed`, `model?`, `problems?` string[]), `pluginErrors[]` (`where`, `message`).
+- `doctor --json`: `status` `ok`|`issues`, `accounts[]` (`ref`, `family`, `name`, `kind`, `dir`, `shared` {`ok`, `total`}, `backups`, `findings[]`), `general[]`, `fixes[]` (`account`, `item`, `code`, `ok`, `message`). `shared` counts only items the Main Account has.
+- Finding: `level` (`ok`|`warn`|`fail`), `account`, `item`, `code` (stable, e.g. `link.real-file`, `link.other-target` (warn), `link.dangling` (fail), `symlink-forbidden` (fail; any link where the item must be a real file or copy), `path.invalid`, `missing`, `copy.stale`, `symlink-forbidden`, `credential.mode`, `json-key.drift`, `json-key.would-remove`, `name.backup-like`, `plugin.error`), `message`, `hint?`, `source` (`core` or plugin name), `fixable`. sideby never re-points a link.
+- Quota: `status: "ok"` with `windows[]` (`label` `5h`|`7d`|`<n>m`, `windowMinutes`, `usedPercent`, `resetsAt`), `observedAt`, `source`, `plan?`; or `status: "unavailable"` with `reason` `not-enabled`|`no-session`|`unrecognized`|`no-source`|`api-account` and `detail?`.
+- Usage: `status: "ok"` with `days`, `sessions`, `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `totalTokens`; or `unavailable` with `reason` `no-source`|`no-session`|`unrecognized` and `detail?`. Sources: Claude `projects/**/*.jsonl`, Codex `sessions/**/rollout-*.jsonl`; Grok and pi have none.
+- `quota setup|teardown --json`: setup `{ family, applied, plan: { status: "enabled"|"ready"|"blocked", file, diff, message } }`; teardown `{ family, ok, message, diff? }` (`schemas/quota-setup.json`, `schemas/quota-teardown.json`).
+- No output ever contains a credential value.
+
+## Configuration
+
+- File: `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` (optional). Fields: `accounts.<ref>.args`, `aliases`, `ignore`, `pluginDirs`, `plugins.<name>` (`enabled` plus plugin settings), `extraSharedItems.<family>[]` (`path` relative to the account directory, no `..`; `mode`; optional `noSymlink`, `credential`).
+- State: `${XDG_STATE_HOME:-~/.local/state}/sideby/` (quota cache, last doctor result, original `settings.json` bytes).
+- Plugins directory: `${XDG_CONFIG_HOME:-~/.config}/sideby/plugins/`.
+- Share Modes: `link`, `copy`, `link-or-copy`, `link-or-local`, `local`, `local-if-api`, `info`, `json-key`.
+
+## Plugin API
+
+- A plugin is a local directory with `plugin.json` (`name`, `version`, `description`, optional `main`, `userConfig`) and `index.ts` exporting `{ name, register(api) } satisfies Plugin`.
+- Loaded from built-ins, then `${XDG_CONFIG_HOME:-~/.config}/sideby/plugins/*`, then config `pluginDirs`. Directory, `plugin.json` and entry must be owned by the user and not group/other writable.
+- A plugin is local code with the user's full permissions.
+- Only `import type { Plugin } from 'sideby'`; never import values. Everything arrives through `api`.
+- `api.family(def: FamilyDef)`: register a Family (`id`, `title`, `bin`, `installUrl`, `layout`, `selectVar`, `hijackVars`, `apiVars`, `sharedItems`, `login`, optional `secretFileMeansApi`, `defaultArgs`, `loginState`, `model`, `readQuota`, `readUsage`, `quotaSetup`). A throwing `loginState` or `model` becomes an entry in that account's `problems`.
+- `api.on('launch.before', [filter], handler)`: before `run`/`login`; mutate `ctx.env` and `ctx.args`, or `throw api.abort(msg)`. 30 s timeout.
+- `api.on('account.created', [filter], handler)`: after `new`; `ctx.log()` for next steps. 30 s.
+- `api.on('doctor.check', [filter], handler)`: return `CheckResult[]` (`level`, `item`, `code`, `message`, `hint?`, `fix?`). 10 s.
+- `filter` is `{ family?: string }`. `ctx.config` is the plugin's own settings. `api.fs.writeFileAtomic(path, data, mode?)` for fixes.
+- Built-in optional plugin `account-script`: when enabled, runs `<account>/sideby-before-launch` before each launch (25 s limit; failure stops the launch).
+- Test plugins with `sideby/testing`: `withFakeHome`, `fakeHost`, `readHostLog`, `snapshot`, `diffSnapshots`.
+
+## Docs
+
+- [README](https://github.com/Adonis0123/sideby/blob/main/README.md): install, quick start, commands, config, plugins, FAQ
+- [README (中文)](https://github.com/Adonis0123/sideby/blob/main/README.zh-CN.md): Chinese README
+- [Agent Skill](https://github.com/Adonis0123/sideby/blob/main/skills/sideby/SKILL.md): how agents diagnose and create accounts; install with `npx skills add Adonis0123/sideby`
+- [Plugin types](https://github.com/Adonis0123/sideby/blob/main/src/types.ts): `Plugin`, `PluginApi`, `FamilyDef`, `Finding`, `QuotaResult`, `UsageResult`
+- [Glossary](https://github.com/Adonis0123/sideby/blob/main/CONTEXT.md): Account, Family, Shared Item, Share Mode, Hijack Variable, Finding
+
+## Optional
+
+- [ADR-0001](https://github.com/Adonis0123/sideby/blob/main/docs/adr/0001-side-by-side-not-switching.md): side by side, never switch, rotate or proxy
+- [ADR-0002](https://github.com/Adonis0123/sideby/blob/main/docs/adr/0002-typescript-npm-local-plugins.md): TypeScript on npm, local plugins, type-only imports
+- [ADR-0003](https://github.com/Adonis0123/sideby/blob/main/docs/adr/0003-quota-from-local-and-official-sources.md): quota from local records and official CLI output only
+- [AGENTS.md](https://github.com/Adonis0123/sideby/blob/main/AGENTS.md): rules for agents maintaining the repository
+- [Release process](https://github.com/Adonis0123/sideby/blob/main/docs/release.md): first publish and tag-based releases (Chinese)

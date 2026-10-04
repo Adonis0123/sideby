@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/list.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "families",
+    "accounts",
+    "pluginErrors"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "families": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "bin",
+          "installUrl",
+          "installed",
+          "plugin"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "bin": {
+            "type": "string"
+          },
+          "installUrl": {
+            "type": "string"
+          },
+          "installed": {
+            "type": "boolean"
+          },
+          "plugin": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "accounts": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "family",
+              "name",
+              "ref",
+              "dir",
+              "isMain",
+              "kind"
+            ],
+            "properties": {
+              "family": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "ref": {
+                "type": "string"
+              },
+              "dir": {
+                "type": "string"
+              },
+              "isMain": {
+                "type": "boolean"
+              },
+              "kind": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "subscription"
+                  },
+                  {
+                    "type": "string",
+                    "const": "api"
+                  }
+                ]
+              },
+              "secretFile": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "familyTitle",
+              "hostInstalled",
+              "login"
+            ],
+            "properties": {
+              "familyTitle": {
+                "type": "string"
+              },
+              "hostInstalled": {
+                "type": "boolean"
+              },
+              "login": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "logged-in"
+                  },
+                  {
+                    "type": "string",
+                    "const": "logged-out"
+                  },
+                  {
+                    "type": "string",
+                    "const": "unknown"
+                  },
+                  {
+                    "type": "string",
+                    "const": "not-needed"
+                  }
+                ]
+              },
+              "model": {
+                "type": "string"
+              },
+              "problems": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "pluginErrors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "where",
+          "message"
+        ],
+        "properties": {
+          "where": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "title": "sideby list --json"
+}

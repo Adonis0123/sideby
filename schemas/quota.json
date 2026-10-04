@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/quota.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "accounts"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "accounts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "ref",
+          "kind",
+          "quota",
+          "usage"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "subscription"
+              },
+              {
+                "type": "string",
+                "const": "api"
+              }
+            ]
+          },
+          "quota": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "status",
+                  "windows",
+                  "observedAt",
+                  "source"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "const": "ok"
+                  },
+                  "windows": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "label",
+                        "windowMinutes",
+                        "usedPercent",
+                        "resetsAt"
+                      ],
+                      "properties": {
+                        "label": {
+                          "type": "string"
+                        },
+                        "windowMinutes": {
+                          "type": "number"
+                        },
+                        "usedPercent": {
+                          "type": "number"
+                        },
+                        "resetsAt": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "observedAt": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "plan": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "status",
+                  "reason"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "const": "unavailable"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "status",
+                  "days",
+                  "sessions",
+                  "inputTokens",
+                  "outputTokens",
+                  "cacheReadTokens",
+                  "cacheWriteTokens",
+                  "totalTokens"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "const": "ok"
+                  },
+                  "days": {
+                    "type": "number"
+                  },
+                  "sessions": {
+                    "type": "number"
+                  },
+                  "inputTokens": {
+                    "type": "number"
+                  },
+                  "outputTokens": {
+                    "type": "number"
+                  },
+                  "cacheReadTokens": {
+                    "type": "number"
+                  },
+                  "cacheWriteTokens": {
+                    "type": "number"
+                  },
+                  "totalTokens": {
+                    "type": "number"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "status",
+                  "reason"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "const": "unavailable"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "title": "sideby quota --json"
+}

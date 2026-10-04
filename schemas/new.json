@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/new.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "ok",
+    "account",
+    "steps",
+    "hookErrors",
+    "nextSteps"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "account": {
+      "type": "object",
+      "required": [
+        "family",
+        "name",
+        "ref",
+        "dir",
+        "isMain",
+        "kind"
+      ],
+      "properties": {
+        "family": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "ref": {
+          "type": "string"
+        },
+        "dir": {
+          "type": "string"
+        },
+        "isMain": {
+          "type": "boolean"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "subscription"
+            },
+            {
+              "type": "string",
+              "const": "api"
+            }
+          ]
+        },
+        "secretFile": {
+          "type": "string"
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "item",
+          "action",
+          "ok"
+        ],
+        "properties": {
+          "item": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "hookErrors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "plugin",
+          "message"
+        ],
+        "properties": {
+          "plugin": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "nextSteps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "title": "sideby new --json"
+}

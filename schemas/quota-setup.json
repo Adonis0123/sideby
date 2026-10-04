@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/quota-setup.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "family",
+    "applied",
+    "plan"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "family": {
+      "type": "string"
+    },
+    "applied": {
+      "type": "boolean"
+    },
+    "plan": {
+      "type": "object",
+      "required": [
+        "status",
+        "file",
+        "diff",
+        "message"
+      ],
+      "properties": {
+        "status": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "enabled"
+            },
+            {
+              "type": "string",
+              "const": "ready"
+            },
+            {
+              "type": "string",
+              "const": "blocked"
+            }
+          ]
+        },
+        "file": {
+          "type": "string"
+        },
+        "diff": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "title": "sideby quota setup --json"
+}

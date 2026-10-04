@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/error.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "error"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "error": {
+      "type": "string"
+    }
+  },
+  "title": "sideby error --json"
+}

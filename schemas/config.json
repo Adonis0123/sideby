@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/config.json",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "accounts": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "type": "object",
+          "properties": {
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "description": "Per-Account settings keyed by `<family>:<name>`."
+    },
+    "aliases": {
+      "type": "object",
+      "patternProperties": {
+        "^[A-Za-z_][A-Za-z0-9_-]*$": {
+          "type": "string"
+        }
+      },
+      "description": "Short shell function names created by `sideby shell-init`, mapped to Account refs."
+    },
+    "ignore": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Account refs that are not Accounts."
+    },
+    "pluginDirs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Absolute or `~/` paths of Plugin directories."
+    },
+    "plugins": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {}
+          }
+        }
+      },
+      "description": "Per-Plugin settings; `enabled: false` turns a Plugin off."
+    },
+    "extraSharedItems": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "mode"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+$"
+              },
+              "mode": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "link"
+                  },
+                  {
+                    "type": "string",
+                    "const": "copy"
+                  },
+                  {
+                    "type": "string",
+                    "const": "link-or-copy"
+                  },
+                  {
+                    "type": "string",
+                    "const": "link-or-local"
+                  },
+                  {
+                    "type": "string",
+                    "const": "local"
+                  },
+                  {
+                    "type": "string",
+                    "const": "local-if-api"
+                  },
+                  {
+                    "type": "string",
+                    "const": "info"
+                  }
+                ]
+              },
+              "noSymlink": {
+                "type": "boolean"
+              },
+              "credential": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": false,
+  "title": "sideby config"
+}
