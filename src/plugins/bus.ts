@@ -93,7 +93,8 @@ export class HookBus {
         () => reject(new HookError(e.plugin, `${event} timed out after ${ms / 1000}s`, false)),
         ms,
       )
-      timer.unref()
+      // Kept referenced: a hook stuck on a bare Promise holds no handle, and an unref'd timer would let
+      // the process exit silently mid-operation. `finally` clears it, so it never delays a normal exit.
     })
     try {
       return await Promise.race([Promise.resolve().then(() => e.handler(ctx)), timeout])

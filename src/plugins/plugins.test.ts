@@ -183,6 +183,19 @@ describe('account.create.before', () => {
     })
   })
 
+  it('times out a hook that hangs on a bare Promise even when nothing else keeps the process alive', async () => {
+    const { execFileSync } = await import('node:child_process')
+    const bus = new URL('./bus.ts', import.meta.url).href
+    const script = [
+      `const { HookBus } = await import(${JSON.stringify(bus)})`,
+      "const b = new HookBus({ 'account.create.before': 50 })",
+      "b.add('stuck', 'account.create.before', {}, () => new Promise(() => {}))",
+      "try { await b.run('account.create.before', 'demo', {}); console.log('no error') } catch (e) { console.log(String(e.message)) }",
+    ].join('\n')
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8' })
+    assert.match(out, /timed out/)
+  })
+
   it('a hook that crashes or hangs also stops creation and names the plugin', async () => {
     await withFakeHome(async (h) => {
       await seedDemoMain(h.write)
