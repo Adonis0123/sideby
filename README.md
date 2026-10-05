@@ -183,7 +183,7 @@ Optional. `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json`, schema in [`schema
 | Field | Meaning |
 |---|---|
 | `accounts.<ref>.args` | Arguments added for one account. Order: family defaults, then these, then what you pass after `--`. sideby adds no dangerous flags by default; put them here per account if you want them. |
-| `aliases` | Extra short shell functions created by `shell-init`, each mapped to an account ref. |
+| `aliases` | Short names mapped to account refs. `shell-init` turns each into a shell function, and commands such as `sideby run` and `sideby doctor` accept them too. |
 | `ignore` | Account refs (`<family>:<name>`) that look like accounts but are not. Doctor warns about names containing `bak`, `backup`, `old` or `tmp` and suggests adding them here. |
 | `pluginDirs` | Extra plugin directories. Absolute paths or paths starting with `~/`. |
 | `plugins.<name>` | Settings for one plugin; `enabled` turns it on or off, built-in families included. |

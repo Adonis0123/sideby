@@ -169,6 +169,12 @@ describe('run', () => {
       assert.match(bad.err, /proxy\.env:2: expected KEY=VALUE/)
       assert.doesNotMatch(bad.err, /this is not valid/)
       assert.equal((await readHostLog(h, 'codex')).length, 1)
+
+      // A config alias starts the same account.
+      await writeFile(secret, 'OPENAI_API_KEY=ok\n')
+      await h.write('.config/sideby/config.json', JSON.stringify({ aliases: { rl: 'codex:relay' } }))
+      assert.equal((await sideby(h, ['run', 'rl'])).code, 0)
+      assert.equal((await readHostLog(h, 'codex')).at(-1)!.env.CODEX_HOME, h.path('.codex-relay'))
     })
   })
 
@@ -406,6 +412,12 @@ describe('read-only commands', () => {
         `${bashInit}\ntype sideby-codex-work cx2 >/dev/null && echo ok`,
       ]).toString()
       assert.equal(typed.trim(), 'ok')
+      // An alias also works wherever an account is named.
+      const doctorAlias = JSON.parse((await sideby(h, ['doctor', 'cx2', '--json'])).out)
+      assert.deepEqual(
+        doctorAlias.accounts.map((a: { ref: string }) => a.ref),
+        ['codex:work'],
+      )
       // Only sideby's own state directory (and its parents) may appear.
       const changed = diffSnapshots(before, await snapshot(h.home)).filter(
         (p) => !['.local', '.local/state'].includes(p) && !p.startsWith('.local/state/sideby'),

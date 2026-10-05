@@ -167,7 +167,7 @@ export async function createRuntime(
     },
     accounts,
     async resolve(ref) {
-      return resolveRef(ref, await accounts())
+      return resolveRef(ref, await accounts(), config.aliases)
     },
     async status(account) {
       const f = familyOf(account.family)
@@ -211,7 +211,7 @@ export async function createRuntime(
           fams = new Map([[o.target, families.get(o.target)!]])
           scope = { kind: 'family', family: o.target }
         } else {
-          const one = resolveRef(o.target, list)
+          const one = resolveRef(o.target, list, config.aliases)
           list = [one]
           fams = new Map([[one.family, familyOf(one.family)]])
           scope = { kind: 'account', ref: one.ref }
@@ -280,7 +280,7 @@ export async function createRuntime(
       return createAccount({ family: familyOf(familyId), name, api: Boolean(o.api), home: paths.home, bus })
     },
     async prepareLaunch(ref, userArgs, command) {
-      const account = resolveRef(ref, await accounts())
+      const account = resolveRef(ref, await accounts(), config.aliases)
       return prepareLaunch({
         account,
         family: familyOf(account.family),

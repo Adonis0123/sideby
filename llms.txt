@@ -22,7 +22,7 @@ Key facts:
 - `sideby quota setup claude [--yes] [--json]`: without `--yes`, print the diff and change nothing; with `--yes`, wrap `statusLine.command` in `~/.claude/settings.json` as `sideby statusline-tap --orig-b64 <base64>` (or `sideby statusline-tap` when there was none). Refused (exit 1) if `sideby` is not on PATH or comes from the npx cache: needs `npm i -g sideby`. Exit 0 ready, applied or already enabled; 1 blocked or failed.
 - `sideby quota teardown claude [--json]`: restore the original bytes, only if the file is unchanged since setup; otherwise refuse with a diff. Exit 0; 1 refused or failed.
 - `sideby ui [--port n] [--no-open]`: local panel on `127.0.0.1:17420`; reuses a running sideby panel, shifts past busy ports.
-- `sideby shell-init zsh|bash`: one shell function per account (`sideby-<family>-<name>`) plus config `aliases`. Use `eval "$(sideby shell-init zsh)"`.
+- `sideby shell-init zsh|bash`: one shell function per account (`sideby-<family>-<name>`) plus config `aliases` (commands that take an account, such as `run` and `doctor`, also accept an alias). Use `eval "$(sideby shell-init zsh)"`.
 - `sideby plugins [--json]`: loaded plugins and load errors. Exit 0; 1 if any failed.
 - Any command: exit 2 on a usage error (unknown option, missing argument); 1 when sideby fails (unknown account, invalid config).
 

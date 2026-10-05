@@ -101,8 +101,13 @@ export async function discoverAccounts(
 
 export class AccountRefError extends UserError {}
 
-/** Resolves `<family>:<name>` or a name unique across Families. */
-export function resolveRef(ref: string, accounts: readonly Account[]): Account {
+/** Resolves `<family>:<name>`, an alias from the config, or a name unique across Families. */
+export function resolveRef(
+  ref: string,
+  accounts: readonly Account[],
+  aliases: Readonly<Record<string, string>> = {},
+): Account {
+  if (!ref.includes(':') && Object.hasOwn(aliases, ref)) return resolveRef(aliases[ref]!, accounts)
   if (ref.includes(':')) {
     const hit = accounts.find((a) => a.ref === ref)
     if (hit) return hit

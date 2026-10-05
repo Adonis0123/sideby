@@ -183,7 +183,7 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 | 字段 | 含义 |
 |---|---|
 | `accounts.<ref>.args` | 给单个账号加的参数。顺序是：家族默认参数，然后这里的参数，最后是 `--` 之后的参数。sideby 默认不带任何危险参数，需要的话在这里按账号配置。 |
-| `aliases` | `shell-init` 额外生成的短命令，每个对应一个账号引用。 |
+| `aliases` | 短名到账号引用的映射。`shell-init` 为每个短名生成一个 shell 函数，`sideby run`、`sideby doctor` 等命令也认这些短名。 |
 | `ignore` | 看起来像账号、其实不是的账号引用（`<family>:<name>`）。名字里有 `bak`、`backup`、`old`、`tmp` 时，doctor 会给一条 warn，建议加到这里。 |
 | `pluginDirs` | 额外的插件目录，只接受绝对路径或以 `~/` 开头的路径。 |
 | `plugins.<name>` | 单个插件的设置；`enabled` 控制开关，内置家族也适用。 |
