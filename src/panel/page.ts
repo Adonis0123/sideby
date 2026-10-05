@@ -1,5 +1,6 @@
 // The Panel page: one self-contained HTML document with inline CSS and JS, no external resources.
 import { QUOTA_FAIL_PERCENT, QUOTA_WARN_PERCENT, USAGE_DAYS } from '../core/quota-levels.ts'
+import { FAMILY_LOGOS } from './logos.ts'
 
 export interface PageOptions {
   basePath: string
@@ -57,7 +58,7 @@ export function renderPage(opts: PageOptions): string {
     </div>
     <div class="top-actions">
       <span id="updated" class="muted small" aria-live="polite">Loading…</span>
-      <button id="refresh" class="btn btn-ghost" type="button" aria-label="Refresh">&#x21bb;<span class="hide-sm"> Refresh</span></button>
+      <button id="refresh" class="btn" type="button" aria-label="Refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg><span class="hide-sm">Refresh</span></button>
     </div>
   </header>
   <div id="banners"></div>
@@ -75,6 +76,7 @@ export function renderPage(opts: PageOptions): string {
       <span class="sk sk-line w70"></span><span class="sk sk-line w50"></span>
     </section>
   </div>
+  <div id="conn" class="toast" role="status" hidden></div>
   <footer class="foot muted small">sideby <span id="ver"></span> · runs on this machine; nothing leaves it.</footer>
 </div>
 <script type="application/json" id="sideby-boot">${boot}</script>
@@ -88,16 +90,20 @@ const CSS = `
 :root {
   --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f0f2f5; --border: #e2e5ea; --border-strong: #cfd4dc;
   --text: #15171c; --muted: #5b6372; --faint: #8b93a1; --accent: #4f46e5; --accent-soft: #eef0ff;
+  --primary: #4f46e5; --primary-hover: #4338ca; --primary-active: #3730a3; --on-primary: #ffffff;
+  --hover: #eceef2; --active: #e2e5ea; --focus: #6366f1;
   --ok: #15803d; --ok-bar: #22c55e; --ok-soft: #e8f7ee; --warn: #b45309; --warn-bar: #f59e0b; --warn-soft: #fdf3e2;
   --fail: #c81e1e; --fail-bar: #ef4444; --fail-soft: #fdecec; --track: #e9ecf1;
   --shadow: 0 1px 2px rgba(16,24,40,.04), 0 2px 8px rgba(16,24,40,.05);
-  --radius: 14px; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius: 14px; --ctl-radius: 8px; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0d0f12; --surface: #15181d; --surface-2: #1c2026; --border: #262b33; --border-strong: #353c47;
     --text: #e7e9ee; --muted: #a0a8b5; --faint: #6c7480; --accent: #8b87ff; --accent-soft: #23224a;
+    --primary: #5b54e8; --primary-hover: #6a64ef; --primary-active: #4f46e5; --on-primary: #ffffff;
+    --hover: #22272e; --active: #2a3038; --focus: #8b87ff;
     --ok: #4ade80; --ok-bar: #22c55e; --ok-soft: #13291c; --warn: #fbbf24; --warn-bar: #f59e0b; --warn-soft: #2d2410;
     --fail: #f87171; --fail-bar: #ef4444; --fail-soft: #331717; --track: #252a32;
     --shadow: 0 1px 2px rgba(0,0,0,.3);
@@ -136,7 +142,12 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
 .card-title .name { font-size: 16px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-title .sub { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge { flex: none; display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: #fff; font-weight: 700; font-size: 12.5px; letter-spacing: .02em; }
+.badge-logo { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
+.badge svg { display: block; width: 20px; height: 20px; fill: currentColor; }
 .badge-sm { width: 24px; height: 24px; border-radius: 7px; font-size: 10.5px; }
+.badge-sm svg { width: 15px; height: 15px; }
+.badge-xs { width: 16px; height: 16px; border-radius: 4px; border: 0; background: none; }
+.badge-xs svg { width: 13px; height: 13px; }
 .tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); font-size: 12px; line-height: 20px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .chip-accent { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
@@ -164,14 +175,32 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
 .usage { border-top: 1px solid var(--border); padding-top: 11px; margin-top: auto; }
 .u-num { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .u-sub { margin-top: 1px; }
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 13px; border-radius: 9px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-weight: 550; cursor: pointer; white-space: nowrap; }
-.btn:hover:not(:disabled) { background: var(--surface-2); text-decoration: none; }
-.btn:disabled { opacity: .55; cursor: default; }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn-primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
+/* Buttons: .btn is the secondary (outlined) variant; .btn-primary is the one main action of a block; .btn-ghost is a
+   quiet action such as Close. Two sizes: default (34px) for block actions, .btn-sm (28px) inside cards, notes and banners. */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 34px; padding: 0 14px; border-radius: var(--ctl-radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-size: 13.5px; font-weight: 600; line-height: 1; cursor: pointer; white-space: nowrap; text-decoration: none; user-select: none; transition: background-color .12s, border-color .12s, color .12s; }
+a.btn:hover { text-decoration: none; }
+.btn:hover:not(:disabled) { background: var(--hover); }
+.btn:active:not(:disabled) { background: var(--active); }
+.btn-primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+.btn-primary:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
+.btn-primary:active:not(:disabled) { background: var(--primary-active); border-color: var(--primary-active); }
 .btn-ghost { border-color: transparent; background: transparent; color: var(--muted); }
-.btn-sm { height: 26px; padding: 0 9px; font-size: 12.5px; border-radius: 7px; }
-.btn:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn-ghost:hover:not(:disabled) { color: var(--text); }
+.btn-sm { height: 28px; padding: 0 10px; font-size: 12.5px; }
+.btn svg { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.btn:disabled { background: var(--surface-2); border-color: var(--border); color: var(--faint); cursor: not-allowed; }
+.btn-ghost:disabled { background: transparent; border-color: transparent; }
+/* A busy button is disabled but keeps its variant, so a running action does not look unavailable. */
+.btn[aria-busy=true]:disabled { cursor: progress; color: var(--muted); }
+.btn-primary[aria-busy=true]:disabled { background: var(--primary); border-color: var(--primary); color: var(--on-primary); opacity: .85; }
+.is-spinning svg { animation: spin .8s linear infinite; }
+.btn:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.note a, .banner a { color: inherit; text-decoration: underline; text-underline-offset: 2px; font-weight: 600; }
+.error-note { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; }
+.error-note > span { min-width: 0; overflow-wrap: anywhere; }
+.toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 10; display: flex; align-items: center; gap: 8px; max-width: calc(100% - 32px); padding: 9px 14px; border-radius: 999px; background: var(--text); color: var(--bg); font-size: 13px; font-weight: 550; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
+.toast[hidden] { display: none; }
+.disabled-why { color: var(--muted); font-size: 12.5px; margin-top: 10px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .spin { width: 13px; height: 13px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -202,10 +231,16 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
 .form { display: flex; flex-direction: column; gap: 12px; }
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field > span { font-weight: 600; font-size: 12.5px; }
-input[type=text], select { height: 36px; border-radius: 9px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; padding: 0 10px; width: 100%; }
+input[type=text], select { height: 36px; border-radius: var(--ctl-radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; padding: 0 10px; width: 100%; transition: border-color .12s; }
+input[type=text]:hover:not(:disabled), select:hover:not(:disabled) { border-color: var(--faint); }
+input[type=text]:focus, select:focus { border-color: var(--focus); }
+input[type=text]:disabled, select:disabled { background: var(--surface-2); color: var(--faint); cursor: not-allowed; }
 input.invalid { border-color: var(--fail); }
+.select-wrap { position: relative; }
+.select-wrap .badge { position: absolute; left: 7px; top: 6px; pointer-events: none; }
+.select-wrap .badge + select { padding-left: 39px; }
 .check { display: flex; gap: 9px; align-items: flex-start; cursor: pointer; }
-.check input { margin-top: 3px; accent-color: var(--accent); }
+.check input { width: 16px; height: 16px; margin: 2px 0 0; flex: none; accent-color: var(--primary); cursor: pointer; }
 .check span { display: flex; flex-direction: column; }
 .field-error { color: var(--fail); font-size: 12.5px; min-height: 0; }
 .field-error:empty { display: none; }
@@ -220,6 +255,8 @@ input.invalid { border-color: var(--fail); }
 .host-list { list-style: none; padding: 0; margin: 4px 0; display: flex; flex-direction: column; gap: 8px; min-width: min(360px, 100%); text-align: left; }
 .host-list li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; }
 .host-list li > span:nth-child(2) { flex: 1; font-weight: 550; }
+.title-logo { display: flex; align-items: center; gap: 8px; }
+.chip .badge-xs { margin-left: -3px; }
 .sk { display: block; border-radius: 7px; background: linear-gradient(90deg, var(--surface-2) 25%, var(--track) 50%, var(--surface-2) 75%); background-size: 200% 100%; animation: shimmer 1.3s ease-in-out infinite; }
 .sk-head { display: flex; gap: 10px; align-items: center; }
 .sk-badge { width: 34px; height: 34px; border-radius: 10px; }
@@ -245,7 +282,8 @@ const SCRIPT = String.raw`
   'use strict'
   const BOOT = JSON.parse(document.getElementById('sideby-boot').textContent)
   const NAME_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
-  const FAMILY_STYLE = { claude: ['CC', '#d97757'], codex: ['CX', '#0f9f7a'], grok: ['GK', '#52525b'], pi: ['π', '#7c3aed'] }
+  const LOGOS = ${jsonForScript(FAMILY_LOGOS)}
+  const SVG_NS = 'http://www.w3.org/2000/svg'
   const S = {
     state: null, loadError: null, loading: false, loadedAt: 0,
     report: null, reportAt: null, checking: false, fixing: false, checkError: null, fixes: null,
@@ -277,18 +315,90 @@ const SCRIPT = String.raw`
     el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)))
   }
 
-  async function api(path, body) {
-    const init = body === undefined ? {} : {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-sideby-token': BOOT.token },
-      body: JSON.stringify(body),
-    }
+  // ---------- server calls ----------
+  // The token is per server process: after sideby ui restarts, the first write gets 403 "bad-token". The page then
+  // fetches the new token from api/session and sends that same request once more; the server refused it before
+  // running it, so the retry cannot apply anything twice. A request that got no answer is never replayed.
+  let token = BOOT.token
+  function failure(message, retryable, network) {
+    const e = new Error(message)
+    e.retryable = retryable
+    e.network = Boolean(network)
+    return e
+  }
+  async function send(path, init) {
     let res
-    try { res = await fetch(BOOT.basePath + path, init) } catch { throw new Error('the panel server is not reachable; is sideby ui still running?') }
+    try { res = await fetch(BOOT.basePath + path, Object.assign({ cache: 'no-store' }, init)) } catch {
+      connectionLost()
+      throw failure('sideby did not answer. Retry once it is back.', true, true)
+    }
     let data = null
     try { data = await res.json() } catch {}
-    if (!res.ok) throw new Error((data && data.error) || 'request failed (' + res.status + ')')
-    return data
+    return { res, data }
+  }
+  async function refreshToken() {
+    const { res, data } = await send('/api/session')
+    if (!res.ok || !data || typeof data.token !== 'string') throw failure('Could not renew the session. Reload the page.', false)
+    token = data.token
+  }
+  async function api(path, body) {
+    for (let attempt = 0; ; attempt++) {
+      const init = body === undefined ? {} : {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-sideby-token': token },
+        body: JSON.stringify(body),
+      }
+      const { res, data } = await send(path, init)
+      if (res.ok) return data
+      if (res.status === 403 && data && data.code === 'bad-token') {
+        if (attempt === 0) { await refreshToken(); continue }
+        throw failure('The session expired. Reload the page.', false)
+      }
+      const msg = (data && data.error) || 'request failed (' + res.status + ')'
+      // 4xx messages are written for people (what is wrong, what to do); 5xx ones are internal, so they get a lead-in.
+      if (res.status >= 500) throw failure('sideby hit an error: ' + msg, true)
+      throw failure(msg.charAt(0).toUpperCase() + msg.slice(1), false)
+    }
+  }
+
+  // ---------- connection ----------
+  // A request that cannot reach the server shows a small notice and polls api/health, waiting 1 s and then up to 5 s
+  // between tries. Once it answers, the page renews its token and reloads the state; writes are left for the user.
+  const conn = { lost: false, timer: 0, delay: 1000 }
+  function connectionLost() {
+    if (conn.lost) return
+    conn.lost = true
+    conn.delay = 1000
+    renderConnection()
+    conn.timer = setTimeout(ping, conn.delay)
+  }
+  async function ping() {
+    try {
+      const res = await fetch(BOOT.basePath + '/api/health', { cache: 'no-store' })
+      const data = await res.json()
+      if (!res.ok || !data || data.app !== 'sideby') throw new Error('not sideby')
+      const s = await fetch(BOOT.basePath + '/api/session', { cache: 'no-store' }).then((r) => r.json())
+      if (typeof s.token !== 'string') throw new Error('no session')
+      token = s.token
+    } catch {
+      conn.delay = Math.min(5000, Math.round(conn.delay * 1.6))
+      conn.timer = setTimeout(ping, conn.delay)
+      return
+    }
+    conn.lost = false
+    renderConnection()
+    load()
+  }
+  function renderConnection() {
+    $('conn').replaceChildren(...(conn.lost ? [spinner(), 'Lost connection to sideby, reconnecting…'] : []))
+    $('conn').hidden = !conn.lost
+  }
+
+  // An error from a server call, with a Retry button when trying again can help.
+  function errorNote(err, retry) {
+    return h('div', { class: 'note note-fail error-note', role: 'alert' },
+      h('span', null, err.message),
+      err.retryable && retry ? h('button', { class: 'btn btn-sm', type: 'button', onclick: retry }, 'Retry') : null)
   }
 
   function ago(iso) {
@@ -320,17 +430,31 @@ const SCRIPT = String.raw`
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many) }
 
   function family(id) { return (S.state && S.state.families.find((f) => f.id === id)) || { id, title: id, bin: id, installUrl: '', installed: false } }
-  function badge(id, small) {
-    const st = FAMILY_STYLE[id]
-    let color = st && st[1]
-    if (!color) { let x = 0; for (const c of id) x = (x * 31 + c.charCodeAt(0)) % 360; color = 'hsl(' + x + ' 55% 46%)' }
-    return h('span', { class: 'badge' + (small ? ' badge-sm' : ''), css: { background: color }, 'aria-hidden': 'true' }, st ? st[0] : id.slice(0, 2).toUpperCase())
+  // A Family's mark: its logo from logos.ts, or its initials on a color derived from the id for a plugin Family.
+  // size: '' (cards), 'sm' (lists, banners, the Tool select) or 'xs' (inside a chip; no initials fallback there).
+  function badge(id, size) {
+    const logo = LOGOS[id]
+    const cls = 'badge' + (size ? ' badge-' + size : '')
+    if (logo) {
+      const svg = document.createElementNS(SVG_NS, 'svg')
+      svg.setAttribute('viewBox', '0 0 24 24')
+      svg.setAttribute('focusable', 'false')
+      const path = document.createElementNS(SVG_NS, 'path')
+      path.setAttribute('d', logo.path)
+      if (logo.fillRule) path.setAttribute('fill-rule', logo.fillRule)
+      svg.append(path)
+      return h('span', { class: cls + ' badge-logo', css: logo.color ? { color: logo.color } : null, title: family(id).title, 'aria-hidden': 'true' }, svg)
+    }
+    if (size === 'xs') return null
+    let x = 0
+    for (const c of id) x = (x * 31 + c.charCodeAt(0)) % 360
+    return h('span', { class: cls, css: { background: 'hsl(' + x + ' 55% 46%)' }, 'aria-hidden': 'true' }, id.slice(0, 2).toUpperCase())
   }
   function spinner() { return h('span', { class: 'spin', 'aria-hidden': 'true' }) }
-  function link(text, url) {
+  function link(text, url, cls) {
     let ok = false
     try { const u = new URL(url); ok = u.protocol === 'https:' || u.protocol === 'http:' } catch {}
-    return ok ? h('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, text) : null
+    return ok ? h('a', { class: cls, href: url, target: '_blank', rel: 'noopener noreferrer' }, text) : null
   }
   async function copyText(text, btn) {
     try { await navigator.clipboard.writeText(text) } catch {
@@ -456,8 +580,8 @@ const SCRIPT = String.raw`
       h('span', { class: 'logo', 'aria-hidden': 'true' }, h('i'), h('i')),
       h('h3', null, 'No accounts yet'),
       h('p', { class: 'muted' }, 'sideby picks up the folders your AI coding tools already use. Install a tool and run it once, then add a second account to run side by side.'),
-      fams.length ? h('ul', { class: 'host-list' }, fams.map((f) => h('li', null, badge(f.id, true), h('span', null, f.title),
-        f.installed ? h('span', { class: 'muted small' }, 'run ', h('code', null, f.bin), ' once') : link('Install', f.installUrl)))) : h('p', { class: 'muted small' }, 'No families are registered. Check sideby plugins.'),
+      fams.length ? h('ul', { class: 'host-list' }, fams.map((f) => h('li', null, badge(f.id, 'sm'), h('span', null, f.title),
+        f.installed ? h('span', { class: 'muted small' }, 'run ', h('code', null, f.bin), ' once') : link('Install', f.installUrl, 'btn btn-sm')))) : h('p', { class: 'muted small' }, 'No families are registered. Check sideby plugins.'),
       BOOT.readOnly ? null : h('a', { class: 'btn btn-primary', href: '#create' }, 'Create your first account'))
   }
   function renderCards() {
@@ -484,7 +608,8 @@ const SCRIPT = String.raw`
     const close = h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: () => { S.setup = null; renderBanners() } }, 'Close')
     const body = []
     if (st.loading) body.push(h('p', { class: 'muted' }, spinner(), ' Preparing the change…'))
-    if (st.error) body.push(h('p', { class: 'note note-fail' }, st.error))
+    // With a plan on screen, its Apply change button is the retry.
+    if (st.error) body.push(errorNote(st.error, st.plan ? null : () => openSetup(st.family)))
     if (st.plan) {
       const p = st.plan
       if (p.status === 'enabled') body.push(h('p', null, st.applied ? 'Done. ' : '', p.message || ('Quota display is on. Numbers appear after your next ' + fam.title + ' session.')))
@@ -494,12 +619,12 @@ const SCRIPT = String.raw`
         if (p.file) body.push(h('p', { class: 'small' }, 'This changes ', h('code', null, p.file), ':'))
         if (p.diff) body.push(diffView(p.diff))
         body.push(h('div', { class: 'actions' },
-          h('button', { class: 'btn btn-primary', type: 'button', disabled: st.applying, onclick: applySetup }, st.applying ? spinner() : null, st.applying ? 'Applying…' : 'Apply change'),
+          h('button', { class: 'btn btn-primary', type: 'button', disabled: st.applying, 'aria-busy': st.applying ? 'true' : null, onclick: applySetup }, st.applying ? spinner() : null, st.applying ? 'Applying…' : 'Apply change'),
           h('button', { class: 'btn', type: 'button', disabled: st.applying, onclick: () => { S.setup = null; renderBanners() } }, 'Cancel')))
       }
     }
     return h('div', { class: 'banner banner-accent setup', id: 'setup', role: 'dialog', 'aria-label': 'Turn on quota' },
-      h('div', { class: 'section-head' }, h('h2', null, 'Turn on ' + fam.title + ' quota'), close), body)
+      h('div', { class: 'section-head' }, h('h2', { class: 'title-logo' }, badge(st.family, 'sm'), 'Turn on ' + fam.title + ' quota'), close), body)
   }
   async function openSetup(fam) {
     S.setup = { family: fam, loading: true }
@@ -508,25 +633,26 @@ const SCRIPT = String.raw`
     try {
       const r = await api('/api/quota/setup', { family: fam })
       S.setup = { family: fam, plan: r.plan, summary: r.summary }
-    } catch (e) { S.setup = { family: fam, error: e.message } }
+    } catch (e) { S.setup = { family: fam, error: e } }
     renderBanners()
   }
   async function applySetup() {
     const st = S.setup
     st.applying = true
+    st.error = null
     renderBanners()
     try {
       const r = await api('/api/quota/setup', { family: st.family, confirm: true })
       S.setup = { family: st.family, plan: r.plan, summary: r.summary, applied: r.plan.status === 'enabled' }
       if (r.plan.status === 'enabled') load()
-    } catch (e) { st.applying = false; st.error = e.message }
+    } catch (e) { st.applying = false; st.error = e }
     renderBanners()
   }
   function renderBanners() {
     const box = $('banners')
     const out = []
     if (S.loadError) out.push(h('div', { class: 'banner banner-fail', role: 'alert' },
-      h('div', null, h('b', null, 'Could not load accounts. '), S.loadError),
+      h('div', null, h('b', null, 'Could not load accounts. '), S.loadError.message),
       h('button', { class: 'btn btn-sm', type: 'button', onclick: () => load({ check: !S.report }) }, 'Retry')))
     if (S.state) {
       if (BOOT.readOnly) out.push(h('div', { class: 'banner' }, h('div', { class: 'muted' }, 'Read-only view. Use the sideby CLI to fix or create accounts.')))
@@ -539,9 +665,9 @@ const SCRIPT = String.raw`
         const off = S.state.accounts.some((a) => a.family === s.family && a.quota && a.quota.status === 'unavailable' && a.quota.reason === 'not-enabled')
         if (!off || s.plan.status === 'enabled') continue
         const title = family(s.family).title
-        if (s.plan.status === 'blocked') out.push(h('div', { class: 'banner banner-warn' }, h('div', null, h('b', null, title + ' quota cannot be turned on. '), s.plan.message)))
+        if (s.plan.status === 'blocked') out.push(h('div', { class: 'banner banner-warn' }, h('div', { class: 'title-logo' }, badge(s.family, 'sm'), h('div', null, h('b', null, title + ' quota cannot be turned on. '), s.plan.message))))
         else if (!BOOT.readOnly) out.push(h('div', { class: 'banner banner-accent' },
-          h('div', null, h('b', null, 'See ' + title + ' quota on every card. '), h('span', { class: 'muted' }, s.summary)),
+          h('div', { class: 'title-logo' }, badge(s.family, 'sm'), h('div', null, h('b', null, 'See ' + title + ' quota on every card. '), h('span', { class: 'muted' }, s.summary))),
           h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => openSetup(s.family) }, 'Turn on')))
       }
     }
@@ -559,7 +685,7 @@ const SCRIPT = String.raw`
       const r = await api('/api/doctor', {})
       S.report = r.report
       S.history = r.history
-    } catch (e) { S.checkError = e.message }
+    } catch (e) { S.checkError = e; S.checkRetry = runCheck }
     S.checking = false
     renderCheckup(); renderCards()
   }
@@ -574,7 +700,7 @@ const SCRIPT = String.raw`
       S.report = r.report
       S.history = r.history
       S.fixes = r.report.fixes
-    } catch (e) { S.checkError = e.message }
+    } catch (e) { S.checkError = e; S.checkRetry = runFix }
     S.fixing = false
     renderCheckup()
     load()
@@ -584,7 +710,7 @@ const SCRIPT = String.raw`
       h('span', { class: 'dot', title: f.level }),
       h('div', { class: 'finding-body' },
         h('div', { class: 'finding-top' },
-          h('span', { class: 'chip mono' }, f.account),
+          h('span', { class: 'chip mono' }, badge(f.account.split(':')[0], 'xs'), f.account),
           h('span', { class: 'muted small mono' }, f.item),
           f.fixable ? h('span', { class: 'chip chip-accent' }, 'auto-fix') : null,
           f.source && f.source !== 'core' ? h('span', { class: 'muted small' }, 'from ' + f.source) : null),
@@ -597,14 +723,17 @@ const SCRIPT = String.raw`
     const at = lastCheckAt()
     const busy = S.checking || S.fixing
     const fixable = findings ? findings.filter((f) => f.fixable).length : 0
+    // Say why Fix all is off, unless a running check or fix already explains it.
+    const fixWhy = busy || fixable ? null : !findings ? 'Run a check first.' : findings.length ? 'None of these findings has an automatic fix; follow the hint under each one.' : 'Nothing to fix.'
     const status = S.checking ? 'Checking accounts…' : S.fixing ? 'Fixing…' : at ? 'Last check ' + ago(at) : 'Not checked yet'
     const out = [h('div', { class: 'section-head' },
       h('div', null, h('h2', { id: 'h-checkup' }, 'Health check'), h('p', { class: 'muted small' }, status)),
       h('div', { class: 'actions' },
-        h('button', { class: 'btn', type: 'button', disabled: busy || !S.state, onclick: runCheck }, S.checking ? spinner() : null, S.checking ? 'Checking' : 'Run check'),
-        BOOT.readOnly ? null : h('button', { class: 'btn btn-primary', type: 'button', disabled: busy || !fixable, onclick: runFix },
+        h('button', { class: 'btn', type: 'button', disabled: busy || !S.state, 'aria-busy': S.checking ? 'true' : null, title: !S.state && !busy ? 'Waiting for accounts to load' : null, onclick: runCheck }, S.checking ? spinner() : null, S.checking ? 'Checking…' : 'Run check'),
+        BOOT.readOnly ? null : h('button', { class: 'btn btn-primary', type: 'button', disabled: busy || !fixable, 'aria-busy': S.fixing ? 'true' : null, title: fixWhy, onclick: runFix },
           S.fixing ? spinner() : null, S.fixing ? 'Fixing…' : 'Fix all' + (fixable ? ' (' + fixable + ')' : ''))))]
-    if (S.checkError) out.push(h('div', { class: 'note note-fail', role: 'alert' }, S.checkError))
+    if (S.checkError) out.push(errorNote(S.checkError, S.checkRetry))
+    if (!BOOT.readOnly && findings && findings.length && fixWhy) out.push(h('p', { class: 'disabled-why' }, 'Fix all is off: ' + fixWhy))
     if (S.fixes) {
       const failed = S.fixes.filter((f) => !f.ok)
       out.push(h('div', { class: 'fix-result ' + (failed.length ? 'is-warn' : 'is-ok'), role: 'status' },
@@ -649,20 +778,24 @@ const SCRIPT = String.raw`
     form.error.textContent = msg
     return msg
   }
-  async function submit(ev) {
+  function submit(ev) {
     ev.preventDefault()
+    create()
+  }
+  async function create() {
     if (S.creating) return
     const msg = validate() || familyProblem() || (form.name.value.trim() ? '' : 'Enter a name.')
     if (msg) { form.error.textContent = msg; form.name.focus(); return }
     S.creating = true
     S.created = null
+    S.createError = null
     renderCreateResult()
     try {
       S.created = await api('/api/accounts', { family: form.family.value, name: form.name.value.trim(), api: form.api.checked })
       form.name.value = ''
       form.api.checked = false
       load({ check: true })
-    } catch (e) { form.error.textContent = e.message }
+    } catch (e) { S.createError = e }
     S.creating = false
     renderCreateResult()
   }
@@ -674,9 +807,10 @@ const SCRIPT = String.raw`
   }
   function renderCreateResult() {
     form.submit.disabled = S.creating || BOOT.readOnly
+    if (S.creating) form.submit.setAttribute('aria-busy', 'true'); else form.submit.removeAttribute('aria-busy')
     form.submit.replaceChildren(...(S.creating ? [spinner(), 'Creating…'] : ['Create account']))
     const r = S.created
-    if (!r) { form.result.replaceChildren(); return }
+    if (!r) { setKids(form.result, S.createError ? errorNote(S.createError, create) : null); return }
     const failed = r.steps.filter((s) => !s.ok)
     form.result.replaceChildren(h('div', { class: 'created', role: 'status' },
       r.ok
@@ -694,13 +828,14 @@ const SCRIPT = String.raw`
     form.name = h('input', { id: 'nf-name', name: 'name', type: 'text', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', placeholder: 'work', maxlength: '32', 'aria-describedby': 'nf-err' })
     form.api = h('input', { id: 'nf-api', type: 'checkbox' })
     form.error = h('p', { class: 'field-error', id: 'nf-err', role: 'alert' })
-    form.submit = h('button', { class: 'btn btn-primary', type: 'submit' }, 'Create account')
+    form.submit = h('button', { class: 'btn btn-primary', type: 'submit', title: BOOT.readOnly ? 'Read-only view' : null }, 'Create account')
+    form.familyLogo = h('span')
     form.result = h('div', { 'aria-live': 'polite' })
     form.name.addEventListener('input', validate)
-    form.family.addEventListener('change', validate)
+    form.family.addEventListener('change', () => { renderFamilyLogo(); validate() })
     const fieldset = h('fieldset', { css: { border: '0', padding: '0', margin: '0', 'min-width': '0' }, disabled: BOOT.readOnly },
       h('form', { class: 'form', novalidate: true, onsubmit: submit },
-        h('label', { class: 'field' }, h('span', null, 'Tool'), form.family),
+        h('label', { class: 'field' }, h('span', null, 'Tool'), h('div', { class: 'select-wrap' }, form.familyLogo, form.family)),
         h('label', { class: 'field' }, h('span', null, 'Name'), form.name),
         h('label', { class: 'check' }, form.api, h('span', null, h('b', null, 'API key account'), h('span', { class: 'muted small' }, 'Gets its own proxy.env for a key or a relay. Leave off for a subscription.'))),
         form.error,
@@ -716,12 +851,21 @@ const SCRIPT = String.raw`
     form.family.replaceChildren(...S.state.families.map((f) => h('option', { value: f.id }, f.title + (f.installed ? '' : ' (not installed)'))))
     const fallback = S.state.families.find((f) => S.state.accounts.some((a) => a.family === f.id && a.isMain))
     form.family.value = keep && S.state.families.some((f) => f.id === keep) ? keep : fallback ? fallback.id : (S.state.families[0] || {}).id || ''
+    renderFamilyLogo()
+  }
+  function renderFamilyLogo() {
+    const next = (form.family.value && badge(form.family.value, 'sm')) || h('span')
+    form.familyLogo.replaceWith(next)
+    form.familyLogo = next
   }
 
   // ---------- top-level ----------
   function renderTop() {
     $('updated').textContent = S.loading && !S.state ? 'Loading…' : S.loading ? 'Refreshing…' : S.loadedAt ? 'Updated ' + ago(new Date(S.loadedAt).toISOString()) : ''
-    $('refresh').disabled = S.loading
+    const refresh = $('refresh')
+    refresh.disabled = S.loading
+    refresh.classList.toggle('is-spinning', S.loading)
+    if (S.loading) refresh.setAttribute('aria-busy', 'true'); else refresh.removeAttribute('aria-busy')
   }
   function renderAll() { renderTop(); renderBanners(); renderCards(); renderCheckup(); renderFamilies() }
   // A load that starts while another runs is queued, never dropped, so a change made meanwhile (a new
@@ -738,13 +882,13 @@ const SCRIPT = String.raw`
     renderTop()
     let state = null
     let error = null
-    try { state = await api('/api/state') } catch (e) { error = e.message }
+    try { state = await api('/api/state') } catch (e) { error = e }
     if (seq === loadSeq) {
       if (state) {
         S.state = state; S.loadError = null; S.loadedAt = Date.now()
         // A read-only Panel never records checks, so keep the result of its own last check over the disk.
         if (!BOOT.readOnly || !S.history) S.history = state.history || null
-      } else S.loadError = error
+      } else if (!error.network) S.loadError = error // a lost connection has its own notice
     }
     S.loading = false
     const next = queued

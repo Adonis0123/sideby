@@ -68,9 +68,12 @@ export interface PanelState {
 
 class HttpError extends Error {
   readonly status: number
-  constructor(status: number, message: string) {
+  /** Machine-readable reason the page acts on, such as `bad-token`. */
+  readonly code?: string
+  constructor(status: number, message: string, code?: string) {
     super(message)
     this.status = status
+    if (code) this.code = code
   }
 }
 
@@ -320,6 +323,13 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           send(res, 200, { app: 'sideby', version })
           return true
         }
+        // The page fetches a fresh token here after the server restarted (a new process, a new token).
+        // It reveals nothing a same-origin read of the page does not; a cross-site page cannot read it.
+        if (sub === '/api/session') {
+          if (req.headers['sec-fetch-site'] === 'cross-site') throw new HttpError(403, 'origin not allowed')
+          send(res, 200, { token })
+          return true
+        }
         if (sub === '/api/state') {
           send(res, 200, await buildState(await getRuntime(), { version, readOnly }))
           return true
@@ -335,7 +345,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       if (!origin || origin.toLowerCase() !== `http://${host}`) throw new HttpError(403, 'origin not allowed')
       const given = req.headers['x-sideby-token']
       if (typeof given !== 'string' || !sameSecret(given, token))
-        throw new HttpError(403, 'missing or wrong x-sideby-token; reload the page')
+        throw new HttpError(403, 'missing or wrong x-sideby-token; reload the page', 'bad-token')
       const body = (await readBody(req)) as Record<string, unknown>
       if (readOnly && (route.writes?.(body) ?? true)) throw new HttpError(403, 'this panel is read-only')
       // Reads that record history (doctor) also run in this queue, so overlapping checks merge in order.
@@ -347,7 +357,8 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return true
       }
       if (err instanceof HttpError) {
-        send(res, err.status, { error: err.message }, err.status === 413 ? { connection: 'close' } : {})
+        const body = err.code ? { error: err.message, code: err.code } : { error: err.message }
+        send(res, err.status, body, err.status === 413 ? { connection: 'close' } : {})
         if (err.status === 413) req.resume()
       } else if (err instanceof UserError) {
         send(res, 400, { error: err.message })

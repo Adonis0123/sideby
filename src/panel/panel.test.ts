@@ -113,7 +113,16 @@ describe('panel handler security', () => {
           403,
         )
         assert.equal((await post(port, '/api/doctor', {}, { origin: good.origin })).status, 403)
-        assert.equal((await post(port, '/api/doctor', {}, { ...good, 'x-sideby-token': 'nope' })).status, 403)
+        const stale = await post(port, '/api/doctor', {}, { ...good, 'x-sideby-token': 'nope' })
+        assert.equal(stale.status, 403)
+        assert.equal((stale.body as { code?: string }).code, 'bad-token')
+        // A page whose token went stale (the server restarted) gets the current one from api/session.
+        const session = await request(port, 'GET', '/api/session', {})
+        assert.equal(session.status, 200)
+        assert.deepEqual(JSON.parse(session.text), { token: real.token })
+        const crossSite = await request(port, 'GET', '/api/session', { 'sec-fetch-site': 'cross-site' })
+        assert.equal(crossSite.status, 403)
+        assert.equal((await request(port, 'GET', '/api/session', { host: 'evil.example:80' })).status, 403)
         assert.equal((await post(port, '/api/doctor', 'x'.repeat(MAX_BODY_BYTES + 10), good)).status, 413)
         assert.equal((await post(port, '/api/doctor', '[1]', good)).status, 400)
         assert.equal((await post(port, '/api/doctor', {}, good)).status, 200)
