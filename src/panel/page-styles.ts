@@ -192,18 +192,21 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .link-btn:disabled { color: var(--faint); cursor: not-allowed; }
 .link-btn:focus-visible { outline: var(--focus-outline); outline-offset: 2px; border-radius: 3px; }
 
-/* Usage: total with the 7 day bars on its baseline, cache hits under it. */
+/* Usage: total with the 7 day bars beside it, cache hits under it. */
 .usage { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.u-top { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.u-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .u-num { font-weight: var(--strong-weight); font-size: 13.5px; line-height: 1.3; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .u-unit { color: var(--faint); font-weight: 400; font-size: 12px; }
 .rows .u-unit { display: none; }
+/* Same width for every total, so the bars line up down the column. */
+.rows .u-num { min-width: 5.4ch; }
 .u-sub, .u-note { color: var(--faint); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .u-note { font-size: var(--small); color: var(--muted); white-space: normal; }
-.spark { display: inline-flex; align-items: flex-end; gap: 2px; height: 22px; flex: none; padding-bottom: 1px; border-bottom: 1px solid var(--border); }
-.spark i { display: block; width: 6px; min-height: 0; border-radius: 2px 2px 0 0; background: var(--border-strong); }
-.spark i.today { background: var(--accent); }
-.spark-lg { height: 34px; gap: 3px; }
+.spark { display: inline-flex; align-items: stretch; gap: 3px; height: 18px; flex: none; }
+.spark i { position: relative; display: block; width: 5px; border-radius: 2px; background: color-mix(in srgb, var(--border) 70%, transparent); overflow: hidden; }
+.spark b { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 2px; background: color-mix(in srgb, var(--accent) 38%, var(--surface)); }
+.spark i.today b { background: var(--accent); }
+.spark-lg { height: 34px; gap: 4px; }
 .spark-lg i { width: 6px; }
 .last { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .health { font-size: 11.5px; line-height: 20px; padding: 0 8px 0 7px; gap: 5px; max-width: 100%; }

@@ -672,7 +672,9 @@ const MAIN = String.raw`
         const v = Number(d.totalTokens) || 0
         const date = new Date(d.date + 'T12:00:00')
         const day = Number.isFinite(date.getTime()) ? date.toLocaleDateString(locale(), { weekday: 'short', month: 'numeric', day: 'numeric' }) : d.date
-        return h('i', { class: (i === daily.length - 1 ? 'today' : '') + (v ? '' : ' zero'), title: day + ': ' + tokens(v), css: { height: (max && v ? Math.max(8, Math.round((v / max) * 100)) : 0) + '%' } })
+        // Every day keeps its slot (a faint track), so empty days read as gaps in time, not missing bars.
+        return h('i', { class: i === daily.length - 1 ? 'today' : null, title: day + ': ' + tokens(v) },
+          v ? h('b', { css: { height: (max ? Math.max(12, Math.round((v / max) * 100)) : 0) + '%' } }) : null)
       }))
   }
   function renderSummary() {
