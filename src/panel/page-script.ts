@@ -8,9 +8,11 @@ import {
   mergeDaily,
   newAccountDir,
   nextReset,
+  panelHint,
   passedWindow,
   quotaPressure,
   sortAccounts,
+  suggestName,
   windowState,
 } from './page-logic.ts'
 
@@ -22,9 +24,11 @@ const LOGIC = [
   mergeDaily,
   newAccountDir,
   nextReset,
+  panelHint,
   passedWindow,
   quotaPressure,
   sortAccounts,
+  suggestName,
   windowState,
 ]
   .map((fn) => fn.toString())
@@ -103,7 +107,22 @@ const MAIN = String.raw`
       else el.setAttribute(k, v === true ? '' : String(v))
     }
     add(el, kids)
+    // Every button gets an explicit accessible name; one without aria-label is named by its visible text.
+    if (tag === 'button' && !el.hasAttribute('aria-label') && !el.hasAttribute('aria-labelledby')) labelFromText(el)
     return el
+  }
+  function visibleText(node) {
+    const parts = []
+    for (const k of node.childNodes) {
+      if (k.nodeType === 3) parts.push(k.data)
+      else if (k.nodeType === 1 && k.getAttribute('aria-hidden') !== 'true') parts.push(visibleText(k))
+    }
+    return parts.join(' ').replace(/\s+/g, ' ').trim()
+  }
+  function labelFromText(el) {
+    const text = visibleText(el)
+    if (text) el.setAttribute('aria-label', text)
+    else el.removeAttribute('aria-label')
   }
   // replaceChildren() would render null as the text "null"; route children through add(), which skips it.
   function setKids(el, kids) {
@@ -162,8 +181,9 @@ const MAIN = String.raw`
   // fetches the new token from api/session and sends that same request once more; the server refused it before
   // running it, so the retry cannot apply anything twice. A request that got no answer is never replayed.
   let token = BOOT.token
-  function failure(message, retryable, network, status) {
+  function failure(message, retryable, network, status, code) {
     const e = new Error(message)
+    e.code = code || ''
     e.retryable = retryable
     e.network = Boolean(network)
     e.status = status || 0
@@ -200,7 +220,7 @@ const MAIN = String.raw`
       const msg = (data && data.error) || 'request failed (' + res.status + ')'
       // 4xx messages are written for people (what is wrong, what to do); 5xx ones are internal, so they get a lead-in.
       if (res.status >= 500) throw failure(t('err.server', { msg }), true, false, res.status)
-      throw failure(msg.charAt(0).toUpperCase() + msg.slice(1), false, false, res.status)
+      throw failure(msg.charAt(0).toUpperCase() + msg.slice(1), false, false, res.status, data && typeof data.code === 'string' ? data.code : '')
     }
   }
 
@@ -370,7 +390,7 @@ const MAIN = String.raw`
   }
   function codeCopy(text) {
     return h('span', { class: 'copy' }, h('code', null, text),
-      h('button', { class: 'btn btn-sm', type: 'button', onclick: () => copyText(text) }, icon('copy'), t('btn.copy')))
+      h('button', { class: 'btn btn-sm', type: 'button', 'aria-label': t('btn.copyText', { text }), onclick: () => copyText(text) }, icon('copy'), t('btn.copy')))
   }
 
   // A "?" next to a term; the explanation shows on hover and on keyboard focus.
@@ -520,7 +540,7 @@ const MAIN = String.raw`
   }
   function stat(label, value, sub, extra, opts) {
     const kids = [h('div', { class: 'stat-text' }, h('div', { class: 'stat-label' }, label), h('div', { class: 'stat-value' }, value), h('div', { class: 'stat-sub' }, sub)), extra]
-    if (opts && opts.onclick) return h('button', { class: 'stat stat-btn' + (opts.cls ? ' ' + opts.cls : ''), type: 'button', 'aria-pressed': String(Boolean(opts.pressed)), title: opts.title, onclick: opts.onclick }, kids)
+    if (opts && opts.onclick) return h('button', { class: 'stat stat-btn' + (opts.cls ? ' ' + opts.cls : ''), type: 'button', 'aria-pressed': String(Boolean(opts.pressed)), 'aria-label': t('stat.btnLabel', { label, value, sub, action: opts.title || '' }), title: opts.title, onclick: opts.onclick }, kids)
     return h('div', { class: 'stat' + (opts && opts.cls ? ' ' + opts.cls : '') }, kids)
   }
   function spark(daily, cls) {
@@ -573,7 +593,7 @@ const MAIN = String.raw`
   // ---------- toolbar ----------
   const tb = {}
   function seg(label, options, value, onPick) {
-    const btns = options.map((o) => h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(o[0] === value), title: o[2] || null, 'aria-label': o[2] || null, onclick: () => {
+    const btns = options.map((o) => h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(o[0] === value), title: o[2] || null, 'aria-label': o[2] || t('tb.segLabel', { group: label, option: o[1] }), onclick: () => {
       for (const b of btns) b.setAttribute('aria-pressed', String(b === btn(o[0])))
       onPick(o[0])
     } }, o[1]))
@@ -598,7 +618,7 @@ const MAIN = String.raw`
     tb.sort.addEventListener('change', () => { prefs.sort = tb.sort.value; savePrefs(); renderAccounts() })
     const quota = seg(t('tb.quota'), [['used', t('tb.used')], ['left', t('tb.left')]], prefs.quota, (v) => { prefs.quota = v; savePrefs(); renderAccounts() })
     const view = seg(t('tb.view'), [['list', icon('list'), t('tb.list')], ['cards', icon('grid'), t('tb.cards')]], prefs.view, (v) => { prefs.view = v; savePrefs(); ui.fade = true; renderAccounts() })
-    const create = BOOT.readOnly ? null : h('button', { class: 'btn btn-primary', type: 'button', onclick: () => openCreate(null) }, icon('plus'), h('span', null, t('tb.new')))
+    const create = BOOT.readOnly ? null : h('button', { class: 'btn btn-primary', type: 'button', 'aria-label': t('tb.new'), onclick: () => openCreate(null) }, icon('plus'), h('span', null, t('tb.new')))
     setKids($('toolbar'), [
       h('label', { class: 'search' }, icon('search', 'search-ic'), tb.search, h('kbd', { class: 'kbd', 'aria-hidden': 'true' }, '/')),
       h('div', { class: 'tools' }, tb.family, tb.sort, quota, view),
@@ -648,7 +668,7 @@ const MAIN = String.raw`
     if (q.reason === 'not-enabled') {
       const can = setup && setup.plan.status === 'ready' && !BOOT.readOnly
       return h('div', { class: 'q-note' }, h('span', { title: q.detail || null }, t('quota.off')),
-        can ? h('button', { class: 'link-btn', type: 'button', onclick: () => openSetup(a.family) }, t('quota.turnOn')) : null)
+        can ? h('button', { class: 'link-btn', type: 'button', 'aria-label': t('quota.turnOnLabel', { host: famTitle(a), ref: a.ref }), onclick: () => openSetup(a.family) }, t('quota.turnOn')) : null)
     }
     if (q.reason === 'api-account') return h('div', { class: 'q-note' }, t('quota.api'), tip('api'))
     const text = { 'no-session': 'quota.noSession', 'no-source': 'quota.noSource', unrecognized: 'quota.unrecognized' }[q.reason]
@@ -693,7 +713,7 @@ const MAIN = String.raw`
     else if (hs.fail) { cls += ' chip-fail'; text = tn('health.issues', hs.fail) }
     else if (hs.warn) { cls += ' chip-warn'; text = tn('health.warnings', hs.warn) }
     else { cls += ' chip-ok'; text = t('health.ok') }
-    return h('button', { class: cls, type: 'button', title: t('health.filterHint'), onclick: () => filterHealth(a.ref) }, text)
+    return h('button', { class: cls, type: 'button', title: t('health.filterHint'), 'aria-label': t('health.chipLabel', { ref: a.ref, status: text }), onclick: () => filterHealth(a.ref) }, text)
   }
   function nameLine(a) {
     return h('div', { class: 'ident-name' },
@@ -701,7 +721,7 @@ const MAIN = String.raw`
       (a.aliases || []).slice(0, 3).map((x) => h('span', { class: 'alias', title: t('acct.alias') }, x)),
       a.kind === 'api' ? h('span', { class: 'chip chip-sm chip-warn', title: t('tip.api.body') }, t('acct.api')) : null,
       a.login === 'logged-out' && a.kind !== 'api'
-        ? h('button', { class: 'chip chip-sm chip-btn chip-fail', type: 'button', title: t('acct.signInHint'), onclick: () => copyText('sideby login ' + a.ref) }, h('span', { class: 'dot dot-fail' }), t('acct.signedOut'))
+        ? h('button', { class: 'chip chip-sm chip-btn chip-fail', type: 'button', title: t('acct.signInHint'), 'aria-label': t('acct.signedOutLabel', { ref: a.ref }), onclick: () => copyText('sideby login ' + a.ref) }, h('span', { class: 'dot dot-fail', 'aria-hidden': 'true' }), t('acct.signedOut'))
         : null,
       a.hostInstalled === false ? h('span', { class: 'chip chip-sm chip-warn' }, t('acct.notInstalled')) : null)
   }
@@ -750,7 +770,7 @@ const MAIN = String.raw`
     const bodyId = 'grp-' + fam.replace(/[^a-zA-Z0-9_-]/g, '_')
     const cards = prefs.view === 'cards'
     const head = h('div', { class: 'group-head' },
-      h('button', { class: 'group-toggle', type: 'button', 'aria-expanded': String(!collapsed), 'aria-controls': bodyId, title: t(collapsed ? 'group.expand' : 'group.collapse'), onclick: () => {
+      h('button', { class: 'group-toggle', type: 'button', 'aria-expanded': String(!collapsed), 'aria-controls': bodyId, title: t(collapsed ? 'group.expand' : 'group.collapse'), 'aria-label': t('group.toggle', { title: info.title, count: list.length === total ? String(total) : list.length + ' / ' + total, action: t(collapsed ? 'group.expand' : 'group.collapse') }), onclick: () => {
         if (collapsed) delete prefs.collapsed[fam]; else prefs.collapsed[fam] = true
         savePrefs()
         renderAccounts()
@@ -760,7 +780,7 @@ const MAIN = String.raw`
       h('div', { class: 'group-meta' },
         need ? h('span', { class: 'chip chip-sm chip-warn' }, tn('group.attention', need)) : null,
         off && setup && setup.plan.status === 'ready' && !BOOT.readOnly
-          ? h('button', { class: 'btn btn-sm', type: 'button', title: setup.summary, onclick: () => openSetup(fam) }, t('quota.turnOnFamily'))
+          ? h('button', { class: 'btn btn-sm', type: 'button', title: setup.summary, 'aria-label': t('quota.turnOnFamilyLabel', { host: info.title }), onclick: () => openSetup(fam) }, t('quota.turnOnFamily'))
           : null,
         off && setup && setup.plan.status === 'blocked' ? h('span', { class: 'muted small label-tip' }, t('quota.blocked'), tipRaw(t('quota.blocked'), setup.plan.message)) : null))
     const body = collapsed ? null : cards
@@ -900,12 +920,12 @@ const MAIN = String.raw`
       h('span', { class: 'dot', title: f.level }),
       h('div', { class: 'finding-body' },
         h('div', { class: 'finding-top' },
-          ui.healthRef ? null : h('button', { class: 'chip chip-btn mono', type: 'button', title: t('health.only', { ref: f.account }), onclick: () => filterHealth(f.account) }, badge(f.account.split(':')[0], 'xs'), f.account),
+          ui.healthRef ? null : h('button', { class: 'chip chip-btn mono', type: 'button', title: t('health.only', { ref: f.account }), 'aria-label': t('health.only', { ref: f.account }), onclick: () => filterHealth(f.account) }, badge(f.account.split(':')[0], 'xs'), f.account),
           h('span', { class: 'muted small mono' }, f.item),
           f.fixable ? h('span', { class: 'chip chip-sm chip-accent' }, t('health.autoFix')) : null,
           f.source && f.source !== 'core' ? h('span', { class: 'muted small' }, t('health.from', { source: f.source })) : null),
         h('p', null, f.message),
-        f.hint ? h('p', { class: 'hint' }, f.hint) : null))
+        f.hint ? h('p', { class: 'hint' }, panelHint(f.hint, f.fixable && !BOOT.readOnly, t('fix.hintAction'))) : null))
   }
   function renderCheckup() {
     const box = $('checkup')
@@ -960,10 +980,11 @@ const MAIN = String.raw`
     setKids(box, out)
   }
   // An error from a server call, with a Retry button when trying again can help.
-  function errorNote(err, retry) {
+  function errorNote(err, retry, extra) {
     return h('div', { class: 'note note-fail error-note', role: 'alert' },
       h('span', null, err.message),
-      err.retryable && retry ? h('button', { class: 'btn btn-sm', type: 'button', onclick: retry }, t('btn.retry')) : null)
+      err.retryable && retry ? h('button', { class: 'btn btn-sm', type: 'button', onclick: retry }, t('btn.retry')) : null,
+      extra ? h('span', { class: 'note-sub' }, extra) : null)
   }
 
   // ---------- dialogs ----------
@@ -1012,10 +1033,14 @@ const MAIN = String.raw`
     })
     const ready = fams.filter((f) => familyStatus(f) === 'ready')
     const pick = prefill && ready.some((f) => f.id === prefill.family) ? prefill.family : prefs.family && ready.some((f) => f.id === prefs.family) ? prefs.family : ready.length ? ready[0].id : ''
-    nf = { fams, family: pick, api: Boolean(prefill && prefill.api), creating: false, result: null, error: null, els: {} }
+    // name: what the user typed, or null while the field shows the suggested name for the picked Family.
+    nf = { fams, family: pick, api: Boolean(prefill && prefill.api), name: null, creating: false, result: null, error: null, els: {} }
     showDialog('create')
     renderCreate()
-    if (nf.els.name) nf.els.name.focus()
+    if (nf.els.name) { nf.els.name.focus(); nf.els.name.select() }
+  }
+  function suggestionFor(fam) {
+    return fam && S.state ? suggestName(S.state.accounts.filter((a) => a.family === fam).map((a) => a.name)) : ''
   }
   function nameProblem() {
     const name = nf.els.name.value.trim()
@@ -1029,19 +1054,34 @@ const MAIN = String.raw`
     const el = dlg.el
     if (nf.result) { setKids(el, createdView()); return }
     const e = nf.els
-    e.name = h('input', { id: 'nf-name', name: 'name', type: 'text', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', placeholder: 'work', maxlength: '32', 'aria-describedby': 'nf-err', 'aria-invalid': 'false' })
-    e.api = h('input', { id: 'nf-api', type: 'checkbox' })
+    const sug = suggestionFor(nf.family)
+    e.name = h('input', { id: 'nf-name', name: 'name', type: 'text', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', placeholder: sug || 'work', maxlength: '32', 'aria-label': t('nf.name'), 'aria-describedby': 'nf-sug nf-err', 'aria-invalid': 'false' })
+    e.name.value = nf.name === null ? sug : nf.name
+    e.api = h('input', { id: 'nf-api', type: 'checkbox', 'aria-label': t('nf.api') })
     e.api.checked = nf.api
+    e.suggest = h('p', { class: 'field-hint', id: 'nf-sug' })
     e.error = h('p', { class: 'field-error', id: 'nf-err', role: 'alert' })
     e.preview = h('dl', { class: 'preview' })
-    e.submit = h('button', { class: 'btn btn-primary', type: 'submit', form: 'nf-form' }, t('nf.create'))
-    e.name.addEventListener('input', () => { validateCreate(); renderPreview() })
-    e.api.addEventListener('change', () => { nf.api = e.api.checked })
+    e.submit = h('button', { class: 'btn btn-primary', type: 'submit', form: 'nf-form', 'aria-label': t('nf.create') }, t('nf.create'))
+    e.name.addEventListener('input', () => { nf.name = e.name.value; validateCreate(); renderPreview() })
+    e.api.addEventListener('change', () => {
+      nf.api = e.api.checked
+      // A refusal was about the old choice; the hint under it no longer applies.
+      if (e.errNote) { e.errNote.remove(); e.errNote = null; nf.error = null }
+    })
     const cards = nf.fams.map((f) => {
       const st = familyStatus(f)
-      const input = h('input', { type: 'radio', name: 'nf-family', value: f.id, class: 'sr-only', disabled: st !== 'ready' })
+      const input = h('input', { type: 'radio', name: 'nf-family', value: f.id, class: 'sr-only', disabled: st !== 'ready', 'aria-label': f.title })
       input.checked = f.id === nf.family
-      input.addEventListener('change', () => { nf.family = f.id; validateCreate(); renderPreview() })
+      input.addEventListener('change', () => {
+        // A name the user has not changed follows the Family: Claude's next free name differs from Cursor's.
+        const typed = e.name.value.trim()
+        const untouched = nf.name === null || !typed || typed === suggestionFor(nf.family)
+        nf.family = f.id
+        if (untouched) { nf.name = null; e.name.value = suggestionFor(f.id); e.name.placeholder = e.name.value || 'work' }
+        validateCreate()
+        renderPreview()
+      })
       const n = S.state.accounts.filter((a) => a.family === f.id).length
       const sub = st === 'ready' ? tn('nf.accounts', n) : st === 'no-main' ? tx('nf.runOnce', { bin: h('code', null, f.bin) }) : t('nf.notInstalled')
       return h('label', { class: 'fam-card' + (st === 'ready' ? '' : ' is-off') }, input, badge(f.id, 'sm'),
@@ -1050,23 +1090,30 @@ const MAIN = String.raw`
     const body = h('form', { id: 'nf-form', class: 'form', novalidate: true, onsubmit: (ev) => { ev.preventDefault(); create() } },
       h('p', { class: 'muted small' }, t('nf.intro')),
       h('fieldset', { class: 'field fam-field' }, h('legend', null, t('nf.tool')), nf.fams.length ? h('div', { class: 'fam-grid' }, cards) : h('p', { class: 'muted small' }, t('empty.noFamilies'))),
-      h('label', { class: 'field' }, h('span', null, t('nf.name')), e.name),
+      h('div', { class: 'field' }, h('label', { class: 'field', for: 'nf-name' }, h('span', null, t('nf.name')), e.name), e.suggest),
       h('div', { class: 'check-row' }, h('label', { class: 'check' }, e.api, h('span', null, h('b', null, t('nf.api')), h('span', { class: 'muted small' }, t('nf.apiHint')))), tip('api')),
       e.preview,
       e.error,
-      nf.error ? errorNote(nf.error, create) : null)
+      e.errNote = nf.error ? errorNote(nf.error, create, nf.error.code === 'create-refused' && !nf.api ? t('nf.refusedApi') : null) : null)
     setKids(el, dialogFrame(t('nf.title'), null, body, [
       h('button', { class: 'btn', type: 'button', onclick: () => el.close() }, t('btn.cancel')),
       e.submit,
     ]))
+    validateCreate()
     if (!nf.family) e.error.textContent = t('nf.noReady')
     renderPreview()
   }
+  // Create stays off until the name is usable; the message under the field says why.
   function validateCreate() {
+    const e = nf.els
     const msg = nameProblem()
-    nf.els.name.classList.toggle('invalid', Boolean(msg))
-    nf.els.name.setAttribute('aria-invalid', String(Boolean(msg)))
-    nf.els.error.textContent = msg
+    const name = e.name.value.trim()
+    e.name.classList.toggle('invalid', Boolean(msg))
+    e.name.setAttribute('aria-invalid', String(Boolean(msg)))
+    e.error.textContent = msg
+    const sug = suggestionFor(nf.family)
+    e.suggest.textContent = sug && name === sug ? t('nf.suggested') : ''
+    if (!nf.creating) e.submit.disabled = Boolean(msg) || !name || !nf.family
     return msg
   }
   function renderPreview() {
@@ -1091,6 +1138,7 @@ const MAIN = String.raw`
     nf.els.submit.disabled = true
     nf.els.submit.setAttribute('aria-busy', 'true')
     nf.els.submit.replaceChildren(spinner(), t('nf.creating'))
+    labelFromText(nf.els.submit)
     try {
       nf.result = await api('/api/accounts', { family: nf.family, name, api: nf.els.api.checked })
       toast(t(nf.result.ok ? 'toast.created' : 'toast.createdProblems', { ref: nf.result.account.ref }), { kind: nf.result.ok ? 'ok' : 'info' })
@@ -1101,7 +1149,13 @@ const MAIN = String.raw`
     nf.creating = false
     dlg.busy = false
     renderCreate()
-    if (!nf.result && nf.els.name) { nf.els.name.value = name; validateCreate(); renderPreview() }
+    if (!nf.result && nf.els.name) {
+      nf.els.name.value = name
+      validateCreate()
+      renderPreview()
+      // A refused subscription account is usually fixed by turning on "API key account".
+      if (nf.error && nf.error.code === 'create-refused' && !nf.api) nf.els.api.focus(); else nf.els.name.focus()
+    }
   }
   function stepRow(s) {
     const fill = /^fill in (.+)$/.exec(s)
@@ -1264,11 +1318,8 @@ const MAIN = String.raw`
     renderStatic()
     buildToolbar()
     renderAll()
-    if (dlg.kind === 'create' && nf && !nf.creating) {
-      const name = nf.els.name ? nf.els.name.value : ''
-      renderCreate()
-      if (nf.els.name) { nf.els.name.value = name; renderPreview() }
-    } else if (dlg.kind === 'setup' && qs) renderSetup()
+    if (dlg.kind === 'create' && nf && !nf.creating) renderCreate()
+    else if (dlg.kind === 'setup' && qs) renderSetup()
   })
   $('theme').addEventListener('click', () => {
     const order = CHOICES.theme

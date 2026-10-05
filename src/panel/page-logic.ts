@@ -223,3 +223,41 @@ export function nextReset(
   }
   return best
 }
+
+/**
+ * A name to offer for a new Account of a Family, given its existing Account names (`main` included or not).
+ * Numbered names (`001` … `007`) continue after the highest number with the same width (`008`); otherwise
+ * `work`, then `work2`, `work3`, … whichever is free.
+ */
+export function suggestName(names: string[]): string {
+  const taken: Record<string, boolean> = {}
+  for (const n of names) taken[n] = true
+  let max = -1
+  let width = 0
+  for (const n of names) {
+    if (!/^[0-9]{1,32}$/.test(n)) continue
+    max = Math.max(max, Number(n))
+    width = Math.max(width, n.length)
+  }
+  if (max >= 0) {
+    for (let i = max + 1; ; i++) {
+      const s = String(i).padStart(width, '0')
+      if (s.length > 32) break
+      if (!taken[s]) return s
+    }
+  }
+  if (!taken.work) return 'work'
+  for (let i = 2; ; i++) if (!taken['work' + i]) return 'work' + i
+}
+
+/**
+ * A Finding's hint as the Panel shows it: for a fixable Finding, "run `sideby doctor --fix`" becomes the
+ * Panel's own action (`action`, such as "use Fix all"), capitalized when it starts the hint. Hints of Findings
+ * that are not fixable, and `--fix --force`, keep the command: Fix all would not do them.
+ */
+export function panelHint(hint: string, fixable: boolean, action: string): string {
+  if (!fixable || !hint) return hint
+  return hint.replace(/run `sideby doctor --fix`/g, (_m: string, at: number) =>
+    at === 0 ? action.charAt(0).toUpperCase() + action.slice(1) : action,
+  )
+}

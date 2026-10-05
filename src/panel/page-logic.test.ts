@@ -11,9 +11,11 @@ import {
   mergeDaily,
   newAccountDir,
   nextReset,
+  panelHint,
   passedWindow,
   quotaPressure,
   sortAccounts,
+  suggestName,
   windowState,
 } from './page-logic.ts'
 import { PAGE_SCRIPT } from './page-script.ts'
@@ -218,5 +220,42 @@ describe('page text', () => {
     assert.doesNotThrow(() => new Function(script))
     assert.equal(html.match(/<\/script>/g)?.length, html.match(/<script/g)?.length)
     assert.match(html, /<script type="application\/json" id="sideby-i18n">/)
+  })
+})
+
+describe('suggestName', () => {
+  it('continues numbered names with the same width', () => {
+    assert.equal(suggestName(['main', '001', '002', '003', '004', '005', '006', '007']), '008')
+    assert.equal(suggestName(['main', '002']), '003')
+    assert.equal(suggestName(['main', '01', '7', 'work']), '08')
+    assert.equal(suggestName(['main', '099']), '100')
+    assert.equal(suggestName(['main', '9']), '10')
+  })
+  it('offers work, then the next free workN', () => {
+    assert.equal(suggestName(['main']), 'work')
+    assert.equal(suggestName([]), 'work')
+    assert.equal(suggestName(['main', 'work', 'deepseek']), 'work2')
+    assert.equal(suggestName(['main', 'work', 'work2', 'work3']), 'work4')
+  })
+})
+
+describe('panelHint', () => {
+  const action = 'use Fix all'
+  it('names the Panel action for fixable Findings', () => {
+    assert.equal(panelHint('run `sideby doctor --fix`', true, action), 'Use Fix all')
+    assert.equal(
+      panelHint('run `sideby doctor --fix` to replace the link with a copy', true, action),
+      'Use Fix all to replace the link with a copy',
+    )
+    assert.equal(panelHint('run `sideby doctor --fix`', true, '点「全部修复」'), '点「全部修复」')
+  })
+  it('keeps the command when Fix all would not do it', () => {
+    const typeMismatch =
+      'sideby does not change the type of an existing item; move it aside and run `sideby doctor --fix`'
+    assert.equal(panelHint(typeMismatch, false, action), typeMismatch)
+    const force = 'add them to the main account first, or run `sideby doctor --fix --force` to remove them'
+    assert.equal(panelHint(force, false, action), force)
+    assert.equal(panelHint(force, true, action), force)
+    assert.equal(panelHint('', true, action), '')
   })
 })

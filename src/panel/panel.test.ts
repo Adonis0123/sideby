@@ -439,6 +439,38 @@ describe('panel through the Runtime (hardening round 1)', () => {
       }
     })
   })
+
+  it('answers 400 with the plugin message and code when account.create.before refuses', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const refusing = demoPlugin(demoFamily(), (api) => {
+        api.on('account.create.before', (ctx) => {
+          if (!ctx.api) throw api.abort('one login only; turn on API key account')
+        })
+      })
+      const { server, port, handler } = await serve((port) =>
+        createPanelHandler({
+          runtime: () => createRuntime({ env: h.env, builtins: [asBuiltin(refusing)] }),
+          allowedHosts: [`127.0.0.1:${port}`],
+        }),
+      )
+      try {
+        const hdr = { origin: `http://127.0.0.1:${port}`, 'x-sideby-token': handler.token }
+        const r = await post(port, '/api/accounts', { family: 'demo', name: 'work' }, hdr)
+        assert.equal(r.status, 400)
+        assert.deepEqual(r.body, {
+          error: '[demo-family] one login only; turn on API key account',
+          code: 'create-refused',
+        })
+        const { lstat } = await import('node:fs/promises')
+        await assert.rejects(lstat(h.path('.demo-work')))
+        const ok = await post(port, '/api/accounts', { family: 'demo', name: 'work', api: true }, hdr)
+        assert.equal(ok.status, 200, JSON.stringify(ok.body))
+      } finally {
+        await close(server)
+      }
+    })
+  })
 })
 
 describe('panel health (hardening round 3)', () => {

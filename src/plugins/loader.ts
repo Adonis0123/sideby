@@ -13,7 +13,7 @@ import type {
   Plugin,
   PluginApi,
 } from '../types.ts'
-import { AbortLaunch, type HookBus } from './bus.ts'
+import { HOOK_TIMEOUT_MS, HookAbort, type HookBus } from './bus.ts'
 
 export interface PluginManifest {
   name: string
@@ -164,14 +164,13 @@ async function register(
     },
     on<E extends HookEvent>(event: E, a: HookFilter | HookHandler<E>, b?: HookHandler<E>) {
       const [filter, handler] = typeof a === 'function' ? [{}, a] : [a, b!]
-      if (!['launch.before', 'account.created', 'doctor.check'].includes(event))
-        throw new Error(`unknown hook event ${event}`)
+      if (!Object.hasOwn(HOOK_TIMEOUT_MS, event)) throw new Error(`unknown hook event ${event}`)
       // Each hook sees its own Plugin's settings; env and args stay shared so mutations reach the Launch.
       const withConfig = ((ctx: { config: Record<string, unknown> }) =>
         handler({ ...ctx, config: settings } as never)) as HookHandler<E>
       stagedHooks.push(() => bus.add(plugin.name, event, filter, withConfig))
     },
-    abort: (message: string) => new AbortLaunch(message),
+    abort: (message: string) => new HookAbort(message),
     fs: {
       async writeFileAtomic(path, data, mode) {
         await writeFileAtomic(path, data, mode)

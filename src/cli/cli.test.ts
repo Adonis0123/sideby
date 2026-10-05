@@ -355,6 +355,26 @@ describe('plugins', () => {
     })
   })
 
+  it('an account.create.before abort stops `new` with exit 1, the message, and no folder', async () => {
+    await withFakeHome(async (h) => {
+      await codexMain(h)
+      await writePlugin(
+        h,
+        'one-login',
+        `export default { name: 'one-login', register(api) { api.on('account.create.before', { family: 'codex' }, (ctx) => { if (!ctx.api) throw api.abort('codex:' + ctx.name + ' would share a login; use --api') }) } }\n`,
+      )
+      const before = await snapshot(h.home)
+      const r = await sideby(h, ['new', 'codex', 'work'])
+      assert.equal(r.code, 1)
+      assert.match(r.err, /sideby: \[one-login\] codex:work would share a login; use --api/)
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+      const asJson = await sideby(h, ['new', 'codex', 'work', '--json'])
+      assert.equal(asJson.code, 1)
+      assert.match(JSON.parse(asJson.out).error, /would share a login/)
+      assert.equal((await sideby(h, ['new', 'codex', 'work', '--api'])).code, 0)
+    })
+  })
+
   it('a hook can add environment variables, and sees only its own settings', async () => {
     await withFakeHome(async (h) => {
       await codexMain(h)

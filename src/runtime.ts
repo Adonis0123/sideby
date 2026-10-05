@@ -277,7 +277,15 @@ export async function createRuntime(
       }
     },
     async createAccount(familyId, name, o = {}) {
-      return createAccount({ family: familyOf(familyId), name, api: Boolean(o.api), home: paths.home, bus })
+      const family = familyOf(familyId)
+      return createAccount({
+        family,
+        name,
+        api: Boolean(o.api),
+        home: paths.home,
+        bus,
+        accounts: await discoverAccounts(family, paths.home, ignore),
+      })
     },
     async prepareLaunch(ref, userArgs, command) {
       const account = resolveRef(ref, await accounts(), config.aliases)

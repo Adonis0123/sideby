@@ -101,7 +101,7 @@ Shared Item paths must be relative and stay inside the account directory: config
 - A plugin is local code with the user's full permissions. Docs, `sideby plugins` output and errors must keep saying so.
 - Plugins may only `import type` from `sideby`. Never add an API that requires a plugin to import a value from sideby; pass it through `PluginApi`.
 - Loader trust checks (owner is the current user, not group or other writable) stay on for plugin directories, `plugin.json`, entry files and `sideby-before-launch`.
-- Hook errors carry the plugin name. A failing plugin affects only itself, except that a failing `launch.before` stops the launch.
+- Hook errors carry the plugin name. A failing plugin affects only itself, except that a failing `launch.before` stops the launch and a failing `account.create.before` stops `new` before anything is written.
 
 **Output contract**
 

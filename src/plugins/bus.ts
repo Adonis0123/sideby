@@ -2,6 +2,7 @@ import type { HookEvent, HookEvents, HookFilter, HookHandler } from '../types.ts
 
 export const HOOK_TIMEOUT_MS: Record<HookEvent, number> = {
   'launch.before': 30_000,
+  'account.create.before': 10_000,
   'account.created': 30_000,
   'doctor.check': 10_000,
 }
@@ -23,8 +24,8 @@ export class HookError extends Error {
   }
 }
 
-/** Thrown by `api.abort()` to stop a Launch on purpose. */
-export class AbortLaunch extends Error {}
+/** Thrown by `api.abort()` to stop a Launch or a new Account on purpose. */
+export class HookAbort extends Error {}
 
 export class HookBus {
   private readonly entries = new Map<HookEvent, Entry<HookEvent>[]>()
@@ -98,7 +99,7 @@ export class HookBus {
       return await Promise.race([Promise.resolve().then(() => e.handler(ctx)), timeout])
     } catch (err) {
       if (err instanceof HookError) throw err
-      const aborted = err instanceof AbortLaunch
+      const aborted = err instanceof HookAbort
       throw new HookError(e.plugin, (err as Error)?.message ?? String(err), aborted)
     } finally {
       clearTimeout(timer)

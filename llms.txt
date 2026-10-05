@@ -59,6 +59,7 @@ Key facts:
 - `api.family(def: FamilyDef)`: register a Family (`id`, `title`, `bin`, `installUrl`, `layout`, `selectVar`, `hijackVars`, `apiVars`, `sharedItems`, `login`, optional `logo`, `secretFileMeansApi`, `defaultArgs`, `loginState`, `model`, `readQuota`, `readUsage`, `quotaSetup`). A throwing `loginState` or `model` becomes an entry in that account's `problems`.
 - `logo: { path, color?, title?, fillRule? }`: the panel's mark for the Family, one SVG path in a 24x24 view box. `path` holds only SVG path data (max 20000 chars), `color` is hex. An invalid logo is dropped with a plugin error; the panel then shows initials.
 - `api.on('launch.before', [filter], handler)`: before `run`/`login`; mutate `ctx.env` and `ctx.args`, or `throw api.abort(msg)`. 30 s timeout.
+- `api.on('account.create.before', [filter], handler)`: before `new` (CLI or panel) writes anything; `ctx` is `{ family, name, api, accounts, config }` (`accounts`: the family's existing accounts). `throw api.abort(msg)` refuses: the CLI exits 1 with `msg`, the panel answers 400 `{ error, code: 'create-refused' }`. Any other error or the 10 s timeout also stops creation. 10 s.
 - `api.on('account.created', [filter], handler)`: after `new`; `ctx.log()` for next steps. 30 s.
 - `api.on('doctor.check', [filter], handler)`: return `CheckResult[]` (`level`, `item`, `code`, `message`, `hint?`, `fix?`). 10 s.
 - `filter` is `{ family?: string }`. `ctx.config` is the plugin's own settings. `api.fs.writeFileAtomic(path, data, mode?)` for fixes.

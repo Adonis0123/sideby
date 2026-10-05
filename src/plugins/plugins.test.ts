@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
-import { chmod, mkdir, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { asBuiltin, demoFamily, demoPlugin, seedDemoMain } from '../../testing/demo.ts'
-import { type FakeHome, withFakeHome } from '../../testing/index.ts'
+import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
+import { UserError } from '../core/errors.ts'
 import { createRuntime } from '../runtime.ts'
 import { accountScript, SCRIPT_NAME } from './account-script.ts'
 import { HookBus } from './bus.ts'
@@ -124,6 +125,88 @@ describe('account-script', () => {
     await withFakeHome(async (h) => {
       const rt = await prepared(h, '#!/bin/sh\nexit 0\n', 0o600)
       await assert.rejects(rt.prepareLaunch('demo:work', [], 'run'), /not executable/)
+    })
+  })
+})
+
+describe('account.create.before', () => {
+  // Allows one non-main subscription Account, like the Cursor plugin; API Accounts always pass.
+  const oneSubscription = demoPlugin(demoFamily(), (api) => {
+    api.on('account.create.before', { family: 'demo' }, (ctx) => {
+      if (ctx.api) return
+      const taken = ctx.accounts.filter((a) => !a.isMain && a.kind === 'subscription')
+      if (taken.length)
+        throw api.abort(`demo:${ctx.name} would share a login with ${taken[0]!.ref}; use --api`)
+    })
+  })
+
+  it('a refusing hook stops creation before anything is written', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const rt = await createRuntime({ env: h.env, builtins: [asBuiltin(oneSubscription)] })
+      assert.equal((await rt.createAccount('demo', 'first')).ok, true)
+      const before = await snapshot(h.home)
+      await assert.rejects(rt.createAccount('demo', 'second'), (e: Error & { code?: string }) => {
+        assert.ok(e instanceof UserError)
+        assert.equal(e.code, 'create-refused')
+        assert.equal(e.message, '[demo-family] demo:second would share a login with demo:first; use --api')
+        return true
+      })
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+      const api = await rt.createAccount('demo', 'second', { api: true })
+      assert.equal(api.ok, true)
+      assert.equal(api.account.kind, 'api')
+    })
+  })
+
+  it('sees the name, the API flag, the Family accounts and its own settings', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const seen: unknown[] = []
+      const spy = demoPlugin(demoFamily(), (api) => {
+        api.on('account.create.before', (ctx) => {
+          seen.push({
+            family: ctx.family.id,
+            name: ctx.name,
+            api: ctx.api,
+            refs: ctx.accounts.map((a) => a.ref),
+            config: ctx.config,
+          })
+        })
+      })
+      await h.write('.config/sideby/config.json', JSON.stringify({ plugins: { 'demo-family': { v: 1 } } }))
+      const rt = await createRuntime({ env: h.env, builtins: [asBuiltin(spy)] })
+      await rt.createAccount('demo', 'work', { api: true })
+      assert.deepEqual(seen, [
+        { family: 'demo', name: 'work', api: true, refs: ['demo:main'], config: { v: 1 } },
+      ])
+    })
+  })
+
+  it('a hook that crashes or hangs also stops creation and names the plugin', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const crash = demoPlugin(demoFamily(), (api) => {
+        api.on('account.create.before', () => {
+          throw new Error('boom')
+        })
+      })
+      const rt = await createRuntime({ env: h.env, builtins: [asBuiltin(crash)] })
+      await assert.rejects(rt.createAccount('demo', 'work'), /\[demo-family\] boom; nothing was created/)
+      await assert.rejects(stat(h.path('.demo-work')), { code: 'ENOENT' })
+
+      const bus = new HookBus({ 'account.create.before': 20 })
+      bus.add('slow', 'account.create.before', {}, () => new Promise(() => {}))
+      await assert.rejects(
+        bus.run('account.create.before', 'demo', {
+          family: demoFamily(),
+          name: 'x',
+          api: false,
+          accounts: [],
+          config: {},
+        }),
+        /\[slow\] account.create.before timed out/,
+      )
     })
   })
 })

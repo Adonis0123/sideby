@@ -1,6 +1,6 @@
 import { mkdir, readFile, symlink } from 'node:fs/promises'
 import { dirname, join, relative, sep } from 'node:path'
-import type { HookBus } from '../plugins/bus.ts'
+import { type HookBus, HookError } from '../plugins/bus.ts'
 import type { Account, FamilyDef, SharedItemDef } from '../types.ts'
 import { ACCOUNT_NAME, accountAt, accountDirOf, mainDirOf } from './accounts.ts'
 import { UserError } from './errors.ts'
@@ -58,6 +58,8 @@ export async function createAccount(opts: {
   api: boolean
   home: string
   bus: HookBus
+  /** The Family's existing Accounts, for `account.create.before`. */
+  accounts?: Account[]
 }): Promise<CreateResult> {
   const { family, name, api, home } = opts
   if (!ACCOUNT_NAME.test(name) || name === 'main')
@@ -82,6 +84,22 @@ export async function createAccount(opts: {
       throw new CreateError(
         `${prefix} exists and is not a real directory (a link or file); move it aside first`,
       )
+  }
+  // Plugins may refuse before anything is written (Cursor keeps one subscription login besides main).
+  try {
+    await opts.bus.run('account.create.before', family.id, {
+      family,
+      name,
+      api,
+      accounts: opts.accounts ?? [],
+      config: {},
+    })
+  } catch (err) {
+    if (!(err instanceof HookError)) throw err
+    if (err.aborted) throw new CreateError(err.message, { code: 'create-refused' })
+    throw new CreateError(
+      `${err.message}; nothing was created. Fix or disable plugin ${err.plugin} (see \`sideby plugins\`)`,
+    )
   }
   await mkdir(dir, { recursive: true, mode: 0o700 })
 

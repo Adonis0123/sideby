@@ -216,6 +216,17 @@ export interface LaunchContext {
   command: 'run' | 'login'
 }
 
+export interface CreateBeforeContext {
+  family: FamilyDef
+  /** Name of the Account about to be created, already checked against the name rules. */
+  name: string
+  /** Whether it will be an API Account (`sideby new --api`, or "API key account" in the Panel). */
+  api: boolean
+  /** The Family's existing Accounts, the Main Account included. */
+  accounts: Account[]
+  config: Record<string, unknown>
+}
+
 export interface CreatedContext {
   account: Account
   family: FamilyDef
@@ -235,6 +246,7 @@ export interface HookFilter {
 
 export interface HookEvents {
   'launch.before': { ctx: LaunchContext; result: void }
+  'account.create.before': { ctx: CreateBeforeContext; result: void }
   'account.created': { ctx: CreatedContext; result: void }
   'doctor.check': { ctx: DoctorContext; result: CheckResult[] | undefined }
 }
@@ -254,7 +266,10 @@ export interface PluginApi {
   family(def: FamilyDef): void
   on<E extends HookEvent>(event: E, handler: HookHandler<E>): void
   on<E extends HookEvent>(event: E, filter: HookFilter, handler: HookHandler<E>): void
-  /** Returns an error that, when thrown from `launch.before`, stops the Launch with this message. */
+  /**
+   * Returns an error that, when thrown from `launch.before` or `account.create.before`, stops the Launch or the
+   * new Account with this message. Say what to do instead: the CLI and the Panel show it as is.
+   */
   abort(message: string): Error
   fs: PluginFs
 }

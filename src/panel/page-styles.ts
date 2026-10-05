@@ -265,6 +265,7 @@ a.btn:hover { text-decoration: none; }
 .note-warn { background: var(--warn-soft); color: var(--warn); }
 .error-note { justify-content: space-between; gap: 12px; }
 .error-note > span { min-width: 0; overflow-wrap: anywhere; }
+.error-note > .note-sub { flex-basis: 100%; color: var(--text); }
 .banner { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 11px 14px; border-radius: calc(var(--radius) - 2px); margin-bottom: 12px; border: 1px solid var(--border); background: var(--surface); }
 .banner > div { min-width: 0; }
 .banner-quiet { padding: 8px 14px; background: transparent; border-style: dashed; }
@@ -327,6 +328,8 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .check span { display: flex; flex-direction: column; gap: 2px; }
 .check b { font-size: var(--small); }
 .field-error { color: var(--fail); font-size: var(--small); }
+.field-hint { color: var(--muted); font-size: var(--small); }
+.field-hint:empty { display: none; }
 .field-error:empty { display: none; }
 .fam-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .fam-card { position: relative; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--ctl-radius); cursor: pointer; min-width: 0; transition: border-color .12s, background-color .12s; }

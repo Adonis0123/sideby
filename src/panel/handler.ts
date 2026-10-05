@@ -409,7 +409,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         send(res, err.status, body, err.status === 413 ? { connection: 'close' } : {})
         if (err.status === 413) req.resume()
       } else if (err instanceof UserError) {
-        send(res, 400, { error: err.message })
+        send(res, 400, err.code ? { error: err.message, code: err.code } : { error: err.message })
       } else {
         send(res, 500, { error: (err as Error)?.message || 'internal error' })
       }
