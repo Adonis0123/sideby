@@ -1,11 +1,13 @@
 // HTTP handler for the local Panel. Mountable under any basePath; standalone and embedded use the same rules.
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { resolveRef } from '../core/accounts.ts'
 import { UserError } from '../core/errors.ts'
 import { packageVersion } from '../core/version.ts'
 import type { AccountStatus, DoctorHistory, FamilyInfo, Runtime } from '../runtime.ts'
-import type { Account, QuotaResult, QuotaSetupPlan, UsageResult } from '../types.ts'
+import type { Account, FamilyLogo, QuotaResult, QuotaSetupPlan, UsageResult } from '../types.ts'
 import { renderPage } from './page.ts'
+import { type PanelTheme, resolveTheme } from './theme.ts'
 
 export const PANEL_VERSION = packageVersion()
 export const MAX_BODY_BYTES = 64 * 1024
@@ -19,9 +21,14 @@ export interface PanelHandlerOptions {
   basePath?: string
   /** Accepted `Host` header values, for example `127.0.0.1:17420`. */
   allowedHosts: string[]
-  /** Rejects changes (fix, create, quota setup apply) with 403. */
+  /** Rejects changes (fix, create, quota setup apply and teardown) with 403. */
   readOnly?: boolean
   version?: string
+  /**
+   * Design tokens that make the page match the embedding page. Checked when the handler is created: an unknown
+   * token or a value that could leave its CSS declaration throws a TypeError.
+   */
+  theme?: PanelTheme
 }
 
 export type PanelHandler = ((req: IncomingMessage, res: ServerResponse) => Promise<boolean>) & {
@@ -35,6 +42,8 @@ export type PanelAccount = (AccountStatus | (Account & Partial<AccountStatus>)) 
   error?: string
   /** Latest Doctor result for this Account; absent when it was never checked. */
   health?: { at: string; fail: number; warn: number }
+  /** Config `aliases` that point at this Account, sorted; absent when none do. */
+  aliases?: string[]
 }
 
 export type { DoctorHistory }
@@ -53,12 +62,33 @@ export function healthByAccount(
   return out
 }
 
+/** Alias names per Account ref, sorted. An alias whose target matches no Account is left out. */
+export function aliasesByAccount(
+  aliases: Readonly<Record<string, string>> | undefined,
+  accounts: readonly Account[],
+): Map<string, string[]> {
+  const out = new Map<string, string[]>()
+  for (const [alias, target] of Object.entries(aliases ?? {})) {
+    let ref: string
+    try {
+      ref = resolveRef(target, accounts).ref
+    } catch {
+      continue
+    }
+    out.set(ref, [...(out.get(ref) ?? []), alias].sort())
+  }
+  return out
+}
+
+/** A Family as the page sees it: FamilyInfo plus the mark from its FamilyDef. */
+export type PanelFamily = FamilyInfo & { logo?: FamilyLogo }
+
 export interface PanelState {
   schemaVersion: 1
   version: string
   readOnly: boolean
   generatedAt: string
-  families: FamilyInfo[]
+  families: PanelFamily[]
   accounts: PanelAccount[]
   pluginErrors: { where: string; message: string }[]
   quotaSetups: { family: string; summary: string; plan: QuotaSetupPlan }[]
@@ -190,17 +220,23 @@ async function buildState(rt: Runtime, opts: { version: string; readOnly: boolea
     rt.doctorHistory(),
     rt.quotaSetups(),
   ])
+  const health = healthByAccount(history)
+  const aliases = aliasesByAccount(rt.config.aliases, accounts)
   return {
     schemaVersion: 1,
     version: opts.version,
     readOnly: opts.readOnly,
     generatedAt: ctx.now.toISOString(),
-    families,
+    families: families.map((f) => {
+      const logo = rt.families.get(f.id)?.logo
+      return logo ? { ...f, logo } : f
+    }),
     accounts: await Promise.all(
       accounts.map(async (a) => {
         const st = await accountState(rt, a, families)
-        const health = healthByAccount(history).get(a.ref)
-        return health ? { ...st, health } : st
+        const h = health.get(a.ref)
+        const names = aliases.get(a.ref)
+        return { ...st, ...(h ? { health: h } : {}), ...(names ? { aliases: names } : {}) }
       }),
     ),
     pluginErrors: rt.pluginErrors.map((e) => ({ where: e.where, message: e.message })),
@@ -230,6 +266,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   const allowed = new Set(opts.allowedHosts.map((h) => h.toLowerCase()))
   const readOnly = Boolean(opts.readOnly)
   const version = opts.version ?? PANEL_VERSION
+  const theme = resolveTheme(opts.theme)
   const token = randomBytes(32).toString('base64url')
   const serial = writeQueue()
   const getRuntime = typeof opts.runtime === 'function' ? opts.runtime : async () => opts.runtime as Runtime
@@ -280,6 +317,15 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return { family, summary: setup.summary, plan }
       },
     },
+    // Undo for the setup above; the Runtime turns a teardown that throws into `{ ok: false, message }`.
+    '/api/quota/teardown': {
+      async run(body) {
+        const family = optString(body, 'family')
+        if (!family) throw new HttpError(400, '"family" is required')
+        const rt = await getRuntime()
+        return { family, result: await rt.quotaSetup(family).teardown() }
+      },
+    },
   }
 
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<boolean> => {
@@ -316,7 +362,9 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
               "frame-ancestors 'self'",
             ].join('; '),
           })
-          res.end(method === 'HEAD' ? undefined : renderPage({ basePath, token, nonce, version, readOnly }))
+          res.end(
+            method === 'HEAD' ? undefined : renderPage({ basePath, token, nonce, version, readOnly, theme }),
+          )
           return true
         }
         if (sub === '/api/health') {

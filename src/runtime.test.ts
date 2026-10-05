@@ -144,11 +144,15 @@ describe('quota levels', () => {
     assert.equal(quotaLevel(87), 'fail')
     assert.equal(quotaLevel(QUOTA_WARN_PERCENT), 'warn')
     assert.equal(quotaLevel(QUOTA_WARN_PERCENT - 1), 'ok')
+    // The page gets the thresholds in its boot data and levels every window with them.
     const html = renderPage({ basePath: '', token: 't' })
-    assert.ok(html.includes(`pct >= ${QUOTA_FAIL_PERCENT} ? 'fail' : pct >= ${QUOTA_WARN_PERCENT} ? 'warn'`))
-    // The page text comes from USAGE_DAYS; the source must not hard-code a day count.
+    assert.ok(html.includes(`"warn":${QUOTA_WARN_PERCENT},"fail":${QUOTA_FAIL_PERCENT}`))
+    assert.match(html, /windowState\(w, now, WARN, FAIL\)/)
+    // The page text comes from USAGE_DAYS; the sources must not hard-code a day count or a threshold.
     const { readFile: read } = await import('node:fs/promises')
-    const source = await read(new URL('./panel/page.ts', import.meta.url), 'utf8')
-    assert.doesNotMatch(source, /last 7 days|\b7 days\b|pct >= \d/)
+    for (const file of ['page.ts', 'page-script.ts', 'page-logic.ts', 'i18n.ts']) {
+      const source = await read(new URL(`./panel/${file}`, import.meta.url), 'utf8')
+      assert.doesNotMatch(source, /last 7 days|\b7 days\b|pct >= \d|7 天/, file)
+    }
   })
 })

@@ -98,6 +98,49 @@ sideby ui --no-open    # print the address only
 
 The panel listens on `127.0.0.1` only. If another sideby panel already runs on the port, sideby opens that one; if another program holds the port, it tries the next ones and prints the address it used. The page shows account cards (quota, usage, login state, health), runs Doctor with one-click fixes, creates accounts, and can turn on Claude quota after showing the diff. For a new subscription account it gives you the `sideby login <account>` command to copy; signing in always happens in your terminal.
 
+#### Desktop app
+
+```sh
+sideby app install       # macOS: ~/Applications/sideby.app; Linux: a "sideby" entry in the app menu
+sideby app uninstall
+sideby ui --background   # what the app runs: start the panel without a terminal, then open it
+sideby ui --stop         # stop the background panel
+```
+
+Double-click the app to open the panel. It starts the panel in the background when none is running (`sideby ui --background`), reuses it when one is, and opens your browser. The background panel keeps running after you close the tab and logs to `${XDG_STATE_HOME:-~/.local/state}/sideby/panel.log`. Apps started from Finder or a desktop menu get a minimal PATH, so the background panel asks your login shell (`$SHELL -ilc`) for its PATH to find hosts in places like `~/.local/bin`.
+
+The app runs the Node and sideby it was installed with: after upgrading either, run `sideby app install` again to update it in place. If your own page embeds the panel (see below), `sideby app install --url http://accounts.localhost:17333/` makes the app open that address instead. Install and uninstall only touch files that `sideby app install` created. The app is a local, unsigned launcher script; it is not meant to be copied to other machines.
+
+#### Embed the panel
+
+Another local Node page can mount the panel under its own path. The handler keeps its own Host, Origin and token checks; you list the hosts your page answers on.
+
+```ts
+import { createServer } from 'node:http'
+import { createPanelHandler, createRuntime } from 'sideby'
+
+const panel = createPanelHandler({
+  runtime: () => createRuntime(), // a factory: every request sees the disk as it is now
+  basePath: '/accounts',
+  allowedHosts: ['tools.localhost:8080'],
+  theme: {
+    colorScheme: 'light', // 'auto' (default) follows the system
+    header: 'bar', // a full-width header strip instead of a title on the page background
+    light: { font: '-apple-system, "PingFang SC", sans-serif', bg: '#f2f8fc', primary: '#e1f0fb', onPrimary: '#1f6396', radius: '10px', shadow: 'none' },
+  },
+})
+createServer(async (req, res) => {
+  if (!(await panel(req, res))) res.writeHead(404).end()
+}).listen(8080, '127.0.0.1')
+```
+
+`theme` makes the page match yours. Its tokens become CSS custom properties inside the page's own nonce'd `<style>`, so the panel's strict CSP stays as it is. An iframe cannot read its parent's CSS variables, so pass concrete values.
+
+- **Tokens** (all optional): type `font`, `monoFont`, `fontSize`, `smallSize`, `controlSize`, `headingSize`, `largeSize`, `titleSize`, `titleWeight`, `headingWeight`, `strongWeight`, `buttonWeight`, `primaryWeight`; colors `bg`, `surface`, `surfaceMuted`, `border`, `borderStrong`, `text`, `muted`, `faint`, `hover`, `active`, `accent`, `accentSoft`, `focus`, `primary`, `primaryHover`, `primaryActive`, `onPrimary`, `primaryBorder`, `primaryHoverBorder`, `buttonText`, `buttonHoverBorder`, `buttonHoverText`, `checkColor`, `ok`, `okSoft`, `warn`, `warnSoft`, `fail`, `failSoft`, `logoBg`, `logoColor`, `logoBorder`, `shadow`, `focusOutline`, `focusRing`; shape and layout `radius`, `controlRadius`, `chipRadius`, `controlHeight`, `controlHeightSmall`, `fieldHeight`, `contentWidth`, `gutter`. [`src/panel/theme.ts`](src/panel/theme.ts) documents each one.
+- **Light and dark**: colors in `light` apply in light mode only; type, shape and layout tokens apply in both. Give `dark` for dark-mode colors, or set `colorScheme: 'light'` when your page has no dark mode.
+- **Checked when the handler is created**: an unknown token, or a value with anything but letters, digits, spaces and `# % ( ) , . + - / ' " _` (so no `;`, `{`, `}`, `<`, `\`, `*` or `:`), with `url(`, unbalanced parentheses or quotes, or over 200 characters, throws a `TypeError` that names the token.
+- Without `theme`, the page looks the same as `sideby ui`.
+
 ### Claude quota
 
 Claude Code passes quota data only to its status line command, so sideby needs a one-time, reversible change:
@@ -132,12 +175,15 @@ Accounts that link `settings.json` to the Main Account (the default) get quota f
 | `sideby quota setup claude [--yes]` | Show the change; with `--yes`, turn the Claude quota source on | 0; 1 if blocked or failed |
 | `sideby quota teardown claude` | Turn it off and restore the original file | 0; 1 if refused or failed |
 | `sideby ui [--port n] [--no-open]` | Local panel; runs until Ctrl+C | — |
+| `sideby ui --background` / `--stop` | Start the panel detached from the terminal (reusing a running one) and open it / stop it | 0; 1 if it could not start or stop |
+| `sideby app install [--url <url>]` | Add a desktop app (macOS, Linux) that opens the panel, or `<url>` | 0; 1 on an unsupported platform or a file it did not create in the way |
+| `sideby app uninstall` | Remove what `app install` created | 0; 1 if it left a file it did not create |
 | `sideby shell-init zsh\|bash` | Print shell functions for every account and your aliases | 0 |
 | `sideby plugins` | Loaded plugins and load errors | 0; 1 if any plugin failed to load |
 
 - Every command exits 2 on a usage error (unknown option, missing argument) and 1 when sideby itself fails (unknown account, invalid name, unreadable config).
 - `<acct>` is `<family>:<name>`, or just `<name>` when it is unique across families. An ambiguous name is an error that lists the candidates.
-- `list`, `new`, `doctor`, `quota` (including `setup` and `teardown`) and `plugins` accept `--json`. JSON output carries `schemaVersion: 1`, and the JSON Schemas ship in [`schemas/`](schemas/). With `--json`, an error prints `{ "schemaVersion": 1, "error": "…" }`. Adding a field keeps the version; removing, renaming or changing the meaning of a field bumps it.
+- `list`, `new`, `doctor`, `quota` (including `setup` and `teardown`), `plugins` and `app` accept `--json`. JSON output carries `schemaVersion: 1`, and the JSON Schemas ship in [`schemas/`](schemas/). With `--json`, an error prints `{ "schemaVersion": 1, "error": "…" }`. Adding a field keeps the version; removing, renaming or changing the meaning of a field bumps it.
 - No output, log or error message ever contains a credential value.
 
 ## Accounts
@@ -258,10 +304,18 @@ export default {
 
 | Extension point | When | What it can do | Timeout |
 |---|---|---|---|
-| `api.family(def)` | when the plugin loads | Add a Family: directory layout, selection variable, Hijack Variables, default arguments, Shared Items, sign-in command, login check, model, optional `readQuota`, `readUsage` and `quotaSetup` | — |
+| `api.family(def)` | when the plugin loads | Add a Family: directory layout, selection variable, Hijack Variables, default arguments, Shared Items, sign-in command, login check, model, optional `logo`, `readQuota`, `readUsage` and `quotaSetup` | — |
 | `launch.before` | before every `run` and `login` | Change `ctx.env` and `ctx.args`, or stop the launch with `throw api.abort(msg)` | 30 s |
 | `account.created` | after `new` succeeds | Add files, print next steps with `ctx.log()` | 30 s |
 | `doctor.check` | for each account during Doctor | Return Findings, each optionally with a `fix()` | 10 s |
+
+A Family's `logo` is the mark the panel shows on its cards and in the Tool select: one SVG path in a 24×24 view box, for example from [Simple Icons](https://simpleicons.org).
+
+```ts
+logo: { path: 'M11.503.131 1.891 5.678…', title: 'Cursor', color: '#000000' } // color is optional
+```
+
+`path` may hold only SVG path data (commands, numbers, spaces, commas, dots, `+`, `-`; up to 20000 characters), `color` must be a hex color and `fillRule` is `nonzero` or `evenodd`. An invalid logo is dropped with a plugin error in `sideby plugins`; the Family still loads and the panel shows its initials. Leave out `color` for a black mark so it follows the text color in dark mode.
 
 Errors always name the plugin. A plugin that fails to load affects only itself; a failing `doctor.check` becomes a fail Finding for that account; a failing `launch.before` stops the launch; a family reader that throws (for example `model`) shows up as one of that account's `problems` in `list`. A `fix()` may write only inside the current account directory, through `api.fs.writeFileAtomic`.
 
@@ -303,7 +357,8 @@ From 22.18, Node strips TypeScript types by default, so sideby can `import()` yo
 |---|---|
 | Config | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
 | Your plugins | `${XDG_CONFIG_HOME:-~/.config}/sideby/plugins/` |
-| State: quota cache, last Doctor result, original `settings.json` bytes | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
+| State: quota cache, last Doctor result, original `settings.json` bytes, background panel pid and logs | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
+| Desktop app (`sideby app install`) | macOS `~/Applications/sideby.app`; Linux `~/.local/share/applications/sideby.desktop`, `~/.local/share/sideby/`, `~/.local/share/icons/hicolor/*/apps/sideby.*` |
 
 sideby writes nothing of its own into Host account directories. The one exception is `quota setup claude --yes`, which changes `~/.claude/settings.json`. Account directories you create with `sideby new` belong to the Host.
 
@@ -322,6 +377,7 @@ They solve related problems with different trade-offs; pick the one that fits ho
 
 ```sh
 sideby quota teardown claude                  # first, if you ran quota setup; the status line calls sideby
+sideby ui --stop && sideby app uninstall       # if you use the desktop app
 npm rm -g sideby
 rm -rf ~/.config/sideby ~/.local/state/sideby  # or your XDG_CONFIG_HOME / XDG_STATE_HOME paths
 ```

@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/app-uninstall.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "platform",
+    "removed",
+    "skipped"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "platform": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "darwin"
+        },
+        {
+          "type": "string",
+          "const": "linux"
+        }
+      ]
+    },
+    "removed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "skipped": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "reason"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "title": "sideby app uninstall --json"
+}

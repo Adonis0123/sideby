@@ -14,6 +14,11 @@ export interface PanelServerOptions {
   open?: boolean
   log?: (s: string) => void
   version?: string
+  /**
+   * Random id of a detached Panel. `/api/health` then also returns it with the server's pid, so `sideby ui
+   * --stop` can tell this Panel from a reused pid or from another Panel before it sends a signal.
+   */
+  instance?: string
 }
 
 export interface PanelServer {
@@ -39,16 +44,30 @@ function listen(server: Server, port: number): Promise<'ok' | 'busy'> {
   })
 }
 
-/** True when a sideby Panel answers on this port. */
-export async function isSidebyPanel(port: number): Promise<boolean> {
+export interface PanelIdentity {
+  instance?: string
+  pid?: number
+}
+
+/** What the sideby Panel on this port says about itself, or undefined when none answers. */
+export async function panelIdentity(port: number): Promise<PanelIdentity | undefined> {
   try {
     const res = await fetch(`http://${LOOPBACK}:${port}/api/health`, { signal: AbortSignal.timeout(1500) })
-    if (!res.ok) return false
-    const body = (await res.json()) as { app?: unknown }
-    return body?.app === 'sideby'
+    if (!res.ok) return undefined
+    const body = (await res.json()) as { app?: unknown; instance?: unknown; pid?: unknown }
+    if (body?.app !== 'sideby') return undefined
+    return {
+      ...(typeof body.instance === 'string' ? { instance: body.instance } : {}),
+      ...(Number.isInteger(body.pid) ? { pid: body.pid as number } : {}),
+    }
   } catch {
-    return false
+    return undefined
   }
+}
+
+/** True when a sideby Panel answers on this port. */
+export async function isSidebyPanel(port: number): Promise<boolean> {
+  return (await panelIdentity(port)) !== undefined
 }
 
 /** Opens `url` in the default browser; returns false (and never throws) when that is not possible. */
@@ -80,12 +99,30 @@ export async function startPanelServer(opts: PanelServerOptions): Promise<PanelS
   }
 
   for (let port = first; port < first + PORT_ATTEMPTS && port <= 65535; port++) {
+    const hosts = [`${LOOPBACK}:${port}`, `localhost:${port}`]
     const handler = createPanelHandler({
       runtime: opts.runtimeFactory,
-      allowedHosts: [`${LOOPBACK}:${port}`, `localhost:${port}`],
+      allowedHosts: hosts,
       ...(opts.version ? { version: opts.version } : {}),
     })
     const server = createServer((req, res) => {
+      if (
+        opts.instance &&
+        req.method === 'GET' &&
+        req.url === '/api/health' &&
+        hosts.includes(req.headers.host ?? '')
+      ) {
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(
+          JSON.stringify({
+            app: 'sideby',
+            ...(opts.version ? { version: opts.version } : {}),
+            instance: opts.instance,
+            pid: process.pid,
+          }),
+        )
+        return
+      }
       handler(req, res)
         .then((handled) => {
           if (!handled) {

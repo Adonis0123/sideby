@@ -4,7 +4,15 @@ import { pathToFileURL } from 'node:url'
 import type { Config } from '../core/config.ts'
 import { writeFileAtomic } from '../core/fs-safe.ts'
 import { expandUserPath } from '../core/paths.ts'
-import type { FamilyDef, HookEvent, HookFilter, HookHandler, Plugin, PluginApi } from '../types.ts'
+import type {
+  FamilyDef,
+  FamilyLogo,
+  HookEvent,
+  HookFilter,
+  HookHandler,
+  Plugin,
+  PluginApi,
+} from '../types.ts'
 import { AbortLaunch, type HookBus } from './bus.ts'
 
 export interface PluginManifest {
@@ -78,6 +86,38 @@ export async function checkTrustedTree(root: string, seen = new Set<string>()): 
   return null
 }
 
+/** SVG path data only: commands, numbers and separators, so a logo cannot carry markup or script. */
+const LOGO_PATH_RE = /^[MmLlHhVvCcSsQqTtAaZz0-9eE.,+\-\s]+$/
+const LOGO_COLOR_RE = /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
+export const MAX_LOGO_PATH = 20_000
+
+/** Why a Family logo is unusable, or null when it is fine. The Panel draws it with DOM APIs, never as markup. */
+export function logoProblem(logo: unknown): string | null {
+  if (typeof logo !== 'object' || logo === null || Array.isArray(logo)) return 'logo must be an object'
+  const { path, color, title, fillRule } = logo as Record<string, unknown>
+  if (typeof path !== 'string' || !path.trim()) return 'logo.path must be a non-empty string'
+  if (path.length > MAX_LOGO_PATH) return `logo.path is over ${MAX_LOGO_PATH} characters`
+  if (!LOGO_PATH_RE.test(path))
+    return 'logo.path may hold only SVG path commands, numbers, spaces, commas, dots, "+" and "-"'
+  if (color !== undefined && (typeof color !== 'string' || !LOGO_COLOR_RE.test(color)))
+    return 'logo.color must be a hex color such as #D97757'
+  if (title !== undefined && (typeof title !== 'string' || title.length > 80))
+    return 'logo.title must be a string of at most 80 characters'
+  if (fillRule !== undefined && fillRule !== 'nonzero' && fillRule !== 'evenodd')
+    return 'logo.fillRule must be "nonzero" or "evenodd"'
+  return null
+}
+
+/** Only the known logo fields, so nothing else a Plugin put on the object reaches the Panel. */
+function cleanLogo(logo: FamilyLogo): FamilyLogo {
+  return {
+    path: logo.path,
+    ...(logo.color ? { color: logo.color } : {}),
+    ...(logo.title ? { title: logo.title } : {}),
+    ...(logo.fillRule ? { fillRule: logo.fillRule } : {}),
+  }
+}
+
 function settingsFor(config: Config, name: string, manifest?: PluginManifest): Record<string, unknown> {
   const defaults: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(manifest?.userConfig ?? {})) if ('default' in v) defaults[k] = v.default
@@ -97,6 +137,7 @@ async function register(
   // halfway leaves no Family and no hook behind.
   const stagedFamilies: FamilyDef[] = []
   const stagedHooks: (() => void)[] = []
+  const stagedErrors: string[] = []
   const api: PluginApi = {
     family(def: FamilyDef) {
       // The id becomes part of account refs and shell function names.
@@ -107,6 +148,18 @@ async function register(
       const owner = result.familyOwner.get(def.id)
       if (owner) throw new Error(`family ${def.id} is already provided by ${owner}`)
       if (stagedFamilies.some((f) => f.id === def.id)) throw new Error(`family ${def.id} is registered twice`)
+      // A bad logo costs only the logo: the Family still loads and the Panel shows its initials.
+      if (def.logo !== undefined) {
+        const problem = logoProblem(def.logo)
+        if (problem) {
+          stagedErrors.push(`family ${def.id}: ${problem}; showing its initials instead`)
+          const { logo: _dropped, ...rest } = def
+          stagedFamilies.push(rest)
+          return
+        }
+        stagedFamilies.push({ ...def, logo: cleanLogo(def.logo) })
+        return
+      }
       stagedFamilies.push(def)
     },
     on<E extends HookEvent>(event: E, a: HookFilter | HookHandler<E>, b?: HookHandler<E>) {
@@ -131,6 +184,7 @@ async function register(
     result.familyOwner.set(def.id, plugin.name)
   }
   for (const add of stagedHooks) add()
+  for (const message of stagedErrors) result.errors.push({ where: plugin.name, message })
   return stagedFamilies.map((f) => f.id)
 }
 

@@ -7,6 +7,7 @@ const Str = Type.String()
 const Level = Type.Union([Type.Literal('ok'), Type.Literal('warn'), Type.Literal('fail')])
 const Kind = Type.Union([Type.Literal('subscription'), Type.Literal('api')])
 const Version = Type.Literal(1)
+const AppPlatform = Type.Union([Type.Literal('darwin'), Type.Literal('linux')])
 
 const Account = Type.Object({
   family: Str,
@@ -84,6 +85,12 @@ const Usage = Type.Union([
     cacheReadTokens: Type.Number(),
     cacheWriteTokens: Type.Number(),
     totalTokens: Type.Number(),
+    daily: Type.Optional(
+      Type.Array(Type.Object({ date: Str, totalTokens: Type.Number() }), {
+        description: 'Tokens per local day (YYYY-MM-DD), oldest first, days without records as 0.',
+      }),
+    ),
+    lastActivityAt: Type.Optional(Str),
   }),
   Type.Object({ status: Type.Literal('unavailable'), reason: Str, detail: Type.Optional(Str) }),
 ])
@@ -172,6 +179,30 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       errors: Type.Array(PluginError),
     },
     { title: 'sideby plugins --json' },
+  ),
+  'app-install': Type.Object(
+    {
+      schemaVersion: Version,
+      platform: AppPlatform,
+      path: Str,
+      files: Type.Array(Str),
+      mode: Type.Union([Type.Literal('panel'), Type.Literal('url')]),
+      url: Type.Optional(Str),
+      node: Str,
+      entry: Str,
+      updated: Type.Boolean(),
+      hints: Type.Array(Str),
+    },
+    { title: 'sideby app install --json' },
+  ),
+  'app-uninstall': Type.Object(
+    {
+      schemaVersion: Version,
+      platform: AppPlatform,
+      removed: Type.Array(Str),
+      skipped: Type.Array(Type.Object({ path: Str, reason: Str })),
+    },
+    { title: 'sideby app uninstall --json' },
   ),
   error: Type.Object({ schemaVersion: Version, error: Str }, { title: 'sideby error --json' }),
   config: ConfigSchema,

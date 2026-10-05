@@ -5,6 +5,7 @@ import { readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { USAGE_DAYS } from '../../core/quota-levels.ts'
+import { dailyBuckets } from '../../core/usage-days.ts'
 import type { Account, ReadContext, UsageResult } from '../../types.ts'
 
 const DAY_MS = 86_400_000
@@ -106,17 +107,22 @@ export async function readClaudeUsage(account: Account, ctx: ReadContext): Promi
     }
 
   const sessions = new Set<string>()
+  const days = dailyBuckets(ctx.now)
+  let last = Number.NEGATIVE_INFINITY
   let inputTokens = 0
   let outputTokens = 0
   let cacheReadTokens = 0
   let cacheWriteTokens = 0
   for (const e of entries.values()) {
-    if (!Number.isFinite(e.timestamp) || e.timestamp < since || e.timestamp > now) continue
+    if (!Number.isFinite(e.timestamp) || e.timestamp > now) continue
+    if (e.timestamp > last) last = e.timestamp
+    if (e.timestamp < since) continue
     sessions.add(e.session)
     inputTokens += e.input
     outputTokens += e.output
     cacheReadTokens += e.cacheRead
     cacheWriteTokens += e.cacheWrite
+    days.add(e.timestamp, e.input + e.output + e.cacheRead + e.cacheWrite)
   }
   return {
     status: 'ok',
@@ -127,5 +133,7 @@ export async function readClaudeUsage(account: Account, ctx: ReadContext): Promi
     cacheReadTokens,
     cacheWriteTokens,
     totalTokens: inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens,
+    daily: days.daily,
+    ...(Number.isFinite(last) ? { lastActivityAt: new Date(last).toISOString() } : {}),
   }
 }

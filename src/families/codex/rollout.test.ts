@@ -3,7 +3,14 @@ import { copyFile, mkdir, utimes } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../../../testing/index.ts'
-import { fileTokens, MAX_QUOTA_FILES, readCodexQuota, readCodexUsage, windowLabel } from './rollout.ts'
+import {
+  fileDeltas,
+  fileTokens,
+  MAX_QUOTA_FILES,
+  readCodexQuota,
+  readCodexUsage,
+  windowLabel,
+} from './rollout.ts'
 
 const NOW = new Date('2026-10-05T12:00:00.000Z')
 const DAY = 24 * 60 * 60 * 1000
@@ -234,7 +241,10 @@ describe('readCodexUsage', () => {
       )
       await rollout(h, '.codex-work', 'd', ['{"type":"session_meta","payload":{}}'], 0)
       const r = await readCodexUsage(h.path('.codex-work'), NOW)
-      assert.deepEqual(r, {
+      assert.equal(r.status, 'ok')
+      if (r.status !== 'ok') return
+      const { daily, lastActivityAt, ...totals } = r
+      assert.deepEqual(totals, {
         status: 'ok',
         days: 7,
         sessions: 2,
@@ -244,7 +254,127 @@ describe('readCodexUsage', () => {
         cacheWriteTokens: 5,
         totalTokens: 250 + 100 + 50 + 5,
       })
+      // The rate-limits-only event is the newest one seen; the truncated line is not.
+      assert.equal(lastActivityAt, '2026-10-05T09:06:00.000Z')
+      assert.equal(
+        daily?.reduce((a, d) => a + d.totalTokens, 0),
+        r.totalTokens,
+      )
     })
+  })
+
+  it('counts only the turns inside the window of a long session resumed today', async () => {
+    await withFakeHome(async (h) => {
+      await rollout(
+        h,
+        '.codex-work',
+        'long',
+        [
+          // Ten days before NOW: outside the window, although the file was modified today.
+          event('2026-09-25T09:00:00Z', { usage: usage(1000, 400, 100) }),
+          event('2026-10-05T09:00:00Z', { usage: usage(1300, 500, 150) }),
+          // The cumulative value drops back: a new segment adds its whole total.
+          event('2026-10-05T10:00:00Z', { usage: usage(20, 0, 5) }),
+        ],
+        0,
+      )
+      // Modified today, but every turn is older than the window: not a session.
+      await rollout(
+        h,
+        '.codex-work',
+        'stale',
+        [event('2026-09-20T09:00:00Z', { usage: usage(50, 0, 50) })],
+        0,
+      )
+      const r = await readCodexUsage(h.path('.codex-work'), NOW)
+      assert.equal(r.status, 'ok')
+      if (r.status !== 'ok') return
+      const { daily, lastActivityAt, ...totals } = r
+      assert.deepEqual(totals, {
+        status: 'ok',
+        days: 7,
+        sessions: 1,
+        inputTokens: 320 - 100,
+        cacheReadTokens: 100,
+        outputTokens: 55,
+        cacheWriteTokens: 0,
+        totalTokens: 375,
+      })
+      assert.equal(
+        daily?.reduce((a, d) => a + d.totalTokens, 0),
+        375,
+      )
+      assert.equal(lastActivityAt, '2026-10-05T10:00:00.000Z')
+
+      await rollout(h, '.codex-old', 'stale', [event('2026-09-20T09:00:00Z', { usage: usage(50, 0, 50) })], 0)
+      const none = await readCodexUsage(h.path('.codex-old'), NOW)
+      assert.equal(none.status === 'unavailable' && none.reason, 'no-session')
+    })
+  })
+
+  it('spreads each file over the local days of its events, keeping segments and the baseline', async () => {
+    await withFakeHome(async (h) => {
+      // Local times, so the test holds in any time zone.
+      const now = new Date(2026, 9, 5, 15, 0, 0)
+      const at = (month: number, d: number, hh: number, mm = 0, ss = 0, ms = 0) =>
+        new Date(2026, month - 1, d, hh, mm, ss, ms).toISOString()
+      const tokens = (input: number) => ({ input_tokens: input, output_tokens: 0 })
+      const line = (time: string, total: number, turn?: number) =>
+        JSON.stringify({
+          timestamp: time,
+          type: 'event_msg',
+          payload: {
+            type: 'token_count',
+            info: {
+              total_token_usage: tokens(total),
+              ...(turn === undefined ? {} : { last_token_usage: tokens(turn) }),
+            },
+          },
+        })
+      const write = async (name: string, lines: string[]) => {
+        const p = await h.write(join('.codex-work', 'sessions', `rollout-${name}.jsonl`), lines.join('\n'))
+        await utimes(p, now, now)
+      }
+      await write('a', [
+        line(at(10, 4, 23, 59, 59, 999), 100, 100),
+        // Exactly midnight: the new day.
+        line(at(10, 5, 0, 0, 0, 0), 150, 50),
+        // The cumulative value drops back: a new segment adds its whole total.
+        line(at(10, 5, 1, 0), 30, 30),
+        event(at(10, 5, 16, 0), { primary: win(1, 300) }),
+      ])
+      // A subagent file that starts from its parent's running total of 980.
+      await write('b', [line(at(10, 2, 12, 0), 1000, 20), line(at(10, 2, 12, 5), 1050, 50)])
+      const r = await readCodexUsage(h.path('.codex-work'), now)
+      assert.equal(r.status, 'ok')
+      if (r.status !== 'ok') return
+      assert.equal(r.totalTokens, 180 + 70)
+      assert.deepEqual(r.daily, [
+        { date: '2026-09-29', totalTokens: 0 },
+        { date: '2026-09-30', totalTokens: 0 },
+        { date: '2026-10-01', totalTokens: 0 },
+        { date: '2026-10-02', totalTokens: 70 },
+        { date: '2026-10-03', totalTokens: 0 },
+        { date: '2026-10-04', totalTokens: 100 },
+        { date: '2026-10-05', totalTokens: 80 },
+      ])
+      // The event after `now` is ignored.
+      assert.equal(r.lastActivityAt, at(10, 5, 1, 0))
+    })
+  })
+})
+
+describe('fileDeltas', () => {
+  const t = (input: number, output: number) => ({ input, cached: 0, output, cacheWrite: 0 })
+  it('gives each event its increment and sums to fileTokens for segments and an inherited baseline', () => {
+    const events = [
+      { total: t(1000, 100), turn: t(20, 2) },
+      { total: t(1050, 105), turn: t(50, 5) },
+      { total: t(5, 1), turn: t(5, 1) },
+    ]
+    assert.deepEqual(fileDeltas(events), [t(20, 2), t(50, 5), t(5, 1)])
+    assert.deepEqual(fileTokens(events), t(75, 8))
+    assert.deepEqual(fileDeltas([]), [])
   })
 })
 
@@ -277,5 +407,47 @@ describe('fileTokens', () => {
   })
   it('returns null for a file without token counts', () => {
     assert.equal(fileTokens([]), null)
+  })
+  it('starts a new segment when any one field drops, even while the total size grows', () => {
+    // input falls 100 -> 50 while output rises 100 -> 150: the size stays 200, but a cumulative counter
+    // only falls when a new segment starts, so the second event counts its whole total.
+    const events = [
+      { total: t(100, 100), turn: t(100, 100) },
+      { total: t(50, 150), turn: t(50, 150) },
+    ]
+    assert.deepEqual(fileDeltas(events), [t(100, 100), t(50, 150)])
+    assert.deepEqual(fileTokens(events), t(150, 250))
+  })
+  it('starts a new segment when only the cached count drops, keeping the cache hit rate honest', () => {
+    const c = (input: number, cached: number) => ({ input, cached, output: 10, cacheWrite: 0 })
+    const events = [
+      { total: c(100, 80), turn: c(100, 80) },
+      { total: c(120, 20), turn: c(120, 20) },
+    ]
+    const deltas = fileDeltas(events)
+    assert.deepEqual(deltas, [c(100, 80), { input: 120, cached: 20, output: 10, cacheWrite: 0 }])
+    assert.deepEqual(fileTokens(events), { input: 220, cached: 100, output: 20, cacheWrite: 0 })
+  })
+  it('keeps every increment non-negative, so fileTokens is exactly the sum of fileDeltas', () => {
+    const c = (input: number, cached: number, output: number, cacheWrite: number) => ({
+      input,
+      cached,
+      output,
+      cacheWrite,
+    })
+    const events = [
+      { total: c(500, 100, 50, 5), turn: c(20, 10, 2, 1) },
+      { total: c(600, 90, 60, 6), turn: null },
+      { total: c(700, 150, 55, 9), turn: null },
+      { total: c(10, 5, 1, 0), turn: c(10, 5, 1, 0) },
+      { total: c(30, 5, 3, 2), turn: null },
+    ]
+    const deltas = fileDeltas(events)
+    for (const d of deltas) for (const v of Object.values(d)) assert.ok(v >= 0, JSON.stringify(deltas))
+    const sum = deltas.reduce(
+      (a, d) => c(a.input + d.input, a.cached + d.cached, a.output + d.output, a.cacheWrite + d.cacheWrite),
+      c(0, 0, 0, 0),
+    )
+    assert.deepEqual(fileTokens(events), sum)
   })
 })

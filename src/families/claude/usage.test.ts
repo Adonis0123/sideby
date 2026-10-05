@@ -32,7 +32,10 @@ describe('claude usage', () => {
       await copyFile(FIXTURE, file)
       await touch(file, new Date(NOW.getTime() - 3_600_000))
       const r = await readClaudeUsage(account(dir), ctx(h))
-      assert.deepEqual(r, {
+      assert.equal(r.status, 'ok')
+      if (r.status !== 'ok') return
+      const { daily, lastActivityAt, ...totals } = r
+      assert.deepEqual(totals, {
         status: 'ok',
         days: 7,
         sessions: 2,
@@ -42,6 +45,57 @@ describe('claude usage', () => {
         cacheWriteTokens: 20,
         totalTokens: 190,
       })
+      // The newest usage row; the later row without usage does not count as activity.
+      assert.equal(lastActivityAt, '2026-10-05T11:00:00.000Z')
+      assert.equal(daily?.length, 7)
+      assert.equal(
+        daily?.reduce((a, d) => a + d.totalTokens, 0),
+        190,
+      )
+    })
+  })
+
+  it('buckets tokens by local day, zero-fills empty days and puts a midnight record on the new day', async () => {
+    await withFakeHome(async (h) => {
+      // Local times, so the test holds in any time zone.
+      const now = new Date(2026, 9, 5, 15, 0, 0)
+      const at = (month: number, d: number, hh: number, mm = 0, ss = 0, ms = 0) =>
+        new Date(2026, month - 1, d, hh, mm, ss, ms)
+      const row = (id: string, time: Date, input: number) =>
+        JSON.stringify({
+          type: 'assistant',
+          timestamp: time.toISOString(),
+          sessionId: 's',
+          message: { id, usage: { input_tokens: input, output_tokens: 0 } },
+        })
+      const file = await h.write(
+        '.claude-work/projects/p/s.jsonl',
+        `${[
+          row('msg_fake_before_midnight', at(10, 4, 23, 59, 59, 999), 1),
+          // Logged twice across midnight: the last line wins, so it counts once, on the new day.
+          row('msg_fake_dup', at(10, 4, 23, 59, 59, 999), 1000),
+          row('msg_fake_dup', at(10, 5, 0, 0, 0, 0), 2),
+          row('msg_fake_oldest_day', at(9, 29, 0, 0), 4),
+          // Inside the 7 x 24 h window but on the day before the first bucket.
+          row('msg_fake_partial_day', at(9, 28, 20, 0), 8),
+          row('msg_fake_future', at(10, 5, 16, 0), 16),
+        ].join('\n')}\n`,
+      )
+      await touch(file, now)
+      const r = await readClaudeUsage(account(h.path('.claude-work')), { ...ctx(h), now })
+      assert.equal(r.status, 'ok')
+      if (r.status !== 'ok') return
+      assert.equal(r.totalTokens, 1 + 2 + 4 + 8)
+      assert.deepEqual(r.daily, [
+        { date: '2026-09-29', totalTokens: 4 },
+        { date: '2026-09-30', totalTokens: 0 },
+        { date: '2026-10-01', totalTokens: 0 },
+        { date: '2026-10-02', totalTokens: 0 },
+        { date: '2026-10-03', totalTokens: 0 },
+        { date: '2026-10-04', totalTokens: 1 },
+        { date: '2026-10-05', totalTokens: 2 },
+      ])
+      assert.equal(r.lastActivityAt, at(10, 5, 0, 0).toISOString())
     })
   })
 

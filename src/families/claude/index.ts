@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { readSecretFile } from '../../core/secret-file.ts'
 import { claudeStatusline } from '../../quota/claude-statusline.ts'
 import type { Account, FamilyDef, LoginState, Plugin, SharedItemDef } from '../../types.ts'
+import { BUILTIN_LOGOS } from '../logos.ts'
 import { CLAUDE_LAYOUT } from './layout.ts'
 import { readClaudeQuota } from './quota.ts'
 import { readClaudeUsage } from './usage.ts'
@@ -56,6 +57,7 @@ async function model(account: Account): Promise<string | undefined> {
 export const claudeFamily: FamilyDef = {
   id: 'claude',
   title: 'Claude Code',
+  logo: BUILTIN_LOGOS.claude,
   bin: 'claude',
   installUrl: 'https://code.claude.com/docs/en/setup',
   selectVar: 'CLAUDE_CONFIG_DIR',

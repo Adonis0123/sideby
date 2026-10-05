@@ -149,6 +149,28 @@
                   },
                   "totalTokens": {
                     "type": "number"
+                  },
+                  "daily": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "date",
+                        "totalTokens"
+                      ],
+                      "properties": {
+                        "date": {
+                          "type": "string"
+                        },
+                        "totalTokens": {
+                          "type": "number"
+                        }
+                      }
+                    },
+                    "description": "Tokens per local day (YYYY-MM-DD), oldest first, days without records as 0."
+                  },
+                  "lastActivityAt": {
+                    "type": "string"
                   }
                 }
               },

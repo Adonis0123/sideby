@@ -7,8 +7,9 @@ import { asBuiltin, demoFamily, demoPlugin, seedDemoMain } from '../../testing/d
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
 import { createRuntime } from '../runtime.ts'
 import { createPanelHandler, MAX_BODY_BYTES, type PanelState } from './handler.ts'
-import { jsonForScript, renderPage } from './page.ts'
+import { jsonForScript, pageStyles, renderPage } from './page.ts'
 import { startPanelServer } from './server.ts'
+import { resolveTheme } from './theme.ts'
 
 function factory(h: FakeHome, broken = false) {
   const def = demoFamily(
@@ -279,6 +280,132 @@ describe('page', () => {
   })
 })
 
+describe('panel theme', () => {
+  it('puts the host tokens into the nonce style, light before dark, and fixes the scheme on request', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const { server, port } = await serve((p) =>
+        createPanelHandler({
+          runtime: factory(h),
+          allowedHosts: [`127.0.0.1:${p}`],
+          theme: {
+            header: 'bar',
+            light: { font: '-apple-system, "PingFang SC", sans-serif', primary: '#e1f0fb', radius: '10px' },
+            dark: { primary: 'rgb(31 99 150 / 90%)' },
+          },
+        }),
+      )
+      try {
+        const r = await request(port, 'GET', '/', { host: `127.0.0.1:${port}` })
+        assert.equal(r.status, 200)
+        const style = /<style nonce="[^"]+">([\s\S]*?)<\/style>/.exec(r.text)?.[1] ?? ''
+        assert.match(
+          style,
+          /:root \{ --font: -apple-system, "PingFang SC", sans-serif; --primary: #e1f0fb; --radius: 10px; \}/,
+        )
+        // The host's dark values come after the built-in dark palette, inside the media query.
+        const dark = style.slice(style.indexOf('@media (prefers-color-scheme: dark)'))
+        assert.ok(dark.indexOf('--primary: #5b54e8') < dark.indexOf('--primary: rgb(31 99 150 / 90%)'))
+        assert.match(r.text, /<body class="header-bar">/)
+      } finally {
+        await close(server)
+      }
+    })
+    const light = pageStyles(resolveTheme({ colorScheme: 'light', light: { bg: '#f2f8fc' } }))
+    assert.doesNotMatch(light, /prefers-color-scheme: dark/)
+    assert.match(light, /color-scheme: light;/)
+    const html = renderPage({ basePath: '', token: 't', theme: resolveTheme({ colorScheme: 'light' }) })
+    assert.match(html, /<meta name="color-scheme" content="light">/)
+    // Without a theme the page keeps following the system.
+    assert.match(pageStyles(), /@media \(prefers-color-scheme: dark\)/)
+  })
+
+  it('refuses values that could leave their declaration, and unknown tokens', () => {
+    const bad = [
+      'red; } body { display: none',
+      '#fff</style><script>',
+      'red}',
+      'url(https://example.invalid/x.png)',
+      'calc(1px',
+      '"PingFang SC',
+      'red /* x */',
+      'a\\62 c',
+      'expression:x',
+      '',
+      'x'.repeat(201),
+    ]
+    for (const value of bad)
+      assert.throws(
+        () =>
+          createPanelHandler({
+            runtime: async () => ({}) as never,
+            allowedHosts: [],
+            theme: { light: { text: value } },
+          }),
+        (err: Error) => err instanceof TypeError && /light\.text/.test(err.message),
+        value,
+      )
+    assert.throws(() => resolveTheme({ light: { colour: 'red' } as never }), /unknown token light\.colour/)
+    assert.throws(() => resolveTheme({ dark: { text: 1 as never } }), /dark\.text must be a string/)
+    assert.throws(() => resolveTheme({ colorScheme: 'sepia' as never }), /colorScheme/)
+    assert.throws(() => resolveTheme({ header: 'tall' as never }), /header/)
+    assert.throws(() => resolveTheme({ css: 'x' } as never), /unknown option css/)
+    assert.deepEqual(
+      resolveTheme({
+        light: { shadow: 'none', focusRing: '0 0 0 3px color-mix(in srgb, #74acdf 30%, transparent)' },
+      }).light,
+      ['--shadow: none', '--focus-ring: 0 0 0 3px color-mix(in srgb, #74acdf 30%, transparent)'],
+    )
+  })
+})
+
+describe('family logos', () => {
+  const PATH = 'M11.5.1 1.9 5.7a.84.84 0 0 0-.42.73v11.19Z'
+  it('sends a valid logo to the page and drops an unsafe one with a plugin error', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const good = demoFamily({ logo: { path: PATH, title: 'Demo', extra: '<b>' } as never })
+      const bad = demoFamily({ id: 'evil', logo: { path: 'M0 0"/><script>alert(1)</script>' } })
+      const plugins = [
+        asBuiltin(demoPlugin(good)),
+        asBuiltin({ name: 'evil-family', register: (api) => api.family(bad) }),
+        asBuiltin({
+          name: 'red-family',
+          register: (api) => api.family(demoFamily({ id: 'red', logo: { path: PATH, color: 'red;x' } })),
+        }),
+      ]
+      const rt = await createRuntime({ env: h.env, builtins: plugins })
+      assert.deepEqual(rt.families.get('demo')?.logo, { path: PATH, title: 'Demo' })
+      assert.equal(rt.families.get('evil')?.logo, undefined)
+      assert.ok(rt.families.has('evil'), 'the Family itself still loads')
+      const errors = rt.pluginErrors.map((e) => `${e.where}: ${e.message}`).join('\n')
+      assert.match(errors, /evil-family: family evil: logo\.path may hold only SVG path commands/)
+      assert.match(errors, /red-family: family red: logo\.color must be a hex color/)
+
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({ runtime: async () => rt, allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      try {
+        const r = await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })
+        const state = JSON.parse(r.text) as PanelState
+        assert.deepEqual(state.families.find((f) => f.id === 'demo')?.logo, { path: PATH, title: 'Demo' })
+        assert.equal(state.families.find((f) => f.id === 'evil')?.logo, undefined)
+        assert.ok(handler.token)
+      } finally {
+        await close(server)
+      }
+    })
+  })
+
+  it('gives every built-in Family a logo that passes the same check', async () => {
+    await withFakeHome(async (h) => {
+      const rt = await createRuntime({ env: h.env })
+      for (const id of ['claude', 'codex', 'grok', 'pi']) assert.ok(rt.families.get(id)?.logo?.path, id)
+      assert.deepEqual(rt.pluginErrors, [])
+    })
+  })
+})
+
 describe('panel through the Runtime (hardening round 1)', () => {
   it('answers 400 with the fix when config.json is broken, and a read-only check writes nothing', async () => {
     await withFakeHome(async (h) => {
@@ -360,6 +487,117 @@ describe('panel health (hardening round 3)', () => {
         assert.equal((await post(ro.port, '/api/fix', {}, hdr)).status, 403)
       } finally {
         await close(ro.server)
+      }
+    })
+  })
+})
+
+describe('panel v2 server data', () => {
+  it('lists the config aliases of each Account, sorted, and skips aliases that match no Account', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      await (await factory(h)()).createAccount('demo', 'work')
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ aliases: { dw: 'demo:work', zz: 'demo:main', aa: 'main', gone: 'demo:nope' } }),
+      )
+      const { server, port } = await serve((port) =>
+        createPanelHandler({ runtime: factory(h), allowedHosts: [`127.0.0.1:${port}`] }),
+      )
+      try {
+        const state = JSON.parse(
+          (await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text,
+        ) as PanelState
+        const byRef = Object.fromEntries(state.accounts.map((a) => [a.ref, a.aliases]))
+        assert.deepEqual(byRef, { 'demo:main': ['aa', 'zz'], 'demo:work': ['dw'] })
+      } finally {
+        await close(server)
+      }
+    })
+  })
+
+  it('tears quota setup down only with token and Origin, and never when read-only', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      let teardowns = 0
+      const withSetup = () =>
+        createRuntime({
+          env: h.env,
+          builtins: [
+            asBuiltin(
+              demoPlugin(
+                demoFamily({
+                  quotaSetup: {
+                    summary: 'demo setup',
+                    async plan() {
+                      return { status: 'enabled', file: 'f', diff: '', message: 'on' }
+                    },
+                    async apply() {
+                      return { status: 'enabled', file: 'f', diff: '', message: 'on' }
+                    },
+                    async teardown() {
+                      teardowns++
+                      return { ok: true, message: 'restored', diff: '-x\n+y\n' }
+                    },
+                  },
+                }),
+              ),
+            ),
+          ],
+        })
+      const { server, port, handler } = await serve((port) =>
+        createPanelHandler({ runtime: withSetup, allowedHosts: [`127.0.0.1:${port}`] }),
+      )
+      try {
+        const origin = `http://127.0.0.1:${port}`
+        const good = { origin, 'x-sideby-token': handler.token }
+        const path = '/api/quota/teardown'
+        assert.equal((await post(port, path, { family: 'demo' }, { origin })).status, 403)
+        assert.equal(
+          (await post(port, path, { family: 'demo' }, { ...good, origin: 'http://evil.example' })).status,
+          403,
+        )
+        assert.equal(
+          (await post(port, path, { family: 'demo' }, { 'x-sideby-token': handler.token })).status,
+          403,
+        )
+        assert.equal((await request(port, 'GET', path, { host: `127.0.0.1:${port}` })).status, 405)
+        assert.equal(teardowns, 0)
+        assert.equal((await post(port, path, {}, good)).status, 400)
+        assert.equal((await post(port, path, { family: 'nofamily' }, good)).status, 400)
+        const done = await post(port, path, { family: 'demo' }, good)
+        assert.equal(done.status, 200)
+        assert.deepEqual(done.body, {
+          family: 'demo',
+          result: { ok: true, message: 'restored', diff: '-x\n+y\n' },
+        })
+        assert.equal(teardowns, 1)
+      } finally {
+        await close(server)
+      }
+      const ro = await serve((port) =>
+        createPanelHandler({ runtime: withSetup, allowedHosts: [`127.0.0.1:${port}`], readOnly: true }),
+      )
+      try {
+        const hdr = { origin: `http://127.0.0.1:${ro.port}`, 'x-sideby-token': ro.handler.token }
+        const refused = await post(ro.port, '/api/quota/teardown', { family: 'demo' }, hdr)
+        assert.equal(refused.status, 403)
+        assert.equal(refused.body.error, 'this panel is read-only')
+        assert.equal(teardowns, 1)
+      } finally {
+        await close(ro.server)
+      }
+      // A Family without a quota setup is a user error, not a crash.
+      const plain = await serve((port) =>
+        createPanelHandler({ runtime: factory(h), allowedHosts: [`127.0.0.1:${port}`] }),
+      )
+      try {
+        const hdr = { origin: `http://127.0.0.1:${plain.port}`, 'x-sideby-token': plain.handler.token }
+        const none = await post(plain.port, '/api/quota/teardown', { family: 'demo' }, hdr)
+        assert.equal(none.status, 400)
+        assert.match(String(none.body.error), /needs no quota setup/)
+      } finally {
+        await close(plain.server)
       }
     })
   })

@@ -1,7 +1,8 @@
+import { fileURLToPath } from 'node:url'
 import { aliasProblem } from '../core/config.ts'
 import type { DoctorReport } from '../core/doctor.ts'
 import { runHost } from '../core/launch.ts'
-import { tildify } from '../core/paths.ts'
+import { resolvePaths, tildify } from '../core/paths.ts'
 import { USAGE_DAYS } from '../core/quota-levels.ts'
 import { createRuntime } from '../runtime.ts'
 import type { Finding } from '../types.ts'
@@ -267,12 +268,58 @@ export async function cmdShellInit(a: ParsedArgs, io: Io): Promise<number> {
   return 0
 }
 
-export async function cmdUi(a: ParsedArgs, io: Io): Promise<number> {
+/** Absolute path of this CLI's entry (`main.ts` from source, `main.js` from dist), for detached processes. */
+function cliEntry(): string {
+  const ext = import.meta.url.endsWith('.ts') ? 'ts' : 'js'
+  return fileURLToPath(new URL(`./main.${ext}`, import.meta.url))
+}
+
+function parsePort(a: ParsedArgs): number | undefined {
   const portFlag = a.flags.get('port')
   const port = typeof portFlag === 'string' ? Number(portFlag) : undefined
   if (port !== undefined && !(Number.isInteger(port) && port > 0 && port < 65536))
     throw new UsageError('--port must be a number between 1 and 65535')
-  const { startPanelServer } = await import('../panel/server.ts')
+  return port
+}
+
+export async function cmdUi(a: ParsedArgs, io: Io): Promise<number> {
+  const port = parsePort(a)
+  const bg = await import('../panel/background.ts')
+  const paths = resolvePaths(process.env)
+  if (a.flags.has('stop')) {
+    if (a.flags.size > 1) throw new UsageError('--stop takes no other options')
+    const r = await bg.stopBackgroundPanel(paths)
+    if (r.status === 'stopped')
+      io.out(`${c.green('✓')} stopped the background panel (pid ${r.pid}, ${r.url})`)
+    else if (r.status === 'not-running')
+      io.out(`No background panel is running.${r.detail ? ` ${r.detail}.` : ''}`)
+    else io.err(c.red(`✗ could not stop the background panel: ${r.detail}`))
+    return r.status === 'failed' ? 1 : 0
+  }
+  if (a.flags.has(bg.DETACHED_FLAG))
+    return bg.serveDetached({
+      paths,
+      env: process.env,
+      ...(port ? { port } : {}),
+      runtimeFactory: (env) => createRuntime({ env }),
+      log: (s) => io.out(s),
+    })
+  const { openBrowser, startPanelServer } = await import('../panel/server.ts')
+  if (a.flags.has('background')) {
+    const r = await bg.startBackgroundPanel({
+      paths,
+      env: process.env,
+      entry: cliEntry(),
+      ...(port ? { port } : {}),
+    })
+    io.out(
+      r.reused
+        ? `sideby panel is already running at ${r.url}`
+        : `sideby panel: ${r.url} (in the background; stop it with \`sideby ui --stop\`)`,
+    )
+    if (!a.flags.has('no-open') && !(await openBrowser(r.url))) io.out(`open ${r.url} in your browser`)
+    return 0
+  }
   const srv = await startPanelServer({
     runtimeFactory: () => createRuntime(),
     ...(port ? { port } : {}),
@@ -289,4 +336,39 @@ export async function cmdUi(a: ParsedArgs, io: Io): Promise<number> {
     process.once('SIGTERM', stop)
   })
   return 0
+}
+
+export async function cmdApp(a: ParsedArgs, io: Io): Promise<number> {
+  const sub = a.positionals[0]
+  const usage = 'usage: sideby app install [--url <url>] | sideby app uninstall'
+  if ((sub !== 'install' && sub !== 'uninstall') || a.positionals.length > 1) throw new UsageError(usage)
+  if (sub === 'uninstall' && a.flags.has('url')) throw new UsageError('--url belongs to `sideby app install`')
+  const { installApp, uninstallApp } = await import('../desktop/app.ts')
+  const home = resolvePaths(process.env).home
+  const ctx = { home, env: process.env, platform: process.platform }
+  if (sub === 'install') {
+    const url = a.flags.get('url')
+    const { packageVersion } = await import('../core/version.ts')
+    const r = await installApp(ctx, {
+      node: process.execPath,
+      entry: cliEntry(),
+      version: packageVersion(),
+      ...(typeof url === 'string' ? { url } : {}),
+    })
+    if (a.flags.has('json')) json(io, r)
+    else {
+      io.out(`${c.green('✓')} ${r.updated ? 'updated' : 'installed'} ${c.bold(tildify(r.path, home))}`)
+      io.out(c.dim(`  starts ${tildify(r.node, home)} ${tildify(r.entry, home)}`))
+      for (const h of r.hints) io.out(`  ${h}`)
+    }
+    return 0
+  }
+  const r = await uninstallApp(ctx)
+  if (a.flags.has('json')) json(io, r)
+  else {
+    for (const p of r.removed) io.out(`${c.green('✓')} removed ${tildify(p, home)}`)
+    for (const s of r.skipped) io.err(c.yellow(`! ${tildify(s.path, home)}: ${s.reason}`))
+    if (!r.removed.length && !r.skipped.length) io.out('No sideby app is installed.')
+  }
+  return r.skipped.length ? 1 : 0
 }

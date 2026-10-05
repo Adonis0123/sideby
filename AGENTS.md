@@ -38,10 +38,13 @@ src/
 ├── core/         paths, config, account discovery, Secret File, Share Modes, doctor, create, launch, atomic writes
 ├── plugins/      loader (trust checks), hook bus, built-in account-script
 ├── families/     claude, codex, grok, pi: each a Family Plugin; index.ts lists built-ins in load order
+│                 logos.ts holds the built-in marks each FamilyDef sets as `logo`
 │                 claude/ reads quota from the tap cache and usage from projects/**/*.jsonl;
 │                 codex/rollout.ts reads quota and usage from sessions/**/rollout-*.jsonl
 ├── quota/        `quota setup|teardown claude` and the `statusline-tap` entry (thin; cache logic in families/claude/quota-cache.ts)
-├── panel/        createPanelHandler, the standalone server and the inline page
+├── panel/        createPanelHandler, the standalone server, the inline page and theme.ts (host theme tokens);
+│                 background.ts runs the server detached (`ui --background`, `--stop`)
+├── desktop/      `sideby app install|uninstall`: macOS app bundle, Linux .desktop entry, icon drawn in pure Node
 ├── runtime.ts    createRuntime(): shared services for CLI and panel
 ├── types.ts      public plugin contract (Plugin, PluginApi, FamilyDef, Finding, ...)
 └── index.ts      library entry: createPanelHandler and plugin types
@@ -123,7 +126,7 @@ Shared Item paths must be relative and stay inside the account directory: config
 ### Adding a family
 
 1. Confirm the Host supports an isolated config directory through an environment variable, and record the tested version. Write the family row in spec §3.4 (Hijack Variables, Shared Items with Share Modes, sign-in command, login-state rule that reads no credential values).
-2. Create `src/families/<id>/index.ts` exporting a `Plugin` that calls `api.family(def)` with a `FamilyDef` from `src/types.ts`.
+2. Create `src/families/<id>/index.ts` exporting a `Plugin` that calls `api.family(def)` with a `FamilyDef` from `src/types.ts`. Add its mark to `src/families/logos.ts` (one 24x24 SVG path with its source and license) and set it as `logo`.
 3. Add it to `BUILTIN_PLUGINS` in `src/families/index.ts`.
 4. Add `src/families/<id>/index.test.ts` with a fake HOME and a fake Host binary: discovery, launch env, every Shared Item's check and fix.
 5. Quota or usage only from local files or official CLI output (ADR-0003); otherwise leave `readQuota` and `readUsage` out so the panel shows "no public source". sideby reads usage itself; do not add a dependency such as ccusage.

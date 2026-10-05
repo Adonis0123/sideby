@@ -1,6 +1,7 @@
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Account, FamilyDef, LoginState, Plugin } from '../../types.ts'
+import { BUILTIN_LOGOS } from '../logos.ts'
 import { topLevelTomlString } from '../shared/toml.ts'
 import { readCodexQuota, readCodexUsage } from './rollout.ts'
 
@@ -17,6 +18,7 @@ async function readModel(account: Account): Promise<string | undefined> {
 export const codexFamily: FamilyDef = {
   id: 'codex',
   title: 'Codex',
+  logo: BUILTIN_LOGOS.codex,
   bin: 'codex',
   installUrl: 'https://github.com/openai/codex',
   selectVar: 'CODEX_HOME',

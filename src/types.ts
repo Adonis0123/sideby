@@ -36,9 +36,25 @@ export interface FamilyLayout {
 
 export type LoginState = 'logged-in' | 'logged-out' | 'unknown'
 
+/**
+ * A Family's mark for the Panel: one SVG path in a 24x24 view box, drawn inline. sideby checks it when the
+ * Plugin registers; an invalid logo is dropped with a plugin error and the Panel shows the Family's initials.
+ */
+export interface FamilyLogo {
+  /** SVG path data: only commands, numbers, spaces, commas, dots, `+` and `-`. At most 20000 characters. */
+  path: string
+  /** Hex brand color such as `#D97757`. Without one the mark uses the text color, so it works in light and dark mode. */
+  color?: string
+  /** Name of the mark for tooltips; defaults to the Family title. */
+  title?: string
+  fillRule?: 'nonzero' | 'evenodd'
+}
+
 export interface FamilyDef {
   id: string
   title: string
+  /** Mark shown on the Panel's cards, lists and the Tool select; without one the Panel shows the id's initials. */
+  logo?: FamilyLogo
   /** Host executable looked up on PATH. */
   bin: string
   installUrl: string
@@ -143,7 +159,19 @@ export interface TokenTotals {
 }
 
 export type UsageResult =
-  | ({ status: 'ok'; days: number; sessions: number } & TokenTotals)
+  | ({
+      status: 'ok'
+      days: number
+      sessions: number
+      /**
+       * Tokens per local calendar day (`YYYY-MM-DD`), `days` entries ending today, oldest first, days without
+       * records as 0. It can sum to less than `totalTokens`, which also covers the part of the oldest day
+       * inside the rolling window.
+       */
+      daily?: { date: string; totalTokens: number }[]
+      /** ISO time of the newest record the reader saw, not later than now. */
+      lastActivityAt?: string
+    } & TokenTotals)
   | { status: 'unavailable'; reason: 'no-source' | 'no-session' | 'unrecognized'; detail?: string }
 
 export type FindingLevel = 'ok' | 'warn' | 'fail'

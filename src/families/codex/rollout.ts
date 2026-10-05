@@ -5,6 +5,7 @@ import { readdir, stat } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import { createInterface } from 'node:readline'
 import { USAGE_DAYS } from '../../core/quota-levels.ts'
+import { dailyBuckets } from '../../core/usage-days.ts'
 import type { QuotaResult, QuotaWindow, UsageResult } from '../../types.ts'
 
 export const MAX_QUOTA_FILES = 20
@@ -160,6 +161,7 @@ function totals(payload: Obj): { total: Totals; turn: Totals | null } | null {
 }
 
 const ZERO: Totals = { input: 0, cached: 0, output: 0, cacheWrite: 0 }
+const FIELDS = ['input', 'cached', 'output', 'cacheWrite'] as const
 const size = (t: Totals) => t.input + t.output + t.cacheWrite
 const plus = (a: Totals, b: Totals): Totals => ({
   input: a.input + b.input,
@@ -173,31 +175,44 @@ const minus = (a: Totals, b: Totals): Totals => ({
   output: Math.max(0, a.output - b.output),
   cacheWrite: Math.max(0, a.cacheWrite - b.cacheWrite),
 })
+/** True when any counter went down: each one only grows within a segment. */
+const dropped = (now: Totals, prev: Totals) => FIELDS.some((k) => now[k] < prev[k])
 
 /**
- * Tokens one rollout file adds. `total_token_usage` is cumulative but not monotonic: it can drop back
- * mid-file (a new segment starts), and a subagent's file starts from its parent's running total. So:
- * sum the final value of every segment, then subtract the starting baseline (first total minus that
- * first turn's own usage), which is zero for an ordinary session.
+ * What each event adds, by index. `total_token_usage` is cumulative per segment: every field, cached input
+ * included, only grows until the Host starts a new segment, where they all start again from zero. A subagent's
+ * file starts from its parent's running total. So the first event adds its total minus the starting baseline
+ * (that total minus the first turn's own usage, zero for an ordinary session), an event where any field went
+ * down starts a new segment and adds its whole total, and any other event adds its growth. Every field of every
+ * increment is therefore zero or more, and any run of events sums to exactly what it added.
  */
-export function fileTokens(events: { total: Totals; turn: Totals | null }[]): Totals | null {
-  if (events.length === 0) return null
+export function fileDeltas(events: { total: Totals; turn: Totals | null }[]): Totals[] {
+  if (events.length === 0) return []
   const first = events[0]!
   const baseline = first.turn ? minus(first.total, first.turn) : ZERO
-  let done = ZERO
+  const out = [minus(first.total, baseline)]
   let prev = first.total
   for (const e of events.slice(1)) {
-    if (size(e.total) < size(prev)) done = plus(done, prev)
+    out.push(dropped(e.total, prev) ? minus(e.total, ZERO) : minus(e.total, prev))
     prev = e.total
   }
-  return minus(plus(done, prev), baseline)
+  return out
+}
+
+/** Tokens one whole rollout file adds: the sum of its fileDeltas. */
+export function fileTokens(events: { total: Totals; turn: Totals | null }[]): Totals | null {
+  if (events.length === 0) return null
+  return fileDeltas(events).reduce(plus, ZERO)
 }
 
 /**
- * Token totals for rollout files modified in the last `days` days; see fileTokens for how one file counts.
+ * Token totals for events in the last `days` x 24 h, from rollout files modified in that window (mtime only
+ * picks which files to read). Each event counts its fileDeltas increment, so a long session resumed today
+ * adds only its recent turns. `daily` spreads the same increments over local days.
  */
 export async function readCodexUsage(dir: string, now: Date, days = USAGE_DAYS): Promise<UsageResult> {
-  const since = now.getTime() - days * 24 * 60 * 60 * 1000
+  const end = now.getTime()
+  const since = end - days * 24 * 60 * 60 * 1000
   const files = (await listRollouts(dir)).filter((f) => f.mtimeMs >= since)
   if (files.length === 0)
     return {
@@ -207,16 +222,29 @@ export async function readCodexUsage(dir: string, now: Date, days = USAGE_DAYS):
     }
   let sessions = 0
   let sawTokenCount = false
+  let sawTotals = false
+  let last = Number.NEGATIVE_INFINITY
+  const daily = dailyBuckets(now, days)
   const sum = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
   for (const f of files) {
-    const events: { total: Totals; turn: Totals | null }[] = []
-    for await (const { payload } of tokenCounts(f.path)) {
+    const events: { at: number; total: Totals; turn: Totals | null }[] = []
+    for await (const { at, payload } of tokenCounts(f.path)) {
       sawTokenCount = true
+      if (at <= end && at > last) last = at
       const t = totals(payload)
-      if (t) events.push(t)
+      if (t) events.push({ at, ...t })
     }
-    const used = fileTokens(events)
-    if (!used) continue
+    if (events.length) sawTotals = true
+    const deltas = fileDeltas(events)
+    let used = ZERO
+    let inWindow = false
+    for (const [i, e] of events.entries()) {
+      if (e.at < since || e.at > end) continue
+      inWindow = true
+      used = plus(used, deltas[i]!)
+      daily.add(e.at, size(deltas[i]!))
+    }
+    if (!inWindow) continue
     sessions++
     const cached = Math.min(used.cached, used.input)
     sum.inputTokens += used.input - cached
@@ -225,7 +253,7 @@ export async function readCodexUsage(dir: string, now: Date, days = USAGE_DAYS):
     sum.cacheWriteTokens += used.cacheWrite
   }
   if (sessions === 0)
-    return sawTokenCount
+    return sawTokenCount && !sawTotals
       ? { status: 'unavailable', reason: 'unrecognized', detail: 'token_count events have no usable totals' }
       : { status: 'unavailable', reason: 'no-session', detail: `no Codex turn in the last ${days} days` }
   return {
@@ -234,5 +262,7 @@ export async function readCodexUsage(dir: string, now: Date, days = USAGE_DAYS):
     sessions,
     ...sum,
     totalTokens: sum.inputTokens + sum.outputTokens + sum.cacheReadTokens + sum.cacheWriteTokens,
+    daily: daily.daily,
+    ...(Number.isFinite(last) ? { lastActivityAt: new Date(last).toISOString() } : {}),
   }
 }

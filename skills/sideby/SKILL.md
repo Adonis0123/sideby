@@ -96,3 +96,5 @@ Usage (7-day tokens) is read by sideby itself from Claude Code and Codex local r
 ## Panel
 
 `sideby ui` opens a local panel on `127.0.0.1:17420` with the same data and actions (`--no-open` prints the address only). Suggest it when the user wants to see every account at once.
+
+For someone who would rather double-click than use a terminal, `sideby app install` adds a desktop app (macOS `~/Applications/sideby.app`, Linux app menu) that runs `sideby ui --background` and opens the panel; `sideby ui --stop` stops it and `sideby app uninstall` removes the app. Ask before running `app install`: it writes outside sideby's own directories.

@@ -98,6 +98,49 @@ sideby ui --no-open    # 只打印地址
 
 面板只监听 `127.0.0.1`。端口上已经有一个 sideby 面板时，直接打开那个面板；端口被别的程序占用时，依次试后面的端口，并打印最终地址。页面上有账号卡片（额度、用量、登录态、健康）、带一键修复的体检、新建账号，还能在展示 diff 后开启 Claude 额度。新建订阅账号后，面板只给出 `sideby login <account>` 的复制按钮，登录始终在你自己的终端里完成。
 
+#### 桌面应用
+
+```sh
+sideby app install       # macOS：~/Applications/sideby.app；Linux：应用菜单里的「sideby」
+sideby app uninstall
+sideby ui --background   # 应用实际执行的命令：不占终端启动面板，然后打开它
+sideby ui --stop         # 停掉后台面板
+```
+
+双击应用就能打开面板。没有面板在运行时，它在后台启动一个（`sideby ui --background`）；已经有了就直接复用，然后打开浏览器。关掉标签页后，后台面板继续运行，日志写到 `${XDG_STATE_HOME:-~/.local/state}/sideby/panel.log`。从 Finder 或桌面菜单启动的程序只拿到很短的 PATH，所以后台面板会向你的登录 shell（`$SHELL -ilc`）要 PATH，好找到 `~/.local/bin` 这类目录里的宿主。
+
+应用运行的是安装时那份 Node 和 sideby：升级其中任何一个后，再跑一次 `sideby app install`，就地更新应用。如果你自己的页面嵌入了面板（见下文），`sideby app install --url http://accounts.localhost:17333/` 让应用改为打开这个地址。安装和卸载只动 `sideby app install` 自己创建的文件。这个应用是本机未签名的启动脚本，不适合拷到别的机器上用。
+
+#### 嵌入面板
+
+别的本地 Node 网页可以把面板挂在自己的路径下。handler 照常做 Host、Origin 和 token 校验，你只需列出自己网页使用的主机名。
+
+```ts
+import { createServer } from 'node:http'
+import { createPanelHandler, createRuntime } from 'sideby'
+
+const panel = createPanelHandler({
+  runtime: () => createRuntime(), // 传工厂函数：每个请求都读到磁盘的最新状态
+  basePath: '/accounts',
+  allowedHosts: ['tools.localhost:8080'],
+  theme: {
+    colorScheme: 'light', // 默认 'auto'，跟随系统
+    header: 'bar', // 通栏页头，而不是放在页面底色上的标题
+    light: { font: '-apple-system, "PingFang SC", sans-serif', bg: '#f2f8fc', primary: '#e1f0fb', onPrimary: '#1f6396', radius: '10px', shadow: 'none' },
+  },
+})
+createServer(async (req, res) => {
+  if (!(await panel(req, res))) res.writeHead(404).end()
+}).listen(8080, '127.0.0.1')
+```
+
+`theme` 让面板和你的页面风格一致。token 会写成面板自带的、带 nonce 的 `<style>` 里的 CSS 自定义属性，面板严格的 CSP 不需要放宽。iframe 读不到父页面的 CSS 变量，所以要传具体值。
+
+- **token**（都可选）：字体排版 `font`、`monoFont`、`fontSize`、`smallSize`、`controlSize`、`headingSize`、`largeSize`、`titleSize`、`titleWeight`、`headingWeight`、`strongWeight`、`buttonWeight`、`primaryWeight`；颜色 `bg`、`surface`、`surfaceMuted`、`border`、`borderStrong`、`text`、`muted`、`faint`、`hover`、`active`、`accent`、`accentSoft`、`focus`、`primary`、`primaryHover`、`primaryActive`、`onPrimary`、`primaryBorder`、`primaryHoverBorder`、`buttonText`、`buttonHoverBorder`、`buttonHoverText`、`checkColor`、`ok`、`okSoft`、`warn`、`warnSoft`、`fail`、`failSoft`、`logoBg`、`logoColor`、`logoBorder`、`shadow`、`focusOutline`、`focusRing`；形状与布局 `radius`、`controlRadius`、`chipRadius`、`controlHeight`、`controlHeightSmall`、`fieldHeight`、`contentWidth`、`gutter`。每个 token 的含义见 [`src/panel/theme.ts`](src/panel/theme.ts)。
+- **浅色与深色**：`light` 里的颜色只在浅色模式生效；字体排版、形状和布局 token 两种模式都生效。深色模式的颜色写在 `dark` 里；你的页面没有深色模式时，设 `colorScheme: 'light'`。
+- **创建 handler 时校验**：未知 token，或值里出现字母、数字、空格和 `# % ( ) , . + - / ' " _` 以外的字符（也就是不允许 `;`、`{`、`}`、`<`、`\`、`*`、`:`），或含 `url(`、括号或引号不成对、超过 200 个字符，都会抛出写明 token 名的 `TypeError`。
+- 不传 `theme` 时，外观和 `sideby ui` 一样。
+
 ### Claude 额度
 
 Claude Code 只把额度数据交给 status line 命令，所以需要做一次可还原的改动：
@@ -132,12 +175,15 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 | `sideby quota setup claude [--yes]` | 展示改动；加 `--yes` 才开启 Claude 额度来源 | 0；无法开启或失败为 1 |
 | `sideby quota teardown claude` | 关闭并还原原文件 | 0；拒绝或失败为 1 |
 | `sideby ui [--port n] [--no-open]` | 本地面板，按 Ctrl+C 停止 | — |
+| `sideby ui --background` / `--stop` | 脱离终端启动面板（已有就复用）并打开 / 停掉它 | 0；启动或停止失败为 1 |
+| `sideby app install [--url <url>]` | 添加打开面板（或 `<url>`）的桌面应用（macOS、Linux） | 0；平台不支持或目标位置有不是它创建的文件为 1 |
+| `sideby app uninstall` | 删除 `app install` 创建的文件 | 0；留下了不是它创建的文件为 1 |
 | `sideby shell-init zsh\|bash` | 输出每个账号和每个别名的 shell 函数 | 0 |
 | `sideby plugins` | 已加载的插件和加载错误 | 0；有插件加载失败时为 1 |
 
 - 所有命令遇到用法错误（未知选项、缺参数）时退出码为 2；sideby 自身出错（账号不存在、名字不合法、配置读不了）时为 1。
 - `<acct>` 写成 `<family>:<name>`；名字在所有家族里唯一时，只写 `<name>` 也行。有歧义就报错，并列出候选。
-- `list`、`new`、`doctor`、`quota`（包括 `setup` 和 `teardown`）、`plugins` 支持 `--json`，输出带 `schemaVersion: 1`，JSON Schema 随包放在 [`schemas/`](schemas/)。加了 `--json` 时，出错会输出 `{ "schemaVersion": 1, "error": "…" }`。只新增字段时版本不变；删除、改名或改语义时加 1。
+- `list`、`new`、`doctor`、`quota`（包括 `setup` 和 `teardown`）、`plugins`、`app` 支持 `--json`，输出带 `schemaVersion: 1`，JSON Schema 随包放在 [`schemas/`](schemas/)。加了 `--json` 时，出错会输出 `{ "schemaVersion": 1, "error": "…" }`。只新增字段时版本不变；删除、改名或改语义时加 1。
 - 任何输出、日志和错误信息里都不会出现凭据的值。
 
 ## 账号
@@ -258,10 +304,18 @@ export default {
 
 | 扩展点 | 时机 | 能做什么 | 超时 |
 |---|---|---|---|
-| `api.family(def)` | 加载插件时 | 注册家族：目录约定、选择变量、Hijack Variables、默认参数、共享项、登录命令、登录态判断、模型，可选的 `readQuota`、`readUsage`、`quotaSetup` | — |
+| `api.family(def)` | 加载插件时 | 注册家族：目录约定、选择变量、Hijack Variables、默认参数、共享项、登录命令、登录态判断、模型，可选的 `logo`、`readQuota`、`readUsage`、`quotaSetup` | — |
 | `launch.before` | 每次 `run`、`login` 之前 | 改 `ctx.env`、`ctx.args`，或用 `throw api.abort(msg)` 中止启动 | 30 秒 |
 | `account.created` | `new` 成功后 | 补文件，用 `ctx.log()` 打印下一步提示 | 30 秒 |
 | `doctor.check` | 体检每个账号时 | 返回 Finding，可以附带 `fix()` | 10 秒 |
+
+家族的 `logo` 是面板在卡片和「Tool」下拉框里显示的标志：24×24 视图框里的一条 SVG path，例如取自 [Simple Icons](https://simpleicons.org)。
+
+```ts
+logo: { path: 'M11.503.131 1.891 5.678…', title: 'Cursor', color: '#000000' } // color 可省略
+```
+
+`path` 只能是 SVG path 数据（命令字母、数字、空格、逗号、点、`+`、`-`，最多 20000 个字符），`color` 必须是十六进制颜色，`fillRule` 取 `nonzero` 或 `evenodd`。不合法的 logo 会被丢弃，并在 `sideby plugins` 里报一条插件错误；家族照常加载，面板改为显示首字母。黑色标志不要设 `color`，这样在深色模式下会跟随文字颜色。
 
 错误信息里总会标明插件名。加载失败只影响它自己；`doctor.check` 出错会变成该账号的一条 fail Finding；`launch.before` 出错会中止启动；家族的读取函数（例如 `model`）抛错时，会出现在 `list` 里该账号的 `problems` 中。`fix()` 只能写当前账号目录，并且要通过 `api.fs.writeFileAtomic` 写。
 
@@ -303,7 +357,8 @@ Node 从 22.18 起默认剥离 TypeScript 类型，sideby 才能直接 `import()
 |---|---|
 | 配置 | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
 | 你的插件 | `${XDG_CONFIG_HOME:-~/.config}/sideby/plugins/` |
-| 状态：额度缓存、上次体检结果、`settings.json` 原始字节 | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
+| 状态：额度缓存、上次体检结果、`settings.json` 原始字节、后台面板的 pid 和日志 | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
+| 桌面应用（`sideby app install`） | macOS `~/Applications/sideby.app`；Linux `~/.local/share/applications/sideby.desktop`、`~/.local/share/sideby/`、`~/.local/share/icons/hicolor/*/apps/sideby.*` |
 
 sideby 不往宿主的账号目录里写自己的文件。唯一的例外是 `quota setup claude --yes`，它会修改 `~/.claude/settings.json`。用 `sideby new` 建出来的账号目录归宿主所有。
 
@@ -322,6 +377,7 @@ sideby 不往宿主的账号目录里写自己的文件。唯一的例外是 `qu
 
 ```sh
 sideby quota teardown claude                  # 跑过 quota setup 的话先执行；status line 会调用 sideby
+sideby ui --stop && sideby app uninstall       # 用过桌面应用的话
 npm rm -g sideby
 rm -rf ~/.config/sideby ~/.local/state/sideby  # 设置过 XDG_CONFIG_HOME / XDG_STATE_HOME 的话换成对应路径
 ```

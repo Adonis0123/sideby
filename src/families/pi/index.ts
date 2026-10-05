@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { lstatOrNull } from '../../core/fs-safe.ts'
 import type { Account, FamilyDef, LoginState, Plugin } from '../../types.ts'
+import { BUILTIN_LOGOS } from '../logos.ts'
 
 /** `auth.json` exists after `/login`; its contents are never read. */
 async function loginState(account: Account): Promise<LoginState> {
@@ -28,6 +29,7 @@ async function model(account: Account): Promise<string | undefined> {
 export const piFamily: FamilyDef = {
   id: 'pi',
   title: 'pi',
+  logo: BUILTIN_LOGOS.pi,
   bin: 'pi',
   installUrl: 'https://github.com/earendil-works/pi',
   selectVar: 'PI_CODING_AGENT_DIR',

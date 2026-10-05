@@ -1,20 +1,13 @@
-// Family marks for the Panel: 24x24 single-path SVG icons, drawn inline because the page CSP allows no external images.
+// Built-in Family marks for the Panel (FamilyDef.logo): 24x24 single-path SVG icons, drawn inline because the page CSP
+// allows no external images.
 // Sources: Claude, OpenAI and pi from Simple Icons (CC0 1.0, https://simpleicons.org; OpenAI from v15.0.0, the last release
 // that ships it; pi is the mark from https://pi.dev). Grok from LobeHub Icons (MIT, Copyright (c) 2023 LobeHub,
 // https://github.com/lobehub/lobe-icons). The marks are trademarks of their owners and only identify each Host.
 
-export interface FamilyLogo {
-  /** Name of the mark, for tooltips. */
-  title: string
-  /** Path data in a 24x24 view box. */
-  path: string
-  /** Brand color; without one the mark uses the text color, so it works in light and dark mode. */
-  color?: string
-  fillRule?: 'evenodd'
-}
+import type { FamilyLogo } from '../types.ts'
 
-/** Logos by built-in Family id. A plugin Family without an entry falls back to its initials. */
-export const FAMILY_LOGOS: Record<string, FamilyLogo> = {
+/** Logos of the built-in Families, by Family id; each Family sets its own as `logo`. */
+export const BUILTIN_LOGOS = {
   claude: {
     title: 'Claude',
     color: '#D97757',
@@ -33,4 +26,4 @@ export const FAMILY_LOGOS: Record<string, FamilyLogo> = {
     title: 'pi',
     path: 'M0 0v24h6v-6h6v-6H6V6h6v6h6V0Zm18 12v12h6V12Z',
   },
-}
+} satisfies Record<'claude' | 'codex' | 'grok' | 'pi', FamilyLogo>

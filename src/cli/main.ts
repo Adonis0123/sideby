@@ -18,11 +18,15 @@ Usage:
   sideby quota setup claude [--yes]   turn on Claude quota (shows the change first)
   sideby quota teardown claude        undo it, restoring the original file
   sideby ui [--port n] [--no-open]    open the local panel
+  sideby ui --background              same, without a terminal: keeps running after this command exits
+  sideby ui --stop                    stop the background panel
+  sideby app install [--url <url>]    add a sideby app that opens the panel (macOS, Linux)
+  sideby app uninstall                remove that app
   sideby shell-init zsh|bash          print shell functions, e.g. eval "$(sideby shell-init zsh)"
   sideby plugins                      list loaded plugins and load errors
 
 Options:
-  --json        machine-readable output (list, new, doctor, quota, plugins)
+  --json        machine-readable output (list, new, doctor, quota, plugins, app)
   -h, --help    show this help
   -v, --version show the version
 
@@ -40,7 +44,8 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   new: { flags: ['api', 'json'] },
   doctor: { flags: ['fix', 'force', 'json'] },
   quota: { flags: ['json', 'yes'] },
-  ui: { flags: ['no-open'], valued: ['port'] },
+  ui: { flags: ['no-open', 'background', 'stop', 'serve-detached'], valued: ['port'] },
+  app: { flags: ['json'], valued: ['url'] },
   'shell-init': { flags: [] },
   plugins: { flags: ['json'] },
 }
@@ -109,6 +114,8 @@ export async function main(argv: string[]): Promise<number> {
         return await cmds.cmdQuota(parsed, io)
       case 'ui':
         return await cmds.cmdUi(parsed, io)
+      case 'app':
+        return await cmds.cmdApp(parsed, io)
       case 'shell-init':
         return await cmds.cmdShellInit(parsed, io)
       case 'plugins':

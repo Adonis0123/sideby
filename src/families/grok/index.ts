@@ -1,6 +1,7 @@
 import { lstat, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Account, FamilyDef, LoginState, Plugin } from '../../types.ts'
+import { BUILTIN_LOGOS } from '../logos.ts'
 import { topLevelTomlString } from '../shared/toml.ts'
 
 // Grok's sandbox rejects these paths when they are symlinks; doctor quotes the Host's own words.
@@ -22,6 +23,7 @@ async function readModel(account: Account): Promise<string | undefined> {
 export const grokFamily: FamilyDef = {
   id: 'grok',
   title: 'Grok Build',
+  logo: BUILTIN_LOGOS.grok,
   bin: 'grok',
   installUrl: 'https://docs.x.ai/build/overview',
   selectVar: 'GROK_HOME',
