@@ -57,7 +57,7 @@ $EDITOR ~/.claude-deepseek/proxy.env     # fill in the variables; the file stays
 sideby run deepseek
 ```
 
-`proxy.env` uses a small dotenv subset (`KEY=VALUE`, optional `export `, quotes, `#` comments; no shell expansion or command substitution). Its variables reach only the launched Host process. sideby refuses to start unless the file's mode is exactly 600 and tells you to run `chmod 600`.
+`proxy.env` uses a small dotenv subset (`KEY=VALUE`, optional `export `, quotes, `#` comments, and `$NAME` / `${NAME}` referring to a key set earlier in the same file; your shell environment is never read and there is no command substitution). Its variables reach only the launched Host process. sideby refuses to start unless the file's mode is exactly 600 and tells you to run `chmod 600`.
 
 An API account needs no sign-in: its login state is `not-needed`, shown as `key` in the LOGIN column of `sideby list`.
 

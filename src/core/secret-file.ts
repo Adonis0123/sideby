@@ -5,13 +5,27 @@ export class SecretFileError extends UserError {}
 
 const LINE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/
 
+const REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)|\$\{/g
+
 /**
  * Parses the dotenv subset sideby supports: KEY=VALUE, optional `export `, quotes and comments.
- * Nothing is executed or expanded. Errors name the line, never its content.
+ * `$NAME` and `${NAME}` in unquoted or double-quoted values expand to a key defined earlier in the
+ * same file; the process environment is never read and nothing is executed. Errors name the line,
+ * never its content.
  */
 export function parseSecretFile(text: string, file: string): Record<string, string> {
   const out: Record<string, string> = {}
   const lines = text.split(/\r?\n/)
+  const expand = (s: string, line: number) =>
+    s.replace(REF, (whole, braced?: string, bare?: string) => {
+      const name = braced ?? bare
+      if (!name) throw new SecretFileError(`${file}:${line}: unterminated \${`)
+      if (!Object.hasOwn(out, name))
+        throw new SecretFileError(
+          `${file}:${line}: ${whole} is not defined earlier in this file; sideby does not read your shell environment`,
+        )
+      return out[name]!
+    })
   lines.forEach((raw, i) => {
     const line = raw.trim()
     if (!line || line.startsWith('#')) return
@@ -34,7 +48,11 @@ export function parseSecretFile(text: string, file: string): Record<string, stri
       if (rest && !rest.startsWith('#'))
         throw new SecretFileError(`${file}:${i + 1}: text after closing quote`)
       value = value.slice(1, end)
-      if (q === '"') value = value.replace(/\\(n|"|\\)/g, (_, c: string) => (c === 'n' ? '\n' : c))
+      if (q === '"')
+        // Escapes and references in one pass, so an escaped `\$` stays a literal dollar sign.
+        value = value.replace(/\\(n|"|\\|\$)|\$[^$\\]*/g, (part, c?: string) =>
+          c === undefined ? expand(part, i + 1) : c === 'n' ? '\n' : c,
+        )
     } else {
       const hash = value.search(/\s#/)
       if (hash !== -1) value = value.slice(0, hash).trimEnd()
@@ -42,6 +60,7 @@ export function parseSecretFile(text: string, file: string): Record<string, stri
         throw new SecretFileError(
           `${file}:${i + 1}: command substitution is not supported; write the value itself`,
         )
+      value = expand(value, i + 1)
     }
     out[key] = value
   })

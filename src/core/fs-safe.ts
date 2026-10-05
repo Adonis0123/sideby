@@ -1,18 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import type { Stats } from 'node:fs'
-import {
-  chmod,
-  cp,
-  lstat,
-  open,
-  readdir,
-  readFile,
-  readlink,
-  realpath,
-  rename,
-  rm,
-  stat,
-} from 'node:fs/promises'
+import { cp, lstat, open, readdir, readFile, readlink, realpath, rename, rm, stat } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
 
 export async function lstatOrNull(p: string): Promise<Stats | null> {
