@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
-import { copyFile, mkdir, utimes } from 'node:fs/promises'
+import { appendFile, copyFile, mkdir, utimes } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../../../testing/index.ts'
 import {
+  codexQuotaMemo,
+  codexUsageMemo,
   fileDeltas,
   fileTokens,
   MAX_QUOTA_FILES,
@@ -449,5 +451,37 @@ describe('fileTokens', () => {
       c(0, 0, 0, 0),
     )
     assert.deepEqual(fileTokens(events), sum)
+  })
+})
+
+describe('rollout parse cache', () => {
+  it('reuses unchanged rollouts for quota and usage and reads a rollout again once it grew', async () => {
+    await withFakeHome(async (h) => {
+      const dir = h.path('.codex-work')
+      const usage = (input: number) => ({ input_tokens: input, cached_input_tokens: 0, output_tokens: 0 })
+      const p = await rollout(
+        h,
+        '.codex-work',
+        'a',
+        [event('2026-10-05T09:00:00Z', { usage: usage(10), primary: win(20, 300) })],
+        DAY,
+      )
+      const q0 = { ...codexQuotaMemo.stats }
+      const u0 = { ...codexUsageMemo.stats }
+      const read = async () => {
+        const q = await readCodexQuota(dir)
+        const u = await readCodexUsage(dir, NOW)
+        return [q.status === 'ok' ? q.windows[0]?.usedPercent : -1, u.status === 'ok' ? u.totalTokens : -1]
+      }
+      assert.deepEqual(await read(), [20, 10])
+      assert.deepEqual(await read(), [20, 10])
+      assert.equal(codexQuotaMemo.stats.hits - q0.hits, 1)
+      assert.equal(codexUsageMemo.stats.hits - u0.hits, 1)
+      await appendFile(p, `\n${event('2026-10-05T10:00:00Z', { usage: usage(25), primary: win(35, 300) })}`)
+      await utimes(p, NOW, NOW)
+      assert.deepEqual(await read(), [35, 25])
+      assert.equal(codexQuotaMemo.stats.misses - q0.misses, 2)
+      assert.equal(codexUsageMemo.stats.misses - u0.misses, 2)
+    })
   })
 })

@@ -21,7 +21,7 @@ npm i -g sideby       # 安装 sideby 命令
 
 - **并排，不切换。** cc-switch、magpie 这类工具会改宿主的全局配置，同一时间只有一个 provider 生效，适合在几家之间来回换的人。sideby 给每个账号一个独立目录，启动官方 CLI 时选中这个目录。工作订阅、个人订阅和一个 DeepSeek key 可以同时开在三个终端里，父 shell 的环境始终不变。
 - **skills、hooks、规则只维护一份。** 主账号（例如 `~/.claude`）是唯一来源。其他账号按各宿主的要求链接或复制它的共享项（Shared Item）。`sideby doctor` 找出漂移，`--fix` 只做安全的修复：不替换真实文件，不改链接指向，不读凭据的值。
-- **额度一屏看完。** `sideby quota` 和 `sideby ui` 列出每个账号的 5 小时、7 天额度、重置时间、数据是多久以前的，以及近 7 天的 token 用量。Claude Code 和 Codex 的本地记录由 sideby 自己读取，不需要 ccusage；Claude 的额度取自 Claude Code 交给 status line 的数据。不联网，不读凭据。
+- **额度一屏看完。** `sideby quota` 和 `sideby ui` 列出每个账号的 5 小时、7 天额度、重置时间、数据是多久以前的，以及近 7 天的 token 用量。Claude Code 和 Codex 的本地记录由 sideby 自己读取，不需要 ccusage；Claude 的额度取自 Claude Code 交给 status line 的数据。不联网，不读 token。
 
 ## 快速上手
 
@@ -39,13 +39,15 @@ sideby run work               # 用 work 账号启动 Claude Code
 有几个账号之后，`sideby list` 的输出大致如下：
 
 ```
-ACCOUNT          TYPE  LOGIN         MODEL        DIR
-claude:main      main  ✓             opus         ~/.claude
-claude:deepseek  api   key           deepseek-v4  ~/.claude-deepseek
-claude:work      sub   ✓             opus         ~/.claude-work
-codex:team       sub   ✓             gpt-5.5      ~/.codex-team
-grok:lab         sub   login needed  grok-code    ~/.grok-lab
+ACCOUNT          TYPE  LOGIN         EMAIL             MODEL        DIR
+claude:main      main  ✓             me@example.com    opus         ~/.claude
+claude:deepseek  api   key           —                 deepseek-v4  ~/.claude-deepseek
+claude:work      sub   ✓             work@example.com  opus         ~/.claude-work
+codex:team       sub   ✓             team@example.com  gpt-5.5      ~/.codex-team
+grok:lab         sub   login needed  —                 grok-code    ~/.grok-lab
 ```
+
+EMAIL 是账号登录的身份，取自宿主的登录文件（Claude Code、Codex、Grok Build）。sideby 在那里只读这个身份字段，从不读 token（ADR-0003）。
 
 家族插件读取某个账号出错时（例如它的设置文件不是合法 JSON），`list` 照常列出这个账号，把问题打印到 stderr；`list --json` 把它放进该账号的 `problems` 数组。
 
@@ -83,7 +85,7 @@ sideby doctor --fix      # 执行安全的修复
 - `shared n/m` 只统计主账号里真有的共享项。主账号没有的项（很多人没有 `commands`、`themes`）直接跳过：不告警，也不计数。
 - 链接目标存在、但不是主账号对应的项：报 warn（`link.other-target`），因为这可能是你有意这么链的；如果宿主要求这里是真实文件或副本，任何链接都报 fail（`symlink-forbidden`）。悬空的链接报 fail（`link.dangling`）。sideby 从不改链接的指向，只报告。
 - 该放链接的位置是真实文件或目录时，只报告，并给出保留它的命令（`mv <x> <x>.local && ln -s …`），sideby 不替换它。
-- 凭据文件（`proxy.env`、`auth.json`、`.claude.json`）只检查类型和权限是否为 600，`--fix` 会把权限改回 600。sideby 从中读取的内容只有 `.claude.json` 的 `mcpServers` 键，用来和主账号保持一致。加 `--force` 后，同步时才允许删掉账号里有、主账号里没有的 server。
+- 凭据文件（`proxy.env`、`auth.json`、`.claude.json`）只检查类型和权限是否为 600，`--fix` 会把权限改回 600。sideby 从中读取的内容只有 `.claude.json` 的 `mcpServers` 键（用来和主账号保持一致），以及显示为账号邮箱的身份字段（`.claude.json` 的 `oauthAccount.emailAddress` 和 `organizationName`、Grok `auth.json` 条目的 `email`、Codex `id_token` 里的 `email` 声明）；token 从不读出、保存或显示。加 `--force` 后，同步时才允许删掉账号里有、主账号里没有的 server。
 - 备份残留（`*.bak*`、`*backup*`、`*.tmp*`）只计数，不处理。
 
 只有 warn 时退出码为 0，有任何 fail 时为 1。
@@ -96,7 +98,7 @@ sideby ui --port 8080
 sideby ui --no-open    # 只打印地址
 ```
 
-面板只监听 `127.0.0.1`。端口上已经有一个 sideby 面板时，直接打开那个面板；端口被别的程序占用时，依次试后面的端口，并打印最终地址。页面上有账号卡片（额度、用量、登录态、健康）、带一键修复的体检、新建账号（可顺手加短命令），还能在展示 diff 后开启 Claude 额度。一次开启对所有 Claude Code 账号生效，所以「开启额度显示」按钮只在 Claude Code 分组标题里，不在每个账号上。新建订阅账号后，面板只给出 `sideby login <account>` 的复制按钮，登录始终在你自己的终端里完成。
+面板只监听 `127.0.0.1`。端口上已经有一个 sideby 面板时，直接打开那个面板；端口被别的程序占用时，依次试后面的端口，并打印最终地址。页面按列对齐显示每个账号的各额度窗口、用量、最近使用、登录邮箱和健康状态；页面打开时每 20 秒自动刷新，开启额度后的几分钟里每 5 秒刷新一次，status line 一上报就能看到第一批数字。「隐藏邮箱」开关会把地址显示成 `a•••@example.com`，方便共享屏幕。页面上还有带一键修复的体检、新建账号（可顺手加短命令），还能在展示 diff 后开启 Claude 额度。一次开启对所有 Claude Code 账号生效，所以「开启额度显示」按钮只在 Claude Code 分组标题里，不在每个账号上。新建订阅账号后，面板只给出 `sideby login <account>` 的复制按钮，登录始终在你自己的终端里完成。
 
 #### 桌面应用
 

@@ -40,6 +40,14 @@ const H = 3_600_000
 for (const host of ['claude', 'codex', 'grok', 'pi'])
   await writeFile(join(bin, host), '#!/bin/sh\necho "demo host"\n', { mode: 0o755 })
 
+/** A Codex auth.json whose id_token carries a fake email claim (no real token, no signature). */
+function codexAuth(email: string): string {
+  const part = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
+  return JSON.stringify({
+    tokens: { id_token: `${part({ alg: 'none' })}.${part({ email })}.demo`, access_token: 'demo' },
+  })
+}
+
 if (variant !== 'empty') {
   // Claude: main + a work subscription + a DeepSeek API account.
   await write('.claude/settings.json', '{\n  "model": "opus"\n}\n')
@@ -47,19 +55,26 @@ if (variant !== 'empty') {
   await write('.claude/CLAUDE.md', '# My rules\n')
   await write(
     '.claude.json',
-    JSON.stringify({ oauthAccount: { emailAddress: 'demo' }, mcpServers: { github: { command: 'gh-mcp' } } }),
+    JSON.stringify({
+      oauthAccount: { emailAddress: 'me@example.com', organizationName: "me@example.com's Organization" },
+      mcpServers: { github: { command: 'gh-mcp' } },
+    }),
     0o600,
   )
   // Codex, Grok and pi main accounts.
   await write('.codex/config.toml', 'model = "gpt-5.5"\n')
   await write('.codex/AGENTS.md', '# My rules\n')
   await mkdir(join(home, '.codex/skills'), { recursive: true })
-  await write('.codex/auth.json', '{}', 0o600)
+  await write('.codex/auth.json', codexAuth('me@example.com'), 0o600)
   await write('.grok/config.toml', 'model = "grok-code"\n')
   await mkdir(join(home, '.grok/skills'), { recursive: true })
   await mkdir(join(home, '.grok/hooks'), { recursive: true })
   await write('.grok/hooks/notify.sh', '#!/bin/sh\n', 0o755)
-  await write('.grok/auth.json', '{}', 0o600)
+  await write(
+    '.grok/auth.json',
+    JSON.stringify({ 'https://auth.x.ai::00000000-demo': { email: 'me@example.com', access_token: 'demo' } }),
+    0o600,
+  )
   await write('.pi/agent/AGENTS.md', '# My rules\n')
   await write('.pi/agent/auth.json', '{}', 0o600)
   await write('.pi/agent/settings.json', '{"defaultProvider":"glm","defaultModel":"glm-5"}')
@@ -71,7 +86,10 @@ if (variant !== 'empty') {
   await rt.createAccount('grok', 'lab')
   await write(
     '.claude-work/.claude.json',
-    JSON.stringify({ oauthAccount: { emailAddress: 'demo' }, mcpServers: { github: { command: 'gh-mcp' } } }),
+    JSON.stringify({
+      oauthAccount: { emailAddress: 'work@example.com', organizationName: 'Example Team' },
+      mcpServers: { github: { command: 'gh-mcp' } },
+    }),
     0o600,
   )
   await write(
@@ -79,7 +97,7 @@ if (variant !== 'empty') {
     'ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic\nANTHROPIC_AUTH_TOKEN=demo\nANTHROPIC_MODEL=deepseek-v4\n',
     0o600,
   )
-  await write('.codex-team/auth.json', '{}', 0o600)
+  await write('.codex-team/auth.json', codexAuth('team@example.com'), 0o600)
   // A fixable issue for the health section: Grok refuses linked hooks.
   await rm(join(home, '.grok-lab/hooks'), { recursive: true, force: true })
   await symlink(join(home, '.grok/hooks'), join(home, '.grok-lab/hooks'))

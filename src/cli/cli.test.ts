@@ -77,6 +77,32 @@ describe('first run', () => {
   })
 })
 
+describe('list identity', () => {
+  it('shows the signed-in email in the table and in valid --json, and no token', async () => {
+    await withFakeHome(async (h) => {
+      await codexMain(h)
+      await fakeHost(h, 'codex')
+      const claims = Buffer.from(JSON.stringify({ email: 'codex@example.com' })).toString('base64url')
+      await h.write(
+        '.codex/auth.json',
+        JSON.stringify({
+          tokens: { id_token: `e30.${claims}.fake-sig-XYZ`, refresh_token: 'fake-refresh-XYZ' },
+        }),
+        0o600,
+      )
+      const r = await sideby(h, ['list', '--json'])
+      const data = checkSchema('list', r.out)
+      assert.deepEqual((data.accounts as { identity?: unknown }[])[0]?.identity, {
+        email: 'codex@example.com',
+      })
+      assert.equal(r.out.includes('fake-sig-XYZ') || r.out.includes('fake-refresh-XYZ'), false)
+      const human = await sideby(h, ['list'])
+      assert.match(human.out, /EMAIL/)
+      assert.match(human.out, /codex@example\.com/)
+    })
+  })
+})
+
 describe('first run with Claude Code', () => {
   it('lists claude:main, suggests the next command, and reports quota setup state as JSON', async () => {
     await withFakeHome(async (h) => {

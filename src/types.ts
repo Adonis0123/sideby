@@ -82,10 +82,23 @@ export interface FamilyDef {
   defaultArgs?(account: Account, userArgs: readonly string[]): string[]
   loginState?(account: Account): Promise<LoginState>
   model?(account: Account): Promise<string | undefined>
+  /**
+   * Who the Account is signed in as, from the Host's own login file: identity fields such as the email and the
+   * organization only, never a token or any other credential value (ADR-0003). Return undefined when unknown; an
+   * error is treated the same way and never shown as a problem.
+   */
+  identity?(account: Account): Promise<AccountIdentity | undefined>
   readQuota?(account: Account, ctx: ReadContext): Promise<QuotaResult>
   readUsage?(account: Account, ctx: ReadContext): Promise<UsageResult>
   /** One-time, reversible change that lets the Host report Quota (Claude: status line wrapper). */
   quotaSetup?: QuotaSetup
+}
+
+/** Identity fields of a signed-in Account. */
+export interface AccountIdentity {
+  email?: string
+  /** Organization or team, when it is not just the personal default. */
+  org?: string
 }
 
 export interface QuotaSetupPlan {

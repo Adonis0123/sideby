@@ -1,6 +1,7 @@
 // Built-in Family Plugin for Claude Code (spec §3.4, checked against Claude Code 2.1.289).
 import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { identityFromJsonFile, identityOf } from '../../core/identity.ts'
 import { readSecretFile } from '../../core/secret-file.ts'
 import { claudeStatusline } from '../../quota/claude-statusline.ts'
 import type { Account, FamilyDef, LoginState, Plugin, SharedItemDef } from '../../types.ts'
@@ -35,6 +36,23 @@ async function loginState(account: Account): Promise<LoginState> {
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return 'unknown'
   return (parsed as Record<string, unknown>).oauthAccount != null ? 'logged-in' : 'logged-out'
+}
+
+/**
+ * `oauthAccount.emailAddress` and `organizationName` from `.claude.json`; nothing else is kept. The organization a
+ * personal sign-in gets by default ("<name>'s Organization") says nothing new, so it is left out.
+ */
+export function claudeIdentity(account: Account) {
+  return identityFromJsonFile(claudeJsonOf(account), (data) => {
+    const o = (data as { oauthAccount?: { emailAddress?: unknown; organizationName?: unknown } } | null)
+      ?.oauthAccount
+    if (typeof o !== 'object' || o === null) return undefined
+    const org =
+      typeof o.organizationName === 'string' && !/'s Organization$/.test(o.organizationName)
+        ? o.organizationName
+        : undefined
+    return identityOf(o.emailAddress, org)
+  })
 }
 
 async function model(account: Account): Promise<string | undefined> {
@@ -95,6 +113,7 @@ export const claudeFamily: FamilyDef = {
   },
   loginState,
   model,
+  identity: claudeIdentity,
   readQuota: readClaudeQuota,
   readUsage: readClaudeUsage,
   quotaSetup: claudeStatusline,

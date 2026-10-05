@@ -131,6 +131,18 @@
               "model": {
                 "type": "string"
               },
+              "identity": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "type": "string"
+                  }
+                },
+                "description": "Who the account is signed in as, from the host's login file: identity fields only, never a token (ADR-0003)."
+              },
               "problems": {
                 "type": "array",
                 "items": {

@@ -9,6 +9,7 @@ Glossary for sideby. Defines words only. Decisions live in `docs/adr/`, designs 
 - **Account**: one isolated configuration directory of a Family. The directory is the identity: its own login, sessions and history. Accounts are discovered from disk, never listed by hand.
 - **Main Account**: the Host's default directory (for example `~/.claude`). It is the source every Shared Item points back to.
 - **Subscription Account**: an Account that logs in with the Host's own sign-in (OAuth). Its credentials stay where the Host puts them.
+- **Identity**: who a Subscription Account is signed in as (email, and for Claude Code the organization), read from identity fields of the Host's login file only, never from a token (ADR-0003). The Panel can mask it.
 - **API Account**: an Account whose directory holds a Secret File. It talks to an API endpoint instead of a subscription. Exception: a Family may keep a Secret File in every Account only to provide keys (pi does); there the file does not make an Account an API Account.
 - **Secret File**: `proxy.env` inside an API Account, readable only by its owner. Its variables exist only in the launched Host process.
 

@@ -1,9 +1,11 @@
 // Reads Codex Quota and Usage from the Account's local rollout files (spec §3.7, ADR-0003).
 // No network, no credentials: only `token_count` events the Host writes into `sessions/**/rollout-*.jsonl`.
+// Each file's parse is remembered until the file changes (core/file-memo.ts), so a refresh reads only new rollouts.
 import { createReadStream, type Dirent } from 'node:fs'
 import { readdir, stat } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import { createInterface } from 'node:readline'
+import { FileMemo, type FileStats } from '../../core/file-memo.ts'
 import { USAGE_DAYS } from '../../core/quota-levels.ts'
 import { dailyBuckets } from '../../core/usage-days.ts'
 import type { QuotaResult, QuotaWindow, UsageResult } from '../../types.ts'
@@ -15,6 +17,7 @@ const MAX_RESETS_AT_SECONDS = 1e11
 export interface RolloutFile {
   path: string
   mtimeMs: number
+  stats: FileStats
 }
 
 type Obj = Record<string, unknown>
@@ -41,7 +44,8 @@ export async function listRollouts(dir: string): Promise<RolloutFile[]> {
     if (!e.isFile() || !ROLLOUT.test(e.name)) continue
     const path = join(e.parentPath, e.name)
     try {
-      out.push({ path, mtimeMs: (await stat(path)).mtimeMs })
+      const st = await stat(path)
+      out.push({ path, mtimeMs: st.mtimeMs, stats: st })
     } catch {
       // removed while scanning
     }
@@ -49,8 +53,14 @@ export async function listRollouts(dir: string): Promise<RolloutFile[]> {
   return out.sort((a, b) => b.mtimeMs - a.mtimeMs)
 }
 
-/** Yields parsed `token_count` payloads with their event time; bad and truncated lines are skipped. */
-async function* tokenCounts(file: string): AsyncGenerator<{ at: number; payload: Obj }> {
+/**
+ * Yields parsed `token_count` payloads with their event time; bad and truncated lines are skipped. A read error
+ * ends the file early and sets `read.failed`, so a caller does not remember a partial parse.
+ */
+async function* tokenCounts(
+  file: string,
+  read: { failed: boolean } = { failed: false },
+): AsyncGenerator<{ at: number; payload: Obj }> {
   const lines = createInterface({ input: createReadStream(file), crlfDelay: Number.POSITIVE_INFINITY })
   try {
     for await (const line of lines) {
@@ -68,6 +78,7 @@ async function* tokenCounts(file: string): AsyncGenerator<{ at: number; payload:
     }
   } catch {
     // unreadable file: keep what was read
+    read.failed = true
   } finally {
     lines.close()
   }
@@ -107,19 +118,46 @@ function rateLimits(payload: Obj): { windows: QuotaWindow[]; plan?: string } | n
   return { windows, ...(typeof rl.plan_type === 'string' ? { plan: rl.plan_type } : {}) }
 }
 
+interface FileLimits {
+  /** The file's newest well-formed `rate_limits` (the later line on a tie), or null. */
+  best: { at: number; windows: QuotaWindow[]; plan?: string } | null
+  failed: boolean
+}
+
+async function fileLimits(file: string): Promise<FileLimits> {
+  const read = { failed: false }
+  let best: FileLimits['best'] = null
+  for await (const { at, payload } of tokenCounts(file, read)) {
+    if (best && at < best.at) continue
+    const rl = rateLimits(payload)
+    if (rl) best = { at, ...rl }
+  }
+  return { best, failed: read.failed }
+}
+
+/** Parsed `rate_limits` per Account directory; a rollout is read again only after it changed. */
+export const codexQuotaMemo = new FileMemo<FileLimits>()
+
 /** Newest well-formed `rate_limits` across the newest rollout files, by event timestamp. */
 export async function readCodexQuota(dir: string): Promise<QuotaResult> {
   const files = (await listRollouts(dir)).slice(0, MAX_QUOTA_FILES)
   if (files.length === 0)
     return { status: 'unavailable', reason: 'no-session', detail: 'no Codex session in this account yet' }
   let best: { at: number; file: string; windows: QuotaWindow[]; plan?: string } | null = null
+  const memo = codexQuotaMemo.pass(dir)
   for (const f of files) {
-    for await (const { at, payload } of tokenCounts(f.path)) {
-      if (best && at < best.at) continue
-      const rl = rateLimits(payload)
-      if (rl) best = { at, file: f.path, ...rl }
-    }
+    // Same pick as reading every line in this order: the newest event wins, a later one on a tie.
+    const fb = (
+      await memo.get(
+        f.path,
+        f.stats,
+        () => fileLimits(f.path),
+        (v) => !v.failed,
+      )
+    ).best
+    if (fb && (!best || fb.at >= best.at)) best = { ...fb, file: f.path }
   }
+  memo.done()
   if (!best)
     return {
       status: 'unavailable',
@@ -205,6 +243,29 @@ export function fileTokens(events: { total: Totals; turn: Totals | null }[]): To
   return fileDeltas(events).reduce(plus, ZERO)
 }
 
+interface FileUsage {
+  /** Time of every `token_count` event, with or without totals. */
+  times: number[]
+  events: { at: number; total: Totals; turn: Totals | null }[]
+  deltas: Totals[]
+  failed: boolean
+}
+
+async function fileUsage(file: string): Promise<FileUsage> {
+  const read = { failed: false }
+  const times: number[] = []
+  const events: FileUsage['events'] = []
+  for await (const { at, payload } of tokenCounts(file, read)) {
+    times.push(at)
+    const t = totals(payload)
+    if (t) events.push({ at, ...t })
+  }
+  return { times, events, deltas: fileDeltas(events), failed: read.failed }
+}
+
+/** Parsed token totals per Account directory; a rollout is read again only after it changed. */
+export const codexUsageMemo = new FileMemo<FileUsage>()
+
 /**
  * Token totals for events in the last `days` x 24 h, from rollout files modified in that window (mtime only
  * picks which files to read). Each event counts its fileDeltas increment, so a long session resumed today
@@ -226,16 +287,17 @@ export async function readCodexUsage(dir: string, now: Date, days = USAGE_DAYS):
   let last = Number.NEGATIVE_INFINITY
   const daily = dailyBuckets(now, days)
   const sum = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
+  const memo = codexUsageMemo.pass(dir)
   for (const f of files) {
-    const events: { at: number; total: Totals; turn: Totals | null }[] = []
-    for await (const { at, payload } of tokenCounts(f.path)) {
-      sawTokenCount = true
-      if (at <= end && at > last) last = at
-      const t = totals(payload)
-      if (t) events.push({ at, ...t })
-    }
+    const { times, events, deltas } = await memo.get(
+      f.path,
+      f.stats,
+      () => fileUsage(f.path),
+      (v) => !v.failed,
+    )
+    if (times.length) sawTokenCount = true
+    for (const at of times) if (at <= end && at > last) last = at
     if (events.length) sawTotals = true
-    const deltas = fileDeltas(events)
     let used = ZERO
     let inWindow = false
     for (const [i, e] of events.entries()) {
@@ -252,6 +314,7 @@ export async function readCodexUsage(dir: string, now: Date, days = USAGE_DAYS):
     sum.outputTokens += used.output
     sum.cacheWriteTokens += used.cacheWrite
   }
+  memo.done()
   if (sessions === 0)
     return sawTokenCount && !sawTotals
       ? { status: 'unavailable', reason: 'unrecognized', detail: 'token_count events have no usable totals' }

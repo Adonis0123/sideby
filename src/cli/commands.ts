@@ -63,10 +63,11 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
           : s.login === 'logged-out'
             ? c.yellow('login needed')
             : c.dim('?'),
+      s.identity?.email ?? c.dim('—'),
       s.model ?? c.dim('—'),
       s.hostInstalled ? tildify(s.dir, home) : `${tildify(s.dir, home)} ${c.yellow('(host not installed)')}`,
     ])
-    io.out(table(rows, ['ACCOUNT', 'TYPE', 'LOGIN', 'MODEL', 'DIR']))
+    io.out(table(rows, ['ACCOUNT', 'TYPE', 'LOGIN', 'EMAIL', 'MODEL', 'DIR']))
     io.out(c.dim('\nsideby run <account>  ·  sideby new <family> <name>  ·  sideby quota  ·  sideby ui'))
   }
   for (const s of statuses) for (const p of s.problems ?? []) io.err(c.yellow(`${s.ref}: ${p}`))

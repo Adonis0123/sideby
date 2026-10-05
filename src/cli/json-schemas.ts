@@ -31,6 +31,15 @@ const AccountStatus = Type.Intersect([
       Type.Literal('not-needed'),
     ]),
     model: Type.Optional(Str),
+    identity: Type.Optional(
+      Type.Object(
+        { email: Type.Optional(Str), org: Type.Optional(Str) },
+        {
+          description:
+            "Who the account is signed in as, from the host's login file: identity fields only, never a token (ADR-0003).",
+        },
+      ),
+    ),
     problems: Type.Optional(Type.Array(Str)),
   }),
 ])

@@ -9,6 +9,7 @@ import {
   cacheHitRate,
   formatDuration,
   type LogicAccount,
+  maskEmail,
   matchesQuery,
   mergeDaily,
   newAccountDir,
@@ -140,6 +141,17 @@ describe('page logic', () => {
     assert.ok(matchesQuery(a, 'claude max', 'Claude Code'))
     assert.ok(matchesQuery(a, 'deepseek', 'Claude Code'))
     assert.equal(matchesQuery(a, 'codex', 'Claude Code'), false)
+    const signed = acct('work', { identity: { email: 'work@example.com', org: 'Fake Team' } })
+    assert.ok(matchesQuery(signed, 'work@example', 'Claude Code'))
+    assert.ok(matchesQuery(signed, 'fake team', 'Claude Code'))
+  })
+
+  it('masks the local part of an email and keeps the domain', () => {
+    assert.equal(maskEmail('alice@example.com'), 'a•••@example.com')
+    assert.equal(maskEmail('a@b.co'), 'a•••@b.co')
+    assert.equal(maskEmail('x.y+tag@sub.example.org'), 'x•••@sub.example.org')
+    assert.equal(maskEmail('noatsign'), 'n•••')
+    assert.equal(maskEmail(''), '')
   })
 
   it('derives a new Account folder from a sibling or a dot-folder Main Account, else gives up', () => {

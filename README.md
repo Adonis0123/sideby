@@ -21,7 +21,7 @@ English | [中文](README.zh-CN.md)
 
 - **Side by side, not switching.** Tools such as cc-switch and magpie change a Host's global config, so one provider is active at a time; that suits people who move between providers. sideby keeps every account in its own directory and starts the official CLI with that directory selected. Your work subscription, personal subscription and a DeepSeek key can run in three terminals at the same time, and the parent shell is never changed.
 - **One copy of skills, hooks and rules.** The Main Account (for example `~/.claude`) is the source. Other accounts link or copy its Shared Items, using the rule each Host needs. `sideby doctor` finds drift and `--fix` repairs what is safe. It never replaces a real file, never changes where a link points, and never reads credential values.
-- **Every quota on one screen.** `sideby quota` and `sideby ui` show each account's 5-hour and 7-day quota, when it resets, how old the data is, and the last 7 days of tokens. sideby reads Claude Code and Codex local records itself (no ccusage needed) and takes Claude quota from the data Claude Code passes to your status line. No network calls, no credential reads.
+- **Every quota on one screen.** `sideby quota` and `sideby ui` show each account's 5-hour and 7-day quota, when it resets, how old the data is, and the last 7 days of tokens. sideby reads Claude Code and Codex local records itself (no ccusage needed) and takes Claude quota from the data Claude Code passes to your status line. No network calls, no token reads.
 
 ## Quick start
 
@@ -39,13 +39,15 @@ sideby run work               # start Claude Code with the work account
 With a few accounts, `sideby list` looks like this:
 
 ```
-ACCOUNT          TYPE  LOGIN         MODEL        DIR
-claude:main      main  ✓             opus         ~/.claude
-claude:deepseek  api   key           deepseek-v4  ~/.claude-deepseek
-claude:work      sub   ✓             opus         ~/.claude-work
-codex:team       sub   ✓             gpt-5.5      ~/.codex-team
-grok:lab         sub   login needed  grok-code    ~/.grok-lab
+ACCOUNT          TYPE  LOGIN         EMAIL             MODEL        DIR
+claude:main      main  ✓             me@example.com    opus         ~/.claude
+claude:deepseek  api   key           —                 deepseek-v4  ~/.claude-deepseek
+claude:work      sub   ✓             work@example.com  opus         ~/.claude-work
+codex:team       sub   ✓             team@example.com  gpt-5.5      ~/.codex-team
+grok:lab         sub   login needed  —                 grok-code    ~/.grok-lab
 ```
+
+EMAIL is who the account is signed in as, read from the host's login file (Claude Code, Codex, Grok Build). sideby reads only that identity field there, never a token (ADR-0003).
 
 If a family plugin fails while reading an account (for example its settings file is not valid JSON), `list` still shows the account and prints the problem on stderr; `list --json` puts it in that account's `problems` array.
 
@@ -83,7 +85,7 @@ sideby doctor --fix      # apply the safe repairs
 - `shared n/m` counts the Shared Items the Main Account actually has. An item the Main Account does not have (many people have no `commands` or `themes`) is skipped: no warning, not counted.
 - A link whose target exists but is not the Main Account's item is a warning (`link.other-target`), since you may have set it up on purpose; where the Host needs a real file or copy, any link is a failure (`symlink-forbidden`). A dangling link is a failure (`link.dangling`). sideby never changes where a link points; it only reports.
 - A real file or directory where a link belongs is reported with a command to keep it (`mv <x> <x>.local && ln -s …`). sideby never replaces it.
-- Credential files (`proxy.env`, `auth.json`, `.claude.json`) are checked for type and mode 600; `--fix` sets the mode back to 600. The only content sideby reads from them is the `mcpServers` key of `.claude.json`, which it keeps in sync with the Main Account. `--force` allows that sync to remove servers the account has and the Main Account does not.
+- Credential files (`proxy.env`, `auth.json`, `.claude.json`) are checked for type and mode 600; `--fix` sets the mode back to 600. The only content sideby reads from them is the `mcpServers` key of `.claude.json`, which it keeps in sync with the Main Account, and the identity fields shown as the account's email (`oauthAccount.emailAddress` and `organizationName` of `.claude.json`, the `email` of Grok's `auth.json` entry, the `email` claim of Codex's `id_token`); tokens are never read out, stored or shown. `--force` allows that sync to remove servers the account has and the Main Account does not.
 - Backup leftovers (`*.bak*`, `*backup*`, `*.tmp*`) are counted, never touched.
 
 Warnings alone exit 0; any failure exits 1.
@@ -96,7 +98,7 @@ sideby ui --port 8080
 sideby ui --no-open    # print the address only
 ```
 
-The panel listens on `127.0.0.1` only. If another sideby panel already runs on the port, sideby opens that one; if another program holds the port, it tries the next ones and prints the address it used. The page shows account cards (quota, usage, login state, health), runs Doctor with one-click fixes, creates accounts (with an optional short command), and can turn on Claude quota after showing the diff. One quota setup covers every Claude Code account, so the "Turn on quota" button sits in the Claude Code group header, not on each account. For a new subscription account it gives you the `sideby login <account>` command to copy; signing in always happens in your terminal.
+The panel listens on `127.0.0.1` only. If another sideby panel already runs on the port, sideby opens that one; if another program holds the port, it tries the next ones and prints the address it used. The page shows each account's quota windows in aligned columns, usage, last use, sign-in email and health, and refreshes itself every 20 seconds while it is open (every 5 seconds for a few minutes after you turn on quota, so the first numbers appear soon after a status line reports them). A "Hide emails" switch masks addresses as `a•••@example.com` for screen sharing. It runs Doctor with one-click fixes, creates accounts (with an optional short command), and can turn on Claude quota after showing the diff. One quota setup covers every Claude Code account, so the "Turn on quota" button sits in the Claude Code group header, not on each account. For a new subscription account it gives you the `sideby login <account>` command to copy; signing in always happens in your terminal.
 
 #### Desktop app
 

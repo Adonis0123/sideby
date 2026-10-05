@@ -27,6 +27,21 @@ Official or local sources exist for two Families:
 - Quota is only as fresh as the Account's last session; the Panel always shows how old the data is.
 - Claude Quota needs a one-time change to the shared `settings.json`, which must be reversible byte for byte.
 
+## Amendment (2026-10-05): account identity
+
+The Panel and `sideby list` show who each Account is signed in as, because several subscriptions of one Host are
+otherwise hard to tell apart.
+
+- sideby reads identity fields only: the email (and, for Claude Code, the organization name when it is not the
+  personal default) from the Host's own login file: `oauthAccount.emailAddress` and `organizationName` in Claude's
+  `.claude.json`, the `email` of the single entry in Grok's `auth.json`, and the `email` claim of Codex's
+  `tokens.id_token`, whose payload segment is base64url-decoded without a signature check.
+- It never reads, stores, logs or outputs a token value, the Codex `id_token` included, or any other field of these
+  files; the parsed file is dropped as soon as the identity fields are picked.
+- Plugins add identity through `FamilyDef.identity`, under the same rule. A reader that fails gives no identity, never
+  an error.
+- The Panel can mask emails (`a•••@example.com`) for screen sharing.
+
 ## Revisit when
 
 A vendor publishes an official usage API or CLI command that reports Quota without starting a session.

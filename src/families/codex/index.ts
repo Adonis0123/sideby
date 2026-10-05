@@ -1,5 +1,6 @@
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { identityFromJsonFile, identityOf, jwtEmail } from '../../core/identity.ts'
 import type { Account, FamilyDef, LoginState, Plugin } from '../../types.ts'
 import { BUILTIN_LOGOS } from '../logos.ts'
 import { topLevelTomlString } from '../shared/toml.ts'
@@ -13,6 +14,13 @@ async function readModel(account: Account): Promise<string | undefined> {
   } catch {
     return undefined
   }
+}
+
+/** The email claim of `tokens.id_token` in auth.json; the token and every other claim are dropped. */
+export function codexIdentity(account: Account) {
+  return identityFromJsonFile(join(account.dir, 'auth.json'), (data) =>
+    identityOf(jwtEmail((data as { tokens?: { id_token?: unknown } } | null)?.tokens?.id_token)),
+  )
 }
 
 export const codexFamily: FamilyDef = {
@@ -51,6 +59,7 @@ export const codexFamily: FamilyDef = {
     }
   },
   model: readModel,
+  identity: codexIdentity,
   readQuota: (account) => readCodexQuota(account.dir),
   readUsage: (account, ctx) => readCodexUsage(account.dir, ctx.now),
 }

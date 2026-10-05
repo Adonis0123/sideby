@@ -40,7 +40,9 @@ src/
 ├── families/     claude, codex, grok, pi: each a Family Plugin; index.ts lists built-ins in load order
 │                 logos.ts holds the built-in marks each FamilyDef sets as `logo`
 │                 claude/ reads quota from the tap cache and usage from projects/**/*.jsonl;
-│                 codex/rollout.ts reads quota and usage from sessions/**/rollout-*.jsonl
+│                 codex/rollout.ts reads quota and usage from sessions/**/rollout-*.jsonl;
+│                 identity readers pick only email/organization from login files (core/identity.ts);
+│                 readers remember each file's parse until it changes (core/file-memo.ts)
 ├── quota/        `quota setup|teardown claude` and the `statusline-tap` entry (thin; cache logic in families/claude/quota-cache.ts)
 ├── panel/        createPanelHandler, the standalone server, the inline page and theme.ts (host theme tokens);
 │                 background.ts runs the server detached (`ui --background`, `--stop`)
@@ -84,7 +86,7 @@ Shared Item paths must be relative and stay inside the account directory: config
 
 **Credentials**
 
-- Never print, log, return, or put in an error message the value of anything from `proxy.env`, `auth.json` or `.claude.json`. Errors name the path or the variable, and for parse errors the line number only. The one value shown is a Claude API Account's `ANTHROPIC_MODEL`, as its model.
+- Never print, log, return, or put in an error message the value of anything from `proxy.env`, `auth.json` or `.claude.json`. Errors name the path or the variable, and for parse errors the line number only. The values shown are a Claude API Account's `ANTHROPIC_MODEL`, as its model, and the identity fields a Family's `identity` reader picks (email, organization; ADR-0003). Never a token: Codex's `id_token` is decoded only to take its `email` claim, and is never stored or returned.
 - Doctor checks credential files for type and mode 600 only. The only content it reads is the single key a `json-key` item names. `proxy.env` is parsed only at Launch and for that model name.
 - Never read a credential to call a model, pool logins, or rotate accounts (ADR-0001). Never call private quota endpoints (ADR-0003). Built-in quota and usage readers make no network requests.
 

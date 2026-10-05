@@ -5,6 +5,7 @@ import { addConfigAlias, aliasProblem, type Config, loadConfig } from './core/co
 import { type CreateResult, createAccount } from './core/create.ts'
 import { applyFixes, type DoctorReport, runDoctor } from './core/doctor.ts'
 import { UserError } from './core/errors.ts'
+import { identityOf } from './core/identity.ts'
 import {
   type DoctorHistory,
   type DoctorScope,
@@ -26,6 +27,7 @@ import { HookBus } from './plugins/bus.ts'
 import { type BuiltinPlugin, type LoadedPlugin, loadPlugins, type PluginLoadError } from './plugins/loader.ts'
 import type {
   Account,
+  AccountIdentity,
   Env,
   FamilyDef,
   LoginState,
@@ -35,7 +37,7 @@ import type {
   UsageResult,
 } from './types.ts'
 
-export type { AccountRefError, DoctorHistory, Shell, ShellInitWrite }
+export type { AccountIdentity, AccountRefError, DoctorHistory, Shell, ShellInitWrite }
 
 /** What happened to the alias asked for with a new Account. */
 export interface AliasResult {
@@ -68,6 +70,8 @@ export interface AccountStatus extends Account {
   /** `not-needed` for API Accounts, which authenticate with their Secret File. */
   login: LoginState | 'not-needed'
   model?: string
+  /** Who the Account is signed in as (email, organization), when its Family can tell. */
+  identity?: AccountIdentity
   /** Plugin errors met while reading this Account (for example an unreadable settings file). */
   problems?: string[]
 }
@@ -136,6 +140,20 @@ export interface Runtime {
 }
 
 export class UnknownFamilyError extends UserError {}
+
+/**
+ * A Family's identity reader, kept to the identity fields with the expected types. A reader that throws, or returns
+ * anything else, gives undefined: identity is a display nicety and never a problem of the Account.
+ */
+async function readIdentity(f: FamilyDef, account: Account): Promise<AccountIdentity | undefined> {
+  if (!f.identity || account.kind === 'api') return undefined
+  try {
+    const r = await f.identity(account)
+    return identityOf(r?.email, r?.org)
+  } catch {
+    return undefined
+  }
+}
 
 export async function createRuntime(
   opts: { env?: Env; builtins?: BuiltinPlugin[]; now?: () => Date } = {},
@@ -219,12 +237,13 @@ export async function createRuntime(
           return undefined
         }
       }
-      const [installed, login, model] = await Promise.all([
+      const [installed, login, model, identity] = await Promise.all([
         which(f.bin, env),
         account.kind === 'api'
           ? undefined
           : safe('login state', f.loginState && (() => f.loginState!(account))),
         safe('model', f.model && (() => f.model!(account))),
+        readIdentity(f, account),
       ])
       return {
         ...account,
@@ -232,6 +251,7 @@ export async function createRuntime(
         hostInstalled: installed !== null,
         login: account.kind === 'api' ? 'not-needed' : (login ?? 'unknown'),
         ...(model ? { model } : {}),
+        ...(identity ? { identity } : {}),
         ...(problems.length ? { problems } : {}),
       }
     },

@@ -14,6 +14,7 @@ export interface LogicAccount {
   login?: string
   model?: string
   aliases?: string[]
+  identity?: { email?: string; org?: string }
   hostInstalled?: boolean
   error?: string
   quota?: {
@@ -146,11 +147,22 @@ export function sortAccounts<T extends LogicAccount>(list: T[], mode: string, no
   return out
 }
 
-/** Whether every word of the query appears in the Account's name, ref, aliases, Family title, model or plan. */
+/**
+ * Whether every word of the query appears in the Account's name, ref, aliases, Family title, model, plan, email or
+ * organization.
+ */
 export function matchesQuery(a: LogicAccount, query: string, familyTitle: string): boolean {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
   if (!words.length) return true
-  const hay = [a.name, a.ref, familyTitle, a.model || '', a.quota?.plan || '']
+  const hay = [
+    a.name,
+    a.ref,
+    familyTitle,
+    a.model || '',
+    a.quota?.plan || '',
+    a.identity?.email || '',
+    a.identity?.org || '',
+  ]
     .concat(a.aliases || [])
     .join(' ')
     .toLowerCase()
@@ -304,4 +316,14 @@ export function aliasIssue(
   const target = configAliases && Object.hasOwn(configAliases, alias) ? configAliases[alias] : undefined
   if (target !== undefined && target !== ref) return 'taken'
   return ''
+}
+
+/**
+ * An email with the local part hidden for screen sharing: its first character, three dots, then the domain
+ * (`a•••@example.com`). Text without an `@` keeps only its first character.
+ */
+export function maskEmail(email: string): string {
+  const at = email.lastIndexOf('@')
+  const first = Array.from(email)[0] || ''
+  return at > 0 ? `${first}•••${email.slice(at)}` : first ? `${first}•••` : ''
 }

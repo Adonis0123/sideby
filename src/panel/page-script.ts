@@ -5,6 +5,7 @@ import {
   attentionReasons,
   cacheHitRate,
   formatDuration,
+  maskEmail,
   matchesQuery,
   mergeDaily,
   newAccountDir,
@@ -23,6 +24,7 @@ const LOGIC = [
   attentionReasons,
   cacheHitRate,
   formatDuration,
+  maskEmail,
   matchesQuery,
   mergeDaily,
   newAccountDir,
@@ -50,9 +52,18 @@ const MAIN = String.raw`
   const NAME_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
   const SVG_NS = 'http://www.w3.org/2000/svg'
   const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  // Auto refresh: the state reloads every AUTO_MS while the page is visible, and every FAST_MS for FAST_FOR_MS after
+  // quota is turned on, so the first numbers show up soon after a status line reports them.
+  const AUTO_MS = 20000
+  const FAST_MS = 5000
+  const FAST_FOR_MS = 3 * 60000
   const S = {
     state: null, loadError: null, loading: false, loadedAt: 0, history: null,
     report: null, checking: false, fixing: false, checkError: null, checkRetry: null, fixes: null,
+    // silent: the running load is a background one (no spinner); lastTry: when the last load started;
+    // pending: a background load finished while the viewer was busy, so its render waits; fastUntil/fastFamily:
+    // the quick polling after quota was turned on.
+    silent: false, lastTry: 0, pending: false, fastUntil: 0, fastFamily: null,
   }
   // View state that is not saved: the search text, the attention filter, the Health check filter.
   const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, highlight: null, fade: true }
@@ -67,8 +78,9 @@ const MAIN = String.raw`
   function loadPrefs() {
     let raw = {}
     try { raw = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') || {} } catch {}
-    const p = { view: 'list', sort: 'pressure', quota: 'used', theme: 'system', lang: '', family: '', collapsed: {} }
+    const p = { view: 'list', sort: 'pressure', quota: 'used', theme: 'system', lang: '', family: '', collapsed: {}, hideEmail: false }
     for (const k of Object.keys(CHOICES)) if (CHOICES[k].includes(raw[k])) p[k] = raw[k]
+    if (raw.hideEmail === true) p.hideEmail = true
     if (typeof raw.family === 'string') p.family = raw.family
     if (raw.collapsed && typeof raw.collapsed === 'object')
       for (const k of Object.keys(raw.collapsed)) if (raw.collapsed[k] === true) p.collapsed[k] = true
@@ -148,6 +160,89 @@ const MAIN = String.raw`
     return out
   }
 
+  // ---------- updating in place ----------
+  // A refresh rebuilds the markup, then keeps every existing element whose markup did not change, so focus, hover,
+  // text selection and scroll stay put and only changed rows are swapped. Children match by data-key, else by
+  // position; a data-patch container that changed is updated child by child instead of being replaced. Rows carry
+  // a data-sig of their account, so equal markup also means their click handlers see the same data.
+  function markup(el) { return el.outerHTML.replace(/tip-[0-9]+/g, 'tip') }
+  function syncAttrs(from, to) {
+    for (const a of Array.from(from.attributes)) if (!to.hasAttribute(a.name)) from.removeAttribute(a.name)
+    for (const a of Array.from(to.attributes)) if (from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value)
+  }
+  function flat(kids, out) {
+    out = out || []
+    if (kids === null || kids === undefined || kids === false) return out
+    if (Array.isArray(kids)) { for (const k of kids) flat(k, out); return out }
+    out.push(kids instanceof Node ? kids : document.createTextNode(String(kids)))
+    return out
+  }
+  function patchKids(box, kids) {
+    const next = flat(kids)
+    const old = Array.from(box.childNodes)
+    const byKey = new Map()
+    for (const o of old) if (o.nodeType === 1 && o.dataset.key) byKey.set(o.dataset.key, o)
+    const used = new Set()
+    const result = next.map((n, i) => {
+      const key = n.nodeType === 1 ? n.dataset.key : ''
+      const o = key ? byKey.get(key) : old[i] && !(old[i].nodeType === 1 && old[i].dataset.key) ? old[i] : null
+      if (!o || used.has(o) || o.nodeType !== n.nodeType || o.nodeName !== n.nodeName) return n
+      if (n.nodeType === 3) { if (o.data !== n.data) o.data = n.data; used.add(o); return o }
+      if (n.nodeType !== 1) return n
+      if (markup(o) === markup(n)) { used.add(o); return o }
+      if (o.hasAttribute('data-patch') && n.hasAttribute('data-patch')) { syncAttrs(o, n); patchKids(o, Array.from(n.childNodes)); used.add(o); return o }
+      return n
+    })
+    for (const o of old) if (!used.has(o)) o.remove()
+    result.forEach((n, i) => { if (box.childNodes[i] !== n) box.insertBefore(n, box.childNodes[i] || null) })
+  }
+  function pathOf(el, root) {
+    const p = []
+    while (el && el !== root) {
+      const up = el.parentElement
+      if (!up) return null
+      p.unshift(Array.prototype.indexOf.call(up.children, el))
+      el = up
+    }
+    return el === root ? p : null
+  }
+  // Replaces box's children like setKids, keeping unchanged elements. Focus inside a swapped element moves to the
+  // element at the same place in its replacement, found through its keyed ancestors (rows can change order).
+  function patch(box, kids) {
+    const active = document.activeElement
+    const keys = []
+    let anchor = box
+    if (active && active !== document.body && box.contains(active)) {
+      for (let el = active.parentElement; el && el !== box; el = el.parentElement) if (el.hasAttribute('data-key')) keys.unshift(el)
+      if (keys.length) anchor = keys[keys.length - 1]
+    }
+    const path = anchor !== box || (active && box.contains(active) && active !== box) ? pathOf(active, anchor) : null
+    const chain = keys.map((el) => el.getAttribute('data-key'))
+    patchKids(box, kids)
+    if (path && !active.isConnected) {
+      let el = box
+      for (const k of chain) el = el && Array.from(el.querySelectorAll('[data-key]')).find((x) => x.getAttribute('data-key') === k)
+      for (const i of path) el = el && el.children[i]
+      if (el && typeof el.focus === 'function') el.focus({ preventScroll: true })
+    }
+  }
+  // A short stable fingerprint of a value.
+  function sig(value) {
+    const s = JSON.stringify(value) || ''
+    let x = 5381
+    for (let i = 0; i < s.length; i++) x = ((x * 33) ^ s.charCodeAt(i)) >>> 0
+    return x.toString(36) + s.length.toString(36)
+  }
+  // Whether the viewer is in the middle of something a background render would disturb: an open menu, dialog or
+  // tooltip, a focused field, or a text selection in the account list.
+  function uiBusy() {
+    if (menu.el || (dlg.el && dlg.el.open) || document.querySelector('.tip.is-open')) return true
+    const el = document.activeElement
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return true
+    const sel = window.getSelection && window.getSelection()
+    return Boolean(sel && !sel.isCollapsed && sel.anchorNode && $('accounts').contains(sel.anchorNode))
+  }
+
   const ICONS = {
     refresh: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7',
     search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4.2-4.2',
@@ -167,6 +262,9 @@ const MAIN = String.raw`
     grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
     list: 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01',
     clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2',
+    mail: 'M3 6h18v12H3zM3 7l9 6 9-6',
+    eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+    eyeOff: 'M3 3l18 18M10.6 5.1A10.8 10.8 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.2M6.6 6.6A17.4 17.4 0 0 0 2 12s3.5 7 10 7a10.4 10.4 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2',
   }
   function icon(name, cls) {
     const svg = document.createElementNS(SVG_NS, 'svg')
@@ -322,6 +420,13 @@ const MAIN = String.raw`
     if (hr < 24) return t('time.hAgo', { n: hr })
     return t('time.dAgo', { n: Math.round(hr / 24) })
   }
+  // The header's "Updated …" age, in seconds for the first minute so the viewer sees it tick.
+  function agoShort(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000))
+    if (s < 5) return t('time.justNow')
+    if (s < 60) return t('time.secAgo', { n: s })
+    return ago(new Date(Date.now() - ms).toISOString())
+  }
   function clock(iso) {
     const d = new Date(iso)
     if (!Number.isFinite(d.getTime())) return '?'
@@ -353,6 +458,8 @@ const MAIN = String.raw`
 
   function family(id) { return (S.state && S.state.families.find((f) => f.id === id)) || { id, title: id, bin: id, installUrl: '', installed: false } }
   function famTitle(a) { return a.familyTitle || family(a.family).title }
+  // The email as the page shows it: masked everywhere while "Hide emails" is on (copying still gives the real one).
+  function emailText(email) { return prefs.hideEmail ? maskEmail(email) : email }
   // A Family's mark: the logo its FamilyDef sets (checked by the loader), or its initials on a color derived from the id.
   // size: '' (cards), 'sm' (rows, groups, dialogs) or 'xs' (inside a chip; no initials fallback there).
   function badge(id, size) {
@@ -389,7 +496,7 @@ const MAIN = String.raw`
       try { ok = document.execCommand('copy') } catch { ok = false }
       ta.remove()
     }
-    if (ok) toast(t('toast.copied', { text }))
+    if (ok) toast(t('toast.copied', { text: prefs.hideEmail && text.includes('@') ? maskEmail(text) : text }))
     else toast(t('toast.copyFailed'), { kind: 'fail' })
   }
   function codeCopy(text) {
@@ -478,6 +585,7 @@ const MAIN = String.raw`
       ...(a.aliases || []).slice(0, 2).map((x) => ({ icon: 'terminal', label: t('menu.copyAlias'), hint: x, run: () => copyText(x) })),
       a.kind !== 'api' ? { icon: 'key', label: t('menu.copyLogin'), hint: 'sideby login ' + a.ref, run: () => copyText('sideby login ' + a.ref) } : null,
       a.dir ? { icon: 'folder', label: t('menu.copyDir'), hint: a.dir, run: () => copyText(a.dir) } : null,
+      a.identity && a.identity.email ? { icon: 'mail', label: t('menu.copyEmail'), hint: emailText(a.identity.email), run: () => copyText(a.identity.email) } : null,
       '-',
       { icon: 'check', label: t('menu.check'), disabled: S.checking || S.fixing || Boolean(ui.checkingRef), run: () => checkAccount(a.ref) },
       BOOT.readOnly ? null : { icon: 'userPlus', label: t('menu.like'), run: () => openCreate({ family: a.family, api: a.kind === 'api' }) },
@@ -516,12 +624,21 @@ const MAIN = String.raw`
   function setupFor(fam) { return S.state && S.state.quotaSetups.find((s) => s.family === fam) }
 
   // ---------- header and summary ----------
+  function renderUpdated() {
+    const busy = S.loading && !S.silent
+    const text = S.loading && !S.state ? t('top.loading') : busy ? t('top.refreshing') : S.loadedAt ? t('top.updated', { ago: agoShort(Date.now() - S.loadedAt) }) : ''
+    const el = $('updated')
+    if (el.textContent !== text) el.textContent = text
+    el.title = S.loadedAt ? t('top.updatedTitle', { at: clock(new Date(S.loadedAt).toISOString()), s: Math.round((S.fastUntil > Date.now() ? FAST_MS : AUTO_MS) / 1000) }) : ''
+  }
   function renderTop() {
-    $('updated').textContent = S.loading && !S.state ? t('top.loading') : S.loading ? t('top.refreshing') : S.loadedAt ? t('top.updated', { ago: ago(new Date(S.loadedAt).toISOString()) }) : ''
+    renderUpdated()
+    // A background refresh keeps the button still; only one the viewer asked for spins it.
+    const busy = S.loading && !S.silent
     const refresh = $('refresh')
-    refresh.disabled = S.loading
-    refresh.classList.toggle('is-spinning', S.loading)
-    if (S.loading) refresh.setAttribute('aria-busy', 'true'); else refresh.removeAttribute('aria-busy')
+    refresh.disabled = busy
+    refresh.classList.toggle('is-spinning', busy)
+    if (busy) refresh.setAttribute('aria-busy', 'true'); else refresh.removeAttribute('aria-busy')
   }
   function renderStatic() {
     document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en'
@@ -582,7 +699,7 @@ const MAIN = String.raw`
     const sessions = usages.reduce((s, a) => s + (Number(a.usage.sessions) || 0), 0)
     const daily = mergeDaily(usages.map((a) => a.usage.daily)).slice(-BOOT.usageDays)
     const nr = nextReset(list, now)
-    setKids(box, [
+    patch(box, [
       stat(t('stat.accounts'), String(list.length), dots([tn('stat.families', famCount), apiCount ? tn('stat.api', apiCount) : null])),
       need
         ? stat(t('stat.attention'), String(need), needSub, null, { cls: 'stat-warn', pressed: ui.attention, title: t(ui.attention ? 'stat.attentionOff' : 'stat.attentionOn'), onclick: () => { ui.attention = !ui.attention; renderSummary(); renderAccounts() } })
@@ -622,14 +739,32 @@ const MAIN = String.raw`
     tb.sort.addEventListener('change', () => { prefs.sort = tb.sort.value; savePrefs(); renderAccounts() })
     const quota = seg(t('tb.quota'), [['used', t('tb.used')], ['left', t('tb.left')]], prefs.quota, (v) => { prefs.quota = v; savePrefs(); renderAccounts() })
     const view = seg(t('tb.view'), [['list', icon('list'), t('tb.list')], ['cards', icon('grid'), t('tb.cards')]], prefs.view, (v) => { prefs.view = v; savePrefs(); ui.fade = true; renderAccounts() })
+    tb.hideEmail = h('button', { class: 'icon-btn tb-icon', type: 'button', 'aria-pressed': String(prefs.hideEmail), onclick: () => {
+      prefs.hideEmail = !prefs.hideEmail
+      savePrefs()
+      renderEmailToggle()
+      renderAccounts()
+    } })
     const create = BOOT.readOnly ? null : h('button', { class: 'btn btn-primary', type: 'button', 'aria-label': t('tb.new'), onclick: () => openCreate(null) }, icon('plus'), h('span', null, t('tb.new')))
     setKids($('toolbar'), [
       h('label', { class: 'search' }, icon('search', 'search-ic'), tb.search, h('kbd', { class: 'kbd', 'aria-hidden': 'true' }, '/')),
-      h('div', { class: 'tools' }, tb.family, tb.sort, quota, view),
+      h('div', { class: 'tools' }, tb.family, tb.sort, quota, view, tb.hideEmail),
       create,
     ])
     renderFamilyFilter()
+    renderEmailToggle()
     if (hadFocus) tb.search.focus()
+  }
+  // "Hide emails": shown once any account has one; its icon and label say what a click does.
+  function renderEmailToggle() {
+    const b = tb.hideEmail
+    if (!b) return
+    b.hidden = !(S.state && S.state.accounts.some((a) => a.identity && a.identity.email))
+    b.setAttribute('aria-pressed', String(prefs.hideEmail))
+    const label = t(prefs.hideEmail ? 'tb.showEmails' : 'tb.hideEmails')
+    b.setAttribute('aria-label', label)
+    b.title = label
+    setKids(b, icon(prefs.hideEmail ? 'eyeOff' : 'eye'))
   }
   function renderFamilyFilter() {
     if (!tb.family) return
@@ -653,19 +788,35 @@ const MAIN = String.raw`
   })
 
   // ---------- accounts ----------
-  function sortedWindows(ws) {
-    const order = (w) => (w.label === '5h' ? 0 : w.label === '7d' ? 1 : 2)
-    return (ws || []).slice().sort((x, y) => order(x) - order(y) || x.windowMinutes - y.windowMinutes)
+  // One column per Quota window label. 5h and 7d always have one, so rows of every group line up under the same
+  // header; a label only some account reports (such as 60m) adds a column, at most three in all.
+  const KNOWN_WINDOWS = { '5h': 300, '7d': 10080 }
+  function quotaColumns(list) {
+    const mins = Object.assign({}, KNOWN_WINDOWS)
+    for (const a of list)
+      if (a.quota && a.quota.status === 'ok')
+        for (const w of a.quota.windows || []) if (!Object.hasOwn(mins, w.label)) mins[w.label] = Number(w.windowMinutes) || 0
+    return Object.keys(mins).sort((x, y) => mins[x] - mins[y]).slice(0, 3)
   }
+  // A window's cell: percent and countdown on one line, the bar under them. The label shows where no column
+  // header does (cards, narrow screens).
   function meter(w, now, stale, observedAt) {
     const st = windowState(w, now, WARN, FAIL)
     const passed = passedWindow(w, observedAt, now)
     const left = prefs.quota === 'left'
     const shown = left ? 100 - st.pct : st.pct
-    return h('div', { class: 'meter lvl-' + st.level + (stale || passed ? ' lvl-stale' : ''), title: passed ? t('quota.resetPassed') : t('quota.resetsAt', { at: clock(w.resetsAt) }) },
-      h('div', { class: 'm-top' }, h('span', { class: 'm-label' }, w.label), h('span', { class: 'm-pct' }, t(left ? 'quota.pctLeft' : 'quota.pctUsed', { n: shown }))),
-      h('div', { class: 'bar', role: 'meter', 'aria-label': t(left ? 'quota.meterLeft' : 'quota.meterUsed', { label: w.label }), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(shown) }, h('span', { css: { width: shown + '%' } })),
-      passed ? h('div', { class: 'm-reset m-passed' }, t('quota.resetNoData', { date: day(passed.since) })) : h('div', { class: 'm-reset' }, countdown(w.resetsAt, now)))
+    const title = passed ? t('quota.resetNoData', { date: day(passed.since) }) : t('quota.resetsAt', { at: clock(w.resetsAt) })
+    return h('div', { class: 'meter lvl-' + st.level + (stale || passed ? ' lvl-stale' : ''), title },
+      h('div', { class: 'm-top' },
+        h('span', { class: 'm-label' }, w.label),
+        h('span', { class: 'm-pct' }, shown + '%', h('span', { class: 'm-unit' }, ' ' + t(left ? 'quota.unitLeft' : 'quota.unitUsed'))),
+        h('span', { class: 'm-reset' + (passed ? ' m-passed' : '') }, passed ? t('quota.resetShort') : countdown(w.resetsAt, now))),
+      h('div', { class: 'bar', role: 'meter', 'aria-label': t(left ? 'quota.meterLeft' : 'quota.meterUsed', { label: w.label }), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(shown), 'aria-valuetext': t(left ? 'quota.pctLeft' : 'quota.pctUsed', { n: shown }) }, h('span', { css: { width: shown + '%' } })))
+  }
+  // A column whose window this account does not report right now, such as a 5h window that has not started.
+  function noMeter(label) {
+    return h('div', { class: 'meter meter-none', title: t('quota.missing', { label }) },
+      h('div', { class: 'm-top' }, h('span', { class: 'm-label' }, label), h('span', { class: 'm-none', 'aria-label': t('quota.missing', { label }) }, '—')))
   }
   function quotaNote(a, q) {
     const setup = setupFor(a.family)
@@ -681,14 +832,17 @@ const MAIN = String.raw`
     const text = { 'no-session': 'quota.noSession', 'no-source': 'quota.noSource', unrecognized: 'quota.unrecognized' }[q.reason]
     return h('div', { class: 'q-note', title: q.reason === 'no-session' ? t('quota.noSessionHint') : q.detail || null }, text ? t(text) : t('quota.unavailable', { reason: q.reason }))
   }
-  function quotaBlock(a, now) {
+  function quotaBlock(a, now, cols) {
     const q = a.quota
     if (!q) return h('div', { class: 'quota' }, h('div', { class: 'q-note' }, '—'))
     if (q.status !== 'ok') return h('div', { class: 'quota' }, quotaNote(a, q))
-    const wins = sortedWindows(q.windows).slice(0, 2)
     const stale = isStale(q.observedAt, now)
+    const wins = q.windows || []
     return h('div', { class: 'quota' + (stale ? ' is-stale' : ''), title: stale ? null : t('quota.dataFrom', { ago: ago(q.observedAt) }) },
-      wins.length ? wins.map((w) => meter(w, now, stale, q.observedAt)) : h('div', { class: 'q-note' }, t('quota.noWindows')),
+      wins.length ? cols.map((c) => {
+        const w = wins.find((x) => x.label === c)
+        return w ? meter(w, now, stale, q.observedAt) : noMeter(c)
+      }) : h('div', { class: 'q-note' }, t('quota.noWindows')),
       stale ? h('div', { class: 'q-asof' }, icon('clock'), t('quota.asOf', { ago: ago(q.observedAt) })) : null)
   }
   function usageBlock(a) {
@@ -701,36 +855,45 @@ const MAIN = String.raw`
     const rate = cacheHitRate(u)
     const detail = t('usage.detail', { days: u.days, sessions: u.sessions, input: tokens(u.inputTokens), output: tokens(u.outputTokens), cache: tokens(u.cacheReadTokens + u.cacheWriteTokens) })
     return h('div', { class: 'usage', title: detail },
-      u.totalTokens ? spark(u.daily) : null,
-      h('div', { class: 'u-text' },
-        h('div', { class: 'u-num' }, tokens(u.totalTokens), h('span', { class: 'u-unit' }, ' ' + t('usage.tokens'))),
-        h('div', { class: 'u-sub' }, rate === null ? tn('usage.sessions', u.sessions) : t('usage.cache', { n: Math.round(rate * 100) }))))
+      h('div', { class: 'u-top' },
+        h('span', { class: 'u-num' }, tokens(u.totalTokens), h('span', { class: 'u-unit' }, ' ' + t('usage.tokens'))),
+        u.totalTokens ? spark(u.daily) : null),
+      h('div', { class: 'u-sub' }, rate === null ? tn('usage.sessions', u.sessions) : t('usage.cache', { n: Math.round(rate * 100) })))
   }
   function lastUsed(a) {
     const at = a.usage && a.usage.status === 'ok' && a.usage.lastActivityAt
-    return h('div', { class: 'last', title: at ? t('last.title', { at: clock(at) }) : t('last.unknown') }, at ? ago(at) : '—')
+    return h('div', { class: 'last', title: at ? t('last.title', { at: clock(at) }) : t('last.unknown') }, at ? ago(at) : h('span', { class: 'faint' }, '—'))
   }
   function healthChip(a) {
     const hs = healthOf(a.ref)
-    let cls = 'chip chip-btn health'
+    let lvl = ''
     let text
     if (ui.checkingRef === a.ref || (S.checking && !hs)) text = t('health.checking')
-    else if (a.error) { cls += ' chip-fail'; text = t('health.error') }
+    else if (a.error) { lvl = 'fail'; text = t('health.error') }
     else if (!hs) text = t('health.notChecked')
-    else if (hs.fail) { cls += ' chip-fail'; text = tn('health.issues', hs.fail) }
-    else if (hs.warn) { cls += ' chip-warn'; text = tn('health.warnings', hs.warn) }
-    else { cls += ' chip-ok'; text = t('health.ok') }
-    return h('button', { class: cls, type: 'button', title: t('health.filterHint'), 'aria-label': t('health.chipLabel', { ref: a.ref, status: text }), onclick: () => filterHealth(a.ref) }, text)
+    else if (hs.fail) { lvl = 'fail'; text = tn('health.issues', hs.fail) }
+    else if (hs.warn) { lvl = 'warn'; text = tn('health.warnings', hs.warn) }
+    else { lvl = 'ok'; text = t('health.ok') }
+    return h('button', { class: 'chip chip-btn health' + (lvl ? ' chip-' + lvl : ''), type: 'button', title: t('health.filterHint'), 'aria-label': t('health.chipLabel', { ref: a.ref, status: text }), onclick: () => filterHealth(a.ref) },
+      h('span', { class: 'dot' + (lvl ? ' dot-' + lvl : ''), 'aria-hidden': 'true' }), text)
   }
   function nameLine(a) {
     return h('div', { class: 'ident-name' },
       h('span', { class: 'name', title: a.name }, a.name),
-      (a.aliases || []).slice(0, 3).map((x) => h('span', { class: 'alias', title: t('acct.alias') }, x)),
-      a.kind === 'api' ? h('span', { class: 'chip chip-sm chip-warn', title: t('tip.api.body') }, t('acct.api')) : null,
+      (a.aliases || []).slice(0, 3).map((x) => h('span', { class: 'tag tag-alias', title: t('acct.alias') }, x)),
+      a.kind === 'api' ? h('span', { class: 'tag tag-warn', title: t('tip.api.body') }, t('acct.api')) : null,
       a.login === 'logged-out' && a.kind !== 'api'
-        ? h('button', { class: 'chip chip-sm chip-btn chip-fail', type: 'button', title: t('acct.signInHint'), 'aria-label': t('acct.signedOutLabel', { ref: a.ref }), onclick: () => copyText('sideby login ' + a.ref) }, h('span', { class: 'dot dot-fail', 'aria-hidden': 'true' }), t('acct.signedOut'))
+        ? h('button', { class: 'tag tag-fail tag-btn', type: 'button', title: t('acct.signInHint'), 'aria-label': t('acct.signedOutLabel', { ref: a.ref }), onclick: () => copyText('sideby login ' + a.ref) }, h('span', { class: 'dot dot-fail', 'aria-hidden': 'true' }), t('acct.signedOut'))
         : null,
-      a.hostInstalled === false ? h('span', { class: 'chip chip-sm chip-warn' }, t('acct.notInstalled')) : null)
+      a.hostInstalled === false ? h('span', { class: 'tag tag-warn' }, t('acct.notInstalled')) : null)
+  }
+  // Who the account is signed in as, under its name; masked while "Hide emails" is on.
+  function emailLine(a) {
+    const id = a.identity
+    if (!id || (!id.email && !id.org)) return null
+    const email = id.email ? emailText(id.email) : ''
+    return h('div', { class: 'ident-email', title: [email, id.org].filter(Boolean).join(' · ') },
+      dots([email ? h('span', { class: 'email' }, email) : null, id.org ? h('span', { class: 'org' }, id.org) : null]))
   }
   function subLine(a) {
     const plan = a.quota && a.quota.status === 'ok' && a.quota.plan
@@ -747,27 +910,52 @@ const MAIN = String.raw`
     if (a.hostInstalled === false) out.push(h('div', { class: 'note note-warn' }, tx('acct.installHost', { host: fam.title, link: link(t('acct.installIt'), fam.installUrl) || '' })))
     return out.length ? h('div', { class: 'row-notes' }, out) : null
   }
-  function row(a, now) {
-    return h('div', { class: 'row' + (a.error ? ' row-error' : ''), role: 'listitem', 'data-ref': a.ref },
-      h('div', { class: 'ident' }, badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a), subLine(a))),
-      quotaBlock(a, now),
+  // What a row or card shows depends on more than the account (health, view preferences, language); the
+  // fingerprint covers what its click handlers use.
+  function rowSig(a) { return sig([a, healthOf(a.ref)]) }
+  function row(a, now, cols) {
+    return h('div', { class: 'row' + (a.error ? ' row-error' : ''), role: 'listitem', 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a) },
+      h('div', { class: 'ident' }, badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a), emailLine(a), subLine(a))),
+      quotaBlock(a, now, cols),
       usageBlock(a),
       lastUsed(a),
       h('div', { class: 'cell-health' }, healthChip(a)),
       moreButton(a),
       notes(a))
   }
-  function card(a, now) {
-    return h('article', { class: 'card' + (a.error ? ' card-error' : ''), 'data-ref': a.ref, 'aria-label': a.ref },
+  function card(a, now, cols) {
+    return h('article', { class: 'card' + (a.error ? ' card-error' : ''), 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a), 'aria-label': a.ref },
       h('header', { class: 'card-head' },
         badge(a.family, 'sm'),
-        h('div', { class: 'ident-text' }, nameLine(a), subLine(a)),
+        h('div', { class: 'ident-text' }, nameLine(a), emailLine(a), subLine(a)),
         moreButton(a)),
       notes(a),
-      quotaBlock(a, now),
+      quotaBlock(a, now, cols),
       h('footer', { class: 'card-foot' }, usageBlock(a), h('div', { class: 'card-side' }, lastUsed(a), healthChip(a))))
   }
-  function group(fam, list, total, now) {
+  // The list's column titles, once per group under its header. Screen readers get each cell's own label instead.
+  function colHead(cols, list) {
+    const left = prefs.quota === 'left'
+    // A group where no account reports windows (no public source, quota off) keeps the columns but not their titles.
+    const titled = list.some((a) => a.quota && a.quota.status === 'ok')
+    return h('div', { class: 'col-head', 'aria-hidden': 'true', 'data-key': 'cols' },
+      h('span', { class: 'ch-id' }, t('col.account')),
+      h('span', { class: 'quota' }, titled ? cols.map((c) => h('span', null, t(left ? 'col.left' : 'col.used', { label: c }))) : null),
+      h('span', { class: 'ch-usage' }, t('col.tokens', { n: BOOT.usageDays })),
+      h('span', { class: 'ch-last' }, t('col.last')),
+      h('span', { class: 'ch-health' }, t('col.health')),
+      h('span', { class: 'ch-more' }))
+  }
+  // Quota is on but no account of the Family has numbers yet: say what brings the first ones.
+  function waitingForQuota(fam) {
+    const setup = setupFor(fam)
+    if (!setup || setup.plan.status !== 'enabled') return false
+    const all = S.state.accounts.filter((a) => a.family === fam && a.kind !== 'api')
+    const waiting = all.some((a) => a.quota && a.quota.status === 'unavailable' && a.quota.reason === 'no-session')
+    const any = all.some((a) => a.quota && a.quota.status === 'ok')
+    return waiting && !any
+  }
+  function group(fam, list, total, now, cols) {
     const info = family(fam)
     const filtering = Boolean(ui.query.trim()) || ui.attention
     const collapsed = !filtering && prefs.collapsed[fam] === true
@@ -776,7 +964,7 @@ const MAIN = String.raw`
     const off = list.some((a) => a.quota && a.quota.status === 'unavailable' && a.quota.reason === 'not-enabled')
     const bodyId = 'grp-' + fam.replace(/[^a-zA-Z0-9_-]/g, '_')
     const cards = prefs.view === 'cards'
-    const head = h('div', { class: 'group-head' },
+    const head = h('div', { class: 'group-head', 'data-key': 'head' },
       h('button', { class: 'group-toggle', type: 'button', 'aria-expanded': String(!collapsed), 'aria-controls': bodyId, title: t(collapsed ? 'group.expand' : 'group.collapse'), 'aria-label': t('group.toggle', { title: info.title, count: list.length === total ? String(total) : list.length + ' / ' + total, action: t(collapsed ? 'group.expand' : 'group.collapse') }), onclick: () => {
         if (collapsed) delete prefs.collapsed[fam]; else prefs.collapsed[fam] = true
         savePrefs()
@@ -785,7 +973,8 @@ const MAIN = String.raw`
         icon('chevron', 'chev'), badge(fam, 'sm'), h('span', { class: 'group-title' }, info.title),
         h('span', { class: 'group-count' }, list.length === total ? String(total) : list.length + ' / ' + total)),
       h('div', { class: 'group-meta' },
-        need ? h('span', { class: 'chip chip-sm chip-warn' }, tn('group.attention', need)) : null,
+        waitingForQuota(fam) ? h('span', { class: 'group-wait', role: 'status' }, h('span', { class: 'pulse', 'aria-hidden': 'true' }), t('quota.waiting', { host: info.title })) : null,
+        need ? h('span', { class: 'tag tag-warn' }, tn('group.attention', need)) : null,
         off && setup && setup.plan.status === 'ready' && !BOOT.readOnly
           ? h('span', { class: 'group-quota' },
             h('span', { class: 'muted small' }, t('quota.turnOnFamilyNote', { host: info.title })),
@@ -793,9 +982,10 @@ const MAIN = String.raw`
           : null,
         off && setup && setup.plan.status === 'blocked' ? h('span', { class: 'muted small label-tip' }, t('quota.blocked'), tipRaw(t('quota.blocked'), setup.plan.message)) : null))
     const body = collapsed ? null : cards
-      ? h('div', { class: 'grid', id: bodyId }, list.map((a) => card(a, now)))
-      : h('div', { class: 'rows', id: bodyId, role: 'list' }, list.map((a) => row(a, now)))
-    return h('section', { class: 'group' + (cards ? ' group-cards' : ' group-list') + (collapsed ? ' is-collapsed' : ''), 'aria-label': info.title }, head, body)
+      ? h('div', { class: 'grid', id: bodyId, 'data-key': 'cards', 'data-patch': '' }, list.map((a) => card(a, now, cols)))
+      : h('div', { class: 'rows', id: bodyId, role: 'list', 'data-key': 'rows', 'data-patch': '' }, list.map((a) => row(a, now, cols)))
+    return h('section', { class: 'group' + (cards ? ' group-cards' : ' group-list') + (collapsed ? ' is-collapsed' : ''), 'aria-label': info.title, 'data-key': 'g:' + fam, 'data-patch': '' },
+      head, collapsed || cards ? null : colHead(cols, list), body)
   }
   function emptyState() {
     const fams = S.state.families.slice().sort((x, y) => Number(y.installed) - Number(x.installed))
@@ -834,28 +1024,30 @@ const MAIN = String.raw`
     const box = $('accounts')
     const count = $('acct-count')
     if (!S.state) {
-      if (S.loadError) { box.removeAttribute('aria-busy'); setKids(box, loadErrorBlock()); setKids(count, null) }
+      if (S.loadError) { box.removeAttribute('aria-busy'); patch(box, loadErrorBlock()); setKids(count, null) }
       return
     }
     box.removeAttribute('aria-busy')
     const all = S.state.accounts
     const now = Date.now()
     $('toolbar').hidden = !all.length
-    if (!all.length) { setKids(count, null); setKids(box, emptyState()); return }
+    if (!all.length) { setKids(count, null); patch(box, emptyState()); return }
     const shown = all.filter((a) => (!prefs.family || a.family === prefs.family) && matchesQuery(a, ui.query, famTitle(a)) && (!ui.attention || reasonsOf(a, now).length))
     const filtered = shown.length !== all.length
-    setKids(count, filtered
+    patch(count, filtered
       ? [t('count.filtered', { n: shown.length, total: all.length }), ' ', h('button', { class: 'link-btn', type: 'button', onclick: clearFilters }, t('filter.clear'))]
       : tn('count.accounts', all.length))
-    if (!shown.length) { setKids(box, noMatch()); return }
+    if (!shown.length) { patch(box, noMatch()); return }
+    const cols = quotaColumns(shown)
+    box.style.setProperty('--qn', String(cols.length))
     const ids = S.state.families.map((f) => f.id)
     for (const a of all) if (!ids.includes(a.family)) ids.push(a.family)
     const groups = []
     for (const fam of ids) {
       const list = shown.filter((a) => a.family === fam)
-      if (list.length) groups.push(group(fam, sortAccounts(list, prefs.sort, now), all.filter((a) => a.family === fam).length, now))
+      if (list.length) groups.push(group(fam, sortAccounts(list, prefs.sort, now), all.filter((a) => a.family === fam).length, now, cols))
     }
-    setKids(box, groups)
+    patch(box, groups)
     if (ui.fade && !REDUCED) {
       box.classList.add('view-in')
       setTimeout(() => box.classList.remove('view-in'), 400)
@@ -886,6 +1078,8 @@ const MAIN = String.raw`
     } catch (e) { S.checkError = e; S.checkRetry = runCheck }
     S.checking = false
     renderCheckup(); renderAccounts(); renderSummary()
+    // A check can follow a change made outside the Panel; pick up the rest of the state too.
+    load({ silent: true })
   }
   async function checkAccount(ref) {
     if (S.checking || S.fixing || ui.checkingRef) return
@@ -900,6 +1094,7 @@ const MAIN = String.raw`
     } catch (e) { toast(t('toast.checkFailed', { ref, msg: e.message }), { kind: 'fail' }) }
     ui.checkingRef = null
     renderAccounts(); renderCheckup(); renderSummary()
+    load({ silent: true })
   }
   async function runFix() {
     if (S.checking || S.fixing) return
@@ -986,7 +1181,7 @@ const MAIN = String.raw`
       out.push(h('ul', { class: 'findings' }, sorted.slice(0, cut).map(findingRow)))
       if (cut < sorted.length) out.push(h('button', { class: 'btn btn-sm more-findings', type: 'button', onclick: () => { ui.allFindings = true; renderCheckup() } }, tn('health.more', sorted.length - cut)))
     }
-    setKids(box, out)
+    patch(box, out)
   }
   // An error from a server call, with a Retry button when trying again can help.
   function errorNote(err, retry, extra) {
@@ -1297,6 +1492,9 @@ const MAIN = String.raw`
         const fam = st.family
         dlg.el.close()
         toast(t('toast.quotaOn', { host: family(fam).title }), { action: { label: t('toast.undo'), run: () => undoSetup(fam) }, duration: 10000 })
+        // The first numbers arrive with the next status line refresh; poll quickly for a while to show them soon.
+        S.fastUntil = Date.now() + FAST_FOR_MS
+        S.fastFamily = fam
         load()
         return
       }
@@ -1305,6 +1503,8 @@ const MAIN = String.raw`
     renderSetup()
   }
   async function undoSetup(fam) {
+    S.fastUntil = 0
+    S.fastFamily = null
     try {
       const r = await api('/api/quota/teardown', { family: fam })
       if (r && r.ok === false) toast(r.message || t('toast.undoFailed', { msg: '' }), { kind: 'fail' })
@@ -1328,22 +1528,30 @@ const MAIN = String.raw`
         h('b', null, tn('banner.plugins', errs.length) + ' '), t('banner.pluginsHint'),
         h('ul', null, errs.map((e) => h('li', null, h('code', null, e.where), ': ', e.message))))))
     }
-    setKids($('banners'), out)
+    patch($('banners'), out)
   }
 
   // ---------- loading ----------
-  function renderAll() { renderTop(); renderBanners(); renderSummary(); renderFamilyFilter(); renderAccounts(); renderCheckup() }
+  function renderAll() { renderTop(); renderBanners(); renderSummary(); renderFamilyFilter(); renderEmailToggle(); renderAccounts(); renderCheckup() }
   // A load that starts while another runs is queued, never dropped, so a change made meanwhile (a new
-  // account, a fix) always ends up on screen; and only the newest response is ever rendered.
+  // account, a fix) always ends up on screen; and only the newest response is ever rendered. A silent load is a
+  // background refresh: no spinner, and its render waits while the viewer is busy (see uiBusy).
   let loadSeq = 0
   let queued = null
   async function load(opts) {
+    opts = opts || {}
     if (S.loading) {
-      queued = { check: Boolean((queued && queued.check) || (opts && opts.check)), announce: Boolean((queued && queued.announce) || (opts && opts.announce)) }
+      queued = {
+        check: Boolean((queued && queued.check) || opts.check),
+        announce: Boolean((queued && queued.announce) || opts.announce),
+        silent: Boolean((queued ? queued.silent : true) && opts.silent),
+      }
       return
     }
     const seq = ++loadSeq
     S.loading = true
+    S.silent = Boolean(opts.silent)
+    S.lastTry = Date.now()
     renderTop()
     let state = null
     let error = null
@@ -1357,15 +1565,31 @@ const MAIN = String.raw`
       } else if (!error.network) S.loadError = error // a lost connection has its own notice
     }
     S.loading = false
+    S.silent = false
     const next = queued
     queued = null
     if (next) return load(next)
-    renderAll()
-    if (opts && opts.announce) {
+    if (opts.silent && uiBusy()) { S.pending = true; renderTop() } else { S.pending = false; renderAll() }
+    if (opts.announce) {
       if (state) toast(t('toast.refreshed'))
       else toast(t('toast.refreshFailed', { msg: error.message }), { kind: 'fail' })
     }
-    if (S.state && opts && opts.check) runCheck()
+    if (S.state && opts.check) runCheck()
+  }
+  // Once a second: the "Updated" age ticks, a deferred render lands once the viewer is done, and the state
+  // reloads on schedule while the page is visible.
+  function tick() {
+    renderUpdated()
+    if (document.visibilityState !== 'visible' || !S.state) return
+    if (S.pending && !S.loading && !uiBusy()) { S.pending = false; renderAll() }
+    const now = Date.now()
+    const every = now < S.fastUntil ? FAST_MS : AUTO_MS
+    if (!S.loading && !conn.lost && !S.fixing && !S.checking && !dlg.busy && now - S.lastTry >= every) load({ silent: true })
+  }
+  // Coming back to the page refreshes at once.
+  function wake() {
+    if (document.visibilityState !== 'visible' || !S.state || S.loading || conn.lost) return
+    if (Date.now() - S.lastTry > 3000) load({ silent: true })
   }
 
   // ---------- start ----------
@@ -1394,11 +1618,9 @@ const MAIN = String.raw`
   buildToolbar()
   raiseToasts()
   load({ check: true })
-  setInterval(() => {
-    if (document.visibilityState !== 'visible') return
-    if (Date.now() - S.loadedAt > 60000 && !(dlg.el && dlg.el.open) && !S.fixing) load()
-    else if (!menu.el) { renderTop(); renderSummary(); renderAccounts(); renderCheckup() }
-  }, 30000)
+  setInterval(tick, 1000)
+  document.addEventListener('visibilitychange', wake)
+  window.addEventListener('focus', wake)
 `
 
 /** The page script: the tested helpers, then the page logic, in one strict-mode function. */

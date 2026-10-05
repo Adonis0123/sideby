@@ -9,7 +9,7 @@ description: Use when the user wants to run several AI coding accounts at the sa
 
 ## Hard rules
 
-- **Never read credential files**: `proxy.env`, `auth.json`, `.claude.json`, or anything under an account directory that may hold a token. Do not `cat`, `grep`, `head`, open or summarize them. sideby already reports their type and mode; that is all you need.
+- **Never read credential files**: `proxy.env`, `auth.json`, `.claude.json`, or anything under an account directory that may hold a token. Do not `cat`, `grep`, `head`, open or summarize them. sideby already reports their type and mode, and `sideby list --json` gives the signed-in email as `identity.email`; that is all you need.
 - **Never sign in for the user.** After creating a subscription account, tell the user to run `sideby login <ref>` in their own terminal. OAuth needs their browser and their decision.
 - **Never put a secret on the command line or in chat.** For API accounts, the user edits `proxy.env` themselves.
 - **Show before you change.** Run `doctor` without `--fix` first and show the findings; run `quota setup claude` only after the user has seen the diff.

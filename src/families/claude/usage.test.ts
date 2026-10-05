@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
-import { copyFile, mkdir, utimes, writeFile } from 'node:fs/promises'
+import { appendFile, copyFile, mkdir, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { type FakeHome, withFakeHome } from '../../../testing/index.ts'
 import type { Account, ReadContext } from '../../types.ts'
-import { readClaudeUsage } from './usage.ts'
+import { claudeUsageMemo, readClaudeUsage } from './usage.ts'
 
 const NOW = new Date('2026-10-05T12:00:00.000Z')
 const FIXTURE = fileURLToPath(new URL('./fixtures/session.jsonl', import.meta.url))
@@ -146,6 +146,39 @@ describe('claude usage', () => {
       await touch(file, NOW)
       const r = await readClaudeUsage(account(dir), ctx(h))
       assert.equal(r.status === 'unavailable' && r.reason, 'unrecognized')
+    })
+  })
+
+  it('reuses the parse of unchanged logs and reads a log again once it grew', async () => {
+    await withFakeHome(async (h) => {
+      const dir = h.path('.claude-work')
+      const row = (id: string, input: number) =>
+        `${JSON.stringify({
+          type: 'assistant',
+          timestamp: new Date(NOW.getTime() - 60_000).toISOString(),
+          sessionId: 's',
+          message: { id, usage: { input_tokens: input, output_tokens: 0 } },
+        })}\n`
+      const a = await h.write('.claude-work/projects/p/a.jsonl', row('msg_fake_a', 5))
+      const b = await h.write('.claude-work/projects/p/b.jsonl', row('msg_fake_b', 7))
+      const total = async () => {
+        const r = await readClaudeUsage(account(dir), ctx(h))
+        return r.status === 'ok' ? r.totalTokens : -1
+      }
+      const before = { ...claudeUsageMemo.stats }
+      assert.equal(await total(), 12)
+      assert.equal(await total(), 12)
+      assert.equal(claudeUsageMemo.stats.misses - before.misses, 2)
+      assert.equal(claudeUsageMemo.stats.hits - before.hits, 2)
+      // Growing one log parses only that log again; the same id logged again replaces its earlier line.
+      await appendFile(b, row('msg_fake_a', 100))
+      assert.equal(await total(), 107)
+      assert.equal(claudeUsageMemo.stats.misses - before.misses, 3)
+      assert.equal(claudeUsageMemo.stats.hits - before.hits, 3)
+      // A log that left the scan (older than the window) is forgotten.
+      await touch(a, new Date(NOW.getTime() - 9 * 86_400_000))
+      assert.equal(await total(), 107)
+      assert.equal(claudeUsageMemo.size(dir), 1)
     })
   })
 })

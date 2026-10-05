@@ -9,11 +9,11 @@ Key facts:
 - Discovery: a directory matching the pattern is an account only if it holds `proxy.env` or at least one of the family's Shared Items (so `~/.claude-code-router` is not an account). Config `ignore` skips refs.
 - API account: an account directory containing `proxy.env` (dotenv subset, mode exactly 600). Its variables reach only the launched Host. Login state is `not-needed` (`key` in `sideby list`). Exception: pi loads `proxy.env` for provider keys, but a pi account stays a subscription account and signs in with `/login`.
 - sideby never switches a global active account, never rotates accounts, never reads credentials to call a model, and never calls private quota endpoints.
-- Agents must not read `proxy.env`, `auth.json` or `.claude.json`, and must let the user run `sideby login <ref>` themselves.
+- Agents must not read `proxy.env`, `auth.json` or `.claude.json`, and must let the user run `sideby login <ref>` themselves. sideby itself reads only identity fields there (email, Claude organization; the `email` claim of Codex's `id_token`), never a token value (ADR-0003); `sideby list` shows them.
 
 ## Commands
 
-- `sideby` / `sideby list [--json]`: list accounts (TYPE `main`|`sub`|`api`, LOGIN `✓`|`login needed`|`key`|`?`, MODEL, DIR). Problems plugins hit while reading an account go to stderr. Exit 0.
+- `sideby` / `sideby list [--json]`: list accounts (TYPE `main`|`sub`|`api`, LOGIN `✓`|`login needed`|`key`|`?`, EMAIL, MODEL, DIR). `--json` accounts carry optional `identity: { email?, org? }`. Problems plugins hit while reading an account go to stderr. Exit 0.
 - `sideby run <acct> [-- args]`: start the Host for one account. Exit: Host's code; 128+n if killed by signal n; 1 on sideby error. Argument order: family defaults, `accounts.<ref>.args` from config, then user args.
 - `sideby new <family> <name> [--api] [--alias <short>] [--json]`: create an account. `--alias` also adds `<short> → <family>:<name>` to config `aliases` (the only config write sideby makes: keys and order kept, refused when the config is not valid JSON); an invalid, reserved or taken alias is refused before anything is created. After creating, every configured `shellInitFile` is rewritten. Exit 0; 1 partly failed, invalid name, or the alias was not added (the account still exists).
 - `sideby login <acct>`: run the family's sign-in command with the account selected; for pi, start pi and print "type /login". Exit: Host's code.

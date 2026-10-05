@@ -1,5 +1,6 @@
 import { lstat, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { identityFromJsonFile, identityOf } from '../../core/identity.ts'
 import type { Account, FamilyDef, LoginState, Plugin } from '../../types.ts'
 import { BUILTIN_LOGOS } from '../logos.ts'
 import { topLevelTomlString } from '../shared/toml.ts'
@@ -18,6 +19,22 @@ async function readModel(account: Account): Promise<string | undefined> {
     return undefined
   }
   return topLevelTomlString(text, 'model')
+}
+
+/**
+ * The `email` of the single sign-in entry in auth.json (keyed by the auth server, such as `https://auth.x.ai::<id>`).
+ * Only that field is read; tokens and every other field are dropped. Several entries give no answer.
+ */
+export function grokIdentity(account: Account) {
+  return identityFromJsonFile(join(account.dir, 'auth.json'), (data) => {
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) return undefined
+    const entries = Object.values(data)
+    if (entries.length !== 1) return undefined
+    const entry = entries[0]
+    return typeof entry === 'object' && entry !== null
+      ? identityOf((entry as { email?: unknown }).email)
+      : undefined
+  })
 }
 
 export const grokFamily: FamilyDef = {
@@ -52,6 +69,7 @@ export const grokFamily: FamilyDef = {
     }
   },
   model: readModel,
+  identity: grokIdentity,
 }
 
 export const grokPlugin: Plugin = {
