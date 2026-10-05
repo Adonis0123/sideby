@@ -10,7 +10,9 @@ const HELP = `sideby — run every AI coding account side by side
 Usage:
   sideby                              list accounts (same as \`sideby list\`)
   sideby run <account> [-- args]      start the host CLI for one account
-  sideby new <family> <name> [--api]  create an account (families: claude, codex, grok, pi)
+  sideby new <family> <name> [--api] [--alias <short>]
+                                      create an account (families: claude, codex, grok, pi);
+                                      --alias also adds a short command such as cc008
   sideby login <account>              sign in to an account
   sideby doctor [target] [--fix] [--force]
                                       check shared items and permissions; --fix repairs safe issues
@@ -23,6 +25,8 @@ Usage:
   sideby app install [--url <url>]    add a sideby app that opens the panel (macOS, Linux)
   sideby app uninstall                remove that app
   sideby shell-init zsh|bash          print shell functions, e.g. eval "$(sideby shell-init zsh)"
+  sideby shell-init [zsh|bash] --write
+                                      rewrite the config's shellInitFile with them
   sideby plugins                      list loaded plugins and load errors
 
 Options:
@@ -41,12 +45,12 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   list: { flags: ['json'] },
   run: { flags: [] },
   login: { flags: [] },
-  new: { flags: ['api', 'json'] },
+  new: { flags: ['api', 'json'], valued: ['alias'] },
   doctor: { flags: ['fix', 'force', 'json'] },
   quota: { flags: ['json', 'yes'] },
   ui: { flags: ['no-open', 'background', 'stop', 'serve-detached'], valued: ['port'] },
   app: { flags: ['json'], valued: ['url'] },
-  'shell-init': { flags: [] },
+  'shell-init': { flags: ['write'] },
   plugins: { flags: ['json'] },
 }
 

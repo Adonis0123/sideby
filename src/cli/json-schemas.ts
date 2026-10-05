@@ -160,6 +160,24 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       ),
       hookErrors: Type.Array(Type.Object({ plugin: Str, message: Str })),
       nextSteps: Type.Array(Str),
+      alias: Type.Optional(
+        Type.Object(
+          { name: Str, added: Type.Boolean(), message: Type.Optional(Str) },
+          { description: 'The `--alias` short command; `added: false` means the Account exists without it.' },
+        ),
+      ),
+      shellInitFiles: Type.Optional(
+        Type.Array(
+          Type.Object({
+            shell: Type.Union([Type.Literal('zsh'), Type.Literal('bash')]),
+            path: Str,
+            ok: Type.Boolean(),
+            action: Type.Optional(Type.Union([Type.Literal('written'), Type.Literal('unchanged')])),
+            message: Type.Optional(Str),
+          }),
+          { description: 'One entry per config `shellInitFile`, rewritten after the Account was created.' },
+        ),
+      ),
     },
     { title: 'sideby new --json' },
   ),

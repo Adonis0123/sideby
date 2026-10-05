@@ -67,7 +67,10 @@ Check the name first: `^[a-z0-9][a-z0-9-]{0,31}$`, and not already taken (`sideb
 ```sh
 sideby new claude work            # subscription account: ~/.claude-work
 sideby new claude deepseek --api  # API account: ~/.claude-deepseek with a proxy.env template (mode 600)
+sideby new claude 008 --alias cc008  # also adds the short command cc008 to config aliases
 ```
+
+Only pass `--alias` when the user wants a short command; follow their existing pattern (`cc001`…`cc007` for `claude:001`…`claude:007` suggests `cc008`). An invalid, reserved or taken alias is refused before anything is created. If `alias.added` is false in `--json`, the account exists but the alias is missing: tell the user the message, do not edit the config by hand.
 
 Families: `claude`, `codex`, `grok`, `pi`. Then:
 
@@ -91,7 +94,7 @@ Usage (7-day tokens) is read by sideby itself from Claude Code and Codex local r
 
 ## Launching
 
-`sideby run <ref> [-- host args]` starts an interactive Host session in the user's terminal. Do not start it from an agent shell; give the user the command. `eval "$(sideby shell-init zsh)"` defines one function per account (`sideby-claude-work`) plus the `aliases` map in config.
+`sideby run <ref> [-- host args]` starts an interactive Host session in the user's terminal. Do not start it from an agent shell; give the user the command. `eval "$(sideby shell-init zsh)"` defines one function per account (`sideby-claude-work`) plus the `aliases` map in config. Users who source a file instead set config `shellInitFile` (for example `{ "zsh": "~/.config/sideby/shell-init.zsh" }`); `new` keeps it current, and `sideby shell-init zsh --write` rewrites it on demand. New functions work in a new shell.
 
 ## Panel
 

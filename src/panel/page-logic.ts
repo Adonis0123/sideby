@@ -261,3 +261,47 @@ export function panelHint(hint: string, fixable: boolean, action: string): strin
     at === 0 ? action.charAt(0).toUpperCase() + action.slice(1) : action,
   )
 }
+
+/**
+ * A short command to offer for a new Account `name` of a Family, from the config aliases of its existing Accounts:
+ * an alias that is a prefix plus its Account's name (`cc001` for `claude:001`) gives the prefix, the most common
+ * one wins (then the longer, then the first alphabetically), and the offer is that prefix plus `name` (`cc008`).
+ * Aliases that do not end in their Account's name (`codex001` for `codex:main`) are ignored. Empty when no
+ * pattern shows, or without a name. The caller still checks the result like any alias.
+ */
+export function suggestAlias(accounts: LogicAccount[], family: string, name: string): string {
+  if (!name) return ''
+  const counts: Record<string, number> = {}
+  for (const a of accounts) {
+    if (a.family !== family) continue
+    for (const alias of a.aliases || [])
+      if (alias.length > a.name.length && alias.endsWith(a.name)) {
+        const prefix = alias.slice(0, alias.length - a.name.length)
+        counts[prefix] = (counts[prefix] || 0) + 1
+      }
+  }
+  const best = Object.keys(counts).sort(
+    (x, y) => (counts[y] || 0) - (counts[x] || 0) || y.length - x.length || (x < y ? -1 : x > y ? 1 : 0),
+  )[0]
+  return best ? best + name : ''
+}
+
+/**
+ * Why `alias` cannot become the short command of `ref`, by the config rules: `pattern` (not a shell-safe name,
+ * matched against the config's own pattern source), `reserved` (a shell keyword, builtin or `sideby`), `taken`
+ * (the config already maps it to another Account). Empty when it is fine or empty.
+ */
+export function aliasIssue(
+  alias: string,
+  pattern: string,
+  reserved: string[],
+  configAliases: Record<string, string> | undefined,
+  ref: string,
+): string {
+  if (!alias) return ''
+  if (!new RegExp(pattern).test(alias)) return 'pattern'
+  if (reserved.indexOf(alias) >= 0) return 'reserved'
+  const target = configAliases && Object.hasOwn(configAliases, alias) ? configAliases[alias] : undefined
+  if (target !== undefined && target !== ref) return 'taken'
+  return ''
+}

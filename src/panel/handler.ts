@@ -94,6 +94,8 @@ export interface PanelState {
   quotaSetups: { family: string; summary: string; plan: QuotaSetupPlan }[]
   /** Latest Doctor result per Account and per Family. */
   history?: DoctorHistory
+  /** The config `aliases` as written (alias → Account ref), so the page can tell which names are taken. */
+  configAliases?: Record<string, string>
 }
 
 class HttpError extends Error {
@@ -242,6 +244,7 @@ async function buildState(rt: Runtime, opts: { version: string; readOnly: boolea
     pluginErrors: rt.pluginErrors.map((e) => ({ where: e.where, message: e.message })),
     quotaSetups,
     ...(history ? { history } : {}),
+    ...(rt.config.aliases ? { configAliases: { ...rt.config.aliases } } : {}),
   }
 }
 
@@ -301,8 +304,9 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const name = optString(body, 'name')
         if (!family || !name) throw new HttpError(400, 'pick a family and enter a name')
         const api = optBool(body, 'api')
+        const alias = optString(body, 'alias')
         const rt = await getRuntime()
-        return rt.createAccount(family, name, { api })
+        return rt.createAccount(family, name, { api, ...(alias ? { alias } : {}) })
       },
     },
     '/api/quota/setup': {

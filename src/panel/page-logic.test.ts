@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { ALIAS_NAME, RESERVED_ALIASES } from '../core/config.ts'
 import { MESSAGES } from './i18n.ts'
 import { renderPage } from './page.ts'
 import {
+  aliasIssue,
   attentionReasons,
   cacheHitRate,
   formatDuration,
@@ -15,6 +17,7 @@ import {
   passedWindow,
   quotaPressure,
   sortAccounts,
+  suggestAlias,
   suggestName,
   windowState,
 } from './page-logic.ts'
@@ -188,6 +191,58 @@ describe('page logic', () => {
       family: 'claude',
     })
     assert.equal(nextReset([], NOW), null)
+  })
+})
+
+describe('short command for a new account', () => {
+  const fam = (family: string, pairs: [string, string[]][]): LogicAccount[] =>
+    pairs.map(([name, aliases]) => ({
+      family,
+      name,
+      ref: `${family}:${name}`,
+      isMain: name === 'main',
+      aliases,
+    }))
+
+  it("continues the prefix the Family's aliases share, ignoring aliases that do not end in their name", () => {
+    const claude = fam('claude', [
+      ['main', []],
+      ...['001', '002', '003', '004', '005', '006', '007'].map((n): [string, string[]] => [n, [`cc${n}`]]),
+    ])
+    const codex = fam('codex', [
+      ['main', ['codex001']],
+      ['002', ['codex002']],
+      ['003', ['codex003']],
+    ])
+    const others = [...fam('pi', [['main', ['pi001']]]), ...fam('cursor', [['002', ['cursor-cli002']]])]
+    const all = [...claude, ...codex, ...others]
+    assert.equal(suggestAlias(all, 'claude', '008'), 'cc008')
+    assert.equal(suggestAlias(all, 'codex', '004'), 'codex004')
+    assert.equal(suggestAlias(all, 'cursor', '003'), 'cursor-cli003')
+    // pi001 points at pi:main, so it shows no pattern.
+    assert.equal(suggestAlias(all, 'pi', '002'), '')
+    assert.equal(suggestAlias(all, 'grok', '001'), '')
+    assert.equal(suggestAlias(all, 'claude', ''), '')
+    // The most common prefix wins.
+    const mixed = fam('claude', [
+      ['001', ['cc001', 'c001']],
+      ['002', ['cc002']],
+    ])
+    assert.equal(suggestAlias(mixed, 'claude', 'work'), 'ccwork')
+  })
+
+  it('checks an alias with the config rules', () => {
+    const rules: [string, string[]] = [ALIAS_NAME.source, [...RESERVED_ALIASES]]
+    const taken = { cc001: 'claude:001' }
+    assert.equal(aliasIssue('cc008', ...rules, taken, 'claude:008'), '')
+    assert.equal(aliasIssue('', ...rules, taken, 'claude:008'), '')
+    assert.equal(aliasIssue('8cc', ...rules, taken, 'claude:008'), 'pattern')
+    assert.equal(aliasIssue('cc 8', ...rules, taken, 'claude:008'), 'pattern')
+    assert.equal(aliasIssue('cd', ...rules, taken, 'claude:008'), 'reserved')
+    assert.equal(aliasIssue('sideby', ...rules, taken, 'claude:008'), 'reserved')
+    assert.equal(aliasIssue('cc001', ...rules, taken, 'claude:008'), 'taken')
+    assert.equal(aliasIssue('cc001', ...rules, taken, 'claude:001'), '')
+    assert.equal(aliasIssue('toString', ...rules, taken, 'claude:008'), '')
   })
 })
 

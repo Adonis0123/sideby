@@ -96,7 +96,7 @@ sideby ui --port 8080
 sideby ui --no-open    # print the address only
 ```
 
-The panel listens on `127.0.0.1` only. If another sideby panel already runs on the port, sideby opens that one; if another program holds the port, it tries the next ones and prints the address it used. The page shows account cards (quota, usage, login state, health), runs Doctor with one-click fixes, creates accounts, and can turn on Claude quota after showing the diff. For a new subscription account it gives you the `sideby login <account>` command to copy; signing in always happens in your terminal.
+The panel listens on `127.0.0.1` only. If another sideby panel already runs on the port, sideby opens that one; if another program holds the port, it tries the next ones and prints the address it used. The page shows account cards (quota, usage, login state, health), runs Doctor with one-click fixes, creates accounts (with an optional short command), and can turn on Claude quota after showing the diff. One quota setup covers every Claude Code account, so the "Turn on quota" button sits in the Claude Code group header, not on each account. For a new subscription account it gives you the `sideby login <account>` command to copy; signing in always happens in your terminal.
 
 #### Desktop app
 
@@ -168,7 +168,7 @@ Accounts that link `settings.json` to the Main Account (the default) get quota f
 | `sideby` | Same as `sideby list` | 0 |
 | `sideby list` | Accounts, type (main, sub or api), login state, model, directory; reading problems go to stderr | 0 |
 | `sideby run <acct> [-- args]` | Start the Host for one account | the Host's code; 128+n if killed by signal n |
-| `sideby new <family> <name> [--api]` | Create an account and lay out its Shared Items | 0; 1 if partly failed |
+| `sideby new <family> <name> [--api] [--alias <short>]` | Create an account and lay out its Shared Items; `--alias` also adds a short command such as `cc008` to `aliases` | 0; 1 if partly failed or the alias was not added |
 | `sideby login <acct>` | Run the family's sign-in command for that account; for pi, start pi and tell you to type `/login` | the Host's code |
 | `sideby doctor [acct\|family] [--fix] [--force]` | Check Shared Items, credential file modes, leftovers; `--fix` repairs what is safe | 0 no failures (warnings allowed); 1 at least one failure |
 | `sideby quota [acct]` | Quota and 7-day usage | 0 |
@@ -179,6 +179,7 @@ Accounts that link `settings.json` to the Main Account (the default) get quota f
 | `sideby app install [--url <url>]` | Add a desktop app (macOS, Linux) that opens the panel, or `<url>` | 0; 1 on an unsupported platform or a file it did not create in the way |
 | `sideby app uninstall` | Remove what `app install` created | 0; 1 if it left a file it did not create |
 | `sideby shell-init zsh\|bash` | Print shell functions for every account and your aliases | 0 |
+| `sideby shell-init [zsh\|bash] --write` | Rewrite the configured `shellInitFile` with that output | 0; 1 if a file could not be written or none is configured |
 | `sideby plugins` | Loaded plugins and load errors | 0; 1 if any plugin failed to load |
 
 - Every command exits 2 on a usage error (unknown option, missing argument) and 1 when sideby itself fails (unknown account, invalid name, unreadable config).
@@ -222,7 +223,8 @@ Optional. `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json`, schema in [`schema
       { "path": "statusline-command.sh", "mode": "link" },
       { "path": "scripts", "mode": "link" }
     ]
-  }
+  },
+  "shellInitFile": { "zsh": "~/.config/sideby/shell-init.zsh" }
 }
 ```
 
@@ -233,6 +235,7 @@ Optional. `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json`, schema in [`schema
 | `ignore` | Account refs (`<family>:<name>`) that look like accounts but are not. Doctor warns about names containing `bak`, `backup`, `old` or `tmp` and suggests adding them here. |
 | `pluginDirs` | Extra plugin directories. Absolute paths or paths starting with `~/`. |
 | `plugins.<name>` | Settings for one plugin; `enabled` turns it on or off, built-in families included. |
+| `shellInitFile` | Optional `{ "zsh": …, "bash": … }`, absolute or `~/` paths. Whenever sideby adds an account or an alias (`sideby new`, the panel), it rewrites each file with what `sideby shell-init <shell>` prints, so a shell that sources the file picks up new commands. It never overwrites a file that `shell-init` did not write. |
 | `extraSharedItems.<family>` | Your own Shared Items on top of the built-in list, each with a Share Mode (`link`, `copy`, `link-or-copy`, `link-or-local`, `local`, `local-if-api`, `info`, `json-key`). `path` is relative to the account directory; absolute paths and `..` are rejected. |
 
 ### Shell functions
@@ -243,6 +246,17 @@ eval "$(sideby shell-init zsh)"
 ```
 
 This defines one function per account, such as `sideby-claude-work`, plus one per alias. With the config above, `ccw --resume` is the same as `sideby run claude:work -- --resume`. Accounts created later need a new shell (or another `eval`) before their function exists.
+
+To add a short command when you create an account, pass `--alias` (`sideby new claude 008 --alias cc008`) or fill in "Short command" in the panel's New account dialog. The panel suggests one from your other aliases of that family: `cc001` … `cc007` for `claude:001` … `claude:007` suggest `cc008`; aliases that do not end in their account's name, such as `codex001` for `codex:main`, are ignored. The alias goes into `aliases` in the config file, which sideby rewrites with every other key kept in order; it refuses a config that is not valid JSON and leaves it alone. If the account was created but the alias could not be written, it says so.
+
+If you prefer sourcing a file over `eval` (a new shell then does not start Node), set `shellInitFile` and source it:
+
+```sh
+sideby shell-init zsh --write                            # writes ~/.config/sideby/shell-init.zsh once
+echo 'source ~/.config/sideby/shell-init.zsh' >> ~/.zshrc
+```
+
+sideby keeps that file up to date from then on. With `eval "$(sideby shell-init zsh)"` there is nothing to set up.
 
 ## Supported hosts
 
@@ -356,7 +370,7 @@ From 22.18, Node strips TypeScript types by default, so sideby can `import()` yo
 
 | What | Where |
 |---|---|
-| Config | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
+| Config (sideby only adds `aliases` entries to it, from `new --alias` or the panel) | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
 | Your plugins | `${XDG_CONFIG_HOME:-~/.config}/sideby/plugins/` |
 | State: quota cache, last Doctor result, original `settings.json` bytes, background panel pid and logs | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
 | Desktop app (`sideby app install`) | macOS `~/Applications/sideby.app`; Linux `~/.local/share/applications/sideby.desktop`, `~/.local/share/sideby/`, `~/.local/share/icons/hicolor/*/apps/sideby.*` |

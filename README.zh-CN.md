@@ -96,7 +96,7 @@ sideby ui --port 8080
 sideby ui --no-open    # 只打印地址
 ```
 
-面板只监听 `127.0.0.1`。端口上已经有一个 sideby 面板时，直接打开那个面板；端口被别的程序占用时，依次试后面的端口，并打印最终地址。页面上有账号卡片（额度、用量、登录态、健康）、带一键修复的体检、新建账号，还能在展示 diff 后开启 Claude 额度。新建订阅账号后，面板只给出 `sideby login <account>` 的复制按钮，登录始终在你自己的终端里完成。
+面板只监听 `127.0.0.1`。端口上已经有一个 sideby 面板时，直接打开那个面板；端口被别的程序占用时，依次试后面的端口，并打印最终地址。页面上有账号卡片（额度、用量、登录态、健康）、带一键修复的体检、新建账号（可顺手加短命令），还能在展示 diff 后开启 Claude 额度。一次开启对所有 Claude Code 账号生效，所以「开启额度显示」按钮只在 Claude Code 分组标题里，不在每个账号上。新建订阅账号后，面板只给出 `sideby login <account>` 的复制按钮，登录始终在你自己的终端里完成。
 
 #### 桌面应用
 
@@ -168,7 +168,7 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 | `sideby` | 等同于 `sideby list` | 0 |
 | `sideby list` | 列出账号、类型（main、sub 或 api）、登录态、模型和目录；读取时遇到的问题输出到 stderr | 0 |
 | `sideby run <acct> [-- args]` | 用某个账号启动宿主 | 宿主的退出码；被信号 n 终止时为 128+n |
-| `sideby new <family> <name> [--api]` | 新建账号并铺好共享项 | 0；部分失败为 1 |
+| `sideby new <family> <name> [--api] [--alias <short>]` | 新建账号并铺好共享项；`--alias` 同时把 `cc008` 这样的短命令加进 `aliases` | 0；部分失败或短命令没加上为 1 |
 | `sideby login <acct>` | 用该账号运行家族的登录命令；pi 会直接启动，并提示你输入 `/login` | 宿主的退出码 |
 | `sideby doctor [acct\|family] [--fix] [--force]` | 检查共享项、凭据文件权限和备份残留；`--fix` 修复安全的部分 | 0 没有 fail（允许有 warn）；1 至少一条 fail |
 | `sideby quota [acct]` | 额度和近 7 天用量 | 0 |
@@ -179,6 +179,7 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 | `sideby app install [--url <url>]` | 添加打开面板（或 `<url>`）的桌面应用（macOS、Linux） | 0；平台不支持或目标位置有不是它创建的文件为 1 |
 | `sideby app uninstall` | 删除 `app install` 创建的文件 | 0；留下了不是它创建的文件为 1 |
 | `sideby shell-init zsh\|bash` | 输出每个账号和每个别名的 shell 函数 | 0 |
+| `sideby shell-init [zsh\|bash] --write` | 用这份输出重写 config 里配置的 `shellInitFile` | 0；写不了或没有配置为 1 |
 | `sideby plugins` | 已加载的插件和加载错误 | 0；有插件加载失败时为 1 |
 
 - 所有命令遇到用法错误（未知选项、缺参数）时退出码为 2；sideby 自身出错（账号不存在、名字不合法、配置读不了）时为 1。
@@ -222,7 +223,8 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
       { "path": "statusline-command.sh", "mode": "link" },
       { "path": "scripts", "mode": "link" }
     ]
-  }
+  },
+  "shellInitFile": { "zsh": "~/.config/sideby/shell-init.zsh" }
 }
 ```
 
@@ -233,6 +235,7 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 | `ignore` | 看起来像账号、其实不是的账号引用（`<family>:<name>`）。名字里有 `bak`、`backup`、`old`、`tmp` 时，doctor 会给一条 warn，建议加到这里。 |
 | `pluginDirs` | 额外的插件目录，只接受绝对路径或以 `~/` 开头的路径。 |
 | `plugins.<name>` | 单个插件的设置；`enabled` 控制开关，内置家族也适用。 |
+| `shellInitFile` | 可选，`{ "zsh": …, "bash": … }`，绝对路径或以 `~/` 开头。sideby 每次新增账号或别名（`sideby new`、面板）后，都用 `sideby shell-init <shell>` 的输出重写这些文件，source 它的 shell 就能用上新命令。不是 `shell-init` 写的文件，它不会覆盖。 |
 | `extraSharedItems.<family>` | 在内置清单之外加你自己的共享项，每项要写 Share Mode（`link`、`copy`、`link-or-copy`、`link-or-local`、`local`、`local-if-api`、`info`、`json-key`）。`path` 相对于账号目录，绝对路径和 `..` 会被拒绝。 |
 
 ### Shell 函数
@@ -243,6 +246,17 @@ eval "$(sideby shell-init zsh)"
 ```
 
 它会为每个账号定义一个函数，例如 `sideby-claude-work`，再为每个别名各定义一个。按上面的配置，`ccw --resume` 等同于 `sideby run claude:work -- --resume`。之后新建的账号，要开新 shell（或再执行一次 `eval`）才有对应的函数。
+
+新建账号时想顺手加短命令，就传 `--alias`（`sideby new claude 008 --alias cc008`），或在面板「新建账号」里填「短命令」。面板会按同一家族已有的别名推断：`cc001` … `cc007` 对应 `claude:001` … `claude:007`，就建议 `cc008`；结尾不是账号名的别名（例如指向 `codex:main` 的 `codex001`）不参与推断。短命令写进 config 文件的 `aliases`，其他键和顺序保持不变；config 不是合法 JSON 时，sideby 拒绝写入，原文件不动。账号建好了但短命令没写进去时，会明确告诉你。
+
+如果你想 source 一个文件、不用 `eval`（这样开新 shell 时不用启动 Node），设置 `shellInitFile` 后 source 它：
+
+```sh
+sideby shell-init zsh --write                            # 先生成一次 ~/.config/sideby/shell-init.zsh
+echo 'source ~/.config/sideby/shell-init.zsh' >> ~/.zshrc
+```
+
+之后 sideby 会自动保持这个文件最新。用 `eval "$(sideby shell-init zsh)"` 的话什么都不用设置。
 
 ## 支持的宿主
 
@@ -356,7 +370,7 @@ Node 从 22.18 起默认剥离 TypeScript 类型，sideby 才能直接 `import()
 
 | 内容 | 位置 |
 |---|---|
-| 配置 | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
+| 配置（sideby 只会往里加 `aliases` 条目，来自 `new --alias` 或面板） | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
 | 你的插件 | `${XDG_CONFIG_HOME:-~/.config}/sideby/plugins/` |
 | 状态：额度缓存、上次体检结果、`settings.json` 原始字节、后台面板的 pid 和日志 | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
 | 桌面应用（`sideby app install`） | macOS `~/Applications/sideby.app`；Linux `~/.local/share/applications/sideby.desktop`、`~/.local/share/sideby/`、`~/.local/share/icons/hicolor/*/apps/sideby.*` |

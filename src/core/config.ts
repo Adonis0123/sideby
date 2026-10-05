@@ -1,8 +1,9 @@
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import { type Static, Type } from 'typebox'
 import { Value } from 'typebox/value'
 import { UserError } from './errors.ts'
-import { parseJsonSafely } from './fs-safe.ts'
+import { lstatOrNull, parseJsonSafely, realpathOrNull, sha256, writeIfUnchanged } from './fs-safe.ts'
 import { SHARE_MODES } from './share-mode-names.ts'
 
 const SharedItemSchema = Type.Object(
@@ -56,6 +57,19 @@ export const ConfigSchema = Type.Object(
       }),
     ),
     extraSharedItems: Type.Optional(Type.Record(Type.String(), Type.Array(SharedItemSchema))),
+    shellInitFile: Type.Optional(
+      Type.Object(
+        {
+          zsh: Type.Optional(Type.String({ minLength: 1 })),
+          bash: Type.Optional(Type.String({ minLength: 1 })),
+        },
+        {
+          additionalProperties: false,
+          description:
+            'Absolute or `~/` paths of files sideby rewrites with the `sideby shell-init <shell>` output whenever it adds an Account or an alias; source the file from your shell rc.',
+        },
+      ),
+    ),
   },
   { additionalProperties: false, title: 'sideby config' },
 )
@@ -90,4 +104,72 @@ export async function loadConfig(file: string): Promise<Config> {
       throw new ConfigError(`${file}: alias "${alias}" ${problem} (it becomes a shell function name)`)
   }
   return data
+}
+
+/** Where the config file is read and written: the target of a link (a dotfiles manager may link it). */
+async function configTarget(file: string): Promise<string> {
+  return (await lstatOrNull(file))?.isSymbolicLink() ? ((await realpathOrNull(file)) ?? file) : file
+}
+
+/**
+ * Adds `alias → ref` to the config file's `aliases`. Re-reads the file, keeps every other key, their order and
+ * `$schema`, and writes 2-space JSON with a trailing newline atomically, keeping the file's mode (0600 for a new
+ * file). Refuses, without writing, a file that is not valid JSON or not a valid config, an invalid alias, or one
+ * that already points elsewhere. Returns the aliases now in the file.
+ */
+export async function addConfigAlias(
+  file: string,
+  alias: string,
+  ref: string,
+): Promise<{ status: 'added' | 'exists'; aliases: Record<string, string> }> {
+  const problem = aliasProblem(alias)
+  if (problem) throw new ConfigError(`alias "${alias}" ${problem} (it becomes a shell function name)`)
+  const target = await configTarget(file)
+  let raw: string | null = null
+  try {
+    raw = await readFile(target, 'utf8')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT')
+      throw new ConfigError(`cannot read ${file}: ${(err as Error).message}`)
+  }
+  let data: Record<string, unknown> = {}
+  if (raw !== null) {
+    let parsed: unknown
+    try {
+      parsed = parseJsonSafely(raw, file)
+    } catch {
+      throw new ConfigError(
+        `${file} is not valid JSON; nothing was changed. Fix the syntax and add the alias again`,
+      )
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
+      throw new ConfigError(
+        `${file} is not a JSON object; nothing was changed. Fix it and add the alias again`,
+      )
+    if (!Value.Check(ConfigSchema, parsed))
+      throw new ConfigError(
+        `${file} does not match schemas/config.json; nothing was changed. Run \`sideby list\` to see why`,
+      )
+    data = parsed as Record<string, unknown>
+  }
+  const current = (data.aliases ?? {}) as Record<string, string>
+  if (Object.hasOwn(current, alias)) {
+    if (current[alias] === ref) return { status: 'exists', aliases: current }
+    throw new ConfigError(`alias "${alias}" already starts ${current[alias]}; pick another name`)
+  }
+  const aliases = { ...current, [alias]: ref }
+  // A new file gets the schema link editors use for completion; an existing file keeps its keys in order.
+  const next =
+    raw === null ? { $schema: 'https://unpkg.com/sideby/schemas/config.json', aliases } : { ...data, aliases }
+  const st = raw === null ? null : await lstatOrNull(target)
+  if (raw === null) await mkdir(dirname(target), { recursive: true, mode: 0o700 })
+  const written = await writeIfUnchanged(
+    target,
+    raw === null ? null : sha256(raw),
+    `${JSON.stringify(next, null, 2)}\n`,
+    st ? st.mode & 0o777 : 0o600,
+  )
+  if (!written)
+    throw new ConfigError(`${file} changed while sideby was writing it; nothing was changed. Try again`)
+  return { status: 'added', aliases }
 }

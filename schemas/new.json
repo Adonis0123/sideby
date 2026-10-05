@@ -109,6 +109,72 @@
       "items": {
         "type": "string"
       }
+    },
+    "alias": {
+      "type": "object",
+      "required": [
+        "name",
+        "added"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "added": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "description": "The `--alias` short command; `added: false` means the Account exists without it."
+    },
+    "shellInitFiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "shell",
+          "path",
+          "ok"
+        ],
+        "properties": {
+          "shell": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "zsh"
+              },
+              {
+                "type": "string",
+                "const": "bash"
+              }
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "action": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "written"
+              },
+              {
+                "type": "string",
+                "const": "unchanged"
+              }
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "One entry per config `shellInitFile`, rewritten after the Account was created."
     }
   },
   "title": "sideby new --json"

@@ -1,6 +1,7 @@
 // The Panel page's inline script. Plain browser JavaScript in a string (no template literals inside, so String.raw
 // keeps it verbatim); the pure helpers from page-logic.ts are prepended so the tested code is the code that runs.
 import {
+  aliasIssue,
   attentionReasons,
   cacheHitRate,
   formatDuration,
@@ -12,11 +13,13 @@ import {
   passedWindow,
   quotaPressure,
   sortAccounts,
+  suggestAlias,
   suggestName,
   windowState,
 } from './page-logic.ts'
 
 const LOGIC = [
+  aliasIssue,
   attentionReasons,
   cacheHitRate,
   formatDuration,
@@ -28,6 +31,7 @@ const LOGIC = [
   passedWindow,
   quotaPressure,
   sortAccounts,
+  suggestAlias,
   suggestName,
   windowState,
 ]
@@ -665,10 +669,13 @@ const MAIN = String.raw`
   }
   function quotaNote(a, q) {
     const setup = setupFor(a.family)
+    // One setup turns quota on for every account of the Family, so the switch lives in the group header only.
     if (q.reason === 'not-enabled') {
-      const can = setup && setup.plan.status === 'ready' && !BOOT.readOnly
-      return h('div', { class: 'q-note' }, h('span', { title: q.detail || null }, t('quota.off')),
-        can ? h('button', { class: 'link-btn', type: 'button', 'aria-label': t('quota.turnOnLabel', { host: famTitle(a), ref: a.ref }), onclick: () => openSetup(a.family) }, t('quota.turnOn')) : null)
+      const host = famTitle(a)
+      const body = setup && setup.plan.status === 'ready' && !BOOT.readOnly ? t('tip.quotaOff.body', { host })
+        : setup && setup.plan.status === 'blocked' ? setup.plan.message
+          : t('tip.quotaOff.cli', { host, family: a.family })
+      return h('div', { class: 'q-note q-off' }, h('span', { class: 'muted' }, t('quota.off')), tipRaw(t('tip.quotaOff.term'), body))
     }
     if (q.reason === 'api-account') return h('div', { class: 'q-note' }, t('quota.api'), tip('api'))
     const text = { 'no-session': 'quota.noSession', 'no-source': 'quota.noSource', unrecognized: 'quota.unrecognized' }[q.reason]
@@ -780,7 +787,9 @@ const MAIN = String.raw`
       h('div', { class: 'group-meta' },
         need ? h('span', { class: 'chip chip-sm chip-warn' }, tn('group.attention', need)) : null,
         off && setup && setup.plan.status === 'ready' && !BOOT.readOnly
-          ? h('button', { class: 'btn btn-sm', type: 'button', title: setup.summary, 'aria-label': t('quota.turnOnFamilyLabel', { host: info.title }), onclick: () => openSetup(fam) }, t('quota.turnOnFamily'))
+          ? h('span', { class: 'group-quota' },
+            h('span', { class: 'muted small' }, t('quota.turnOnFamilyNote', { host: info.title })),
+            h('button', { class: 'btn btn-sm', type: 'button', title: setup.summary, 'aria-label': t('quota.turnOnFamilyLabel', { host: info.title }), onclick: () => openSetup(fam) }, t('quota.turnOnFamily')))
           : null,
         off && setup && setup.plan.status === 'blocked' ? h('span', { class: 'muted small label-tip' }, t('quota.blocked'), tipRaw(t('quota.blocked'), setup.plan.message)) : null))
     const body = collapsed ? null : cards
@@ -1033,8 +1042,8 @@ const MAIN = String.raw`
     })
     const ready = fams.filter((f) => familyStatus(f) === 'ready')
     const pick = prefill && ready.some((f) => f.id === prefill.family) ? prefill.family : prefs.family && ready.some((f) => f.id === prefs.family) ? prefs.family : ready.length ? ready[0].id : ''
-    // name: what the user typed, or null while the field shows the suggested name for the picked Family.
-    nf = { fams, family: pick, api: Boolean(prefill && prefill.api), name: null, creating: false, result: null, error: null, els: {} }
+    // name / alias: what the user typed, or null while the field shows the suggestion (an emptied alias stays empty).
+    nf = { fams, family: pick, api: Boolean(prefill && prefill.api), name: null, alias: null, creating: false, result: null, error: null, els: {} }
     showDialog('create')
     renderCreate()
     if (nf.els.name) { nf.els.name.focus(); nf.els.name.select() }
@@ -1050,6 +1059,26 @@ const MAIN = String.raw`
     if (S.state && S.state.accounts.some((a) => a.ref === nf.family + ':' + name)) return t('nf.exists', { ref: nf.family + ':' + name })
     return ''
   }
+  // The short command offered for the typed name: the Family's alias pattern (cc001… gives cc008), if it is usable.
+  function aliasSuggestion() {
+    const name = nf.els.name.value.trim()
+    if (!nf.family || !name || nameProblem()) return ''
+    const sug = suggestAlias(S.state.accounts, nf.family, name)
+    return sug && !aliasIssue(sug, BOOT.aliasPattern, BOOT.reservedAliases, S.state.configAliases, nf.family + ':' + name) ? sug : ''
+  }
+  function followAlias() {
+    if (nf.alias !== null) return
+    nf.els.alias.value = aliasSuggestion()
+  }
+  function aliasProblem() {
+    const alias = nf.els.alias.value.trim()
+    const ref = nf.family + ':' + nf.els.name.value.trim()
+    const issue = aliasIssue(alias, BOOT.aliasPattern, BOOT.reservedAliases, S.state.configAliases, ref)
+    if (issue === 'pattern') return t('nf.aliasBad')
+    if (issue === 'reserved') return t('nf.aliasReserved', { alias })
+    if (issue === 'taken') return t('nf.aliasTaken', { alias, ref: S.state.configAliases[alias] })
+    return ''
+  }
   function renderCreate() {
     const el = dlg.el
     if (nf.result) { setKids(el, createdView()); return }
@@ -1057,13 +1086,17 @@ const MAIN = String.raw`
     const sug = suggestionFor(nf.family)
     e.name = h('input', { id: 'nf-name', name: 'name', type: 'text', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', placeholder: sug || 'work', maxlength: '32', 'aria-label': t('nf.name'), 'aria-describedby': 'nf-sug nf-err', 'aria-invalid': 'false' })
     e.name.value = nf.name === null ? sug : nf.name
+    e.alias = h('input', { id: 'nf-alias', name: 'alias', type: 'text', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', placeholder: t('nf.aliasPh'), maxlength: '64', 'aria-describedby': 'nf-alias-hint nf-alias-err', 'aria-invalid': 'false' })
+    e.aliasHint = h('p', { class: 'field-hint', id: 'nf-alias-hint' })
+    e.aliasErr = h('p', { class: 'field-error', id: 'nf-alias-err', role: 'alert' })
     e.api = h('input', { id: 'nf-api', type: 'checkbox', 'aria-label': t('nf.api') })
     e.api.checked = nf.api
     e.suggest = h('p', { class: 'field-hint', id: 'nf-sug' })
     e.error = h('p', { class: 'field-error', id: 'nf-err', role: 'alert' })
     e.preview = h('dl', { class: 'preview' })
     e.submit = h('button', { class: 'btn btn-primary', type: 'submit', form: 'nf-form', 'aria-label': t('nf.create') }, t('nf.create'))
-    e.name.addEventListener('input', () => { nf.name = e.name.value; validateCreate(); renderPreview() })
+    e.name.addEventListener('input', () => { nf.name = e.name.value; followAlias(); validateCreate(); renderPreview() })
+    e.alias.addEventListener('input', () => { nf.alias = e.alias.value; validateCreate(); renderPreview() })
     e.api.addEventListener('change', () => {
       nf.api = e.api.checked
       // A refusal was about the old choice; the hint under it no longer applies.
@@ -1079,6 +1112,7 @@ const MAIN = String.raw`
         const untouched = nf.name === null || !typed || typed === suggestionFor(nf.family)
         nf.family = f.id
         if (untouched) { nf.name = null; e.name.value = suggestionFor(f.id); e.name.placeholder = e.name.value || 'work' }
+        followAlias()
         validateCreate()
         renderPreview()
       })
@@ -1091,6 +1125,7 @@ const MAIN = String.raw`
       h('p', { class: 'muted small' }, t('nf.intro')),
       h('fieldset', { class: 'field fam-field' }, h('legend', null, t('nf.tool')), nf.fams.length ? h('div', { class: 'fam-grid' }, cards) : h('p', { class: 'muted small' }, t('empty.noFamilies'))),
       h('div', { class: 'field' }, h('label', { class: 'field', for: 'nf-name' }, h('span', null, t('nf.name')), e.name), e.suggest),
+      h('div', { class: 'field' }, h('label', { class: 'field', for: 'nf-alias' }, h('span', null, t('nf.alias'), ' ', h('span', { class: 'muted small' }, t('nf.optional'))), e.alias), e.aliasHint, e.aliasErr),
       h('div', { class: 'check-row' }, h('label', { class: 'check' }, e.api, h('span', null, h('b', null, t('nf.api')), h('span', { class: 'muted small' }, t('nf.apiHint')))), tip('api')),
       e.preview,
       e.error,
@@ -1099,6 +1134,7 @@ const MAIN = String.raw`
       h('button', { class: 'btn', type: 'button', onclick: () => el.close() }, t('btn.cancel')),
       e.submit,
     ]))
+    if (nf.alias === null) followAlias(); else e.alias.value = nf.alias
     validateCreate()
     if (!nf.family) e.error.textContent = t('nf.noReady')
     renderPreview()
@@ -1113,25 +1149,40 @@ const MAIN = String.raw`
     e.error.textContent = msg
     const sug = suggestionFor(nf.family)
     e.suggest.textContent = sug && name === sug ? t('nf.suggested') : ''
-    if (!nf.creating) e.submit.disabled = Boolean(msg) || !name || !nf.family
-    return msg
+    const aliasMsg = aliasProblem()
+    const alias = e.alias.value.trim()
+    e.alias.classList.toggle('invalid', Boolean(aliasMsg))
+    e.alias.setAttribute('aria-invalid', String(Boolean(aliasMsg)))
+    e.aliasErr.textContent = aliasMsg
+    e.aliasHint.textContent = alias && alias === aliasSuggestion() ? t('nf.aliasSuggested', { host: family(nf.family).title }) : t('nf.aliasHint')
+    if (!nf.creating) e.submit.disabled = Boolean(msg) || Boolean(aliasMsg) || !name || !nf.family
+    return msg || aliasMsg
   }
   function renderPreview() {
     const name = nf.els.name.value.trim()
     const ok = name && !nameProblem() && nf.family
     const shown = ok ? name : '<' + t('nf.namePh') + '>'
     const dir = nf.family ? newAccountDir(S.state.accounts, nf.family, shown) : null
+    const alias = nf.els.alias.value.trim()
+    const run = nf.family ? 'sideby run ' + nf.family + ':' + shown : '—'
     setKids(nf.els.preview, [
       dir ? [h('dt', null, t('nf.dir')), h('dd', { class: 'mono' }, dir)] : null,
-      h('dt', null, t('nf.launch')), h('dd', { class: 'mono' }, nf.family ? 'sideby run ' + nf.family + ':' + shown : '—'),
+      h('dt', null, t('nf.launch')),
+      alias && !aliasProblem() && nf.family
+        ? h('dd', null, h('span', { class: 'mono' }, alias), h('span', { class: 'muted small' }, ' ' + t('nf.or') + ' '), h('span', { class: 'mono' }, run))
+        : h('dd', { class: 'mono' }, run),
     ])
     nf.els.preview.classList.toggle('is-draft', !ok)
   }
   async function create() {
     if (nf.creating) return
     const name = nf.els.name.value.trim()
-    const msg = validateCreate() || (nf.family ? '' : t('nf.noReady')) || (name ? '' : t('nf.enterName'))
+    const alias = nf.els.alias.value.trim()
+    const aliasMsg = aliasProblem()
+    const msg = nameProblem() || (nf.family ? '' : t('nf.noReady')) || (name ? '' : t('nf.enterName'))
+    validateCreate()
     if (msg) { nf.els.error.textContent = msg; nf.els.name.focus(); return }
+    if (aliasMsg) { nf.els.alias.focus(); return }
     nf.creating = true
     nf.error = null
     dlg.busy = true
@@ -1140,7 +1191,7 @@ const MAIN = String.raw`
     nf.els.submit.replaceChildren(spinner(), t('nf.creating'))
     labelFromText(nf.els.submit)
     try {
-      nf.result = await api('/api/accounts', { family: nf.family, name, api: nf.els.api.checked })
+      nf.result = await api('/api/accounts', alias ? { family: nf.family, name, api: nf.els.api.checked, alias } : { family: nf.family, name, api: nf.els.api.checked })
       toast(t(nf.result.ok ? 'toast.created' : 'toast.createdProblems', { ref: nf.result.account.ref }), { kind: nf.result.ok ? 'ok' : 'info' })
       ui.highlight = nf.result.account.ref
       dlg.onClose = () => { if (ui.highlight) flashRow(ui.highlight) }
@@ -1151,10 +1202,14 @@ const MAIN = String.raw`
     renderCreate()
     if (!nf.result && nf.els.name) {
       nf.els.name.value = name
+      nf.alias = alias
+      nf.els.alias.value = alias
       validateCreate()
       renderPreview()
       // A refused subscription account is usually fixed by turning on "API key account".
-      if (nf.error && nf.error.code === 'create-refused' && !nf.api) nf.els.api.focus(); else nf.els.name.focus()
+      if (nf.error && nf.error.code === 'create-refused' && !nf.api) nf.els.api.focus()
+      else if (nf.error && nf.error.code === 'alias-invalid') nf.els.alias.focus()
+      else nf.els.name.focus()
     }
   }
   function stepRow(s) {
@@ -1175,6 +1230,11 @@ const MAIN = String.raw`
         failed.map((s) => h('span', { class: 'small' }, s.item + ': ' + (s.message || 'failed'))),
         r.hookErrors.map((e) => h('span', { class: 'small' }, 'plugin ' + e.plugin + ': ' + e.message))) : null,
       r.account.dir ? h('p', { class: 'small' }, h('span', { class: 'muted' }, t('nf.dir') + ' '), h('code', null, r.account.dir)) : null,
+      r.alias && r.alias.added ? h('div', { class: 'small created-alias' }, h('span', { class: 'muted' }, t('nf.alias') + ' '), codeCopy(r.alias.name), h('span', { class: 'muted' }, ' ' + t('nf.aliasNewShell'))) : null,
+      r.alias && !r.alias.added ? h('div', { class: 'note note-warn' }, h('b', null, t('nf.aliasNotAdded')), ' ', h('span', { class: 'small' }, r.alias.message || '')) : null,
+      (r.shellInitFiles || []).map((f) => f.ok
+        ? h('p', { class: 'muted small' }, t(f.action === 'unchanged' ? 'nf.shellFileSame' : 'nf.shellFileUpdated', { file: f.path }))
+        : h('div', { class: 'note note-warn' }, h('span', { class: 'small' }, f.message))),
       h('p', { class: 'muted small' }, t('nf.next')),
       h('ol', { class: 'steps' }, r.nextSteps.map(stepRow)))
     return dialogFrame(t('nf.title'), r.account.family, body, [

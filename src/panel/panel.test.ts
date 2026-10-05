@@ -548,6 +548,47 @@ describe('panel v2 server data', () => {
     })
   })
 
+  it('creates an Account with a short command, exposes the config aliases and checks the alias', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ aliases: { dm001: 'demo:main' }, shellInitFile: { zsh: '~/.sideby.zsh' } }),
+      )
+      const { server, port, handler } = await serve((port) =>
+        createPanelHandler({ runtime: factory(h), allowedHosts: [`127.0.0.1:${port}`] }),
+      )
+      try {
+        const hdr = { origin: `http://127.0.0.1:${port}`, 'x-sideby-token': handler.token }
+        const state = JSON.parse(
+          (await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text,
+        ) as PanelState
+        assert.deepEqual(state.configAliases, { dm001: 'demo:main' })
+        const page = (await request(port, 'GET', '/', { host: `127.0.0.1:${port}` })).text
+        assert.match(page, /"aliasPattern":/)
+        assert.match(page, /"reservedAliases":\[/)
+        const bad = await post(port, '/api/accounts', { family: 'demo', name: 'work', alias: 'dm001' }, hdr)
+        assert.equal(bad.status, 400)
+        assert.equal(bad.body.code, 'alias-invalid')
+        assert.equal(
+          (await post(port, '/api/accounts', { family: 'demo', name: 'work', alias: 7 }, hdr)).status,
+          400,
+        )
+        const ok = await post(port, '/api/accounts', { family: 'demo', name: 'work', alias: 'dmwork' }, hdr)
+        assert.equal(ok.status, 200, JSON.stringify(ok.body))
+        assert.deepEqual(ok.body.alias, { name: 'dmwork', added: true })
+        assert.equal((ok.body.shellInitFiles as { ok: boolean }[])[0]?.ok, true)
+        const after = JSON.parse(
+          (await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text,
+        ) as PanelState
+        assert.deepEqual(after.configAliases, { dm001: 'demo:main', dmwork: 'demo:work' })
+        assert.deepEqual(after.accounts.find((a) => a.ref === 'demo:work')?.aliases, ['dmwork'])
+      } finally {
+        await close(server)
+      }
+    })
+  })
+
   it('tears quota setup down only with token and Origin, and never when read-only', async () => {
     await withFakeHome(async (h) => {
       await seedDemoMain(h.write)

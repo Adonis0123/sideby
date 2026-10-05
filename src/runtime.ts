@@ -1,7 +1,7 @@
 // The one service layer the CLI and the Panel share. Frozen contract for v0.1 (plan: 审核修订).
 
 import { type AccountRefError, discoverAccounts, resolveRef } from './core/accounts.ts'
-import { type Config, loadConfig } from './core/config.ts'
+import { addConfigAlias, aliasProblem, type Config, loadConfig } from './core/config.ts'
 import { type CreateResult, createAccount } from './core/create.ts'
 import { applyFixes, type DoctorReport, runDoctor } from './core/doctor.ts'
 import { UserError } from './core/errors.ts'
@@ -14,6 +14,13 @@ import {
 } from './core/last-doctor.ts'
 import { type PreparedLaunch, prepareLaunch, which } from './core/launch.ts'
 import { type Paths, resolvePaths } from './core/paths.ts'
+import {
+  SHELLS,
+  type Shell,
+  type ShellInitWrite,
+  shellInitScript,
+  writeShellInitFile,
+} from './core/shell-init.ts'
 import { BUILTIN_PLUGINS } from './families/index.ts'
 import { HookBus } from './plugins/bus.ts'
 import { type BuiltinPlugin, type LoadedPlugin, loadPlugins, type PluginLoadError } from './plugins/loader.ts'
@@ -28,7 +35,22 @@ import type {
   UsageResult,
 } from './types.ts'
 
-export type { AccountRefError, DoctorHistory }
+export type { AccountRefError, DoctorHistory, Shell, ShellInitWrite }
+
+/** What happened to the alias asked for with a new Account. */
+export interface AliasResult {
+  name: string
+  /** True when the config now maps the alias to the new Account (also when it already did). */
+  added: boolean
+  message?: string
+}
+
+/** `createAccount` plus the alias and shell-init files it wrote; `ok` is false when either failed. */
+export interface CreateAccountResult extends CreateResult {
+  alias?: AliasResult
+  /** One entry per file in config `shellInitFile`; absent when none is configured. */
+  shellInitFiles?: ShellInitWrite[]
+}
 
 export interface FamilyInfo {
   id: string
@@ -91,7 +113,22 @@ export interface Runtime {
   quotaSetups(): Promise<{ family: string; summary: string; plan: QuotaSetupPlan }[]>
   /** One Family's quota setup; throws UnknownFamilyError or a UserError when the Family has none. */
   quotaSetup(familyId: string): BoundQuotaSetup
-  createAccount(family: string, name: string, opts?: { api?: boolean }): Promise<CreateResult>
+  /**
+   * Creates the Account, then (when `alias` is given) adds it to the config `aliases`, then rewrites every
+   * `shellInitFile`. An alias that is invalid or taken is refused before anything is created; a failure to write
+   * it afterwards leaves the Account in place and is reported in `alias`.
+   */
+  createAccount(
+    family: string,
+    name: string,
+    opts?: { api?: boolean; alias?: string },
+  ): Promise<CreateAccountResult>
+  /** Why `alias` cannot start `ref` (shell-safe, not reserved, not taken by another Account), or null. */
+  aliasProblem(alias: string, ref: string): string | null
+  /** What `sideby shell-init <shell>` prints, from the Accounts on disk and the config aliases. */
+  shellInitScript(shell: Shell): Promise<string>
+  /** Rewrites the configured `shellInitFile` of each shell (all configured ones by default). */
+  writeShellInitFiles(shells?: readonly Shell[]): Promise<ShellInitWrite[]>
   prepareLaunch(ref: string, userArgs: readonly string[], command: 'run' | 'login'): Promise<PreparedLaunch>
   quota(account: Account): Promise<QuotaResult>
   usage(account: Account): Promise<UsageResult>
@@ -278,7 +315,13 @@ export async function createRuntime(
     },
     async createAccount(familyId, name, o = {}) {
       const family = familyOf(familyId)
-      return createAccount({
+      const alias = o.alias?.trim() || undefined
+      const ref = `${family.id}:${name}`
+      if (alias) {
+        const problem = rt.aliasProblem(alias, ref)
+        if (problem) throw new UserError(`${problem}; nothing was created`, { code: 'alias-invalid' })
+      }
+      const created: CreateAccountResult = await createAccount({
         family,
         name,
         api: Boolean(o.api),
@@ -286,6 +329,46 @@ export async function createRuntime(
         bus,
         accounts: await discoverAccounts(family, paths.home, ignore),
       })
+      if (alias) {
+        try {
+          const r = await addConfigAlias(paths.configFile, alias, created.account.ref)
+          config.aliases = r.aliases
+          created.alias = {
+            name: alias,
+            added: true,
+            ...(r.status === 'exists' ? { message: 'already in the config' } : {}),
+          }
+        } catch (err) {
+          created.alias = {
+            name: alias,
+            added: false,
+            message: `${created.account.ref} was created, but the alias was not added: ${(err as Error).message}`,
+          }
+        }
+      }
+      const files = await rt.writeShellInitFiles()
+      if (files.length) created.shellInitFiles = files
+      created.ok = created.ok && created.alias?.added !== false && files.every((f) => f.ok)
+      return created
+    },
+    aliasProblem(alias, ref) {
+      const bad = aliasProblem(alias)
+      if (bad) return `alias "${alias}" ${bad} (it becomes a shell function name)`
+      const taken = config.aliases?.[alias]
+      if (taken !== undefined && taken !== ref)
+        return `alias "${alias}" already starts ${taken}; pick another name`
+      return null
+    },
+    async shellInitScript() {
+      return shellInitScript(await accounts(), config.aliases)
+    },
+    async writeShellInitFiles(shells = SHELLS) {
+      const out: ShellInitWrite[] = []
+      for (const shell of shells) {
+        const file = config.shellInitFile?.[shell]
+        if (file) out.push(await writeShellInitFile(shell, file, paths.home, await rt.shellInitScript(shell)))
+      }
+      return out
     },
     async prepareLaunch(ref, userArgs, command) {
       const account = resolveRef(ref, await accounts(), config.aliases)

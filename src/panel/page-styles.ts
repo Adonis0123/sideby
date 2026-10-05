@@ -133,6 +133,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .group-title { font-weight: var(--heading-weight); font-size: var(--heading-size); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .group-count { color: var(--muted); font-size: 12px; background: var(--surface-2); border-radius: var(--chip-radius); padding: 0 8px; line-height: 20px; }
 .group-meta { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.group-quota { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
 /* List rows: identity, quota, usage, last used, health, menu. */
 .rows { border-top: 1px solid var(--border); }

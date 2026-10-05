@@ -410,6 +410,45 @@ describe('plugins', () => {
   })
 })
 
+describe('short commands', () => {
+  it('new --alias adds the alias, rewrites shellInitFile like shell-init prints, and refuses a bad alias first', async () => {
+    await withFakeHome(async (h) => {
+      await codexMain(h)
+      await fakeHost(h, 'codex')
+      await h.write(
+        '.config/sideby/config.json',
+        `${JSON.stringify({ $schema: 'x', aliases: { codex002: 'codex:002' }, shellInitFile: { zsh: '~/.config/sideby/shell-init.zsh' } }, null, 2)}\n`,
+      )
+      const bad = await sideby(h, ['new', 'codex', 'work', '--alias', 'cd'])
+      assert.equal(bad.code, 1)
+      assert.match(bad.err, /shell keyword.*nothing was created/)
+      assert.equal(await stat(h.path('.codex-work')).catch(() => null), null)
+
+      const r = await sideby(h, ['new', 'codex', '003', '--alias', 'codex003', '--json'])
+      assert.equal(r.code, 0, r.out + r.err)
+      const data = checkSchema('new', r.out)
+      assert.deepEqual(data.alias, { name: 'codex003', added: true })
+      const config = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8'))
+      assert.deepEqual(Object.keys(config), ['$schema', 'aliases', 'shellInitFile'])
+      assert.deepEqual(config.aliases, { codex002: 'codex:002', codex003: 'codex:003' })
+      const file = await readFile(h.path('.config/sideby/shell-init.zsh'), 'utf8')
+      assert.equal(file, (await sideby(h, ['shell-init', 'zsh'])).out)
+      assert.match(file, /^codex003\(\) \{ command sideby run 'codex:003' -- "\$@"; \}$/m)
+
+      // --write regenerates on demand, and says what to configure when nothing is.
+      await writeFile(h.path('.config/sideby/shell-init.zsh'), `${file}# stale\n`)
+      const w = await sideby(h, ['shell-init', '--write'])
+      assert.equal(w.code, 0, w.err)
+      assert.match(w.out, /updated ~\/\.config\/sideby\/shell-init\.zsh/)
+      assert.equal(await readFile(h.path('.config/sideby/shell-init.zsh'), 'utf8'), file)
+      const none = await sideby(h, ['shell-init', 'bash', '--write'])
+      assert.equal(none.code, 1)
+      assert.match(none.err, /no shellInitFile\.bash .*"shellInitFile"/)
+      assert.equal((await sideby(h, ['shell-init'])).code, 2)
+    })
+  })
+})
+
 describe('read-only commands', () => {
   it('list, doctor, quota and shell-init never write into host directories; JSON matches the schemas', async () => {
     await withFakeHome(async (h) => {

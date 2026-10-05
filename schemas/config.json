@@ -119,6 +119,21 @@
           }
         }
       }
+    },
+    "shellInitFile": {
+      "type": "object",
+      "properties": {
+        "zsh": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bash": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "description": "Absolute or `~/` paths of files sideby rewrites with the `sideby shell-init <shell>` output whenever it adds an Account or an alias; source the file from your shell rc."
     }
   },
   "additionalProperties": false,

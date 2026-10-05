@@ -1,9 +1,10 @@
 import { fileURLToPath } from 'node:url'
-import { aliasProblem } from '../core/config.ts'
 import type { DoctorReport } from '../core/doctor.ts'
+import { UserError } from '../core/errors.ts'
 import { runHost } from '../core/launch.ts'
 import { resolvePaths, tildify } from '../core/paths.ts'
 import { USAGE_DAYS } from '../core/quota-levels.ts'
+import { SHELLS, type Shell, type ShellInitWrite } from '../core/shell-init.ts'
 import { createRuntime } from '../runtime.ts'
 import type { Finding } from '../types.ts'
 import { type ParsedArgs, UsageError } from './args.ts'
@@ -75,22 +76,39 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
 
 export async function cmdNew(a: ParsedArgs, io: Io): Promise<number> {
   const [family, name] = a.positionals
-  if (!family || !name) throw new UsageError('usage: sideby new <family> <name> [--api]')
+  if (!family || !name || a.positionals.length > 2)
+    throw new UsageError('usage: sideby new <family> <name> [--api] [--alias <short-command>]')
+  const alias = a.flags.get('alias')
   const rt = await createRuntime()
-  const res = await rt.createAccount(family, name, { api: a.flags.has('api') })
+  const res = await rt.createAccount(family, name, {
+    api: a.flags.has('api'),
+    ...(typeof alias === 'string' ? { alias } : {}),
+  })
   if (a.flags.has('json')) {
     json(io, res)
     return res.ok ? 0 : 1
   }
-  const where = tildify(res.account.dir, rt.paths.home)
+  const home = rt.paths.home
+  const where = tildify(res.account.dir, home)
   if (res.ok) io.out(`${c.green('✓')} created ${c.bold(res.account.ref)} at ${where}`)
   else io.out(`${c.yellow('!')} created ${c.bold(res.account.ref)} at ${where} with problems; see below`)
   for (const s of res.steps.filter((x) => !x.ok || x.action === 'skipped'))
     io.out(`  ${s.ok ? c.dim('·') : c.red('✗')} ${s.item}: ${s.message ?? s.action}`)
   for (const e of res.hookErrors) io.err(c.red(`  ${e.message}`))
+  if (res.alias?.added) io.out(`${c.green('✓')} short command ${c.bold(res.alias.name)} (in a new shell)`)
+  else if (res.alias) io.out(`  ${c.red('✗')} ${res.alias.message}`)
+  printShellInitWrites(io, res.shellInitFiles ?? [], home)
   io.out('\nNext:')
   for (const n of res.nextSteps) io.out(`  ${n}`)
   return res.ok ? 0 : 1
+}
+
+function printShellInitWrites(io: Io, files: readonly ShellInitWrite[], home: string) {
+  for (const f of files) {
+    const path = f.path.startsWith('/') ? tildify(f.path, home) : f.path
+    if (f.ok) io.out(`${c.green('✓')} ${f.action === 'unchanged' ? 'up to date' : 'updated'} ${path}`)
+    else io.out(`  ${c.red('✗')} ${f.message}`)
+  }
 }
 
 export async function cmdRun(a: ParsedArgs, io: Io, command: 'run' | 'login'): Promise<number> {
@@ -256,16 +274,25 @@ export async function cmdPlugins(a: ParsedArgs, io: Io): Promise<number> {
 
 export async function cmdShellInit(a: ParsedArgs, io: Io): Promise<number> {
   const shell = a.positionals[0]
-  if (shell !== 'zsh' && shell !== 'bash') throw new UsageError('usage: sideby shell-init zsh|bash')
+  const write = a.flags.has('write')
+  const usage = 'usage: sideby shell-init zsh|bash  |  sideby shell-init [zsh|bash] --write'
+  if (a.positionals.length > 1 || (shell === undefined && !write)) throw new UsageError(usage)
+  if (shell !== undefined && !SHELLS.includes(shell as Shell)) throw new UsageError(usage)
   const rt = await createRuntime()
-  const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
-  const lines = ['# sideby shell-init: one function per account, plus aliases from the sideby config']
-  for (const acc of await rt.accounts())
-    lines.push(`sideby-${acc.family}-${acc.name}() { command sideby run ${q(acc.ref)} -- "$@"; }`)
-  for (const [alias, ref] of Object.entries(rt.config.aliases ?? {}))
-    if (!aliasProblem(alias)) lines.push(`${alias}() { command sideby run ${q(ref)} -- "$@"; }`)
-  io.out(lines.join('\n'))
-  return 0
+  if (!write) {
+    io.out((await rt.shellInitScript(shell as Shell)).replace(/\n$/, ''))
+    return 0
+  }
+  const configured = SHELLS.filter((s) => rt.config.shellInitFile?.[s])
+  const wanted = shell ? [shell as Shell] : configured
+  const missing = shell && !configured.includes(shell as Shell) ? shell : wanted.length ? null : 'zsh'
+  if (missing)
+    throw new UserError(
+      `no shellInitFile.${missing} in ${tildify(rt.paths.configFile, rt.paths.home)}; add for example "shellInitFile": { "${missing}": "~/.config/sideby/shell-init.${missing}" }`,
+    )
+  const files = await rt.writeShellInitFiles(wanted)
+  printShellInitWrites(io, files, rt.paths.home)
+  return files.every((f) => f.ok) ? 0 : 1
 }
 
 /** Absolute path of this CLI's entry (`main.ts` from source, `main.js` from dist), for detached processes. */

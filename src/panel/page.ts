@@ -1,6 +1,7 @@
 // The Panel page: one self-contained HTML document with inline CSS and JS, no external resources. The parts live in
 // sibling modules: page-styles.ts (tokens and CSS), page-script.ts (behaviour, with page-logic.ts helpers) and
 // i18n.ts (English and Chinese text); this module assembles them under the CSP nonce.
+import { ALIAS_NAME, RESERVED_ALIASES } from '../core/config.ts'
 import { QUOTA_FAIL_PERCENT, QUOTA_WARN_PERCENT, USAGE_DAYS } from '../core/quota-levels.ts'
 import { MESSAGES } from './i18n.ts'
 import { PAGE_SCRIPT } from './page-script.ts'
@@ -50,6 +51,9 @@ export function renderPage(opts: PageOptions): string {
     warn: QUOTA_WARN_PERCENT,
     fail: QUOTA_FAIL_PERCENT,
     usageDays: USAGE_DAYS,
+    // The alias rules of the config, so the new-account dialog checks a short command as sideby will.
+    aliasPattern: ALIAS_NAME.source,
+    reservedAliases: [...RESERVED_ALIASES],
   })
   return `<!doctype html>
 <html lang="en">
