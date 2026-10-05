@@ -5,7 +5,7 @@ import { describe, it } from 'node:test'
 import { asBuiltin, demoPlugin, seedDemoMain } from '../../testing/demo.ts'
 import { withFakeHome } from '../../testing/index.ts'
 import { createRuntime } from '../runtime.ts'
-import { addConfigAlias, ConfigError, loadConfig } from './config.ts'
+import { addConfigAlias, ConfigError, loadConfig, removeConfigAlias } from './config.ts'
 import { SHELL_INIT_HEADER, shellInitScript, writeShellInitFile } from './shell-init.ts'
 
 const CONFIG = '.config/sideby/config.json'
@@ -63,6 +63,67 @@ describe('addConfigAlias', () => {
       await assert.rejects(addConfigAlias(h.path(CONFIG), 'cd', 'claude:008'), /shell keyword/)
       await assert.rejects(addConfigAlias(h.path(CONFIG), 'x;rm', 'claude:008'), /must match/)
       assert.equal(await readFile(h.path(CONFIG), 'utf8'), good)
+    })
+  })
+
+  it('writes { account, args } for host arguments and compares both when the alias exists', async () => {
+    await withFakeHome(async (h) => {
+      await h.write(CONFIG, JSON.stringify({ aliases: { pi001: 'pi:main' } }))
+      const args = ['--model', 'kimi-coding/k3:high']
+      assert.equal((await addConfigAlias(h.path(CONFIG), 'pi-kimi', 'pi:main', args)).status, 'added')
+      const written = await readFile(h.path(CONFIG), 'utf8')
+      assert.deepEqual(JSON.parse(written).aliases, {
+        pi001: 'pi:main',
+        'pi-kimi': { account: 'pi:main', args },
+      })
+      assert.equal((await loadConfig(h.path(CONFIG))).aliases?.['pi-kimi'] !== undefined, true)
+      assert.equal((await addConfigAlias(h.path(CONFIG), 'pi-kimi', 'pi:main', args)).status, 'exists')
+      await assert.rejects(
+        addConfigAlias(h.path(CONFIG), 'pi-kimi', 'pi:main'),
+        /already starts pi:main with --model kimi-coding\/k3:high; .*sideby alias rm pi-kimi/,
+      )
+      await assert.rejects(
+        addConfigAlias(h.path(CONFIG), 'pi001', 'pi:main', args),
+        /already starts pi:main;/,
+      )
+      assert.equal(await readFile(h.path(CONFIG), 'utf8'), written)
+    })
+  })
+
+  it('accepts only an Account ref and arguments in an alias object', async () => {
+    await withFakeHome(async (h) => {
+      for (const value of [
+        { account: 'main' },
+        { account: 'pi:main', env: { K: 'v' } },
+        { account: 'pi:main', args: [1] },
+      ]) {
+        await h.write(CONFIG, JSON.stringify({ aliases: { x: value } }))
+        await assert.rejects(loadConfig(h.path(CONFIG)), /aliases\/x/)
+      }
+    })
+  })
+
+  it('removes an alias and leaves the file alone when it is not there', async () => {
+    await withFakeHome(async (h) => {
+      assert.equal((await removeConfigAlias(h.path(CONFIG), 'cc001')).status, 'absent')
+      await assert.rejects(readFile(h.path(CONFIG)), /ENOENT/)
+      const before = {
+        $schema: 'x',
+        aliases: { cc001: 'claude:001', 'pi-kimi': { account: 'pi:main', args: ['-m'] } },
+        ignore: [],
+      }
+      await h.write(CONFIG, JSON.stringify(before))
+      const r = await removeConfigAlias(h.path(CONFIG), 'pi-kimi')
+      assert.equal(r.status, 'removed')
+      assert.equal(
+        await readFile(h.path(CONFIG), 'utf8'),
+        `${JSON.stringify({ ...before, aliases: { cc001: 'claude:001' } }, null, 2)}\n`,
+      )
+      const text = await readFile(h.path(CONFIG), 'utf8')
+      assert.equal((await removeConfigAlias(h.path(CONFIG), 'pi-kimi')).status, 'absent')
+      assert.equal(await readFile(h.path(CONFIG), 'utf8'), text)
+      await h.write(CONFIG, '{ "aliases": ')
+      await assert.rejects(removeConfigAlias(h.path(CONFIG), 'cc001'), /not valid JSON; nothing was changed/)
     })
   })
 
@@ -134,12 +195,24 @@ describe('Runtime createAccount with an alias', () => {
       const fresh = await rtFor(h.env)
       assert.equal(file, await fresh.shellInitScript('zsh'))
       assert.ok(file.startsWith(SHELL_INIT_HEADER))
-      assert.match(file, /^dm008\(\) \{ command sideby run 'demo:008' -- "\$@"; \}$/m)
+      assert.match(file, /^dm008\(\) \{ command sideby run 'dm008' -- "\$@"; \}$/m)
       assert.match(file, /^sideby-demo-008\(\) /m)
       assert.equal(fresh.config.aliases?.dm008, 'demo:008')
       // Without an alias the file still gains the new Account's function.
       await rt.createAccount('demo', '009')
       assert.match(await readFile(h.path('.sideby.zsh'), 'utf8'), /^sideby-demo-009\(\) /m)
+    })
+  })
+
+  it('keeps the arguments of an alias that already starts the new Account', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const alias = { account: 'demo:008', args: ['--model', 'k'] }
+      await h.write(CONFIG, JSON.stringify({ aliases: { dmk: alias } }))
+      const r = await (await rtFor(h.env)).createAccount('demo', '008', { alias: 'dmk' })
+      assert.equal(r.ok, true, JSON.stringify(r))
+      assert.deepEqual(r.alias, { name: 'dmk', added: true, message: 'already in the config' })
+      assert.deepEqual(JSON.parse(await readFile(h.path(CONFIG), 'utf8')).aliases, { dmk: alias })
     })
   })
 

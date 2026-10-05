@@ -14,6 +14,7 @@ export interface LogicAccount {
   login?: string
   model?: string
   aliases?: string[]
+  aliasArgs?: Record<string, string[]>
   identity?: { email?: string; org?: string }
   hostInstalled?: boolean
   error?: string
@@ -148,8 +149,8 @@ export function sortAccounts<T extends LogicAccount>(list: T[], mode: string, no
 }
 
 /**
- * Whether every word of the query appears in the Account's name, ref, aliases, Family title, model, plan, email or
- * organization.
+ * Whether every word of the query appears in the Account's name, ref, aliases (with their arguments), Family title,
+ * model, plan, email or organization.
  */
 export function matchesQuery(a: LogicAccount, query: string, familyTitle: string): boolean {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
@@ -164,9 +165,19 @@ export function matchesQuery(a: LogicAccount, query: string, familyTitle: string
     a.identity?.org || '',
   ]
     .concat(a.aliases || [])
+    .concat(Object.values(a.aliasArgs || {}).flat())
     .join(' ')
     .toLowerCase()
   return words.every((w) => hay.includes(w))
+}
+
+/**
+ * The Host arguments the alias `name` of this Account adds, or null when it adds none. Reads only own keys, so an
+ * alias named like an Object method (`constructor`, `toString`) is not mistaken for one with arguments.
+ */
+export function aliasArgsOf(a: LogicAccount, name: string): string[] | null {
+  const args = a.aliasArgs && Object.hasOwn(a.aliasArgs, name) ? a.aliasArgs[name] : undefined
+  return Array.isArray(args) && args.length ? args : null
 }
 
 /**

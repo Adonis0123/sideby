@@ -400,3 +400,28 @@ export async function cmdApp(a: ParsedArgs, io: Io): Promise<number> {
   }
   return r.skipped.length ? 1 : 0
 }
+
+export async function cmdAlias(a: ParsedArgs, io: Io): Promise<number> {
+  const [sub, alias, target, ...more] = a.positionals
+  const usage =
+    'usage: sideby alias add <short-command> <account> [-- host args]  |  sideby alias rm <short-command>'
+  const add = sub === 'add' && alias !== undefined && target !== undefined && more.length === 0
+  const rm = sub === 'rm' && alias !== undefined && target === undefined && a.rest.length === 0
+  if (!add && !rm) throw new UsageError(usage)
+  const rt = await createRuntime()
+  const res = add ? await rt.addAlias(alias, target, a.rest) : await rt.removeAlias(alias)
+  if (a.flags.has('json')) {
+    json(io, res)
+    return res.ok ? 0 : 1
+  }
+  const starts = res.account ? ` → ${res.account}${res.args ? ` ${res.args.join(' ')}` : ''}` : ''
+  const said = {
+    added: `${c.green('✓')} short command ${c.bold(res.alias)}${starts} (in a new shell)`,
+    exists: `${c.green('✓')} short command ${c.bold(res.alias)}${starts} was already in the config`,
+    removed: `${c.green('✓')} removed short command ${c.bold(res.alias)}${starts}`,
+    absent: `${c.dim('·')} no short command ${res.alias} in the config; nothing to remove`,
+  }
+  io.out(said[res.status])
+  printShellInitWrites(io, res.shellInitFiles ?? [], rt.paths.home)
+  return res.ok ? 0 : 1
+}

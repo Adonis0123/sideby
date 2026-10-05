@@ -1,7 +1,17 @@
 // The one service layer the CLI and the Panel share. Frozen contract for v0.1 (plan: 审核修订).
 
 import { type AccountRefError, discoverAccounts, resolveRef } from './core/accounts.ts'
-import { addConfigAlias, aliasProblem, type Config, loadConfig } from './core/config.ts'
+import {
+  type AliasValue,
+  addConfigAlias,
+  aliasAccount,
+  aliasArgs,
+  aliasProblem,
+  aliasRefs,
+  type Config,
+  loadConfig,
+  removeConfigAlias,
+} from './core/config.ts'
 import { type CreateResult, createAccount } from './core/create.ts'
 import { applyFixes, type DoctorReport, runDoctor } from './core/doctor.ts'
 import { UserError } from './core/errors.ts'
@@ -45,6 +55,19 @@ export interface AliasResult {
   /** True when the config now maps the alias to the new Account (also when it already did). */
   added: boolean
   message?: string
+}
+
+/** What `sideby alias add|rm` did; `ok` is false when a shell-init file was not rewritten. */
+export interface AliasEditResult {
+  ok: boolean
+  alias: string
+  status: 'added' | 'exists' | 'removed' | 'absent'
+  /** The Account ref the alias starts (for `rm`, started before it was removed). */
+  account?: string
+  /** Host arguments the alias adds to `sideby run`; absent when there are none. */
+  args?: string[]
+  /** One entry per file in config `shellInitFile`; absent when none is configured. */
+  shellInitFiles?: ShellInitWrite[]
 }
 
 /** `createAccount` plus the alias and shell-init files it wrote; `ok` is false when either failed. */
@@ -127,6 +150,13 @@ export interface Runtime {
     name: string,
     opts?: { api?: boolean; alias?: string },
   ): Promise<CreateAccountResult>
+  /**
+   * Adds a short command for an existing Account (`target` is a ref, a unique name or an alias, saved as the ref),
+   * with Host arguments for `sideby run`, then rewrites every `shellInitFile`. Refuses a taken name.
+   */
+  addAlias(alias: string, target: string, args?: readonly string[]): Promise<AliasEditResult>
+  /** Removes a short command from the config, then rewrites every `shellInitFile`. */
+  removeAlias(alias: string): Promise<AliasEditResult>
   /** Why `alias` cannot start `ref` (shell-safe, not reserved, not taken by another Account), or null. */
   aliasProblem(alias: string, ref: string): string | null
   /** What `sideby shell-init <shell>` prints, from the Accounts on disk and the config aliases. */
@@ -201,6 +231,29 @@ export async function createRuntime(
     env,
   })
 
+  /** The config value of the alias `name`, from own keys only (`constructor` is not an alias unless configured). */
+  const ownAlias = (name: string): AliasValue | undefined =>
+    config.aliases && Object.hasOwn(config.aliases, name) ? config.aliases[name] : undefined
+  /** The config value of `ref` when it names an alias (no colon), as `resolveRef` reads it. */
+  const aliasValue = (ref: string): AliasValue | undefined => (ref.includes(':') ? undefined : ownAlias(ref))
+
+  const aliasEdit = async (
+    alias: string,
+    status: AliasEditResult['status'],
+    value: AliasValue | undefined,
+  ): Promise<AliasEditResult> => {
+    const args = aliasArgs(value)
+    const files = await rt.writeShellInitFiles()
+    return {
+      ok: files.every((f) => f.ok),
+      alias,
+      status,
+      ...(value === undefined ? {} : { account: aliasAccount(value) }),
+      ...(args.length ? { args } : {}),
+      ...(files.length ? { shellInitFiles: files } : {}),
+    }
+  }
+
   const rt: Runtime = {
     paths,
     config,
@@ -222,7 +275,7 @@ export async function createRuntime(
     },
     accounts,
     async resolve(ref) {
-      return resolveRef(ref, await accounts(), config.aliases)
+      return resolveRef(ref, await accounts(), aliasRefs(config.aliases))
     },
     async status(account) {
       const f = familyOf(account.family)
@@ -268,7 +321,7 @@ export async function createRuntime(
           fams = new Map([[o.target, families.get(o.target)!]])
           scope = { kind: 'family', family: o.target }
         } else {
-          const one = resolveRef(o.target, list, config.aliases)
+          const one = resolveRef(o.target, list, aliasRefs(config.aliases))
           list = [one]
           fams = new Map([[one.family, familyOf(one.family)]])
           scope = { kind: 'account', ref: one.ref }
@@ -351,7 +404,13 @@ export async function createRuntime(
       })
       if (alias) {
         try {
-          const r = await addConfigAlias(paths.configFile, alias, created.account.ref)
+          // An alias that already starts this Account keeps its arguments; creating the Account does not change them.
+          const r = await addConfigAlias(
+            paths.configFile,
+            alias,
+            created.account.ref,
+            aliasArgs(ownAlias(alias)),
+          )
           config.aliases = r.aliases
           created.alias = {
             name: alias,
@@ -371,10 +430,26 @@ export async function createRuntime(
       created.ok = created.ok && created.alias?.added !== false && files.every((f) => f.ok)
       return created
     },
+    async addAlias(alias, target, args = []) {
+      const bad = aliasProblem(alias)
+      if (bad) throw new UserError(`alias "${alias}" ${bad} (it becomes a shell function name)`)
+      // Resolve first so the config only ever names an Account that exists, by its ref.
+      const account = resolveRef(target, await accounts(), aliasRefs(config.aliases))
+      const r = await addConfigAlias(paths.configFile, alias, account.ref, args)
+      config.aliases = r.aliases
+      return aliasEdit(alias, r.status, r.aliases[alias])
+    },
+    async removeAlias(alias) {
+      const before = ownAlias(alias)
+      const r = await removeConfigAlias(paths.configFile, alias)
+      config.aliases = r.aliases
+      return aliasEdit(alias, r.status, r.status === 'removed' ? before : undefined)
+    },
     aliasProblem(alias, ref) {
       const bad = aliasProblem(alias)
       if (bad) return `alias "${alias}" ${bad} (it becomes a shell function name)`
-      const taken = config.aliases?.[alias]
+      const value = ownAlias(alias)
+      const taken = value === undefined ? undefined : aliasAccount(value)
       if (taken !== undefined && taken !== ref)
         return `alias "${alias}" already starts ${taken}; pick another name`
       return null
@@ -391,13 +466,14 @@ export async function createRuntime(
       return out
     },
     async prepareLaunch(ref, userArgs, command) {
-      const account = resolveRef(ref, await accounts(), config.aliases)
+      const account = resolveRef(ref, await accounts(), aliasRefs(config.aliases))
       return prepareLaunch({
         account,
         family: familyOf(account.family),
         baseEnv: env,
         accountArgs: config.accounts?.[account.ref]?.args ?? [],
-        userArgs,
+        // An alias's arguments come before the user's; the Family sees both as the user's choice (ADR-0005).
+        userArgs: command === 'run' ? [...aliasArgs(aliasValue(ref)), ...userArgs] : userArgs,
         command,
         bus,
       })

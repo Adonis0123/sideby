@@ -111,6 +111,17 @@ const QuotaSetupPlan = Type.Object({
   message: Str,
 })
 
+const ShellInitFiles = Type.Array(
+  Type.Object({
+    shell: Type.Union([Type.Literal('zsh'), Type.Literal('bash')]),
+    path: Str,
+    ok: Type.Boolean(),
+    action: Type.Optional(Type.Union([Type.Literal('written'), Type.Literal('unchanged')])),
+    message: Type.Optional(Str),
+  }),
+  { description: 'One entry per config `shellInitFile`, rewritten after the change.' },
+)
+
 export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
   list: Type.Object(
     {
@@ -175,20 +186,26 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
           { description: 'The `--alias` short command; `added: false` means the Account exists without it.' },
         ),
       ),
-      shellInitFiles: Type.Optional(
-        Type.Array(
-          Type.Object({
-            shell: Type.Union([Type.Literal('zsh'), Type.Literal('bash')]),
-            path: Str,
-            ok: Type.Boolean(),
-            action: Type.Optional(Type.Union([Type.Literal('written'), Type.Literal('unchanged')])),
-            message: Type.Optional(Str),
-          }),
-          { description: 'One entry per config `shellInitFile`, rewritten after the Account was created.' },
-        ),
-      ),
+      shellInitFiles: Type.Optional(ShellInitFiles),
     },
     { title: 'sideby new --json' },
+  ),
+  alias: Type.Object(
+    {
+      schemaVersion: Version,
+      ok: Type.Boolean({ description: 'False when a config `shellInitFile` was not rewritten.' }),
+      alias: Str,
+      status: Type.Union([
+        Type.Literal('added'),
+        Type.Literal('exists'),
+        Type.Literal('removed'),
+        Type.Literal('absent'),
+      ]),
+      account: Type.Optional(Str),
+      args: Type.Optional(Type.Array(Str, { description: 'Host arguments `sideby run <alias>` adds.' })),
+      shellInitFiles: Type.Optional(ShellInitFiles),
+    },
+    { title: 'sideby alias add|rm --json' },
   ),
   plugins: Type.Object(
     {

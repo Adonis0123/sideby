@@ -459,7 +459,7 @@ describe('short commands', () => {
       assert.deepEqual(config.aliases, { codex002: 'codex:002', codex003: 'codex:003' })
       const file = await readFile(h.path('.config/sideby/shell-init.zsh'), 'utf8')
       assert.equal(file, (await sideby(h, ['shell-init', 'zsh'])).out)
-      assert.match(file, /^codex003\(\) \{ command sideby run 'codex:003' -- "\$@"; \}$/m)
+      assert.match(file, /^codex003\(\) \{ command sideby run 'codex003' -- "\$@"; \}$/m)
 
       // --write regenerates on demand, and says what to configure when nothing is.
       await writeFile(h.path('.config/sideby/shell-init.zsh'), `${file}# stale\n`)
@@ -471,6 +471,93 @@ describe('short commands', () => {
       assert.equal(none.code, 1)
       assert.match(none.err, /no shellInitFile\.bash .*"shellInitFile"/)
       assert.equal((await sideby(h, ['shell-init'])).code, 2)
+    })
+  })
+})
+
+describe('alias add and rm', () => {
+  it('adds a short command with host arguments that only run uses, and removes it', async () => {
+    await withFakeHome(async (h) => {
+      await codexMain(h)
+      await fakeHost(h, 'codex')
+      assert.equal((await sideby(h, ['new', 'codex', 'work'])).code, 0)
+      const configFile = '.config/sideby/config.json'
+      await h.write(
+        configFile,
+        JSON.stringify({
+          accounts: { 'codex:work': { args: ['--a'] } },
+          aliases: { cx: 'codex:work' },
+          shellInitFile: { zsh: '~/.config/sideby/shell-init.zsh' },
+        }),
+      )
+      // The target may be a name or another alias; the config keeps the Account ref.
+      const r = await sideby(h, ['alias', 'add', 'cx-m', 'cx', '--json', '--', '--model', 'm'])
+      assert.equal(r.code, 0, r.out + r.err)
+      const data = checkSchema('alias', r.out)
+      assert.equal(data.status, 'added')
+      assert.equal(data.account, 'codex:work')
+      assert.deepEqual(data.args, ['--model', 'm'])
+      const config = JSON.parse(await readFile(h.path(configFile), 'utf8'))
+      assert.deepEqual(config.aliases, {
+        cx: 'codex:work',
+        'cx-m': { account: 'codex:work', args: ['--model', 'm'] },
+      })
+      const file = await readFile(h.path('.config/sideby/shell-init.zsh'), 'utf8')
+      assert.equal(file, (await sideby(h, ['shell-init', 'zsh'])).out)
+      assert.match(file, /^cx-m\(\) \{ command sideby run 'cx-m' -- "\$@"; \}$/m)
+
+      // Family args, then the Account's, then the alias's, then the user's; login and doctor ignore the alias's.
+      assert.equal((await sideby(h, ['run', 'cx-m', '--', '--resume'])).code, 0)
+      assert.equal((await sideby(h, ['login', 'cx-m'])).code, 0)
+      const [run, login] = await readHostLog(h, 'codex')
+      assert.deepEqual(run!.argv, [
+        '-c',
+        'cli_auth_credentials_store="file"',
+        '--a',
+        '--model',
+        'm',
+        '--resume',
+      ])
+      assert.equal(run!.env.CODEX_HOME, h.path('.codex-work'))
+      assert.deepEqual(login!.argv, ['-c', 'cli_auth_credentials_store="file"', 'login'])
+      const doctor = checkSchema('doctor', (await sideby(h, ['doctor', 'cx-m', '--json'])).out)
+      assert.deepEqual(
+        (doctor.accounts as { ref: string }[]).map((a) => a.ref),
+        ['codex:work'],
+      )
+
+      // Adding it again is a no-op; other arguments, a missing Account or a bad name change nothing.
+      const written = await readFile(h.path(configFile), 'utf8')
+      const again = await sideby(h, ['alias', 'add', 'cx-m', 'codex:work', '--', '--model', 'm'])
+      assert.equal(again.code, 0, again.err)
+      assert.match(again.out, /already in the config/)
+      const other = await sideby(h, ['alias', 'add', 'cx-m', 'codex:work', '--', '--model', 'n'])
+      assert.equal(other.code, 1)
+      assert.match(other.err, /already starts codex:work with --model m; .*sideby alias rm cx-m/)
+      const missing = await sideby(h, ['alias', 'add', 'cx9', 'codex:nope', '--json'])
+      assert.equal(missing.code, 1)
+      assert.match(
+        checkSchema('error', missing.out).error as string,
+        /no account codex:nope; run `sideby list`/,
+      )
+      assert.equal((await sideby(h, ['alias', 'add', 'cd', 'codex:work'])).code, 1)
+      assert.equal(await readFile(h.path(configFile), 'utf8'), written)
+      assert.equal((await sideby(h, ['alias', 'add', 'cx9'])).code, 2)
+      const noSep = await sideby(h, ['alias', 'add', 'cx9', 'codex:work', '--model', 'm'])
+      assert.equal(noSep.code, 2)
+      assert.match(noSep.err, /unknown option --model; put Host arguments after `--`/)
+      assert.equal((await sideby(h, ['alias', 'rm', 'cx9', '--', '-x'])).code, 2)
+
+      const rm = await sideby(h, ['alias', 'rm', 'cx-m', '--json'])
+      assert.equal(rm.code, 0, rm.err)
+      const removed = checkSchema('alias', rm.out)
+      assert.equal(removed.status, 'removed')
+      assert.deepEqual(removed.args, ['--model', 'm'])
+      assert.deepEqual(JSON.parse(await readFile(h.path(configFile), 'utf8')).aliases, { cx: 'codex:work' })
+      assert.doesNotMatch(await readFile(h.path('.config/sideby/shell-init.zsh'), 'utf8'), /cx-m/)
+      const absent = await sideby(h, ['alias', 'rm', 'cx-m', '--json'])
+      assert.equal(absent.code, 0)
+      assert.equal(checkSchema('alias', absent.out).status, 'absent')
     })
   })
 })
@@ -488,7 +575,7 @@ describe('read-only commands', () => {
       checkSchema('quota', (await sideby(h, ['quota', '--json'])).out)
       const init = await sideby(h, ['shell-init', 'zsh'])
       assert.match(init.out, /sideby-codex-work\(\) \{ command sideby run 'codex:work' -- "\$@"; \}/)
-      assert.match(init.out, /cx2\(\) \{ command sideby run 'codex:work' -- "\$@"; \}/)
+      assert.match(init.out, /cx2\(\) \{ command sideby run 'cx2' -- "\$@"; \}/)
       // bash accepts these names outside POSIX mode: the script parses and the functions are callable.
       const { execFileSync } = await import('node:child_process')
       const bashInit = (await sideby(h, ['shell-init', 'bash'])).out

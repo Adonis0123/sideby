@@ -138,6 +138,7 @@ const en = {
   'group.attention.other': '{n} need attention',
 
   'acct.alias': 'Alias',
+  'acct.aliasArgs': 'Alias, starts this account with {args}',
   'acct.api': 'API',
   'acct.model': 'Model',
   'acct.signedOut': 'Signed out',
@@ -439,6 +440,7 @@ const zh: Record<MessageKey, string> = {
   'group.attention.other': '{n} 个需要处理',
 
   'acct.alias': '别名',
+  'acct.aliasArgs': '别名，启动这个账号并附加 {args}',
   'acct.api': 'API',
   'acct.model': '模型',
   'acct.signedOut': '未登录',

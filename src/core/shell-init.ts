@@ -22,13 +22,14 @@ const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
  */
 export function shellInitScript(
   accounts: readonly Account[],
-  aliases: Readonly<Record<string, string>> | undefined,
+  aliases: Readonly<Record<string, unknown>> | undefined,
 ): string {
   const lines = [SHELL_INIT_HEADER]
   for (const acc of accounts)
     lines.push(`sideby-${acc.family}-${acc.name}() { command sideby run ${quote(acc.ref)} -- "$@"; }`)
-  for (const [alias, ref] of Object.entries(aliases ?? {}))
-    if (!aliasProblem(alias)) lines.push(`${alias}() { command sideby run ${quote(ref)} -- "$@"; }`)
+  // An alias function runs the alias itself, so `sideby run` reads its Account and arguments from the config.
+  for (const alias of Object.keys(aliases ?? {}))
+    if (!aliasProblem(alias)) lines.push(`${alias}() { command sideby run ${quote(alias)} -- "$@"; }`)
   return `${lines.join('\n')}\n`
 }
 

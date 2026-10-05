@@ -531,7 +531,15 @@ describe('panel v2 server data', () => {
       await (await factory(h)()).createAccount('demo', 'work')
       await h.write(
         '.config/sideby/config.json',
-        JSON.stringify({ aliases: { dw: 'demo:work', zz: 'demo:main', aa: 'main', gone: 'demo:nope' } }),
+        JSON.stringify({
+          aliases: {
+            dw: 'demo:work',
+            zz: 'demo:main',
+            aa: 'main',
+            gone: 'demo:nope',
+            'dm-x': { account: 'demo:main', args: ['--model', 'x'] },
+          },
+        }),
       )
       const { server, port } = await serve((port) =>
         createPanelHandler({ runtime: factory(h), allowedHosts: [`127.0.0.1:${port}`] }),
@@ -541,7 +549,12 @@ describe('panel v2 server data', () => {
           (await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text,
         ) as PanelState
         const byRef = Object.fromEntries(state.accounts.map((a) => [a.ref, a.aliases]))
-        assert.deepEqual(byRef, { 'demo:main': ['aa', 'zz'], 'demo:work': ['dw'] })
+        assert.deepEqual(byRef, { 'demo:main': ['aa', 'dm-x', 'zz'], 'demo:work': ['dw'] })
+        // Arguments ride along per alias; configAliases stays alias → ref so the page can check names.
+        const main = state.accounts.find((a) => a.ref === 'demo:main')!
+        assert.deepEqual(main.aliasArgs, { 'dm-x': ['--model', 'x'] })
+        assert.equal(state.accounts.find((a) => a.ref === 'demo:work')!.aliasArgs, undefined)
+        assert.equal(state.configAliases?.['dm-x'], 'demo:main')
       } finally {
         await close(server)
       }

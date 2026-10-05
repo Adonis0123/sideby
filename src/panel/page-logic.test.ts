@@ -4,6 +4,7 @@ import { ALIAS_NAME, RESERVED_ALIASES } from '../core/config.ts'
 import { MESSAGES } from './i18n.ts'
 import { renderPage } from './page.ts'
 import {
+  aliasArgsOf,
   aliasIssue,
   attentionReasons,
   cacheHitRate,
@@ -141,6 +142,22 @@ describe('page logic', () => {
     assert.ok(matchesQuery(a, 'claude max', 'Claude Code'))
     assert.ok(matchesQuery(a, 'deepseek', 'Claude Code'))
     assert.equal(matchesQuery(a, 'codex', 'Claude Code'), false)
+    const pi = acct('main', {
+      aliases: ['pi001', 'pi-kimi'],
+      aliasArgs: { 'pi-kimi': ['--model', 'kimi-coding/k3'] },
+    })
+    assert.ok(matchesQuery(pi, 'kimi-coding', 'pi'))
+  })
+
+  it('reads alias arguments from own keys only', () => {
+    const pi = acct('main', {
+      aliases: ['constructor', 'pi-kimi'],
+      aliasArgs: { 'pi-kimi': ['--model', 'k3'] },
+    })
+    assert.deepEqual(aliasArgsOf(pi, 'pi-kimi'), ['--model', 'k3'])
+    for (const name of ['constructor', 'toString', '__proto__', 'pi001'])
+      assert.equal(aliasArgsOf(pi, name), null)
+    assert.equal(aliasArgsOf(acct('main', { aliases: ['constructor'] }), 'constructor'), null)
     const signed = acct('work', { identity: { email: 'work@example.com', org: 'Fake Team' } })
     assert.ok(matchesQuery(signed, 'work@example', 'Claude Code'))
     assert.ok(matchesQuery(signed, 'fake team', 'Claude Code'))

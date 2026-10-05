@@ -174,7 +174,7 @@
           }
         }
       },
-      "description": "One entry per config `shellInitFile`, rewritten after the Account was created."
+      "description": "One entry per config `shellInitFile`, rewritten after the change."
     }
   },
   "title": "sideby new --json"

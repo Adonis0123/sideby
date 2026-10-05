@@ -1,6 +1,7 @@
 // The Panel page's inline script. Plain browser JavaScript in a string (no template literals inside, so String.raw
 // keeps it verbatim); the pure helpers from page-logic.ts are prepended so the tested code is the code that runs.
 import {
+  aliasArgsOf,
   aliasIssue,
   attentionReasons,
   cacheHitRate,
@@ -20,6 +21,7 @@ import {
 } from './page-logic.ts'
 
 const LOGIC = [
+  aliasArgsOf,
   aliasIssue,
   attentionReasons,
   cacheHitRate,
@@ -882,7 +884,10 @@ const MAIN = String.raw`
   function nameLine(a) {
     return h('div', { class: 'ident-name' },
       h('span', { class: 'name', title: a.name }, a.name),
-      (a.aliases || []).slice(0, 3).map((x) => h('span', { class: 'tag tag-alias', title: t('acct.alias') }, x)),
+      (a.aliases || []).slice(0, 3).map((x) => {
+        const args = aliasArgsOf(a, x)
+        return h('span', { class: 'tag tag-alias', title: args ? t('acct.aliasArgs', { args: args.join(' ') }) : t('acct.alias') }, x)
+      }),
       a.kind === 'api' ? h('span', { class: 'tag tag-warn', title: t('tip.api.body') }, t('acct.api')) : null,
       a.login === 'logged-out' && a.kind !== 'api'
         ? h('button', { class: 'tag tag-fail tag-btn', type: 'button', title: t('acct.signInHint'), 'aria-label': t('acct.signedOutLabel', { ref: a.ref }), onclick: () => copyText('sideby login ' + a.ref) }, h('span', { class: 'dot dot-fail', 'aria-hidden': 'true' }), t('acct.signedOut'))

@@ -171,6 +171,8 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 | `sideby list` | 列出账号、类型（main、sub 或 api）、登录态、模型和目录；读取时遇到的问题输出到 stderr | 0 |
 | `sideby run <acct> [-- args]` | 用某个账号启动宿主 | 宿主的退出码；被信号 n 终止时为 128+n |
 | `sideby new <family> <name> [--api] [--alias <short>]` | 新建账号并铺好共享项；`--alias` 同时把 `cc008` 这样的短命令加进 `aliases` | 0；部分失败或短命令没加上为 1 |
+| `sideby alias add <short> <acct> [-- args]` | 给已有账号加短命令，可以带 `sideby run` 时附加的宿主参数 | 0，已存在也是 0；名字被占用、不合法或账号不存在为 1 |
+| `sideby alias rm <short>` | 删掉一个短命令 | 0，不存在也是 0 |
 | `sideby login <acct>` | 用该账号运行家族的登录命令；pi 会直接启动，并提示你输入 `/login` | 宿主的退出码 |
 | `sideby doctor [acct\|family] [--fix] [--force]` | 检查共享项、凭据文件权限和备份残留；`--fix` 修复安全的部分 | 0 没有 fail（允许有 warn）；1 至少一条 fail |
 | `sideby quota [acct]` | 额度和近 7 天用量 | 0 |
@@ -212,7 +214,8 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
   "aliases": {
     "cc": "claude:main",
     "ccw": "claude:work",
-    "cx": "codex:main"
+    "cx": "codex:main",
+    "pi-kimi": { "account": "pi:main", "args": ["--model", "kimi-coding/k3"] }
   },
   "ignore": ["claude:backup"],
   "pluginDirs": ["~/code/sideby-plugins/litellm-gateway"],
@@ -232,12 +235,12 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 
 | 字段 | 含义 |
 |---|---|
-| `accounts.<ref>.args` | 给单个账号加的参数。顺序是：家族默认参数，然后这里的参数，最后是 `--` 之后的参数。sideby 默认不带任何危险参数，需要的话在这里按账号配置。 |
-| `aliases` | 短名到账号引用的映射。`shell-init` 为每个短名生成一个 shell 函数，`sideby run`、`sideby doctor` 等命令也认这些短名。 |
+| `accounts.<ref>.args` | 给单个账号加的参数。顺序是：家族默认参数，然后这里的参数，再是短命令的 `args`，最后是 `--` 之后的参数。sideby 默认不带任何危险参数，需要的话在这里按账号配置。 |
+| `aliases` | 短名到账号引用的映射；也可以写成 `{ "account": "<ref>", "args": [...] }`，用固定的宿主参数（比如换个模型）启动同一个账号。`shell-init` 为每个短名生成一个 shell 函数，`sideby run`、`sideby doctor` 等命令也认这些短名；只有 `sideby run` 会加上 `args`。同一账号的几个短名共用它的登录态和会话。短名不能设置环境变量。 |
 | `ignore` | 看起来像账号、其实不是的账号引用（`<family>:<name>`）。名字里有 `bak`、`backup`、`old`、`tmp` 时，doctor 会给一条 warn，建议加到这里。 |
 | `pluginDirs` | 额外的插件目录，只接受绝对路径或以 `~/` 开头的路径。 |
 | `plugins.<name>` | 单个插件的设置；`enabled` 控制开关，内置家族也适用。 |
-| `shellInitFile` | 可选，`{ "zsh": …, "bash": … }`，绝对路径或以 `~/` 开头。sideby 每次新增账号或别名（`sideby new`、面板）后，都用 `sideby shell-init <shell>` 的输出重写这些文件，source 它的 shell 就能用上新命令。不是 `shell-init` 写的文件，它不会覆盖。 |
+| `shellInitFile` | 可选，`{ "zsh": …, "bash": … }`，绝对路径或以 `~/` 开头。sideby 每次新增账号、新增或删除别名（`sideby new`、`sideby alias`、面板）后，都用 `sideby shell-init <shell>` 的输出重写这些文件，source 它的 shell 就能用上新命令。不是 `shell-init` 写的文件，它不会覆盖。 |
 | `extraSharedItems.<family>` | 在内置清单之外加你自己的共享项，每项要写 Share Mode（`link`、`copy`、`link-or-copy`、`link-or-local`、`local`、`local-if-api`、`info`、`json-key`）。`path` 相对于账号目录，绝对路径和 `..` 会被拒绝。 |
 
 ### Shell 函数
@@ -250,6 +253,15 @@ eval "$(sideby shell-init zsh)"
 它会为每个账号定义一个函数，例如 `sideby-claude-work`，再为每个别名各定义一个。按上面的配置，`ccw --resume` 等同于 `sideby run claude:work -- --resume`。之后新建的账号，要开新 shell（或再执行一次 `eval`）才有对应的函数。
 
 新建账号时想顺手加短命令，就传 `--alias`（`sideby new claude 008 --alias cc008`），或在面板「新建账号」里填「短命令」。面板会按同一家族已有的别名推断：`cc001` … `cc007` 对应 `claude:001` … `claude:007`，就建议 `cc008`；结尾不是账号名的别名（例如指向 `codex:main` 的 `codex001`）不参与推断。短命令写进 config 文件的 `aliases`，其他键和顺序保持不变；config 不是合法 JSON 时，sideby 拒绝写入，原文件不动。账号建好了但短命令没写进去时，会明确告诉你。
+
+给已有账号加短命令，或想用别的宿主参数启动同一个账号，用 `sideby alias add`：
+
+```sh
+sideby alias add pi-kimi pi:main -- --model kimi-coding/k3   # pi-kimi = 换了模型的 pi001
+sideby alias rm pi-kimi
+```
+
+面板在账号旁边列出它的每个短命令（悬停能看到参数），搜索也能按参数找到账号。还要改环境变量的入口不算短命令，继续写在你的 shell rc 里。
 
 如果你想 source 一个文件、不用 `eval`（这样开新 shell 时不用启动 Node），设置 `shellInitFile` 后 source 它：
 
@@ -372,7 +384,7 @@ Node 从 22.18 起默认剥离 TypeScript 类型，sideby 才能直接 `import()
 
 | 内容 | 位置 |
 |---|---|
-| 配置（sideby 只会往里加 `aliases` 条目，来自 `new --alias` 或面板） | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
+| 配置（sideby 只写其中的 `aliases`，来自 `new --alias`、`sideby alias` 或面板） | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
 | 你的插件 | `${XDG_CONFIG_HOME:-~/.config}/sideby/plugins/` |
 | 状态：额度缓存、上次体检结果、`settings.json` 原始字节、后台面板的 pid 和日志 | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
 | 桌面应用（`sideby app install`） | macOS `~/Applications/sideby.app`；Linux `~/.local/share/applications/sideby.desktop`、`~/.local/share/sideby/`、`~/.local/share/icons/hicolor/*/apps/sideby.*` |

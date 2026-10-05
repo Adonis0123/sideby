@@ -2,6 +2,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { resolveRef } from '../core/accounts.ts'
+import { aliasArgs, aliasRefs } from '../core/config.ts'
 import { UserError } from '../core/errors.ts'
 import { packageVersion } from '../core/version.ts'
 import type { AccountStatus, DoctorHistory, FamilyInfo, Runtime } from '../runtime.ts'
@@ -44,6 +45,8 @@ export type PanelAccount = (AccountStatus | (Account & Partial<AccountStatus>)) 
   health?: { at: string; fail: number; warn: number }
   /** Config `aliases` that point at this Account, sorted; absent when none do. */
   aliases?: string[]
+  /** Host arguments of those aliases that add any (alias → arguments); absent when none do. */
+  aliasArgs?: Record<string, string[]>
 }
 
 export type { DoctorHistory }
@@ -94,7 +97,7 @@ export interface PanelState {
   quotaSetups: { family: string; summary: string; plan: QuotaSetupPlan }[]
   /** Latest Doctor result per Account and per Family. */
   history?: DoctorHistory
-  /** The config `aliases` as written (alias → Account ref), so the page can tell which names are taken. */
+  /** The config `aliases` as alias → Account ref (arguments left out), so the page can tell which names are taken. */
   configAliases?: Record<string, string>
 }
 
@@ -223,7 +226,7 @@ async function buildState(rt: Runtime, opts: { version: string; readOnly: boolea
     rt.quotaSetups(),
   ])
   const health = healthByAccount(history)
-  const aliases = aliasesByAccount(rt.config.aliases, accounts)
+  const aliases = aliasesByAccount(aliasRefs(rt.config.aliases), accounts)
   return {
     schemaVersion: 1,
     version: opts.version,
@@ -238,13 +241,21 @@ async function buildState(rt: Runtime, opts: { version: string; readOnly: boolea
         const st = await accountState(rt, a, families)
         const h = health.get(a.ref)
         const names = aliases.get(a.ref)
-        return { ...st, ...(h ? { health: h } : {}), ...(names ? { aliases: names } : {}) }
+        const withArgs = (names ?? [])
+          .map((n) => [n, aliasArgs(rt.config.aliases?.[n])] as const)
+          .filter(([, args]) => args.length)
+        return {
+          ...st,
+          ...(h ? { health: h } : {}),
+          ...(names ? { aliases: names } : {}),
+          ...(withArgs.length ? { aliasArgs: Object.fromEntries(withArgs) } : {}),
+        }
       }),
     ),
     pluginErrors: rt.pluginErrors.map((e) => ({ where: e.where, message: e.message })),
     quotaSetups,
     ...(history ? { history } : {}),
-    ...(rt.config.aliases ? { configAliases: { ...rt.config.aliases } } : {}),
+    ...(rt.config.aliases ? { configAliases: aliasRefs(rt.config.aliases) } : {}),
   }
 }
 

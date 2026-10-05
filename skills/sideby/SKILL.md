@@ -1,6 +1,6 @@
 ---
 name: sideby
-description: Use when the user wants to run several AI coding accounts at the same time (Claude Code, Codex, Grok Build, pi), create a new Claude, Codex, Grok or pi account or API account, check how much quota or usage each account has left, or repair a broken or drifted account directory (skills, hooks, rules, settings not shared, wrong symlinks, credential file permissions). Drives the `sideby` CLI with `--json` for diagnosis and leaves sign-in and credentials to the user.
+description: Use when the user wants to run several AI coding accounts at the same time (Claude Code, Codex, Grok Build, pi), create a new Claude, Codex, Grok or pi account or API account, add a short command (alias) for an account, including one that starts it with another model, check how much quota or usage each account has left, or repair a broken or drifted account directory (skills, hooks, rules, settings not shared, wrong symlinks, credential file permissions). Drives the `sideby` CLI with `--json` for diagnosis and leaves sign-in and credentials to the user.
 ---
 
 # sideby
@@ -72,6 +72,8 @@ sideby new claude 008 --alias cc008  # also adds the short command cc008 to conf
 
 Only pass `--alias` when the user wants a short command; follow their existing pattern (`cc001`…`cc007` for `claude:001`…`claude:007` suggests `cc008`). An invalid, reserved or taken alias is refused before anything is created. If `alias.added` is false in `--json`, the account exists but the alias is missing: tell the user the message, do not edit the config by hand.
 
+For an account that already exists, add the short command with `sideby alias add <short> <ref> --json`. To start one account with fixed Host arguments, such as another model, put them after `--`: `sideby alias add pi-kimi pi:main --json -- --model kimi-coding/k3`. It is the same account (same login, same sessions), not a new one; do not create an account per model. Only `sideby run <short>` adds the arguments. `status: "exists"` means it was already there; a refusal names the next step (`sideby alias rm <short>` first). Entry points that need environment variables are not aliases: leave them in the user's shell rc. Do not edit `aliases` in the config by hand.
+
 Families: `claude`, `codex`, `grok`, `pi`. Then:
 
 - **Subscription account**: tell the user to run `sideby login claude:work` in their own terminal (for pi, `sideby login pi:<name>` starts pi; then they type `/login`). Do not run it for them.
@@ -94,7 +96,7 @@ Usage (7-day tokens) is read by sideby itself from Claude Code and Codex local r
 
 ## Launching
 
-`sideby run <ref> [-- host args]` starts an interactive Host session in the user's terminal. Do not start it from an agent shell; give the user the command. `eval "$(sideby shell-init zsh)"` defines one function per account (`sideby-claude-work`) plus the `aliases` map in config. Users who source a file instead set config `shellInitFile` (for example `{ "zsh": "~/.config/sideby/shell-init.zsh" }`); `new` keeps it current, and `sideby shell-init zsh --write` rewrites it on demand. New functions work in a new shell.
+`sideby run <ref> [-- host args]` starts an interactive Host session in the user's terminal. Do not start it from an agent shell; give the user the command. `eval "$(sideby shell-init zsh)"` defines one function per account (`sideby-claude-work`) plus the `aliases` map in config. Users who source a file instead set config `shellInitFile` (for example `{ "zsh": "~/.config/sideby/shell-init.zsh" }`); `new` and `alias add|rm` keep it current, and `sideby shell-init zsh --write` rewrites it on demand. New functions work in a new shell.
 
 ## Panel
 

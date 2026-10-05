@@ -32,6 +32,45 @@ export function aliasProblem(alias: string): string | null {
   return null
 }
 
+/** One `aliases` value: an Account ref, or a ref plus Host arguments that only `sideby run` adds (ADR-0005). */
+const AliasSchema = Type.Union([
+  Type.String(),
+  Type.Object(
+    {
+      account: Type.String({ pattern: '^[^:]+:.+$', description: 'The Account ref, `<family>:<name>`.' }),
+      args: Type.Optional(
+        Type.Array(Type.String(), {
+          description:
+            'Host arguments `sideby run <alias>` adds after the Account `args`, before the user’s.',
+        }),
+      ),
+    },
+    { additionalProperties: false },
+  ),
+])
+
+export type AliasValue = Static<typeof AliasSchema>
+
+/** The Account ref an Alias starts. */
+export const aliasAccount = (value: AliasValue): string => (typeof value === 'string' ? value : value.account)
+
+/** The Host arguments an Alias adds to `sideby run`; none for a plain ref. */
+export const aliasArgs = (value: AliasValue | undefined): string[] =>
+  typeof value === 'object' ? [...(value.args ?? [])] : []
+
+/** `aliases` as alias → Account ref, for lookups that ignore the arguments. */
+export function aliasRefs(aliases: Readonly<Record<string, AliasValue>> | undefined): Record<string, string> {
+  return Object.fromEntries(Object.entries(aliases ?? {}).map(([name, v]) => [name, aliasAccount(v)]))
+}
+
+const sameAlias = (a: AliasValue, b: AliasValue) =>
+  aliasAccount(a) === aliasAccount(b) && JSON.stringify(aliasArgs(a)) === JSON.stringify(aliasArgs(b))
+
+const describeAlias = (v: AliasValue) => {
+  const args = aliasArgs(v)
+  return args.length ? `${aliasAccount(v)} with ${args.join(' ')}` : aliasAccount(v)
+}
+
 export const ConfigSchema = Type.Object(
   {
     $schema: Type.Optional(Type.String()),
@@ -43,8 +82,9 @@ export const ConfigSchema = Type.Object(
       ),
     ),
     aliases: Type.Optional(
-      Type.Record(Type.String({ pattern: '^[A-Za-z_][A-Za-z0-9_-]*$' }), Type.String(), {
-        description: 'Short shell function names created by `sideby shell-init`, mapped to Account refs.',
+      Type.Record(Type.String({ pattern: '^[A-Za-z_][A-Za-z0-9_-]*$' }), AliasSchema, {
+        description:
+          'Short shell function names created by `sideby shell-init`, mapped to an Account ref or to `{ account, args }`.',
       }),
     ),
     ignore: Type.Optional(Type.Array(Type.String(), { description: 'Account refs that are not Accounts.' })),
@@ -112,18 +152,16 @@ async function configTarget(file: string): Promise<string> {
 }
 
 /**
- * Adds `alias → ref` to the config file's `aliases`. Re-reads the file, keeps every other key, their order and
- * `$schema`, and writes 2-space JSON with a trailing newline atomically, keeping the file's mode (0600 for a new
- * file). Refuses, without writing, a file that is not valid JSON or not a valid config, an invalid alias, or one
- * that already points elsewhere. Returns the aliases now in the file.
+ * Re-reads the config file, lets `edit` change its `aliases`, and writes the result: every other key and their
+ * order kept (with `$schema`), 2-space JSON with a trailing newline, atomically, keeping the file's mode (0600 for
+ * a new file). Refuses, without writing, a file that is not valid JSON or not a valid config, or one that changed
+ * while sideby wrote it. `edit` returns null to leave the file alone. `retry` names what to do again after a fix.
  */
-export async function addConfigAlias(
+async function editConfigAliases(
   file: string,
-  alias: string,
-  ref: string,
-): Promise<{ status: 'added' | 'exists'; aliases: Record<string, string> }> {
-  const problem = aliasProblem(alias)
-  if (problem) throw new ConfigError(`alias "${alias}" ${problem} (it becomes a shell function name)`)
+  retry: string,
+  edit: (current: Record<string, AliasValue>) => Record<string, AliasValue> | null,
+): Promise<Record<string, AliasValue>> {
   const target = await configTarget(file)
   let raw: string | null = null
   try {
@@ -139,25 +177,20 @@ export async function addConfigAlias(
       parsed = parseJsonSafely(raw, file)
     } catch {
       throw new ConfigError(
-        `${file} is not valid JSON; nothing was changed. Fix the syntax and add the alias again`,
+        `${file} is not valid JSON; nothing was changed. Fix the syntax and ${retry} again`,
       )
     }
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
-      throw new ConfigError(
-        `${file} is not a JSON object; nothing was changed. Fix it and add the alias again`,
-      )
+      throw new ConfigError(`${file} is not a JSON object; nothing was changed. Fix it and ${retry} again`)
     if (!Value.Check(ConfigSchema, parsed))
       throw new ConfigError(
         `${file} does not match schemas/config.json; nothing was changed. Run \`sideby list\` to see why`,
       )
     data = parsed as Record<string, unknown>
   }
-  const current = (data.aliases ?? {}) as Record<string, string>
-  if (Object.hasOwn(current, alias)) {
-    if (current[alias] === ref) return { status: 'exists', aliases: current }
-    throw new ConfigError(`alias "${alias}" already starts ${current[alias]}; pick another name`)
-  }
-  const aliases = { ...current, [alias]: ref }
+  const current = (data.aliases ?? {}) as Record<string, AliasValue>
+  const aliases = edit(current)
+  if (!aliases) return current
   // A new file gets the schema link editors use for completion; an existing file keeps its keys in order.
   const next =
     raw === null ? { $schema: 'https://unpkg.com/sideby/schemas/config.json', aliases } : { ...data, aliases }
@@ -171,5 +204,47 @@ export async function addConfigAlias(
   )
   if (!written)
     throw new ConfigError(`${file} changed while sideby was writing it; nothing was changed. Try again`)
-  return { status: 'added', aliases }
+  return aliases
+}
+
+/**
+ * Adds `alias → ref` to the config file's `aliases`, as `{ account, args }` when `args` is not empty (see
+ * `editConfigAliases` for how the file is written). Refuses an invalid alias, or one that already starts another
+ * Account or the same Account with other arguments. Returns the aliases now in the file.
+ */
+export async function addConfigAlias(
+  file: string,
+  alias: string,
+  ref: string,
+  args: readonly string[] = [],
+): Promise<{ status: 'added' | 'exists'; aliases: Record<string, AliasValue> }> {
+  const problem = aliasProblem(alias)
+  if (problem) throw new ConfigError(`alias "${alias}" ${problem} (it becomes a shell function name)`)
+  const value: AliasValue = args.length ? { account: ref, args: [...args] } : ref
+  let status: 'added' | 'exists' = 'added'
+  const aliases = await editConfigAliases(file, 'add the alias', (current) => {
+    if (!Object.hasOwn(current, alias)) return { ...current, [alias]: value }
+    if (!sameAlias(current[alias]!, value))
+      throw new ConfigError(
+        `alias "${alias}" already starts ${describeAlias(current[alias]!)}; pick another name, or remove it first with \`sideby alias rm ${alias}\``,
+      )
+    status = 'exists'
+    return null
+  })
+  return { status, aliases }
+}
+
+/** Removes `alias` from the config file's `aliases`; `absent` when it was not there (nothing is written then). */
+export async function removeConfigAlias(
+  file: string,
+  alias: string,
+): Promise<{ status: 'removed' | 'absent'; aliases: Record<string, AliasValue> }> {
+  let status: 'removed' | 'absent' = 'absent'
+  const aliases = await editConfigAliases(file, 'remove the alias', (current) => {
+    if (!Object.hasOwn(current, alias)) return null
+    status = 'removed'
+    const { [alias]: _gone, ...rest } = current
+    return rest
+  })
+  return { status, aliases }
 }

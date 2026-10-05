@@ -28,10 +28,35 @@
       "type": "object",
       "patternProperties": {
         "^[A-Za-z_][A-Za-z0-9_-]*$": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "required": [
+                "account"
+              ],
+              "properties": {
+                "account": {
+                  "type": "string",
+                  "pattern": "^[^:]+:.+$",
+                  "description": "The Account ref, `<family>:<name>`."
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Host arguments `sideby run <alias>` adds after the Account `args`, before the user’s."
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
         }
       },
-      "description": "Short shell function names created by `sideby shell-init`, mapped to Account refs."
+      "description": "Short shell function names created by `sideby shell-init`, mapped to an Account ref or to `{ account, args }`."
     },
     "ignore": {
       "type": "array",

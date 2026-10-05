@@ -171,6 +171,8 @@ Accounts that link `settings.json` to the Main Account (the default) get quota f
 | `sideby list` | Accounts, type (main, sub or api), login state, model, directory; reading problems go to stderr | 0 |
 | `sideby run <acct> [-- args]` | Start the Host for one account | the Host's code; 128+n if killed by signal n |
 | `sideby new <family> <name> [--api] [--alias <short>]` | Create an account and lay out its Shared Items; `--alias` also adds a short command such as `cc008` to `aliases` | 0; 1 if partly failed or the alias was not added |
+| `sideby alias add <short> <acct> [-- args]` | Add a short command for an existing account, optionally with Host arguments that `sideby run` adds | 0, also when it already exists; 1 if the name is taken, invalid or the account does not exist |
+| `sideby alias rm <short>` | Remove a short command | 0, also when it is not there |
 | `sideby login <acct>` | Run the family's sign-in command for that account; for pi, start pi and tell you to type `/login` | the Host's code |
 | `sideby doctor [acct\|family] [--fix] [--force]` | Check Shared Items, credential file modes, leftovers; `--fix` repairs what is safe | 0 no failures (warnings allowed); 1 at least one failure |
 | `sideby quota [acct]` | Quota and 7-day usage | 0 |
@@ -212,7 +214,8 @@ Optional. `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json`, schema in [`schema
   "aliases": {
     "cc": "claude:main",
     "ccw": "claude:work",
-    "cx": "codex:main"
+    "cx": "codex:main",
+    "pi-kimi": { "account": "pi:main", "args": ["--model", "kimi-coding/k3"] }
   },
   "ignore": ["claude:backup"],
   "pluginDirs": ["~/code/sideby-plugins/litellm-gateway"],
@@ -232,12 +235,12 @@ Optional. `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json`, schema in [`schema
 
 | Field | Meaning |
 |---|---|
-| `accounts.<ref>.args` | Arguments added for one account. Order: family defaults, then these, then what you pass after `--`. sideby adds no dangerous flags by default; put them here per account if you want them. |
-| `aliases` | Short names mapped to account refs. `shell-init` turns each into a shell function, and commands such as `sideby run` and `sideby doctor` accept them too. |
+| `accounts.<ref>.args` | Arguments added for one account. Order: family defaults, then these, then an alias's `args`, then what you pass after `--`. sideby adds no dangerous flags by default; put them here per account if you want them. |
+| `aliases` | Short names mapped to an account ref, or to `{ "account": "<ref>", "args": [...] }` for one account started with fixed Host arguments (another model, say). `shell-init` turns each into a shell function, and commands such as `sideby run` and `sideby doctor` accept them too; only `sideby run` adds the `args`. Two aliases of one account share its login and sessions. An alias cannot set environment variables. |
 | `ignore` | Account refs (`<family>:<name>`) that look like accounts but are not. Doctor warns about names containing `bak`, `backup`, `old` or `tmp` and suggests adding them here. |
 | `pluginDirs` | Extra plugin directories. Absolute paths or paths starting with `~/`. |
 | `plugins.<name>` | Settings for one plugin; `enabled` turns it on or off, built-in families included. |
-| `shellInitFile` | Optional `{ "zsh": …, "bash": … }`, absolute or `~/` paths. Whenever sideby adds an account or an alias (`sideby new`, the panel), it rewrites each file with what `sideby shell-init <shell>` prints, so a shell that sources the file picks up new commands. It never overwrites a file that `shell-init` did not write. |
+| `shellInitFile` | Optional `{ "zsh": …, "bash": … }`, absolute or `~/` paths. Whenever sideby adds an account or adds or removes an alias (`sideby new`, `sideby alias`, the panel), it rewrites each file with what `sideby shell-init <shell>` prints, so a shell that sources the file picks up new commands. It never overwrites a file that `shell-init` did not write. |
 | `extraSharedItems.<family>` | Your own Shared Items on top of the built-in list, each with a Share Mode (`link`, `copy`, `link-or-copy`, `link-or-local`, `local`, `local-if-api`, `info`, `json-key`). `path` is relative to the account directory; absolute paths and `..` are rejected. |
 
 ### Shell functions
@@ -250,6 +253,15 @@ eval "$(sideby shell-init zsh)"
 This defines one function per account, such as `sideby-claude-work`, plus one per alias. With the config above, `ccw --resume` is the same as `sideby run claude:work -- --resume`. Accounts created later need a new shell (or another `eval`) before their function exists.
 
 To add a short command when you create an account, pass `--alias` (`sideby new claude 008 --alias cc008`) or fill in "Short command" in the panel's New account dialog. The panel suggests one from your other aliases of that family: `cc001` … `cc007` for `claude:001` … `claude:007` suggest `cc008`; aliases that do not end in their account's name, such as `codex001` for `codex:main`, are ignored. The alias goes into `aliases` in the config file, which sideby rewrites with every other key kept in order; it refuses a config that is not valid JSON and leaves it alone. If the account was created but the alias could not be written, it says so.
+
+For an account that already exists, or to start one account with other Host arguments, use `sideby alias add`:
+
+```sh
+sideby alias add pi-kimi pi:main -- --model kimi-coding/k3   # pi-kimi = pi001 with another model
+sideby alias rm pi-kimi
+```
+
+The panel shows every alias next to its account (hover one to see its arguments) and finds an account by them in search. Entry points that also change environment variables are not aliases; keep them in your shell rc.
 
 If you prefer sourcing a file over `eval` (a new shell then does not start Node), set `shellInitFile` and source it:
 
@@ -372,7 +384,7 @@ From 22.18, Node strips TypeScript types by default, so sideby can `import()` yo
 
 | What | Where |
 |---|---|
-| Config (sideby only adds `aliases` entries to it, from `new --alias` or the panel) | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
+| Config (sideby only writes `aliases` in it, from `new --alias`, `sideby alias` or the panel) | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
 | Your plugins | `${XDG_CONFIG_HOME:-~/.config}/sideby/plugins/` |
 | State: quota cache, last Doctor result, original `settings.json` bytes, background panel pid and logs | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
 | Desktop app (`sideby app install`) | macOS `~/Applications/sideby.app`; Linux `~/.local/share/applications/sideby.desktop`, `~/.local/share/sideby/`, `~/.local/share/icons/hicolor/*/apps/sideby.*` |

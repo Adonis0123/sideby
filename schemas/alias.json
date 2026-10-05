@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/alias.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "ok",
+    "alias",
+    "status"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "False when a config `shellInitFile` was not rewritten."
+    },
+    "alias": {
+      "type": "string"
+    },
+    "status": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "added"
+        },
+        {
+          "type": "string",
+          "const": "exists"
+        },
+        {
+          "type": "string",
+          "const": "removed"
+        },
+        {
+          "type": "string",
+          "const": "absent"
+        }
+      ]
+    },
+    "account": {
+      "type": "string"
+    },
+    "args": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Host arguments `sideby run <alias>` adds."
+    },
+    "shellInitFiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "shell",
+          "path",
+          "ok"
+        ],
+        "properties": {
+          "shell": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "zsh"
+              },
+              {
+                "type": "string",
+                "const": "bash"
+              }
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "action": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "written"
+              },
+              {
+                "type": "string",
+                "const": "unchanged"
+              }
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "One entry per config `shellInitFile`, rewritten after the change."
+    }
+  },
+  "title": "sideby alias add|rm --json"
+}

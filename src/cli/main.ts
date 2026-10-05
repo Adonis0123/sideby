@@ -13,6 +13,10 @@ Usage:
   sideby new <family> <name> [--api] [--alias <short>]
                                       create an account (families: claude, codex, grok, pi);
                                       --alias also adds a short command such as cc008
+  sideby alias add <short> <account> [-- args]
+                                      add a short command, optionally with host arguments
+                                      (sideby alias add pi-kimi pi:main -- --model kimi-coding/k3)
+  sideby alias rm <short>             remove a short command
   sideby login <account>              sign in to an account
   sideby doctor [target] [--fix] [--force]
                                       check shared items and permissions; --fix repairs safe issues
@@ -30,7 +34,7 @@ Usage:
   sideby plugins                      list loaded plugins and load errors
 
 Options:
-  --json        machine-readable output (list, new, doctor, quota, plugins, app)
+  --json        machine-readable output (list, new, alias, doctor, quota, plugins, app)
   -h, --help    show this help
   -v, --version show the version
 
@@ -46,6 +50,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   run: { flags: [] },
   login: { flags: [] },
   new: { flags: ['api', 'json'], valued: ['alias'] },
+  alias: { flags: ['json'] },
   doctor: { flags: ['fix', 'force', 'json'] },
   quota: { flags: ['json', 'yes'] },
   ui: { flags: ['no-open', 'background', 'stop', 'serve-detached'], valued: ['port'] },
@@ -97,7 +102,18 @@ export async function main(argv: string[]): Promise<number> {
         rest: [...more, ...(sep === -1 ? [] : args.slice(sep + 1))],
       }
       if (ref === '-h' || ref === '--help') parsed.flags.set('help', true)
-    } else parsed = parseArgs(args, [...spec.flags, 'help'], spec.valued ?? [])
+    } else {
+      try {
+        parsed = parseArgs(args, [...spec.flags, 'help'], spec.valued ?? [])
+      } catch (err) {
+        // `alias add` takes Host arguments too; the usual mistake is leaving out the `--` before them.
+        if (cmd === 'alias' && err instanceof UsageError && err.message.startsWith('unknown option'))
+          throw new UsageError(
+            `${err.message}; put Host arguments after \`--\`, for example: sideby alias add pi-kimi pi:main -- --model kimi-coding/k3`,
+          )
+        throw err
+      }
+    }
     if (parsed.flags.has('help')) {
       console.log(HELP)
       return 0
@@ -112,6 +128,8 @@ export async function main(argv: string[]): Promise<number> {
         return await cmds.cmdRun(parsed, io, 'login')
       case 'new':
         return await cmds.cmdNew(parsed, io)
+      case 'alias':
+        return await cmds.cmdAlias(parsed, io)
       case 'doctor':
         return await cmds.cmdDoctor(parsed, io)
       case 'quota':

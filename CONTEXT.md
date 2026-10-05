@@ -26,7 +26,7 @@ Avoid: *profile* (Codex already uses it for a config layer that does not change 
 - **Launch**: starting a Host for one Account, with only that Account's identity in the environment.
 - **Hijack Variable**: an environment variable that would override an Account's identity if inherited (for example a global `ANTHROPIC_API_KEY`). Cleared before every Launch.
 - **Side by side**: two or more Accounts launched at the same time, from any Family, without affecting each other.
-- **Alias** (the Panel says *short command*): a name in the config `aliases`, such as `cc008`, that starts one Account. `sideby shell-init` turns each into a shell function; commands that take an Account accept it too.
+- **Alias** (the Panel says *short command*): a name in the config `aliases`, such as `cc008`, that starts one Account, optionally with fixed Host arguments (`pi-kimi` starts the same Account as `pi001` with another model). It never changes which Account starts, so two Aliases of one Account share its login and sessions. `sideby shell-init` turns each into a shell function; commands that take an Account accept it too.
 - **Shell-init file**: a file named in the config `shellInitFile` that sideby keeps equal to the `sideby shell-init` output, for shells that source it instead of running `eval`.
 
 ## Health
