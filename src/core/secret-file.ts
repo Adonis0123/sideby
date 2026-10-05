@@ -5,26 +5,43 @@ export class SecretFileError extends UserError {}
 
 const LINE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/
 
+/** Non-secret locations a Secret File may reference from the environment, such as `$HOME/bin/notify`. */
+export const SECRET_FILE_ENV_REFS = [
+  'HOME',
+  'USER',
+  'LOGNAME',
+  'TMPDIR',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+  'XDG_STATE_HOME',
+  'XDG_CACHE_HOME',
+] as const
+
 const REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)|\$\{/g
 
 /**
  * Parses the dotenv subset sideby supports: KEY=VALUE, optional `export `, quotes and comments.
  * `$NAME` and `${NAME}` in unquoted or double-quoted values expand to a key defined earlier in the
- * same file; the process environment is never read and nothing is executed. Errors name the line,
- * never its content.
+ * same file, else to one of SECRET_FILE_ENV_REFS from `env`; no other variable is read and nothing is
+ * executed. Errors name the line, never its content.
  */
-export function parseSecretFile(text: string, file: string): Record<string, string> {
+export function parseSecretFile(
+  text: string,
+  file: string,
+  env: Readonly<Record<string, string | undefined>> = {},
+): Record<string, string> {
   const out: Record<string, string> = {}
   const lines = text.split(/\r?\n/)
   const expand = (s: string, line: number) =>
     s.replace(REF, (whole, braced?: string, bare?: string) => {
       const name = braced ?? bare
       if (!name) throw new SecretFileError(`${file}:${line}: unterminated \${`)
-      if (!Object.hasOwn(out, name))
-        throw new SecretFileError(
-          `${file}:${line}: ${whole} is not defined earlier in this file; sideby does not read your shell environment`,
-        )
-      return out[name]!
+      if (Object.hasOwn(out, name)) return out[name]!
+      const fromEnv = (SECRET_FILE_ENV_REFS as readonly string[]).includes(name) ? env[name] : undefined
+      if (fromEnv !== undefined) return fromEnv
+      throw new SecretFileError(
+        `${file}:${line}: ${whole} is not defined earlier in this file; from the environment only ${SECRET_FILE_ENV_REFS.join(', ')} are read`,
+      )
     })
   lines.forEach((raw, i) => {
     const line = raw.trim()
@@ -90,7 +107,10 @@ export async function inspectSecretFile(file: string): Promise<SecretFileState> 
 }
 
 /** Reads a Secret File after inspectSecretFile accepts it. */
-export async function readSecretFile(file: string): Promise<Record<string, string>> {
+export async function readSecretFile(
+  file: string,
+  env: Readonly<Record<string, string | undefined>> = {},
+): Promise<Record<string, string>> {
   const state = await inspectSecretFile(file)
   if (state.kind === 'missing') throw new SecretFileError(`${file} is missing`)
   if (state.kind === 'not-file')
@@ -99,7 +119,7 @@ export async function readSecretFile(file: string): Promise<Record<string, strin
     throw new SecretFileError(
       `${file} has mode ${state.mode.toString(8)}; run \`chmod 600 ${file}\` so only you can read it`,
     )
-  return parseSecretFile(await readFile(file, 'utf8'), file)
+  return parseSecretFile(await readFile(file, 'utf8'), file, env)
 }
 
 export function secretFileTemplate(vars: readonly string[], familyTitle: string): string {

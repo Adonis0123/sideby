@@ -148,12 +148,13 @@ describe('run', () => {
       assert.equal((await stat(secret)).mode & 0o777, 0o600)
       await writeFile(
         secret,
-        'export OPENAI_BASE_URL="https://relay.invalid/v1"\nOPENAI_API_KEY=sk-test # comment\n',
+        'export OPENAI_BASE_URL="https://relay.invalid/v1"\nMASTER=sk-test # comment\nOPENAI_API_KEY="$MASTER"\nNOTIFY=$HOME/bin/notify\n',
       )
       assert.equal((await sideby(h, ['run', 'relay'])).code, 0)
       const [rec] = await readHostLog(h, 'codex')
       assert.equal(rec!.env.OPENAI_BASE_URL, 'https://relay.invalid/v1')
       assert.equal(rec!.env.OPENAI_API_KEY, 'sk-test')
+      assert.equal(rec!.env.NOTIFY, h.path('bin/notify'))
 
       await chmod(secret, 0o644)
       const loose = await sideby(h, ['run', 'relay'])

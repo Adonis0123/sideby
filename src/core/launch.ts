@@ -49,7 +49,7 @@ export async function prepareLaunch(opts: {
   const env: Env = { ...opts.baseEnv }
   for (const v of family.hijackVars) delete env[v]
   delete env[family.selectVar]
-  if (account.secretFile) Object.assign(env, await readSecretFile(account.secretFile))
+  if (account.secretFile) Object.assign(env, await readSecretFile(account.secretFile, opts.baseEnv))
   if (!account.isMain) env[family.selectVar] = account.dir
 
   let args: string[]

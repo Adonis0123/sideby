@@ -48,14 +48,27 @@ describe('parseSecretFile', () => {
       ESCAPED: '$KEY costs $5',
       LATER: 'changed',
     })
+  })
+
+  it('reads only non-secret locations such as HOME from the environment it is given', () => {
+    const env = { HOME: '/fake-home', OPENAI_API_KEY: 'leak' }
+    assert.deepEqual(parseSecretFile('NOTIFY="$HOME/bin/notify"\nHOME=/own\nAGAIN=$HOME', 'p', env), {
+      NOTIFY: '/fake-home/bin/notify',
+      HOME: '/own',
+      AGAIN: '/own',
+    })
     process.env.SIDEBY_TEST_FROM_ENV = 'leak'
     try {
-      assert.throws(
-        () => parseSecretFile('A="$SIDEBY_TEST_FROM_ENV"', 'p'),
-        (e: unknown) =>
-          e instanceof SecretFileError &&
-          /p:1: \$SIDEBY_TEST_FROM_ENV is not defined earlier/.test(e.message),
-      )
+      for (const text of ['A="$OPENAI_API_KEY"', 'A=$SIDEBY_TEST_FROM_ENV', 'A=$USER'])
+        assert.throws(
+          () => parseSecretFile(text, 'p', env),
+          (e: unknown) =>
+            e instanceof SecretFileError &&
+            /p:1: \$\w+ is not defined earlier in this file; from the environment only HOME/.test(
+              e.message,
+            ) &&
+            !e.message.includes('leak'),
+        )
     } finally {
       delete process.env.SIDEBY_TEST_FROM_ENV
     }
