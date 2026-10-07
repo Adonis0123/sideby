@@ -59,7 +59,7 @@ scripts/          leak-check.sh, demo-home.ts, sync-skill-version.ts (run by `np
 docs/             adr/, specs/, plans/, verification/, assets/ (README screenshots), release.md
 ```
 
-Public contract files: `src/types.ts`, `src/runtime.ts`, `testing/index.ts`, `schemas/`. Changing them affects plugin authors and JSON consumers; see "Change process".
+Public contract files: `src/types.ts`, `src/runtime.ts`, `testing/index.ts`, `schemas/`, and what Portals rely on (ADR-0006; `src/index.ts`, `src/panel/handler.ts`, `src/panel/theme.ts`): every `createPanelHandler` option, its `Promise<boolean>` result and `token`, every `PanelTheme` field and `PanelThemeTokens` key, and the `app` and `version` fields of `/api/health`. Changing them affects plugin authors, Portal authors and JSON consumers; see "Change process".
 
 ## Invariants
 
@@ -107,6 +107,10 @@ Shared Item paths must be relative and stay inside the account directory: config
 - Plugins may only `import type` from `sideby`. Never add an API that requires a plugin to import a value from sideby; pass it through `PluginApi`.
 - Loader trust checks (owner is the current user, not group or other writable) stay on for plugin directories, `plugin.json`, entry files and `sideby-before-launch`.
 - Hook errors carry the plugin name. A failing plugin affects only itself, except that a failing `launch.before` stops the launch and a failing `account.create.before` stops `new` before anything is written.
+
+**Panel**
+
+- The Panel's CSP (`frame-ancestors 'self'` included) and its Host, Origin (`http://<Host>`) and token checks are never loosened, also not to suit a Portal (ADR-0006).
 
 **Output contract**
 

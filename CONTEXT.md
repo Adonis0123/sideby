@@ -50,3 +50,4 @@ Avoid: *rotation* and *failover* (sideby never moves work between Accounts on it
 - **Family Plugin**: a Plugin that describes one Family.
 - **Hook**: a function a Plugin runs at a lifecycle event: before a Launch, after an Account is created, or during Doctor.
 - **Panel**: the local web page that shows every Account, its health, Quota and Usage.
+- **Portal**: another local server that shows the Panel next to other tools' pages, for example under its own `*.localhost` host with a shared top bar. It mounts `createPanelHandler` under a path of its own origin and shows that path in an iframe on a page of the same host and port. It configures the Panel only through the handler's options and never injects markup into it (ADR-0006).
