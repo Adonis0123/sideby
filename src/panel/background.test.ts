@@ -97,6 +97,46 @@ describe('background panel', () => {
     })
   })
 
+  it('replaces a background panel that runs another build, and reuses one that runs this build', async () => {
+    await withFakeHome(async (h) => {
+      const port = 30000 + Math.floor(Math.random() * 20000)
+      const base = { ...(h.env as Record<string, string>), SHELL: '/bin/sh' }
+      const start = (build: string) =>
+        sideby({ ...base, SIDEBY_BUILD_ID: build }, [
+          'ui',
+          '--background',
+          '--no-open',
+          '--port',
+          String(port),
+        ])
+      const pids: number[] = []
+      try {
+        assert.equal((await start('old')).code, 0)
+        const old = (await readPid(h))!.pid
+        pids.push(old)
+        const health = (await (await fetch(`http://127.0.0.1:${port}/api/health`)).json()) as {
+          build: string
+        }
+        assert.match(health.build, /\+old$/)
+        const upgraded = await start('new')
+        assert.equal(upgraded.code, 0, upgraded.err)
+        assert.match(upgraded.out, /replacing the one from an older sideby/)
+        const now = (await readPid(h))!.pid
+        pids.push(now)
+        assert.notEqual(now, old)
+        assert.equal(alive(old), false, 'the old build was stopped')
+        const state = (await (await fetch(`http://127.0.0.1:${port}/api/state`)).json()) as { build: string }
+        assert.match(state.build, /\+new$/, 'the page sees the new build and reloads')
+        const same = await start('new')
+        assert.match(same.out, /already running at/)
+        assert.equal((await readPid(h))!.pid, now)
+        assert.equal((await sideby(base, ['ui', '--stop'])).code, 0)
+      } finally {
+        for (const pid of pids) if (alive(pid)) process.kill(pid, 'SIGKILL')
+      }
+    })
+  })
+
   it('starts only one server when two launches race (a double double-click)', async () => {
     await withFakeHome(async (h) => {
       const env = { ...(h.env as Record<string, string>), SHELL: '/bin/sh' }

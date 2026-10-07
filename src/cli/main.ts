@@ -18,6 +18,9 @@ Usage:
                                       (sideby alias add pi-kimi pi:main -- --model kimi-coding/k3)
   sideby alias rm <short>             remove a short command
   sideby login <account>              sign in to an account
+  sideby next <family> [--dry-run] [--include-api] [-- args]
+                                      recommend the account with the most quota left (claude, codex)
+                                      and start it; --dry-run only recommends
   sideby doctor [target] [--fix] [--force]
                                       check shared items and permissions; --fix repairs safe issues
   sideby quota [account]              quota and 7-day token usage
@@ -34,7 +37,7 @@ Usage:
   sideby plugins                      list loaded plugins and load errors
 
 Options:
-  --json        machine-readable output (list, new, alias, doctor, quota, plugins, app)
+  --json        machine-readable output (list, new, next, alias, doctor, quota, plugins, app)
   -h, --help    show this help
   -v, --version show the version
 
@@ -49,6 +52,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   list: { flags: ['json'] },
   run: { flags: [] },
   login: { flags: [] },
+  next: { flags: ['dry-run', 'include-api', 'json'] },
   new: { flags: ['api', 'json'], valued: ['alias'] },
   alias: { flags: ['json'] },
   doctor: { flags: ['fix', 'force', 'json'] },
@@ -111,6 +115,10 @@ export async function main(argv: string[]): Promise<number> {
           throw new UsageError(
             `${err.message}; put Host arguments after \`--\`, for example: sideby alias add pi-kimi pi:main -- --model kimi-coding/k3`,
           )
+        if (cmd === 'next' && err instanceof UsageError && err.message.startsWith('unknown option'))
+          throw new UsageError(
+            `${err.message}; put Host arguments after \`--\`, for example: sideby next claude -- --model opus`,
+          )
         throw err
       }
     }
@@ -126,6 +134,8 @@ export async function main(argv: string[]): Promise<number> {
         return await cmds.cmdRun(parsed, io, 'run')
       case 'login':
         return await cmds.cmdRun(parsed, io, 'login')
+      case 'next':
+        return await cmds.cmdNext(parsed, io)
       case 'new':
         return await cmds.cmdNew(parsed, io)
       case 'alias':
@@ -147,8 +157,11 @@ export async function main(argv: string[]): Promise<number> {
   } catch (err) {
     const usage = err instanceof UsageError
     const message = err instanceof Error ? err.message : String(err)
-    if (wantsJson) console.log(JSON.stringify({ schemaVersion: 1, error: message }, null, 2))
-    else console.error(`sideby: ${message}`)
+    if (wantsJson) {
+      const { UserError } = await import('../core/errors.ts')
+      const code = usage ? 'usage' : err instanceof UserError && err.code ? err.code : 'error'
+      console.log(JSON.stringify({ schemaVersion: 1, error: message, code }, null, 2))
+    } else console.error(`sideby: ${message}`)
     if (!usage && process.env.SIDEBY_DEBUG && err instanceof Error) console.error(err.stack)
     return usage ? 2 : 1
   }

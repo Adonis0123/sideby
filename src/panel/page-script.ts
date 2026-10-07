@@ -17,6 +17,7 @@ import {
   sortAccounts,
   suggestAlias,
   suggestName,
+  updatedAge,
   windowState,
 } from './page-logic.ts'
 
@@ -37,6 +38,7 @@ const LOGIC = [
   sortAccounts,
   suggestAlias,
   suggestName,
+  updatedAge,
   windowState,
 ]
   .map((fn) => fn.toString())
@@ -422,12 +424,10 @@ const MAIN = String.raw`
     if (hr < 24) return t('time.hAgo', { n: hr })
     return t('time.dAgo', { n: Math.round(hr / 24) })
   }
-  // The header's "Updated …" age, in seconds for the first minute so the viewer sees it tick.
+  // The header's "Updated …" age (see updatedAge).
   function agoShort(ms) {
-    const s = Math.max(0, Math.floor(ms / 1000))
-    if (s < 5) return t('time.justNow')
-    if (s < 60) return t('time.secAgo', { n: s })
-    return ago(new Date(Date.now() - ms).toISOString())
+    const a = updatedAge(ms)
+    return t(a.key, { n: a.n })
   }
   function clock(iso) {
     const d = new Date(iso)
@@ -674,9 +674,9 @@ const MAIN = String.raw`
         const v = Number(d.totalTokens) || 0
         const date = new Date(d.date + 'T12:00:00')
         const day = Number.isFinite(date.getTime()) ? date.toLocaleDateString(locale(), { weekday: 'short', month: 'numeric', day: 'numeric' }) : d.date
-        // Every day keeps its slot (a faint track), so empty days read as gaps in time, not missing bars.
-        return h('i', { class: i === daily.length - 1 ? 'today' : null, title: day + ': ' + tokens(v) },
-          v ? h('b', { css: { height: (max ? Math.max(12, Math.round((v / max) * 100)) : 0) + '%' } }) : null)
+        // Every day keeps its slot; an empty day shows only a short stub on the baseline, so it reads as a gap in time.
+        return h('i', { class: (i === daily.length - 1 ? 'today' : '') + (v ? '' : ' zero') || null, title: day + ': ' + tokens(v) },
+          h('b', { css: { height: v && max ? Math.max(10, Math.round((v / max) * 100)) + '%' : null } }))
       }))
   }
   function renderSummary() {
@@ -859,10 +859,10 @@ const MAIN = String.raw`
     const rate = cacheHitRate(u)
     const detail = t('usage.detail', { days: u.days, sessions: u.sessions, input: tokens(u.inputTokens), output: tokens(u.outputTokens), cache: tokens(u.cacheReadTokens + u.cacheWriteTokens) })
     return h('div', { class: 'usage', title: detail },
-      h('div', { class: 'u-top' },
+      h('div', { class: 'u-text' },
         h('span', { class: 'u-num' }, tokens(u.totalTokens), h('span', { class: 'u-unit' }, ' ' + t('usage.tokens'))),
-        u.totalTokens ? spark(u.daily) : null),
-      h('div', { class: 'u-sub' }, rate === null ? tn('usage.sessions', u.sessions) : t('usage.cache', { n: Math.round(rate * 100) })))
+        h('div', { class: 'u-sub' }, rate === null ? tn('usage.sessions', u.sessions) : t('usage.cache', { n: Math.round(rate * 100) }))),
+      u.totalTokens ? spark(u.daily) : null)
   }
   function lastUsed(a) {
     const at = a.usage && a.usage.status === 'ok' && a.usage.lastActivityAt
@@ -889,6 +889,9 @@ const MAIN = String.raw`
         return h('span', { class: 'tag tag-alias', title: args ? t('acct.aliasArgs', { args: args.join(' ') }) : t('acct.alias') }, x)
       }),
       a.kind === 'api' ? h('span', { class: 'tag tag-warn', title: t('tip.api.body') }, t('acct.api')) : null,
+      isNext(a)
+        ? h('button', { class: 'tag tag-ok tag-btn', type: 'button', title: t('acct.nextHint', { family: a.family }), 'aria-label': t('acct.nextLabel', { ref: a.ref, family: a.family }), onclick: () => copyText('sideby next ' + a.family) }, t('acct.next'))
+        : null,
       a.login === 'logged-out' && a.kind !== 'api'
         ? h('button', { class: 'tag tag-fail tag-btn', type: 'button', title: t('acct.signInHint'), 'aria-label': t('acct.signedOutLabel', { ref: a.ref }), onclick: () => copyText('sideby login ' + a.ref) }, h('span', { class: 'dot dot-fail', 'aria-hidden': 'true' }), t('acct.signedOut'))
         : null,
@@ -919,7 +922,9 @@ const MAIN = String.raw`
   }
   // What a row or card shows depends on more than the account (health, view preferences, language); the
   // fingerprint covers what its click handlers use.
-  function rowSig(a) { return sig([a, healthOf(a.ref)]) }
+  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a)]) }
+  // The Account 'sideby next <family>' would pick; the server ranks it with the CLI's rule (spec §3.13).
+  function isNext(a) { return Boolean(S.state && S.state.handoff && S.state.handoff[a.family] === a.ref) }
   function row(a, now, cols) {
     return h('div', { class: 'row' + (a.error ? ' row-error' : ''), role: 'listitem', 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a) },
       h('div', { class: 'ident' }, badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a), emailLine(a), subLine(a))),
@@ -1567,6 +1572,11 @@ const MAIN = String.raw`
       if (state) {
         if (!S.state) ui.fade = true
         S.state = state; S.loadError = null; S.loadedAt = Date.now()
+        // The server now runs another build (sideby was reinstalled and restarted): this page's script is old.
+        if (state.build && BOOT.build && state.build !== BOOT.build && !S.newBuild) {
+          S.newBuild = true
+          if (uiBusy()) toast(t('toast.updated'))
+        }
         // A read-only Panel never records checks, so keep the result of its own last check over the disk.
         if (!BOOT.readOnly || !S.history) S.history = state.history || null
       } else if (!error.network) S.loadError = error // a lost connection has its own notice
@@ -1582,11 +1592,17 @@ const MAIN = String.raw`
       else toast(t('toast.refreshFailed', { msg: error.message }), { kind: 'fail' })
     }
     if (S.state && opts.check) runCheck()
+    reloadForNewBuild()
+  }
+  // Reloads into the new build once the viewer is not in the middle of something (a dialog, a form, a selection).
+  function reloadForNewBuild() {
+    if (S.newBuild && !uiBusy() && !S.fixing && !S.checking && !dlg.busy) location.reload()
   }
   // Once a second: the "Updated" age ticks, a deferred render lands once the viewer is done, and the state
   // reloads on schedule while the page is visible.
   function tick() {
     renderUpdated()
+    reloadForNewBuild()
     if (document.visibilityState !== 'visible' || !S.state) return
     if (S.pending && !S.loading && !uiBusy()) { S.pending = false; renderAll() }
     const now = Date.now()

@@ -338,3 +338,17 @@ export function maskEmail(email: string): string {
   const first = Array.from(email)[0] || ''
   return at > 0 ? `${first}•••${email.slice(at)}` : first ? `${first}•••` : ''
 }
+
+/**
+ * The header's "Updated …" age as a message key and count. The state reloads every 20 s, so the whole first minute
+ * is "just now": a count of seconds would tick all the time and make an idle page look busy. After that, whole
+ * minutes, hours and days, which only show when refreshes stopped (connection lost, page hidden, load failing).
+ */
+export function updatedAge(ms: number): { key: string; n?: number } {
+  const m = Number.isFinite(ms) ? Math.floor(ms / 60000) : 0
+  if (m < 1) return { key: 'time.justNow' }
+  if (m < 60) return { key: 'time.minAgo', n: m }
+  const h = Math.floor(m / 60)
+  if (h < 24) return { key: 'time.hAgo', n: h }
+  return { key: 'time.dAgo', n: Math.floor(h / 24) }
+}

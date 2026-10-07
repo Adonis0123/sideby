@@ -612,3 +612,152 @@ describe('read-only commands', () => {
     })
   })
 })
+
+describe('next (Handoff, spec §3.13)', () => {
+  const iso = (hours: number) => new Date(Date.now() + hours * 3600_000).toISOString()
+  const cache = (h: FakeHome, name: string, five: number, seven: number, resetIn = 2) =>
+    h.write(
+      `.local/state/sideby/quota/claude/${name}.json`,
+      JSON.stringify({
+        observedAt: iso(-0.1),
+        windows: [
+          { label: '5h', windowMinutes: 300, usedPercent: five, resetsAt: iso(resetIn) },
+          { label: '7d', windowMinutes: 10080, usedPercent: seven, resetsAt: iso(90) },
+        ],
+      }),
+    )
+  async function claudeAccounts(h: FakeHome) {
+    await h.write('.claude/settings.json', '{}\n')
+    await h.write('.claude.json', JSON.stringify({ oauthAccount: { id: 'main' } }), 0o600)
+    for (const n of ['work', 'lab']) {
+      await h.write(`.claude-${n}/settings.json`, '{}\n')
+      await h.write(`.claude-${n}/.claude.json`, JSON.stringify({ oauthAccount: { id: n } }), 0o600)
+    }
+    await fakeHost(h, 'claude')
+  }
+
+  it('starts the account with the lowest quota pressure, as `run` would, passing host arguments on', async () => {
+    await withFakeHome(async (h) => {
+      await claudeAccounts(h)
+      await cache(h, 'main', 95, 40)
+      await cache(h, 'work', 30, 50)
+      await cache(h, 'lab', 10, 20)
+      const r = await sideby(h, ['next', 'claude', '--', '--print', 'hi'])
+      assert.equal(r.code, 0, r.err)
+      assert.match(r.out, /Next: claude:lab \(lowest quota pressure, 20%\)/)
+      assert.match(r.out, /handoff note/)
+      const [rec] = await readHostLog(h, 'claude')
+      assert.equal(rec?.env.CLAUDE_CONFIG_DIR, h.path('.claude-lab'))
+      assert.deepEqual(rec?.argv.slice(-2), ['--print', 'hi'])
+    })
+  })
+
+  it('--dry-run and --json only recommend, and never start the host', async () => {
+    await withFakeHome(async (h) => {
+      await claudeAccounts(h)
+      await cache(h, 'main', 95, 40)
+      await cache(h, 'work', 30, 50)
+      const dry = await sideby(h, ['next', 'claude', '--dry-run'])
+      assert.equal(dry.code, 0, dry.err)
+      assert.match(dry.out, /Next: claude:work/)
+      assert.match(dry.out, /sideby run claude:work/)
+      const j = await sideby(h, ['next', 'claude', '--json'])
+      assert.equal(j.code, 0, j.err)
+      const plan = checkSchema('next', j.out) as { pick: string; accounts: { ref: string; state: string }[] }
+      assert.equal(plan.pick, 'claude:work')
+      assert.deepEqual(
+        plan.accounts.map((a) => `${a.ref} ${a.state}`),
+        ['claude:work ready', 'claude:lab unknown', 'claude:main full'],
+      )
+      assert.deepEqual(await readHostLog(h, 'claude'), [])
+    })
+  })
+
+  it('starts nothing when every account is full and says which comes back first', async () => {
+    await withFakeHome(async (h) => {
+      await claudeAccounts(h)
+      await cache(h, 'main', 95, 40, 3)
+      await cache(h, 'work', 90, 50, 1)
+      await cache(h, 'lab', 99, 20, 5)
+      const r = await sideby(h, ['next', 'claude'])
+      assert.equal(r.code, 1)
+      assert.match(r.err, /every claude account is at its limit; claude:work is back at/)
+      const j = await sideby(h, ['next', 'claude', '--json'])
+      assert.equal(j.code, 1)
+      const plan = checkSchema('next', j.out) as { pick: null; earliestReset: { ref: string } }
+      assert.equal(plan.pick, null)
+      assert.equal(plan.earliestReset.ref, 'claude:work')
+      assert.deepEqual(await readHostLog(h, 'claude'), [])
+    })
+  })
+
+  it('starts nothing when no account has quota data, and keeps host arguments in the suggested command', async () => {
+    await withFakeHome(async (h) => {
+      await claudeAccounts(h)
+      const r = await sideby(h, ['next', 'claude', '--', '--model', 'opus'])
+      assert.equal(r.code, 1)
+      assert.match(r.err, /no claude account has quota data yet/)
+      assert.match(r.err, /sideby run claude:main -- --model opus/)
+      const j = await sideby(h, ['next', 'claude', '--json'])
+      assert.equal(j.code, 1)
+      assert.equal((checkSchema('next', j.out) as { hasQuota: boolean }).hasQuota, false)
+      assert.deepEqual(await readHostLog(h, 'claude'), [])
+      await cache(h, 'main', 95, 40)
+      await cache(h, 'work', 20, 30)
+      const dry = await sideby(h, ['next', 'claude', '--dry-run', '--', '--model', 'opus 4'])
+      assert.match(dry.out, /sideby run claude:work -- --model 'opus 4'/)
+      const typo = await sideby(h, ['next', 'claude', '--model', 'opus'])
+      assert.equal(typo.code, 2)
+      assert.match(typo.err, /put Host arguments after `--`/)
+    })
+  })
+
+  it('leaves API accounts out unless --include-api', async () => {
+    await withFakeHome(async (h) => {
+      await claudeAccounts(h)
+      for (const n of ['main', 'work', 'lab']) await cache(h, n, 99, 50)
+      await h.write('.claude-key/proxy.env', 'ANTHROPIC_BASE_URL=https://example.invalid\n', 0o600)
+      const r = await sideby(h, ['next', 'claude', '--dry-run'])
+      assert.equal(r.code, 1)
+      assert.match(r.err, /add --include-api/)
+      const api = await sideby(h, ['next', 'claude', '--dry-run', '--include-api'])
+      assert.equal(api.code, 0, api.err)
+      assert.match(api.out, /Next: claude:key \(API account, pay per use\)/)
+    })
+  })
+
+  it('a family without a public quota source, a missing family or argument each say what to do', async () => {
+    await withFakeHome(async (h) => {
+      const grok = await sideby(h, ['next', 'grok', '--json'])
+      assert.equal(grok.code, 1)
+      const e = checkSchema('error', grok.out) as { code: string; error: string }
+      assert.equal(e.code, 'no-quota-source')
+      assert.match(e.error, /pick one yourself/)
+      const none = await sideby(h, ['next', 'claude'])
+      assert.equal(none.code, 1)
+      assert.match(none.err, /sideby new claude <name>/)
+      const usage = await sideby(h, ['next', '--json'])
+      assert.equal(usage.code, 2)
+      assert.equal((checkSchema('error', usage.out) as { code: string }).code, 'usage')
+    })
+  })
+})
+
+describe('confirmation exit code', () => {
+  it('quota setup without --yes shows the change and exits 10, changing nothing', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}\n')
+      await h.write('.claude.json', JSON.stringify({ oauthAccount: { id: 'x' } }), 0o600)
+      await fakeHost(h, 'claude')
+      await fakeHost(h, 'sideby')
+      const before = await snapshot(h.home)
+      const r = await sideby(h, ['quota', 'setup', 'claude'])
+      assert.equal(r.code, 10, r.err)
+      assert.match(r.out, /--yes/)
+      const j = await sideby(h, ['quota', 'setup', 'claude', '--json'])
+      assert.equal(j.code, 10)
+      assert.equal((checkSchema('quota-setup', j.out) as { applied: boolean }).applied, false)
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+    })
+  })
+})

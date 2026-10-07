@@ -1,13 +1,19 @@
-// The sideby mark drawn without dependencies: the Panel header's logo (a dark rounded tile with two light
-// bars, the second at 55% opacity) rasterised with analytic antialiasing and encoded as PNG, SVG or ICNS.
+// The sideby mark drawn without dependencies: the Panel header's logo (a dark rounded tile with a light disc
+// split into two halves, offset along the diagonal, the second at 55% opacity) rasterised with analytic
+// antialiasing and encoded as PNG, SVG or ICNS.
 import { deflateSync } from 'node:zlib'
 
 /** Text stored in every generated file, so `sideby app uninstall` deletes only what it wrote. */
 export const APP_MARKER = 'sideby-app-install'
 
-// Geometry in the Panel's 40-unit logo box (page.ts: .logo 40×40, radius 10; bars 7×20, radius 3, gap 4).
+// Geometry in the Panel's 40-unit logo box (page.ts: .logo 40×40, radius 10; halves of radius 10.5 centred at
+// 18.5,18.5 facing left and 21.5,21.5 facing right, so they sit 3 apart and mirror through the centre).
 const TILE = { size: 40, radius: 10, color: [0x15, 0x17, 0x1c] as const }
-const BAR = { w: 7, h: 20, r: 3, gap: 4, color: [0xf5, 0xf6, 0xf8] as const, opacities: [1, 0.55] }
+const MARK = { color: [0xf5, 0xf6, 0xf8] as const, opacities: [1, 0.55] }
+const HALVES = [
+  { cx: 18.5, cy: 18.5, r: 10.5, side: -1 },
+  { cx: 21.5, cy: 21.5, r: 10.5, side: 1 },
+] as const
 // The tile sits on the macOS icon grid: 824 of 1024 units, centred.
 const GRID = { canvas: 1024, tile: 824 }
 
@@ -19,22 +25,21 @@ interface Rect {
   r: number
 }
 
-function shapes(size: number): { tile: Rect; bars: Rect[] } {
+/** Half of a disc: `side` -1 keeps the part left of the centre, 1 the part right of it. */
+interface Half {
+  cx: number
+  cy: number
+  r: number
+  side: number
+}
+
+function shapes(size: number): { tile: Rect; halves: Half[] } {
   const tilePx = (size * GRID.tile) / GRID.canvas
   const off = (size - tilePx) / 2
   const u = tilePx / TILE.size
-  const barsW = 2 * BAR.w + BAR.gap
-  const x0 = (TILE.size - barsW) / 2
-  const y0 = (TILE.size - BAR.h) / 2
   return {
     tile: { x: off, y: off, w: tilePx, h: tilePx, r: TILE.radius * u },
-    bars: [0, 1].map((i) => ({
-      x: off + (x0 + i * (BAR.w + BAR.gap)) * u,
-      y: off + y0 * u,
-      w: BAR.w * u,
-      h: BAR.h * u,
-      r: BAR.r * u,
-    })),
+    halves: HALVES.map((h) => ({ cx: off + h.cx * u, cy: off + h.cy * u, r: h.r * u, side: h.side })),
   }
 }
 
@@ -48,12 +53,21 @@ function roundedRectDistance(px: number, py: number, s: Rect): number {
   return outside + Math.min(Math.max(qx, qy), 0) - s.r
 }
 
+/** Signed distance from (px, py) to a half disc: the disc intersected with the half-plane on its side. */
+function halfDistance(px: number, py: number, h: Half): number {
+  return Math.max(Math.hypot(px - h.cx, py - h.cy) - h.r, (px - h.cx) * -h.side)
+}
+
 /** RGBA pixels (straight alpha) of the icon at `size`×`size`. */
 export function renderIcon(size: number): Uint8Array {
-  const { tile, bars } = shapes(size)
+  const { tile, halves } = shapes(size)
   const layers = [
-    { rect: tile, color: TILE.color, opacity: 1 },
-    ...bars.map((rect, i) => ({ rect, color: BAR.color, opacity: BAR.opacities[i]! })),
+    { dist: (x: number, y: number) => roundedRectDistance(x, y, tile), color: TILE.color, opacity: 1 },
+    ...halves.map((h, i) => ({
+      dist: (x: number, y: number) => halfDistance(x, y, h),
+      color: MARK.color,
+      opacity: MARK.opacities[i]!,
+    })),
   ]
   const px = new Uint8Array(size * size * 4)
   for (let y = 0; y < size; y++)
@@ -64,7 +78,7 @@ export function renderIcon(size: number): Uint8Array {
       let b = 0
       let a = 0
       for (const l of layers) {
-        const cover = Math.min(1, Math.max(0, 0.5 - roundedRectDistance(x + 0.5, y + 0.5, l.rect)))
+        const cover = Math.min(1, Math.max(0, 0.5 - l.dist(x + 0.5, y + 0.5)))
         const la = cover * l.opacity
         if (la === 0) continue
         r = (l.color[0] / 255) * la + r * (1 - la)
@@ -170,15 +184,19 @@ export function encodeIcns(pngs: ReadonlyMap<string, Buffer>): Buffer {
 
 /** The same mark as an SVG (1024-unit canvas), for Linux icon themes. */
 export function iconSvg(): string {
-  const { tile, bars } = shapes(GRID.canvas)
+  const { tile, halves } = shapes(GRID.canvas)
   const hex = (c: readonly number[]) => `#${c.map((v) => v.toString(16).padStart(2, '0')).join('')}`
-  const rect = (s: Rect, fill: string, opacity?: number) =>
-    `  <rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" rx="${s.r}" fill="${fill}"${opacity === undefined || opacity === 1 ? '' : ` fill-opacity="${opacity}"`}/>`
+  const opacityAttr = (opacity: number) => (opacity === 1 ? '' : ` fill-opacity="${opacity}"`)
+  const rect = (s: Rect, fill: string) =>
+    `  <rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" rx="${s.r}" fill="${fill}"/>`
+  // From the top of the cut to its bottom, bulging to the half's side.
+  const half = (h: Half, fill: string, opacity: number) =>
+    `  <path d="M${h.cx} ${h.cy - h.r}A${h.r} ${h.r} 0 0 ${h.side > 0 ? 1 : 0} ${h.cx} ${h.cy + h.r}Z" fill="${fill}"${opacityAttr(opacity)}/>`
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${GRID.canvas} ${GRID.canvas}" width="${GRID.canvas}" height="${GRID.canvas}">`,
     `  <!-- ${APP_MARKER} -->`,
     rect(tile, hex(TILE.color)),
-    ...bars.map((b, i) => rect(b, hex(BAR.color), BAR.opacities[i])),
+    ...halves.map((h, i) => half(h, hex(MARK.color), MARK.opacities[i]!)),
     '</svg>',
     '',
   ].join('\n')

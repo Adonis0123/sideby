@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/next.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "family",
+    "pick",
+    "accounts",
+    "hasQuota"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "family": {
+      "type": "string"
+    },
+    "pick": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The recommended account; null when none can be used now (exit code 1)."
+    },
+    "accounts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "ref",
+          "kind",
+          "state",
+          "pressure"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "subscription"
+              },
+              {
+                "type": "string",
+                "const": "api"
+              }
+            ]
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "ready"
+              },
+              {
+                "type": "string",
+                "const": "unknown"
+              },
+              {
+                "type": "string",
+                "const": "api"
+              },
+              {
+                "type": "string",
+                "const": "full"
+              },
+              {
+                "type": "string",
+                "const": "logged-out"
+              }
+            ],
+            "description": "ready and unknown can be picked; api only with --include-api; full and logged-out never."
+          },
+          "pressure": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Used percent of the fullest window not reset yet; null without quota."
+          },
+          "resetsAt": {
+            "type": "string",
+            "description": "For full: when its last full window resets."
+          },
+          "observedAt": {
+            "type": "string",
+            "description": "When the account's quota was recorded (its last session)."
+          }
+        }
+      },
+      "description": "Every account of the family, best first."
+    },
+    "hasQuota": {
+      "type": "boolean",
+      "description": "False when no account has quota data: the pick is then a guess, and `sideby next` does not start it (exit 1)."
+    },
+    "earliestReset": {
+      "type": "object",
+      "required": [
+        "ref",
+        "at"
+      ],
+      "properties": {
+        "ref": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string"
+        }
+      },
+      "description": "Set when nothing can be picked and some accounts are full: the first to come back."
+    }
+  },
+  "title": "sideby next --json"
+}

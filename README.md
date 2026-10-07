@@ -163,6 +163,32 @@ Because Claude Code runs the wrapper on every refresh, `setup` refuses when `sid
 
 Accounts that link `settings.json` to the Main Account (the default) get quota from the same setup. An account with its own `settings.json` shows quota as not enabled until that file's status line is wrapped the same way. Codex quota needs no setup: sideby reads it from local session files.
 
+### When an account hits its limit
+
+```sh
+sideby next claude              # pick the account with the most quota left and start it
+sideby next codex --dry-run     # only show the pick
+sideby next claude -- --model opus  # Host arguments go after --
+```
+
+`next` ranks the family's accounts by their fullest quota window that has not reset yet, starts the lowest one, and lists the rest with why they were left out:
+
+```
+   ACCOUNT        STATE       NOTE
+→  claude:work    ready       fullest window 23%
+   claude:new     unknown     no quota data yet
+   claude:key     api         left out; add --include-api to use it
+   claude:main    full        back at 14:30
+```
+
+- Accounts with a window at 85% or more are full; a window whose reset time has passed counts as empty again.
+- Accounts without quota data yet come after the ones with known room. API accounts cost money per request, so they join only with `--include-api`.
+- When every account is full, nothing starts and sideby tells you which one comes back first. When no account has quota data yet, nothing starts either: the pick would only be a guess. Turn quota on (`sideby quota setup claude`) or choose with `sideby run`.
+- The new account starts a new session: each account keeps its own sessions. Ask the old session for a short handoff note and paste it in.
+- Claude and Codex only; Grok and pi publish no quota, so `next grok` lists the accounts for you to choose.
+
+sideby recommends; you start the account. It never switches or rotates by itself (see the FAQ). The panel marks the same pick as **Next** in each family.
+
 ## Commands
 
 | Command | What it does | Exit code |
@@ -174,21 +200,22 @@ Accounts that link `settings.json` to the Main Account (the default) get quota f
 | `sideby alias add <short> <acct> [-- args]` | Add a short command for an existing account, optionally with Host arguments that `sideby run` adds | 0, also when it already exists; 1 if the name is taken, invalid or the account does not exist |
 | `sideby alias rm <short>` | Remove a short command | 0, also when it is not there |
 | `sideby login <acct>` | Run the family's sign-in command for that account; for pi, start pi and tell you to type `/login` | the Host's code |
+| `sideby next <family> [--dry-run] [--include-api] [-- args]` | Recommend the account with the most quota left (Claude, Codex) and start it; `--dry-run` only recommends | the Host's code; 0 for `--dry-run` or `--json` with a pick; 1 if no account can be used, none has quota data yet, the family has no quota source or no accounts |
 | `sideby doctor [acct\|family] [--fix] [--force]` | Check Shared Items, credential file modes, leftovers; `--fix` repairs what is safe | 0 no failures (warnings allowed); 1 at least one failure |
 | `sideby quota [acct]` | Quota and 7-day usage | 0 |
-| `sideby quota setup claude [--yes]` | Show the change; with `--yes`, turn the Claude quota source on | 0; 1 if blocked or failed |
+| `sideby quota setup claude [--yes]` | Show the change; with `--yes`, turn the Claude quota source on | 10 when it only showed the change; 0 once on; 1 if blocked or failed |
 | `sideby quota teardown claude` | Turn it off and restore the original file | 0; 1 if refused or failed |
 | `sideby ui [--port n] [--no-open]` | Local panel; runs until Ctrl+C | — |
-| `sideby ui --background` / `--stop` | Start the panel detached from the terminal (reusing a running one) and open it / stop it | 0; 1 if it could not start or stop |
+| `sideby ui --background` / `--stop` | Start the panel detached from the terminal (reusing a running one, or replacing it after sideby was upgraded) and open it / stop it | 0; 1 if it could not start or stop |
 | `sideby app install [--url <url>]` | Add a desktop app (macOS, Linux) that opens the panel, or `<url>` | 0; 1 on an unsupported platform or a file it did not create in the way |
 | `sideby app uninstall` | Remove what `app install` created | 0; 1 if it left a file it did not create |
 | `sideby shell-init zsh\|bash` | Print shell functions for every account and your aliases | 0 |
 | `sideby shell-init [zsh\|bash] --write` | Rewrite the configured `shellInitFile` with that output | 0; 1 if a file could not be written or none is configured |
 | `sideby plugins` | Loaded plugins and load errors | 0; 1 if any plugin failed to load |
 
-- Every command exits 2 on a usage error (unknown option, missing argument) and 1 when sideby itself fails (unknown account, invalid name, unreadable config).
+- Every command exits 2 on a usage error (unknown option, missing argument) and 1 when sideby itself fails (unknown account, invalid name, unreadable config). Exit code 10 means a change was shown and waits for your yes: run the same command again with `--yes`.
 - `<acct>` is `<family>:<name>`, or just `<name>` when it is unique across families. An ambiguous name is an error that lists the candidates.
-- `list`, `new`, `doctor`, `quota` (including `setup` and `teardown`), `plugins` and `app` accept `--json`. JSON output carries `schemaVersion: 1`, and the JSON Schemas ship in [`schemas/`](schemas/). With `--json`, an error prints `{ "schemaVersion": 1, "error": "…" }`. Adding a field keeps the version; removing, renaming or changing the meaning of a field bumps it.
+- `list`, `new`, `next`, `alias`, `doctor`, `quota` (including `setup` and `teardown`), `plugins` and `app` accept `--json`. JSON output carries `schemaVersion: 1`, and the JSON Schemas ship in [`schemas/`](schemas/). With `--json`, an error prints `{ "schemaVersion": 1, "error": "…", "code": "…" }`, where `code` is `usage` for a malformed command line or a reason such as `no-quota-source`. Adding a field keeps the version; removing, renaming or changing the meaning of a field bumps it.
 - No output, log or error message ever contains a credential value.
 
 ## Accounts
@@ -370,7 +397,7 @@ Before each launch of that account, sideby runs `sideby-before-launch` with the 
 sideby is built to stay inside what each Host already supports (see [ADR-0001](docs/adr/0001-side-by-side-not-switching.md) and [ADR-0003](docs/adr/0003-quota-from-local-and-official-sources.md)):
 
 - It does not switch: it never edits a Host's global config to change the active account. Each account is a separate config directory, the mechanism every Host documents (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`, `PI_CODING_AGENT_DIR`).
-- It does not rotate: it never moves to another subscription when a quota runs out. Picking the next account is your call.
+- It does not rotate: it never moves to another subscription when a quota runs out. `sideby next` recommends the account with the most room from data already on your machine; starting it is your call.
 - It does not proxy credentials: it never reads a subscription token to call a model, and never pools logins.
 - It does not call private endpoints: quota comes from local files and from data Claude Code hands to your status line command.
 
@@ -416,7 +443,7 @@ Remove the `eval "$(sideby shell-init …)"` line from your shell rc file. Accou
 ## For AI agents
 
 - [`llms.txt`](llms.txt): commands, JSON contract and plugin API in one index.
-- [`skills/sideby/SKILL.md`](skills/sideby/SKILL.md): an Agent Skill for diagnosing and creating accounts. Install with `npx skills add Adonis0123/sideby`.
+- [`skills/sideby/SKILL.md`](skills/sideby/SKILL.md): one Agent Skill for seeing, repairing and creating accounts and for moving on when one hits its limit. It routes to short references, so an agent loads only what the task needs. Install with `npx skills add Adonis0123/sideby -g`; `sideby doctor` warns when the installed copy is for another sideby version.
 - [`AGENTS.md`](AGENTS.md): rules for agents working on this repository.
 
 ## License

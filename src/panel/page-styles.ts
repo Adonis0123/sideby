@@ -23,6 +23,7 @@ const LIGHT_TOKENS = `
   --hover: #eceef2; --active: #e2e5ea; --focus: #6366f1;
   --ok: #15803d; --ok-bar: #22c55e; --ok-soft: #e8f7ee; --warn: #b45309; --warn-bar: #f59e0b; --warn-soft: #fdf3e2;
   --fail: #c81e1e; --fail-bar: #ef4444; --fail-soft: #fdecec; --track: #e9ecf1;
+  --spark: oklch(from var(--accent) clamp(0.55, l, 0.62) max(c, 0.14) h); --spark-soft: oklch(from var(--accent) 0.83 calc(max(c, 0.14) * 0.6) h);
   --shadow: 0 1px 2px rgba(16,24,40,.04), 0 2px 8px rgba(16,24,40,.05);
   --float-shadow: 0 10px 30px rgba(16,24,40,.14), 0 2px 6px rgba(16,24,40,.06);${DERIVED_COLORS}`
 const DARK_TOKENS = `
@@ -32,6 +33,7 @@ const DARK_TOKENS = `
   --hover: #22272e; --active: #2a3038; --focus: #8b87ff;
   --ok: #4ade80; --ok-bar: #22c55e; --ok-soft: #13291c; --warn: #fbbf24; --warn-bar: #f59e0b; --warn-soft: #2d2410;
   --fail: #f87171; --fail-bar: #ef4444; --fail-soft: #331717; --track: #252a32;
+  --spark: oklch(from var(--accent) clamp(0.7, l, 0.78) max(c, 0.14) h); --spark-soft: oklch(from var(--accent) 0.45 calc(max(c, 0.14) * 0.6) h);
   --shadow: 0 1px 2px rgba(0,0,0,.3); --float-shadow: 0 12px 32px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.3);${DERIVED_COLORS}`
 
 /**
@@ -78,9 +80,9 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .brand h1 { font-size: var(--title-size); font-weight: var(--title-weight); line-height: 1.3; letter-spacing: -0.02em; }
 .tagline { color: var(--muted); font-size: 13px; }
-.logo { display: inline-flex; align-items: center; justify-content: center; gap: 4px; flex: none; width: 40px; height: 40px; border-radius: 10px; background: var(--logo-bg); box-shadow: inset 0 0 0 1px var(--logo-line); }
-.logo i { display: block; width: 7px; height: 20px; border-radius: 3px; background: var(--logo-fg); }
-.logo i + i { opacity: .55; }
+.logo { display: inline-flex; flex: none; width: 40px; height: 40px; border-radius: 10px; background: var(--logo-bg); box-shadow: inset 0 0 0 1px var(--logo-line); }
+/* desktop/icon.ts draws the same two half discs for the app icon. */
+.logo svg { display: block; width: 100%; height: 100%; fill: var(--logo-fg); }
 .top-actions { display: flex; align-items: center; gap: 8px; }
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
 .section-head > div:first-child { min-width: 0; }
@@ -192,22 +194,33 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .link-btn:disabled { color: var(--faint); cursor: not-allowed; }
 .link-btn:focus-visible { outline: var(--focus-outline); outline-offset: 2px; border-radius: 3px; }
 
-/* Usage: total with the 7 day bars beside it, cache hits under it. */
-.usage { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.u-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* Usage: total over cache hits, with the 7 day bars beside both lines. In the wide list the bars sit at the column's
+   right edge, so they line up down the column whatever the totals. */
+.usage { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.rows .usage { justify-content: space-between; }
+.u-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .u-num { font-weight: var(--strong-weight); font-size: 13.5px; line-height: 1.3; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .u-unit { color: var(--faint); font-weight: 400; font-size: 12px; }
 .rows .u-unit { display: none; }
-/* Same width for every total, so the bars line up down the column. */
-.rows .u-num { min-width: 5.4ch; }
 .u-sub, .u-note { color: var(--faint); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .u-note { font-size: var(--small); color: var(--muted); white-space: normal; }
-.spark { display: inline-flex; align-items: stretch; gap: 3px; height: 18px; flex: none; }
-.spark i { position: relative; display: block; width: 5px; border-radius: 2px; background: color-mix(in srgb, var(--border) 70%, transparent); overflow: hidden; }
-.spark b { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 2px; background: color-mix(in srgb, var(--accent) 38%, var(--surface)); }
+/* One slot per day, bars grow from a shared baseline; past days are a tint of the accent, today is the accent. */
+.spark { display: inline-flex; align-items: flex-end; gap: 3px; height: 26px; flex: none; }
+.spark i { display: flex; align-items: flex-end; width: 5px; height: 100%; }
+.spark b { display: block; width: 100%; min-height: 4px; border-radius: 1.5px; background: color-mix(in srgb, var(--accent) 32%, var(--surface)); transition: background-color .12s; }
+.spark i.zero b { height: 2px; min-height: 0; background: color-mix(in srgb, var(--faint) 30%, transparent); }
 .spark i.today b { background: var(--accent); }
-.spark-lg { height: 34px; gap: 4px; }
-.spark-lg i { width: 6px; }
+.spark i:not(.zero):hover b { background: color-mix(in srgb, var(--accent) 70%, var(--surface)); }
+.spark i.today:hover b { background: var(--accent); }
+/* Where relative colors work, both shades keep the accent's hue at a set lightness and a floor on chroma, so a dark or
+   muted accent still gives a clear light tint for past days and a vivid bar for today. */
+@supports (color: oklch(from red l c h)) {
+  .spark b { background: var(--spark-soft); }
+  .spark i.today:not(.zero) b, .spark i:not(.zero):hover b { background: var(--spark); }
+}
+.spark-lg { height: 36px; gap: 4px; }
+.spark-lg i { width: 7px; }
+.spark-lg b { border-radius: 2px; }
 .last { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .health { font-size: 11.5px; line-height: 20px; padding: 0 8px 0 7px; gap: 5px; max-width: 100%; }
 .health .dot { width: 6px; height: 6px; }
@@ -238,6 +251,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .tag-alias { font-family: var(--mono); font-weight: 400; }
 .tag-warn { background: var(--warn-soft); color: var(--warn); }
 .tag-fail { background: var(--fail-soft); color: var(--fail); }
+.tag-ok { background: var(--ok-soft); color: var(--ok); }
 .tag .dot { width: 6px; height: 6px; }
 .tag-btn { cursor: pointer; transition: filter .12s; }
 .tag-btn:hover { filter: brightness(.96); }
@@ -398,13 +412,14 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .dlg-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 var(--radius) var(--radius); }
 
 /* Menu, tooltips, toasts */
-.menu { position: fixed; z-index: 40; min-width: 230px; max-width: min(340px, calc(100vw - 16px)); padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: calc(var(--ctl-radius) + 2px); box-shadow: var(--float-shadow); }
+.menu { position: fixed; z-index: 40; min-width: 230px; max-width: min(380px, calc(100vw - 16px)); padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: calc(var(--ctl-radius) + 2px); box-shadow: var(--float-shadow); }
 .menu-item { display: flex; align-items: center; gap: 10px; width: 100%; height: 32px; padding: 0 10px; border: 0; border-radius: calc(var(--ctl-radius) - 2px); background: none; color: var(--text); font: inherit; font-size: var(--control-size); text-align: left; cursor: pointer; }
-.menu-item .ic { color: var(--muted); }
+.menu-item .ic { flex: none; color: var(--muted); }
 .menu-item:hover:not(:disabled), .menu-item:focus-visible { background: var(--hover); outline: none; }
 .menu-item:disabled { color: var(--faint); cursor: not-allowed; }
-.menu-label { white-space: nowrap; }
-.menu-hint { margin-left: auto; padding-left: 12px; color: var(--faint); font-size: 11px; white-space: nowrap; }
+.menu-label { flex: none; white-space: nowrap; }
+/* The hint gives way first: it shrinks to an ellipsis so a long label never pushes it past the menu's edge. */
+.menu-hint { min-width: 0; margin-left: auto; padding-left: 12px; color: var(--faint); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .menu-sep { height: 1px; margin: 4px 6px; background: var(--border); }
 .tip { display: inline-flex; position: relative; vertical-align: middle; }
 .tip-btn { display: inline-grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--surface); color: var(--muted); font: 700 10px/1 var(--font); cursor: help; }
@@ -460,6 +475,7 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .row { grid-template-columns: minmax(0, 1fr) auto var(--m-w); grid-template-areas: "id health more" "quota quota quota" "usage usage last" "notes notes notes"; row-gap: 10px; }
   .row > .quota { grid-template-columns: repeat(var(--qn), minmax(0, 1fr)); max-width: 560px; }
   .rows .m-label, .rows .m-unit, .rows .u-unit { display: inline; }
+  .rows .usage { justify-content: flex-start; }
   .row > .last { justify-self: end; }
 }
 @media (max-width: 760px) {

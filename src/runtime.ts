@@ -15,6 +15,7 @@ import {
 import { type CreateResult, createAccount } from './core/create.ts'
 import { applyFixes, type DoctorReport, runDoctor } from './core/doctor.ts'
 import { UserError } from './core/errors.ts'
+import { type HandoffPlan, planHandoff } from './core/handoff.ts'
 import { identityOf } from './core/identity.ts'
 import {
   type DoctorHistory,
@@ -32,6 +33,7 @@ import {
   shellInitScript,
   writeShellInitFile,
 } from './core/shell-init.ts'
+import { packageVersion } from './core/version.ts'
 import { BUILTIN_PLUGINS } from './families/index.ts'
 import { HookBus } from './plugins/bus.ts'
 import { type BuiltinPlugin, type LoadedPlugin, loadPlugins, type PluginLoadError } from './plugins/loader.ts'
@@ -166,6 +168,11 @@ export interface Runtime {
   prepareLaunch(ref: string, userArgs: readonly string[], command: 'run' | 'login'): Promise<PreparedLaunch>
   quota(account: Account): Promise<QuotaResult>
   usage(account: Account): Promise<UsageResult>
+  /**
+   * Which Account of a Family to move on to (spec §3.13). Throws a UserError with code `no-quota-source`
+   * when the Family cannot tell, `no-accounts` when it has none.
+   */
+  handoff(familyId: string, opts?: { includeApi?: boolean }): Promise<HandoffPlan>
   readContext(): ReadContext
 }
 
@@ -333,6 +340,9 @@ export async function createRuntime(
         accounts: list,
         bus,
         force: Boolean(o.force),
+        // Checked for every Family in the run, also when Doctor is aimed at one Account, so the saved result
+        // of that Family keeps its skill warning.
+        skillVersion: packageVersion(),
       }
       let report = await runDoctor(input)
       if (o.fix) {
@@ -496,6 +506,37 @@ export async function createRuntime(
       } catch (err) {
         return { status: 'unavailable', reason: 'unrecognized', detail: (err as Error).message }
       }
+    },
+    async handoff(familyId, o = {}) {
+      const f = familyOf(familyId)
+      const list = (await accounts()).filter((a) => a.family === f.id)
+      if (!f.readQuota)
+        throw new UserError(
+          `${f.title} has no public quota source, so sideby cannot tell which account has room; pick one yourself: ${
+            list.map((a) => `sideby run ${a.ref}`).join(', ') || `sideby new ${f.id} <name>`
+          }`,
+          { code: 'no-quota-source' },
+        )
+      if (list.length === 0)
+        throw new UserError(`no ${f.title} accounts yet; create one with \`sideby new ${f.id} <name>\``, {
+          code: 'no-accounts',
+        })
+      // Only the login state and Quota: no identity, model or Host lookups are needed to rank.
+      const loginOf = async (a: Account): Promise<LoginState | 'not-needed'> => {
+        if (a.kind === 'api') return 'not-needed'
+        try {
+          return (await f.loginState?.(a)) ?? 'unknown'
+        } catch {
+          return 'unknown'
+        }
+      }
+      const candidates = await Promise.all(
+        list.map(async (a) => {
+          const [login, quota] = await Promise.all([loginOf(a), rt.quota(a)])
+          return { ref: a.ref, name: a.name, isMain: a.isMain, kind: a.kind, login, quota }
+        }),
+      )
+      return planHandoff(f.id, candidates, readContext().now, o)
     },
     readContext,
   }

@@ -7,6 +7,7 @@ import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/prom
 import { join } from 'node:path'
 import { loginShellPath } from '../core/login-path.ts'
 import type { Paths } from '../core/paths.ts'
+import { buildId } from '../core/version.ts'
 import type { Env } from '../types.ts'
 import {
   DEFAULT_PANEL_PORT,
@@ -73,7 +74,7 @@ function psField(pid: number, field: string): Promise<string | undefined> {
 export const processStartTime = (pid: number) => psField(pid, 'lstart')
 
 type PanelCheck =
-  | { status: 'ours' }
+  | { status: 'ours'; build?: string }
   /** The pid file does not name this process: stale, safe to remove. */
   | { status: 'stale'; reason: string }
   /** The process looks like the one that wrote the pid file, but no Panel on the port confirms it. */
@@ -100,7 +101,7 @@ async function checkPanel(rec: PanelPidFile): Promise<PanelCheck> {
     }
   if (id.instance !== rec.instance || id.pid !== rec.pid)
     return stale(`the panel on port ${rec.port} is not the one it names`)
-  return { status: 'ours' }
+  return { status: 'ours', ...(id.build ? { build: id.build } : {}) }
 }
 
 /** URL of a running background Panel, or of any sideby Panel on `port`; removes a stale pid file. */
@@ -112,6 +113,18 @@ export async function findRunningPanel(p: Paths, port: number): Promise<string |
     if (check.status === 'stale') await rm(pidFilePath(p), { force: true })
   }
   return (await isSidebyPanel(port)) ? `http://127.0.0.1:${port}/` : undefined
+}
+
+/**
+ * Stops this state directory's background Panel when it runs another build than `build` (or is older than build
+ * ids). Only a Panel the pid file names and that answers as itself is stopped; true when one was.
+ */
+async function stopOutdated(p: Paths, build: string): Promise<boolean> {
+  const rec = await readPidFile(p)
+  if (!rec) return false
+  const check = await checkPanel(rec)
+  if (check.status !== 'ours' || check.build === build) return false
+  return (await stopBackgroundPanel(p)).status === 'stopped'
 }
 
 /** Takes the start lock, waiting while another launch holds it; a lock older than 30 s is taken over. */
@@ -165,9 +178,11 @@ export interface StartBackgroundOptions {
  */
 export async function startBackgroundPanel(
   opts: StartBackgroundOptions,
-): Promise<{ url: string; reused: boolean; pid?: number }> {
+): Promise<{ url: string; reused: boolean; pid?: number; replaced?: boolean }> {
   const { paths } = opts
   const port = opts.port ?? DEFAULT_PANEL_PORT
+  // After an upgrade or reinstall the old background Panel still runs the old code: replace it.
+  const replaced = await stopOutdated(paths, buildId(opts.env))
   const running = await findRunningPanel(paths, port)
   if (running) return { url: running, reused: true }
   await mkdir(paths.stateDir, { recursive: true, mode: 0o700 })
@@ -208,7 +223,8 @@ export async function startBackgroundPanel(
       child.removeAllListeners()
       if (child.connected) child.disconnect()
       child.unref()
-      return msg.reused ? { url: msg.url, reused: true } : { url: msg.url, reused: false, pid: child.pid! }
+      if (msg.reused) return { url: msg.url, reused: true }
+      return { url: msg.url, reused: false, pid: child.pid!, ...(replaced ? { replaced } : {}) }
     } finally {
       await log.close()
     }

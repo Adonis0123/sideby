@@ -162,6 +162,57 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     },
     { title: 'sideby quota --json' },
   ),
+  next: Type.Object(
+    {
+      schemaVersion: Version,
+      family: Str,
+      pick: Type.Union([Str, Type.Null()], {
+        description: 'The recommended account; null when none can be used now (exit code 1).',
+      }),
+      accounts: Type.Array(
+        Type.Object({
+          ref: Str,
+          kind: Kind,
+          state: Type.Union(
+            [
+              Type.Literal('ready'),
+              Type.Literal('unknown'),
+              Type.Literal('api'),
+              Type.Literal('full'),
+              Type.Literal('logged-out'),
+            ],
+            {
+              description:
+                'ready and unknown can be picked; api only with --include-api; full and logged-out never.',
+            },
+          ),
+          pressure: Type.Union([Type.Number(), Type.Null()], {
+            description: 'Used percent of the fullest window not reset yet; null without quota.',
+          }),
+          resetsAt: Type.Optional(
+            Type.String({ description: 'For full: when its last full window resets.' }),
+          ),
+          observedAt: Type.Optional(
+            Type.String({ description: "When the account's quota was recorded (its last session)." }),
+          ),
+        }),
+        { description: 'Every account of the family, best first.' },
+      ),
+      hasQuota: Type.Boolean({
+        description:
+          'False when no account has quota data: the pick is then a guess, and `sideby next` does not start it (exit 1).',
+      }),
+      earliestReset: Type.Optional(
+        Type.Object(
+          { ref: Str, at: Str },
+          {
+            description: 'Set when nothing can be picked and some accounts are full: the first to come back.',
+          },
+        ),
+      ),
+    },
+    { title: 'sideby next --json' },
+  ),
   'quota-setup': Type.Object(
     { schemaVersion: Version, family: Str, applied: Type.Boolean(), plan: QuotaSetupPlan },
     { title: 'sideby quota setup --json' },
@@ -248,6 +299,16 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     },
     { title: 'sideby app uninstall --json' },
   ),
-  error: Type.Object({ schemaVersion: Version, error: Str }, { title: 'sideby error --json' }),
+  error: Type.Object(
+    {
+      schemaVersion: Version,
+      error: Type.String({ description: 'What went wrong and what to do next.' }),
+      code: Type.String({
+        description:
+          '`usage` for a malformed command line (exit 2), a reason such as `no-quota-source` or `alias-invalid`, or `error`.',
+      }),
+    },
+    { title: 'sideby error --json' },
+  ),
   config: ConfigSchema,
 }

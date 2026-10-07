@@ -39,6 +39,10 @@ Avoid: *profile* (Codex already uses it for a config layer that does not change 
 
 - **Quota**: a limit the Host's vendor sets on a Subscription Account for a time window (for example 5 hours or 7 days), with the time it resets.
 - **Usage**: what an Account has consumed (tokens, estimated cost), counted from the Host's own local records.
+- **Quota Pressure**: how full an Account's fullest Quota window is, ignoring windows whose reset time has passed. Unknown when the Account has no Quota yet.
+- **Handoff**: moving on to another Account of the same Family when one Account's Quota runs low. sideby recommends the Account with the lowest Quota Pressure; a person starts it. The old session stays in the old Account.
+
+Avoid: *rotation* and *failover* (sideby never moves work between Accounts on its own), *relay* (people use it for a third-party API endpoint).
 
 ## Extending
 

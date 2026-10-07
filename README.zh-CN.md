@@ -163,6 +163,32 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 
 `settings.json` 链接到主账号的账号（默认如此）共用这一次 setup。自己有一份 `settings.json` 的账号，额度显示为未开启，要等它自己的 status line 也这样包装后才有数据。Codex 的额度不用设置，sideby 直接读本地会话文件。
 
+### 账号撞上限额时
+
+```sh
+sideby next claude              # 选剩余额度最多的账号并启动
+sideby next codex --dry-run     # 只看推荐
+sideby next claude -- --model opus  # 宿主参数放在 -- 之后
+```
+
+`next` 按每个账号「还没重置的窗口里最满的那个」排序，启动最低的那个，并列出其余账号和没选它们的原因：
+
+```
+   ACCOUNT        STATE       NOTE
+→  claude:work    ready       fullest window 23%
+   claude:new     unknown     no quota data yet
+   claude:key     api         left out; add --include-api to use it
+   claude:main    full        back at 14:30
+```
+
+- 有窗口到 85% 的账号算用满；已过重置时间的窗口重新按 0% 算。
+- 还没有额度数据的账号排在有余量的账号后面。API 账号按次花钱，加 `--include-api` 才参与。
+- 全部用满时什么都不启动，并告诉你哪个账号最先恢复。所有账号都还没有额度数据时也不启动，因为那样的推荐只是猜测：先开启额度（`sideby quota setup claude`），或用 `sideby run` 自己选。
+- 新账号会开一个新会话，因为每个账号各存各的会话。可以先让旧会话写一份简短的交接说明，再贴进新会话。
+- 只支持 Claude 和 Codex。Grok、pi 没有公开额度，`next grok` 会列出账号让你自己选。
+
+sideby 只推荐，账号由你启动，它从不自己切换或轮换（见常见问题）。面板在每个家族里把同一个推荐账号标成「下一个」。
+
 ## 命令
 
 | 命令 | 作用 | 退出码 |
@@ -170,16 +196,17 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 | `sideby` | 等同于 `sideby list` | 0 |
 | `sideby list` | 列出账号、类型（main、sub 或 api）、登录态、模型和目录；读取时遇到的问题输出到 stderr | 0 |
 | `sideby run <acct> [-- args]` | 用某个账号启动宿主 | 宿主的退出码；被信号 n 终止时为 128+n |
+| `sideby next <family> [--dry-run] [--include-api] [-- args]` | 推荐剩余额度最多的账号（Claude、Codex）并启动；`--dry-run` 只推荐 | 宿主的退出码；`--dry-run` 或 `--json` 有推荐时为 0；没有可用账号、都还没有额度数据、家族没有额度来源或没有账号为 1 |
 | `sideby new <family> <name> [--api] [--alias <short>]` | 新建账号并铺好共享项；`--alias` 同时把 `cc008` 这样的短命令加进 `aliases` | 0；部分失败或短命令没加上为 1 |
 | `sideby alias add <short> <acct> [-- args]` | 给已有账号加短命令，可以带 `sideby run` 时附加的宿主参数 | 0，已存在也是 0；名字被占用、不合法或账号不存在为 1 |
 | `sideby alias rm <short>` | 删掉一个短命令 | 0，不存在也是 0 |
 | `sideby login <acct>` | 用该账号运行家族的登录命令；pi 会直接启动，并提示你输入 `/login` | 宿主的退出码 |
 | `sideby doctor [acct\|family] [--fix] [--force]` | 检查共享项、凭据文件权限和备份残留；`--fix` 修复安全的部分 | 0 没有 fail（允许有 warn）；1 至少一条 fail |
 | `sideby quota [acct]` | 额度和近 7 天用量 | 0 |
-| `sideby quota setup claude [--yes]` | 展示改动；加 `--yes` 才开启 Claude 额度来源 | 0；无法开启或失败为 1 |
+| `sideby quota setup claude [--yes]` | 展示改动；加 `--yes` 才开启 Claude 额度来源 | 只展示改动时为 10；开启后为 0；无法开启或失败为 1 |
 | `sideby quota teardown claude` | 关闭并还原原文件 | 0；拒绝或失败为 1 |
 | `sideby ui [--port n] [--no-open]` | 本地面板，按 Ctrl+C 停止 | — |
-| `sideby ui --background` / `--stop` | 脱离终端启动面板（已有就复用）并打开 / 停掉它 | 0；启动或停止失败为 1 |
+| `sideby ui --background` / `--stop` | 脱离终端启动面板（已有就复用，sideby 升级后则替换旧的）并打开 / 停掉它 | 0；启动或停止失败为 1 |
 | `sideby app install [--url <url>]` | 添加打开面板（或 `<url>`）的桌面应用（macOS、Linux） | 0；平台不支持或目标位置有不是它创建的文件为 1 |
 | `sideby app uninstall` | 删除 `app install` 创建的文件 | 0；留下了不是它创建的文件为 1 |
 | `sideby shell-init zsh\|bash` | 输出每个账号和每个别名的 shell 函数 | 0 |
@@ -188,7 +215,8 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 
 - 所有命令遇到用法错误（未知选项、缺参数）时退出码为 2；sideby 自身出错（账号不存在、名字不合法、配置读不了）时为 1。
 - `<acct>` 写成 `<family>:<name>`；名字在所有家族里唯一时，只写 `<name>` 也行。有歧义就报错，并列出候选。
-- `list`、`new`、`doctor`、`quota`（包括 `setup` 和 `teardown`）、`plugins`、`app` 支持 `--json`，输出带 `schemaVersion: 1`，JSON Schema 随包放在 [`schemas/`](schemas/)。加了 `--json` 时，出错会输出 `{ "schemaVersion": 1, "error": "…" }`。只新增字段时版本不变；删除、改名或改语义时加 1。
+- 退出码 10 表示命令展示了改动、在等你确认：同意的话，加上 `--yes` 再跑一次同一条命令。
+- `list`、`new`、`next`、`alias`、`doctor`、`quota`（包括 `setup` 和 `teardown`）、`plugins`、`app` 支持 `--json`，输出带 `schemaVersion: 1`，JSON Schema 随包放在 [`schemas/`](schemas/)。加了 `--json` 时，出错会输出 `{ "schemaVersion": 1, "error": "…", "code": "…" }`：命令行写错时 `code` 为 `usage`，其他情况是 `no-quota-source` 这样的原因。只新增字段时版本不变；删除、改名或改语义时加 1。
 - 任何输出、日志和错误信息里都不会出现凭据的值。
 
 ## 账号
@@ -370,7 +398,7 @@ chmod 700 ~/.claude-deepseek/sideby-before-launch
 sideby 的设计只用各宿主已经支持的机制（见 [ADR-0001](docs/adr/0001-side-by-side-not-switching.md) 和 [ADR-0003](docs/adr/0003-quota-from-local-and-official-sources.md)）：
 
 - 不切换：从不改宿主的全局配置来换当前账号。每个账号是一个独立的配置目录，这是各宿主都写进文档的机制（`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`GROK_HOME`、`PI_CODING_AGENT_DIR`）。
-- 不轮换：额度用完时，不会自动换到另一个订阅。下一个用哪个账号，由你决定。
+- 不轮换：额度用完时，不会自动换到另一个订阅。`sideby next` 只根据本机已有的数据推荐余量最多的账号，启不启动由你决定。
 - 不代理凭据：从不读取订阅 token 去调模型，也不把多个登录凑成一个池子。
 - 不调私有接口：额度来自本地文件，以及 Claude Code 交给 status line 命令的数据。
 
@@ -416,7 +444,7 @@ rm -rf ~/.config/sideby ~/.local/state/sideby  # 设置过 XDG_CONFIG_HOME / XDG
 ## 给 AI agent
 
 - [`llms.txt`](llms.txt)：命令、JSON 契约和插件 API 的索引。
-- [`skills/sideby/SKILL.md`](skills/sideby/SKILL.md)：诊断和新建账号的 Agent Skill，用 `npx skills add Adonis0123/sideby` 安装。
+- [`skills/sideby/SKILL.md`](skills/sideby/SKILL.md)：一个 Agent Skill，覆盖查看、修复、新建账号，以及账号撞限额后换号接着干。它按任务指向简短的 reference，agent 只加载需要的部分。用 `npx skills add Adonis0123/sideby -g` 安装；已装的版本和 sideby 不一致时，`sideby doctor` 会提醒。
 - [`AGENTS.md`](AGENTS.md)：在本仓库干活的 agent 要遵守的规则。
 
 ## 许可证

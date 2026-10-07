@@ -5,6 +5,7 @@ import { looksLikeBackup, mainDirOf } from './accounts.ts'
 import { lstatOrNull, permBits, statOrNull } from './fs-safe.ts'
 import { inspectSecretFile } from './secret-file.ts'
 import { checkItem, credentialModeFinding, itemPaths } from './share-modes.ts'
+import { checkInstalledSkills } from './skill-check.ts'
 
 export interface AccountReport {
   ref: string
@@ -39,6 +40,8 @@ export interface DoctorInput {
   accounts: readonly Account[]
   bus: HookBus
   force?: boolean
+  /** This sideby's version: when set, installed sideby skills of the checked Families are compared with it. */
+  skillVersion?: string
 }
 
 const BACKUP_ENTRY = /(\.bak|backup|\.tmp)/i
@@ -188,6 +191,10 @@ export async function runDoctor(input: DoctorInput): Promise<DoctorReport> {
         fixable: false,
       })
     for (const account of list) accounts.push(await checkAccount(input, family, account))
+  }
+  if (input.skillVersion) {
+    const checked = [...input.families.values()].filter((f) => input.accounts.some((a) => a.family === f.id))
+    general.push(...(await checkInstalledSkills(input.home, checked, input.skillVersion)))
   }
   const failed = [...general, ...accounts.flatMap((a) => a.findings)].some((f) => f.level === 'fail')
   return { status: failed ? 'issues' : 'ok', accounts, general, fixes: [] }

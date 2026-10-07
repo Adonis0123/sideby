@@ -96,7 +96,8 @@ describe('panel handler security', () => {
       try {
         const good = { origin: `http://127.0.0.1:${port}`, 'x-sideby-token': real.token }
         const health = await fetch(`http://127.0.0.1:${port}/api/health`)
-        assert.deepEqual(await health.json(), { app: 'sideby', version: '0.1.0' })
+        // Only the app, its version and the build id (a random id per build): nothing about accounts.
+        assert.deepEqual(await health.json(), { app: 'sideby', version: '0.1.0', build: '0.1.0+source' })
 
         const rebinding = await request(port, 'GET', '/api/state', { host: 'evil.example:80' })
         assert.equal(rebinding.status, 403)
@@ -684,6 +685,96 @@ describe('panel v2 server data', () => {
         assert.match(String(none.body.error), /needs no quota setup/)
       } finally {
         await close(plain.server)
+      }
+    })
+  })
+})
+
+describe('panel handoff (spec §3.13)', () => {
+  const quotaOf = (pct: number) => ({
+    status: 'ok' as const,
+    observedAt: new Date().toISOString(),
+    source: 'test',
+    windows: [
+      {
+        label: '5h',
+        windowMinutes: 300,
+        usedPercent: pct,
+        resetsAt: new Date(Date.now() + 3600_000).toISOString(),
+      },
+    ],
+  })
+  const used: Record<string, number> = { main: 90, work: 40, lab: 10 }
+  const runtime = (h: FakeHome, withQuota: boolean | 'none') => () =>
+    createRuntime({
+      env: h.env,
+      builtins: [
+        asBuiltin(
+          demoPlugin(
+            demoFamily({
+              loginState: async () => 'logged-in',
+              ...(withQuota === 'none'
+                ? {
+                    readQuota: async () => ({
+                      status: 'unavailable' as const,
+                      reason: 'no-session' as const,
+                    }),
+                  }
+                : withQuota
+                  ? { readQuota: async (a) => quotaOf(used[a.name] ?? 0) }
+                  : {}),
+            }),
+          ),
+        ),
+      ],
+    })
+  async function stateOf(h: FakeHome, withQuota: boolean | 'none'): Promise<PanelState> {
+    const { server, port } = await serve((port) =>
+      createPanelHandler({ runtime: runtime(h, withQuota), allowedHosts: [`127.0.0.1:${port}`] }),
+    )
+    try {
+      return JSON.parse(
+        (await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text,
+      ) as PanelState
+    } finally {
+      await close(server)
+    }
+  }
+
+  it('names the account `sideby next` would pick, only where there is a choice and a quota source', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      assert.equal((await stateOf(h, true)).handoff, undefined, 'a single account is no choice')
+      await (await runtime(h, true)()).createAccount('demo', 'work')
+      assert.deepEqual((await stateOf(h, true)).handoff, { demo: 'demo:work' })
+      await (await runtime(h, true)()).createAccount('demo', 'lab')
+      assert.deepEqual((await stateOf(h, true)).handoff, { demo: 'demo:lab' })
+      assert.equal((await stateOf(h, false)).handoff, undefined, 'no quota source, no recommendation')
+      assert.equal((await stateOf(h, 'none')).handoff, undefined, 'no quota data yet, no recommendation')
+    })
+  })
+})
+
+describe('panel build identity', () => {
+  it('reports the build in health, state and the page boot data, so an old page can reload itself', async () => {
+    await withFakeHome(async (h) => {
+      const { buildId } = await import('../core/version.ts')
+      const { server, port } = await serve((port) =>
+        createPanelHandler({ runtime: factory(h), allowedHosts: [`127.0.0.1:${port}`] }),
+      )
+      try {
+        const host = { host: `127.0.0.1:${port}` }
+        const health = JSON.parse((await request(port, 'GET', '/api/health', host)).text) as { build: string }
+        const state = JSON.parse((await request(port, 'GET', '/api/state', host)).text) as PanelState
+        const page = (await request(port, 'GET', '/', host)).text
+        assert.equal(health.build, buildId())
+        assert.equal(state.build, buildId())
+        assert.ok(
+          page.includes(`"build":${JSON.stringify(buildId())}`),
+          'the page boot data carries the build',
+        )
+      } finally {
+        await close(server)
       }
     })
   })

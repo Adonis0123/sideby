@@ -4,7 +4,8 @@
   "type": "object",
   "required": [
     "schemaVersion",
-    "error"
+    "error",
+    "code"
   ],
   "properties": {
     "schemaVersion": {
@@ -12,7 +13,12 @@
       "const": 1
     },
     "error": {
-      "type": "string"
+      "type": "string",
+      "description": "What went wrong and what to do next."
+    },
+    "code": {
+      "type": "string",
+      "description": "`usage` for a malformed command line (exit 2), a reason such as `no-quota-source` or `alias-invalid`, or `error`."
     }
   },
   "title": "sideby error --json"

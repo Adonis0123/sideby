@@ -1,6 +1,7 @@
 // Standalone Panel server for `sideby ui`: loopback only, reuses a running Panel, shifts past busy ports.
 import { spawn } from 'node:child_process'
 import { createServer, type Server } from 'node:http'
+import { buildId } from '../core/version.ts'
 import type { Runtime } from '../runtime.ts'
 import { createPanelHandler } from './handler.ts'
 
@@ -47,6 +48,8 @@ function listen(server: Server, port: number): Promise<'ok' | 'busy'> {
 export interface PanelIdentity {
   instance?: string
   pid?: number
+  /** buildId() of the code serving it; absent from Panels older than this field. */
+  build?: string
 }
 
 /** What the sideby Panel on this port says about itself, or undefined when none answers. */
@@ -54,11 +57,12 @@ export async function panelIdentity(port: number): Promise<PanelIdentity | undef
   try {
     const res = await fetch(`http://${LOOPBACK}:${port}/api/health`, { signal: AbortSignal.timeout(1500) })
     if (!res.ok) return undefined
-    const body = (await res.json()) as { app?: unknown; instance?: unknown; pid?: unknown }
+    const body = (await res.json()) as { app?: unknown; instance?: unknown; pid?: unknown; build?: unknown }
     if (body?.app !== 'sideby') return undefined
     return {
       ...(typeof body.instance === 'string' ? { instance: body.instance } : {}),
       ...(Number.isInteger(body.pid) ? { pid: body.pid as number } : {}),
+      ...(typeof body.build === 'string' ? { build: body.build } : {}),
     }
   } catch {
     return undefined
@@ -117,6 +121,7 @@ export async function startPanelServer(opts: PanelServerOptions): Promise<PanelS
           JSON.stringify({
             app: 'sideby',
             ...(opts.version ? { version: opts.version } : {}),
+            build: buildId(),
             instance: opts.instance,
             pid: process.pid,
           }),

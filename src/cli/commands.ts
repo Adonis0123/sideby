@@ -8,7 +8,7 @@ import { SHELLS, type Shell, type ShellInitWrite } from '../core/shell-init.ts'
 import { createRuntime } from '../runtime.ts'
 import type { Finding } from '../types.ts'
 import { type ParsedArgs, UsageError } from './args.ts'
-import { c, quotaText, table, usageText } from './format.ts'
+import { c, clock, quotaText, table, usageText } from './format.ts'
 
 export interface Io {
   out(s: string): void
@@ -124,6 +124,91 @@ export async function cmdRun(a: ParsedArgs, io: Io, command: 'run' | 'login'): P
   return runHost(prepared)
 }
 
+/** Quotes a Host argument for a command line the user may paste; plain words stay as they are. */
+function shellQuote(arg: string): string {
+  return /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`
+}
+
+/** `sideby next <family>`: recommend the Account with the most room, then start it (spec §3.13). */
+export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
+  const [family, ...extra] = a.positionals
+  if (!family || extra.length)
+    throw new UsageError('usage: sideby next <family> [--dry-run] [--include-api] [-- host args]')
+  const includeApi = a.flags.has('include-api')
+  const rt = await createRuntime()
+  const plan = await rt.handoff(family, { includeApi })
+  if (a.flags.has('json')) {
+    json(io, plan)
+    return plan.pick && plan.hasQuota ? 0 : 1
+  }
+  const now = rt.readContext().now
+  const note = (e: (typeof plan.accounts)[number]): string => {
+    if (e.state === 'ready') return `fullest window ${Math.round(e.pressure ?? 0)}%`
+    if (e.state === 'unknown') return 'no quota data yet'
+    if (e.state === 'api')
+      return includeApi ? 'API account, pay per use' : 'left out; add --include-api to use it'
+    if (e.state === 'full') return e.resetsAt ? `back at ${clock(e.resetsAt, now)}` : 'at its limit'
+    return `signed out; sign in with \`sideby login ${e.ref}\``
+  }
+  const mark = { ready: c.green, unknown: c.yellow, api: c.cyan, full: c.red, 'logged-out': c.dim } as const
+  io.out(
+    table(
+      plan.accounts.map((e) => [
+        e.ref === plan.pick ? c.green('→') : ' ',
+        c.bold(e.ref),
+        mark[e.state](e.state === 'logged-out' ? 'signed out' : e.state),
+        c.dim(note(e)),
+      ]),
+      ['', 'ACCOUNT', 'STATE', 'NOTE'],
+    ),
+  )
+  if (!plan.pick) {
+    const out = plan.accounts.filter((e) => e.state === 'logged-out').map((e) => `sideby login ${e.ref}`)
+    const apiLeft = !includeApi && plan.accounts.some((e) => e.state === 'api')
+    const why = plan.earliestReset
+      ? `every ${family} account is at its limit; ${plan.earliestReset.ref} is back at ${clock(plan.earliestReset.at, now)}`
+      : `no ${family} account can be used now`
+    const next = [
+      ...(out.length ? [`sign in with \`${out.join('` or `')}\``] : []),
+      ...(apiLeft ? ['add --include-api to use an API account'] : []),
+    ]
+    io.err(c.yellow(`\n${why}${next.length ? `; ${next.join(', or ')}` : ''}.`))
+    return 1
+  }
+  const picked = plan.accounts.find((e) => e.ref === plan.pick)!
+  const runCmd = ['sideby run', plan.pick, ...(a.rest.length ? ['--', ...a.rest.map(shellQuote)] : [])].join(
+    ' ',
+  )
+  if (!plan.hasQuota) {
+    // Without any Quota the pick is a guess, often the Account that just ran out: recommend nothing, start nothing.
+    const setup = (await rt.quotaSetups()).some((s) => s.family === family && s.plan.status === 'ready')
+    io.err(
+      c.yellow(
+        `\nno ${family} account has quota data yet, so sideby cannot tell which one has room; ${
+          setup ? `turn it on with \`sideby quota setup ${family}\`, or ` : ''
+        }start one yourself, for example \`${runCmd}\`.`,
+      ),
+    )
+    return 1
+  }
+  const reason =
+    picked.state === 'ready'
+      ? `lowest quota pressure, ${Math.round(picked.pressure ?? 0)}%`
+      : picked.state === 'unknown'
+        ? 'no account with known room; this one has no quota data yet'
+        : 'API account, pay per use'
+  io.out(`\nNext: ${c.bold(plan.pick)} (${reason}).`)
+  if (a.flags.has('dry-run')) {
+    io.out(`Start it with \`${runCmd}\`.`)
+    return 0
+  }
+  // The old session stays in the old Account (spec §3.13); a short note carries the context over.
+  io.out(c.dim('Tip: ask your old session for a short handoff note and paste it into the new one.'))
+  const prepared = await rt.prepareLaunch(plan.pick, a.rest, 'run')
+  if (prepared.notice) io.err(c.cyan(prepared.notice))
+  return runHost(prepared)
+}
+
 export async function cmdDoctor(a: ParsedArgs, io: Io): Promise<number> {
   const rt = await createRuntime()
   const report = await rt.doctor({
@@ -138,7 +223,10 @@ export async function cmdDoctor(a: ParsedArgs, io: Io): Promise<number> {
   const home = rt.paths.home
   for (const f of report.fixes)
     io.out(`${f.ok ? c.green('fixed') : c.red('not fixed')} ${f.account} ${f.item}: ${f.message}`)
-  for (const f of report.general) io.out(`${c.red('✗')} ${f.message}${f.hint ? c.dim(` — ${f.hint}`) : ''}`)
+  for (const f of report.general)
+    io.out(
+      `${f.level === 'fail' ? c.red('✗') : c.yellow('!')} ${tilde(f.message, home)}${f.hint ? c.dim(` — ${f.hint}`) : ''}`,
+    )
   for (const acc of report.accounts) {
     const bad = acc.findings.filter((f) => f.level !== 'ok')
     const mark = bad.some((f) => f.level === 'fail') ? c.red('✗') : bad.length ? c.yellow('!') : c.green('✓')
@@ -239,7 +327,8 @@ async function cmdQuotaSetup(a: ParsedArgs, io: Io, sub: 'setup' | 'teardown'): 
         )
       }
     }
-    return plan.status === 'blocked' ? 1 : 0
+    // 10: the change is shown and waits for the user's yes (spec §3.9); agents ask before adding --yes.
+    return plan.status === 'blocked' ? 1 : plan.status === 'ready' ? 10 : 0
   }
   const after = await setup.apply()
   if (a.flags.has('json')) json(io, { family: familyId, applied: after.status === 'enabled', plan: after })
@@ -343,7 +432,7 @@ export async function cmdUi(a: ParsedArgs, io: Io): Promise<number> {
     io.out(
       r.reused
         ? `sideby panel is already running at ${r.url}`
-        : `sideby panel: ${r.url} (in the background; stop it with \`sideby ui --stop\`)`,
+        : `sideby panel: ${r.url} (in the background${r.replaced ? ', replacing the one from an older sideby' : ''}; stop it with \`sideby ui --stop\`)`,
     )
     if (!a.flags.has('no-open') && !(await openBrowser(r.url))) io.out(`open ${r.url} in your browser`)
     return 0

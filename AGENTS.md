@@ -35,7 +35,9 @@ HOME=/tmp/sideby-demo/home XDG_CONFIG_HOME=/tmp/sideby-demo/home/.config \
 ```
 src/
 ├── cli/          argument parsing and subcommands; I/O only, no business logic
-├── core/         paths, config, account discovery, Secret File, Share Modes, doctor, create, launch, atomic writes
+├── core/         paths, config, account discovery, Secret File, Share Modes, doctor, create, launch, atomic writes;
+│                 handoff.ts ranks Accounts for `sideby next` (Quota Pressure in quota-levels.ts);
+│                 skill-check.ts compares an installed sideby skill with this version
 ├── plugins/      loader (trust checks), hook bus, built-in account-script
 ├── families/     claude, codex, grok, pi: each a Family Plugin; index.ts lists built-ins in load order
 │                 logos.ts holds the built-in marks each FamilyDef sets as `logo`
@@ -52,8 +54,8 @@ src/
 └── index.ts      library entry: createPanelHandler and plugin types
 testing/          fake HOME, fake Host binaries, snapshots; also published as `sideby/testing`
 schemas/          generated JSON Schemas for config and every `--json` output
-skills/sideby/    Agent Skill shipped in the package
-scripts/          leak-check.sh, demo-home.ts
+skills/sideby/    Agent Skill shipped in the package: SKILL.md routes to references/*.md; metadata.version = package version
+scripts/          leak-check.sh, demo-home.ts, sync-skill-version.ts (run by `npm version`), write-build-id.ts (run by `pnpm build`)
 docs/             adr/, specs/, plans/, verification/, assets/ (README screenshots), release.md
 ```
 
@@ -97,6 +99,7 @@ Shared Item paths must be relative and stay inside the account directory: config
 - Quota warning levels and the Usage window live in `core/quota-levels.ts`; the CLI and the Panel page both use them.
 - Fixes write only inside the account being fixed, through the atomic writer (temp file in the same directory, mode 600, rename). Credential files end at mode 600.
 - `launch` never changes the parent shell environment, never adds dangerous flags by default, and clears Hijack Variables for every account.
+- `sideby next` (Handoff, spec §3.13) only ranks local Quota and starts its pick exactly as `run` would. It starts nothing when nothing can be picked, nor when no signed-in Subscription Account of the Family has Quota data (`hasQuota: false`, the pick would be a guess), and never copies sessions between Accounts.
 
 **Plugins**
 
@@ -107,8 +110,9 @@ Shared Item paths must be relative and stay inside the account directory: config
 
 **Output contract**
 
-- Every `--json` output has `schemaVersion: 1`. Adding a field keeps the version; removing, renaming or changing meaning bumps it and needs an ADR.
+- Every `--json` output has `schemaVersion: 1`. A `--json` error is `{ schemaVersion, error, code }`; `error` stays a string. Adding a field keeps the version; removing, renaming or changing meaning bumps it and needs an ADR.
 - Every user-facing error says what to do next.
+- Exit code 10 means a change was shown and waits for `--yes` (only `quota setup` today). Doctor never uses it: it exits 1 only for `fail` Findings.
 
 ## Tests
 

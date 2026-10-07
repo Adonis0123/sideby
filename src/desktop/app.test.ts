@@ -68,12 +68,16 @@ describe('app icon', () => {
     assert.deepEqual(text, [`Software\0${APP_MARKER}`])
     assert.deepEqual(px(0, 0), [0, 0, 0, 0], 'outside the tile is transparent')
     assert.deepEqual(px(128, 60), [0x15, 0x17, 0x1c, 255], 'the tile is the Panel dark')
-    // Bars sit at 11-18 and 22-29 of the 40-unit logo; the tile is 824/1024 of the canvas, centred.
+    // Halves of radius 10.5 at 18.5,18.5 (left) and 21.5,21.5 (right) in the 40-unit logo; the tile is
+    // 824/1024 of the canvas, centred.
     const at = (u: number) => Math.floor(25 + (u * 206) / 40)
-    assert.deepEqual(px(at(14.5), 128), [0xf5, 0xf6, 0xf8, 255], 'first bar opaque')
-    const second = px(at(25.5), 128)
-    assert.equal(second[0], Math.round(0xf5 * 0.55 + 0x15 * 0.45), 'second bar at 55%')
-    assert.deepEqual(px(at(20), 128), [0x15, 0x17, 0x1c, 255], 'gap between the bars')
+    const tile = [0x15, 0x17, 0x1c, 255]
+    assert.deepEqual(px(at(13), at(18.5)), [0xf5, 0xf6, 0xf8, 255], 'left half opaque')
+    const second = px(at(27), at(21.5))
+    assert.equal(second[0], Math.round(0xf5 * 0.55 + 0x15 * 0.45), 'right half at 55%')
+    assert.deepEqual(px(at(20), at(20)), tile, 'gap between the halves')
+    assert.deepEqual(px(at(17), at(9)), [0xf5, 0xf6, 0xf8, 255], 'left half starts higher')
+    assert.deepEqual(px(at(23), at(9)), tile, 'right half starts lower')
     const edge = Array.from({ length: 256 }, (_, y) => px(25, y)[3]!)
     assert.ok(
       edge.some((a) => a > 0 && a < 255),

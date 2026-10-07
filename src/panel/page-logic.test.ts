@@ -21,6 +21,7 @@ import {
   sortAccounts,
   suggestAlias,
   suggestName,
+  updatedAge,
   windowState,
 } from './page-logic.ts'
 import { PAGE_SCRIPT } from './page-script.ts'
@@ -341,5 +342,23 @@ describe('panelHint', () => {
     assert.equal(panelHint(force, false, action), force)
     assert.equal(panelHint(force, true, action), force)
     assert.equal(panelHint('', true, action), '')
+  })
+})
+
+describe('updatedAge', () => {
+  it('says just now for the whole first minute, so the header does not tick between auto refreshes', () => {
+    for (const ms of [0, 4999, 5000, 20000, 59999])
+      assert.deepEqual(updatedAge(ms), { key: 'time.justNow' }, String(ms))
+  })
+  it('counts whole minutes, hours and days after that', () => {
+    assert.deepEqual(updatedAge(60000), { key: 'time.minAgo', n: 1 })
+    assert.deepEqual(updatedAge(119999), { key: 'time.minAgo', n: 1 })
+    assert.deepEqual(updatedAge(59 * 60000 + 59999), { key: 'time.minAgo', n: 59 })
+    assert.deepEqual(updatedAge(3600000), { key: 'time.hAgo', n: 1 })
+    assert.deepEqual(updatedAge(24 * 3600000), { key: 'time.dAgo', n: 1 })
+  })
+  it('treats a negative or unknown age as just now', () => {
+    assert.deepEqual(updatedAge(-5000), { key: 'time.justNow' })
+    assert.deepEqual(updatedAge(Number.NaN), { key: 'time.justNow' })
   })
 })

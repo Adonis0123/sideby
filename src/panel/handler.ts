@@ -4,7 +4,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { resolveRef } from '../core/accounts.ts'
 import { aliasArgs, aliasRefs } from '../core/config.ts'
 import { UserError } from '../core/errors.ts'
-import { packageVersion } from '../core/version.ts'
+import { planHandoff } from '../core/handoff.ts'
+import { buildId, packageVersion } from '../core/version.ts'
 import type { AccountStatus, DoctorHistory, FamilyInfo, Runtime } from '../runtime.ts'
 import type { Account, FamilyLogo, QuotaResult, QuotaSetupPlan, UsageResult } from '../types.ts'
 import { renderPage } from './page.ts'
@@ -89,6 +90,8 @@ export type PanelFamily = FamilyInfo & { logo?: FamilyLogo }
 export interface PanelState {
   schemaVersion: 1
   version: string
+  /** buildId() of the process serving the Panel: a page from another build reloads itself. */
+  build: string
   readOnly: boolean
   generatedAt: string
   families: PanelFamily[]
@@ -99,6 +102,38 @@ export interface PanelState {
   history?: DoctorHistory
   /** The config `aliases` as alias → Account ref (arguments left out), so the page can tell which names are taken. */
   configAliases?: Record<string, string>
+  /**
+   * Family → the Account `sideby next <family>` would pick (spec §3.13). Only Families with a Quota source,
+   * at least two subscription Accounts, some Quota data and a pick; API Accounts are left out as in the CLI default.
+   */
+  handoff?: Record<string, string>
+}
+
+/** The `handoff` map of the Panel state, from the statuses and Quota already read for the page. */
+export function handoffByFamily(
+  rt: Runtime,
+  accounts: readonly PanelAccount[],
+  now: Date,
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [id, f] of rt.families) {
+    const list = accounts.filter((a) => a.family === id)
+    if (!f.readQuota || list.filter((a) => a.kind === 'subscription').length < 2) continue
+    const plan = planHandoff(
+      id,
+      list.map((a) => ({
+        ref: a.ref,
+        name: a.name,
+        isMain: a.isMain,
+        kind: a.kind,
+        login: a.login ?? 'unknown',
+        quota: a.quota ?? { status: 'unavailable', reason: 'unrecognized' },
+      })),
+      now,
+    )
+    if (plan.pick && plan.hasQuota) out[id] = plan.pick
+  }
+  return out
 }
 
 class HttpError extends Error {
@@ -217,7 +252,10 @@ async function accountState(rt: Runtime, account: Account, families: FamilyInfo[
   }
 }
 
-async function buildState(rt: Runtime, opts: { version: string; readOnly: boolean }): Promise<PanelState> {
+async function buildState(
+  rt: Runtime,
+  opts: { version: string; build: string; readOnly: boolean },
+): Promise<PanelState> {
   const ctx = rt.readContext()
   const [families, accounts, history, quotaSetups] = await Promise.all([
     rt.familyInfo(),
@@ -227,35 +265,39 @@ async function buildState(rt: Runtime, opts: { version: string; readOnly: boolea
   ])
   const health = healthByAccount(history)
   const aliases = aliasesByAccount(aliasRefs(rt.config.aliases), accounts)
+  const list = await Promise.all(
+    accounts.map(async (a): Promise<PanelAccount> => {
+      const st = await accountState(rt, a, families)
+      const h = health.get(a.ref)
+      const names = aliases.get(a.ref)
+      const withArgs = (names ?? [])
+        .map((n) => [n, aliasArgs(rt.config.aliases?.[n])] as const)
+        .filter(([, args]) => args.length)
+      return {
+        ...st,
+        ...(h ? { health: h } : {}),
+        ...(names ? { aliases: names } : {}),
+        ...(withArgs.length ? { aliasArgs: Object.fromEntries(withArgs) } : {}),
+      }
+    }),
+  )
+  const handoff = handoffByFamily(rt, list, ctx.now)
   return {
     schemaVersion: 1,
     version: opts.version,
+    build: opts.build,
     readOnly: opts.readOnly,
     generatedAt: ctx.now.toISOString(),
     families: families.map((f) => {
       const logo = rt.families.get(f.id)?.logo
       return logo ? { ...f, logo } : f
     }),
-    accounts: await Promise.all(
-      accounts.map(async (a) => {
-        const st = await accountState(rt, a, families)
-        const h = health.get(a.ref)
-        const names = aliases.get(a.ref)
-        const withArgs = (names ?? [])
-          .map((n) => [n, aliasArgs(rt.config.aliases?.[n])] as const)
-          .filter(([, args]) => args.length)
-        return {
-          ...st,
-          ...(h ? { health: h } : {}),
-          ...(names ? { aliases: names } : {}),
-          ...(withArgs.length ? { aliasArgs: Object.fromEntries(withArgs) } : {}),
-        }
-      }),
-    ),
+    accounts: list,
     pluginErrors: rt.pluginErrors.map((e) => ({ where: e.where, message: e.message })),
     quotaSetups,
     ...(history ? { history } : {}),
     ...(rt.config.aliases ? { configAliases: aliasRefs(rt.config.aliases) } : {}),
+    ...(Object.keys(handoff).length ? { handoff } : {}),
   }
 }
 
@@ -280,6 +322,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   const allowed = new Set(opts.allowedHosts.map((h) => h.toLowerCase()))
   const readOnly = Boolean(opts.readOnly)
   const version = opts.version ?? PANEL_VERSION
+  const build = buildId()
   const theme = resolveTheme(opts.theme)
   const token = randomBytes(32).toString('base64url')
   const serial = writeQueue()
@@ -378,12 +421,14 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
             ].join('; '),
           })
           res.end(
-            method === 'HEAD' ? undefined : renderPage({ basePath, token, nonce, version, readOnly, theme }),
+            method === 'HEAD'
+              ? undefined
+              : renderPage({ basePath, token, nonce, version, build, readOnly, theme }),
           )
           return true
         }
         if (sub === '/api/health') {
-          send(res, 200, { app: 'sideby', version })
+          send(res, 200, { app: 'sideby', version, build })
           return true
         }
         // The page fetches a fresh token here after the server restarted (a new process, a new token).
@@ -394,7 +439,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           return true
         }
         if (sub === '/api/state') {
-          send(res, 200, await buildState(await getRuntime(), { version, readOnly }))
+          send(res, 200, await buildState(await getRuntime(), { version, build, readOnly }))
           return true
         }
         if (Object.hasOwn(routes, sub)) throw new HttpError(405, 'use POST')

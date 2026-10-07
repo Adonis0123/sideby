@@ -16,6 +16,8 @@ export interface PageOptions {
   /** CSP nonce for the inline style and script. */
   nonce?: string
   version?: string
+  /** buildId() of the serving process; the page reloads when /api/state reports another one. */
+  build?: string
   readOnly?: boolean
   /** Host theme from resolveTheme(); the default look when absent. */
   theme?: ResolvedTheme
@@ -46,6 +48,7 @@ export function renderPage(opts: PageOptions): string {
     basePath: opts.basePath,
     token: opts.token,
     version: opts.version ?? '',
+    build: opts.build ?? '',
     readOnly: Boolean(opts.readOnly),
     colorScheme: theme.colorScheme,
     warn: QUOTA_WARN_PERCENT,
@@ -70,7 +73,7 @@ export function renderPage(opts: PageOptions): string {
 <header class="top">
   <div class="top-in">
     <div class="brand">
-      <span class="logo" aria-hidden="true"><i></i><i></i></span>
+      <span class="logo" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M18.5 8A10.5 10.5 0 0 0 18.5 29Z"/><path d="M21.5 11A10.5 10.5 0 0 1 21.5 32Z" fill-opacity=".55"/></svg></span>
       <div>
         <h1>sideby</h1>
         <p class="tagline" data-i18n="top.tagline">Every AI coding account, side by side.</p>
