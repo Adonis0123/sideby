@@ -136,7 +136,7 @@ async function fileLimits(file: string): Promise<FileLimits> {
 }
 
 /** Parsed `rate_limits` per Account directory; a rollout is read again only after it changed. */
-export const codexQuotaMemo = new FileMemo<FileLimits>()
+export const codexQuotaMemo = new FileMemo<FileLimits>({ name: 'codex-quota', version: 1 })
 
 /** Newest well-formed `rate_limits` across the newest rollout files, by event timestamp. */
 export async function readCodexQuota(dir: string): Promise<QuotaResult> {
@@ -264,7 +264,7 @@ async function fileUsage(file: string): Promise<FileUsage> {
 }
 
 /** Parsed token totals per Account directory; a rollout is read again only after it changed. */
-export const codexUsageMemo = new FileMemo<FileUsage>()
+export const codexUsageMemo = new FileMemo<FileUsage>({ name: 'codex-usage', version: 1 })
 
 /**
  * Token totals for events in the last `days` x 24 h, from rollout files modified in that window (mtime only

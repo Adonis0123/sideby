@@ -66,3 +66,54 @@ describe('FileMemo', () => {
     assert.equal(fileSignature(st(3, 4, 5, 6)), '3:4:5:6')
   })
 })
+
+describe('FileMemo dump and restore', () => {
+  it('dumps what a pass kept, restores it into a fresh memo and marks only real changes dirty', async () => {
+    const memo = new FileMemo<string>()
+    let p = memo.pass('acct')
+    await p.get('/a', st(1), async () => 'a')
+    p.done()
+    assert.equal(memo.dirty, true)
+    const dump = memo.dump()
+    assert.deepEqual(dump, { acct: { '/a': ['1:1000:1000:7', 'a'] } })
+    assert.equal(memo.dirty, false)
+    p = memo.pass('acct')
+    await p.get('/a', st(1), async () => 'never')
+    p.done()
+    assert.equal(memo.dirty, false, 'a pass that reused everything changes nothing')
+
+    const fresh = new FileMemo<string>()
+    fresh.restore(dump)
+    let parses = 0
+    p = fresh.pass('acct')
+    assert.equal(
+      await p.get('/a', st(1), async () => {
+        parses++
+        return 'b'
+      }),
+      'a',
+    )
+    assert.equal(
+      await p.get('/a', st(2), async () => {
+        parses++
+        return 'b'
+      }),
+      'b',
+      'a changed file is parsed again',
+    )
+    assert.equal(parses, 1)
+  })
+
+  it('does not overwrite a scope this process already read, and skips malformed entries', async () => {
+    const memo = new FileMemo<string>()
+    const p = memo.pass('acct')
+    await p.get('/a', st(1), async () => 'live')
+    p.done()
+    memo.restore({
+      acct: { '/a': ['1:1000:1000:7', 'old'] },
+      other: { '/b': [7 as never, 'x'], '/c': ['s', 'c'] },
+    })
+    assert.equal(memo.dump().acct?.['/a']?.[1], 'live')
+    assert.equal(memo.size('other'), 1)
+  })
+})

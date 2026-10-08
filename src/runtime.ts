@@ -25,6 +25,7 @@ import {
   writeDoctorHistory,
 } from './core/last-doctor.ts'
 import { type HostLaunch, type PreparedLaunch, prepareLaunch, which } from './core/launch.ts'
+import { memoStore } from './core/memo-store.ts'
 import { type Paths, resolvePaths } from './core/paths.ts'
 import { findResumeRoute } from './core/resume.ts'
 import { shareMeaning } from './core/share-meaning.ts'
@@ -248,6 +249,7 @@ export async function createRuntime(
 ): Promise<Runtime> {
   const env = opts.env ?? process.env
   const paths = resolvePaths(env)
+  const memos = memoStore(paths.stateDir)
   const config = await loadConfig(paths.configFile)
   const bus = new HookBus()
   const loaded = await loadPlugins({
@@ -618,19 +620,25 @@ export async function createRuntime(
       if (account.kind === 'api') return { status: 'unavailable', reason: 'api-account' }
       const f = familyOf(account.family)
       if (!f.readQuota) return { status: 'unavailable', reason: 'no-source' }
+      await memos.ready()
       try {
         return await f.readQuota(account, readContext())
       } catch (err) {
         return { status: 'unavailable', reason: 'unrecognized', detail: (err as Error).message }
+      } finally {
+        memos.saveSoon()
       }
     },
     async usage(account) {
       const f = familyOf(account.family)
       if (!f.readUsage) return { status: 'unavailable', reason: 'no-source' }
+      await memos.ready()
       try {
         return await f.readUsage(account, readContext())
       } catch (err) {
         return { status: 'unavailable', reason: 'unrecognized', detail: (err as Error).message }
+      } finally {
+        memos.saveSoon()
       }
     },
     async handoff(familyId, o = {}) {

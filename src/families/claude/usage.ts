@@ -100,7 +100,7 @@ async function parseFile(file: string): Promise<Parsed> {
 }
 
 /** Parsed session logs per Account directory; a file is parsed again only after it changed. */
-export const claudeUsageMemo = new FileMemo<Parsed>()
+export const claudeUsageMemo = new FileMemo<Parsed>({ name: 'claude-usage', version: 1 })
 
 export async function readClaudeUsage(account: Account, ctx: ReadContext): Promise<UsageResult> {
   const files = await listJsonl(join(account.dir, 'projects'))
