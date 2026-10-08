@@ -53,6 +53,48 @@ const FamilyInfo = Type.Object({
   plugin: Str,
 })
 
+const ShareModeSchema = Type.Union(
+  ['link', 'copy', 'link-or-copy', 'link-or-local', 'local', 'local-if-api', 'info', 'json-key'].map((m) =>
+    Type.Literal(m),
+  ),
+)
+
+const FamilyDetail = Type.Intersect([
+  FamilyInfo,
+  Type.Object({
+    layout: Type.Object(
+      { main: Str, account: Str },
+      { description: 'Relative to HOME, for example `.claude` and `.claude-<name>`.' },
+    ),
+    selectVar: Type.String({
+      description: 'Environment variable that selects a non-main Account directory.',
+    }),
+    login: Type.Object({
+      args: Type.Union([Type.Array(Str), Type.Null()], {
+        description: "Arguments of the Host's sign-in command; null when sign-in happens inside the Host.",
+      }),
+      hint: Str,
+    }),
+    quota: Type.Boolean(),
+    usage: Type.Boolean(),
+    quotaSetup: Type.Boolean({ description: 'Quota needs `sideby quota setup <family>` once.' }),
+    shared: Type.Array(
+      Type.Object({
+        path: Str,
+        mode: ShareModeSchema,
+        key: Type.Optional(Str),
+        mainPath: Type.Optional(Str),
+        credential: Type.Optional(Type.Boolean()),
+        noSymlink: Type.Optional(Type.Boolean()),
+        source: Type.Union([Type.Literal('family'), Type.Literal('config')]),
+        meaning: Type.String({
+          description: 'What the item looks like in each Account, in one fixed sentence.',
+        }),
+      }),
+    ),
+  }),
+])
+
 const PluginError = Type.Object({ where: Str, message: Str })
 
 const Finding = Type.Object({
@@ -238,6 +280,15 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
         ),
       ),
       shellInitFiles: Type.Optional(ShellInitFiles),
+      suggestion: Type.Optional(
+        Type.Object(
+          { name: Str, alias: Type.Optional(Str), aliasProblem: Type.Optional(Str) },
+          {
+            description:
+              'Only with `--next`: the picked name, the short command that follows the existing pattern, or why that short command was left out.',
+          },
+        ),
+      ),
     },
     { title: 'sideby new --json' },
   ),
@@ -274,6 +325,10 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       errors: Type.Array(PluginError),
     },
     { title: 'sideby plugins --json' },
+  ),
+  families: Type.Object(
+    { schemaVersion: Version, families: Type.Array(FamilyDetail) },
+    { title: 'sideby families --json' },
   ),
   'app-install': Type.Object(
     {

@@ -881,3 +881,116 @@ describe('resume (spec §3.15)', () => {
     })
   }
 })
+
+describe('setup by an agent (spec §3.16)', () => {
+  async function claudeMain(h: FakeHome) {
+    await h.write('.claude/settings.json', '{}\n')
+    await h.mkdir('.claude/skills')
+    await fakeHost(h, 'claude')
+  }
+
+  it('families states every shared item with its mode, meaning and source', async () => {
+    await withFakeHome(async (h) => {
+      await claudeMain(h)
+      await h.write(
+        '.config/sideby/config.json',
+        `${JSON.stringify({ extraSharedItems: { claude: [{ path: 'scripts', mode: 'link' }] } })}\n`,
+      )
+      const r = await sideby(h, ['families', 'claude', '--json'])
+      assert.equal(r.code, 0, r.err)
+      const data = checkSchema('families', r.out) as unknown as {
+        families: {
+          id: string
+          layout: { main: string; account: string }
+          selectVar: string
+          quotaSetup: boolean
+          shared: { path: string; mode: string; key?: string; source: string; meaning: string }[]
+        }[]
+      }
+      const [claude] = data.families
+      assert.equal(data.families.length, 1)
+      assert.deepEqual(claude!.layout, { main: '.claude', account: '.claude-<name>' })
+      assert.equal(claude!.selectVar, 'CLAUDE_CONFIG_DIR')
+      assert.equal(claude!.quotaSetup, true)
+      const by = new Map(claude!.shared.map((s) => [s.path, s]))
+      assert.equal(by.get('skills')?.mode, 'link')
+      assert.equal(by.get('skills')?.source, 'family')
+      assert.equal(by.get('.claude.json')?.key, 'mcpServers')
+      assert.equal(by.get('scripts')?.source, 'config')
+      for (const s of claude!.shared) assert.ok(s.meaning.length > 0, s.path)
+
+      const all = checkSchema('families', (await sideby(h, ['families', '--json'])).out)
+      assert.deepEqual(
+        (all.families as { id: string }[]).map((f) => f.id),
+        ['claude', 'codex', 'grok', 'pi'],
+      )
+      const grok = (all.families as { id: string; shared: { path: string; meaning: string }[] }[]).find(
+        (f) => f.id === 'grok',
+      )!
+      const config = grok.shared.find((s) => s.path === 'config.toml')!
+      assert.match(config.meaning, /a copy of the Main Account's/)
+      assert.doesNotMatch(config.meaning, /a link to the Main Account's/)
+
+      const human = await sideby(h, ['families', 'claude'])
+      assert.match(human.out, /CLAUDE_CONFIG_DIR/)
+      assert.match(human.out, /sign-in, sessions and history/)
+      const unknown = await sideby(h, ['families', 'nope', '--json'])
+      assert.equal(unknown.code, 1)
+      assert.match(checkSchema('error', unknown.out).error as string, /available: claude, codex, grok, pi/)
+      assert.equal((await sideby(h, ['families', 'claude', 'codex'])).code, 2)
+    })
+  })
+
+  it('new --next continues the numbering and the short-command pattern, and leaves out a taken one', async () => {
+    await withFakeHome(async (h) => {
+      await claudeMain(h)
+      for (const n of ['001', '002'])
+        assert.equal((await sideby(h, ['new', 'claude', n, '--alias', `cc${n}`])).code, 0)
+
+      const r = await sideby(h, ['new', 'claude', '--next', '--json'])
+      assert.equal(r.code, 0, r.out + r.err)
+      const data = checkSchema('new', r.out)
+      assert.deepEqual(data.suggestion, { name: '003', alias: 'cc003' })
+      assert.deepEqual(data.alias, { name: 'cc003', added: true })
+      assert.ok((await stat(h.path('.claude-003'))).isDirectory())
+
+      // cc004 already starts another Account: the Account is still created, without a short command.
+      assert.equal((await sideby(h, ['alias', 'add', 'cc004', 'claude:main'])).code, 0)
+      const taken = await sideby(h, ['new', 'claude', '--next', '--json'])
+      assert.equal(taken.code, 0, taken.out)
+      const t = checkSchema('new', taken.out)
+      assert.equal((t.suggestion as { name: string }).name, '004')
+      assert.match((t.suggestion as { aliasProblem: string }).aliasProblem, /^cc004: /)
+      assert.equal(t.alias, undefined)
+      const config = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8'))
+      assert.equal(config.aliases.cc004, 'claude:main')
+
+      // An explicit --alias wins over the pattern.
+      const own = checkSchema(
+        'new',
+        (await sideby(h, ['new', 'claude', '--next', '--alias', 'c5', '--json'])).out,
+      )
+      assert.deepEqual(own.suggestion, { name: '005' })
+      assert.deepEqual(own.alias, { name: 'c5', added: true })
+
+      const both = await sideby(h, ['new', 'claude', '006', '--next'])
+      assert.equal(both.code, 2)
+      assert.match(both.err, /--next picks the name/)
+      assert.equal(await stat(h.path('.claude-006')).catch(() => null), null)
+    })
+  })
+
+  it('prints help for one command, and the general help with agent guidance otherwise', async () => {
+    await withFakeHome(async (h) => {
+      const one = await sideby(h, ['new', '--help'])
+      assert.equal(one.code, 0)
+      assert.match(one.out, /^sideby new <family> <name>/)
+      assert.match(one.out, /--next/)
+      assert.match((await sideby(h, ['help', 'login'])).out, /^sideby login <account>/)
+      assert.match((await sideby(h, ['families', '--help'])).out, /^sideby families/)
+      const general = await sideby(h, ['run', '--help'])
+      assert.match(general.out, /^sideby — run every AI coding account/)
+      assert.match(general.out, /For AI agents:/)
+    })
+  })
+})

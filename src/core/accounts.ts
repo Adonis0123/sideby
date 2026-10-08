@@ -121,3 +121,21 @@ export function resolveRef(
     throw new AccountRefError(`no account named ${ref}; run \`sideby list\` to see accounts`)
   throw new AccountRefError(`${ref} is ambiguous; use one of: ${hits.map((a) => a.ref).join(', ')}`)
 }
+
+/** Alias names per Account ref, sorted. An alias whose target matches no Account is left out. */
+export function aliasesByAccount(
+  aliases: Readonly<Record<string, string>> | undefined,
+  accounts: readonly Account[],
+): Map<string, string[]> {
+  const out = new Map<string, string[]>()
+  for (const [alias, target] of Object.entries(aliases ?? {})) {
+    let ref: string
+    try {
+      ref = resolveRef(target, accounts).ref
+    } catch {
+      continue
+    }
+    out.set(ref, [...(out.get(ref) ?? []), alias].sort())
+  }
+  return out
+}

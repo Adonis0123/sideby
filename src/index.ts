@@ -12,7 +12,9 @@ export {
   type AccountStatus,
   createRuntime,
   type DoctorOptions,
+  type FamilyDetail,
   type FamilyInfo,
   type Runtime,
+  type SharedItemInfo,
 } from './runtime.ts'
 export type * from './types.ts'

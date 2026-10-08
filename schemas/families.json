@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/families.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "families"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "families": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "title",
+              "bin",
+              "installUrl",
+              "installed",
+              "plugin"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "bin": {
+                "type": "string"
+              },
+              "installUrl": {
+                "type": "string"
+              },
+              "installed": {
+                "type": "boolean"
+              },
+              "plugin": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "layout",
+              "selectVar",
+              "login",
+              "quota",
+              "usage",
+              "quotaSetup",
+              "shared"
+            ],
+            "properties": {
+              "layout": {
+                "type": "object",
+                "required": [
+                  "main",
+                  "account"
+                ],
+                "properties": {
+                  "main": {
+                    "type": "string"
+                  },
+                  "account": {
+                    "type": "string"
+                  }
+                },
+                "description": "Relative to HOME, for example `.claude` and `.claude-<name>`."
+              },
+              "selectVar": {
+                "type": "string",
+                "description": "Environment variable that selects a non-main Account directory."
+              },
+              "login": {
+                "type": "object",
+                "required": [
+                  "args",
+                  "hint"
+                ],
+                "properties": {
+                  "args": {
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Arguments of the Host's sign-in command; null when sign-in happens inside the Host."
+                  },
+                  "hint": {
+                    "type": "string"
+                  }
+                }
+              },
+              "quota": {
+                "type": "boolean"
+              },
+              "usage": {
+                "type": "boolean"
+              },
+              "quotaSetup": {
+                "type": "boolean",
+                "description": "Quota needs `sideby quota setup <family>` once."
+              },
+              "shared": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "path",
+                    "mode",
+                    "source",
+                    "meaning"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "mode": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "link"
+                        },
+                        {
+                          "type": "string",
+                          "const": "copy"
+                        },
+                        {
+                          "type": "string",
+                          "const": "link-or-copy"
+                        },
+                        {
+                          "type": "string",
+                          "const": "link-or-local"
+                        },
+                        {
+                          "type": "string",
+                          "const": "local"
+                        },
+                        {
+                          "type": "string",
+                          "const": "local-if-api"
+                        },
+                        {
+                          "type": "string",
+                          "const": "info"
+                        },
+                        {
+                          "type": "string",
+                          "const": "json-key"
+                        }
+                      ]
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "mainPath": {
+                      "type": "string"
+                    },
+                    "credential": {
+                      "type": "boolean"
+                    },
+                    "noSymlink": {
+                      "type": "boolean"
+                    },
+                    "source": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "family"
+                        },
+                        {
+                          "type": "string",
+                          "const": "config"
+                        }
+                      ]
+                    },
+                    "meaning": {
+                      "type": "string",
+                      "description": "What the item looks like in each Account, in one fixed sentence."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "title": "sideby families --json"
+}

@@ -27,6 +27,7 @@ import {
 import { type HostLaunch, type PreparedLaunch, prepareLaunch, which } from './core/launch.ts'
 import { type Paths, resolvePaths } from './core/paths.ts'
 import { findResumeRoute } from './core/resume.ts'
+import { shareMeaning } from './core/share-meaning.ts'
 import {
   SHELLS,
   type Shell,
@@ -47,6 +48,7 @@ import type {
   QuotaResult,
   QuotaSetupPlan,
   ReadContext,
+  ShareMode,
   UsageResult,
 } from './types.ts'
 
@@ -99,6 +101,33 @@ export interface FamilyInfo {
   plugin: string
 }
 
+/** One Shared Item as `sideby families` reports it (spec §3.16). */
+export interface SharedItemInfo {
+  path: string
+  mode: ShareMode
+  key?: string
+  mainPath?: string
+  credential?: boolean
+  noSymlink?: boolean
+  /** `family` from the FamilyDef, `config` from `extraSharedItems`. */
+  source: 'family' | 'config'
+  /** What the item looks like in an Account, in one fixed sentence. */
+  meaning: string
+}
+
+/** A Family's facts for agents and docs: FamilyInfo plus layout, sign-in, sources and Shared Items (spec §3.16). */
+export interface FamilyDetail extends FamilyInfo {
+  /** Relative to HOME: `{ main: '.claude', account: '.claude-<name>' }`. */
+  layout: { main: string; account: string }
+  selectVar: string
+  /** `args` is null when sign-in happens inside the Host. */
+  login: { args: string[] | null; hint: string }
+  quota: boolean
+  usage: boolean
+  quotaSetup: boolean
+  shared: SharedItemInfo[]
+}
+
 export interface AccountStatus extends Account {
   familyTitle: string
   hostInstalled: boolean
@@ -137,6 +166,8 @@ export interface Runtime {
   plugins: readonly LoadedPlugin[]
   pluginErrors: readonly PluginLoadError[]
   familyInfo(): Promise<FamilyInfo[]>
+  /** Every loaded Family with its layout, sign-in, quota support and Shared Items (config extras included). */
+  familyDetails(): Promise<FamilyDetail[]>
   accounts(): Promise<Account[]>
   resolve(ref: string): Promise<Account>
   status(account: Account): Promise<AccountStatus>
@@ -294,6 +325,32 @@ export async function createRuntime(
           plugin: loaded.familyOwner.get(f.id) ?? 'unknown',
         })),
       )
+    },
+    async familyDetails() {
+      const info = new Map((await rt.familyInfo()).map((f) => [f.id, f]))
+      return [...families.values()].map((f) => {
+        // The merged list holds the config's own objects, so identity tells which ones came from `extraSharedItems`.
+        const fromConfig = new Set<unknown>(config.extraSharedItems?.[f.id] ?? [])
+        return {
+          ...info.get(f.id)!,
+          layout: { main: f.layout.main, account: f.layout.account },
+          selectVar: f.selectVar,
+          login: { args: f.login.args ? [...f.login.args] : null, hint: f.login.hint },
+          quota: Boolean(f.readQuota),
+          usage: Boolean(f.readUsage),
+          quotaSetup: Boolean(f.quotaSetup),
+          shared: f.sharedItems.map((item) => ({
+            path: item.path,
+            mode: item.mode,
+            ...(item.key ? { key: item.key } : {}),
+            ...(item.mainPath ? { mainPath: item.mainPath } : {}),
+            ...(item.credential ? { credential: true } : {}),
+            ...(item.noSymlink ? { noSymlink: true } : {}),
+            source: fromConfig.has(item) ? ('config' as const) : ('family' as const),
+            meaning: shareMeaning(item),
+          })),
+        }
+      })
     },
     accounts,
     async resolve(ref) {

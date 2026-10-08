@@ -1,7 +1,7 @@
 // HTTP handler for the local Panel. Mountable under any basePath; standalone and embedded use the same rules.
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { resolveRef } from '../core/accounts.ts'
+import { aliasesByAccount } from '../core/accounts.ts'
 import { aliasArgs, aliasRefs } from '../core/config.ts'
 import { UserError } from '../core/errors.ts'
 import { planHandoff } from '../core/handoff.ts'
@@ -78,24 +78,6 @@ export function healthByAccount(
       fail: entry.findings.filter((f) => f.level === 'fail').length,
       warn: entry.findings.filter((f) => f.level === 'warn').length,
     })
-  return out
-}
-
-/** Alias names per Account ref, sorted. An alias whose target matches no Account is left out. */
-export function aliasesByAccount(
-  aliases: Readonly<Record<string, string>> | undefined,
-  accounts: readonly Account[],
-): Map<string, string[]> {
-  const out = new Map<string, string[]>()
-  for (const [alias, target] of Object.entries(aliases ?? {})) {
-    let ref: string
-    try {
-      ref = resolveRef(target, accounts).ref
-    } catch {
-      continue
-    }
-    out.set(ref, [...(out.get(ref) ?? []), alias].sort())
-  }
   return out
 }
 

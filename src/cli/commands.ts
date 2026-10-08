@@ -1,11 +1,14 @@
 import { fileURLToPath } from 'node:url'
+import { aliasesByAccount } from '../core/accounts.ts'
+import { aliasRefs } from '../core/config.ts'
 import type { DoctorReport } from '../core/doctor.ts'
 import { UserError } from '../core/errors.ts'
 import { runHost } from '../core/launch.ts'
 import { resolvePaths, tildify } from '../core/paths.ts'
 import { USAGE_DAYS } from '../core/quota-levels.ts'
 import { SHELLS, type Shell, type ShellInitWrite } from '../core/shell-init.ts'
-import { createRuntime } from '../runtime.ts'
+import { suggestAlias, suggestName } from '../panel/page-logic.ts'
+import { createRuntime, type Runtime, UnknownFamilyError } from '../runtime.ts'
 import type { Finding } from '../types.ts'
 import { type ParsedArgs, UsageError } from './args.ts'
 import { c, clock, quotaText, table, usageText } from './format.ts'
@@ -75,20 +78,61 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
   return 0
 }
 
+export interface NewSuggestion {
+  name: string
+  alias?: string
+  /** Why the alias the pattern suggests was left out (taken, reserved); the Account is created without it. */
+  aliasProblem?: string
+}
+
+/**
+ * `new --next`: the next name of a Family, and a short command following the pattern of its existing aliases,
+ * from the same helpers the Panel uses (spec §3.16).
+ */
+async function suggestNew(rt: Runtime, family: string, alias: string | undefined): Promise<NewSuggestion> {
+  if (!(await rt.familyInfo()).some((f) => f.id === family))
+    throw new UnknownFamilyError(`unknown family "${family}"; run \`sideby families\` to see them`)
+  const all = await rt.accounts()
+  const mine = all.filter((x) => x.family === family)
+  const name = suggestName(mine.map((x) => x.name))
+  if (alias !== undefined) return { name }
+  const byRef = aliasesByAccount(aliasRefs(rt.config.aliases), all)
+  const offer = suggestAlias(
+    mine.map((x) => ({ family: x.family, name: x.name, ref: x.ref, aliases: byRef.get(x.ref) ?? [] })),
+    family,
+    name,
+  )
+  if (!offer) return { name }
+  const problem = rt.aliasProblem(offer, `${family}:${name}`)
+  return problem ? { name, aliasProblem: `${offer}: ${problem}` } : { name, alias: offer }
+}
+
 export async function cmdNew(a: ParsedArgs, io: Io): Promise<number> {
-  const [family, name] = a.positionals
-  if (!family || !name || a.positionals.length > 2)
-    throw new UsageError('usage: sideby new <family> <name> [--api] [--alias <short-command>]')
-  const alias = a.flags.get('alias')
+  const [family, given] = a.positionals
+  const next = a.flags.has('next')
+  if (!family || (next ? given !== undefined : !given) || a.positionals.length > 2)
+    throw new UsageError(
+      next
+        ? 'usage: sideby new <family> --next [--api] [--alias <short-command>]; --next picks the name, so leave it out'
+        : 'usage: sideby new <family> <name> [--api] [--alias <short-command>], or `--next` instead of <name>',
+    )
+  const givenAlias = a.flags.get('alias')
   const rt = await createRuntime()
+  const suggestion = next
+    ? await suggestNew(rt, family, typeof givenAlias === 'string' ? givenAlias : undefined)
+    : undefined
+  const name = suggestion?.name ?? given!
+  const alias = typeof givenAlias === 'string' ? givenAlias : suggestion?.alias
   const res = await rt.createAccount(family, name, {
     api: a.flags.has('api'),
-    ...(typeof alias === 'string' ? { alias } : {}),
+    ...(alias !== undefined ? { alias } : {}),
   })
   if (a.flags.has('json')) {
-    json(io, res)
+    json(io, suggestion ? { ...res, suggestion } : res)
     return res.ok ? 0 : 1
   }
+  if (suggestion?.aliasProblem)
+    io.out(`${c.yellow('!')} no short command: the pattern suggests ${suggestion.aliasProblem}`)
   const home = rt.paths.home
   const where = tildify(res.account.dir, home)
   if (res.ok) io.out(`${c.green('✓')} created ${c.bold(res.account.ref)} at ${where}`)
@@ -527,4 +571,44 @@ export async function cmdAlias(a: ParsedArgs, io: Io): Promise<number> {
   io.out(said[res.status])
   printShellInitWrites(io, res.shellInitFiles ?? [], rt.paths.home)
   return res.ok ? 0 : 1
+}
+
+/** `sideby families [family]`: each Family's layout, sign-in and Shared Items, from its FamilyDef (spec §3.16). */
+export async function cmdFamilies(a: ParsedArgs, io: Io): Promise<number> {
+  const [only, ...extra] = a.positionals
+  if (extra.length) throw new UsageError('usage: sideby families [family] [--json]')
+  const rt = await createRuntime()
+  const all = await rt.familyDetails()
+  const families = only === undefined ? all : all.filter((f) => f.id === only)
+  if (only !== undefined && families.length === 0)
+    throw new UnknownFamilyError(
+      `unknown family "${only}"; available: ${all.map((f) => f.id).join(', ') || 'none (check `sideby plugins`)'}`,
+    )
+  if (a.flags.has('json')) {
+    json(io, { families })
+    return 0
+  }
+  families.forEach((f, i) => {
+    if (i) io.out('')
+    io.out(
+      `${c.bold(f.title)} (${f.id})  ${f.installed ? c.green('installed') : c.yellow(`not installed: ${f.installUrl}`)}`,
+    )
+    io.out(`  Accounts   ~/${f.layout.main} (main), ~/${f.layout.account}; selected with ${f.selectVar}`)
+    io.out(
+      `  Sign in    sideby login ${f.id}:<name>  ${c.dim(f.login.args ? `(runs ${[f.bin, ...f.login.args].join(' ')})` : `(${f.login.hint})`)}`,
+    )
+    const yes = (b: boolean) => (b ? c.green('yes') : c.dim('no public source'))
+    io.out(
+      `  Quota      ${yes(f.quota)}${f.quotaSetup ? c.dim(`, after \`sideby quota setup ${f.id}\``) : ''}   Usage ${yes(f.usage)}`,
+    )
+    io.out('  Shared items, and how each account holds them:')
+    const rows = f.shared.map((s) => [
+      `    ${s.path}${s.key ? `#${s.key}` : ''}`,
+      s.source === 'config' ? `${s.mode} ${c.dim('(config)')}` : s.mode,
+      s.meaning,
+    ])
+    io.out(table(rows, ['    ITEM', 'MODE', 'IN EACH ACCOUNT']))
+    io.out(c.dim('  Everything else in an account directory is its own: sign-in, sessions and history.'))
+  })
+  return 0
 }

@@ -175,6 +175,24 @@
         }
       },
       "description": "One entry per config `shellInitFile`, rewritten after the change."
+    },
+    "suggestion": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "alias": {
+          "type": "string"
+        },
+        "aliasProblem": {
+          "type": "string"
+        }
+      },
+      "description": "Only with `--next`: the picked name, the short command that follows the existing pattern, or why that short command was left out."
     }
   },
   "title": "sideby new --json"
