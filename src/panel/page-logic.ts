@@ -122,6 +122,30 @@ export function attentionReasons(
   return out
 }
 
+/**
+ * The most serious reason an Account needs a look, as a message key and its values for the Panel to show where the
+ * attention count is: `why.<reason>`; for `quota-high` the fullest live window at or over `warn`, with its label and
+ * rounded percentage. Null when all is well.
+ */
+export function attentionWhy(
+  a: LogicAccount,
+  health: { fail: number; warn: number } | null,
+  now: number,
+  warn: number,
+): { key: string; vars: Record<string, string | number> } | null {
+  const reason = attentionReasons(a, health, now, warn)[0]
+  if (!reason) return null
+  if (reason !== 'quota-high') return { key: `why.${reason}`, vars: {} }
+  let top: { label: string; pct: number } | null = null
+  for (const w of a.quota?.windows ?? []) {
+    const reset = Date.parse(w.resetsAt)
+    if (Number.isFinite(reset) && reset <= now) continue
+    const pct = Number(w.usedPercent) || 0
+    if (pct >= warn && (!top || pct > top.pct)) top = { label: w.label, pct }
+  }
+  return { key: 'why.quota-high', vars: { label: top?.label ?? '', pct: Math.round(top?.pct ?? 0), warn } }
+}
+
 /** Sorted copy: `pressure` (fullest Quota first), `name`, or `recent` (last activity first). The Main Account leads ties. */
 export function sortAccounts<T extends LogicAccount>(list: T[], mode: string, now: number): T[] {
   const byName = (x: LogicAccount, y: LogicAccount) =>

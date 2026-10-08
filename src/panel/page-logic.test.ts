@@ -7,6 +7,7 @@ import {
   aliasArgsOf,
   aliasIssue,
   attentionReasons,
+  attentionWhy,
   cacheHitRate,
   formatDuration,
   type LogicAccount,
@@ -96,6 +97,26 @@ describe('page logic', () => {
     const passed = quota(90)
     passed!.windows![0]!.resetsAt = at(-1)
     assert.equal(quotaPressure(acct('a', { quota: passed }), NOW), 0)
+  })
+
+  it('says why an Account needs attention, naming the fullest live window over the warning level', () => {
+    assert.deepEqual(attentionWhy(acct('a', { quota: quota(40, 62) }), null, NOW, 60), {
+      key: 'why.quota-high',
+      vars: { label: '7d', pct: 62, warn: 60 },
+    })
+    assert.deepEqual(attentionWhy(acct('a', { quota: quota(91.6, 70) }), null, NOW, 60)?.vars, {
+      label: '5h',
+      pct: 92,
+      warn: 60,
+    })
+    // The most serious reason wins, and a window that has reset no longer counts.
+    assert.deepEqual(attentionWhy(acct('a', { error: 'x', quota: quota(90) }), null, NOW, 60), {
+      key: 'why.error',
+      vars: {},
+    })
+    const passed = quota(90, 10)
+    passed!.windows![0]!.resetsAt = at(-1)
+    assert.equal(attentionWhy(acct('a', { quota: passed }), { fail: 0, warn: 0 }, NOW, 60), null)
   })
 
   it('lists attention reasons, most serious first', () => {

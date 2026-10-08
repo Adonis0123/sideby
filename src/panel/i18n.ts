@@ -104,6 +104,12 @@ const en = {
   'need.quota-high.other': '{n} near limit',
   'need.health-warn.one': '{n} with warnings',
   'need.health-warn.other': '{n} with warnings',
+  'why.error': 'unreadable',
+  'why.health-fail': 'Health check found issues',
+  'why.signed-out': 'signed out',
+  'why.not-installed': 'tool not installed',
+  'why.quota-high': '{label} at {pct}% (warns from {warn}%)',
+  'why.health-warn': 'Health check has warnings',
 
   'tb.search': 'Search accounts',
   'tb.searchPh': 'Search name, alias, email, model…',
@@ -136,6 +142,7 @@ const en = {
   'group.toggle': '{title} ({count}): {action}',
   'group.attention.one': '{n} needs attention',
   'group.attention.other': '{n} need attention',
+  'group.attentionShow': 'Show {name}',
 
   'acct.alias': 'Alias',
   'acct.aliasArgs': 'Alias, starts this account with {args}',
@@ -151,6 +158,7 @@ const en = {
   'acct.notInstalled': 'Tool missing',
   'acct.readError': 'Could not read this account.',
   'acct.installHost': '{host} is not installed on this machine. {link}',
+  'acct.nearLimit': '{label} quota is {pct}% used; warnings start at {warn}%.',
   'acct.installIt': 'Install it',
 
   'quota.pctUsed': '{n}% used',
@@ -410,6 +418,12 @@ const zh: Record<MessageKey, string> = {
   'need.quota-high.other': '{n} 个接近上限',
   'need.health-warn.one': '{n} 个有警告',
   'need.health-warn.other': '{n} 个有警告',
+  'why.error': '读取失败',
+  'why.health-fail': '体检发现问题',
+  'why.signed-out': '未登录',
+  'why.not-installed': '缺少工具',
+  'why.quota-high': '{label} 已用 {pct}%（{warn}% 起提醒）',
+  'why.health-warn': '体检有警告',
 
   'tb.search': '搜索账号',
   'tb.searchPh': '搜索名称、别名、邮箱、模型…',
@@ -442,6 +456,7 @@ const zh: Record<MessageKey, string> = {
   'group.toggle': '{title}（{count}）：{action}',
   'group.attention.one': '{n} 个需要处理',
   'group.attention.other': '{n} 个需要处理',
+  'group.attentionShow': '定位到 {name}',
 
   'acct.alias': '别名',
   'acct.aliasArgs': '别名，启动这个账号并附加 {args}',
@@ -456,6 +471,7 @@ const zh: Record<MessageKey, string> = {
   'acct.notInstalled': '未安装工具',
   'acct.readError': '无法读取这个账号。',
   'acct.installHost': '本机没有安装 {host}。{link}',
+  'acct.nearLimit': '{label} 额度已用 {pct}%，达到 {warn}% 就会提醒。',
   'acct.installIt': '去安装',
 
   'quota.pctUsed': '已用 {n}%',

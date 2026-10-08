@@ -4,6 +4,7 @@ import {
   aliasArgsOf,
   aliasIssue,
   attentionReasons,
+  attentionWhy,
   cacheHitRate,
   formatDuration,
   maskEmail,
@@ -26,6 +27,7 @@ const LOGIC = [
   aliasArgsOf,
   aliasIssue,
   attentionReasons,
+  attentionWhy,
   cacheHitRate,
   formatDuration,
   maskEmail,
@@ -627,6 +629,8 @@ const MAIN = String.raw`
     return { fail, warn }
   }
   function reasonsOf(a, now) { return attentionReasons(a, healthOf(a.ref), now, WARN) }
+  // One line on why an Account needs a look, such as "7d at 62% (warns from 60%)".
+  function whyOf(a, now) { const m = attentionWhy(a, healthOf(a.ref), now, WARN); return m ? t(m.key, m.vars) : '' }
   function setupFor(fam) { return S.state && S.state.quotaSetups.find((s) => s.family === fam) }
 
   // ---------- header and summary ----------
@@ -923,6 +927,9 @@ const MAIN = String.raw`
     const out = []
     if (a.error) out.push(h('div', { class: 'note note-fail' }, h('b', null, t('acct.readError')), ' ', h('span', null, a.error)))
     if (a.hostInstalled === false) out.push(h('div', { class: 'note note-warn' }, tx('acct.installHost', { host: fam.title, link: link(t('acct.installIt'), fam.installUrl) || '' })))
+    // The other reasons already show in the row (read error, missing tool, sign-in, Health); a full window does not.
+    const why = attentionWhy(a, healthOf(a.ref), Date.now(), WARN)
+    if (why && why.key === 'why.quota-high') out.push(h('div', { class: 'note note-warn' }, t('acct.nearLimit', why.vars)))
     return out.length ? h('div', { class: 'row-notes' }, out) : null
   }
   // What a row or card shows depends on more than the account (health, view preferences, language); the
@@ -972,11 +979,23 @@ const MAIN = String.raw`
     const any = all.some((a) => a.quota && a.quota.status === 'ok')
     return waiting && !any
   }
+  // The group's attention tag says who and why: with one Account its name and reason, and a click shows its row;
+  // with more, the count, each one's reason on hover, and a click shows only them (as the summary card does).
+  function attentionTag(needing, now) {
+    if (needing.length === 1) {
+      const a = needing[0]
+      const label = a.name + ' · ' + whyOf(a, now)
+      return h('button', { class: 'tag tag-warn tag-btn', type: 'button', title: t('group.attentionShow', { name: a.name }), onclick: () => flashRow(a.ref) }, label)
+    }
+    const list = needing.map((a) => a.name + ': ' + whyOf(a, now)).join('\n')
+    return h('button', { class: 'tag tag-warn tag-btn', type: 'button', title: list, 'aria-pressed': String(ui.attention), onclick: () => { ui.attention = !ui.attention; renderSummary(); renderAccounts() } }, tn('group.attention', needing.length))
+  }
   function group(fam, list, total, now, cols) {
     const info = family(fam)
     const filtering = Boolean(ui.query.trim()) || ui.attention
     const collapsed = !filtering && prefs.collapsed[fam] === true
-    const need = list.filter((a) => reasonsOf(a, now).length).length
+    const needing = list.filter((a) => reasonsOf(a, now).length)
+    const need = needing.length
     const setup = setupFor(fam)
     const off = list.some((a) => a.quota && a.quota.status === 'unavailable' && a.quota.reason === 'not-enabled')
     const bodyId = 'grp-' + fam.replace(/[^a-zA-Z0-9_-]/g, '_')
@@ -991,7 +1010,7 @@ const MAIN = String.raw`
         h('span', { class: 'group-count' }, list.length === total ? String(total) : list.length + ' / ' + total)),
       h('div', { class: 'group-meta' },
         waitingForQuota(fam) ? h('span', { class: 'group-wait', role: 'status' }, h('span', { class: 'pulse', 'aria-hidden': 'true' }), t('quota.waiting', { host: info.title })) : null,
-        need ? h('span', { class: 'tag tag-warn' }, tn('group.attention', need)) : null,
+        need ? attentionTag(needing, now) : null,
         off && setup && setup.plan.status === 'ready' && !BOOT.readOnly
           ? h('span', { class: 'group-quota' },
             h('span', { class: 'muted small' }, t('quota.turnOnFamilyNote', { host: info.title })),
