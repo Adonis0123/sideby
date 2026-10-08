@@ -84,6 +84,10 @@ if (variant !== 'empty') {
   await rt.createAccount('claude', 'deepseek', { api: true })
   await rt.createAccount('codex', 'team')
   await rt.createAccount('grok', 'lab')
+  // Short commands, so the Panel shows them next to the account names as people really use it.
+  await rt.addAlias('ccw', 'claude:work')
+  await rt.addAlias('ccd', 'claude:deepseek')
+  await rt.addAlias('cxt', 'codex:team')
   await write(
     '.claude-work/.claude.json',
     JSON.stringify({
