@@ -1,0 +1,124 @@
+# 使用指南
+
+[English](usage.md) | 中文
+
+← [README](../../README.zh-CN.md)
+
+## 账号
+
+| 家族 | 主账号 | 其他账号 | 选择变量 |
+|---|---|---|---|
+| claude | `~/.claude` | `~/.claude-<name>` | `CLAUDE_CONFIG_DIR` |
+| codex | `~/.codex` | `~/.codex-<name>` | `CODEX_HOME` |
+| grok | `~/.grok` | `~/.grok-<name>` | `GROK_HOME` |
+| pi | `~/.pi/agent` | `~/.pi-<name>/agent` | `PI_CODING_AGENT_DIR` |
+
+账号从磁盘上自动发现，不用手动登记。名字要匹配 `^[a-z0-9][a-z0-9-]{0,31}$`，`004` 和 `work` 都合法。目录里有 `proxy.env`，或者至少有一个该家族的共享项，才算账号；所以别的工具恰好同名的目录不会被误认，例如 claude-code-router 的 `~/.claude-code-router`。主账号固定叫 `main`，启动时不设选择变量。每次启动前，sideby 会清掉 Hijack Variables（例如全局的 `ANTHROPIC_API_KEY`），避免继承来的变量顶替账号身份。
+
+EMAIL 是账号登录的身份，取自宿主的登录文件（Claude Code、Codex、Grok Build）。sideby 在那里只读这个身份字段，从不读 token（ADR-0003）。
+
+家族插件读取某个账号出错时（例如它的设置文件不是合法 JSON），`list` 照常列出这个账号，把问题打印到 stderr；`list --json` 把它放进该账号的 `problems` 数组。
+
+## API 账号
+
+```sh
+sideby new claude deepseek --api
+$EDITOR ~/.claude-deepseek/proxy.env     # 填好变量；文件权限保持 600
+sideby run deepseek
+```
+
+`proxy.env` 用的是 dotenv 的一个子集：`KEY=VALUE`、可选的 `export ` 前缀、单双引号、`#` 注释，以及 `$NAME` / `${NAME}`。引用只能指向同一文件前面已定义的变量，或 `HOME`、`USER`、`LOGNAME`、`TMPDIR`、`XDG_*_HOME` 这几个位置变量。其他 shell 变量一律不读，也不支持命令替换。里面的变量只进入这次启动的宿主进程。文件权限不是 600 时，sideby 拒绝启动，并提示执行 `chmod 600`。
+
+API 账号不需要登录：登录态是 `not-needed`，在 `sideby list` 的 LOGIN 列显示为 `key`。
+
+pi 是例外。pi 的任何账号都可以放一个 `proxy.env` 来加载 provider key，所以 sideby 启动时会加载它，但这个账号仍按订阅账号处理，用 `/login` 登录。
+
+## 体检（doctor）
+
+```sh
+sideby doctor            # 所有账号
+sideby doctor work       # 单个账号，也可以是一个家族：sideby doctor grok
+sideby doctor --fix      # 执行安全的修复
+```
+
+```
+✓ claude:work subscription shared 4/4  ~/.claude-work
+✗ grok:lab subscription shared 2/3  ~/.grok-lab
+    fail hooks must be a real copy, not a link (host says: "Grok hooks directory has wrong type (expected real directory)")
+         run `sideby doctor --fix` to replace the link with a copy
+
+1 issue(s) can be fixed with `sideby doctor --fix`.
+```
+
+- `shared n/m` 只统计主账号里真有的共享项。主账号没有的项（很多人没有 `commands`、`themes`）直接跳过：不告警，也不计数。
+- 链接目标存在、但不是主账号对应的项：报 warn（`link.other-target`），因为这可能是你有意这么链的；如果宿主要求这里是真实文件或副本，任何链接都报 fail（`symlink-forbidden`）。悬空的链接报 fail（`link.dangling`）。sideby 从不改链接的指向，只报告。
+- 该放链接的位置是真实文件或目录时，只报告，并给出保留它的命令（`mv <x> <x>.local && ln -s …`），sideby 不替换它。
+- 凭据文件（`proxy.env`、`auth.json`、`.claude.json`）只检查类型和权限是否为 600，`--fix` 会把权限改回 600。sideby 从中读取的内容只有 `.claude.json` 的 `mcpServers` 键（用来和主账号保持一致），以及显示为账号邮箱的身份字段（`.claude.json` 的 `oauthAccount.emailAddress` 和 `organizationName`、Grok `auth.json` 条目的 `email`、Codex `id_token` 里的 `email` 声明）；token 从不读出、保存或显示。加 `--force` 后，同步时才允许删掉账号里有、主账号里没有的 server。
+- 备份残留（`*.bak*`、`*backup*`、`*.tmp*`）只计数，不处理。
+
+只有 warn 时退出码为 0，有任何 fail 时为 1。
+
+## Claude 额度
+
+Claude Code 只把额度数据交给 status line 命令，所以需要做一次可还原的改动：
+
+```sh
+npm i -g sideby                   # status line 每次刷新都会调用 sideby
+sideby quota setup claude         # 只展示 diff，不改文件
+sideby quota setup claude --yes   # 写入改动
+sideby quota                      # 每个账号的 5h / 7d 额度和数据时间
+sideby quota teardown claude      # 把原文件逐字节还原
+```
+
+`setup` 修改 `~/.claude/settings.json`：把你的 `statusLine.command` 包成 `sideby statusline-tap --orig-b64 <原命令的 base64>`，用 base64 是为了原命令里的引号和空格不被拆坏。原来没有 status line 时，设成 `sideby statusline-tap`，它会输出一行 `5h 72% · 7d 44%` 这样的内容。原始字节存进 sideby 的状态目录。status line 的显示不变；实测多出的冷启动耗时中位数约 82 ms。
+
+Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 `PATH` 上、或者来自 npx 缓存时，`setup` 会拒绝，并提示先执行 `npm i -g sideby`。
+
+`teardown` 只在文件仍是 `setup` 写入的样子时才还原。如果之后你改过它，`teardown` 会拒绝并给出 diff，请手动把 `statusLine.command` 改回原命令（就是 `--orig-b64` 后面那段 base64），原来没有 `statusLine` 的就整段删掉。
+
+`settings.json` 链接到主账号的账号（默认如此）共用这一次 setup。自己有一份 `settings.json` 的账号，额度显示为未开启，要等它自己的 status line 也这样包装后才有数据。Codex 的额度不用设置，sideby 直接读本地会话文件。
+
+## 账号撞上限额时
+
+```sh
+sideby next claude              # 选剩余额度最多的账号并启动
+sideby next codex --dry-run     # 只看推荐
+sideby next claude -- --model opus  # 宿主参数放在 -- 之后
+```
+
+`next` 按每个账号「还没重置的窗口里最满的那个」排序，启动最低的那个，并列出其余账号和没选它们的原因：
+
+```
+   ACCOUNT        STATE       NOTE
+→  claude:work    ready       fullest window 23%
+   claude:new     unknown     no quota data yet
+   claude:key     api         left out; add --include-api to use it
+   claude:main    full        back at 14:30
+```
+
+- 有窗口到 85% 的账号算用满；已过重置时间的窗口重新按 0% 算。
+- 还没有额度数据的账号排在有余量的账号后面。API 账号按次花钱，加 `--include-api` 才参与。
+- 全部用满时什么都不启动，并告诉你哪个账号最先恢复。所有账号都还没有额度数据时也不启动，因为那样的推荐只是猜测：先开启额度（`sideby quota setup claude`），或用 `sideby run` 自己选。
+- 新账号会开一个新会话，因为每个账号各存各的会话。可以先让旧会话写一份简短的交接说明，再贴进新会话。
+- 只支持 Claude 和 Codex。Grok、pi 没有公开额度，`next grok` 会列出账号让你自己选。
+
+sideby 只推荐，账号由你启动，它从不自己切换或轮换（见常见问题）。面板在每个家族里把同一个推荐账号标成「下一个」。
+
+## 宿主说明
+
+以下版本于 2026-10-05 测试通过。sideby 启动的是 `PATH` 上的官方可执行文件，不修改也不包装它。
+
+| 宿主 | 家族 | 测试版本 | 登录 | 额度 | 用量（近 7 天） |
+|---|---|---|---|---|---|
+| Claude Code | `claude` | 2.1.289 | `claude auth login` | status line 缓存（先跑 `quota setup claude`） | 本地会话记录 |
+| Codex CLI | `codex` | 0.160.0 | `codex login` | 本地会话文件 | 本地会话文件 |
+| Grok Build | `grok` | 1.0.46 | `grok login` | 没有公开来源 | 没有公开来源 |
+| pi | `pi` | 1.0.2 | 进入 pi 后执行 `/login` | 没有公开来源 | 没有公开来源 |
+
+用量由 sideby 自己从 Claude Code 的 `projects/**/*.jsonl` 和 Codex 的 `sessions/**/rollout-*.jsonl` 统计，不需要 ccusage。Grok Build 和 pi 没有额度和用量来源。API 账号只显示用量，不显示额度。宿主没装时，`list` 照常列出它的账号并标注「宿主未安装」，`run` 会告诉你去哪里安装。
+
+各宿主的差异：
+
+- **codex**：非 main 账号默认加 `-c cli_auth_credentials_store="file"`，让每个账号的登录存在自己的 `auth.json` 里；你的参数里已经有这个键时不加。
+- **grok**：Grok 的沙箱不允许某些路径是 symlink，所以 `hooks`、`hooks-paths` 用复制而不是链接，`trusted_folders.toml` 和 `config.toml` 是账号自己的文件。doctor 发现问题时会引用宿主的原话。
+- **pi**：账号目录多一层（`~/.pi-<name>/agent`）。`proxy.env` 只用来加载 provider key，不会让 pi 账号变成 API 账号。

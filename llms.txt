@@ -73,8 +73,14 @@ Key facts:
 
 ## Docs
 
-- [README](https://github.com/Adonis0123/sideby/blob/main/README.md): install, quick start, commands, config, plugins, FAQ
-- [README (中文)](https://github.com/Adonis0123/sideby/blob/main/README.zh-CN.md): Chinese README
+- [README](https://github.com/Adonis0123/sideby/blob/main/README.md): what sideby is, install, quick start, supported hosts
+- [Using sideby](https://github.com/Adonis0123/sideby/blob/main/docs/guide/usage.md): accounts, API accounts, Doctor, Claude quota, Handoff, Host notes
+- [Commands](https://github.com/Adonis0123/sideby/blob/main/docs/guide/commands.md): every command, exit codes, `--json`
+- [Configuration](https://github.com/Adonis0123/sideby/blob/main/docs/guide/configuration.md): `config.json` fields, aliases, shell functions
+- [Panel](https://github.com/Adonis0123/sideby/blob/main/docs/guide/panel.md): panel, desktop app, `createPanelHandler` embedding and theme tokens
+- [Plugins](https://github.com/Adonis0123/sideby/blob/main/docs/guide/plugins.md): plugin layout, extension points, `account-script`
+- [FAQ](https://github.com/Adonis0123/sideby/blob/main/docs/guide/faq.md): terms of service, data locations, alternatives, uninstall
+- [README (中文)](https://github.com/Adonis0123/sideby/blob/main/README.zh-CN.md): Chinese README; each guide has a `.zh-CN.md` twin
 - [Agent Skill](https://github.com/Adonis0123/sideby/blob/main/skills/sideby/SKILL.md): one skill that routes agents to short references (diagnose, accounts, quota, handoff); install with `npx skills add Adonis0123/sideby -g`
 - [Plugin types](https://github.com/Adonis0123/sideby/blob/main/src/types.ts): `Plugin`, `PluginApi`, `FamilyDef`, `Finding`, `QuotaResult`, `UsageResult`
 - [Glossary](https://github.com/Adonis0123/sideby/blob/main/CONTEXT.md): Account, Family, Shared Item, Share Mode, Hijack Variable, Finding

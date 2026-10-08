@@ -28,7 +28,7 @@ HOME=/tmp/sideby-demo/home XDG_CONFIG_HOME=/tmp/sideby-demo/home/.config \
   XDG_STATE_HOME=/tmp/sideby-demo/home/.local/state PATH=/tmp/sideby-demo/bin:$PATH node src/cli/main.ts ui
 ```
 
-`empty` has Host binaries but no accounts; `error` and `slow` add a local plugin Family whose reader fails or answers after 6 s, for the Panel's error and loading states. The script recreates `<dir>`, and refuses a non-empty directory it did not create (it leaves a `.sideby-demo` marker). Set the XDG variables too, or a shell that already exports them would point the Panel at your real config and state. README screenshots live in `docs/assets/panel.png` (light) and `docs/assets/panel-dark.png` (dark); both are 1280×860. Retake them from the `normal` variant, once with the system in light mode and once in dark mode. Keep the `<picture>` block in both READMEs pointing at them.
+`empty` has Host binaries but no accounts; `error` and `slow` add a local plugin Family whose reader fails or answers after 6 s, for the Panel's error and loading states. The script recreates `<dir>`, and refuses a non-empty directory it did not create (it leaves a `.sideby-demo` marker). Set the XDG variables too, or a shell that already exports them would point the Panel at your real config and state. README screenshots live in `docs/assets/panel.png` (light) and `docs/assets/panel-dark.png` (dark); both are 1280×860. Retake them from the `normal` variant, once with the system in light mode and once in dark mode. Keep the `<picture>` block in both READMEs pointing at them. The terminal demo `docs/assets/demo.gif` is recorded with [VHS](https://github.com/charmbracelet/vhs) from `docs/assets/demo.tape` (steps in its header); retake it when the output of `list`, `quota`, `next` or `doctor` changes. `docs/assets/banner.jpg` is an illustration; keep any command shown in it valid.
 
 ## Map
 
@@ -56,7 +56,7 @@ testing/          fake HOME, fake Host binaries, snapshots; also published as `s
 schemas/          generated JSON Schemas for config and every `--json` output
 skills/sideby/    Agent Skill shipped in the package: SKILL.md routes to references/*.md; metadata.version = package version
 scripts/          leak-check.sh, demo-home.ts, sync-skill-version.ts (run by `npm version`), write-build-id.ts (run by `pnpm build`)
-docs/             adr/, specs/, plans/, verification/, assets/ (README screenshots), release.md
+docs/             adr/, specs/, plans/, verification/, guide/ (user guide, English and .zh-CN.md), assets/ (README banner and screenshots), release.md
 ```
 
 Public contract files: `src/types.ts`, `src/runtime.ts`, `testing/index.ts`, `schemas/`, and what Portals rely on (ADR-0006; `src/index.ts`, `src/panel/handler.ts`, `src/panel/theme.ts`): every `createPanelHandler` option, its `Promise<boolean>` result and `token`, every `PanelTheme` field and `PanelThemeTokens` key, and the `app` and `version` fields of `/api/health`. Changing them affects plugin authors, Portal authors and JSON consumers; see "Change process".
@@ -129,7 +129,7 @@ Shared Item paths must be relative and stay inside the account directory: config
 ## Change process
 
 1. Behaviour or contract change: update the spec in `docs/specs/` first. A new decision, or reversing one, gets an ADR in `docs/adr/`. Then change code and tests.
-2. Keep `README.md` and `README.zh-CN.md` in sync, with the same terms (`CONTEXT.md`).
+2. Keep `README.md` and `README.zh-CN.md` in sync, and each `docs/guide/<page>.md` with its `<page>.zh-CN.md`, with the same terms (`CONTEXT.md`). The README stays a short landing page (pitch, quick start, hosts, links); details go in `docs/guide/`.
 3. If `--json` output or config changed, run `pnpm schemas` and update `llms.txt`.
 4. Run `pnpm check` and `pnpm build`.
 
@@ -140,7 +140,7 @@ Shared Item paths must be relative and stay inside the account directory: config
 3. Add it to `BUILTIN_PLUGINS` in `src/families/index.ts`.
 4. Add `src/families/<id>/index.test.ts` with a fake HOME and a fake Host binary: discovery, launch env, every Shared Item's check and fix.
 5. Quota or usage only from local files or official CLI output (ADR-0003); otherwise leave `readQuota` and `readUsage` out so the panel shows "no public source". sideby reads usage itself; do not add a dependency such as ccusage.
-6. Update the supported hosts tables in both READMEs, `llms.txt` and `skills/sideby/SKILL.md`.
+6. Update the supported hosts tables in both READMEs, the Host notes in `docs/guide/usage*.md`, `llms.txt` and `skills/sideby/SKILL.md`.
 
 ## Commits and releases
 
