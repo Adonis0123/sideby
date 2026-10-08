@@ -37,24 +37,27 @@ def fit(lines: list[str], cols: int, rows: int) -> list[str]:
 
 
 def main() -> None:
-    size = shutil.get_terminal_size((110, 32))
-    cols = max(24, (size.columns - 3) // 2)
-    rows = max(8, size.lines - 2)
-    sys.stdout.write("\033[2J\033[H")
+    size = shutil.get_terminal_size((61, 11))
+    cols = max(20, (size.columns - 3) // 2)
+    rows = max(1, size.lines - 1)
+    # Hide the cursor. A trailing newline on the last row would scroll and
+    # leave a block cursor on the empty line under the panes.
+    sys.stdout.write("\033[?25l\033[2J\033[H")
+    sys.stdout.flush()
+    with open("/tmp/sideby-demo-view.ready", "w", encoding="utf-8"):
+        pass
     try:
         while True:
             left = fit(capture("sideby:0.0"), cols, rows)
             right = fit(capture("sideby:0.1"), cols, rows)
-            left_title = " personal ".center(cols, "─")
-            right_title = " work ".center(cols, "─")
-            sys.stdout.write("\033[H")
-            sys.stdout.write(f"{left_title}   {right_title}\n")
-            for a, b in zip(left, right):
-                sys.stdout.write(f"{a} │ {b}\n")
+            lines = [" personal ".center(cols, "─") + "   " + " work ".center(cols, "─")]
+            lines.extend(f"{a} │ {b}" for a, b in zip(left, right))
+            lines = lines[: size.lines]
+            sys.stdout.write("\033[?25l\033[H" + "\n".join(lines))
             sys.stdout.flush()
-            time.sleep(0.4)
+            time.sleep(0.1)
     except KeyboardInterrupt:
-        pass
+        sys.stdout.write("\033[?25h")
 
 
 if __name__ == "__main__":

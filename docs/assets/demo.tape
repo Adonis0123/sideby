@@ -5,14 +5,15 @@
 # From the repository root, with Node 22.18+, vhs, ttyd, tmux, ffmpeg and Chrome:
 #   sh scripts/record-demo.sh
 # Do not point it at a real HOME.
+# Font 32 and height 560 give 11 rows, so the two sessions fill the window.
 Output "/tmp/sideby-demo-term.gif"
 
 Set Shell "bash"
 Set FontFamily "JetBrains Mono"
-Set FontSize 18
+Set FontSize 32
 Set Width 1280
-Set Height 640
-Set Padding 20
+Set Height 560
+Set Padding 12
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 12ms
 Set Framerate 8
@@ -24,4 +25,4 @@ Type "python3 -u docs/assets/demo-view.py"
 Enter
 Sleep 700ms
 Show
-Sleep 7s
+Sleep 6.5s

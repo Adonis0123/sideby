@@ -37,6 +37,9 @@ HOME=$demo/home \
 panel=$!
 cleanup() {
   kill "$panel" 2>/dev/null || true
+  if [ -f /tmp/sideby-demo-typer.pid ]; then
+    kill "$(cat /tmp/sideby-demo-typer.pid)" 2>/dev/null || true
+  fi
   tmux -L sideby-demo kill-server >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -74,12 +77,14 @@ if [ ! -s "$shot" ]; then
   exit 1
 fi
 
-# Terminal clip, then about 8s of the panel. Same frame size (setsar: the two sources
-# otherwise refuse to concat), a short palette, so the GIF stays small.
+# Terminal clip, then the panel. Same frame size (setsar: the two sources otherwise
+# refuse to concat). The tape is shorter than the panel, so pad it to 860 and center it.
+term_h=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 /tmp/sideby-demo-term.gif)
+pad_top=$(( (860 - term_h) / 2 ))
 ffmpeg -y -i /tmp/sideby-demo-term.gif \
-  -vf "fps=8,scale=1280:640:flags=lanczos,pad=1280:860:0:110:color=0x1e1e2e,setsar=1,format=yuv420p" \
+  -vf "fps=8,scale=1280:${term_h}:flags=lanczos,pad=1280:860:0:${pad_top}:color=0x1e1e2e,setsar=1,format=yuv420p" \
   /tmp/sideby-demo-term.mp4
-ffmpeg -y -loop 1 -framerate 8 -t 8 -i "$shot" \
+ffmpeg -y -loop 1 -framerate 8 -t 7 -i "$shot" \
   -vf "scale=1280:860:flags=lanczos,setsar=1,format=yuv420p" \
   -r 8 /tmp/sideby-demo-panel.mp4
 ffmpeg -y -i /tmp/sideby-demo-term.mp4 -i /tmp/sideby-demo-panel.mp4 -filter_complex \
