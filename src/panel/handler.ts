@@ -31,6 +31,21 @@ export interface PanelHandlerOptions {
    * token or a value that could leave its CSS declaration throws a TypeError.
    */
   theme?: PanelTheme
+  /**
+   * The Panel's language. `en` or `zh` wins over what the viewer saved and hides the Panel's own switch; `auto`
+   * (the default) uses the viewer's saved choice, then the browser language. Checked when the handler is created:
+   * any other value throws a TypeError. A Portal that changes language creates the handler again.
+   */
+  lang?: 'auto' | 'en' | 'zh'
+}
+
+const PANEL_LANGS = ['auto', 'en', 'zh'] as const
+
+function resolveLang(lang: unknown): (typeof PANEL_LANGS)[number] {
+  if (lang === undefined) return 'auto'
+  const found = PANEL_LANGS.find((l) => l === lang)
+  if (!found) throw new TypeError('panel lang must be "auto", "en" or "zh"')
+  return found
 }
 
 export type PanelHandler = ((req: IncomingMessage, res: ServerResponse) => Promise<boolean>) & {
@@ -324,6 +339,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   const version = opts.version ?? PANEL_VERSION
   const build = buildId()
   const theme = resolveTheme(opts.theme)
+  const lang = resolveLang(opts.lang)
   const token = randomBytes(32).toString('base64url')
   const serial = writeQueue()
   const getRuntime = typeof opts.runtime === 'function' ? opts.runtime : async () => opts.runtime as Runtime
@@ -423,7 +439,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           res.end(
             method === 'HEAD'
               ? undefined
-              : renderPage({ basePath, token, nonce, version, build, readOnly, theme }),
+              : renderPage({ basePath, token, nonce, version, build, readOnly, theme, lang }),
           )
           return true
         }

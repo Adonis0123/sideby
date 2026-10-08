@@ -21,6 +21,8 @@ export interface PageOptions {
   readOnly?: boolean
   /** Host theme from resolveTheme(); the default look when absent. */
   theme?: ResolvedTheme
+  /** Host language from createPanelHandler's `lang`; `auto` (the default) lets the viewer choose. */
+  lang?: 'auto' | 'en' | 'zh'
 }
 
 /** JSON that is safe inside a `<script>` element: no `</script>`, `<!--` or line separators survive. */
@@ -44,6 +46,7 @@ export function renderPage(opts: PageOptions): string {
   const nonce = opts.nonce ? ` nonce="${attr(opts.nonce)}"` : ''
   const theme = opts.theme ?? resolveTheme(undefined)
   const scheme = theme.colorScheme === 'auto' ? 'light dark' : theme.colorScheme
+  const lang = opts.lang ?? 'auto'
   const boot = jsonForScript({
     basePath: opts.basePath,
     token: opts.token,
@@ -51,6 +54,7 @@ export function renderPage(opts: PageOptions): string {
     build: opts.build ?? '',
     readOnly: Boolean(opts.readOnly),
     colorScheme: theme.colorScheme,
+    lang,
     warn: QUOTA_WARN_PERCENT,
     fail: QUOTA_FAIL_PERCENT,
     usageDays: USAGE_DAYS,
@@ -59,7 +63,7 @@ export function renderPage(opts: PageOptions): string {
     reservedAliases: [...RESERVED_ALIASES],
   })
   return `<!doctype html>
-<html lang="en">
+<html lang="${lang === 'zh' ? 'zh-CN' : 'en'}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -81,7 +85,7 @@ export function renderPage(opts: PageOptions): string {
     </div>
     <div class="top-actions">
       <span id="updated" class="muted small">Loading…</span>
-      <button id="lang" class="icon-btn lang-btn" type="button">中文</button>
+      <button id="lang" class="icon-btn lang-btn" type="button"${lang === 'auto' ? '' : ' hidden'}>${lang === 'zh' ? 'EN' : '中文'}</button>
       <button id="theme" class="icon-btn" type="button" hidden></button>
       <button id="refresh" class="btn" type="button" aria-label="Refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg><span class="hide-sm" data-i18n="top.refresh">Refresh</span></button>
     </div>

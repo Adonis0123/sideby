@@ -16,6 +16,7 @@ import {
   newAccountDir,
   nextReset,
   panelHint,
+  panelLang,
   passedWindow,
   quotaPressure,
   sortAccounts,
@@ -342,6 +343,61 @@ describe('panelHint', () => {
     assert.equal(panelHint(force, false, action), force)
     assert.equal(panelHint(force, true, action), force)
     assert.equal(panelHint('', true, action), '')
+  })
+})
+
+describe('panelLang', () => {
+  it('uses a host lang of en or zh over the saved choice and the browser', () => {
+    assert.equal(panelLang('zh', 'en', 'en-US'), 'zh')
+    assert.equal(panelLang('en', 'zh', 'zh-CN'), 'en')
+    assert.equal(panelLang('en', '', 'zh-TW'), 'en')
+  })
+  it('keeps the saved choice, then the browser language, for auto or no host lang', () => {
+    for (const host of ['auto', undefined as unknown as string]) {
+      assert.equal(panelLang(host, 'zh', 'en-US'), 'zh')
+      assert.equal(panelLang(host, 'en', 'zh-CN'), 'en')
+      assert.equal(panelLang(host, '', 'zh-CN'), 'zh')
+      assert.equal(panelLang(host, '', 'ZH'), 'zh')
+      assert.equal(panelLang(host, '', 'en-GB'), 'en')
+      assert.equal(panelLang(host, '', undefined as unknown as string), 'en')
+    }
+  })
+})
+
+describe('panel page lang', () => {
+  const boot = (html: string) =>
+    JSON.parse(
+      /<script type="application\/json" id="sideby-boot">([\s\S]*?)<\/script>/.exec(html)?.[1] ?? '{}',
+    )
+  it('carries a host lang into the boot data, the html element and a hidden switch', () => {
+    const zh = renderPage({ basePath: '', token: 't', lang: 'zh' })
+    assert.equal(boot(zh).lang, 'zh')
+    assert.match(zh, /<html lang="zh-CN">/)
+    assert.match(zh, /<button id="lang" [^>]*hidden>EN<\/button>/)
+    const en = renderPage({ basePath: '', token: 't', lang: 'en' })
+    assert.equal(boot(en).lang, 'en')
+    assert.match(en, /<html lang="en">/)
+    assert.match(en, /<button id="lang" [^>]*hidden>中文<\/button>/)
+  })
+  it('leaves the page as before for auto or no lang', () => {
+    for (const html of [
+      renderPage({ basePath: '', token: 't' }),
+      renderPage({ basePath: '', token: 't', lang: 'auto' }),
+    ]) {
+      assert.equal(boot(html).lang, 'auto')
+      assert.match(html, /<html lang="en">/)
+      assert.match(html, /<button id="lang" class="icon-btn lang-btn" type="button">中文<\/button>/)
+    }
+  })
+  it('picks the language through panelLang and never saves it while the host fixes it', () => {
+    assert.match(PAGE_SCRIPT, /let lang = panelLang\(BOOT\.lang, prefs\.lang, navigator\.language\)/)
+    assert.match(PAGE_SCRIPT, /lb\.hidden = LANG_FIXED/)
+    // The only write of prefs.lang is the switch's click handler, after its guard.
+    assert.equal(PAGE_SCRIPT.match(/prefs\.lang =/g)?.length, 1)
+    assert.match(
+      PAGE_SCRIPT,
+      /if \(LANG_FIXED\) return\n\s+lang = lang === 'zh' \? 'en' : 'zh'\n\s+prefs\.lang = lang/,
+    )
   })
 })
 

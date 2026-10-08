@@ -755,6 +755,45 @@ describe('panel handoff (spec §3.13)', () => {
   })
 })
 
+describe('panel lang', () => {
+  it('serves a host lang in the page boot data, and auto when none is given', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const { server, port } = await serve((p) =>
+        createPanelHandler({ runtime: factory(h), allowedHosts: [`127.0.0.1:${p}`], lang: 'zh' }),
+      )
+      const plain = await serve((p) =>
+        createPanelHandler({ runtime: factory(h), allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      try {
+        const zh = (await request(port, 'GET', '/', { host: `127.0.0.1:${port}` })).text
+        assert.ok(zh.includes('"lang":"zh"'), 'the boot data carries the host lang')
+        assert.match(zh, /<html lang="zh-CN">/)
+        const auto = (await request(plain.port, 'GET', '/', { host: `127.0.0.1:${plain.port}` })).text
+        assert.ok(auto.includes('"lang":"auto"'))
+        assert.match(auto, /<html lang="en">/)
+      } finally {
+        await close(server)
+        await close(plain.server)
+      }
+    })
+  })
+
+  it('refuses an unknown lang when the handler is created', () => {
+    for (const lang of ['fr', 'zh-CN', 'EN', '', null, 1])
+      assert.throws(
+        () =>
+          createPanelHandler({ runtime: async () => ({}) as never, allowedHosts: [], lang: lang as never }),
+        (err: Error) => err instanceof TypeError && /lang must be "auto", "en" or "zh"/.test(err.message),
+        String(lang),
+      )
+    for (const lang of ['auto', 'en', 'zh', undefined] as const)
+      assert.doesNotThrow(() =>
+        createPanelHandler({ runtime: async () => ({}) as never, allowedHosts: [], lang }),
+      )
+  })
+})
+
 describe('panel build identity', () => {
   it('reports the build in health, state and the page boot data, so an old page can reload itself', async () => {
     await withFakeHome(async (h) => {

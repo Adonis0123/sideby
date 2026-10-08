@@ -352,3 +352,13 @@ export function updatedAge(ms: number): { key: string; n?: number } {
   if (h < 24) return { key: 'time.hAgo', n: h }
   return { key: 'time.dAgo', n: Math.floor(h / 24) }
 }
+
+/**
+ * The Panel's language: a host `lang` of `en` or `zh` wins; `auto` uses the viewer's saved choice, then the browser
+ * language (`zh*` gives Chinese, anything else English).
+ */
+export function panelLang(host: string, saved: string, browser: string): string {
+  if (host === 'en' || host === 'zh') return host
+  if (saved === 'en' || saved === 'zh') return saved
+  return /^zh/i.test(browser || '') ? 'zh' : 'en'
+}

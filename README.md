@@ -130,6 +130,7 @@ const panel = createPanelHandler({
     header: 'bar', // a full-width header strip instead of a title on the page background
     light: { font: '-apple-system, "PingFang SC", sans-serif', bg: '#f2f8fc', primary: '#e1f0fb', onPrimary: '#1f6396', radius: '10px', shadow: 'none' },
   },
+  lang: 'en', // 'auto' (default) uses the language picked in the panel, then the browser's
 })
 createServer(async (req, res) => {
   if (!(await panel(req, res))) res.writeHead(404).end()
@@ -142,6 +143,8 @@ createServer(async (req, res) => {
 - **Light and dark**: colors in `light` apply in light mode only; type, shape and layout tokens apply in both. Give `dark` for dark-mode colors, or set `colorScheme: 'light'` when your page has no dark mode.
 - **Checked when the handler is created**: an unknown token, or a value with anything but letters, digits, spaces and `# % ( ) , . + - / ' " _` (so no `;`, `{`, `}`, `<`, `\`, `*` or `:`), with `url(`, unbalanced parentheses or quotes, or over 200 characters, throws a `TypeError` that names the token.
 - Without `theme`, the page looks the same as `sideby ui`.
+
+`lang` (`'auto'`, `'en'` or `'zh'`) keeps the panel's language in step with your page. `'en'` or `'zh'` wins over the language picked in the panel and hides the panel's language switch; the choice picked there stays saved and applies again under `'auto'`. `'auto'` (the default) uses the language picked in the panel, then the browser language. Any other value throws a `TypeError` when the handler is created. The handler reads `lang` once: to switch language, create the handler again.
 
 ### Claude quota
 

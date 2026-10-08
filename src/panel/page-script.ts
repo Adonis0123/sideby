@@ -12,6 +12,7 @@ import {
   newAccountDir,
   nextReset,
   panelHint,
+  panelLang,
   passedWindow,
   quotaPressure,
   sortAccounts,
@@ -33,6 +34,7 @@ const LOGIC = [
   newAccountDir,
   nextReset,
   panelHint,
+  panelLang,
   passedWindow,
   quotaPressure,
   sortAccounts,
@@ -91,7 +93,9 @@ const MAIN = String.raw`
     return p
   }
   function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)) } catch {} }
-  let lang = prefs.lang || (/^zh/i.test(navigator.language || '') ? 'zh' : 'en')
+  // A host lang other than auto wins over the saved choice (which stays saved) and hides the switch.
+  const LANG_FIXED = BOOT.lang === 'en' || BOOT.lang === 'zh'
+  let lang = panelLang(BOOT.lang, prefs.lang, navigator.language)
 
   // ---------- text ----------
   function t(key, vars) {
@@ -647,6 +651,7 @@ const MAIN = String.raw`
     for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.getAttribute('data-i18n'))
     $('refresh').setAttribute('aria-label', t('top.refresh'))
     const lb = $('lang')
+    lb.hidden = LANG_FIXED
     lb.textContent = lang === 'zh' ? 'EN' : '中文'
     lb.setAttribute('aria-label', t('top.language'))
     lb.title = t('top.language')
@@ -1619,6 +1624,7 @@ const MAIN = String.raw`
   $('ver').textContent = BOOT.version ? 'v' + BOOT.version : ''
   $('refresh').addEventListener('click', () => load({ check: true, announce: true }))
   $('lang').addEventListener('click', () => {
+    if (LANG_FIXED) return
     lang = lang === 'zh' ? 'en' : 'zh'
     prefs.lang = lang
     savePrefs()

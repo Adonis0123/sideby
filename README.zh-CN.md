@@ -130,6 +130,7 @@ const panel = createPanelHandler({
     header: 'bar', // 通栏页头，而不是放在页面底色上的标题
     light: { font: '-apple-system, "PingFang SC", sans-serif', bg: '#f2f8fc', primary: '#e1f0fb', onPrimary: '#1f6396', radius: '10px', shadow: 'none' },
   },
+  lang: 'en', // 默认 'auto'：先用面板里选过的语言，再看浏览器语言
 })
 createServer(async (req, res) => {
   if (!(await panel(req, res))) res.writeHead(404).end()
@@ -142,6 +143,8 @@ createServer(async (req, res) => {
 - **浅色与深色**：`light` 里的颜色只在浅色模式生效；字体排版、形状和布局 token 两种模式都生效。深色模式的颜色写在 `dark` 里；你的页面没有深色模式时，设 `colorScheme: 'light'`。
 - **创建 handler 时校验**：未知 token，或值里出现字母、数字、空格和 `# % ( ) , . + - / ' " _` 以外的字符（也就是不允许 `;`、`{`、`}`、`<`、`\`、`*`、`:`），或含 `url(`、括号或引号不成对、超过 200 个字符，都会抛出写明 token 名的 `TypeError`。
 - 不传 `theme` 时，外观和 `sideby ui` 一样。
+
+`lang`（`'auto'`、`'en'` 或 `'zh'`）让面板语言和你的页面一致。设为 `'en'` 或 `'zh'` 时，它优先于面板里选过的语言，并隐藏面板的语言切换按钮；面板里选过的语言仍然保存着，改回 `'auto'` 后照常生效。`'auto'`（默认）先用面板里选过的语言，再看浏览器语言。其他值会在创建 handler 时抛出 `TypeError`。handler 只在创建时读一次 `lang`：要切换语言，就重新创建 handler。
 
 ### Claude 额度
 
