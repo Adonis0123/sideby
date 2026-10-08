@@ -104,6 +104,8 @@ sideby 启动 `PATH` 上的官方程序，从不修改它。测试过的版本�
 
 细节和服务条款的问题见[常见问题](docs/guide/faq.zh-CN.md)。
 
+使用上的问题和想法发到 [Discussions](https://github.com/Adonis0123/sideby/discussions)。
+
 ## 文档
 
 - [使用指南](docs/guide/usage.zh-CN.md)：账号、API 账号、体检、额度、接力、宿主说明

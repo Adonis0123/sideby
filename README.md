@@ -104,6 +104,8 @@ macOS and Linux. CI runs the suite on `ubuntu-latest` and `macos-latest`, Node 2
 
 Details and the terms-of-service question are in the [FAQ](docs/guide/faq.md).
 
+Usage questions and ideas go in [Discussions](https://github.com/Adonis0123/sideby/discussions).
+
 ## Docs
 
 - [Using sideby](docs/guide/usage.md): accounts, API accounts, Doctor, quota, Handoff, Host notes
