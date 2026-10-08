@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net'
 import { describe, it } from 'node:test'
 import { asBuiltin, demoFamily, demoPlugin, seedDemoMain } from '../../testing/demo.ts'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
+import { packageVersion } from '../core/version.ts'
 import { createRuntime } from '../runtime.ts'
 import { createPanelHandler, MAX_BODY_BYTES, type PanelState } from './handler.ts'
 import { jsonForScript, pageStyles, renderPage } from './page.ts'
@@ -97,7 +98,8 @@ describe('panel handler security', () => {
         const good = { origin: `http://127.0.0.1:${port}`, 'x-sideby-token': real.token }
         const health = await fetch(`http://127.0.0.1:${port}/api/health`)
         // Only the app, its version and the build id (a random id per build): nothing about accounts.
-        assert.deepEqual(await health.json(), { app: 'sideby', version: '0.1.0', build: '0.1.0+source' })
+        const version = packageVersion()
+        assert.deepEqual(await health.json(), { app: 'sideby', version, build: `${version}+source` })
 
         const rebinding = await request(port, 'GET', '/api/state', { host: 'evil.example:80' })
         assert.equal(rebinding.status, 403)
