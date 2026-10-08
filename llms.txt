@@ -16,7 +16,7 @@ Key facts:
 
 Users ask "install sideby", "set up another Claude account, cc008". Do every step yourself except those marked **user**; for those, give the user exactly one line to run (in Claude Code they can type `! <command>`).
 
-1. `node --version` must be 22.18 or newer; otherwise tell the user to upgrade Node and stop. `sideby --version`; if it is missing, `npm i -g sideby` (a global install is needed for Claude quota and shell functions).
+1. `node --version` must be 22.18 or newer; otherwise tell the user to upgrade Node and stop. npm's `engines` warning (`EBADENGINE`) does not stop the program. sideby exits 1 itself below 22.18, including `--help` and `--version`; `statusline-tap` still runs the original status-line command. `sideby --version`; if it is missing, `npm i -g sideby` (a global install is needed for Claude quota and shell functions).
 2. `npx skills add Adonis0123/sideby -g` installs the sideby skill so later requests go through it.
 3. `sideby list --json`: `families[].installed` says which Host CLIs are on PATH. For a Host that is not installed, give the user its `installUrl` and stop; never install a Host unasked. If the Host has no Main Account yet, ask the user to start it once (for example `claude`); `new` needs the Main Account.
 4. `sideby families <family> --json`: tell the user in a sentence or two what the new account will share and that its sign-in, sessions and history stay its own.

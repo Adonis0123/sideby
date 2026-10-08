@@ -4,6 +4,8 @@ English | [中文](faq.zh-CN.md)
 
 ← [README](../../README.md)
 
+<a id="terms"></a>
+
 ## Does this break any terms of service?
 
 sideby is built to stay inside what each Host already supports (see [ADR-0001](../../docs/adr/0001-side-by-side-not-switching.md) and [ADR-0003](../../docs/adr/0003-quota-from-local-and-official-sources.md)):
@@ -17,7 +19,9 @@ This is the maintainers' own reading of the rules, not legal advice. Check your 
 
 ## Why Node 22.18?
 
-From 22.18, Node strips TypeScript types by default, so sideby can `import()` your `.ts` plugins straight from disk. On older Node, sideby prints an upgrade hint and exits with 1.
+From 22.18, Node strips TypeScript types by default, so sideby can `import()` your `.ts` plugins straight from disk. The published program is plain JavaScript. `package.json` sets `"engines": { "node": ">=22.18.0" }`. npm prints an `EBADENGINE` warning and still starts the program; that warning is not a stop.
+
+sideby then checks the version itself. Below 22.18, `--help`, `--version` and every other command print an upgrade hint and exit with 1. `statusline-tap` is the exception: Claude Code runs it on every status-line refresh, and it still runs your original command, so that refresh is not dropped.
 
 ## Where does sideby keep its data?
 
