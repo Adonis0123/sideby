@@ -59,7 +59,7 @@ logo: { path: 'M11.503.131 1.891 5.678…', title: 'Cursor', color: '#000000' } 
 
 错误信息里总会标明插件名。加载失败只影响它自己；`doctor.check` 出错会变成该账号的一条 fail Finding；`launch.before` 出错会中止启动；家族的读取函数（例如 `model`）抛错时，会出现在 `list` 里该账号的 `problems` 中。`fix()` 只能写当前账号目录，并且要通过 `api.fs.writeFileAtomic` 写。
 
-### `account-script`
+## `account-script`
 
 内置插件，默认关闭，用来在账号启动前跑一段脚本（例如先拉起 API 账号要用的本地网关）：
 

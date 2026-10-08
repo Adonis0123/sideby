@@ -29,7 +29,8 @@ Optional. `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json`, schema in [`schema
       { "path": "scripts", "mode": "link" }
     ]
   },
-  "shellInitFile": { "zsh": "~/.config/sideby/shell-init.zsh" }
+  "shellInitFile": { "zsh": "~/.config/sideby/shell-init.zsh" },
+  "resumeRouting": true
 }
 ```
 
@@ -41,9 +42,10 @@ Optional. `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json`, schema in [`schema
 | `pluginDirs` | Extra plugin directories. Absolute paths or paths starting with `~/`. |
 | `plugins.<name>` | Settings for one plugin; `enabled` turns it on or off, built-in families included. |
 | `shellInitFile` | Optional `{ "zsh": …, "bash": … }`, absolute or `~/` paths. Whenever sideby adds an account or adds or removes an alias (`sideby new`, `sideby alias`, the panel), it rewrites each file with what `sideby shell-init <shell>` prints, so a shell that sources the file picks up new commands. It never overwrites a file that `shell-init` did not write. |
+| `resumeRouting` | Optional, off by default. When `true`, `shell-init` also defines functions named after the Hosts (`claude`, `codex`, `grok`) that resume a session by id in the account that holds it; see [Resuming from other tools](#resuming-from-other-tools). |
 | `extraSharedItems.<family>` | Your own Shared Items on top of the built-in list, each with a Share Mode (`link`, `copy`, `link-or-copy`, `link-or-local`, `local`, `local-if-api`, `info`, `json-key`). `path` is relative to the account directory; absolute paths and `..` are rejected. |
 
-### Shell functions
+## Shell functions
 
 ```sh
 # ~/.zshrc (or ~/.bashrc with `bash`)
@@ -71,3 +73,13 @@ echo 'source ~/.config/sideby/shell-init.zsh' >> ~/.zshrc
 ```
 
 sideby keeps that file up to date from then on. With `eval "$(sideby shell-init zsh)"` there is nothing to set up.
+
+## Resuming from other tools
+
+Terminal managers such as Orca reopen a pane by typing the bare Host command, for example `claude --resume <id>`. That command does not say which account the session belongs to, so the Host looks only in the Main Account and reports `No conversation found`. Set `"resumeRouting": true` and regenerate the functions (`sideby shell-init --write`, or a new shell with `eval`). For each family that has an account besides the main one, `shell-init` then also defines a function with the Host's name:
+
+```sh
+function claude { local a; if [ -z "${CLAUDE_CONFIG_DIR-}" ]; then for a in "$@"; do case $a in ????????-????-????-????-????????????|--resume=????????-????-????-????-????????????) command sideby resume 'claude' -- "$@"; return;; esac; done; fi; command claude "$@"; }
+```
+
+`sideby resume` finds the account whose directory holds that session id (Claude `projects/*/<id>.jsonl`, Codex `sessions/**/rollout-*-<id>.jsonl`, Grok `sessions/*/<id>/`) and starts it as `sideby run` would. Anything else, including `--continue`, a session title, or a session in the Main Account, runs the Host unchanged. A Host started by sideby already has its selection variable set, so it is never routed twice. An alias such as `alias claude='claude --dangerously-skip-permissions'` keeps working. Only a command with an argument shaped like a session id goes through sideby (about 140 ms more); every other Host command runs directly. sideby never copies or moves sessions.

@@ -29,7 +29,8 @@
       { "path": "scripts", "mode": "link" }
     ]
   },
-  "shellInitFile": { "zsh": "~/.config/sideby/shell-init.zsh" }
+  "shellInitFile": { "zsh": "~/.config/sideby/shell-init.zsh" },
+  "resumeRouting": true
 }
 ```
 
@@ -41,9 +42,10 @@
 | `pluginDirs` | 额外的插件目录，只接受绝对路径或以 `~/` 开头的路径。 |
 | `plugins.<name>` | 单个插件的设置；`enabled` 控制开关，内置家族也适用。 |
 | `shellInitFile` | 可选，`{ "zsh": …, "bash": … }`，绝对路径或以 `~/` 开头。sideby 每次新增账号、新增或删除别名（`sideby new`、`sideby alias`、面板）后，都用 `sideby shell-init <shell>` 的输出重写这些文件，source 它的 shell 就能用上新命令。不是 `shell-init` 写的文件，它不会覆盖。 |
+| `resumeRouting` | 可选，默认关。设为 `true` 时，`shell-init` 还会生成与宿主同名的函数（`claude`、`codex`、`grok`），按 id 恢复会话时转到存有该会话的账号；见[从其他工具恢复会话](#从其他工具恢复会话)。 |
 | `extraSharedItems.<family>` | 在内置清单之外加你自己的共享项，每项要写 Share Mode（`link`、`copy`、`link-or-copy`、`link-or-local`、`local`、`local-if-api`、`info`、`json-key`）。`path` 相对于账号目录，绝对路径和 `..` 会被拒绝。 |
 
-### Shell 函数
+## Shell 函数
 
 ```sh
 # ~/.zshrc（bash 用户写进 ~/.bashrc，参数换成 bash）
@@ -71,3 +73,13 @@ echo 'source ~/.config/sideby/shell-init.zsh' >> ~/.zshrc
 ```
 
 之后 sideby 会自动保持这个文件最新。用 `eval "$(sideby shell-init zsh)"` 的话什么都不用设置。
+
+## 从其他工具恢复会话
+
+Orca 这类终端管理器重开窗格时，会在 shell 里敲裸的宿主命令，比如 `claude --resume <id>`。这条命令没说会话属于哪个账号，宿主只在主账号里找，于是报 `No conversation found`。把 `"resumeRouting": true` 写进 config，再重新生成函数（`sideby shell-init --write`，用 `eval` 的话开个新 shell）。之后，对每个除主账号外还有别的账号的家族，`shell-init` 会多生成一个与宿主同名的函数：
+
+```sh
+function claude { local a; if [ -z "${CLAUDE_CONFIG_DIR-}" ]; then for a in "$@"; do case $a in ????????-????-????-????-????????????|--resume=????????-????-????-????-????????????) command sideby resume 'claude' -- "$@"; return;; esac; done; fi; command claude "$@"; }
+```
+
+`sideby resume` 找出账号目录里存有这个会话 id 的账号（Claude 是 `projects/*/<id>.jsonl`，Codex 是 `sessions/**/rollout-*-<id>.jsonl`，Grok 是 `sessions/*/<id>/`），像 `sideby run` 一样启动它。其他情况原样运行宿主，包括 `--continue`、按标题恢复、会话在主账号里。sideby 启动的宿主已经设了选择变量，不会被二次路由。`alias claude='claude --dangerously-skip-permissions'` 这样的 alias 照常生效。只有参数里有会话 id 形状的命令才经过 sideby（多约 140 ms），其他宿主命令直接运行。sideby 不复制、不移动会话。

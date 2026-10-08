@@ -4,7 +4,7 @@
 
 ← [README](../../README.zh-CN.md)
 
-### 会不会违反服务条款？
+## 会不会违反服务条款？
 
 sideby 的设计只用各宿主已经支持的机制（见 [ADR-0001](../../docs/adr/0001-side-by-side-not-switching.md) 和 [ADR-0003](../../docs/adr/0003-quota-from-local-and-official-sources.md)）：
 
@@ -15,11 +15,11 @@ sideby 的设计只用各宿主已经支持的机制（见 [ADR-0001](../../docs
 
 以上是维护者自己对规则的理解，不构成法律意见。具体情况请以各服务商的条款为准。
 
-### 为什么要求 Node 22.18？
+## 为什么要求 Node 22.18？
 
 Node 从 22.18 起默认剥离 TypeScript 类型，sideby 才能直接 `import()` 磁盘上的 `.ts` 插件。Node 版本更低时，sideby 会提示升级并以 1 退出。
 
-### 数据存在哪里？
+## 数据存在哪里？
 
 | 内容 | 位置 |
 |---|---|
@@ -30,7 +30,7 @@ Node 从 22.18 起默认剥离 TypeScript 类型，sideby 才能直接 `import()
 
 sideby 不往宿主的账号目录里写自己的文件。唯一的例外是 `quota setup claude --yes`，它会修改 `~/.claude/settings.json`。用 `sideby new` 建出来的账号目录归宿主所有。
 
-### 和 aimux、agenv、cc-switch、magpie 有什么区别？
+## 和 aimux、agenv、cc-switch、magpie 有什么区别？
 
 它们解决的是相近的问题，取舍不同，按自己的用法选就好。
 
@@ -41,7 +41,7 @@ sideby 不往宿主的账号目录里写自己的文件。唯一的例外是 `qu
 | 额度 | 只用本地记录和 status line 数据 | 实时探测额度；`run --auto` 自动选余量最多的订阅 | — | — | — |
 | 形态 | CLI、本地网页面板、本地插件 | 带 TUI 的 CLI | 带 TUI 的 CLI | 桌面应用 | 菜单栏应用 |
 
-### 怎么卸载？
+## 怎么卸载？
 
 ```sh
 sideby quota teardown claude                  # 跑过 quota setup 的话先执行；status line 会调用 sideby

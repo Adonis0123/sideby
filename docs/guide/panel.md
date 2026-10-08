@@ -12,7 +12,7 @@ sideby ui --no-open    # print the address only
 
 The panel listens on `127.0.0.1` only. If another sideby panel already runs on the port, sideby opens that one; if another program holds the port, it tries the next ones and prints the address it used. The page shows each account's quota windows in aligned columns, usage, last use, sign-in email and health, and refreshes itself every 20 seconds while it is open (every 5 seconds for a few minutes after you turn on quota, so the first numbers appear soon after a status line reports them). A "Hide emails" switch masks addresses as `a•••@example.com` for screen sharing. It runs Doctor with one-click fixes, creates accounts (with an optional short command), and can turn on Claude quota after showing the diff. One quota setup covers every Claude Code account, so the "Turn on quota" button sits in the Claude Code group header, not on each account. For a new subscription account it gives you the `sideby login <account>` command to copy; signing in always happens in your terminal.
 
-### Desktop app
+## Desktop app
 
 ```sh
 sideby app install       # macOS: ~/Applications/sideby.app; Linux: a "sideby" entry in the app menu
@@ -25,7 +25,7 @@ Double-click the app to open the panel. It starts the panel in the background wh
 
 The app runs the Node and sideby it was installed with: after upgrading either, run `sideby app install` again to update it in place. If your own page embeds the panel (see below), `sideby app install --url http://accounts.localhost:17333/` makes the app open that address instead. Install and uninstall only touch files that `sideby app install` created. The app is a local, unsigned launcher script; it is not meant to be copied to other machines.
 
-### Embed the panel
+## Embed the panel
 
 Another local Node page can mount the panel under its own path. The handler keeps its own Host, Origin and token checks; you list the hosts your page answers on.
 

@@ -59,7 +59,7 @@ logo: { path: 'M11.503.131 1.891 5.678…', title: 'Cursor', color: '#000000' } 
 
 Errors always name the plugin. A plugin that fails to load affects only itself; a failing `doctor.check` becomes a fail Finding for that account; a failing `launch.before` stops the launch; a family reader that throws (for example `model`) shows up as one of that account's `problems` in `list`. A `fix()` may write only inside the current account directory, through `api.fs.writeFileAtomic`.
 
-### `account-script`
+## `account-script`
 
 A built-in plugin, off by default, for "run this before the account starts" (for example, start a local gateway that an API account needs):
 

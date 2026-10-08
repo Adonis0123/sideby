@@ -12,7 +12,7 @@ sideby ui --no-open    # 只打印地址
 
 面板只监听 `127.0.0.1`。端口上已经有一个 sideby 面板时，直接打开那个面板；端口被别的程序占用时，依次试后面的端口，并打印最终地址。页面按列对齐显示每个账号的各额度窗口、用量、最近使用、登录邮箱和健康状态；页面打开时每 20 秒自动刷新，开启额度后的几分钟里每 5 秒刷新一次，status line 一上报就能看到第一批数字。「隐藏邮箱」开关会把地址显示成 `a•••@example.com`，方便共享屏幕。页面上还有带一键修复的体检、新建账号（可顺手加短命令），还能在展示 diff 后开启 Claude 额度。一次开启对所有 Claude Code 账号生效，所以「开启额度显示」按钮只在 Claude Code 分组标题里，不在每个账号上。新建订阅账号后，面板只给出 `sideby login <account>` 的复制按钮，登录始终在你自己的终端里完成。
 
-### 桌面应用
+## 桌面应用
 
 ```sh
 sideby app install       # macOS：~/Applications/sideby.app；Linux：应用菜单里的「sideby」
@@ -25,7 +25,7 @@ sideby ui --stop         # 停掉后台面板
 
 应用运行的是安装时那份 Node 和 sideby：升级其中任何一个后，再跑一次 `sideby app install`，就地更新应用。如果你自己的页面嵌入了面板（见下文），`sideby app install --url http://accounts.localhost:17333/` 让应用改为打开这个地址。安装和卸载只动 `sideby app install` 自己创建的文件。这个应用是本机未签名的启动脚本，不适合拷到别的机器上用。
 
-### 嵌入面板
+## 嵌入面板
 
 别的本地 Node 网页可以把面板挂在自己的路径下。handler 照常做 Host、Origin 和 token 校验，你只需列出自己网页使用的主机名。
 

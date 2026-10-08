@@ -4,7 +4,7 @@ English | [中文](faq.zh-CN.md)
 
 ← [README](../../README.md)
 
-### Does this break any terms of service?
+## Does this break any terms of service?
 
 sideby is built to stay inside what each Host already supports (see [ADR-0001](../../docs/adr/0001-side-by-side-not-switching.md) and [ADR-0003](../../docs/adr/0003-quota-from-local-and-official-sources.md)):
 
@@ -15,11 +15,11 @@ sideby is built to stay inside what each Host already supports (see [ADR-0001](.
 
 This is the maintainers' own reading of the rules, not legal advice. Check your provider's terms for your situation.
 
-### Why Node 22.18?
+## Why Node 22.18?
 
 From 22.18, Node strips TypeScript types by default, so sideby can `import()` your `.ts` plugins straight from disk. On older Node, sideby prints an upgrade hint and exits with 1.
 
-### Where does sideby keep its data?
+## Where does sideby keep its data?
 
 | What | Where |
 |---|---|
@@ -30,7 +30,7 @@ From 22.18, Node strips TypeScript types by default, so sideby can `import()` yo
 
 sideby writes nothing of its own into Host account directories. The one exception is `quota setup claude --yes`, which changes `~/.claude/settings.json`. Account directories you create with `sideby new` belong to the Host.
 
-### How is it different from aimux, agenv, cc-switch or magpie?
+## How is it different from aimux, agenv, cc-switch or magpie?
 
 They solve related problems with different trade-offs; pick the one that fits how you work.
 
@@ -41,7 +41,7 @@ They solve related problems with different trade-offs; pick the one that fits ho
 | Quota | local records and status line data only | live limit probe; `run --auto` picks the subscription with the most headroom | — | — | — |
 | Shape | CLI, local web panel, local plugins | CLI with TUI | CLI with TUI | desktop app | menu bar app |
 
-### How do I uninstall?
+## How do I uninstall?
 
 ```sh
 sideby quota teardown claude                  # first, if you ran quota setup; the status line calls sideby
