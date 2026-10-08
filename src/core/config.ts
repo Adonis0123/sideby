@@ -97,6 +97,12 @@ export const ConfigSchema = Type.Object(
       }),
     ),
     extraSharedItems: Type.Optional(Type.Record(Type.String(), Type.Array(SharedItemSchema))),
+    accountTitle: Type.Optional(
+      Type.Boolean({
+        description:
+          'Set the terminal title to `[<short command or account>]` when sideby starts an Account, and keep Hosts that allow it (Codex) from replacing it. Off by default.',
+      }),
+    ),
     resumeRouting: Type.Optional(
       Type.Boolean({
         description:

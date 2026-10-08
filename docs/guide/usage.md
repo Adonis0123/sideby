@@ -35,6 +35,18 @@ A new account starts with the Main Account's skills, hooks, rules and settings. 
 - **An API account's `config.toml`** is its own, so changing its endpoint or model never changes the Main Account's.
 - An item the Main Account does not have is skipped when an account is created, and Doctor does not report it.
 
+## Show which account a session is
+
+Every time sideby starts an account it sets two variables for the Host: `SIDEBY_ACCOUNT` (the ref, `claude:001`) and `SIDEBY_LABEL` (the short command it was started with or owns, `cc001`, else the ref). A status line or prompt can show them. Check the family prefix of `SIDEBY_ACCOUNT` first: a Host started inside another one inherits both.
+
+| Host | Where the badge goes | How |
+|---|---|---|
+| Claude Code | status line | Add `case "${SIDEBY_ACCOUNT-}" in claude:*) printf '[%s] ' "$SIDEBY_LABEL" ;; esac` to the script in `settings.json`'s `statusLine.command`. `settings.json` is linked, so one edit covers every account. |
+| Grok Build | status line | Save a script that prints the badge (for example `~/.grok/statusline.sh`), then add `[ui.status_line]` with `type = "command"` and `command = "~/.grok/statusline.sh"` to `~/.grok/config.toml`. Run `sideby doctor grok --fix` to copy it to subscription accounts; an API account's `config.toml` is its own, so edit that one too. The command replaces the built-in row, so print the directory, model and context yourself (the payload has `workspace.current_dir`, `model.display_name`, `context_window.used_percentage`). |
+| Codex | terminal tab title | Codex's status line and title take only built-in items. Set `"accountTitle": true` in the [config](configuration.md): sideby sets the title to `[codex002]` and starts Codex with `-c tui.terminal_title=[]` so Codex leaves it, losing its own spinner in the title. |
+
+With `sideby quota setup claude` on, the status line command is `sideby statusline-tap --orig-b64 …`: edit the script it runs, not that command. To add a status line where there was none, run `sideby quota teardown claude`, set `statusLine`, then `sideby quota setup claude --yes` again.
+
 ## API accounts
 
 ```sh

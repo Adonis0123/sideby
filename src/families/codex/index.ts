@@ -52,6 +52,8 @@ export const codexFamily: FamilyDef = {
     if (account.isMain || userArgs.some((a) => a.includes(FILE_STORE_KEY))) return []
     return ['-c', `${FILE_STORE_KEY}="file"`]
   },
+  // `tui.terminal_title` takes only built-in items; an empty list leaves the title sideby set alone.
+  keepTitle: { key: 'tui.terminal_title', args: ['-c', 'tui.terminal_title=[]'] },
   async loginState(account): Promise<LoginState> {
     try {
       return (await stat(join(account.dir, 'auth.json'))).isFile() ? 'logged-in' : 'unknown'

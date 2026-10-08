@@ -14,10 +14,12 @@ export interface PreparedLaunch {
   env: Env
   /** Printed before launching when sign-in happens inside the Host. */
   notice?: string
+  /** Terminal title set before the Host starts (config `accountTitle`), for example `[codex002]`. */
+  title?: string
 }
 
 /** What `runHost` needs: a prepared Account launch, or the Host run unchanged (`sideby resume`). */
-export type HostLaunch = Pick<PreparedLaunch, 'family' | 'bin' | 'args' | 'env'>
+export type HostLaunch = Pick<PreparedLaunch, 'family' | 'bin' | 'args' | 'env' | 'title'>
 
 /** Finds an executable on PATH; returns null when the Host is not installed. */
 export async function which(bin: string, env: Env): Promise<string | null> {
@@ -47,6 +49,10 @@ export async function prepareLaunch(opts: {
   userArgs: readonly string[]
   command: 'run' | 'login'
   bus: HookBus
+  /** What the Host may show as the Account (`SIDEBY_LABEL`): the short command, else the ref. */
+  label?: string
+  /** Config `accountTitle`: set the terminal title to `[<label>]` and keep the Host from replacing it. */
+  title?: boolean
 }): Promise<PreparedLaunch> {
   const { account, family } = opts
   const env: Env = { ...opts.baseEnv }
@@ -54,6 +60,10 @@ export async function prepareLaunch(opts: {
   delete env[family.selectVar]
   if (account.secretFile) Object.assign(env, await readSecretFile(account.secretFile, opts.baseEnv))
   if (!account.isMain) env[family.selectVar] = account.dir
+  // Which Account this is, for a status line, prompt or hook to show (spec §3.5); set for every Launch, so a value
+  // inherited from another sideby Launch never leaks through.
+  env.SIDEBY_ACCOUNT = account.ref
+  env.SIDEBY_LABEL = opts.label || account.ref
 
   let args: string[]
   let notice: string | undefined
@@ -66,7 +76,16 @@ export async function prepareLaunch(opts: {
       notice = family.login.hint
     }
   } else {
-    args = [...(family.defaultArgs?.(account, opts.userArgs) ?? []), ...opts.accountArgs, ...opts.userArgs]
+    const keep =
+      opts.title && family.keepTitle && !opts.userArgs.some((a) => a.includes(family.keepTitle!.key))
+        ? family.keepTitle.args
+        : []
+    args = [
+      ...(family.defaultArgs?.(account, opts.userArgs) ?? []),
+      ...keep,
+      ...opts.accountArgs,
+      ...opts.userArgs,
+    ]
   }
 
   await opts.bus.run('launch.before', family.id, {
@@ -77,7 +96,19 @@ export async function prepareLaunch(opts: {
     config: {},
     command: opts.command,
   })
-  return { account, family, bin: family.bin, args, env, ...(notice ? { notice } : {}) }
+  // Control characters would end the escape sequence early; labels are shell-safe names, so this is a guard only.
+  const title = opts.title
+    ? [...`[${env.SIDEBY_LABEL ?? account.ref}]`].filter((ch) => ch >= ' ' && ch !== '\x7f').join('')
+    : undefined
+  return {
+    account,
+    family,
+    bin: family.bin,
+    args,
+    env,
+    ...(notice ? { notice } : {}),
+    ...(title ? { title } : {}),
+  }
 }
 
 /**
@@ -88,6 +119,8 @@ export async function prepareLaunch(opts: {
  * default action so Ctrl-Z suspends sideby together with the Host and `fg` resumes both.
  */
 export function runHost(p: HostLaunch): Promise<number> {
+  // OSC 0 sets the terminal's tab and window title; only on a terminal, never into a pipe.
+  if (p.title && process.stdout.isTTY) process.stdout.write(`\x1b]0;${p.title}\x07`)
   return new Promise((resolve) => {
     const child = spawn(p.bin, p.args, { stdio: 'inherit', env: p.env as NodeJS.ProcessEnv })
     const ignore = () => {}

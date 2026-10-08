@@ -43,7 +43,7 @@ export default {
 
 | Extension point | When | What it can do | Timeout |
 |---|---|---|---|
-| `api.family(def)` | when the plugin loads | Add a Family: directory layout, selection variable, Hijack Variables, default arguments, Shared Items, sign-in command, login check, model, optional `logo`, `readQuota`, `readUsage` and `quotaSetup` | — |
+| `api.family(def)` | when the plugin loads | Add a Family: directory layout, selection variable, Hijack Variables, default arguments, Shared Items, sign-in command, login check, model, optional `logo`, `readQuota`, `readUsage`, `quotaSetup` and `keepTitle` (Host arguments that keep the title config `accountTitle` sets) | — |
 | `launch.before` | before every `run` and `login` | Change `ctx.env` and `ctx.args`, or stop the launch with `throw api.abort(msg)` | 30 s |
 | `account.create.before` | before `new` (CLI or panel) writes anything | Refuse the new account with `throw api.abort(msg)`; `ctx` has `family`, `name`, `api`, the family's existing `accounts` and `config`. The CLI exits 1 and the panel shows `msg`, so say what to do instead | 10 s |
 | `account.created` | after `new` succeeds | Add files, print next steps with `ctx.log()` | 30 s |

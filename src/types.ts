@@ -80,6 +80,11 @@ export interface FamilyDef {
   login: { args: string[] | null; hint: string }
   /** Arguments sideby adds before the Account's and the user's arguments. */
   defaultArgs?(account: Account, userArgs: readonly string[]): string[]
+  /**
+   * Host arguments that stop the Host from setting the terminal title for this run, so the title sideby sets with
+   * config `accountTitle` (`[<SIDEBY_LABEL>]`) stays. Added after `defaultArgs`, unless a user argument contains `key`.
+   */
+  keepTitle?: { args: string[]; key: string }
   loginState?(account: Account): Promise<LoginState>
   model?(account: Account): Promise<string | undefined>
   /**

@@ -145,6 +145,10 @@
         }
       }
     },
+    "accountTitle": {
+      "type": "boolean",
+      "description": "Set the terminal title to `[<short command or account>]` when sideby starts an Account, and keep Hosts that allow it (Codex) from replacing it. Off by default."
+    },
     "resumeRouting": {
       "type": "boolean",
       "description": "Make `sideby shell-init` also define Host-named functions (`claude`, `codex`, `grok`) that resume a session by id in the Account that holds it. Off by default."

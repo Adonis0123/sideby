@@ -1,6 +1,6 @@
 // The one service layer the CLI and the Panel share. Frozen contract for v0.1 (plan: 审核修订).
 
-import { type AccountRefError, discoverAccounts, resolveRef } from './core/accounts.ts'
+import { type AccountRefError, aliasesByAccount, discoverAccounts, resolveRef } from './core/accounts.ts'
 import {
   type AliasValue,
   addConfigAlias,
@@ -269,6 +269,17 @@ export async function createRuntime(
   for (const [id, extra] of Object.entries(config.extraSharedItems ?? {})) {
     const f = families.get(id)
     if (f) families.set(id, { ...f, sharedItems: [...f.sharedItems, ...extra] })
+  }
+
+  /**
+   * `SIDEBY_LABEL` for a Launch: the alias it was started through; else the Account's aliases, those without Host
+   * arguments first, then by name; else the ref.
+   */
+  const launchLabel = (ref: string, account: Account, all: readonly Account[]): string => {
+    if (!ref.includes(':') && ownAlias(ref) !== undefined) return ref
+    const names = aliasesByAccount(aliasRefs(config.aliases), all).get(account.ref) ?? []
+    const plain = names.filter((n) => aliasArgs(ownAlias(n)).length === 0)
+    return plain[0] ?? names[0] ?? account.ref
   }
 
   const accounts = async (): Promise<Account[]> => {
@@ -558,8 +569,11 @@ export async function createRuntime(
       return out
     },
     async prepareLaunch(ref, userArgs, command) {
-      const account = resolveRef(ref, await accounts(), aliasRefs(config.aliases))
+      const all = await accounts()
+      const account = resolveRef(ref, all, aliasRefs(config.aliases))
       return prepareLaunch({
+        label: launchLabel(ref, account, all),
+        title: config.accountTitle === true,
         account,
         family: familyOf(account.family),
         baseEnv: env,

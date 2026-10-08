@@ -35,6 +35,18 @@ EMAIL 是账号登录的身份，取自宿主的登录文件（Claude Code、Cod
 - **API 账号的 `config.toml`** 是它自己的，改它的接口地址或模型不会改到主账号。
 - 主账号没有的项，建账号时跳过，Doctor 也不报。
 
+## 在会话里显示是哪个账号
+
+sideby 每次启动账号，都给宿主设两个变量：`SIDEBY_ACCOUNT`（ref，例如 `claude:001`）和 `SIDEBY_LABEL`（启动用的或这个账号拥有的短命令，例如 `cc001`；没有短命令就是 ref）。状态栏或提示符可以显示它们。显示前先核对 `SIDEBY_ACCOUNT` 的家族前缀：在一个宿主里再开另一个宿主，会继承这两个变量。
+
+| 宿主 | 标识放在哪 | 怎么配 |
+|---|---|---|
+| Claude Code | 状态栏 | 在 `settings.json` 的 `statusLine.command` 指向的脚本里加一行 `case "${SIDEBY_ACCOUNT-}" in claude:*) printf '[%s] ' "$SIDEBY_LABEL" ;; esac`。`settings.json` 是链接，改一次所有账号生效。 |
+| Grok Build | 状态栏 | 存一个打印标识的脚本（例如 `~/.grok/statusline.sh`），在 `~/.grok/config.toml` 里加 `[ui.status_line]`，写 `type = "command"` 和 `command = "~/.grok/statusline.sh"`。跑 `sideby doctor grok --fix` 把它复制到订阅账号；API 账号的 `config.toml` 是它自己的，也要改。command 会替换内置的那一行，所以目录、模型、上下文要自己打印（输入里有 `workspace.current_dir`、`model.display_name`、`context_window.used_percentage`）。 |
+| Codex | 终端标签页标题 | Codex 的状态栏和标题只能选内置项。在[配置](configuration.zh-CN.md)里设 `"accountTitle": true`：sideby 把标题设成 `[codex002]`，并用 `-c tui.terminal_title=[]` 启动 Codex，让它不改标题；代价是标题里看不到 Codex 自己的转圈。 |
+
+开了 `sideby quota setup claude` 时，状态栏命令是 `sideby statusline-tap --orig-b64 …`：改它运行的那个脚本，不要改这条命令。原来没有状态栏、想加一个时，先 `sideby quota teardown claude`，设好 `statusLine`，再 `sideby quota setup claude --yes`。
+
 ## API 账号
 
 ```sh

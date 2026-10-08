@@ -15,8 +15,9 @@ For "install sideby", "set up another Claude account", "add cc008", "配置一�
    - Subscription account: `sideby login <ref>`. It opens the Host's sign-in in their browser. For pi it starts pi; they type `/login`.
    - API account: they open the `proxy.env` path that `new` printed and fill in the values. Never read or write it, and never ask for the key in chat.
 7. **Short command in new terminals.** If `~/.config/sideby/config.json` has no `shellInitFile`, and `~/.zshrc` (bash: `~/.bashrc`) has no line containing `sideby shell-init`, say so and append `eval "$(sideby shell-init zsh)"` (or `bash`). It takes effect in new terminals. Skip this when the user wanted no short command.
-8. **Verify.** `sideby doctor <ref> --json` should report no `fail`; fix only the new account with `sideby doctor <ref> --fix`. After the user signed in, `sideby list --json` shows `login: "logged-in"` for it.
-9. **Optional, Claude Code:** for quota in `sideby quota` and the panel, follow `quota.md` (it needs the user's yes).
+8. **Account badge.** Offer to show which account each session is (`[cc008]` in the status line or tab title); if they want it, follow `badge.md`.
+9. **Verify.** `sideby doctor <ref> --json` should report no `fail`; fix only the new account with `sideby doctor <ref> --fix`. After the user signed in, `sideby list --json` shows `login: "logged-in"` for it.
+10. **Optional, Claude Code:** for quota in `sideby quota` and the panel, follow `quota.md` (it needs the user's yes).
 
 Finish with how to start it: the short command in a new terminal (`cc008`), or `sideby run <ref>`; and `sideby ui` to see every account's quota.
 

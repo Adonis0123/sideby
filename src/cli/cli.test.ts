@@ -152,6 +152,63 @@ describe('run', () => {
     })
   })
 
+  it('tells the host which account it is: SIDEBY_ACCOUNT, and SIDEBY_LABEL from the short command used or owned', async () => {
+    await withFakeHome(async (h) => {
+      await codexMain(h)
+      await fakeHost(h, 'codex')
+      assert.equal((await sideby(h, ['new', 'codex', '002', '--alias', 'codex002'])).code, 0)
+      assert.equal(
+        (await sideby(h, ['alias', 'add', 'cx-fast', 'codex:002', '--', '--model', 'mini'])).code,
+        0,
+      )
+      assert.equal((await sideby(h, ['new', 'codex', 'work'])).code, 0)
+      const inherited = { SIDEBY_ACCOUNT: 'claude:001', SIDEBY_LABEL: 'cc001' }
+      const runs: [string, string, string][] = [
+        ['cx-fast', 'codex:002', 'cx-fast'], // started through an alias: that alias, even one with Host arguments
+        ['codex:002', 'codex:002', 'codex002'], // by ref: the Account's alias without Host arguments
+        ['work', 'codex:work', 'codex:work'], // no alias: the ref
+        ['codex:main', 'codex:main', 'codex:main'],
+      ]
+      for (const [i, [ref]] of runs.entries()) {
+        assert.equal((await sideby(h, ['run', ref], inherited)).code, 0)
+        const rec = (await readHostLog(h, 'codex'))[i]!
+        assert.equal(rec.env.SIDEBY_ACCOUNT, runs[i]![1], ref)
+        assert.equal(rec.env.SIDEBY_LABEL, runs[i]![2], ref)
+      }
+    })
+  })
+
+  it('accountTitle sets the title to the label and keeps Codex from replacing it, unless the user sets it', async () => {
+    await withFakeHome(async (h) => {
+      await codexMain(h)
+      await fakeHost(h, 'codex')
+      assert.equal((await sideby(h, ['new', 'codex', '002', '--alias', 'codex002'])).code, 0)
+      const keep = ['-c', 'tui.terminal_title=[]']
+      const store = ['-c', 'cli_auth_credentials_store="file"']
+      await sideby(h, ['run', 'codex002'])
+      assert.deepEqual((await readHostLog(h, 'codex'))[0]!.argv, store, 'off by default')
+
+      const file = h.path('.config/sideby/config.json')
+      await writeFile(
+        file,
+        JSON.stringify({ ...JSON.parse(await readFile(file, 'utf8')), accountTitle: true }),
+      )
+      await sideby(h, ['run', 'codex002', '--', 'exec', 'hi'])
+      assert.deepEqual((await readHostLog(h, 'codex'))[1]!.argv, [...store, ...keep, 'exec', 'hi'])
+      await sideby(h, ['run', 'codex002', '--', '-c', 'tui.terminal_title=["model"]'])
+      assert.deepEqual((await readHostLog(h, 'codex'))[2]!.argv, [
+        ...store,
+        '-c',
+        'tui.terminal_title=["model"]',
+      ])
+
+      const { createRuntime } = await import('../runtime.ts')
+      const rt = await createRuntime({ env: h.env })
+      assert.equal((await rt.prepareLaunch('codex:002', [], 'run')).title, '[codex002]')
+      assert.equal((await rt.prepareLaunch('codex:main', [], 'run')).title, '[codex:main]')
+    })
+  })
+
   it('loads an API account Secret File only into the host and enforces mode 600', async () => {
     await withFakeHome(async (h) => {
       await codexMain(h)

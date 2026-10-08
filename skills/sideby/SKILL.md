@@ -1,6 +1,6 @@
 ---
 name: sideby
-description: Use when the user runs, or wants to run, several AI coding accounts (Claude Code, Codex, Grok Build, pi) side by side. Covers installing sideby and setting up a new account ("install sideby", "set up another Claude account", "add cc008", "配置一个 cc00x", "再加一个 Codex 账号"), explaining what accounts share and what stays separate ("what do my accounts share?", "这些账号共享了什么"), seeing accounts, quota and usage, moving on when one hits its 5-hour or weekly limit, adding a short command (alias), and repairing drifted account directories (skills, hooks, rules or settings not shared, wrong symlinks, credential file permissions). Drives the `sideby` CLI with `--json`; the agent does every step except browser sign-in, filling in secrets and starting interactive sessions, which it hands to the user as one command.
+description: Use when the user runs, or wants to run, several AI coding accounts (Claude Code, Codex, Grok Build, pi) side by side. Covers installing sideby and setting up a new account ("install sideby", "set up another Claude account", "add cc008", "配置一个 cc00x", "再加一个 Codex 账号"), explaining what accounts share and what stays separate ("what do my accounts share?", "这些账号共享了什么"), showing which account a session is ("show [cc001] in the status line", "加上账号标识"), seeing accounts, quota and usage, moving on when one hits its 5-hour or weekly limit, adding a short command (alias), and repairing drifted account directories (skills, hooks, rules or settings not shared, wrong symlinks, credential file permissions). Drives the `sideby` CLI with `--json`; the agent does every step except browser sign-in, filling in secrets and starting interactive sessions, which it hands to the user as one command.
 metadata:
   version: "0.2.2"
   requires:
@@ -37,6 +37,7 @@ Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique
 | The user wants to | Run | Then read |
 |---|---|---|
 | Install sideby, or set up a new account ("add cc008") | `sideby --version`, `sideby list --json`, `sideby new <family> --next --json` | `references/setup.md` |
+| Show which account a session is (`[cc001]` in the status line or tab title) | `sideby list --json` for the labels | `references/badge.md` |
 | Know what accounts share and what stays separate | `sideby families <family> --json` | `references/sharing.md` |
 | See accounts, health, quota and usage | `sideby list --json`, `sideby doctor --json`, `sideby quota --json` | `references/diagnose.md` |
 | Repair drift or permissions | `sideby doctor [ref] --json`, then `--fix` after they agree | `references/diagnose.md` |
