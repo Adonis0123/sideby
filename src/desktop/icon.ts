@@ -8,8 +8,8 @@ export const APP_MARKER = 'sideby-app-install'
 
 // Geometry in the Panel's 40-unit logo box (page.ts: .logo 40×40, radius 10; halves of radius 10.5 centred at
 // 18.5,18.5 facing left and 21.5,21.5 facing right, so they sit 3 apart and mirror through the centre).
-const TILE = { size: 40, radius: 10, color: [0x15, 0x17, 0x1c] as const }
-const MARK = { color: [0xf5, 0xf6, 0xf8] as const, opacities: [1, 0.55] }
+const TILE = { size: 40, radius: 10, color: [0xe5, 0xf2, 0xfb] as const }
+const MARK = { color: [0x3f, 0x8f, 0xc4] as const, opacities: [1, 0.55] }
 const HALVES = [
   { cx: 18.5, cy: 18.5, r: 10.5, side: -1 },
   { cx: 21.5, cy: 21.5, r: 10.5, side: 1 },

@@ -4,9 +4,8 @@ import { type ResolvedTheme, resolveTheme } from './theme.ts'
 
 // Colors defined from other tokens; repeated in both schemes so they follow that scheme's base colors.
 const DERIVED_COLORS = `
-  --primary-border: var(--primary); --primary-hover-border: var(--primary-hover); --btn-text: var(--text);
-  --btn-hover-border: var(--border-strong); --btn-hover-text: var(--text); --check: var(--primary);
-  --logo-bg: var(--text); --logo-fg: var(--bg); --logo-line: transparent;
+  --btn-text: var(--text); --btn-hover-text: var(--accent); --check: var(--focus);
+  --logo-bg: var(--accent-soft); --logo-fg: var(--focus); --logo-line: var(--border);
   --focus-outline: 2px solid var(--focus); --focus-ring: none;`
 // Design tokens. A host theme (theme.ts) layers its values over these: light values after LIGHT_TOKENS, dark values after
 // DARK_TOKENS. DARK_TOKENS sets every color token again, so a host's light colors never leak into dark mode, while
@@ -17,22 +16,24 @@ const LIGHT_TOKENS = `
   --title-weight: 750; --heading-weight: 650; --strong-weight: 600; --button-weight: 600; --primary-weight: var(--button-weight);
   --radius: 14px; --ctl-radius: 8px; --chip-radius: 999px; --ctl-h: 34px; --ctl-h-sm: 28px; --field-h: 36px;
   --content-width: 1180px; --gutter: 24px;
-  --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f0f2f5; --border: #e2e5ea; --border-strong: #cfd4dc;
-  --text: #15171c; --muted: #5b6372; --faint: #8b93a1; --accent: #4f46e5; --accent-soft: #eef0ff;
-  --primary: #4f46e5; --primary-hover: #4338ca; --primary-active: #3730a3; --on-primary: #ffffff;
-  --hover: #eceef2; --active: #e2e5ea; --focus: #6366f1;
+  --bg: #f2f8fc; --surface: #fcfcfa; --surface-2: #f6fafd; --border: #dce8f0; --border-strong: #c5d7e4;
+  --text: #15171c; --muted: #555b63; --faint: #8b93a1; --accent: #27658f; --accent-soft: #e5f2fb;
+  --primary: #e1f0fb; --primary-hover: #d2e8f9; --primary-active: #c3e0f6; --on-primary: #1f6396;
+  --primary-border: #b9d8ef; --primary-hover-border: #9cc7e8; --btn-hover-border: #8fbde3;
+  --hover: #f0f7fc; --active: #e6f1fa; --focus: #3f8fc4;
   --ok: #15803d; --ok-bar: #22c55e; --ok-soft: #e8f7ee; --warn: #b45309; --warn-bar: #f59e0b; --warn-soft: #fdf3e2;
-  --fail: #c81e1e; --fail-bar: #ef4444; --fail-soft: #fdecec; --track: #e9ecf1;
+  --fail: #c81e1e; --fail-bar: #ef4444; --fail-soft: #fdecec; --track: #e4edf4;
   --spark: oklch(from var(--accent) clamp(0.55, l, 0.62) max(c, 0.14) h); --spark-soft: oklch(from var(--accent) 0.83 calc(max(c, 0.14) * 0.6) h);
   --shadow: 0 1px 2px rgba(16,24,40,.04), 0 2px 8px rgba(16,24,40,.05);
   --float-shadow: 0 10px 30px rgba(16,24,40,.14), 0 2px 6px rgba(16,24,40,.06);${DERIVED_COLORS}`
 const DARK_TOKENS = `
-  --bg: #0d0f12; --surface: #15181d; --surface-2: #1c2026; --border: #262b33; --border-strong: #353c47;
-  --text: #e7e9ee; --muted: #a0a8b5; --faint: #6c7480; --accent: #8b87ff; --accent-soft: #23224a;
-  --primary: #5b54e8; --primary-hover: #6a64ef; --primary-active: #4f46e5; --on-primary: #ffffff;
-  --hover: #22272e; --active: #2a3038; --focus: #8b87ff;
+  --bg: #0e1621; --surface: #141e2a; --surface-2: #111a25; --border: #233244; --border-strong: #30455b;
+  --text: #e6edf3; --muted: #9aa9b8; --faint: #6b7a8a; --accent: #8cc4ee; --accent-soft: #16314a;
+  --primary: #173a58; --primary-hover: #1d4769; --primary-active: #22537a; --on-primary: #d3e9fa;
+  --primary-border: #2b5b82; --primary-hover-border: #3a6f99; --btn-hover-border: #4a7fa8;
+  --hover: #182736; --active: #1c2f42; --focus: #5aa7dc;
   --ok: #4ade80; --ok-bar: #22c55e; --ok-soft: #13291c; --warn: #fbbf24; --warn-bar: #f59e0b; --warn-soft: #2d2410;
-  --fail: #f87171; --fail-bar: #ef4444; --fail-soft: #331717; --track: #252a32;
+  --fail: #f87171; --fail-bar: #ef4444; --fail-soft: #331717; --track: #1f2c3a;
   --spark: oklch(from var(--accent) clamp(0.7, l, 0.78) max(c, 0.14) h); --spark-soft: oklch(from var(--accent) 0.45 calc(max(c, 0.14) * 0.6) h);
   --shadow: 0 1px 2px rgba(0,0,0,.3); --float-shadow: 0 12px 32px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.3);${DERIVED_COLORS}`
 

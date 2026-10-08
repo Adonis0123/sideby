@@ -308,7 +308,7 @@ describe('panel theme', () => {
         )
         // The host's dark values come after the built-in dark palette, inside the media query.
         const dark = style.slice(style.indexOf('@media (prefers-color-scheme: dark)'))
-        assert.ok(dark.indexOf('--primary: #5b54e8') < dark.indexOf('--primary: rgb(31 99 150 / 90%)'))
+        assert.ok(dark.indexOf('--primary: #173a58') < dark.indexOf('--primary: rgb(31 99 150 / 90%)'))
         assert.match(r.text, /<body class="header-bar">/)
       } finally {
         await close(server)
