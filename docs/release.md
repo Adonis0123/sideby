@@ -77,19 +77,32 @@ npm view sideby version        # 应为 0.1.0
 
 本机首发没有 provenance，这是正常的；之后 CI 发的版本才有。
 
+新包首发时，registry 先建一个公开的占位版本 `0.0.0-stage`，`npm publish` 返回 202 并提示「Your package is being processed」。约 1 分钟后 `0.1.0` 出现并成为 `latest`；在那之前 `npm view sideby version` 显示 `0.0.0-stage`，不要重发。
+
 ### 5. 首发失败怎么办
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
 | `E403`，提示包名和已有包太像，或没有权限 | 包名被占用或被 npm 判为近似名 | 不要换个名字直接发；先改 spec 和 `package.json`，再从第 1 步重来 |
 | `E402 Payment Required` | 漏了 `--access public` | 加上参数重发 |
-| `EOTP` 或浏览器确认超时 | 2FA 没在时限内完成 | 重新执行 `npm publish`，在打开的页面里用 passkey 确认 |
+| `EOTP` 或浏览器确认超时 | 2FA 没在时限内完成；`https://www.npmjs.com/auth/cli/…` 链接几分钟就过期 | 重新执行命令，拿到新链接后马上用 passkey 确认 |
+| `EOTP`，没出现浏览器链接 | 命令不在终端里跑（例如 AI agent 的后台命令），npm 不走浏览器确认 | 套一层伪终端：`script -q /dev/null npm publish --access public`，再打开它打印的 `https://www.npmjs.com/auth/cli/…` |
 | 网络中断，不确定有没有发出去 | — | 先跑 `npm view sideby versions`；已经有 0.1.0 就不要重发 |
 | 发出去了，但内容有问题 | — | 不要 unpublish；按下面「回滚」处理，然后发 0.1.1 |
 
 ### 6. 在 npmjs.com 配置 trusted publisher
 
-打开 npmjs.com 上 `sideby` 包的 **Settings**：
+2026-10-08 已用 npm 11.21 的命令配好，等同下面的网页操作：
+
+```sh
+npx npm@11 trust github sideby --file release.yml --repo Adonis0123/sideby --env npm --allow-publish --yes
+npx npm@11 access set mfa=publish sideby    # Require 2FA and disallow tokens；要浏览器确认
+npx npm@11 trust list sideby                # 复查
+```
+
+`trust list` 显示的权限是 `createPackage` 和 `createStagedPackage`，即允许 `npm publish`，也允许 `npm stage publish`。
+
+网页上的做法：打开 npmjs.com 上 `sideby` 包的 **Settings**：
 
 1. **Trusted Publisher** 选 **GitHub Actions**，填：
    - Organization or user：`Adonis0123`
