@@ -124,6 +124,20 @@ export async function cmdRun(a: ParsedArgs, io: Io, command: 'run' | 'login'): P
   return runHost(prepared)
 }
 
+/**
+ * `sideby resume <family>`: what the Host-named shell function calls (spec §3.15). Starts the Account that holds the
+ * session the arguments resume by id, or runs the Host unchanged.
+ */
+export async function cmdResume(a: ParsedArgs, io: Io): Promise<number> {
+  const [family, ...extra] = a.positionals
+  if (!family) throw new UsageError('usage: sideby resume <family> [-- host args]')
+  const rt = await createRuntime()
+  const route = await rt.resumeLaunch(family, [...extra, ...a.rest])
+  if (route.account)
+    io.err(c.dim(`sideby: session ${route.sessionId} is in ${route.account.ref}; starting it there`))
+  return runHost(route.launch)
+}
+
 /** Quotes a Host argument for a command line the user may paste; plain words stay as they are. */
 function shellQuote(arg: string): string {
   return /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`

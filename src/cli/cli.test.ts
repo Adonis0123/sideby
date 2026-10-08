@@ -761,3 +761,123 @@ describe('confirmation exit code', () => {
     })
   })
 })
+
+describe('resume (spec §3.15)', () => {
+  const ID = '0a4964a7-fb75-40c0-a9eb-f0755cc54449'
+
+  /** Claude main plus `claude:work`, which holds session `ID`. */
+  async function claudeWithSession(h: FakeHome, config: object = {}) {
+    await h.mkdir('.claude/projects')
+    await h.write(`.claude-work/projects/-work-app/${ID}.jsonl`, '{}\n')
+    await h.write('.config/sideby/config.json', `${JSON.stringify(config)}\n`)
+    await fakeHost(h, 'claude')
+  }
+
+  it('starts the Account that holds the session, and runs the Host unchanged otherwise', async () => {
+    await withFakeHome(async (h) => {
+      await claudeWithSession(h, { accounts: { 'claude:work': { args: ['--model', 'opus'] } } })
+      const routed = await sideby(h, ['resume', 'claude', '--', '--resume', ID], {
+        ANTHROPIC_API_KEY: 'leak',
+      })
+      assert.equal(routed.code, 0, routed.err)
+      assert.match(routed.err, new RegExp(`session ${ID} is in claude:work`))
+      const [rec] = await readHostLog(h, 'claude')
+      assert.equal(rec!.env.CLAUDE_CONFIG_DIR, h.path('.claude-work'))
+      assert.equal(rec!.env.ANTHROPIC_API_KEY, undefined)
+      assert.deepEqual(rec!.argv, ['--model', 'opus', '--resume', ID])
+
+      // A new session: the Host runs exactly as typed, keeping the environment.
+      const plain = await sideby(h, ['resume', 'claude', '--', '-p', 'hi'], { ANTHROPIC_API_KEY: 'kept' })
+      assert.equal(plain.code, 0, plain.err)
+      assert.equal(plain.err, '')
+      const second = (await readHostLog(h, 'claude'))[1]!
+      assert.equal(second.env.CLAUDE_CONFIG_DIR, undefined)
+      assert.equal(second.env.ANTHROPIC_API_KEY, 'kept')
+      assert.deepEqual(second.argv, ['-p', 'hi'])
+
+      const pi = await sideby(h, ['resume', 'pi', '--', '--resume', ID])
+      assert.equal(pi.code, 1)
+      assert.match(pi.err, /cannot be routed; start an account yourself with `sideby run/)
+      assert.equal((await sideby(h, ['resume'])).code, 2)
+    })
+  })
+
+  it('shell-init defines the Host-named function only with resumeRouting and a non-main Account', async () => {
+    await withFakeHome(async (h) => {
+      await claudeWithSession(h)
+      await h.write('.codex/AGENTS.md', '# rules\n')
+      const off = await sideby(h, ['shell-init', 'zsh'])
+      assert.doesNotMatch(off.out, /^function /m)
+      await h.write('.config/sideby/config.json', `${JSON.stringify({ resumeRouting: true })}\n`)
+      const on = await sideby(h, ['shell-init', 'zsh'])
+      const glob = '????????-????-????-????-????????????'
+      assert.ok(
+        on.out.includes(
+          `function claude { local a; if [ -z "\${CLAUDE_CONFIG_DIR-}" ]; then for a in "$@"; do case $a in ${glob}|--resume=${glob}) command sideby resume 'claude' -- "$@"; return;; esac; done; fi; command claude "$@"; }\n`,
+        ),
+        on.out,
+      )
+      // Codex has only its Main Account here, so there is nowhere to route to.
+      assert.doesNotMatch(on.out, /function codex/)
+      // An Alias with the Host's name wins.
+      await h.write(
+        '.config/sideby/config.json',
+        `${JSON.stringify({ resumeRouting: true, aliases: { claude: 'claude:work' } })}\n`,
+      )
+      assert.doesNotMatch((await sideby(h, ['shell-init', 'zsh'])).out, /function claude/)
+    })
+  })
+
+  for (const shell of ['bash', 'zsh'] as const) {
+    it(`the ${shell} function routes a bare resume even behind an alias of the same name`, async (t) => {
+      const { execFileSync } = await import('node:child_process')
+      try {
+        execFileSync(shell, ['-c', 'true'])
+      } catch {
+        t.skip(`${shell} is not installed`)
+        return
+      }
+      await withFakeHome(async (h) => {
+        await claudeWithSession(h, { resumeRouting: true })
+        // A sideby on PATH that also counts its calls, so the test sees when the function skips it.
+        const calls = h.path('sideby.calls')
+        await h.write(
+          'bin-sideby',
+          `#!/bin/sh\necho x >> ${JSON.stringify(calls)}\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(MAIN)} "$@"\n`,
+          0o755,
+        )
+        const { rename } = await import('node:fs/promises')
+        await rename(h.path('bin-sideby'), join(h.bin, 'sideby'))
+        const init = h.path('shell-init.sh')
+        await writeFile(init, (await sideby(h, ['shell-init', shell])).out)
+        // The alias comes first, as in a typical rc file. A sourced file is parsed line by line, like an rc file
+        // followed by typed commands; a `-c` string would be parsed before the alias exists.
+        const script = h.path('session.sh')
+        await writeFile(
+          script,
+          [
+            ...(shell === 'bash' ? ['shopt -s expand_aliases'] : []),
+            `alias claude='claude --dangerously-skip-permissions'`,
+            `source ${JSON.stringify(init)}`,
+            `claude --resume ${ID}`,
+            `CLAUDE_CONFIG_DIR=/picked claude --resume ${ID}`,
+            'claude -p hi',
+          ].join('\n'),
+        )
+        const run = `source ${JSON.stringify(script)}`
+        execFileSync(shell, shell === 'zsh' ? ['-f', '-c', run] : ['--norc', '-c', run], {
+          env: h.env as NodeJS.ProcessEnv,
+          stdio: 'pipe',
+        })
+        const [routed, picked, plain] = await readHostLog(h, 'claude')
+        assert.equal(routed!.env.CLAUDE_CONFIG_DIR, h.path('.claude-work'))
+        assert.deepEqual(routed!.argv, ['--dangerously-skip-permissions', '--resume', ID])
+        assert.equal(picked!.env.CLAUDE_CONFIG_DIR, '/picked')
+        assert.deepEqual(picked!.argv, ['--dangerously-skip-permissions', '--resume', ID])
+        assert.deepEqual(plain!.argv, ['--dangerously-skip-permissions', '-p', 'hi'])
+        // Only the routed resume started sideby; the chosen Account and the plain command went straight to the Host.
+        assert.equal(await readFile(calls, 'utf8'), 'x\n')
+      })
+    })
+  }
+})

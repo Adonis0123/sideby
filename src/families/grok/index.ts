@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { identityFromJsonFile, identityOf } from '../../core/identity.ts'
 import type { Account, FamilyDef, LoginState, Plugin } from '../../types.ts'
 import { BUILTIN_LOGOS } from '../logos.ts'
+import { groupedEntryWrittenAt, resumeFlagSession } from '../shared/sessions.ts'
 import { topLevelTomlString } from '../shared/toml.ts'
 
 // Grok's sandbox rejects these paths when they are symlinks; doctor quotes the Host's own words.
@@ -70,6 +71,9 @@ export const grokFamily: FamilyDef = {
   },
   model: readModel,
   identity: grokIdentity,
+  resumedSession: resumeFlagSession,
+  // One directory per session, grouped by working directory: sessions/<encoded cwd>/<id>/.
+  sessionWrittenAt: (account, id) => groupedEntryWrittenAt(join(account.dir, 'sessions'), id, 'dir'),
 }
 
 export const grokPlugin: Plugin = {

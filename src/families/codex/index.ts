@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { identityFromJsonFile, identityOf, jwtEmail } from '../../core/identity.ts'
 import type { Account, FamilyDef, LoginState, Plugin } from '../../types.ts'
 import { BUILTIN_LOGOS } from '../logos.ts'
+import { nestedFileWrittenAt, resumeSubcommandSession } from '../shared/sessions.ts'
 import { topLevelTomlString } from '../shared/toml.ts'
 import { readCodexQuota, readCodexUsage } from './rollout.ts'
 
@@ -62,6 +63,8 @@ export const codexFamily: FamilyDef = {
   identity: codexIdentity,
   readQuota: (account) => readCodexQuota(account.dir),
   readUsage: (account, ctx) => readCodexUsage(account.dir, ctx.now),
+  resumedSession: resumeSubcommandSession,
+  sessionWrittenAt: (account, id) => nestedFileWrittenAt(join(account.dir, 'sessions'), `-${id}.jsonl`),
 }
 
 export const codexPlugin: Plugin = {

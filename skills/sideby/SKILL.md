@@ -45,6 +45,8 @@ Read only the reference the task needs.
 
 `eval "$(sideby shell-init zsh)"` defines one function per account (`sideby-claude-work`) plus the config `aliases`. Users who source a file instead set config `shellInitFile` (for example `{ "zsh": "~/.config/sideby/shell-init.zsh" }`); `new` and `alias add|rm` keep it current, and `sideby shell-init zsh --write` rewrites it. New functions work in a new shell.
 
+When a terminal manager such as Orca reopens a pane with a bare `claude --resume <id>` (or `codex resume <id>`, `grok --resume <id>`) and the Host says `No conversation found`, the session lives in another account. Suggest config `"resumeRouting": true` followed by `sideby shell-init --write` (or a new shell with `eval`): `shell-init` then defines Host-named functions that call `sideby resume <family>`, which starts the account holding that session. For a one-off, find it with `ls -d ~/.claude*/projects/*/<id>.jsonl` and run `sideby run <ref> -- --resume <id>`.
+
 For someone who would rather double-click than use a terminal, `sideby app install` adds a desktop app (macOS `~/Applications/sideby.app`, Linux app menu) that runs `sideby ui --background`; `sideby ui --stop` stops it and `sideby app uninstall` removes the app. Ask before `app install`: it writes outside sideby's own directories.
 
 ## Keeping this skill current

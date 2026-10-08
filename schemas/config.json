@@ -145,6 +145,10 @@
         }
       }
     },
+    "resumeRouting": {
+      "type": "boolean",
+      "description": "Make `sideby shell-init` also define Host-named functions (`claude`, `codex`, `grok`) that resume a session by id in the Account that holds it. Off by default."
+    },
     "shellInitFile": {
       "type": "object",
       "properties": {

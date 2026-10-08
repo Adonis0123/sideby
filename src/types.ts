@@ -92,6 +92,13 @@ export interface FamilyDef {
   readUsage?(account: Account, ctx: ReadContext): Promise<UsageResult>
   /** One-time, reversible change that lets the Host report Quota (Claude: status line wrapper). */
   quotaSetup?: QuotaSetup
+  /**
+   * The session these Host arguments resume by id (UUID-shaped), or undefined when they start a new session or
+   * pick one another way. With `sessionWrittenAt` it lets `sideby resume` find the Account (ADR-0007).
+   */
+  resumedSession?(args: readonly string[]): string | undefined
+  /** When the Account holds the session, the last write time of its file in ms; otherwise undefined. */
+  sessionWrittenAt?(account: Account, sessionId: string): Promise<number | undefined>
 }
 
 /** Identity fields of a signed-in Account. */

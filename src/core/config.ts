@@ -97,6 +97,12 @@ export const ConfigSchema = Type.Object(
       }),
     ),
     extraSharedItems: Type.Optional(Type.Record(Type.String(), Type.Array(SharedItemSchema))),
+    resumeRouting: Type.Optional(
+      Type.Boolean({
+        description:
+          'Make `sideby shell-init` also define Host-named functions (`claude`, `codex`, `grok`) that resume a session by id in the Account that holds it. Off by default.',
+      }),
+    ),
     shellInitFile: Type.Optional(
       Type.Object(
         {

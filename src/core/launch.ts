@@ -16,6 +16,9 @@ export interface PreparedLaunch {
   notice?: string
 }
 
+/** What `runHost` needs: a prepared Account launch, or the Host run unchanged (`sideby resume`). */
+export type HostLaunch = Pick<PreparedLaunch, 'family' | 'bin' | 'args' | 'env'>
+
 /** Finds an executable on PATH; returns null when the Host is not installed. */
 export async function which(bin: string, env: Env): Promise<string | null> {
   for (const dir of (env.PATH ?? '').split(delimiter)) {
@@ -84,7 +87,7 @@ export async function prepareLaunch(opts: {
  * process group, so the Host receives them directly) and forwards SIGTERM/SIGHUP once. SIGTSTP keeps its
  * default action so Ctrl-Z suspends sideby together with the Host and `fg` resumes both.
  */
-export function runHost(p: PreparedLaunch): Promise<number> {
+export function runHost(p: HostLaunch): Promise<number> {
   return new Promise((resolve) => {
     const child = spawn(p.bin, p.args, { stdio: 'inherit', env: p.env as NodeJS.ProcessEnv })
     const ignore = () => {}

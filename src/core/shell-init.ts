@@ -3,7 +3,7 @@
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { Account } from '../types.ts'
-import { aliasProblem } from './config.ts'
+import { ALIAS_NAME, aliasProblem, RESERVED_ALIASES } from './config.ts'
 import { realpathOrNull, statOrNull, writeFileAtomic } from './fs-safe.ts'
 import { expandUserPath } from './paths.ts'
 
@@ -16,6 +16,32 @@ export const SHELL_INIT_HEADER =
 
 const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
 
+/** A Family whose bare Host command `shell-init` routes through `sideby resume` (config `resumeRouting`). */
+export interface ResumeRouteFunction {
+  family: string
+  bin: string
+  selectVar: string
+}
+
+const SHELL_VAR = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/** A shell `case` pattern for a session id: 36 characters with dashes where a UUID has them. */
+const SESSION_ID_GLOB = '????????-????-????-????-????????????'
+
+/**
+ * The Host-named function for one routed Family, or null when its names are not safe in a shell (spec §3.15). It
+ * starts sideby only when an argument looks like a session id, so a plain Host command costs nothing extra.
+ * `function name {` because zsh expands an alias of the same name in `name() {`.
+ */
+function resumeRouteFunction(r: ResumeRouteFunction): string | null {
+  if (!ALIAS_NAME.test(r.bin) || RESERVED_ALIASES.has(r.bin) || !SHELL_VAR.test(r.selectVar)) return null
+  const id = SESSION_ID_GLOB
+  return [
+    `function ${r.bin} { local a; if [ -z "\${${r.selectVar}-}" ]; then for a in "$@"; do case $a in ${id}|--resume=${id})`,
+    ` command sideby resume ${quote(r.family)} -- "$@"; return;; esac; done; fi; command ${r.bin} "$@"; }`,
+  ].join('')
+}
+
 /**
  * The script for one shell, ending in a newline: exactly what `sideby shell-init <shell>` prints. zsh and bash
  * read the same function syntax, so the shell only names the file it goes to.
@@ -23,6 +49,7 @@ const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
 export function shellInitScript(
   accounts: readonly Account[],
   aliases: Readonly<Record<string, unknown>> | undefined,
+  routes: readonly ResumeRouteFunction[] = [],
 ): string {
   const lines = [SHELL_INIT_HEADER]
   for (const acc of accounts)
@@ -30,6 +57,11 @@ export function shellInitScript(
   // An alias function runs the alias itself, so `sideby run` reads its Account and arguments from the config.
   for (const alias of Object.keys(aliases ?? {}))
     if (!aliasProblem(alias)) lines.push(`${alias}() { command sideby run ${quote(alias)} -- "$@"; }`)
+  // An Alias with the Host's name wins: it already starts a chosen Account.
+  for (const r of routes) {
+    const fn = aliases && Object.hasOwn(aliases, r.bin) ? null : resumeRouteFunction(r)
+    if (fn) lines.push(fn)
+  }
   return `${lines.join('\n')}\n`
 }
 

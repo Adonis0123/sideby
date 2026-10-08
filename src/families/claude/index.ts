@@ -6,6 +6,7 @@ import { readSecretFile } from '../../core/secret-file.ts'
 import { claudeStatusline } from '../../quota/claude-statusline.ts'
 import type { Account, FamilyDef, LoginState, Plugin, SharedItemDef } from '../../types.ts'
 import { BUILTIN_LOGOS } from '../logos.ts'
+import { groupedEntryWrittenAt, resumeFlagSession } from '../shared/sessions.ts'
 import { CLAUDE_LAYOUT } from './layout.ts'
 import { readClaudeQuota } from './quota.ts'
 import { readClaudeUsage } from './usage.ts'
@@ -117,6 +118,9 @@ export const claudeFamily: FamilyDef = {
   readQuota: readClaudeQuota,
   readUsage: readClaudeUsage,
   quotaSetup: claudeStatusline,
+  resumedSession: resumeFlagSession,
+  sessionWrittenAt: (account, id) =>
+    groupedEntryWrittenAt(join(account.dir, 'projects'), `${id}.jsonl`, 'file'),
 }
 
 export const claudePlugin: Plugin = {

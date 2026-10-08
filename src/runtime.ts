@@ -24,8 +24,9 @@ import {
   readDoctorHistory,
   writeDoctorHistory,
 } from './core/last-doctor.ts'
-import { type PreparedLaunch, prepareLaunch, which } from './core/launch.ts'
+import { type HostLaunch, type PreparedLaunch, prepareLaunch, which } from './core/launch.ts'
 import { type Paths, resolvePaths } from './core/paths.ts'
+import { findResumeRoute } from './core/resume.ts'
 import {
   SHELLS,
   type Shell,
@@ -50,6 +51,15 @@ import type {
 } from './types.ts'
 
 export type { AccountIdentity, AccountRefError, DoctorHistory, Shell, ShellInitWrite }
+
+/** How `sideby resume` starts the Host (spec §3.15). */
+export interface ResumeLaunch {
+  launch: HostLaunch
+  /** The session the Host arguments resume by id, when they name one. */
+  sessionId?: string
+  /** Set when the session lives in a non-main Account and `launch` starts that Account as `run` would. */
+  account?: Account
+}
 
 /** What happened to the alias asked for with a new Account. */
 export interface AliasResult {
@@ -166,6 +176,11 @@ export interface Runtime {
   /** Rewrites the configured `shellInitFile` of each shell (all configured ones by default). */
   writeShellInitFiles(shells?: readonly Shell[]): Promise<ShellInitWrite[]>
   prepareLaunch(ref: string, userArgs: readonly string[], command: 'run' | 'login'): Promise<PreparedLaunch>
+  /**
+   * Starts the non-main Account that holds the session the Host arguments resume, or else the Host unchanged
+   * (spec §3.15). Throws UnknownFamilyError, or a UserError when the Family cannot route sessions.
+   */
+  resumeLaunch(familyId: string, userArgs: readonly string[]): Promise<ResumeLaunch>
   quota(account: Account): Promise<QuotaResult>
   usage(account: Account): Promise<UsageResult>
   /**
@@ -465,7 +480,17 @@ export async function createRuntime(
       return null
     },
     async shellInitScript() {
-      return shellInitScript(await accounts(), config.aliases)
+      const list = await accounts()
+      // Routing helps only a Family that can route and has somewhere else to route to (spec §3.15).
+      const routes = config.resumeRouting
+        ? [...families.values()]
+            .filter(
+              (f) =>
+                f.resumedSession && f.sessionWrittenAt && list.some((a) => a.family === f.id && !a.isMain),
+            )
+            .map((f) => ({ family: f.id, bin: f.bin, selectVar: f.selectVar }))
+        : []
+      return shellInitScript(list, config.aliases, routes)
     },
     async writeShellInitFiles(shells = SHELLS) {
       const out: ShellInitWrite[] = []
@@ -487,6 +512,24 @@ export async function createRuntime(
         command,
         bus,
       })
+    },
+    async resumeLaunch(familyId, userArgs) {
+      const family = familyOf(familyId)
+      if (!family.resumedSession || !family.sessionWrittenAt)
+        throw new UserError(
+          `${family.title} sessions cannot be routed; start an account yourself with \`sideby run <account> -- …\``,
+        )
+      const host: HostLaunch = { family, bin: family.bin, args: [...userArgs], env }
+      // A select variable already set means an Account was chosen on purpose: run the Host as it is.
+      if (env[family.selectVar]) return { launch: host }
+      const route = await findResumeRoute(family, await accounts(), userArgs)
+      const id = route.sessionId ? { sessionId: route.sessionId } : {}
+      if (!route.account || route.account.isMain) return { launch: host, ...id }
+      return {
+        launch: await rt.prepareLaunch(route.account.ref, userArgs, 'run'),
+        ...id,
+        account: route.account,
+      }
     },
     async quota(account) {
       if (account.kind === 'api') return { status: 'unavailable', reason: 'api-account' }

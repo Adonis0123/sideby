@@ -18,6 +18,8 @@ Usage:
                                       (sideby alias add pi-kimi pi:main -- --model kimi-coding/k3)
   sideby alias rm <short>             remove a short command
   sideby login <account>              sign in to an account
+  sideby resume <family> [-- args]    run the host; a session resumed by id (claude --resume <id>,
+                                      codex resume <id>) starts in the account that holds it
   sideby next <family> [--dry-run] [--include-api] [-- args]
                                       recommend the account with the most quota left (claude, codex)
                                       and start it; --dry-run only recommends
@@ -51,6 +53,7 @@ function nodeTooOld(): boolean {
 const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   list: { flags: ['json'] },
   run: { flags: [] },
+  resume: { flags: [] },
   login: { flags: [] },
   next: { flags: ['dry-run', 'include-api', 'json'] },
   new: { flags: ['api', 'json'], valued: ['alias'] },
@@ -94,9 +97,9 @@ export async function main(argv: string[]): Promise<number> {
   const wantsJson = Boolean(spec?.flags.includes('json')) && own.includes('--json')
   try {
     if (!spec) throw new UsageError(`unknown command "${cmd}"; run \`sideby --help\``)
-    // `run` passes everything after the account through to the host, with or without `--`.
+    // `run` and `resume` pass everything after the account or family through to the host, with or without `--`.
     let parsed: import('./args.ts').ParsedArgs
-    if (cmd === 'run') {
+    if (cmd === 'run' || cmd === 'resume') {
       const sep = args.indexOf('--')
       const head = sep === -1 ? args : args.slice(0, sep)
       const [ref, ...more] = head
@@ -134,6 +137,8 @@ export async function main(argv: string[]): Promise<number> {
         return await cmds.cmdRun(parsed, io, 'run')
       case 'login':
         return await cmds.cmdRun(parsed, io, 'login')
+      case 'resume':
+        return await cmds.cmdResume(parsed, io)
       case 'next':
         return await cmds.cmdNext(parsed, io)
       case 'new':
