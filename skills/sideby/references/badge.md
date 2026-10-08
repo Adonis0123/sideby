@@ -22,7 +22,7 @@ For "show the account in the status line", "加上 [cc001] 这个标识". sideby
 
    Never add a second `[ui]` table; if `[ui.status_line]` exists, change it.
 3. `sideby doctor grok --fix` copies `config.toml` to subscription accounts (it must be a real copy there). API accounts (`kind: "api"`) keep their own `config.toml`: add the same table to each.
-4. `GROK_HOME=<dir> grok inspect` must not report the new keys as unrecognized. It takes effect in a new Grok session.
+4. `GROK_HOME=<dir> grok inspect` must not report the new keys as unrecognized. It takes effect in a new Grok session, and Grok hides the row on its welcome screen: tell the user it appears after the first message.
 
 ## Codex: terminal tab title
 
