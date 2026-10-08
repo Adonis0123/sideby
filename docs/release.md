@@ -2,7 +2,9 @@
 
 sideby 用 npm trusted publishing 发布：GitHub Actions 用 OIDC 换一个短期凭据，自动附带 provenance（来源证明），仓库里不存任何长期 npm token。
 
-npm 要求包已经存在才能配置 trusted publisher，所以 0.1.0 只能在本机手动发一次，之后全部走 tag。
+npm 要求包已经存在才能配置 trusted publisher（网页和 `npm trust` 命令都是），所以 0.1.0 只能在本机手动发一次，之后全部走 tag。
+
+维护者要求发版时，AI agent 可以执行除 2FA 确认以外的所有步骤：检查、`npm version`、推送 tag、发版后核对。需要 2FA 的步骤（本机首发、npmjs.com 设置、`npm deprecate`、`npm dist-tag`）由 agent 发起命令，维护者在浏览器里用 passkey 确认。
 
 ```mermaid
 flowchart LR
@@ -17,12 +19,14 @@ flowchart LR
 
 ### 1. 准备
 
-1. 用 `npm login` 登录 npm，并确认开了 2FA：
+1. 在 npmjs.com 开 2FA，再在本机登录：
+
+   - 2FA 只能用 passkey 或 USB 安全钥匙。npm 从 2025-09 起不再允许新设身份验证器 App（TOTP）。passkey 存在会跨设备同步的地方（Google Password Manager 或 iCloud Keychain），设完后生成 recovery codes 存进密码管理器。
+   - 本机登录和之后需要 2FA 的命令都会打开浏览器，用 passkey 确认，不输一次性密码：
 
    ```sh
+   npm login --auth-type=web
    npm whoami
-   npm profile get                      # two-factor auth 一行应为 auth-and-writes
-   npm profile enable-2fa auth-and-writes   # 还没开就执行这条
    ```
 
 2. 确认包名没被占用。返回 `E404` 才能继续；有返回内容说明已被占用，需要先改 spec 里的包名再继续：
@@ -67,7 +71,7 @@ npm pack --dry-run --json | node -e 'const [p] = JSON.parse(require("fs").readFi
 ### 4. 发布
 
 ```sh
-npm publish --access public    # 按提示输入 2FA 一次性密码
+npm publish --access public    # 打开浏览器，用 passkey 确认
 npm view sideby version        # 应为 0.1.0
 ```
 
@@ -79,7 +83,7 @@ npm view sideby version        # 应为 0.1.0
 |---|---|---|
 | `E403`，提示包名和已有包太像，或没有权限 | 包名被占用或被 npm 判为近似名 | 不要换个名字直接发；先改 spec 和 `package.json`，再从第 1 步重来 |
 | `E402 Payment Required` | 漏了 `--access public` | 加上参数重发 |
-| `EOTP` 或一次性密码错误 | 2FA 密码过期 | 等下一个密码，重新执行 `npm publish` |
+| `EOTP` 或浏览器确认超时 | 2FA 没在时限内完成 | 重新执行 `npm publish`，在打开的页面里用 passkey 确认 |
 | 网络中断，不确定有没有发出去 | — | 先跑 `npm view sideby versions`；已经有 0.1.0 就不要重发 |
 | 发出去了，但内容有问题 | — | 不要 unpublish；按下面「回滚」处理，然后发 0.1.1 |
 
@@ -96,6 +100,8 @@ npm view sideby version        # 应为 0.1.0
 3. 保存后，如果本机或其他地方还有为 sideby 建的 automation token 或 granular token，在 **Access Tokens** 里删掉。
 
 ### 7. 在 GitHub 配置仓库
+
+2026-10-08 已按下面各项配好（Required reviewers 未开：tag 推送后自动发布）。复查可用 `gh api repos/Adonis0123/sideby/environments/npm`、`gh api repos/Adonis0123/sideby/rulesets`。
 
 在 `Adonis0123/sideby` 的 **Settings** 里：
 
