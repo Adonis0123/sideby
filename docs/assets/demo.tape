@@ -1,70 +1,28 @@
-# The terminal demo in the README. Retake it from the repository root:
-#   node scripts/demo-home.ts /tmp/sideby-demo normal
-#   SIDEBY_DEMO=/tmp/sideby-demo vhs docs/assets/demo.tape
-# It runs the CLI from source against the demo HOME; `doctor --fix` writes only there.
-Output "docs/assets/demo.gif"
+# README demo: two accounts at once. scripts/record-demo.sh builds the fake HOME,
+# runs docs/assets/demo-setup.sh (two real `sideby run` processes), then this tape.
+# VHS cannot tmux-attach, so docs/assets/demo-view.py mirrors the two panes.
+# The script then appends the local quota panel.
+# From the repository root, with Node 22.18+, vhs, ttyd, tmux, ffmpeg and Chrome:
+#   sh scripts/record-demo.sh
+# Do not point it at a real HOME.
+# Font 32 and height 560 give 11 rows, so the two sessions fill the window.
+Output "/tmp/sideby-demo-term.gif"
 
 Set Shell "bash"
-Set FontSize 14
-Set Width 1320
-Set Height 430
-Set Padding 22
+Set FontFamily "JetBrains Mono"
+Set FontSize 32
+Set Width 1280
+Set Height 560
+Set Padding 12
 Set Theme "Catppuccin Mocha"
-Set TypingSpeed 40ms
+Set TypingSpeed 12ms
+Set Framerate 8
 Set WindowBar Colorful
-Env BASH_SILENCE_DEPRECATION_WARNING "1"
+Env TERM "xterm-256color"
 
 Hide
-Type `R=$PWD D=$SIDEBY_DEMO; export HOME=$D/home XDG_CONFIG_HOME=$D/home/.config XDG_STATE_HOME=$D/home/.local/state PATH=$D/bin:$PATH PS1='$ '`
+Type "python3 -u docs/assets/demo-view.py"
 Enter
-Type `sideby() { node "$R/src/cli/main.ts" "$@"; }`
-Enter
-
-Type "clear"
-Enter
-Sleep 300ms
+Sleep 700ms
 Show
-Type "sideby"
-Sleep 400ms
-Enter
-Sleep 3.5s
-
-Hide
-Type "clear"
-Enter
-Sleep 300ms
-Show
-Type "sideby quota"
-Sleep 400ms
-Enter
-Sleep 4s
-
-Hide
-Type "clear"
-Enter
-Sleep 300ms
-Show
-Type "sideby next claude --dry-run"
-Sleep 400ms
-Enter
-Sleep 4s
-
-Hide
-Type "clear"
-Enter
-Sleep 300ms
-Show
-Type "sideby doctor"
-Sleep 400ms
-Enter
-Sleep 4s
-
-Hide
-Type "clear"
-Enter
-Sleep 300ms
-Show
-Type "sideby doctor --fix"
-Sleep 400ms
-Enter
-Sleep 4s
+Sleep 6.5s

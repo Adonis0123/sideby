@@ -4,6 +4,8 @@
 
 ← [README](../../README.zh-CN.md)
 
+<a id="terms"></a>
+
 ## 会不会违反服务条款？
 
 sideby 的设计只用各宿主已经支持的机制（见 [ADR-0001](../../docs/adr/0001-side-by-side-not-switching.md) 和 [ADR-0003](../../docs/adr/0003-quota-from-local-and-official-sources.md)）：
@@ -17,7 +19,9 @@ sideby 的设计只用各宿主已经支持的机制（见 [ADR-0001](../../docs
 
 ## 为什么要求 Node 22.18？
 
-Node 从 22.18 起默认剥离 TypeScript 类型，sideby 才能直接 `import()` 磁盘上的 `.ts` 插件。Node 版本更低时，sideby 会提示升级并以 1 退出。
+Node 从 22.18 起默认会剥掉 TypeScript 类型，sideby 才能直接 `import()` 磁盘上的 `.ts` 插件。发到 npm 上的程序本身是编译好的 JavaScript。`package.json` 里写的是 `"engines": { "node": ">=22.18.0" }`。npm 只会打出一条 `EBADENGINE` 警告，然后照样把程序拉起来，这条警告拦不住。
+
+真正拦住你的是 sideby 自己的检查。低于 22.18 时，`--help`、`--version` 以及其他命令都会提示升级，并以 1 退出。唯一的例外是 `statusline-tap`：Claude Code 每次刷新 status line 都会调用它。这时它仍会去跑你原来的命令，不会因为 Node 版本不够把这一次刷新丢掉。
 
 ## 数据存在哪里？
 

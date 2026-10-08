@@ -1,0 +1,47 @@
+name: Bug report
+description: Something sideby did that it should not have, or something it failed to do.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        English or Chinese is fine. Do not paste tokens, API keys, `proxy.env`, `auth.json`, or `.claude.json`. Name the file if a credential is involved; leave the value out.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, and what sideby printed. A `--json` snippet with secrets removed is useful.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Commands, in order. Mention the host (Claude Code, Codex, Grok Build, pi) and whether the account is a subscription or an API key.
+      placeholder: |
+        1. sideby new claude work
+        2. sideby doctor --fix
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Output of `sideby --version`, `node --version`, and your OS (macOS or Linux; Windows is untested).
+      placeholder: sideby 0.3.0, Node 22.22.0, macOS 15
+    validations:
+      required: true
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: Secrets
+      options:
+        - label: I did not paste a token, API key, or the contents of a credential file.
+          required: true

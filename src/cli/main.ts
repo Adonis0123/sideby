@@ -128,8 +128,12 @@ Examples:
 Exit: 0; 1 unknown family; 2 malformed command line.`,
 }
 
-function nodeTooOld(): boolean {
-  const [maj = 0, min = 0] = process.versions.node.split('.').map(Number)
+/**
+ * True below Node 22.18. npm's `engines` field only warns (`EBADENGINE`); this is the check that exits.
+ * `version` defaults to the running Node so tests can pass a string.
+ */
+export function nodeTooOld(version = process.versions.node): boolean {
+  const [maj = 0, min = 0] = version.split('.').map(Number)
   return maj < MIN_NODE[0]! || (maj === MIN_NODE[0] && min < MIN_NODE[1]!)
 }
 
@@ -152,9 +156,17 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
 
 export async function main(argv: string[]): Promise<number> {
   const [first, ...rest] = argv
+  // Claude Code runs this on every status-line refresh. It must still launch the original command when Node is
+  // older than 22.18, so the check below does not apply here (spec §3.1).
   if (first === 'statusline-tap') {
     const { runStatuslineTap } = await import('../quota/statusline-tap.ts')
     return runStatuslineTap(rest, process.env, process.stdin, process.stdout)
+  }
+  if (nodeTooOld()) {
+    console.error(
+      `sideby needs Node ${MIN_NODE.join('.')} or newer (you have ${process.versions.node}). Upgrade: https://nodejs.org`,
+    )
+    return 1
   }
   if (first === '-v' || first === '--version' || first === 'version') {
     const { packageVersion } = await import('../core/version.ts')
@@ -164,12 +176,6 @@ export async function main(argv: string[]): Promise<number> {
   if (first === '-h' || first === '--help' || first === 'help') {
     console.log((rest[0] !== undefined && first === 'help' && COMMAND_HELP[rest[0]]) || HELP)
     return 0
-  }
-  if (nodeTooOld()) {
-    console.error(
-      `sideby needs Node ${MIN_NODE.join('.')} or newer (you have ${process.versions.node}). Upgrade: https://nodejs.org`,
-    )
-    return 1
   }
   const cmd = first === undefined || first.startsWith('--') ? 'list' : first
   const args = first === undefined || first.startsWith('--') ? argv : rest

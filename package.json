@@ -1,7 +1,7 @@
 {
   "name": "sideby",
   "version": "0.3.0",
-  "description": "Run every AI coding account side by side: Claude Code, Codex, Grok and pi, with one shared config and a quota panel.",
+  "description": "Run work, personal and API-key accounts at the same time, without their configs drifting apart.",
   "license": "MIT",
   "type": "module",
   "keywords": [
