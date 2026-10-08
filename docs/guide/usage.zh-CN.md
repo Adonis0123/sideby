@@ -19,6 +19,22 @@ EMAIL 是账号登录的身份，取自宿主的登录文件（Claude Code、Cod
 
 家族插件读取某个账号出错时（例如它的设置文件不是合法 JSON），`list` 照常列出这个账号，把问题打印到 stderr；`list --json` 把它放进该账号的 `problems` 数组。
 
+## 每个账号共享什么
+
+新账号一开始就带着主账号的 skills、hooks、规则和设置。登录、会话和历史都是它自己的，所以两个账号能同时开。`sideby families <family>` 会按你这台机器列出这张表，包括插件家族和你用 [`extraSharedItems`](configuration.zh-CN.md) 加的项。
+
+| 宿主 | 链接到主账号 | 复制或同步 | 账号自己的 |
+|---|---|---|---|
+| Claude Code | `settings.json`、`settings.local.json`、`skills`、`commands`、`plugins`、`hooks`、`themes`、`CLAUDE.md` | MCP 服务器：账号 `.claude.json` 里的 `mcpServers` 一项，与 `~/.claude.json` 保持一致 | 登录、`.claude.json` 的其余内容、会话（`projects/`）、历史 |
+| Codex | `AGENTS.md`、`hooks.json`、`plugins`、`rules`、`skills`；订阅账号的 `config.toml` | — | 登录（`auth.json`）、会话、历史；API 账号的 `config.toml` |
+| Grok Build | `skills`、`installed-plugins` | `hooks`、`hooks-paths`，以及订阅账号的 `config.toml`：Grok 不接受这些位置是链接 | 登录（`auth.json`）、`trusted_folders.toml`（复制一次，之后归账号自己）、会话；API 账号的 `config.toml` |
+| pi | `AGENTS.md` | — | 登录（`auth.json`）、会话和其他一切 |
+
+- **链接**：在主账号改一次，所有账号都生效。
+- **复制或同步**：主账号的改了之后，`sideby doctor --fix` 把副本对齐。
+- **API 账号的 `config.toml`** 是它自己的，改它的接口地址或模型不会改到主账号。
+- 主账号没有的项，建账号时跳过，Doctor 也不报。
+
 ## API 账号
 
 ```sh

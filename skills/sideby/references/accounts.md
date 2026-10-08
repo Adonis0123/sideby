@@ -10,7 +10,7 @@ sideby new claude deepseek --api     # API account: ~/.claude-deepseek with a pr
 sideby new claude 008 --alias cc008  # also adds the short command cc008 to config aliases
 ```
 
-Only pass `--alias` when the user wants a short command; follow their existing pattern (`cc001`…`cc007` for `claude:001`…`claude:007` suggests `cc008`). An invalid, reserved or taken alias is refused before anything is created (error `code: "alias-invalid"`). If `alias.added` is false in `--json`, the account exists but the alias is missing: tell the user the message, do not edit the config by hand.
+Only pass `--alias` when the user wants a short command. To continue their numbering (`cc001`…`cc007` for `claude:001`…`claude:007`), use `sideby new claude --next --json` instead of a name: it picks `008` and `cc008` the same way the panel does (see `setup.md`). An invalid, reserved or taken alias is refused before anything is created (error `code: "alias-invalid"`). If `alias.added` is false in `--json`, the account exists but the alias is missing: tell the user the message, do not edit the config by hand.
 
 Then:
 

@@ -21,12 +21,12 @@
 You have a work subscription, a personal one and maybe an API key. Switching tools rewrite the Host's global config, so only one account is live at a time, and your skills and hooks slowly drift apart between accounts.
 
 - **Side by side, not switching.** Each account lives in its own directory, and sideby starts the official CLI with that directory selected. Run three accounts in three terminals; your shell is never changed.
-- **One copy of skills, hooks and rules.** Your Main Account (for example `~/.claude`) is the source. Other accounts link or copy its Shared Items, and `sideby doctor --fix` repairs drift without touching real files or credentials.
+- **One copy of skills, hooks and rules.** Your Main Account (for example `~/.claude`) is the source. Other accounts link or copy its Shared Items ([what is shared](docs/guide/usage.md#what-each-account-shares)), and `sideby doctor --fix` repairs drift without touching real files or credentials.
 - **Every quota on one screen.** 5-hour and 7-day quota, reset times and 7-day token usage for every account. Out of room? `sideby next` starts the account with the most left. All from local files: no network calls, no token reads.
 
 ## Quick start
 
-Requires Node 22.18+ and at least one Host CLI (Claude Code, Codex, Grok Build or pi) installed.
+Requires Node 22.18+ and at least one Host CLI (Claude Code, Codex, Grok Build or pi) installed. AI agents: follow the setup steps in [`llms.txt`](llms.txt) ("Set up sideby for a user") instead.
 
 ```sh
 npm i -g sideby
@@ -37,6 +37,17 @@ sideby ui                     # every account's quota at http://127.0.0.1:17420
 ```
 
 `sideby run claude:main` keeps using `~/.claude` in another terminal at the same time. Arguments after `--` go to the Host: `sideby run work -- --resume`. To try it without installing, run `npx sideby`.
+
+## Set up with your AI agent
+
+Paste this into Claude Code, Codex or any coding agent:
+
+```text
+Install the sideby CLI (npm package `sideby`) and its agent skill, then set up a second Claude Code account for me.
+Follow "Set up sideby for a user" in https://raw.githubusercontent.com/Adonis0123/sideby/main/llms.txt
+```
+
+The agent checks Node and your Host CLIs, installs sideby and the skill, creates the account, tells you what it shares with your main one and makes its short command work. You sign in once in your browser; the agent gives you that one command. Once the skill is installed, short requests work too: "add another Claude account, cc008", "what do my Codex accounts share?", "which account still has quota?".
 
 ## What it looks like
 
@@ -92,7 +103,7 @@ Details and the terms-of-service question are in the [FAQ](docs/guide/faq.md).
 
 ## For AI agents
 
-- [`llms.txt`](llms.txt): commands, JSON contract and plugin API in one index.
+- [`llms.txt`](llms.txt): setup steps, commands, JSON contract and plugin API in one index. `sideby families --json` states what each Host's accounts share.
 - [`skills/sideby/SKILL.md`](skills/sideby/SKILL.md): one Agent Skill for seeing, repairing and creating accounts and for moving on when one hits its limit. Install with `npx skills add Adonis0123/sideby -g`; `sideby doctor` warns when the installed copy is for another sideby version.
 - [`AGENTS.md`](AGENTS.md): rules for agents working on this repository.
 

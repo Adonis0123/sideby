@@ -38,6 +38,7 @@ src/
 ├── core/         paths, config, account discovery, Secret File, Share Modes, doctor, create, launch, atomic writes;
 │                 handoff.ts ranks Accounts for `sideby next` (Quota Pressure in quota-levels.ts);
 │                 skill-check.ts compares an installed sideby skill with this version
+│                 share-meaning.ts: the one-line meaning of each Shared Item that `sideby families` prints
 ├── plugins/      loader (trust checks), hook bus, built-in account-script
 ├── families/     claude, codex, grok, pi: each a Family Plugin; index.ts lists built-ins in load order
 │                 logos.ts holds the built-in marks each FamilyDef sets as `logo`
@@ -47,6 +48,7 @@ src/
 │                 readers remember each file's parse until it changes (core/file-memo.ts)
 ├── quota/        `quota setup|teardown claude` and the `statusline-tap` entry (thin; cache logic in families/claude/quota-cache.ts)
 ├── panel/        createPanelHandler, the standalone server, the inline page and theme.ts (host theme tokens);
+│                 page-logic.ts suggestName/suggestAlias also pick the name and short command for `new --next`
 │                 background.ts runs the server detached (`ui --background`, `--stop`)
 ├── desktop/      `sideby app install|uninstall`: macOS app bundle, Linux .desktop entry, icon drawn in pure Node
 ├── runtime.ts    createRuntime(): shared services for CLI and panel
@@ -140,7 +142,7 @@ Shared Item paths must be relative and stay inside the account directory: config
 3. Add it to `BUILTIN_PLUGINS` in `src/families/index.ts`.
 4. Add `src/families/<id>/index.test.ts` with a fake HOME and a fake Host binary: discovery, launch env, every Shared Item's check and fix.
 5. Quota or usage only from local files or official CLI output (ADR-0003); otherwise leave `readQuota` and `readUsage` out so the panel shows "no public source". sideby reads usage itself; do not add a dependency such as ccusage.
-6. Update the supported hosts tables in both READMEs, the Host notes in `docs/guide/usage*.md`, `llms.txt` and `skills/sideby/SKILL.md`.
+6. Update the supported hosts tables in both READMEs, the Host notes and the "What each account shares" table in `docs/guide/usage*.md` (check it against `sideby families <id>`), the shared-items line in `llms.txt`, and `skills/sideby/SKILL.md`.
 
 ## Commits and releases
 

@@ -19,6 +19,22 @@ EMAIL is who the account is signed in as, read from the host's login file (Claud
 
 If a family plugin fails while reading an account (for example its settings file is not valid JSON), `list` still shows the account and prints the problem on stderr; `list --json` puts it in that account's `problems` array.
 
+## What each account shares
+
+A new account starts with the Main Account's skills, hooks, rules and settings. Its sign-in, sessions and history stay its own, which is what lets two accounts run at once. `sideby families <family>` prints this list for your machine, including plugin families and items you add with [`extraSharedItems`](configuration.md).
+
+| Host | Linked to the Main Account | Copied or synced | The account's own |
+|---|---|---|---|
+| Claude Code | `settings.json`, `settings.local.json`, `skills`, `commands`, `plugins`, `hooks`, `themes`, `CLAUDE.md` | MCP servers: the `mcpServers` entry of the account's `.claude.json`, kept equal to `~/.claude.json` | sign-in, the rest of `.claude.json`, sessions (`projects/`), history |
+| Codex | `AGENTS.md`, `hooks.json`, `plugins`, `rules`, `skills`; `config.toml` of a subscription account | — | sign-in (`auth.json`), sessions, history; `config.toml` of an API account |
+| Grok Build | `skills`, `installed-plugins` | `hooks`, `hooks-paths`, and `config.toml` of a subscription account: Grok refuses links there | sign-in (`auth.json`), `trusted_folders.toml` (copied once, then yours), sessions; `config.toml` of an API account |
+| pi | `AGENTS.md` | — | sign-in (`auth.json`), sessions, everything else |
+
+- **Linked**: change it once in the Main Account and every account sees it.
+- **Copied or synced**: `sideby doctor --fix` brings the copy back in line when the Main Account's changes.
+- **An API account's `config.toml`** is its own, so changing its endpoint or model never changes the Main Account's.
+- An item the Main Account does not have is skipped when an account is created, and Doctor does not report it.
+
 ## API accounts
 
 ```sh

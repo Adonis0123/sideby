@@ -21,12 +21,12 @@
 你有一个工作订阅、一个个人订阅，可能还有一个 API key。切换类工具会改宿主的全局配置，同一时间只有一个账号生效；各账号的 skills 和 hooks 也会慢慢变得不一致。
 
 - **并排，不切换。** 每个账号一个独立目录，sideby 启动官方 CLI 时选中这个目录。三个账号可以同时开在三个终端里，你的 shell 环境不受影响。
-- **skills、hooks、规则只维护一份。** 主账号（例如 `~/.claude`）是唯一来源，其他账号链接或复制它的共享项（Shared Item）。`sideby doctor --fix` 修复漂移，不碰真实文件，也不碰凭据。
+- **skills、hooks、规则只维护一份。** 主账号（例如 `~/.claude`）是唯一来源，其他账号链接或复制它的共享项（Shared Item，[共享了哪些](docs/guide/usage.zh-CN.md#每个账号共享什么)）。`sideby doctor --fix` 修复漂移，不碰真实文件，也不碰凭据。
 - **额度一屏看完。** 每个账号的 5 小时、7 天额度、重置时间和近 7 天 token 用量。额度用完了，`sideby next` 帮你启动剩余最多的账号。数据都来自本地文件：不联网，不读 token。
 
 ## 快速上手
 
-需要 Node 22.18 或更高版本，并且至少装好一个宿主 CLI（Claude Code、Codex、Grok Build 或 pi）。
+需要 Node 22.18 或更高版本，并且至少装好一个宿主 CLI（Claude Code、Codex、Grok Build 或 pi）。AI agent 请改按 [`llms.txt`](llms.txt) 里 "Set up sideby for a user" 的步骤做。
 
 ```sh
 npm i -g sideby
@@ -37,6 +37,17 @@ sideby ui                     # 在 http://127.0.0.1:17420 查看所有账号的
 ```
 
 `sideby run claude:main` 可以同时在另一个终端里继续用 `~/.claude`。`--` 之后的参数原样交给宿主：`sideby run work -- --resume`。不想安装，可以先跑 `npx sideby` 试试。
+
+## 让 AI 帮你装
+
+把下面这段粘贴给 Claude Code、Codex 或其他 coding agent：
+
+```text
+帮我安装 sideby（npm 包 `sideby`）和它的 agent skill，再给我加一个 Claude Code 账号。
+按 https://raw.githubusercontent.com/Adonis0123/sideby/main/llms.txt 里 "Set up sideby for a user" 的步骤来。
+```
+
+agent 会检查 Node 和宿主 CLI，装好 sideby 和 skill，建账号，告诉你它和主账号共享什么，并让短命令生效。你只需要在浏览器里登录一次，agent 会把那一行命令给你。装好 skill 之后，简短的说法也行：「再加一个 Claude 账号，叫 cc008」「我的 Codex 账号共享了什么」「哪个账号还有额度」。
 
 ## 长什么样
 
@@ -92,7 +103,7 @@ sideby 启动 `PATH` 上的官方程序，从不修改它。测试过的版本�
 
 ## 给 AI agent
 
-- [`llms.txt`](llms.txt)：命令、JSON 契约和插件 API 的索引。
+- [`llms.txt`](llms.txt)：安装步骤、命令、JSON 契约和插件 API 的索引。`sideby families --json` 给出每个宿主的账号共享什么。
 - [`skills/sideby/SKILL.md`](skills/sideby/SKILL.md)：一个 Agent Skill，用来查看、修复、新建账号，以及在额度用完时换账号。用 `npx skills add Adonis0123/sideby -g` 安装；装的版本和 sideby 不一致时，`sideby doctor` 会提醒。
 - [`AGENTS.md`](AGENTS.md)：给维护本仓库的 agent 的规则。
 
