@@ -859,6 +859,21 @@ describe('resume (spec §3.15)', () => {
     })
   })
 
+  it('says when a never-saved session starts anew in the Account that started it', async () => {
+    await withFakeHome(async (h) => {
+      await h.mkdir('.claude/projects')
+      await h.mkdir('.claude-work/projects')
+      await h.mkdir(`.claude-work/session-env/${ID}`)
+      await fakeHost(h, 'claude')
+      const r = await sideby(h, ['resume', 'claude', '--', '--dangerously-skip-permissions', '--resume', ID])
+      assert.equal(r.code, 0, r.err)
+      assert.match(r.err, new RegExp(`session ${ID} was never saved; starting a new session in claude:work`))
+      const [rec] = await readHostLog(h, 'claude')
+      assert.equal(rec!.env.CLAUDE_CONFIG_DIR, h.path('.claude-work'))
+      assert.deepEqual(rec!.argv, ['--dangerously-skip-permissions'])
+    })
+  })
+
   it('shell-init defines the Host-named function only with resumeRouting and a non-main Account', async () => {
     await withFakeHome(async (h) => {
       await claudeWithSession(h)

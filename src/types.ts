@@ -104,6 +104,13 @@ export interface FamilyDef {
   resumedSession?(args: readonly string[]): string | undefined
   /** When the Account holds the session, the last write time of its file in ms; otherwise undefined. */
   sessionWrittenAt?(account: Account, sessionId: string): Promise<number | undefined>
+  /**
+   * When the Account started the session, even one the Host never saved, the time in ms; otherwise undefined.
+   * With `withoutResume` it lets `sideby resume` start a new session there instead of a resume that fails (ADR-0009).
+   */
+  sessionStartedAt?(account: Account, sessionId: string): Promise<number | undefined>
+  /** The Host arguments without the by-id resume `resumedSession` reads; the others keep their order. */
+  withoutResume?(args: readonly string[]): string[]
 }
 
 /** Identity fields of a signed-in Account. */

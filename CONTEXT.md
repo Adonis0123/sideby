@@ -28,7 +28,7 @@ Avoid: *profile* (Codex already uses it for a config layer that does not change 
 - **Side by side**: two or more Accounts launched at the same time, from any Family, without affecting each other.
 - **Alias** (the Panel says *short command*): a name in the config `aliases`, such as `cc008`, that starts one Account, optionally with fixed Host arguments (`pi-kimi` starts the same Account as `pi001` with another model). It never changes which Account starts, so two Aliases of one Account share its login and sessions. `sideby shell-init` turns each into a shell function; commands that take an Account accept it too.
 - **Shell-init file**: a file named in the config `shellInitFile` that sideby keeps equal to the `sideby shell-init` output, for shells that source it instead of running `eval`.
-- **Resume Routing**: with config `resumeRouting`, a shell function with the Host's own name sends a bare resume by session id (`claude --resume <id>`, as terminal managers type it) to the Account that holds the session, through `sideby resume`. It never copies sessions (ADR-0007).
+- **Resume Routing**: with config `resumeRouting`, a shell function with the Host's own name sends a bare resume by session id (`claude --resume <id>`, as terminal managers type it) to the Account that holds the session, through `sideby resume`. A Claude session that was started but never saved opens as a new session in the Account that started it (ADR-0009). It never copies sessions (ADR-0007).
 
 ## Health
 

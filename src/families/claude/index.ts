@@ -6,7 +6,12 @@ import { readSecretFile } from '../../core/secret-file.ts'
 import { claudeStatusline } from '../../quota/claude-statusline.ts'
 import type { Account, FamilyDef, LoginState, Plugin, SharedItemDef } from '../../types.ts'
 import { BUILTIN_LOGOS } from '../logos.ts'
-import { groupedEntryWrittenAt, resumeFlagSession } from '../shared/sessions.ts'
+import {
+  dirWrittenAt,
+  groupedEntryWrittenAt,
+  resumeFlagSession,
+  withoutResumeFlag,
+} from '../shared/sessions.ts'
 import { CLAUDE_LAYOUT } from './layout.ts'
 import { readClaudeQuota } from './quota.ts'
 import { readClaudeUsage } from './usage.ts'
@@ -121,6 +126,9 @@ export const claudeFamily: FamilyDef = {
   resumedSession: resumeFlagSession,
   sessionWrittenAt: (account, id) =>
     groupedEntryWrittenAt(join(account.dir, 'projects'), `${id}.jsonl`, 'file'),
+  // Claude Code makes this directory for SessionStart hooks before the first message is saved (ADR-0009).
+  sessionStartedAt: (account, id) => dirWrittenAt(join(account.dir, 'session-env', id)),
+  withoutResume: withoutResumeFlag,
 }
 
 export const claudePlugin: Plugin = {

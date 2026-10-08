@@ -59,8 +59,13 @@ export interface ResumeLaunch {
   launch: HostLaunch
   /** The session the Host arguments resume by id, when they name one. */
   sessionId?: string
-  /** Set when the session lives in a non-main Account and `launch` starts that Account as `run` would. */
+  /**
+   * Set when the session lives in a non-main Account and `launch` starts that Account as `run` would, or with
+   * `newSession` the Account (main included) that started a session the Host never saved.
+   */
   account?: Account
+  /** Set when the session was never saved: `launch` starts a new session in `account` without the resume (ADR-0009). */
+  newSession?: true
 }
 
 /** What happened to the alias asked for with a new Account. */
@@ -595,7 +600,14 @@ export async function createRuntime(
       if (env[family.selectVar]) return { launch: host }
       const route = await findResumeRoute(family, await accounts(), userArgs)
       const id = route.sessionId ? { sessionId: route.sessionId } : {}
-      if (!route.account || route.account.isMain) return { launch: host, ...id }
+      if (route.neverSaved && route.account && family.withoutResume) {
+        const args = family.withoutResume(userArgs)
+        const launch = route.account.isMain
+          ? { ...host, args }
+          : await rt.prepareLaunch(route.account.ref, args, 'run')
+        return { launch, ...id, account: route.account, newSession: true }
+      }
+      if (!route.account || route.account.isMain || route.neverSaved) return { launch: host, ...id }
       return {
         launch: await rt.prepareLaunch(route.account.ref, userArgs, 'run'),
         ...id,

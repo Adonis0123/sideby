@@ -83,4 +83,4 @@ Orca 这类终端管理器重开窗格时，会在 shell 里敲裸的宿主命�
 function claude { local a; if [ -z "${CLAUDE_CONFIG_DIR-}" ]; then for a in "$@"; do case $a in ????????-????-????-????-????????????|--resume=????????-????-????-????-????????????) command sideby resume 'claude' -- "$@"; return;; esac; done; fi; command claude "$@"; }
 ```
 
-`sideby resume` 找出账号目录里存有这个会话 id 的账号（Claude 是 `projects/*/<id>.jsonl`，Codex 是 `sessions/**/rollout-*-<id>.jsonl`，Grok 是 `sessions/*/<id>/`），像 `sideby run` 一样启动它。其他情况原样运行宿主，包括 `--continue`、按标题恢复、会话在主账号里。sideby 启动的宿主已经设了选择变量，不会被二次路由。`alias claude='claude --dangerously-skip-permissions'` 这样的 alias 照常生效。只有参数里有会话 id 形状的命令才经过 sideby（多约 140 ms），其他宿主命令直接运行。sideby 不复制、不移动会话。
+`sideby resume` 找出账号目录里存有这个会话 id 的账号（Claude 是 `projects/*/<id>.jsonl`，Codex 是 `sessions/**/rollout-*-<id>.jsonl`，Grok 是 `sessions/*/<id>/`），像 `sideby run` 一样启动它。Claude 会话打开后没发过消息时没有这个文件：哪个账号都没有它时，`sideby resume` 再找起过它的账号（`session-env/<id>/`），去掉 `--resume <id>`，在那个账号开一个新会话，并在 stderr 说明。其他情况原样运行宿主，包括 `--continue`、按标题恢复、会话在主账号里。sideby 启动的宿主已经设了选择变量，不会被二次路由。`alias claude='claude --dangerously-skip-permissions'` 这样的 alias 照常生效。只有参数里有会话 id 形状的命令才经过 sideby（多约 140 ms），其他宿主命令直接运行。sideby 不复制、不移动会话。

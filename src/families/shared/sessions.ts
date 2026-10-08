@@ -27,6 +27,23 @@ export function resumeFlagSession(args: readonly string[]): string | undefined {
   return undefined
 }
 
+/** The arguments without the by-id resume `resumeFlagSession` reads; the rest keep their order (ADR-0009). */
+export function withoutResumeFlag(args: readonly string[]): string[] {
+  const end = args.indexOf('--')
+  const opts = end === -1 ? args : args.slice(0, end)
+  const kept: string[] = []
+  for (let i = 0; i < opts.length; i++) {
+    const a = opts[i]!
+    if (a.startsWith('--resume=') && isSessionId(a.slice('--resume='.length))) continue
+    if ((a === '--resume' || a === '-r') && isSessionId(opts[i + 1])) {
+      i++
+      continue
+    }
+    kept.push(a)
+  }
+  return end === -1 ? kept : [...kept, ...args.slice(end)]
+}
+
 /** The first UUID after the `resume` subcommand (`codex resume [options] <id>`). */
 export function resumeSubcommandSession(args: readonly string[]): string | undefined {
   const opts = options(args)
@@ -46,6 +63,9 @@ async function firstWrittenAt(paths: readonly string[], type: 'file' | 'dir'): P
   }
   return undefined
 }
+
+/** Modification time in ms of `path` when it is a directory (Claude `session-env/<id>`, ADR-0009). */
+export const dirWrittenAt = (path: string) => firstWrittenAt([path], 'dir')
 
 async function subdirs(dir: string): Promise<string[]> {
   try {

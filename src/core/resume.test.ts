@@ -23,6 +23,14 @@ async function claudeSession(h: FakeHome, dir: string, mtime?: Date) {
   if (mtime) await utimes(p, mtime, mtime)
 }
 
+/** A Claude Account that started session `ID` but saved nothing for it (ADR-0009). */
+async function claudeStarted(h: FakeHome, dir: string, mtime?: Date) {
+  await h.mkdir(`${dir}/projects`)
+  const p = h.path(`${dir}/session-env/${ID}`)
+  await h.mkdir(`${dir}/session-env/${ID}`)
+  if (mtime) await utimes(p, mtime, mtime)
+}
+
 describe('resumedSession', () => {
   it('reads the id from --resume, --resume= and -r for Claude and Grok, and only before --', () => {
     for (const f of [claudeFamily, grokFamily]) {
@@ -48,6 +56,24 @@ describe('resumedSession', () => {
   it('is not offered by pi', () => {
     assert.equal(piFamily.resumedSession, undefined)
     assert.equal(piFamily.sessionWrittenAt, undefined)
+  })
+
+  it('drops only the by-id resume for Claude, before --', () => {
+    const f = claudeFamily
+    assert.deepEqual(f.withoutResume!(['--dangerously-skip-permissions', '--resume', ID]), [
+      '--dangerously-skip-permissions',
+    ])
+    assert.deepEqual(f.withoutResume!([`--resume=${ID}`, '--model', 'opus']), ['--model', 'opus'])
+    assert.deepEqual(f.withoutResume!(['-r', ID, '-p', 'hi']), ['-p', 'hi'])
+    assert.deepEqual(f.withoutResume!(['--resume', 'fix login']), ['--resume', 'fix login'])
+    assert.deepEqual(f.withoutResume!(['-p', 'x', '--', '--resume', ID]), ['-p', 'x', '--', '--resume', ID])
+  })
+
+  it('leaves never-saved sessions to Claude alone', () => {
+    for (const f of [codexFamily, grokFamily, piFamily]) {
+      assert.equal(f.sessionStartedAt, undefined)
+      assert.equal(f.withoutResume, undefined)
+    }
   })
 })
 
@@ -117,6 +143,56 @@ describe('resumeLaunch', () => {
       const grok = await rt.resumeLaunch('grok', ['--resume', ID])
       assert.equal(grok.account?.ref, 'grok:lab')
       assert.equal(grok.launch.env.GROK_HOME, h.path('.grok-lab'))
+    })
+  })
+
+  it('starts a new session in the Account that started a never-saved session (ADR-0009)', async () => {
+    await withFakeHome(async (h) => {
+      await h.mkdir('.claude/projects')
+      await claudeStarted(h, '.claude-work')
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ accounts: { 'claude:work': { args: ['--model', 'opus'] } } }),
+      )
+      const rt = await createRuntime({ env: { ...h.env, ANTHROPIC_API_KEY: 'leak' }, builtins })
+      const r = await rt.resumeLaunch('claude', ['--dangerously-skip-permissions', '--resume', ID])
+      assert.equal(r.newSession, true)
+      assert.equal(r.account?.ref, 'claude:work')
+      assert.equal(r.sessionId, ID)
+      assert.equal(r.launch.env.CLAUDE_CONFIG_DIR, h.path('.claude-work'))
+      assert.equal(r.launch.env.ANTHROPIC_API_KEY, undefined)
+      assert.deepEqual(r.launch.args, ['--model', 'opus', '--dangerously-skip-permissions'])
+    })
+  })
+
+  it('starts a new session in the Main Account with the environment kept when it started the session', async () => {
+    await withFakeHome(async (h) => {
+      await claudeStarted(h, '.claude')
+      await h.mkdir('.claude-work/projects')
+      const env = { ...h.env, ANTHROPIC_API_KEY: 'kept' }
+      const rt = await createRuntime({ env, builtins })
+      const r = await rt.resumeLaunch('claude', ['--resume', ID])
+      assert.equal(r.newSession, true)
+      assert.equal(r.account?.ref, 'claude:main')
+      assert.equal(r.launch.env, env)
+      assert.deepEqual(r.launch.args, [])
+    })
+  })
+
+  it('prefers a saved session over a started one, and the newest start among several', async () => {
+    await withFakeHome(async (h) => {
+      await claudeStarted(h, '.claude-a', new Date('2026-10-07T00:00:00Z'))
+      await claudeStarted(h, '.claude-b', new Date('2026-10-08T00:00:00Z'))
+      const rt = await createRuntime({ env: h.env, builtins })
+      const started = await rt.resumeLaunch('claude', ['--resume', ID])
+      assert.equal(started.account?.ref, 'claude:b')
+      assert.equal(started.newSession, true)
+
+      await claudeSession(h, '.claude-a')
+      const saved = await rt.resumeLaunch('claude', ['--resume', ID])
+      assert.equal(saved.account?.ref, 'claude:a')
+      assert.equal(saved.newSession, undefined)
+      assert.deepEqual(saved.launch.args, ['--resume', ID])
     })
   })
 
