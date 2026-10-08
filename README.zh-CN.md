@@ -1,10 +1,10 @@
 <p align="center">
-  <img alt="sideby：一份共享配置，每个账号一个终端" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/banner.jpg" width="880">
+  <img alt="sideby：工作号、个人号和 API key 账号，各开一个终端，配置还是同一份" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/banner.jpg" width="880">
 </p>
 
 <p align="center">
-  <b>Run every AI coding account side by side.</b><br>
-  把 Claude Code、Codex、Grok Build、pi 的多个账号并排跑起来：每个账号一个目录，skills、hooks、规则共用一份，额度在一个面板里看完。
+  <b>工作号、个人号和 API key 账号同时开着，配置也不会各走各的。</b><br>
+  每个账号一个目录、一个终端。skills、hooks 和设置链在主账号上，改一处就都生效。支持 Claude Code、Codex、Grok Build 和 pi。
 </p>
 
 <p align="center">
@@ -16,13 +16,17 @@
 
 <p align="center"><a href="README.md">English</a> | 中文</p>
 
-## 为什么用 sideby
+## 为什么不直接写个别名？
 
-你有一个工作订阅、一个个人订阅，可能还有一个 API key。切换类工具会改宿主的全局配置，同一时间只有一个账号生效；各账号的 skills 和 hooks 也会慢慢变得不一致。
+每个账号一条别名，再配上 `CLAUDE_CONFIG_DIR`，第二个账号确实能开起来。但它不会帮你把 skills 和设置收成一份，也看不到每个账号还剩多少额度。[会不会违反服务条款？](docs/guide/faq.zh-CN.md#terms)
 
-- **并排，不切换。** 每个账号一个独立目录，sideby 启动官方 CLI 时选中这个目录。三个账号可以同时开在三个终端里，你的 shell 环境不受影响。
-- **skills、hooks、规则只维护一份。** 主账号（例如 `~/.claude`）是唯一来源，其他账号链接或复制它的共享项（Shared Item，[共享了哪些](docs/guide/usage.zh-CN.md#每个账号共享什么)）。`sideby doctor --fix` 修复漂移，不碰真实文件，也不碰凭据。
-- **额度一屏看完。** 每个账号的 5 小时、7 天额度、重置时间和近 7 天 token 用量。额度用完了，`sideby next` 帮你启动剩余最多的账号。数据都来自本地文件：不联网，不读 token。
+| | 同时开 | skills、hooks、设置 | 额度和用量 | 准备 |
+|---|---|---|---|---|
+| `CLAUDE_CONFIG_DIR` 加别名 | 能。每个终端自己 export。 | 每个目录各一份。不自己做软链接，过一阵就不一样了。 | 只有当前这个会话的 status line | 一个账号一条别名 |
+| [cc-switch](https://github.com/farion1231/cc-switch) | 启用一个供应商会写进宿主正在用的配置，已经打开的会话跟着变。 | 插件配置要另外复制一次。 | 当前启用的那一个，走对方的额度接口 | 装一个桌面应用 |
+| sideby | 能。`sideby run` 只给这个进程选目录，不改你的 shell。 | 链到主账号。副本用 `sideby doctor --fix` 拉齐。登录和会话各留各的。 | 所有账号，只读本地文件。Claude 要先跑 `quota setup`。 | `npm i -g sideby`，然后 `sideby new`，登录一次 |
+
+cc-switch 自己的说明是：切换时把配置写进宿主正在用的文件（[README](https://github.com/farion1231/cc-switch#readme)）。[#1105](https://github.com/farion1231/cc-switch/issues/1105) 和 [#2908](https://github.com/farion1231/cc-switch/issues/2908) 要的是同时开好几个会话。[#1106](https://github.com/farion1231/cc-switch/issues/1106) 已经关闭，维护者说 Claude Code 的「打开终端」可以用某个供应商的配置启动，而不改全局配置。
 
 ## 快速上手
 
@@ -51,7 +55,7 @@ agent 会检查 Node 和宿主 CLI，装好 sideby 和 skill，建账号，告�
 
 ## 长什么样
 
-<img alt="终端里的 sideby：列出账号、查看额度、推荐下一个账号、发现并修复漂移" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/demo.gif" width="1320">
+<img alt="两个终端：个人号和工作号同时开着，然后切到本机的额度面板" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/demo.gif" width="1280">
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/panel-dark.zh-CN.png">
@@ -83,6 +87,14 @@ agent 会检查 Node 和宿主 CLI，装好 sideby 和 skill，建账号，告�
 | pi | `~/.pi/agent`、`~/.pi-<name>/agent` | 在 pi 里输入 `/login` | 无公开来源 | 无公开来源 |
 
 sideby 启动 `PATH` 上的官方程序，从不修改它。测试过的版本和各宿主的注意事项见[使用指南](docs/guide/usage.zh-CN.md#宿主说明)。
+
+## 平台
+
+在 macOS 和 Linux 上用过。CI 跑的是 `ubuntu-latest` 和 `macos-latest`，Node 22 和 24。**Windows 还没测过。** `sideby app` 只在 macOS 和 Linux 上装启动器。用链接共享的项是符号链接，`sideby shell-init` 只生成 bash 和 zsh 函数，Claude 的额度包装跑的是 `/bin/sh`。
+
+## 路线图
+
+**Gemini CLI。** Gemini 可以用 `GEMINI_CONFIG_DIR` 换一个配置目录。旧文档里的 `GEMINI_CLI_HOME` 已经标成过时；和精确的目录变量一起设的话，现在的版本启动时会直接退出。sideby 要接它，得先定一个测过的版本，确认登录状态怎么判断才不会读到 token，再列出哪些文件该链接、哪些该复制。这一步不小，所以这版先不做。
 
 ## 安全边界
 

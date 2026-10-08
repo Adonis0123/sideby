@@ -1,0 +1,34 @@
+name: Feature request
+description: A change to sideby, including a new host.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        English or Chinese is fine. sideby does not switch a host's global config, rotate subscriptions, or call private quota endpoints. A request that needs one of those will be closed with a pointer at the FAQ.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The account setup and the command you wish existed.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like sideby to do
+    validations:
+      required: true
+  - type: textarea
+    id: host
+    attributes:
+      label: Host, if this is about one
+      description: Claude Code, Codex, Grok Build, pi, Gemini CLI, or another. For a new host, name the environment variable that selects its config directory and the version you tried.
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: Secrets
+      options:
+        - label: I did not paste a token, API key, or the contents of a credential file.
+          required: true
