@@ -76,8 +76,9 @@ export async function fakeHost(h: FakeHome, name: string, opts: FakeHostOptions 
 const fs = require('node:fs')
 const log = ${JSON.stringify(log)}
 const rec = (o) => fs.appendFileSync(log, JSON.stringify(o) + '\\n')
-rec({ argv: process.argv.slice(2), env: process.env, pid: process.pid })
+// Handlers first: tests signal the Host as soon as the start record appears.
 for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT']) process.on(s, () => { rec({ signal: s }); process.exit(${opts.sleep ? 100 : 0}) })
+rec({ argv: process.argv.slice(2), env: process.env, pid: process.pid })
 const finish = () => {
   ${opts.selfSignal ? `process.removeAllListeners(${JSON.stringify(opts.selfSignal)}); process.kill(process.pid, ${JSON.stringify(opts.selfSignal)})` : `process.exit(${opts.exitCode ?? 0})`}
 }
