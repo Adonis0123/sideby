@@ -22,5 +22,3 @@ Only the version currently tagged `latest` on npm is supported. Older releases, 
 ## Reporting a vulnerability
 
 Report privately through [GitHub private vulnerability reporting](https://github.com/Adonis0123/sideby/security/advisories/new) (Security Advisories). Do not open a public issue or discussion, and do not include token values, `proxy.env`, `auth.json`, or `.claude.json`.
-
-If that form says private reporting is turned off, contact the maintainer at the address in [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) or via their [GitHub profile](https://github.com/Adonis0123). Still do not post the details publicly. The maintainer turns the GitHub setting on; this repository's files cannot do that.

@@ -60,9 +60,7 @@ representative at an online or offline event.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement at
-513554676@qq.com. That address is already public: it is the npm maintainer
-email for adonis0123 and the git author email in this repository. The
-maintainer's GitHub profile is <https://github.com/Adonis0123>.
+<https://github.com/Adonis0123>.
 
 All complaints will be reviewed and investigated promptly and fairly.
 
