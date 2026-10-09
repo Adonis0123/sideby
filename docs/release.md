@@ -178,6 +178,7 @@ git push --follow-tags
 
 ```sh
 npm view sideby version
+npm view sideby readmeFilename       # 应为 README.md，不是 README.zh-CN.md
 npm view sideby dist.attestations    # 有内容说明 provenance 已生成
 ```
 
