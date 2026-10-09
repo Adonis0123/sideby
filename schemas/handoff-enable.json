@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/handoff-enable.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "applied",
+    "file",
+    "diff",
+    "settings",
+    "nextSteps"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "applied": {
+      "type": "boolean"
+    },
+    "file": {
+      "type": "string"
+    },
+    "diff": {
+      "type": "string"
+    },
+    "settings": {
+      "type": "object",
+      "required": [
+        "auto",
+        "sameFamily",
+        "prepareAt",
+        "threshold",
+        "waitIfResetWithinMinutes",
+        "countdownSeconds",
+        "crossOrganization",
+        "families"
+      ],
+      "properties": {
+        "auto": {
+          "type": "boolean"
+        },
+        "sameFamily": {
+          "type": "boolean"
+        },
+        "prepareAt": {
+          "type": "number"
+        },
+        "threshold": {
+          "type": "number"
+        },
+        "waitIfResetWithinMinutes": {
+          "type": "number"
+        },
+        "countdownSeconds": {
+          "type": "number"
+        },
+        "crossOrganization": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "families": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "object",
+              "required": [
+                "policy",
+                "order"
+              ],
+              "properties": {
+                "policy": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "pressure"
+                    },
+                    {
+                      "type": "string",
+                      "const": "order"
+                    }
+                  ]
+                },
+                "order": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "nextSteps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "title": "sideby handoff enable --json"
+}

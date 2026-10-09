@@ -71,6 +71,7 @@ The agent checks Node and your Host CLIs, installs sideby and the skill, creates
 | Find and fix config drift between accounts | `sideby doctor --fix` | [Doctor](docs/guide/usage.md#doctor) |
 | See Claude quota (Codex needs no setup) | `sideby quota setup claude --yes` | [Claude quota](docs/guide/usage.md#claude-quota) |
 | Move on when an account hits its limit | `sideby next claude` | [Handoff](docs/guide/usage.md#when-an-account-hits-its-limit) |
+| Let a running task move to the next account by itself when quota runs low (off by default; see the risk) | `sideby handoff enable` (or the panel) | [Auto Handoff](docs/guide/usage.md#auto-handoff) |
 | Short commands such as `ccw` | `sideby alias add ccw claude:work` | [Shell functions](docs/guide/configuration.md#shell-functions) |
 | Reopen a session from Orca and the like in the account that holds it | `"resumeRouting": true` in config | [Resuming from other tools](docs/guide/configuration.md#resuming-from-other-tools) |
 | Open the panel from the Dock or app menu | `sideby app install` | [Desktop app](docs/guide/panel.md#desktop-app) |
@@ -98,7 +99,7 @@ macOS and Linux. CI runs the suite on `ubuntu-latest` and `macos-latest`, Node 2
 
 ## Safe by design
 
-- It never edits a Host's global config to switch accounts, and never rotates accounts by itself.
+- It never edits a Host's global config to switch accounts. It moves a task to another account only when you turn on Auto Handoff, and never proxies requests or pools logins.
 - It never reads, prints or sends a credential value. Nothing leaves your machine: sideby calls no remote service.
 - `doctor --fix` never replaces a real file and never changes where a link points.
 

@@ -12,6 +12,7 @@ import {
   resumeFlagSession,
   withoutResumeFlag,
 } from '../shared/sessions.ts'
+import { claudeHandoff } from './handoff.ts'
 import { CLAUDE_LAYOUT } from './layout.ts'
 import { readClaudeQuota } from './quota.ts'
 import { readClaudeUsage } from './usage.ts'
@@ -129,6 +130,7 @@ export const claudeFamily: FamilyDef = {
   // Claude Code makes this directory for SessionStart hooks before the first message is saved (ADR-0009).
   sessionStartedAt: (account, id) => dirWrittenAt(join(account.dir, 'session-env', id)),
   withoutResume: withoutResumeFlag,
+  handoff: claudeHandoff,
 }
 
 export const claudePlugin: Plugin = {

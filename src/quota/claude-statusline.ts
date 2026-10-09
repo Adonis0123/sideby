@@ -4,7 +4,7 @@
 import { mkdir, readFile, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { lstatOrNull, realpathOrNull, sha256, writeFileAtomic, writeIfUnchanged } from '../core/fs-safe.ts'
-import { which } from '../core/launch.ts'
+import { sidebyBinProblem } from '../core/launch.ts'
 import { tildify } from '../core/paths.ts'
 import { CLAUDE_MAIN_DIR } from '../families/claude/layout.ts'
 import type { QuotaSetup, QuotaSetupPlan, ReadContext } from '../types.ts'
@@ -95,18 +95,8 @@ async function analyze(ctx: ReadContext): Promise<Analysis> {
       plan: { status: 'enabled', file: target, diff: '', message: `already enabled in ${targetName}${note}` },
     }
 
-  const bin = await which('sideby', ctx.env)
-  if (!bin)
-    return blocked(
-      `sideby is not on PATH, and the status line runs \`${TAP_COMMAND}\` on every refresh; install it with \`npm i -g sideby\` and retry`,
-      target,
-    )
-  const real = (await realpathOrNull(bin)) ?? bin
-  if (bin.includes('/_npx/') || real.includes('/_npx/'))
-    return blocked(
-      `sideby on PATH comes from the npx cache (${bin}), which can disappear; install it with \`npm i -g sideby\` and retry`,
-      target,
-    )
+  const problem = await sidebyBinProblem(ctx.env, `the status line runs \`${TAP_COMMAND}\` on every refresh`)
+  if (problem) return blocked(problem, target)
 
   const statusLine = current
     ? { type: 'command', ...current, command: wrapCommand(command) }

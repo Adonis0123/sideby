@@ -111,6 +111,51 @@ export interface FamilyDef {
   sessionStartedAt?(account: Account, sessionId: string): Promise<number | undefined>
   /** The Host arguments without the by-id resume `resumedSession` reads; the others keep their order. */
   withoutResume?(args: readonly string[]): string[]
+  /** How this Family takes part in a Handoff (spec §3.17); without it the Family neither starts nor receives one. */
+  handoff?: FamilyHandoff
+}
+
+/** A Host hook event sideby's handoff hook listens to. */
+export type HandoffHookEvent = 'PostToolUse' | 'Stop' | 'StopFailure'
+
+/** Whether one run may start a Handoff, or start as the next Account of one, and why not. */
+export interface HandoffEligibility {
+  start: boolean
+  receive: boolean
+  /** Shown before the Host starts when `start` or `receive` is false. */
+  reason?: string
+  /** Host arguments this run needs to take part, such as Grok's per-Account leader socket. */
+  args?: string[]
+  /** False when the session cannot write its Brief (Codex read-only sandbox): sideby puts one together instead. */
+  agentBrief?: boolean
+}
+
+export interface FamilyHandoff {
+  /**
+   * What this Family can start: `quota` before the limit (prepare and threshold, from its Quota), `limit` after a
+   * turn failed at the limit. Empty: it can only receive. Plugin Families can only receive for now: the hook entry
+   * loads built-in readers only.
+   */
+  starts: readonly ('quota' | 'limit')[]
+  /** Host arguments that load sideby's hooks for one run; omitted when the hooks come from `hookSetup`. */
+  hookArgs?(command: (event: HandoffHookEvent) => string, stateDir: string): Promise<string[]>
+  /** Host arguments that let the session read and write the chain directory. */
+  dirArgs?(dir: string): string[]
+  /** Host arguments that start a new interactive session with this first prompt. */
+  promptArgs(prompt: string): string[]
+  /** The user's Host arguments for the next session of this Family: no resume, continue or old first prompt. */
+  continueArgs(args: readonly string[]): string[]
+  /** Host arguments that resume this session in the same Account. */
+  resumeArgs(sessionId: string): string[]
+  /** Whether this run may start or receive a Handoff (headless runs, Codex `--remote`, Grok sandbox profiles). */
+  eligibility(args: readonly string[], account: Account, env: Env): Promise<HandoffEligibility>
+  /** A Brief from the session's local records, without a model; undefined when nothing could be read. */
+  briefFromSession?(
+    account: Account,
+    session: { id?: string; transcriptPath?: string },
+  ): Promise<string | undefined>
+  /** One-time hook installation for a Host without a launch option (Grok); the same contract as `quotaSetup`. */
+  hookSetup?: QuotaSetup
 }
 
 /** Identity fields of a signed-in Account. */

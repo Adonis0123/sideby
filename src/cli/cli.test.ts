@@ -1066,3 +1066,169 @@ describe('setup by an agent (spec §3.16)', () => {
     })
   })
 })
+
+describe('sideby handoff (spec §3.17)', () => {
+  it('ready refuses outside an Auto Handoff run and says how to get one', async () => {
+    await withFakeHome(async (h) => {
+      const r = await sideby(h, ['handoff', 'ready', '--json'])
+      assert.equal(r.code, 1)
+      const data = JSON.parse(r.out) as { code: string; error: string }
+      assert.equal(data.code, 'not-in-handoff-run')
+      assert.match(data.error, /handoff\.auto/)
+    })
+  })
+
+  it('ready inside a run copies the user’s Brief and writes the request', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude-001/projects/.keep', '')
+      await h.write('.claude-002/projects/.keep', '')
+      await fakeHost(h, 'claude')
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ handoff: { auto: true, sameFamily: true } }),
+      )
+      const dir = await h.mkdir('.local/state/sideby/handoffs/c1')
+      const mine = await h.write('notes.md', '# my brief\n')
+      const r = await sideby(h, ['handoff', 'ready', '--brief', mine, '--json'], {
+        SIDEBY_HANDOFF_RUN: 'r1',
+        SIDEBY_HANDOFF_DIR: dir,
+        SIDEBY_HANDOFF_FAMILY: 'claude',
+        SIDEBY_ACCOUNT: 'claude:001',
+      })
+      assert.equal(r.code, 0, r.err)
+      const data = checkSchema('handoff-ready', r.out)
+      assert.equal(await readFile(String(data.brief), 'utf8'), '# my brief\n')
+      const request = JSON.parse(await readFile(join(dir, 'request.json'), 'utf8')) as {
+        runId: string
+        trigger: string
+      }
+      assert.deepEqual([request.runId, request.trigger], ['r1', 'manual'])
+    })
+  })
+
+  it('ready exits 1 and writes nothing when no account can take over', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude-001/projects/.keep', '')
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ handoff: { auto: true, sameFamily: true } }),
+      )
+      const dir = await h.mkdir('.local/state/sideby/handoffs/c1')
+      const r = await sideby(h, ['handoff', 'ready', '--json'], {
+        SIDEBY_HANDOFF_RUN: 'r1',
+        SIDEBY_HANDOFF_DIR: dir,
+        SIDEBY_HANDOFF_FAMILY: 'claude',
+        SIDEBY_ACCOUNT: 'claude:001',
+      })
+      assert.equal(r.code, 1)
+      assert.equal((JSON.parse(r.out) as { code: string }).code, 'no-pick')
+      await assert.rejects(readFile(join(dir, 'request.json'), 'utf8'))
+    })
+  })
+
+  it('setup grok shows the change with exit 10, writes one file with --yes, and teardown undoes it', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.grok/skills/.keep', '')
+      await fakeHost(h, 'sideby')
+      const before = await snapshot(h.home)
+      const shown = await sideby(h, ['handoff', 'setup', 'grok'])
+      assert.equal(shown.code, 10, shown.err)
+      assert.match(shown.out, /sideby-handoff\.json/)
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+      const applied = await sideby(h, ['handoff', 'setup', 'grok', '--yes', '--json'])
+      assert.equal(applied.code, 0, applied.err)
+      checkSchema('handoff-setup', applied.out)
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [
+        '.grok/hooks',
+        '.grok/hooks/sideby-handoff.json',
+      ])
+      const undone = await sideby(h, ['handoff', 'teardown', 'grok', '--json'])
+      assert.equal(undone.code, 0)
+      checkSchema('handoff-teardown', undone.out)
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+    })
+  })
+
+  it('setup is refused for a Family that needs none', async () => {
+    await withFakeHome(async (h) => {
+      const r = await sideby(h, ['handoff', 'setup', 'claude'])
+      assert.equal(r.code, 1)
+      assert.match(r.err, /needs no handoff setup/)
+    })
+  })
+})
+
+describe('sideby handoff status, enable and disable (spec §3.17)', () => {
+  it('status lists what is missing, with enable first while Auto Handoff is off', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude-001/projects/.keep', '')
+      await h.write('.grok/skills/.keep', '')
+      const r = await sideby(h, ['handoff', 'status', '--json'])
+      assert.equal(r.code, 0, r.err)
+      const st = checkSchema('handoff-status', r.out) as {
+        auto: boolean
+        nextSteps: string[]
+        families: { family: string; ready: boolean; problems: string[] }[]
+      }
+      assert.equal(st.auto, false)
+      assert.equal(st.nextSteps[0], 'sideby handoff enable')
+      assert.ok(st.nextSteps.includes('sideby quota setup claude'))
+      assert.ok(st.nextSteps.includes('sideby handoff setup grok'))
+      assert.deepEqual(
+        st.families.map((f) => f.ready),
+        [false, false],
+      )
+    })
+  })
+
+  it('enable shows the change with exit 10, writes only the handoff key with --yes, disable keeps the rest', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude-001/projects/.keep', '')
+      await h.write('.codex/config.toml', 'model = "m"\n')
+      const config = { $schema: 'x', aliases: { cc001: 'claude:001', codex001: 'codex:main' } }
+      await h.write('.config/sideby/config.json', JSON.stringify(config))
+      const before = await snapshot(h.home)
+      const shown = await sideby(h, ['handoff', 'enable', '--order', 'claude=codex001', '--threshold', '90'])
+      assert.equal(shown.code, 10, shown.err)
+      assert.match(shown.out, /\+ {3}"auto": true/)
+      assert.match(shown.out, /sideby handoff enable --order claude=codex001 --threshold 90 --yes/)
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+      const applied = await sideby(h, [
+        'handoff',
+        'enable',
+        '--order',
+        'claude=codex001',
+        '--threshold',
+        '90',
+        '--yes',
+        '--json',
+      ])
+      assert.equal(applied.code, 0, applied.err)
+      checkSchema('handoff-enable', applied.out)
+      const written = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8'))
+      assert.deepEqual(Object.keys(written), ['$schema', 'aliases', 'handoff'])
+      assert.deepEqual(written.handoff, {
+        auto: true,
+        threshold: 90,
+        families: { claude: { policy: 'order', order: ['codex001'] } },
+      })
+      const off = await sideby(h, ['handoff', 'disable', '--yes', '--json'])
+      assert.equal(off.code, 0)
+      checkSchema('handoff-disable', off.out)
+      const after = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8'))
+      assert.deepEqual(after.handoff, { ...written.handoff, auto: false })
+      assert.equal((await sideby(h, ['handoff', 'disable'])).code, 0, 'already off: nothing to confirm')
+    })
+  })
+
+  it('enable refuses an order with an unknown account and lists the ones it knows', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude-001/projects/.keep', '')
+      const r = await sideby(h, ['handoff', 'enable', '--order', 'claude=cc009', '--json'])
+      assert.equal(r.code, 1)
+      const data = JSON.parse(r.out) as { code: string; error: string }
+      assert.equal(data.code, 'unknown-account')
+      assert.match(data.error, /claude:001/)
+    })
+  })
+})

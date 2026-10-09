@@ -10,6 +10,8 @@ import {
   attentionWhy,
   cacheHitRate,
   formatDuration,
+  handoffChangeOf,
+  handoffHintAccount,
   type LogicAccount,
   maskEmail,
   matchesQuery,
@@ -437,5 +439,73 @@ describe('updatedAge', () => {
   it('treats a negative or unknown age as just now', () => {
     assert.deepEqual(updatedAge(-5000), { key: 'time.justNow' })
     assert.deepEqual(updatedAge(Number.NaN), { key: 'time.justNow' })
+  })
+})
+
+describe('Auto Handoff helpers', () => {
+  const now = Date.parse('2026-10-09T12:00:00Z')
+  const acct = (ref: string, used: number, kind = 'subscription') => {
+    const [family, name] = ref.split(':') as [string, string]
+    return {
+      ref,
+      family,
+      name,
+      kind,
+      quota: {
+        status: 'ok',
+        windows: [{ label: '5h', windowMinutes: 300, usedPercent: used, resetsAt: '2026-10-09T15:00:00Z' }],
+      },
+    }
+  }
+  it('hints at the fullest starter account at the threshold, only while Auto Handoff is off', () => {
+    const accounts = [
+      acct('claude:001', 96),
+      acct('claude:002', 98),
+      acct('codex:main', 99, 'api'),
+      acct('pi:main', 99),
+    ]
+    assert.deepEqual(handoffHintAccount(accounts, { auto: false, threshold: 95 }, ['claude'], now), {
+      ref: 'claude:002',
+      pressure: 98,
+    })
+    assert.equal(handoffHintAccount(accounts, { auto: true, threshold: 95 }, ['claude'], now), null)
+    assert.equal(
+      handoffHintAccount([acct('claude:001', 90)], { auto: false, threshold: 95 }, ['claude'], now),
+      null,
+    )
+  })
+  it('turns the form into only what changed; an empty order goes back to ranking by quota', () => {
+    const s = {
+      auto: false,
+      sameFamily: false,
+      prepareAt: 80,
+      threshold: 95,
+      waitIfResetWithinMinutes: 30,
+      countdownSeconds: 10,
+      families: { claude: { policy: 'order', order: ['cc002'] } },
+    }
+    const same = {
+      auto: false,
+      sameFamily: false,
+      prepareAt: 80,
+      threshold: 95,
+      wait: 30,
+      countdown: 10,
+      orders: { claude: { policy: 'order', order: ['cc002'] } },
+    }
+    assert.deepEqual(handoffChangeOf(s, same), {})
+    assert.deepEqual(
+      handoffChangeOf(s, {
+        ...same,
+        auto: true,
+        threshold: 90,
+        orders: { claude: { policy: 'pressure', order: ['cc002'] } },
+      }),
+      {
+        auto: true,
+        threshold: 90,
+        orders: [{ family: 'claude', order: [] }],
+      },
+    )
   })
 })

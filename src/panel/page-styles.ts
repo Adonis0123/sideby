@@ -323,6 +323,15 @@ a.btn:hover { text-decoration: none; }
 .banner-fail { background: var(--fail-soft); border-color: transparent; color: var(--fail); }
 .banner-warn { background: var(--warn-soft); border-color: transparent; color: var(--warn); }
 .banner ul { margin: 6px 0 0; padding-left: 18px; }
+.banner-actions { display: flex; gap: 8px; flex: none; }
+.ah-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end; }
+.ah-fam { border: 1px solid var(--border); border-radius: calc(var(--radius) - 4px); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.ah-fam-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ah-order { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ah-order li { display: flex; align-items: center; gap: 6px; }
+.ah-order li .mono { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ah-add { display: flex; gap: 6px; }
+.ah-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
 .disabled-why { color: var(--muted); font-size: var(--small); margin-top: 10px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .spin { display: inline-block; width: 13px; height: 13px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite; vertical-align: -2px; flex: none; }
@@ -355,11 +364,11 @@ a.btn:hover { text-decoration: none; }
 .field { display: flex; flex-direction: column; gap: 6px; border: 0; padding: 0; margin: 0; min-width: 0; }
 .field > span, .field > legend { font-weight: var(--strong-weight); font-size: var(--small); padding: 0; margin-bottom: 6px; }
 .field > span { margin-bottom: 0; }
-input[type=text], input[type=search], select { height: var(--field-h); border-radius: var(--ctl-radius); border: 1px solid var(--border-strong); background-color: var(--surface); color: var(--text); font: inherit; padding: 0 12px; width: 100%; transition: border-color .12s, box-shadow .12s; }
+input[type=text], input[type=search], input[type=number], select { height: var(--field-h); border-radius: var(--ctl-radius); border: 1px solid var(--border-strong); background-color: var(--surface); color: var(--text); font: inherit; padding: 0 12px; width: 100%; transition: border-color .12s, box-shadow .12s; }
 input[type=search] { -webkit-appearance: none; appearance: none; }
 input[type=search]::-webkit-search-cancel-button { -webkit-appearance: none; }
 input::placeholder { color: var(--faint); }
-input[type=text]:hover:not(:disabled), input[type=search]:hover, select:hover:not(:disabled) { border-color: var(--btn-hover-border); }
+input[type=text]:hover:not(:disabled), input[type=number]:hover:not(:disabled), input[type=search]:hover, select:hover:not(:disabled) { border-color: var(--btn-hover-border); }
 input[type=text]:focus, input[type=search]:focus, select:focus { border-color: var(--focus); }
 input[type=text]:disabled, select:disabled { background-color: var(--surface-2); color: var(--faint); cursor: not-allowed; }
 input.invalid { border-color: var(--fail); }

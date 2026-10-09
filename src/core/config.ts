@@ -71,6 +71,76 @@ const describeAlias = (v: AliasValue) => {
   return args.length ? `${aliasAccount(v)} with ${args.join(' ')}` : aliasAccount(v)
 }
 
+const Percent = (description: string) =>
+  Type.Optional(Type.Integer({ minimum: 1, maximum: 100, description }))
+
+/** Auto Handoff (spec §3.17, ADR-0010). Every key is optional; `handoffSettings` fills the defaults. */
+const HandoffSchema = Type.Object(
+  {
+    auto: Type.Optional(
+      Type.Boolean({
+        description:
+          'Hand a running session to the next account when its Quota runs low: only to other families and API accounts unless `sameFamily` is on. Off by default.',
+      }),
+    ),
+    sameFamily: Type.Optional(
+      Type.Boolean({
+        description:
+          'Also hand off to an account of the same family (cc001 → cc002). The kind vendors are most likely to act on. Off by default.',
+      }),
+    ),
+    prepareAt: Percent('Quota Pressure at which the session starts keeping a Handoff Brief (default 80).'),
+    threshold: Percent('Quota Pressure at which the Handoff begins (default 95).'),
+    waitIfResetWithinMinutes: Type.Optional(
+      Type.Integer({
+        minimum: 0,
+        description:
+          'Stay and wait when the full window resets within this many minutes (default 30; 0 never waits).',
+      }),
+    ),
+    countdownSeconds: Type.Optional(
+      Type.Integer({
+        minimum: 0,
+        description: 'Countdown before the next account starts; Enter cancels (default 10; 0 skips it).',
+      }),
+    ),
+    crossOrganization: Type.Optional(
+      Type.Array(Type.String(), {
+        description:
+          'Accounts (ref or short command) that may take over from an account of another organization.',
+      }),
+    ),
+    families: Type.Optional(
+      Type.Record(
+        Type.String(),
+        Type.Object(
+          {
+            policy: Type.Optional(Type.Union([Type.Literal('pressure'), Type.Literal('order')])),
+            order: Type.Optional(Type.Array(Type.String())),
+          },
+          { additionalProperties: false },
+        ),
+        {
+          description:
+            'Handoff Order per family the session starts in: `pressure` (default) or an `order` list.',
+        },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+)
+
+export interface HandoffSettings {
+  auto: boolean
+  sameFamily: boolean
+  prepareAt: number
+  threshold: number
+  waitIfResetWithinMinutes: number
+  countdownSeconds: number
+  crossOrganization: string[]
+  families: Record<string, { policy: 'pressure' | 'order'; order: string[] }>
+}
+
 export const ConfigSchema = Type.Object(
   {
     $schema: Type.Optional(Type.String()),
@@ -109,6 +179,7 @@ export const ConfigSchema = Type.Object(
           'Make `sideby shell-init` also define Host-named functions (`claude`, `codex`, `grok`) that resume a session by id in the Account that holds it. Off by default.',
       }),
     ),
+    handoff: Type.Optional(HandoffSchema),
     shellInitFile: Type.Optional(
       Type.Object(
         {
@@ -127,6 +198,26 @@ export const ConfigSchema = Type.Object(
 )
 
 export type Config = Static<typeof ConfigSchema>
+
+/** The `handoff` settings with every default filled in. */
+export function handoffSettings(config: Config): HandoffSettings {
+  const h = config.handoff ?? {}
+  return {
+    auto: h.auto ?? false,
+    sameFamily: h.sameFamily ?? false,
+    prepareAt: h.prepareAt ?? 80,
+    threshold: h.threshold ?? 95,
+    waitIfResetWithinMinutes: h.waitIfResetWithinMinutes ?? 30,
+    countdownSeconds: h.countdownSeconds ?? 10,
+    crossOrganization: [...(h.crossOrganization ?? [])],
+    families: Object.fromEntries(
+      Object.entries(h.families ?? {}).map(([f, v]) => [
+        f,
+        { policy: v.policy ?? 'pressure', order: [...(v.order ?? [])] },
+      ]),
+    ),
+  }
+}
 
 export class ConfigError extends UserError {}
 
@@ -149,6 +240,11 @@ export async function loadConfig(file: string): Promise<Config> {
     const where = first?.instancePath || '/'
     throw new ConfigError(`${file}: ${where} ${first?.message ?? 'is invalid'}; see schemas/config.json`)
   }
+  const handoff = handoffSettings(data)
+  if (handoff.prepareAt >= handoff.threshold)
+    throw new ConfigError(
+      `${file}: handoff.prepareAt (${handoff.prepareAt}) must be lower than handoff.threshold (${handoff.threshold}); lower prepareAt or raise threshold`,
+    )
   // TypeBox does not enforce key patterns on records; alias names become shell function names.
   for (const alias of Object.keys(data.aliases ?? {})) {
     const problem = aliasProblem(alias)
@@ -164,16 +260,20 @@ async function configTarget(file: string): Promise<string> {
 }
 
 /**
- * Re-reads the config file, lets `edit` change its `aliases`, and writes the result: every other key and their
- * order kept (with `$schema`), 2-space JSON with a trailing newline, atomically, keeping the file's mode (0600 for
- * a new file). Refuses, without writing, a file that is not valid JSON or not a valid config, or one that changed
- * while sideby wrote it. `edit` returns null to leave the file alone. `retry` names what to do again after a fix.
+ * Re-reads the config file, lets `edit` change one top-level `key` (the only two sideby writes are `aliases` and
+ * `handoff`, spec §3.10), and writes the result: every other key and their order kept (with `$schema`), 2-space JSON
+ * with a trailing newline, atomically, keeping the file's mode (0600 for a new file). Refuses, without writing, a
+ * file that is not valid JSON or not a valid config, a result that is not a valid config, or a file that changed
+ * while sideby wrote it. `edit` returns null to leave the file alone; `dryRun` returns the change without writing.
+ * `retry` names what to do again after a fix.
  */
-async function editConfigAliases(
+async function editConfigKey<K extends 'aliases' | 'handoff'>(
   file: string,
+  key: K,
   retry: string,
-  edit: (current: Record<string, AliasValue>) => Record<string, AliasValue> | null,
-): Promise<Record<string, AliasValue>> {
+  edit: (current: Config[K] | undefined) => Config[K] | null,
+  opts: { dryRun?: boolean } = {},
+): Promise<{ changed: boolean; before: Config[K] | undefined; after: Config[K] | undefined }> {
   const target = await configTarget(file)
   let raw: string | null = null
   try {
@@ -200,12 +300,23 @@ async function editConfigAliases(
       )
     data = parsed as Record<string, unknown>
   }
-  const current = (data.aliases ?? {}) as Record<string, AliasValue>
-  const aliases = edit(current)
-  if (!aliases) return current
+  const before = data[key] as Config[K] | undefined
+  const after = edit(before)
+  if (after === null || JSON.stringify(after) === JSON.stringify(before))
+    return { changed: false, before, after: before }
   // A new file gets the schema link editors use for completion; an existing file keeps its keys in order.
   const next =
-    raw === null ? { $schema: 'https://unpkg.com/sideby/schemas/config.json', aliases } : { ...data, aliases }
+    raw === null
+      ? { $schema: 'https://unpkg.com/sideby/schemas/config.json', [key]: after }
+      : { ...data, [key]: after }
+  if (!Value.Check(ConfigSchema, next))
+    throw new ConfigError(`the new ${key} would not match schemas/config.json`)
+  const h = handoffSettings(next as Config)
+  if (h.prepareAt >= h.threshold)
+    throw new ConfigError(
+      `handoff.prepareAt must be lower than handoff.threshold; fix them in ${file} and ${retry} again`,
+    )
+  if (opts.dryRun) return { changed: true, before, after }
   const st = raw === null ? null : await lstatOrNull(target)
   if (raw === null) await mkdir(dirname(target), { recursive: true, mode: 0o700 })
   const written = await writeIfUnchanged(
@@ -216,7 +327,30 @@ async function editConfigAliases(
   )
   if (!written)
     throw new ConfigError(`${file} changed while sideby was writing it; nothing was changed. Try again`)
-  return aliases
+  return { changed: true, before, after }
+}
+
+async function editConfigAliases(
+  file: string,
+  retry: string,
+  edit: (current: Record<string, AliasValue>) => Record<string, AliasValue> | null,
+): Promise<Record<string, AliasValue>> {
+  const r = await editConfigKey(file, 'aliases', retry, (current) => edit(current ?? {}))
+  return r.after ?? {}
+}
+
+export type HandoffConfig = NonNullable<Config['handoff']>
+
+/**
+ * `sideby handoff enable|disable` (spec §3.17): changes the config `handoff` key with `edit` (see `editConfigKey`
+ * for how the file is written). With `dryRun`, shows the change without writing.
+ */
+export function editConfigHandoff(
+  file: string,
+  edit: (current: HandoffConfig) => HandoffConfig,
+  opts: { dryRun?: boolean } = {},
+): Promise<{ changed: boolean; before: HandoffConfig | undefined; after: HandoffConfig | undefined }> {
+  return editConfigKey(file, 'handoff', 'run the command', (current) => edit(current ?? {}), opts)
 }
 
 /**

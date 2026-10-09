@@ -1,5 +1,6 @@
 // Panel: spec §5 items 9 and 10 (security rules, per-card errors) and both mounting modes.
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { createServer, request as httpRequest, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { describe, it } from 'node:test'
@@ -816,6 +817,84 @@ describe('panel build identity', () => {
         )
       } finally {
         await close(server)
+      }
+    })
+  })
+})
+
+describe('Auto Handoff in the Panel (spec §3.17)', () => {
+  it('sends the settings with the state, shows readiness, previews without writing and writes only on confirm', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude-001/projects/.keep', '')
+      await h.write('.claude-002/projects/.keep', '')
+      const { claudePlugin } = await import('../families/claude/index.ts')
+      const runtime = () => createRuntime({ env: h.env, builtins: [asBuiltin(claudePlugin)] })
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      try {
+        const hdr = {
+          host: `127.0.0.1:${port}`,
+          origin: `http://127.0.0.1:${port}`,
+          'x-sideby-token': handler.token,
+        }
+        const state = JSON.parse(
+          (await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text,
+        ) as PanelState
+        assert.equal(state.autoHandoff.settings.auto, false)
+        assert.deepEqual(state.autoHandoff.starters, ['claude'])
+        const status = (await post(port, '/api/handoff/status', {}, hdr)).body as { nextSteps: string[] }
+        assert.equal(status.nextSteps[0], 'sideby handoff enable')
+        const change = { auto: true, sameFamily: true, orders: [{ family: 'claude', order: ['claude:002'] }] }
+        const preview = (await post(port, '/api/handoff/configure', { change }, hdr)).body as {
+          applied: boolean
+          diff: string
+        }
+        assert.equal(preview.applied, false)
+        assert.match(preview.diff, /"auto": true/)
+        await assert.rejects(readFile(h.path('.config/sideby/config.json'), 'utf8'))
+        const saved = (await post(port, '/api/handoff/configure', { change, confirm: true }, hdr)).body as {
+          applied: boolean
+        }
+        assert.equal(saved.applied, true)
+        const written = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8'))
+        assert.deepEqual(written.handoff, {
+          auto: true,
+          sameFamily: true,
+          families: { claude: { policy: 'order', order: ['claude:002'] } },
+        })
+        assert.equal(
+          (await post(port, '/api/handoff/configure', { change: { rotate: true } }, hdr)).status,
+          400,
+        )
+        assert.equal(
+          (await post(port, '/api/handoff/configure', { change: { threshold: '95' } }, hdr)).status,
+          400,
+        )
+      } finally {
+        await close(server)
+      }
+      const ro = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`], readOnly: true }),
+      )
+      try {
+        const hdr = {
+          host: `127.0.0.1:${ro.port}`,
+          origin: `http://127.0.0.1:${ro.port}`,
+          'x-sideby-token': ro.handler.token,
+        }
+        assert.equal((await post(ro.port, '/api/handoff/status', {}, hdr)).status, 200)
+        assert.equal(
+          (await post(ro.port, '/api/handoff/configure', { change: { auto: false } }, hdr)).status,
+          200,
+        )
+        assert.equal(
+          (await post(ro.port, '/api/handoff/configure', { change: { auto: false }, confirm: true }, hdr))
+            .status,
+          403,
+        )
+      } finally {
+        await close(ro.server)
       }
     })
   })

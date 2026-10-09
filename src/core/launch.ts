@@ -1,9 +1,10 @@
-import { spawn } from 'node:child_process'
+import { type ChildProcess, spawn } from 'node:child_process'
 import { access, constants } from 'node:fs/promises'
 import { constants as osConstants } from 'node:os'
 import { delimiter, join } from 'node:path'
 import type { HookBus } from '../plugins/bus.ts'
 import type { Account, Env, FamilyDef } from '../types.ts'
+import { realpathOrNull } from './fs-safe.ts'
 import { readSecretFile } from './secret-file.ts'
 
 export interface PreparedLaunch {
@@ -33,6 +34,20 @@ export async function which(bin: string, env: Env): Promise<string | null> {
       // keep looking
     }
   }
+  return null
+}
+
+/**
+ * Why a Host could not run `sideby` by name, or null when it can: something the Host runs on its own (the status line
+ * tap, the handoff hook) needs sideby installed on PATH, not the npx cache, which can disappear. `why` completes
+ * "sideby is not on PATH, and …".
+ */
+export async function sidebyBinProblem(env: Env, why: string): Promise<string | null> {
+  const bin = await which('sideby', env)
+  if (!bin) return `sideby is not on PATH, and ${why}; install it with \`npm i -g sideby\` and retry`
+  const real = (await realpathOrNull(bin)) ?? bin
+  if (bin.includes('/_npx/') || real.includes('/_npx/'))
+    return `sideby on PATH comes from the npx cache (${bin}), which can disappear; install it with \`npm i -g sideby\` and retry`
   return null
 }
 
@@ -119,10 +134,18 @@ export async function prepareLaunch(opts: {
  * default action so Ctrl-Z suspends sideby together with the Host and `fg` resumes both.
  */
 export function runHost(p: HostLaunch): Promise<number> {
+  return spawnHost(p).exited
+}
+
+/**
+ * `runHost` with the child process exposed, so the Auto Handoff (spec §3.17) can end the Host and start the next
+ * Account in the same terminal. Same signal handling, exit codes and title as `runHost`.
+ */
+export function spawnHost(p: HostLaunch): { child: ChildProcess; exited: Promise<number> } {
   // OSC 0 sets the terminal's tab and window title; only on a terminal, never into a pipe.
   if (p.title && process.stdout.isTTY) process.stdout.write(`\x1b]0;${p.title}\x07`)
-  return new Promise((resolve) => {
-    const child = spawn(p.bin, p.args, { stdio: 'inherit', env: p.env as NodeJS.ProcessEnv })
+  const child = spawn(p.bin, p.args, { stdio: 'inherit', env: p.env as NodeJS.ProcessEnv })
+  const exited = new Promise<number>((resolve) => {
     const ignore = () => {}
     const forwarded = new Set<NodeJS.Signals>()
     const forward = (sig: NodeJS.Signals) => () => {
@@ -155,4 +178,5 @@ export function runHost(p: HostLaunch): Promise<number> {
       else resolve(code ?? 1)
     })
   })
+  return { child, exited }
 }

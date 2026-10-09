@@ -1,6 +1,6 @@
 # ADR 0001: Isolate Accounts by directory and run them side by side; never switch, rotate or proxy
 
-Date: 2026-10-05 · Status: accepted
+Date: 2026-10-05 · Status: accepted, amended by ADR-0010 (opt-in Auto Handoff)
 
 ## Context
 

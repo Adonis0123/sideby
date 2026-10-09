@@ -5,6 +5,7 @@ import type { Account, FamilyDef, LoginState, Plugin } from '../../types.ts'
 import { BUILTIN_LOGOS } from '../logos.ts'
 import { groupedEntryWrittenAt, resumeFlagSession } from '../shared/sessions.ts'
 import { topLevelTomlString } from '../shared/toml.ts'
+import { grokHandoff } from './handoff.ts'
 
 // Grok's sandbox rejects these paths when they are symlinks; doctor quotes the Host's own words.
 const HOOKS_DIR_MESSAGE = 'Grok hooks directory has wrong type (expected real directory)'
@@ -72,6 +73,7 @@ export const grokFamily: FamilyDef = {
   model: readModel,
   identity: grokIdentity,
   resumedSession: resumeFlagSession,
+  handoff: grokHandoff,
   // One directory per session, grouped by working directory: sessions/<encoded cwd>/<id>/.
   sessionWrittenAt: (account, id) => groupedEntryWrittenAt(join(account.dir, 'sessions'), id, 'dir'),
 }

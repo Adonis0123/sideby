@@ -37,6 +37,7 @@ src/
 ├── cli/          argument parsing and subcommands; I/O only, no business logic
 ├── core/         paths, config, account discovery, Secret File, Share Modes, doctor, create, launch, atomic writes;
 │                 handoff.ts ranks Accounts for `sideby next` (Quota Pressure in quota-levels.ts);
+│                 handoff-select.ts, handoff-run.ts, handoff-chain.ts, handoff-brief.ts, handoff-doctor.ts: Auto Handoff (§3.17)
 │                 skill-check.ts compares an installed sideby skill with this version
 │                 share-meaning.ts: the one-line meaning of each Shared Item that `sideby families` prints
 ├── plugins/      loader (trust checks), hook bus, built-in account-script
@@ -47,6 +48,8 @@ src/
 │                 identity readers pick only email/organization from login files (core/identity.ts);
 │                 readers remember each file's parse until it changes (core/file-memo.ts)
 ├── quota/        `quota setup|teardown claude` and the `statusline-tap` entry (thin; cache logic in families/claude/quota-cache.ts)
+├── handoff/      the `handoff-hook` entry (leaf imports only), its messages and the per-Host reader contract;
+│                 each Family's reader is families/<id>/handoff-hook.ts, its `handoff` member families/<id>/handoff.ts
 ├── panel/        createPanelHandler, the standalone server, the inline page and theme.ts (host theme tokens);
 │                 page-logic.ts suggestName/suggestAlias also pick the name and short command for `new --next`
 │                 background.ts runs the server detached (`ui --background`, `--stop`)
@@ -92,16 +95,18 @@ Shared Item paths must be relative and stay inside the account directory: config
 
 - Never print, log, return, or put in an error message the value of anything from `proxy.env`, `auth.json` or `.claude.json`. Errors name the path or the variable, and for parse errors the line number only. The values shown are a Claude API Account's `ANTHROPIC_MODEL`, as its model, and the identity fields a Family's `identity` reader picks (email, organization; ADR-0003). Never a token: Codex's `id_token` is decoded only to take its `email` claim, and is never stored or returned.
 - Doctor checks credential files for type and mode 600 only. The only content it reads is the single key a `json-key` item names. `proxy.env` is parsed only at Launch and for that model name.
-- Never read a credential to call a model, pool logins, or rotate accounts (ADR-0001). Never call private quota endpoints (ADR-0003). Built-in quota and usage readers make no network requests.
+- Never read a credential to call a model, pool logins, or rotate accounts on its own (ADR-0001; Auto Handoff is opt-in, ADR-0010). Never call private quota endpoints (ADR-0003). Built-in quota and usage readers make no network requests.
 
 **Host directories**
 
-- sideby writes none of its own files into a Host account directory. The only exception is `quota setup claude --yes`, which wraps the main `settings.json` status line as `sideby statusline-tap --orig-b64 <base64>`; `teardown` restores it byte for byte, only while the file hash still matches what setup wrote. Setup refuses when `sideby` is not on PATH or comes from the npx cache, because Claude Code runs the wrapper on every refresh.
+- sideby writes none of its own files into a Host account directory. The exceptions are `quota setup claude --yes`, which wraps the main `settings.json` status line as `sideby statusline-tap --orig-b64 <base64>`, and `handoff setup grok --yes`, which adds `~/.grok/hooks/sideby-handoff.json` (ADR-0010). `teardown` restores the file byte for byte (removes the hook file and a hooks directory it emptied), only while the file still matches what setup wrote. Setup refuses when `sideby` is not on PATH or comes from the npx cache, because the Host runs it by name.
+- `handoff-hook` (spec §3.17) runs on every tool call while Auto Handoff is on. Its imports follow the same rule as `statusline-tap`, and `src/handoff/hook.test.ts` walks its import graph to keep it so. It does nothing without `SIDEBY_HANDOFF_RUN` or for another Family's hook, never fails the Host (any problem: no output, exit 0), and a `StopFailure` counts only for a used-up Quota. Measured cold start (median of 21): about 40 ms from `dist`.
 - `statusline-tap` runs on every status line refresh. It may import only Node built-ins and leaf modules: `families/claude/quota-cache.ts`, `families/claude/layout.ts`, `core/account-name.ts`, `core/fs-safe.ts`, `core/paths.ts`. Never import `runtime.ts`, a Family index or `core/accounts.ts` from it. It must never change what the original command receives, prints or returns. Measured cold start (median of 21): about 40 ms from `dist`, 71–79 ms from source.
 - Quota warning levels and the Usage window live in `core/quota-levels.ts`; the CLI and the Panel page both use them.
 - Fixes write only inside the account being fixed, through the atomic writer (temp file in the same directory, mode 600, rename). Credential files end at mode 600.
 - `launch` never changes the parent shell environment, never adds dangerous flags by default, and clears Hijack Variables for every account.
 - `sideby next` (Handoff, spec §3.13) only ranks local Quota and starts its pick exactly as `run` would. It starts nothing when nothing can be picked, nor when no signed-in Subscription Account of the Family has Quota data (`hasQuota: false`, the pick would be a guess), and never copies sessions between Accounts.
+- Auto Handoff (spec §3.17, ADR-0010) acts only with config `handoff.auto`, and between two Accounts of one Family only with `sameFamily` too. It never ends a Host before a pick exists, never kills one (SIGTERM, then 10 s, then it gives up), never copies sessions, and passes the Brief's path, never its text, on the command line. It adds no dangerous flag: hooks come through `--settings` (Claude), `-c hooks.*` (Codex, which the user must trust in `/hooks`) or the Grok setup file.
 
 **Plugins**
 
@@ -118,7 +123,7 @@ Shared Item paths must be relative and stay inside the account directory: config
 
 - Every `--json` output has `schemaVersion: 1`. A `--json` error is `{ schemaVersion, error, code }`; `error` stays a string. Adding a field keeps the version; removing, renaming or changing meaning bumps it and needs an ADR.
 - Every user-facing error says what to do next.
-- Exit code 10 means a change was shown and waits for `--yes` (only `quota setup` today). Doctor never uses it: it exits 1 only for `fail` Findings.
+- Exit code 10 means a change was shown and waits for `--yes` (`quota setup` and `handoff setup`). Doctor never uses it: it exits 1 only for `fail` Findings.
 
 ## Tests
 

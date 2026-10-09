@@ -20,7 +20,7 @@ Do every step you can yourself. Only browser sign-in, secrets and interactive se
 - **Never sign in for the user.** Give them `sideby login <ref>` as one line to run in their own terminal (Claude Code: `! sideby login <ref>`). OAuth needs their browser and their decision.
 - **Never put a secret on the command line or in chat.** For API accounts, the user edits `proxy.env` themselves.
 - **Never start a Host session from your shell.** `sideby run`, `sideby next` (without `--dry-run`) and `sideby login` open an interactive session; give the user the command instead.
-- **Never switch, rotate or proxy accounts.** sideby does not do it, and you must not work around that by editing config, copying session files or moving credentials. Choosing the next account is the user's call; `sideby next` only recommends.
+- **Never switch, rotate or proxy accounts yourself.** Do not work around sideby by editing config, copying session files or moving credentials. `sideby next` only recommends. Moving a running task on its own is Auto Handoff, which the user turns on: use `sideby handoff enable` (exit 10, then their yes), never hand-edit `config.json`. Inside such a session you may run `sideby handoff ready` when the user asks to hand over.
 - **Say what you change.** Read-only commands first. What the user asked for (the account they asked to create, its short command, the shell line that makes it work) you do, saying what you do. Changes they did not ask for (`doctor --fix` on other accounts, `quota setup`, `app install`) wait until they have seen the change and agreed.
 - Do not edit Host config files (`settings.json`, `config.toml`, symlinks in account directories) by hand when a `sideby` command does the job.
 
@@ -42,6 +42,7 @@ Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique
 | See accounts, health, quota and usage | `sideby list --json`, `sideby doctor --json`, `sideby quota --json` | `references/diagnose.md` |
 | Repair drift or permissions | `sideby doctor [ref] --json`, then `--fix` after they agree | `references/diagnose.md` |
 | Keep working because an account hit its limit | `sideby next <family> --json` | `references/handoff.md` |
+| Turn on Auto Handoff ("自动交接", "hand over when quota runs low"), see what it still needs, hand this session over now, or pick an account with room for a subtask | `sideby handoff status --json`, `sideby handoff enable --json` (exit 10 first), `sideby handoff ready`, `sideby next <family> --json` | `references/handoff.md` |
 | Create an account with a given name, an API account, or a short command | `sideby new`, `sideby alias add` | `references/accounts.md` |
 | See Claude quota (it shows `not-enabled`) | `sideby quota setup claude` (exits 10) | `references/quota.md` |
 | See everything at once | `sideby ui` (local panel on `127.0.0.1:17420`; `--no-open` prints the address) | — |

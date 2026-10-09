@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/handoff-status.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "auto",
+    "sameFamily",
+    "prepareAt",
+    "threshold",
+    "sideby",
+    "families",
+    "nextSteps"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "auto": {
+      "type": "boolean"
+    },
+    "sameFamily": {
+      "type": "boolean"
+    },
+    "prepareAt": {
+      "type": "number"
+    },
+    "threshold": {
+      "type": "number"
+    },
+    "sideby": {
+      "type": "object",
+      "required": [
+        "ok"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "problem": {
+          "type": "string"
+        }
+      }
+    },
+    "families": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "family",
+          "starts",
+          "ready",
+          "problems",
+          "notes",
+          "order"
+        ],
+        "properties": {
+          "family": {
+            "type": "string"
+          },
+          "starts": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "quota"
+                },
+                {
+                  "type": "string",
+                  "const": "limit"
+                }
+              ]
+            }
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "order": {
+            "type": "object",
+            "required": [
+              "policy",
+              "order",
+              "unknown"
+            ],
+            "properties": {
+              "policy": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "pressure"
+                  },
+                  {
+                    "type": "string",
+                    "const": "order"
+                  }
+                ]
+              },
+              "order": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "unknown": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "nextSteps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "title": "sideby handoff status --json"
+}

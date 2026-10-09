@@ -19,6 +19,12 @@
 | `sideby quota [acct]` | 额度和近 7 天用量 | 0 |
 | `sideby quota setup claude [--yes]` | 展示改动；加 `--yes` 才开启 Claude 额度来源 | 只展示改动时为 10；开启后为 0；无法开启或失败为 1 |
 | `sideby quota teardown claude` | 关闭并还原原文件 | 0；拒绝或失败为 1 |
+| `sideby handoff status` | 按家族列出本机启用自动交接还差什么，以及接下来要运行的命令 | 0 |
+| `sideby handoff enable [--same-family] [--order <family>=<acct,…>] [--threshold n] [--prepare-at n] [--yes]` | 展示 config 改动；加 `--yes` 才开启（其他设置保留），并列出还要做的步骤 | 只展示改动时为 10；写入后或已是这样为 0；`--order` 里有找不到的账号为 1 |
+| `sideby handoff disable [--yes]` | 关闭，其他设置保留 | 只展示改动时为 10；写入后或本来就关着为 0 |
+| `sideby handoff ready [--brief <file>]` | 在 sideby 以自动交接启动的会话里：这一轮结束后交给下一个账号；`--brief` 用你自己写的交接说明 | 0；不在这类会话里或读不了 brief 文件为 1 |
+| `sideby handoff setup grok [--yes]` | 展示改动；加 `--yes` 才添加 sideby 的 hook 文件，让 Grok 撞上限额时能交接 | 只展示改动时为 10；开启后为 0；无法开启或失败为 1 |
+| `sideby handoff teardown grok` | 文件未被改动时删除它 | 0；拒绝或失败为 1 |
 | `sideby ui [--port n] [--no-open]` | 本地面板，按 Ctrl+C 停止 | — |
 | `sideby ui --background` / `--stop` | 脱离终端启动面板（已有就复用，sideby 升级后则替换旧的）并打开 / 停掉它 | 0；启动或停止失败为 1 |
 | `sideby app install [--url <url>]` | 添加打开面板（或 `<url>`）的桌面应用（macOS、Linux） | 0；平台不支持或目标位置有不是它创建的文件为 1 |

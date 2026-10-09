@@ -386,3 +386,65 @@ export function panelLang(host: string, saved: string, browser: string): string 
   if (saved === 'en' || saved === 'zh') return saved
   return /^zh/i.test(browser || '') ? 'zh' : 'en'
 }
+
+/**
+ * The Account that makes the Panel's Auto Handoff hint worth showing (spec §3.17): Auto Handoff is off and a
+ * subscription Account of a Family that can start a Handoff is at or above the threshold. The fullest wins.
+ */
+export function handoffHintAccount(
+  accounts: readonly LogicAccount[],
+  settings: { auto: boolean; threshold: number },
+  starters: readonly string[],
+  now: number,
+): { ref: string; pressure: number } | null {
+  if (settings.auto) return null
+  let best: { ref: string; pressure: number } | null = null
+  for (const a of accounts) {
+    if (a.kind === 'api' || !starters.includes(a.family)) continue
+    const p = quotaPressure(a, now)
+    if (p >= settings.threshold && (!best || p > best.pressure))
+      best = { ref: a.ref, pressure: Math.round(p) }
+  }
+  return best
+}
+
+export interface HandoffSettingsView {
+  auto: boolean
+  sameFamily: boolean
+  prepareAt: number
+  threshold: number
+  waitIfResetWithinMinutes: number
+  countdownSeconds: number
+  families: Record<string, { policy: string; order: string[] }>
+}
+
+export interface HandoffForm {
+  auto: boolean
+  sameFamily: boolean
+  prepareAt: number
+  threshold: number
+  wait: number
+  countdown: number
+  orders: Record<string, { policy: string; order: string[] }>
+}
+
+/** What the Panel's Auto Handoff form changed, as the `change` /api/handoff/configure takes; {} when nothing. */
+export function handoffChangeOf(s: HandoffSettingsView, f: HandoffForm): Record<string, unknown> {
+  const c: Record<string, unknown> = {}
+  if (f.auto !== s.auto) c.auto = f.auto
+  if (f.sameFamily !== s.sameFamily) c.sameFamily = f.sameFamily
+  if (f.prepareAt !== s.prepareAt) c.prepareAt = f.prepareAt
+  if (f.threshold !== s.threshold) c.threshold = f.threshold
+  if (f.wait !== s.waitIfResetWithinMinutes) c.waitIfResetWithinMinutes = f.wait
+  if (f.countdown !== s.countdownSeconds) c.countdownSeconds = f.countdown
+  const orders: { family: string; order: string[] }[] = []
+  for (const family of Object.keys(f.orders)) {
+    const o = f.orders[family]!
+    const cur = s.families[family]
+    const want = o.policy === 'order' ? o.order : []
+    const have = cur && cur.policy === 'order' ? cur.order : []
+    if (want.join('\n') !== have.join('\n')) orders.push({ family, order: want.slice() })
+  }
+  if (orders.length) c.orders = orders
+  return c
+}

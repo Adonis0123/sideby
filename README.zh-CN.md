@@ -71,6 +71,7 @@ agent 会检查 Node 和宿主 CLI，装好 sideby 和 skill，建账号，告�
 | 找出并修复账号之间的配置漂移 | `sideby doctor --fix` | [体检](docs/guide/usage.zh-CN.md#体检doctor) |
 | 看 Claude 额度（Codex 不用设置） | `sideby quota setup claude --yes` | [Claude 额度](docs/guide/usage.zh-CN.md#claude-额度) |
 | 账号撞上限额时换一个接着用 | `sideby next claude` | [接力](docs/guide/usage.zh-CN.md#账号撞上限额时) |
+| 额度快用完时，让正在跑的任务自己交给下一个账号（默认关闭，注意风险） | `sideby handoff enable`（或在面板里开启） | [自动交接](docs/guide/usage.zh-CN.md#自动交接auto-handoff) |
 | 用 `ccw` 这样的短命令 | `sideby alias add ccw claude:work` | [Shell 函数](docs/guide/configuration.zh-CN.md#shell-函数) |
 | 在 Orca 这类工具里重开会话时，自动进到存有它的账号 | config 里写 `"resumeRouting": true` | [从其他工具恢复会话](docs/guide/configuration.zh-CN.md#从其他工具恢复会话) |
 | 从 Dock 或应用菜单打开面板 | `sideby app install` | [桌面应用](docs/guide/panel.zh-CN.md#桌面应用) |
@@ -98,7 +99,7 @@ sideby 启动 `PATH` 上的官方程序，从不修改它。测试过的版本�
 
 ## 安全边界
 
-- 不改宿主的全局配置来切换账号，也不会自己轮换账号。
+- 不改宿主的全局配置来切换账号。只有你打开自动交接（Auto Handoff）时，才会把任务交给另一个账号；从不代理请求，也不合并登录。
 - 不读取、不打印、不发送任何凭据的值。数据不出本机：sideby 不调用任何远程服务。
 - `doctor --fix` 不替换真实文件，也不改链接的指向。
 

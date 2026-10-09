@@ -64,6 +64,11 @@ export interface FakeHostOptions {
   selfSignal?: string
   /** Seconds to sleep before exiting, so tests can signal it. */
   sleep?: number
+  /**
+   * JavaScript run right after the start record, with `fs`, `path` and `process` in scope; for example to write
+   * the file a Host hook would write. It may call `process.exit`.
+   */
+  onStart?: string
 }
 
 /**
@@ -79,6 +84,7 @@ const rec = (o) => fs.appendFileSync(log, JSON.stringify(o) + '\\n')
 // Handlers first: tests signal the Host as soon as the start record appears.
 for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT']) process.on(s, () => { rec({ signal: s }); process.exit(${opts.sleep ? 100 : 0}) })
 rec({ argv: process.argv.slice(2), env: process.env, pid: process.pid })
+${opts.onStart ? `{ const path = require('node:path'); ${opts.onStart} }` : ''}
 const finish = () => {
   ${opts.selfSignal ? `process.removeAllListeners(${JSON.stringify(opts.selfSignal)}); process.kill(process.pid, ${JSON.stringify(opts.selfSignal)})` : `process.exit(${opts.exitCode ?? 0})`}
 }

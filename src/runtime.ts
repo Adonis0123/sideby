@@ -9,6 +9,8 @@ import {
   aliasProblem,
   aliasRefs,
   type Config,
+  type HandoffSettings,
+  handoffSettings,
   loadConfig,
   removeConfigAlias,
 } from './core/config.ts'
@@ -16,6 +18,8 @@ import { type CreateResult, createAccount } from './core/create.ts'
 import { applyFixes, type DoctorReport, runDoctor } from './core/doctor.ts'
 import { UserError } from './core/errors.ts'
 import { type HandoffPlan, planHandoff } from './core/handoff.ts'
+import { handoffFindings } from './core/handoff-doctor.ts'
+import { type HandoffDecision, type SelectCandidate, selectNext } from './core/handoff-select.ts'
 import { identityOf } from './core/identity.ts'
 import {
   type DoctorHistory,
@@ -47,6 +51,7 @@ import type {
   FamilyDef,
   LoginState,
   QuotaResult,
+  QuotaSetup,
   QuotaSetupPlan,
   ReadContext,
   ShareMode,
@@ -189,6 +194,8 @@ export interface Runtime {
   quotaSetups(): Promise<{ family: string; summary: string; plan: QuotaSetupPlan }[]>
   /** One Family's quota setup; throws UnknownFamilyError or a UserError when the Family has none. */
   quotaSetup(familyId: string): BoundQuotaSetup
+  /** One Family's handoff hook setup (spec §3.17, Grok); throws a UserError when the Family needs none. */
+  handoffSetup(familyId: string): BoundQuotaSetup
   /**
    * Creates the Account, then (when `alias` is given) adds it to the config `aliases`, then rewrites every
    * `shellInitFile`. An alias that is invalid or taken is refused before anything is created; a failure to write
@@ -225,6 +232,13 @@ export interface Runtime {
    * when the Family cannot tell, `no-accounts` when it has none.
    */
   handoff(familyId: string, opts?: { includeApi?: boolean }): Promise<HandoffPlan>
+  /** The config `handoff` settings with every default filled in (spec §3.17). */
+  handoffSettings(): HandoffSettings
+  /**
+   * Where an Auto Handoff from `origin` would go now (spec §3.17 "选号"): every Account of every Family is a
+   * candidate; `used` lists the chain's Accounts so far.
+   */
+  handoffDecision(origin: Account, used: readonly string[]): Promise<HandoffDecision>
   readContext(): ReadContext
 }
 
@@ -293,6 +307,43 @@ export async function createRuntime(
     const out: Account[] = []
     for (const f of families.values()) out.push(...(await discoverAccounts(f, paths.home, ignore)))
     return out
+  }
+
+  const loginOf = async (a: Account): Promise<LoginState | 'not-needed'> => {
+    if (a.kind === 'api') return 'not-needed'
+    try {
+      return (await familyOf(a.family).loginState?.(a)) ?? 'unknown'
+    } catch {
+      return 'unknown'
+    }
+  }
+
+  /** A Family's one-time setup bound to this Runtime; a setup that throws is reported, never crashes the caller. */
+  const bindSetup = (f: FamilyDef, setup: QuotaSetup): BoundQuotaSetup => {
+    // The message is the error's own text; setup implementations must not put file contents into it.
+    const blocked = (err: unknown): QuotaSetupPlan => ({
+      status: 'blocked',
+      file: '',
+      diff: '',
+      message: (err as Error)?.message ?? String(err),
+    })
+    return {
+      family: f.id,
+      summary: setup.summary,
+      // Promise.resolve().then also catches a setup that throws synchronously.
+      plan: () =>
+        Promise.resolve()
+          .then(() => setup.plan(readContext()))
+          .catch(blocked),
+      apply: () =>
+        Promise.resolve()
+          .then(() => setup.apply(readContext()))
+          .catch(blocked),
+      teardown: () =>
+        Promise.resolve()
+          .then(() => setup.teardown(readContext()))
+          .catch((err: unknown) => ({ ok: false, message: (err as Error)?.message ?? String(err) })),
+    }
   }
 
   const readContext = (): ReadContext => ({
@@ -434,10 +485,26 @@ export async function createRuntime(
         // of that Family keeps its skill warning.
         skillVersion: packageVersion(),
       }
-      let report = await runDoctor(input)
+      // Auto Handoff warnings (spec §3.17) join the general Findings; they never fail Doctor.
+      const all = await accounts()
+      const withHandoff = async (r: DoctorReport): Promise<DoctorReport> => {
+        const claude = fams.get('claude')
+        const extra = await handoffFindings({
+          settings: handoffSettings(config),
+          families: [...fams.keys()],
+          accounts: all,
+          aliases: aliasRefs(config.aliases),
+          ...(claude?.quotaSetup
+            ? { claudeTap: (await bindSetup(claude, claude.quotaSetup).plan()).status === 'enabled' }
+            : {}),
+          home: paths.home,
+        })
+        return extra.length ? { ...r, general: [...r.general, ...extra] } : r
+      }
+      let report = await withHandoff(await runDoctor(input))
       if (o.fix) {
         const fixes = await applyFixes(report)
-        report = { ...(await runDoctor(input)), fixes }
+        report = { ...(await withHandoff(await runDoctor(input))), fixes }
       }
       const history = mergeDoctorHistory(await readDoctorHistory(paths.stateDir), report, scope, now())
       if (o.persist !== false) await writeDoctorHistory(paths.stateDir, history)
@@ -455,36 +522,16 @@ export async function createRuntime(
     },
     quotaSetup(familyId) {
       const f = familyOf(familyId)
-      const setup = f.quotaSetup
-      if (!setup) throw new UserError(`${f.title} needs no quota setup`)
-      // One rule for every adapter: a setup that throws is reported, never crashes the caller. The message
-      // is the error's own text; setup implementations must not put file contents into it.
-      const blocked = (err: unknown): QuotaSetupPlan => ({
-        status: 'blocked',
-        file: '',
-        diff: '',
-        message: (err as Error)?.message ?? String(err),
-      })
-      return {
-        family: f.id,
-        summary: setup.summary,
-        // Promise.resolve().then also catches a setup that throws synchronously.
-        plan: () =>
-          Promise.resolve()
-            .then(() => setup.plan(readContext()))
-            .catch(blocked),
-        apply: () =>
-          Promise.resolve()
-            .then(() => setup.apply(readContext()))
-            .catch(blocked),
-        teardown: () =>
-          Promise.resolve()
-            .then(() => setup.teardown(readContext()))
-            .catch((err: unknown) => ({
-              ok: false,
-              message: (err as Error)?.message ?? String(err),
-            })),
-      }
+      if (!f.quotaSetup) throw new UserError(`${f.title} needs no quota setup`)
+      return bindSetup(f, f.quotaSetup)
+    },
+    handoffSetup(familyId) {
+      const f = familyOf(familyId)
+      if (!f.handoff?.hookSetup)
+        throw new UserError(
+          `${f.title} needs no handoff setup: ${f.handoff?.starts.length ? 'sideby adds its hooks when it starts the account' : 'it cannot start a handoff, only take one over'}`,
+        )
+      return bindSetup(f, f.handoff.hookSetup)
     },
     async createAccount(familyId, name, o = {}) {
       const family = familyOf(familyId)
@@ -656,14 +703,6 @@ export async function createRuntime(
           code: 'no-accounts',
         })
       // Only the login state and Quota: no identity, model or Host lookups are needed to rank.
-      const loginOf = async (a: Account): Promise<LoginState | 'not-needed'> => {
-        if (a.kind === 'api') return 'not-needed'
-        try {
-          return (await f.loginState?.(a)) ?? 'unknown'
-        } catch {
-          return 'unknown'
-        }
-      }
       const candidates = await Promise.all(
         list.map(async (a) => {
           const [login, quota] = await Promise.all([loginOf(a), rt.quota(a)])
@@ -671,6 +710,51 @@ export async function createRuntime(
         }),
       )
       return planHandoff(f.id, candidates, readContext().now, o)
+    },
+    handoffSettings: () => handoffSettings(config),
+    async handoffDecision(origin, used) {
+      const candidates = await Promise.all(
+        (await accounts()).map(async (a): Promise<SelectCandidate> => {
+          const f = familyOf(a.family)
+          const [installed, login, quota, identity] = await Promise.all([
+            which(f.bin, env),
+            loginOf(a),
+            rt.quota(a),
+            readIdentity(f, a),
+          ])
+          let receive = false
+          try {
+            receive = Boolean(
+              f.handoff &&
+                (await f.handoff.eligibility(config.accounts?.[a.ref]?.args ?? [], a, env)).receive,
+            )
+          } catch {
+            // a Family that cannot tell does not take over
+          }
+          return {
+            ref: a.ref,
+            family: a.family,
+            name: a.name,
+            isMain: a.isMain,
+            kind: a.kind,
+            login,
+            quota,
+            ...(identity ? { identity } : {}),
+            installed: installed !== null,
+            receive,
+          }
+        }),
+      )
+      const self = candidates.find((c) => c.ref === origin.ref)
+      if (!self) throw new UserError(`${origin.ref} is not an account sideby can find; run \`sideby list\``)
+      return selectNext({
+        origin: self,
+        candidates,
+        settings: handoffSettings(config),
+        aliases: aliasRefs(config.aliases),
+        used,
+        now: now(),
+      })
     },
     readContext,
   }

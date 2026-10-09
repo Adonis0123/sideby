@@ -7,6 +7,8 @@ import {
   attentionWhy,
   cacheHitRate,
   formatDuration,
+  handoffChangeOf,
+  handoffHintAccount,
   maskEmail,
   matchesQuery,
   mergeDaily,
@@ -30,6 +32,8 @@ const LOGIC = [
   attentionWhy,
   cacheHitRate,
   formatDuration,
+  handoffChangeOf,
+  handoffHintAccount,
   maskEmail,
   matchesQuery,
   mergeDaily,
@@ -89,6 +93,7 @@ const MAIN = String.raw`
     const p = { view: 'list', sort: 'pressure', quota: 'used', theme: 'system', lang: '', family: '', collapsed: {}, hideEmail: false }
     for (const k of Object.keys(CHOICES)) if (CHOICES[k].includes(raw[k])) p[k] = raw[k]
     if (raw.hideEmail === true) p.hideEmail = true
+    if (typeof raw.ahHintAt === 'number') p.ahHintAt = raw.ahHintAt
     if (typeof raw.family === 'string') p.family = raw.family
     if (raw.collapsed && typeof raw.collapsed === 'object')
       for (const k of Object.keys(raw.collapsed)) if (raw.collapsed[k] === true) p.collapsed[k] = true
@@ -643,6 +648,7 @@ const MAIN = String.raw`
   }
   function renderTop() {
     renderUpdated()
+    renderHandoffButton()
     // A background refresh keeps the button still; only one the viewer asked for spins it.
     const busy = S.loading && !S.silent
     const refresh = $('refresh')
@@ -1551,6 +1557,184 @@ const MAIN = String.raw`
     load()
   }
 
+  // ---------- auto handoff ----------
+  // Settings come with /api/state; readiness (which runs a check of the sideby on PATH) only when the dialog opens.
+  let ah = null
+  const HINT_QUIET_MS = 24 * 3600000
+  function ahState() { return S.state && S.state.autoHandoff }
+  function renderHandoffButton() {
+    const b = $('handoff')
+    const st = ahState()
+    b.hidden = !st
+    if (!st) return
+    const on = st.settings.auto
+    setKids(b, [h('span', { class: 'hide-sm' }, t('ah.button')), h('span', { class: 'chip chip-sm' + (on ? ' chip-ok' : '') }, on ? t('ah.on') : t('ah.off'))])
+    b.setAttribute('aria-label', t('ah.button') + ': ' + (on ? t('ah.on') : t('ah.off')))
+  }
+  function handoffHint() {
+    const st = ahState()
+    if (!st || BOOT.readOnly) return null
+    if (prefs.ahHintAt && Date.now() - prefs.ahHintAt < HINT_QUIET_MS) return null
+    return handoffHintAccount(S.state.accounts, st.settings, st.starters, Date.now())
+  }
+  function handoffForm() {
+    const st = ahState()
+    const s = st.settings
+    const orders = {}
+    for (const f of st.starters) {
+      const cur = s.families[f]
+      orders[f] = { policy: cur && cur.policy === 'order' ? 'order' : 'pressure', order: cur ? cur.order.slice() : [] }
+    }
+    return { auto: s.auto, sameFamily: s.sameFamily, prepareAt: s.prepareAt, threshold: s.threshold, wait: s.waitIfResetWithinMinutes, countdown: s.countdownSeconds, orders }
+  }
+  async function openHandoff() {
+    if (!ahState()) return
+    ah = { form: handoffForm(), loading: true }
+    showDialog('handoff')
+    renderHandoff()
+    await loadHandoffStatus()
+  }
+  async function loadHandoffStatus() {
+    const mine = ah
+    try {
+      const st = await api('/api/handoff/status', {})
+      if (ah === mine) { ah.status = st; ah.loading = false; ah.error = null }
+    } catch (e) { if (ah === mine) { ah.error = e; ah.loading = false } }
+    if (dlg.kind === 'handoff') renderHandoff()
+  }
+  function ahEdit(fn) {
+    fn(ah.form)
+    ah.preview = null
+    ah.nothing = false
+    ah.saved = null
+    renderHandoff()
+  }
+  function ahNumber(key, label, min, max) {
+    const id = 'ah-' + key
+    const input = h('input', { id, type: 'number', min: String(min), max: String(max), step: '1', value: String(ah.form[key]), disabled: BOOT.readOnly })
+    input.addEventListener('change', () => {
+      const n = Math.round(Number(input.value))
+      if (Number.isFinite(n)) ahEdit((f) => { f[key] = Math.min(max, Math.max(min, n)) })
+    })
+    return h('label', { class: 'field', for: id }, h('span', null, label), input)
+  }
+  function ahCheck(key, label, hintText) {
+    const input = h('input', { type: 'checkbox', disabled: BOOT.readOnly })
+    input.checked = Boolean(ah.form[key])
+    input.addEventListener('change', () => ahEdit((f) => { f[key] = input.checked }))
+    return h('div', { class: 'check-row' }, h('label', { class: 'check' }, input, h('span', null, h('b', null, label), hintText ? h('span', { class: 'muted small' }, hintText) : null)))
+  }
+  function accountLabel(ref) {
+    const a = S.state.accounts.find((x) => x.ref === ref || (x.aliases || []).includes(ref))
+    const alias = a && a.aliases && a.aliases[0]
+    return a ? (alias && alias !== ref ? ref + ' (' + alias + ')' : a.ref) : ref
+  }
+  function ahFamily(fam) {
+    const o = ah.form.orders[fam]
+    const f = family(fam)
+    const policy = h('select', { 'aria-label': t('ah.order', { host: f.title }), disabled: BOOT.readOnly },
+      h('option', { value: 'pressure' }, t('ah.byQuota')), h('option', { value: 'order' }, t('ah.myOrder')))
+    policy.value = o.policy
+    policy.addEventListener('change', () => ahEdit((form) => { form.orders[fam].policy = policy.value }))
+    const kids = [h('div', { class: 'ah-fam-head' }, h('b', { class: 'title-logo' }, badge(fam, 'sm'), t('ah.order', { host: f.title })), h('span', null, policy))]
+    if (o.policy === 'order') {
+      const move = (i, d) => ahEdit((form) => { const l = form.orders[fam].order; const x = l[i]; l[i] = l[i + d]; l[i + d] = x })
+      kids.push(h('ol', { class: 'ah-order' }, o.order.map((ref, i) => h('li', null,
+        h('span', { class: 'mono' }, (i + 1) + '. ' + accountLabel(ref)),
+        h('button', { class: 'btn btn-sm', type: 'button', disabled: BOOT.readOnly || i === 0, 'aria-label': t('ah.up'), onclick: () => move(i, -1) }, '↑'),
+        h('button', { class: 'btn btn-sm', type: 'button', disabled: BOOT.readOnly || i === o.order.length - 1, 'aria-label': t('ah.down'), onclick: () => move(i, 1) }, '↓'),
+        h('button', { class: 'icon-btn', type: 'button', disabled: BOOT.readOnly, 'aria-label': t('ah.remove'), onclick: () => ahEdit((form) => { form.orders[fam].order.splice(i, 1) }) }, icon('x'))))))
+      const taken = new Set(o.order)
+      const free = S.state.accounts.filter((a) => !taken.has(a.ref) && !(a.aliases || []).some((n) => taken.has(n)))
+      if (!o.order.length) kids.push(h('p', { class: 'note note-warn' }, t('ah.emptyOrder')))
+      if (free.length && !BOOT.readOnly) {
+        const pick = h('select', { 'aria-label': t('ah.add') }, h('option', { value: '' }, t('ah.add') + '…'), free.map((a) => h('option', { value: a.ref }, accountLabel(a.ref))))
+        pick.addEventListener('change', () => { if (pick.value) ahEdit((form) => { form.orders[fam].order.push(pick.value) }) })
+        kids.push(h('div', { class: 'ah-add' }, pick))
+      }
+    } else kids.push(h('p', { class: 'muted small' }, t('ah.byQuotaHint')))
+    return h('div', { class: 'ah-fam' }, kids)
+  }
+  function ahReadiness() {
+    if (ah.loading) return h('p', { class: 'muted' }, spinner(), ' ', t('ah.checking'))
+    if (ah.error) return errorNote(ah.error, loadHandoffStatus)
+    const st = ah.status
+    if (!st) return null
+    const rows = []
+    if (st.sideby.problem) rows.push(h('p', { class: 'note note-fail' }, st.sideby.problem))
+    for (const f of st.families) {
+      const state = f.starts.length ? (f.ready ? h('span', { class: 'chip chip-sm chip-ok' }, t('ah.ready')) : h('span', { class: 'chip chip-sm chip-warn' }, t('ah.notYet'))) : h('span', { class: 'chip chip-sm' }, t('ah.takesOver'))
+      rows.push(h('div', { class: 'ah-fam' }, h('div', { class: 'ah-fam-head' }, h('b', { class: 'title-logo' }, badge(f.family, 'sm'), family(f.family).title), state),
+        f.problems.map((p) => h('p', { class: 'note note-warn' }, p)),
+        f.notes.map((n) => h('p', { class: 'muted small' }, n))))
+    }
+    if (st.nextSteps.length) rows.push(h('p', { class: 'small' }, h('b', null, t('ah.steps'))), h('ol', { class: 'ah-steps' }, st.nextSteps.map((s) => h('li', null, codeCopy(s)))))
+    return rows
+  }
+  function renderHandoff() {
+    const st = ahState()
+    if (!st || !ah) return
+    const f = ah.form
+    const body = [h('p', { class: 'muted small' }, t('ah.intro'))]
+    if (BOOT.readOnly) body.push(h('p', { class: 'note' }, t('banner.readOnly')))
+    body.push(ahCheck('auto', t('ah.auto'), null))
+    body.push(ahCheck('sameFamily', t('ah.sameFamily'), t('ah.sameFamilyWarn')))
+    body.push(h('div', { class: 'ah-grid' },
+      ahNumber('prepareAt', t('ah.prepareAt'), 1, 99),
+      ahNumber('threshold', t('ah.threshold'), 2, 100),
+      ahNumber('wait', t('ah.wait'), 0, 300),
+      ahNumber('countdown', t('ah.countdown'), 0, 60)))
+    if (f.prepareAt >= f.threshold) body.push(h('p', { class: 'note note-warn' }, t('ah.badLevels')))
+    for (const fam of st.starters) body.push(ahFamily(fam))
+    // The result of Review or Apply sits right under the form, where the button that made it is.
+    if (ah.applyError) body.push(errorNote(ah.applyError, null))
+    if (ah.saved) body.push(h('p', { class: 'note' }, t('ah.saved', { file: ah.saved })))
+    if (ah.nothing) body.push(h('p', { class: 'muted small' }, t('ah.nothing')))
+    if (ah.preview) body.push(h('p', { class: 'small' }, tx('ah.changes', { file: h('code', null, ah.preview.file) })), diffView(ah.preview.diff))
+    body.push(h('h3', { class: 'small' }, t('ah.readiness')))
+    body.push(ahReadiness())
+    const foot = [h('button', { class: 'btn', type: 'button', disabled: ah.applying, onclick: () => dlg.el.close() }, t('btn.close'))]
+    if (!BOOT.readOnly) {
+      const bad = f.prepareAt >= f.threshold
+      if (ah.preview) foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: ah.applying, 'aria-busy': ah.applying ? 'true' : null, onclick: applyHandoff }, ah.applying ? spinner() : null, ah.applying ? t('ah.applying') : t('ah.apply')))
+      else foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: bad || ah.reviewing, onclick: reviewHandoff }, ah.reviewing ? spinner() : null, t('ah.review')))
+    }
+    setKids(dlg.el, dialogFrame(t('ah.title'), null, body, foot))
+  }
+  async function reviewHandoff() {
+    const change = handoffChangeOf(ahState().settings, ah.form)
+    if (!Object.keys(change).length) { ah.nothing = true; renderHandoff(); return }
+    ah.reviewing = true
+    ah.applyError = null
+    renderHandoff()
+    try {
+      const r = await api('/api/handoff/configure', { change })
+      ah.preview = r.changed ? { change, file: r.file, diff: r.diff } : null
+      ah.nothing = !r.changed
+    } catch (e) { ah.applyError = e }
+    ah.reviewing = false
+    renderHandoff()
+  }
+  async function applyHandoff() {
+    ah.applying = true
+    dlg.busy = true
+    renderHandoff()
+    try {
+      const r = await api('/api/handoff/configure', { change: ah.preview.change, confirm: true })
+      ah.saved = r.file
+      ah.preview = null
+      toast(r.settings.auto ? t('toast.ahOn') : t('toast.ahOff'))
+      await load({ silent: true })
+      if (ahState()) ah.form = handoffForm()
+      ah.loading = true
+      ah.status = null
+    } catch (e) { ah.applyError = e }
+    ah.applying = false
+    dlg.busy = false
+    renderHandoff()
+    if (ah.loading) loadHandoffStatus()
+  }
+
   // ---------- banners ----------
   function renderBanners() {
     const out = []
@@ -1559,6 +1743,12 @@ const MAIN = String.raw`
       h('button', { class: 'btn btn-sm', type: 'button', onclick: () => load({ check: !S.report }) }, t('btn.retry'))))
     if (S.state) {
       if (BOOT.readOnly) out.push(h('div', { class: 'banner banner-quiet' }, h('div', { class: 'muted small' }, t('banner.readOnly'))))
+      const hint = handoffHint()
+      if (hint) out.push(h('div', { class: 'banner', role: 'status' },
+        h('div', null, t('ah.hint', { ref: hint.ref, p: hint.pressure })),
+        h('div', { class: 'banner-actions' },
+          h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: openHandoff }, t('ah.setUp')),
+          h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { prefs.ahHintAt = Date.now(); savePrefs(); renderBanners() } }, t('ah.dismiss')))))
       const errs = S.state.pluginErrors
       if (errs.length) out.push(h('div', { class: 'banner banner-warn', role: 'status' }, h('div', null,
         h('b', null, tn('banner.plugins', errs.length) + ' '), t('banner.pluginsHint'),
@@ -1642,6 +1832,7 @@ const MAIN = String.raw`
   // ---------- start ----------
   $('ver').textContent = BOOT.version ? 'v' + BOOT.version : ''
   $('refresh').addEventListener('click', () => load({ check: true, announce: true }))
+  $('handoff').addEventListener('click', openHandoff)
   $('lang').addEventListener('click', () => {
     if (LANG_FIXED) return
     lang = lang === 'zh' ? 'en' : 'zh'

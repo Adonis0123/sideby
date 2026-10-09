@@ -9,10 +9,12 @@ import { FileMemo, type FileStats } from '../../core/file-memo.ts'
 import { USAGE_DAYS } from '../../core/quota-levels.ts'
 import { dailyBuckets } from '../../core/usage-days.ts'
 import type { QuotaResult, QuotaWindow, UsageResult } from '../../types.ts'
+import { isNum, isObj, rateLimits } from './rate-limits.ts'
+
+export { windowLabel } from './rate-limits.ts'
 
 export const MAX_QUOTA_FILES = 20
 const ROLLOUT = /^rollout-.*\.jsonl$/
-const MAX_RESETS_AT_SECONDS = 1e11
 
 export interface RolloutFile {
   path: string
@@ -21,14 +23,6 @@ export interface RolloutFile {
 }
 
 type Obj = Record<string, unknown>
-
-function isObj(v: unknown): v is Obj {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
-
-function isNum(v: unknown): v is number {
-  return typeof v === 'number' && Number.isFinite(v)
-}
 
 /** Every rollout file under `<dir>/sessions`, newest mtime first. */
 export async function listRollouts(dir: string): Promise<RolloutFile[]> {
@@ -82,40 +76,6 @@ async function* tokenCounts(
   } finally {
     lines.close()
   }
-}
-
-export function windowLabel(minutes: number): string {
-  if (minutes === 300) return '5h'
-  if (minutes === 10080) return '7d'
-  return `${minutes}m`
-}
-
-function quotaWindow(raw: unknown): QuotaWindow | null {
-  if (!isObj(raw)) return null
-  const { used_percent: used, window_minutes: minutes, resets_at: resets } = raw
-  if (!isNum(used) || !isNum(minutes) || minutes <= 0) return null
-  // Seconds since the epoch; a millisecond value would land tens of thousands of years ahead.
-  if (!isNum(resets) || resets <= 0 || resets >= MAX_RESETS_AT_SECONDS) return null
-  return {
-    label: windowLabel(minutes),
-    windowMinutes: minutes,
-    usedPercent: used,
-    resetsAt: new Date(resets * 1000).toISOString(),
-  }
-}
-
-function rateLimits(payload: Obj): { windows: QuotaWindow[]; plan?: string } | null {
-  const rl = payload.rate_limits
-  if (!isObj(rl)) return null
-  const primary = quotaWindow(rl.primary)
-  if (!primary) return null
-  const windows = [primary]
-  if (rl.secondary !== null && rl.secondary !== undefined) {
-    const secondary = quotaWindow(rl.secondary)
-    if (!secondary) return null
-    windows.push(secondary)
-  }
-  return { windows, ...(typeof rl.plan_type === 'string' ? { plan: rl.plan_type } : {}) }
 }
 
 interface FileLimits {

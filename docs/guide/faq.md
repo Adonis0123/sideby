@@ -11,7 +11,7 @@ English | [中文](faq.zh-CN.md)
 sideby is built to stay inside what each Host already supports (see [ADR-0001](../../docs/adr/0001-side-by-side-not-switching.md) and [ADR-0003](../../docs/adr/0003-quota-from-local-and-official-sources.md)):
 
 - It does not switch: it never edits a Host's global config to change the active account. Each account is a separate config directory, the mechanism every Host documents (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`, `PI_CODING_AGENT_DIR`).
-- It does not rotate: it never moves to another subscription when a quota runs out. `sideby next` recommends the account with the most room from data already on your machine; starting it is your call.
+- It does not rotate on its own: by default it never moves to another subscription when a quota runs out. `sideby next` recommends the account with the most room from data already on your machine; starting it is your call. If you turn on [Auto Handoff](usage.md#auto-handoff) (off by default), a session sideby started hands its task to the next account in your order when its quota runs low. Vendors may treat moving between your own subscriptions of one vendor to get past a limit as against their terms; that kind needs a second switch, `sameFamily`, and the risk is yours.
 - It does not proxy credentials: it never reads a subscription token to call a model, and never pools logins.
 - It does not call private endpoints: quota comes from local files and from data Claude Code hands to your status line command.
 
@@ -27,7 +27,7 @@ sideby then checks the version itself. Below 22.18, `--help`, `--version` and ev
 
 | What | Where |
 |---|---|
-| Config (sideby only writes `aliases` in it, from `new --alias`, `sideby alias` or the panel) | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
+| Config (sideby only writes `aliases`, from `new --alias`, `sideby alias` or the panel, and `handoff`, from `sideby handoff enable`, `sideby handoff disable` or the panel) | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
 | Your plugins | `${XDG_CONFIG_HOME:-~/.config}/sideby/plugins/` |
 | State: quota cache, last Doctor result, original `settings.json` bytes, background panel pid and logs | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
 | Desktop app (`sideby app install`) | macOS `~/Applications/sideby.app`; Linux `~/.local/share/applications/sideby.desktop`, `~/.local/share/sideby/`, `~/.local/share/icons/hicolor/*/apps/sideby.*` |

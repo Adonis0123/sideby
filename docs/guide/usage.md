@@ -130,7 +130,38 @@ sideby next claude -- --model opus  # Host arguments go after --
 - The new account starts a new session: each account keeps its own sessions. Ask the old session for a short handoff note and paste it in.
 - Claude and Codex only; Grok and pi publish no quota, so `next grok` lists the accounts for you to choose.
 
-sideby recommends; you start the account. It never switches or rotates by itself (see the FAQ). The panel marks the same pick as **Next** in each family.
+sideby recommends; you start the account. It never switches or rotates by itself unless you turn on Auto Handoff below (see the FAQ). The panel marks the same pick as **Next** in each family.
+
+## Auto Handoff
+
+Off by default. Turn it on with `sideby handoff enable` (it shows the config change first; add `--yes`), or with **Auto Handoff** in the panel's top bar. `sideby handoff status` lists, family by family, what is still missing and the command for each. When it is off and an account passes the threshold, sideby says so once a day after the session ends, and the panel shows a hint with **Set up**.
+
+With it on, a session that sideby started (`sideby run`, a short command or `sideby next`) hands its task to the next account when its quota runs low: the old session writes a handoff brief, sideby ends it, and the next account starts a new session from that brief in the same terminal.
+
+```sh
+sideby handoff status
+sideby handoff enable --order claude=codex001,cc002 --yes
+sideby handoff enable --same-family --yes   # cc001 → cc002 too; read the risk below first
+sideby handoff disable --yes
+```
+
+The same settings live under `handoff` in the config file (see the [configuration](configuration.md) schema).
+
+- **When.** At 80% of the fullest window (`prepareAt`) the session is asked to start a brief and keep it current; at 95% (`threshold`) it finishes the current step, updates the brief and ends its turn. If the window resets within 30 minutes (`waitIfResetWithinMinutes`), sideby waits instead.
+- **Where to.** `policy: "order"` follows your list (accounts or short commands, any family); without it sideby picks the family's account with the most room, then API accounts of other families. Each account is used once per chain, a full or signed-out account is skipped (so is one already at your `threshold`), and so is an account of another organization (compared by organization, else by email domain) unless it is listed in `crossOrganization`.
+- **Same family.** `auto` alone hands over to API accounts (of any family) and to accounts of other families that you list in `order`. Moving between two accounts of the same vendor (cc001 → cc002) also needs `"sameFamily": true`. Vendors may treat that as getting past a usage limit and act on the account; the risk is yours.
+- **Before it moves.** A 10-second countdown (`countdownSeconds`); press Enter to stay, and sideby resumes the same session in the old account.
+- **By hand.** Inside such a session, run `sideby handoff ready` (or ask the agent to), optionally with `--brief <file>` from your own handoff tool; the next account starts when the turn ends.
+- **The brief.** Kept under `~/.local/state/sideby/handoffs/<chain>/`, mode 600, never in your repository; sideby adds the branch, uncommitted files and diff stat, and never commits or stashes. The next session gets the brief's path, not its text. When the old session could not write one, sideby puts one together from the session's records, marked as possibly incomplete.
+
+| Host | Starts a handoff | Needs |
+|---|---|---|
+| Claude Code | at 80% / 95%, or when a turn fails at the limit | `sideby quota setup claude` (the quota tap); sideby adds its hooks with `--settings` |
+| Codex | at 80% / 95% | trust sideby's hooks once per account: type `/hooks` in Codex; sideby says so the first time |
+| Grok Build | only when a turn fails at the usage limit (Grok has no public quota) | `sideby handoff setup grok --yes`, then `sideby doctor grok --fix`; the default sandbox (`off` or `devbox`); `workspace` and `read-only` can only take over; `strict` and custom profiles take no part. A sandbox set by macOS device management is invisible to sideby |
+| pi | never; it can take over | — |
+
+A headless run (`claude -p`, `codex exec`, `grok -p`), Codex with `--remote`, or a session started without sideby never hands over. `sideby doctor` warns when Auto Handoff is on but the Claude quota tap or the Grok hook file is missing, or when `order` is empty or names an account sideby cannot find. Auto Handoff turns itself off for a run, and says so, when the `sideby` on your `PATH` is missing, comes from the npx cache, or is too old to have the hook.
 
 ## Host notes
 

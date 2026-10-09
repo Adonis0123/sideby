@@ -41,9 +41,13 @@ Avoid: *profile* (Codex already uses it for a config layer that does not change 
 - **Quota**: a limit the Host's vendor sets on a Subscription Account for a time window (for example 5 hours or 7 days), with the time it resets.
 - **Usage**: what an Account has consumed (tokens, estimated cost), counted from the Host's own local records.
 - **Quota Pressure**: how full an Account's fullest Quota window is, ignoring windows whose reset time has passed. Unknown when the Account has no Quota yet.
-- **Handoff**: moving on to another Account of the same Family when one Account's Quota runs low. sideby recommends the Account with the lowest Quota Pressure; a person starts it. The old session stays in the old Account.
+- **Handoff**: moving on to another Account when one Account's Quota runs low. The next Account starts a new session; the old session stays in the old Account. Started by a person (`sideby next`) or by sideby itself (Auto Handoff).
+- **Handoff Order**: which Accounts a Handoff may move on to, and in what order: either the Family's Accounts by lowest Quota Pressure, or a list the user writes, which may name Accounts of other Families.
+- **Handoff Brief**: the note the next Account starts from: what the task is, what is done, what is left. Written by the old session while it still has Quota, or put together by sideby from the old session's local records when it could not.
+- **Handoff Threshold**: the Quota Pressure at which an Auto Handoff begins.
+- **Auto Handoff**: a Handoff sideby carries out by itself when a running session reaches the Handoff Threshold: the old session writes the Handoff Brief and ends, and the next Account in the Handoff Order starts from it in the same terminal.
 
-Avoid: *rotation* and *failover* (sideby never moves work between Accounts on its own), *relay* (people use it for a third-party API endpoint).
+Avoid: *rotation* (cycling through Accounts per request or on a timer; a Handoff moves on only when Quota runs low and never goes back to a full Account), *failover* (say Auto Handoff), *relay* (people use it for a third-party API endpoint).
 
 ## Extending
 

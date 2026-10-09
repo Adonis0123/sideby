@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/handoff-teardown.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "family",
+    "ok",
+    "message"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "family": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "message": {
+      "type": "string"
+    },
+    "diff": {
+      "type": "string"
+    }
+  },
+  "title": "sideby handoff teardown --json"
+}

@@ -3,6 +3,9 @@ import { aliasesByAccount } from '../core/accounts.ts'
 import { aliasRefs } from '../core/config.ts'
 import type { DoctorReport } from '../core/doctor.ts'
 import { UserError } from '../core/errors.ts'
+import { requestHandoff } from '../core/handoff-chain.ts'
+import { explain, type HandoffIo, readyDecision, runWithHandoff } from '../core/handoff-run.ts'
+import { configureHandoff, type HandoffChange, handoffHint, handoffStatus } from '../core/handoff-status.ts'
 import { runHost } from '../core/launch.ts'
 import { resolvePaths, tildify } from '../core/paths.ts'
 import { USAGE_DAYS } from '../core/quota-levels.ts'
@@ -16,6 +19,25 @@ import { c, clock, quotaText, table, usageText } from './format.ts'
 export interface Io {
   out(s: string): void
   err(s: string): void
+  /** The terminal Auto Handoff counts down on (spec §3.17); `process.stdin` when left out. */
+  stdin?: HandoffIo['stdin']
+}
+
+/** Runs the Account with Auto Handoff when it applies (spec §3.17), else the Host as usual. */
+async function runAccount(rt: Runtime, ref: string, args: readonly string[], io: Io): Promise<number> {
+  const handed = await runWithHandoff(rt, ref, args, {
+    err: (l) => io.err(c.dim(l)),
+    stdin: io.stdin ?? process.stdin,
+  })
+  if (handed !== null) return handed
+  const prepared = await rt.prepareLaunch(ref, args, 'run')
+  if (prepared.notice) io.err(c.cyan(prepared.notice))
+  const code = await runHost(prepared)
+  if ((io.stdin ?? process.stdin).isTTY) {
+    const hint = await handoffHint(rt, ref)
+    if (hint) io.err(c.dim(`sideby: ${hint}`))
+  }
+  return code
 }
 
 const json = (io: Io, data: object) => io.out(JSON.stringify({ schemaVersion: 1, ...data }, null, 2))
@@ -163,6 +185,7 @@ export async function cmdRun(a: ParsedArgs, io: Io, command: 'run' | 'login'): P
   if (command === 'login' && (extra.length || a.rest.length))
     throw new UsageError('login takes no extra arguments')
   const rt = await createRuntime()
+  if (command === 'run') return runAccount(rt, ref, [...extra, ...a.rest], io)
   const prepared = await rt.prepareLaunch(ref, [...extra, ...a.rest], command)
   if (prepared.notice) io.err(c.cyan(prepared.notice))
   return runHost(prepared)
@@ -268,9 +291,11 @@ export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
   }
   // The old session stays in the old Account (spec §3.13); a short note carries the context over.
   io.out(c.dim('Tip: ask your old session for a short handoff note and paste it into the new one.'))
-  const prepared = await rt.prepareLaunch(plan.pick, a.rest, 'run')
-  if (prepared.notice) io.err(c.cyan(prepared.notice))
-  return runHost(prepared)
+  if (!rt.handoffSettings().auto)
+    io.out(
+      c.dim('Sessions can also hand over by themselves when quota runs low: see `sideby handoff status`.'),
+    )
+  return runAccount(rt, plan.pick, a.rest, io)
 }
 
 export async function cmdDoctor(a: ParsedArgs, io: Io): Promise<number> {
@@ -365,7 +390,19 @@ async function cmdQuotaSetup(a: ParsedArgs, io: Io, sub: 'setup' | 'teardown'): 
   if (!familyId)
     throw new UsageError(`usage: sideby quota ${sub} <family>${sub === 'setup' ? ' [--yes]' : ''}`)
   const rt = await createRuntime()
-  const setup = rt.quotaSetup(familyId)
+  return runSetup(a, io, rt, 'quota', sub, familyId, rt.quotaSetup(familyId))
+}
+
+/** `sideby quota|handoff setup|teardown <family>`: show the change, apply it only with --yes (exit 10 before). */
+async function runSetup(
+  a: ParsedArgs,
+  io: Io,
+  rt: Runtime,
+  command: 'quota' | 'handoff',
+  sub: 'setup' | 'teardown',
+  familyId: string,
+  setup: ReturnType<Runtime['quotaSetup']>,
+): Promise<number> {
   if (sub === 'teardown') {
     const r = await setup.teardown()
     if (a.flags.has('json')) json(io, { family: familyId, ...r })
@@ -386,7 +423,7 @@ async function cmdQuotaSetup(a: ParsedArgs, io: Io, sub: 'setup' | 'teardown'): 
         io.out(plan.diff)
         io.out(
           c.cyan(
-            `\nApply it with \`sideby quota setup ${familyId} --yes\`; undo any time with \`sideby quota teardown ${familyId}\`.`,
+            `\nApply it with \`sideby ${command} setup ${familyId} --yes\`; undo any time with \`sideby ${command} teardown ${familyId}\`.`,
           ),
         )
       }
@@ -398,6 +435,170 @@ async function cmdQuotaSetup(a: ParsedArgs, io: Io, sub: 'setup' | 'teardown'): 
   if (a.flags.has('json')) json(io, { family: familyId, applied: after.status === 'enabled', plan: after })
   else io.out(`${after.status === 'enabled' ? c.green('✓') : c.red('✗')} ${after.message}`)
   return after.status === 'enabled' ? 0 : 1
+}
+
+/** `sideby handoff status` (spec §3.17): what Auto Handoff still needs, with the commands to run. */
+async function cmdHandoffStatus(a: ParsedArgs, io: Io): Promise<number> {
+  const st = await handoffStatus(await createRuntime())
+  if (a.flags.has('json')) {
+    json(io, st)
+    return 0
+  }
+  io.out(
+    `Auto Handoff: ${st.auto ? c.green('on') : c.yellow('off')} (same family ${st.sameFamily ? 'on' : 'off'}; brief at ${st.prepareAt}%, hand over at ${st.threshold}%)`,
+  )
+  if (st.sideby.problem) io.out(c.red(`sideby on PATH: ${st.sideby.problem}`))
+  if (st.families.length)
+    io.out(
+      `\n${table(
+        st.families.map((f) => [
+          c.bold(f.family),
+          f.starts.length ? f.starts.join(', ') : c.dim('takes over only'),
+          f.ready ? c.green('ready') : f.starts.length ? c.yellow('not yet') : c.dim('—'),
+          f.order.policy === 'order' ? f.order.order.join(' → ') : c.dim('by quota'),
+        ]),
+        ['FAMILY', 'STARTS', 'STATE', 'ORDER'],
+      )}`,
+    )
+  for (const f of st.families) {
+    for (const p of f.problems) io.out(c.yellow(`${f.family}: ${p}`))
+    for (const n of f.notes) io.out(c.dim(`${f.family}: ${n}`))
+  }
+  if (st.nextSteps.length) {
+    io.out('\nNext:')
+    for (const [i, step] of st.nextSteps.entries()) io.out(`  ${i + 1}. ${step}`)
+  }
+  return 0
+}
+
+function intFlag(a: ParsedArgs, name: string): number | undefined {
+  const v = a.flags.get(name)
+  if (v === undefined) return undefined
+  const n = Number(v)
+  if (typeof v !== 'string' || !Number.isInteger(n) || n < 0)
+    throw new UsageError(`--${name} takes a whole number, for example --${name} 95`)
+  return n
+}
+
+/** The `enable`/`disable` command line for `change`, to repeat with --yes. */
+function switchCommand(sub: 'enable' | 'disable', change: HandoffChange): string {
+  const parts = [`sideby handoff ${sub}`]
+  if (change.sameFamily === true) parts.push('--same-family')
+  if (change.sameFamily === false) parts.push('--no-same-family')
+  for (const o of change.orders ?? []) parts.push(`--order ${o.family}=${o.order.join(',')}`)
+  if (change.prepareAt !== undefined) parts.push(`--prepare-at ${change.prepareAt}`)
+  if (change.threshold !== undefined) parts.push(`--threshold ${change.threshold}`)
+  if (change.waitIfResetWithinMinutes !== undefined)
+    parts.push(`--wait-minutes ${change.waitIfResetWithinMinutes}`)
+  if (change.countdownSeconds !== undefined) parts.push(`--countdown ${change.countdownSeconds}`)
+  return parts.join(' ')
+}
+
+/** `sideby handoff enable|disable` (spec §3.17): show the config change (exit 10), write it with --yes. */
+async function cmdHandoffSwitch(a: ParsedArgs, io: Io, sub: 'enable' | 'disable'): Promise<number> {
+  const change: HandoffChange = { auto: sub === 'enable' }
+  if (sub === 'enable') {
+    if (a.flags.has('same-family')) change.sameFamily = true
+    if (a.flags.has('no-same-family')) change.sameFamily = false
+    const order = a.flags.get('order')
+    if (typeof order === 'string') {
+      const eq = order.indexOf('=')
+      if (eq <= 0)
+        throw new UsageError(
+          '--order takes <family>=<account,account>, for example --order claude=codex001,cc002',
+        )
+      change.orders = [
+        {
+          family: order.slice(0, eq),
+          order: order
+            .slice(eq + 1)
+            .split(',')
+            .map((x) => x.trim())
+            .filter(Boolean),
+        },
+      ]
+    }
+    const nums = {
+      prepareAt: 'prepare-at',
+      threshold: 'threshold',
+      waitIfResetWithinMinutes: 'wait-minutes',
+      countdownSeconds: 'countdown',
+    } as const
+    for (const [key, flag] of Object.entries(nums)) {
+      const n = intFlag(a, flag)
+      if (n !== undefined) change[key as keyof typeof nums] = n
+    }
+  }
+  const rt = await createRuntime()
+  const r = await configureHandoff(rt, change, { apply: a.flags.has('yes') })
+  const nextSteps =
+    r.applied && sub === 'enable' ? (await handoffStatus(await createRuntime())).nextSteps : []
+  if (a.flags.has('json')) {
+    json(io, { applied: r.applied, file: r.file, diff: r.diff, settings: r.settings, nextSteps })
+  } else if (!r.changed)
+    io.out(`Auto Handoff is already ${sub === 'enable' ? 'set that way' : 'off'}; nothing to change.`)
+  else if (!r.applied) {
+    io.out(`Change to ${tildify(r.file, rt.paths.home)}:\n\n${r.diff}`)
+    if (sub === 'enable' && r.settings.sameFamily)
+      io.out(
+        c.yellow(
+          'Same-family hand-over moves work between subscriptions of one vendor; vendors may act on that.',
+        ),
+      )
+    io.out(c.cyan(`\nApply it with \`${switchCommand(sub, change)} --yes\`.`))
+  } else {
+    io.out(`${c.green('✓')} Auto Handoff is ${sub === 'enable' ? 'on' : 'off'}.`)
+    if (nextSteps.length) {
+      io.out('Still to do:')
+      for (const [i, step] of nextSteps.entries()) io.out(`  ${i + 1}. ${step}`)
+    }
+  }
+  // 10: the change is shown and waits for the user's yes, as for `quota setup`.
+  return r.changed && !r.applied ? 10 : 0
+}
+
+/** `sideby handoff ready|setup|teardown` (spec §3.17). */
+export async function cmdHandoff(a: ParsedArgs, io: Io): Promise<number> {
+  const sub = a.positionals[0]
+  if (sub === 'setup' || sub === 'teardown') {
+    const familyId = a.positionals[1]
+    if (!familyId)
+      throw new UsageError(`usage: sideby handoff ${sub} <family>${sub === 'setup' ? ' [--yes]' : ''}`)
+    const rt = await createRuntime()
+    return runSetup(a, io, rt, 'handoff', sub, familyId, rt.handoffSetup(familyId))
+  }
+  if (sub === 'status') return cmdHandoffStatus(a, io)
+  if (sub === 'enable' || sub === 'disable') return cmdHandoffSwitch(a, io, sub)
+  if (sub !== 'ready')
+    throw new UsageError(
+      'usage: sideby handoff status | enable [--same-family] [--order <family>=<acct,…>] [--threshold n] [--prepare-at n] [--yes] | disable [--yes] | ready [--brief <file>] | setup|teardown <family> [--yes]',
+    )
+  const flag = a.flags.get('brief')
+  const brief = typeof flag === 'string' ? flag : undefined
+  const decision = await readyDecision(await createRuntime(), process.env)
+  if (decision && decision.kind !== 'pick')
+    throw new UserError(`nothing can take over now: ${explain(decision)}; keep working in this account`, {
+      code: 'no-pick',
+    })
+  let request: Awaited<ReturnType<typeof requestHandoff>>
+  try {
+    request = await requestHandoff(process.env, brief)
+  } catch (err) {
+    throw new UserError(
+      `cannot read the brief ${brief}: ${(err as Error).message}; check the path and retry`,
+      {
+        code: 'brief-unreadable',
+      },
+    )
+  }
+  if (!request)
+    throw new UserError(
+      'not inside a session sideby started with Auto Handoff; set `handoff.auto` in the config and start the account with sideby (`sideby run`, a short command), or use `sideby next <family>`',
+      { code: 'not-in-handoff-run' },
+    )
+  if (a.flags.has('json')) json(io, { requested: true, ...(request.brief ? { brief: request.brief } : {}) })
+  else io.out('The next account starts when this turn ends; finish the turn now.')
+  return 0
 }
 
 export async function cmdPlugins(a: ParsedArgs, io: Io): Promise<number> {

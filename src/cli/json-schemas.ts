@@ -259,6 +259,75 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     { schemaVersion: Version, family: Str, applied: Type.Boolean(), plan: QuotaSetupPlan },
     { title: 'sideby quota setup --json' },
   ),
+  'handoff-status': Type.Object(
+    {
+      schemaVersion: Version,
+      auto: Type.Boolean(),
+      sameFamily: Type.Boolean(),
+      prepareAt: Type.Number(),
+      threshold: Type.Number(),
+      sideby: Type.Object({ ok: Type.Boolean(), problem: Type.Optional(Str) }),
+      families: Type.Array(
+        Type.Object({
+          family: Str,
+          starts: Type.Array(Type.Union([Type.Literal('quota'), Type.Literal('limit')])),
+          ready: Type.Boolean(),
+          problems: Type.Array(Str),
+          notes: Type.Array(Str),
+          order: Type.Object({
+            policy: Type.Union([Type.Literal('pressure'), Type.Literal('order')]),
+            order: Type.Array(Str),
+            unknown: Type.Array(Str),
+          }),
+        }),
+      ),
+      nextSteps: Type.Array(Str),
+    },
+    { title: 'sideby handoff status --json' },
+  ),
+  ...Object.fromEntries(
+    (['enable', 'disable'] as const).map((sub) => [
+      `handoff-${sub}`,
+      Type.Object(
+        {
+          schemaVersion: Version,
+          applied: Type.Boolean(),
+          file: Str,
+          diff: Str,
+          settings: Type.Object({
+            auto: Type.Boolean(),
+            sameFamily: Type.Boolean(),
+            prepareAt: Type.Number(),
+            threshold: Type.Number(),
+            waitIfResetWithinMinutes: Type.Number(),
+            countdownSeconds: Type.Number(),
+            crossOrganization: Type.Array(Str),
+            families: Type.Record(
+              Str,
+              Type.Object({
+                policy: Type.Union([Type.Literal('pressure'), Type.Literal('order')]),
+                order: Type.Array(Str),
+              }),
+            ),
+          }),
+          nextSteps: Type.Array(Str),
+        },
+        { title: `sideby handoff ${sub} --json` },
+      ),
+    ]),
+  ),
+  'handoff-ready': Type.Object(
+    { schemaVersion: Version, requested: Type.Literal(true), brief: Type.Optional(Str) },
+    { title: 'sideby handoff ready --json' },
+  ),
+  'handoff-setup': Type.Object(
+    { schemaVersion: Version, family: Str, applied: Type.Boolean(), plan: QuotaSetupPlan },
+    { title: 'sideby handoff setup --json' },
+  ),
+  'handoff-teardown': Type.Object(
+    { schemaVersion: Version, family: Str, ok: Type.Boolean(), message: Str, diff: Type.Optional(Str) },
+    { title: 'sideby handoff teardown --json' },
+  ),
   'quota-teardown': Type.Object(
     { schemaVersion: Version, family: Str, ok: Type.Boolean(), message: Str, diff: Type.Optional(Str) },
     { title: 'sideby quota teardown --json' },

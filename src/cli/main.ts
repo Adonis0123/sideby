@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Entry point. Keeps imports lazy so `statusline-tap`, which Claude Code runs on every refresh, starts fast.
+// Entry point. Keeps imports lazy so `statusline-tap` (run on every status line refresh) and `handoff-hook` (run on
+// every tool call while Auto Handoff is on) start fast.
 import { realpathSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -31,6 +32,14 @@ Usage:
   sideby quota [account]              quota and 7-day token usage
   sideby quota setup claude [--yes]   turn on Claude quota (shows the change first)
   sideby quota teardown claude        undo it, restoring the original file
+  sideby handoff status               what Auto Handoff still needs on this machine
+  sideby handoff enable [--yes]       turn it on (shows the config change first); --same-family,
+                                      --order claude=codex001,cc002, --threshold n, --prepare-at n
+  sideby handoff disable [--yes]      turn it off, keeping the other settings
+  sideby handoff ready [--brief <f>]  inside a session sideby started with Auto Handoff: hand over to
+                                      the next account when this turn ends (config \`handoff\`)
+  sideby handoff setup grok [--yes]   add sideby's hook file so Grok can hand over at its limit
+  sideby handoff teardown grok        remove it
   sideby ui [--port n] [--no-open]    open the local panel
   sideby ui --background              same, without a terminal: keeps running after this command exits
   sideby ui --stop                    stop the background panel
@@ -42,7 +51,7 @@ Usage:
   sideby plugins                      list loaded plugins and load errors
 
 Options:
-  --json        machine-readable output (list, new, next, alias, doctor, quota, families, plugins, app)
+  --json        machine-readable output (list, new, next, alias, doctor, quota, handoff, families, plugins, app)
   -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families
   -v, --version show the version
 
@@ -147,6 +156,10 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   alias: { flags: ['json'] },
   doctor: { flags: ['fix', 'force', 'json'] },
   quota: { flags: ['json', 'yes'] },
+  handoff: {
+    flags: ['json', 'yes', 'same-family', 'no-same-family'],
+    valued: ['brief', 'order', 'prepare-at', 'threshold', 'wait-minutes', 'countdown'],
+  },
   ui: { flags: ['no-open', 'background', 'stop', 'serve-detached'], valued: ['port'] },
   app: { flags: ['json'], valued: ['url'] },
   'shell-init': { flags: ['write'] },
@@ -161,6 +174,12 @@ export async function main(argv: string[]): Promise<number> {
   if (first === 'statusline-tap') {
     const { runStatuslineTap } = await import('../quota/statusline-tap.ts')
     return runStatuslineTap(rest, process.env, process.stdin, process.stdout)
+  }
+  // The handoff hook runs on every tool call while Auto Handoff is on; like the tap it comes before the Node check,
+  // so a Host never gets a version error from its own hook (spec §3.17).
+  if (first === 'handoff-hook') {
+    const { runHandoffHook } = await import('../handoff/hook.ts')
+    return runHandoffHook(rest, process.env, process.stdin, process.stdout)
   }
   if (nodeTooOld()) {
     console.error(
@@ -239,6 +258,8 @@ export async function main(argv: string[]): Promise<number> {
         return await cmds.cmdDoctor(parsed, io)
       case 'quota':
         return await cmds.cmdQuota(parsed, io)
+      case 'handoff':
+        return await cmds.cmdHandoff(parsed, io)
       case 'ui':
         return await cmds.cmdUi(parsed, io)
       case 'app':

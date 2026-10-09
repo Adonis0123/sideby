@@ -19,6 +19,12 @@ English | [中文](commands.zh-CN.md)
 | `sideby quota [acct]` | Quota and 7-day usage | 0 |
 | `sideby quota setup claude [--yes]` | Show the change; with `--yes`, turn the Claude quota source on | 10 when it only showed the change; 0 once on; 1 if blocked or failed |
 | `sideby quota teardown claude` | Turn it off and restore the original file | 0; 1 if refused or failed |
+| `sideby handoff status` | What Auto Handoff still needs on this machine, family by family, with the commands to run next | 0 |
+| `sideby handoff enable [--same-family] [--order <family>=<acct,…>] [--threshold n] [--prepare-at n] [--yes]` | Show the config change; with `--yes`, turn Auto Handoff on (other settings kept) and list what is still to do | 10 when it only showed the change; 0 once written or already so; 1 if an `--order` account is unknown |
+| `sideby handoff disable [--yes]` | Turn it off, keeping the other settings | 10 when it only showed the change; 0 once written or already off |
+| `sideby handoff ready [--brief <file>]` | Inside a session sideby started with Auto Handoff: hand over to the next account when this turn ends; `--brief` uses your own handoff note | 0; 1 outside such a session or when the brief cannot be read |
+| `sideby handoff setup grok [--yes]` | Show the change; with `--yes`, add sideby's hook file so Grok can hand over at its limit | 10 when it only showed the change; 0 once on; 1 if blocked or failed |
+| `sideby handoff teardown grok` | Remove that file while it is unchanged | 0; 1 if refused or failed |
 | `sideby ui [--port n] [--no-open]` | Local panel; runs until Ctrl+C | — |
 | `sideby ui --background` / `--stop` | Start the panel detached from the terminal (reusing a running one, or replacing it after sideby was upgraded) and open it / stop it | 0; 1 if it could not start or stop |
 | `sideby app install [--url <url>]` | Add a desktop app (macOS, Linux) that opens the panel, or `<url>` | 0; 1 on an unsupported platform or a file it did not create in the way |

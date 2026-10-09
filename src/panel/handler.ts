@@ -2,10 +2,13 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { aliasesByAccount } from '../core/accounts.ts'
-import { aliasArgs, aliasRefs } from '../core/config.ts'
+import { aliasArgs, aliasRefs, type HandoffSettings } from '../core/config.ts'
 import { UserError } from '../core/errors.ts'
 import { planHandoff } from '../core/handoff.ts'
+import { configureHandoff, type HandoffChange, handoffStatus } from '../core/handoff-status.ts'
+import { tildify } from '../core/paths.ts'
 import { buildId, packageVersion } from '../core/version.ts'
+import { HOOK_FAMILIES } from '../handoff/hook.ts'
 import type { AccountStatus, DoctorHistory, FamilyInfo, Runtime } from '../runtime.ts'
 import type { Account, FamilyLogo, QuotaResult, QuotaSetupPlan, UsageResult } from '../types.ts'
 import { renderPage } from './page.ts'
@@ -104,6 +107,8 @@ export interface PanelState {
    * at least two subscription Accounts, some Quota data and a pick; API Accounts are left out as in the CLI default.
    */
   handoff?: Record<string, string>
+  /** Auto Handoff settings (spec §3.17) and the Families that can start one; readiness comes from /api/handoff/status. */
+  autoHandoff: { settings: HandoffSettings; starters: string[] }
 }
 
 /** The `handoff` map of the Panel state, from the statuses and Quota already read for the page. */
@@ -295,7 +300,48 @@ async function buildState(
     ...(history ? { history } : {}),
     ...(rt.config.aliases ? { configAliases: aliasRefs(rt.config.aliases) } : {}),
     ...(Object.keys(handoff).length ? { handoff } : {}),
+    autoHandoff: {
+      settings: rt.handoffSettings(),
+      starters: [...rt.families.values()]
+        .filter((f) => f.handoff?.starts.length && HOOK_FAMILIES.includes(f.id))
+        .map((f) => f.id),
+    },
   }
+}
+
+/** The `change` of a /api/handoff/configure body, with every field checked; unknown fields are refused. */
+function handoffChange(body: Record<string, unknown>): HandoffChange {
+  const c = body.change
+  if (!c || typeof c !== 'object' || Array.isArray(c)) throw new HttpError(400, '"change" must be an object')
+  const out: HandoffChange = {}
+  for (const [k, v] of Object.entries(c)) {
+    if (k === 'auto' || k === 'sameFamily') {
+      if (typeof v !== 'boolean') throw new HttpError(400, `"${k}" must be true or false`)
+      out[k] = v
+    } else if (
+      k === 'prepareAt' ||
+      k === 'threshold' ||
+      k === 'waitIfResetWithinMinutes' ||
+      k === 'countdownSeconds'
+    ) {
+      if (!Number.isInteger(v) || (v as number) < 0) throw new HttpError(400, `"${k}" must be a whole number`)
+      out[k] = v as number
+    } else if (k === 'orders') {
+      if (
+        !Array.isArray(v) ||
+        !v.every(
+          (o) =>
+            o &&
+            typeof o.family === 'string' &&
+            Array.isArray(o.order) &&
+            o.order.every((n: unknown) => typeof n === 'string'),
+        )
+      )
+        throw new HttpError(400, '"orders" must be a list of { family, order: [account] }')
+      out.orders = v.map((o) => ({ family: o.family, order: [...o.order] }))
+    } else throw new HttpError(400, `unknown setting "${k}"`)
+  }
+  return out
 }
 
 /** Runs write requests one at a time; a few may wait, the rest are told to retry. */
@@ -371,6 +417,22 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const setup = rt.quotaSetup(family)
         const plan = confirm ? await setup.apply() : await setup.plan()
         return { family, summary: setup.summary, plan }
+      },
+    },
+    // Auto Handoff (spec §3.17): readiness reads only; configure shows the config change unless `confirm`.
+    '/api/handoff/status': {
+      writes: () => false,
+      async run() {
+        return handoffStatus(await getRuntime())
+      },
+    },
+    '/api/handoff/configure': {
+      writes: (body) => body.confirm === true,
+      async run(body) {
+        const change = handoffChange(body)
+        const rt = await getRuntime()
+        const r = await configureHandoff(rt, change, { apply: optBool(body, 'confirm') })
+        return { ...r, file: tildify(r.file, rt.paths.home) }
       },
     },
     // Undo for the setup above; the Runtime turns a teardown that throws into `{ ok: false, message }`.

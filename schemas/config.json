@@ -153,6 +153,79 @@
       "type": "boolean",
       "description": "Make `sideby shell-init` also define Host-named functions (`claude`, `codex`, `grok`) that resume a session by id in the Account that holds it. Off by default."
     },
+    "handoff": {
+      "type": "object",
+      "properties": {
+        "auto": {
+          "type": "boolean",
+          "description": "Hand a running session to the next account when its Quota runs low: only to other families and API accounts unless `sameFamily` is on. Off by default."
+        },
+        "sameFamily": {
+          "type": "boolean",
+          "description": "Also hand off to an account of the same family (cc001 → cc002). The kind vendors are most likely to act on. Off by default."
+        },
+        "prepareAt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Quota Pressure at which the session starts keeping a Handoff Brief (default 80)."
+        },
+        "threshold": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Quota Pressure at which the Handoff begins (default 95)."
+        },
+        "waitIfResetWithinMinutes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Stay and wait when the full window resets within this many minutes (default 30; 0 never waits)."
+        },
+        "countdownSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Countdown before the next account starts; Enter cancels (default 10; 0 skips it)."
+        },
+        "crossOrganization": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Accounts (ref or short command) that may take over from an account of another organization."
+        },
+        "families": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "object",
+              "properties": {
+                "policy": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "pressure"
+                    },
+                    {
+                      "type": "string",
+                      "const": "order"
+                    }
+                  ]
+                },
+                "order": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "description": "Handoff Order per family the session starts in: `pressure` (default) or an `order` list."
+        }
+      },
+      "additionalProperties": false
+    },
     "shellInitFile": {
       "type": "object",
       "properties": {

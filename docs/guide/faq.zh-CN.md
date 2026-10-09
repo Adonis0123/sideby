@@ -11,7 +11,7 @@
 sideby 的设计只用各宿主已经支持的机制（见 [ADR-0001](../../docs/adr/0001-side-by-side-not-switching.md) 和 [ADR-0003](../../docs/adr/0003-quota-from-local-and-official-sources.md)）：
 
 - 不切换：从不改宿主的全局配置来换当前账号。每个账号是一个独立的配置目录，这是各宿主都写进文档的机制（`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`GROK_HOME`、`PI_CODING_AGENT_DIR`）。
-- 不轮换：额度用完时，不会自动换到另一个订阅。`sideby next` 只根据本机已有的数据推荐余量最多的账号，启不启动由你决定。
+- 默认不轮换：额度用完时，不会自动换到另一个订阅。`sideby next` 只根据本机已有的数据推荐余量最多的账号，启不启动由你决定。如果你打开[自动交接](usage.zh-CN.md#自动交接auto-handoff)（默认关闭），sideby 启动的会话会在额度快用完时，把任务交给你配置顺序里的下一个账号。同一家厂商的多个订阅之间互相接力来绕过限额，厂商可能认为违反条款；这种接力要另开 `sameFamily`，风险由你承担。
 - 不代理凭据：从不读取订阅 token 去调模型，也不把多个登录凑成一个池子。
 - 不调私有接口：额度来自本地文件，以及 Claude Code 交给 status line 命令的数据。
 
@@ -27,7 +27,7 @@ Node 从 22.18 起默认会剥掉 TypeScript 类型，sideby 才能直接 `impor
 
 | 内容 | 位置 |
 |---|---|
-| 配置（sideby 只写其中的 `aliases`，来自 `new --alias`、`sideby alias` 或面板） | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
+| 配置（sideby 只写其中的 `aliases` 和 `handoff`：前者来自 `new --alias`、`sideby alias` 或面板，后者来自 `sideby handoff enable`、`sideby handoff disable` 或面板） | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
 | 你的插件 | `${XDG_CONFIG_HOME:-~/.config}/sideby/plugins/` |
 | 状态：额度缓存、上次体检结果、`settings.json` 原始字节、后台面板的 pid 和日志 | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
 | 桌面应用（`sideby app install`） | macOS `~/Applications/sideby.app`；Linux `~/.local/share/applications/sideby.desktop`、`~/.local/share/sideby/`、`~/.local/share/icons/hicolor/*/apps/sideby.*` |

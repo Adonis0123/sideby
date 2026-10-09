@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { lstatOrNull } from '../../core/fs-safe.ts'
 import type { Account, FamilyDef, LoginState, Plugin } from '../../types.ts'
 import { BUILTIN_LOGOS } from '../logos.ts'
+import { piHandoff } from './handoff.ts'
 
 /** `auth.json` exists after `/login`; its contents are never read. */
 async function loginState(account: Account): Promise<LoginState> {
@@ -50,6 +51,7 @@ export const piFamily: FamilyDef = {
   login: { args: null, hint: 'pi signs in inside the app: start it and type /login' },
   loginState,
   model,
+  handoff: piHandoff,
 }
 
 export const piPlugin: Plugin = {
