@@ -58,7 +58,7 @@ npm pack --dry-run
 
 逐项核对输出的文件列表：
 
-- 只有 `dist/`、`schemas/`、`skills/`、`README.md`、`README.zh-CN.md`、`LICENSE`、`package.json`。
+- 只有 `dist/`、`schemas/`、`skills/`、`README.md`、`README.zh-CN.md`、`LICENSE`、`package.json`。这一步是 `npm pack --dry-run`，两份 README 都在。真正发布时脚本会先把 `README.zh-CN.md` 挪开（发完放回），registry 上的说明来自 `README.md`，见下面「说明文件」。
 - `dist/` 里只有 `.js` 和 `.d.ts`，没有 `.ts` 源码，没有 `*.test.*`、`fixtures/`。
 - 没有 `.env`、`proxy.env`、`auth.json`、`.review-handoff/` 之类的文件。
 
@@ -71,8 +71,24 @@ npm pack --dry-run --json | node -e 'const [p] = JSON.parse(require("fs").readFi
 ### 4. 发布
 
 ```sh
-npm publish --access public    # 打开浏览器，用 passkey 确认
-npm view sideby version        # 应为 0.1.0
+node scripts/pin-english-npm-readme.ts --publish    # 内部是 npm publish --access public；打开浏览器，用 passkey 确认
+npm view sideby version                             # 应为 0.1.0
+npm view sideby readmeFilename                      # 应为 README.md
+```
+
+### 说明文件
+
+`sideby@0.3.0` 在 npm 上的 `readmeFilename` 是 `README.zh-CN.md`。包里的 `README.md` 仍是英文，npmjs.com 显示的是 registry 文档里的 `readme` 字段，不是 tarball 里的文件名。
+
+npm 用 `{README,README.*}` 找说明，取第一个像 Markdown 的文件。`README.zh-CN.md` 也符合。glob 依赖的 path-scurry 把每个目录项插到列表头部，顺序和 `readdir` 相反，所以中文文件排在前面。只在 `package.json` 里写 `readmeFilename` 不够：`readme` 为空时这次选择会再跑一遍并盖掉它。
+
+`scripts/pin-english-npm-readme.ts` 在发布前把 `README.md` 的正文写进 `package.json` 的 `readme`，把 `readmeFilename` 设为 `README.md`，并把 `README.zh-CN.md` 挪到 `.git` 里的临时目录。`postpublish` 和 `--publish` 的 `finally` 都会放回。挪开中文文件是为了 `pnpm publish`：它在 `prepublishOnly` 之前就读了 manifest，打包时用这份旧 manifest 盖过磁盘上的 `package.json`，再执行 `npm publish --ignore-scripts`。tarball 里如果还有 `README.zh-CN.md`，这次扫描仍会选中文。不能把 `embed-readme=true` 写进提交的 `.npmrc`，leak-check 把 `.npmrc` 当成凭据文件。
+
+发布前可以确认选择，结束时工作区应无改动：
+
+```sh
+node scripts/pin-english-npm-readme.ts --check
+git diff
 ```
 
 本机首发没有 provenance，这是正常的；之后 CI 发的版本才有。
@@ -86,7 +102,7 @@ npm view sideby version        # 应为 0.1.0
 | `E403`，提示包名和已有包太像，或没有权限 | 包名被占用或被 npm 判为近似名 | 不要换个名字直接发；先改 spec 和 `package.json`，再从第 1 步重来 |
 | `E402 Payment Required` | 漏了 `--access public` | 加上参数重发 |
 | `EOTP` 或浏览器确认超时 | 2FA 没在时限内完成；`https://www.npmjs.com/auth/cli/…` 链接几分钟就过期 | 重新执行命令，拿到新链接后马上用 passkey 确认 |
-| `EOTP`，没出现浏览器链接 | 命令不在终端里跑（例如 AI agent 的后台命令），npm 不走浏览器确认 | 套一层伪终端：`script -q /dev/null npm publish --access public`，再打开它打印的 `https://www.npmjs.com/auth/cli/…` |
+| `EOTP`，没出现浏览器链接 | 命令不在终端里跑（例如 AI agent 的后台命令），npm 不走浏览器确认 | 套一层伪终端：`script -q /dev/null node scripts/pin-english-npm-readme.ts --publish`，再打开它打印的 `https://www.npmjs.com/auth/cli/…` |
 | 网络中断，不确定有没有发出去 | — | 先跑 `npm view sideby versions`；已经有 0.1.0 就不要重发 |
 | 发出去了，但内容有问题 | — | 不要 unpublish；按下面「回滚」处理，然后发 0.1.1 |
 
@@ -155,7 +171,7 @@ git push --follow-tags
    - 升级到最新 npm，并确认版本不低于 11.5.1。
    - `pnpm install --frozen-lockfile --ignore-scripts`。
    - 确认 tag 等于 `v` 加 `package.json` 里的版本号，不一致就失败。
-   - `pnpm check`、`pnpm build`，然后 `npm publish --access public`。provenance 由 trusted publishing 自动生成，不传 token。
+   - `pnpm check`、`pnpm build`，然后 `node scripts/pin-english-npm-readme.ts --publish`（内部是 `npm publish --access public`）。provenance 由 trusted publishing 自动生成，不传 token。
 2. `github-release` job（权限 `contents: write`）：用 changelogithub 按 emoji 前缀的 commit 生成发布说明。
 
 发完检查：
@@ -194,6 +210,6 @@ npm dist-tag add sideby@0.1.2 latest
 
 ## 四、规则
 
-- 除首发外，不在本机执行 `npm publish`。
+- 除首发外，不在本机执行发布。本机首发和 CI 都用 `node scripts/pin-english-npm-readme.ts --publish`，不要直接跑 `npm publish`。
 - 不创建长期 npm token，不在 workflow 里用 `pull_request_target`。
 - workflow 里的 action 全部固定到完整 commit SHA，行尾注释版本号。Dependabot 升级 action 时会一起更新 SHA 和注释。

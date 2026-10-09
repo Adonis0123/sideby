@@ -71,9 +71,10 @@ jobs:
           fi
 
       # Trusted publishing: npm exchanges the OIDC token for a short-lived credential and adds provenance.
+      # The script pins README.md as the registry readme. A bare `npm publish` would store README.zh-CN.md.
       - name: Publish to npm
         if: steps.npm.outputs.published == 'false'
-        run: npm publish --access public
+        run: node scripts/pin-english-npm-readme.ts --publish
 
   github-release:
     needs: publish

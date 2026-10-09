@@ -114,6 +114,7 @@ sideby 启动 `PATH` 上的官方程序，从不修改它。测试过的版本�
 - [面板](docs/guide/panel.zh-CN.md)：面板、桌面应用、嵌入
 - [插件](docs/guide/plugins.zh-CN.md)：自己写家族或启动 hook
 - [常见问题](docs/guide/faq.zh-CN.md)：服务条款、数据位置、同类工具对比、卸载
+- [更新记录](https://github.com/Adonis0123/sideby/releases)
 
 ## 给 AI agent
 
