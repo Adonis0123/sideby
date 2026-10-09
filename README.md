@@ -114,6 +114,7 @@ Usage questions and ideas go in [Discussions](https://github.com/Adonis0123/side
 - [Panel](docs/guide/panel.md): the panel, desktop app and embedding
 - [Plugins](docs/guide/plugins.md): write your own Family or launch hook
 - [FAQ](docs/guide/faq.md): terms of service, data locations, alternatives, uninstall
+- [Changelog](https://github.com/Adonis0123/sideby/releases)
 
 ## For AI agents
 

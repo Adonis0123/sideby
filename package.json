@@ -3,15 +3,23 @@
   "version": "0.3.0",
   "description": "Run work, personal and API-key accounts at the same time, without their configs drifting apart.",
   "license": "MIT",
+  "author": "Adonis0123 (https://github.com/Adonis0123)",
   "type": "module",
   "keywords": [
     "claude-code",
     "codex",
+    "codex-cli",
     "grok",
+    "grokbuild",
     "pi",
     "multi-account",
+    "account-manager",
+    "rate-limits",
+    "usage-monitor",
     "ai-coding",
+    "developer-tools",
     "cli",
+    "anthropic",
     "quota"
   ],
   "repository": {
@@ -54,7 +62,9 @@
     "schemas": "node src/cli/schemas.ts",
     "leak-check": "sh scripts/leak-check.sh",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm leak-check",
-    "version": "node scripts/sync-skill-version.ts && git add skills/sideby/SKILL.md"
+    "version": "node scripts/sync-skill-version.ts && git add skills/sideby/SKILL.md",
+    "prepublishOnly": "node scripts/pin-english-npm-readme.ts",
+    "postpublish": "node scripts/pin-english-npm-readme.ts --restore"
   },
   "dependencies": {
     "typebox": "^1.3.34"
