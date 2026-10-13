@@ -10,6 +10,7 @@ import { USAGE_DAYS } from '../../core/quota-levels.ts'
 import {
   type Compaction,
   getOrCreate,
+  IDLE_OBSERVED_MS,
   type ModelRecords,
   type Turn,
   tuningResult,
@@ -35,8 +36,8 @@ const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v)
 
 /** `[key, ts, session, model, ctx, out, write5m, write1h]` */
 type TurnRow = [string, number, string, string, number, number, number, number]
-/** `[ts, session, model, trigger, pre, post]` */
-type CompactionRow = [number, string, string, string, number, number]
+/** `[ts, session, model, trigger, pre, post, silentMs]`; `silentMs` is how long the session was quiet before it (-1 unknown). */
+type CompactionRow = [number, string, string, string, number, number, number]
 
 /** What one session log contributes: only what the replay needs, never message text. */
 interface Summary {
@@ -64,6 +65,8 @@ async function parseFile(file: string, since: number): Promise<Summary> {
   const lastModel = new Map<string, string>()
   // Compactions logged before the first assistant row of their session in this file: they take that row's model.
   const orphans = new Map<string, CompactionRow[]>()
+  // When each session last spoke, to tell a compaction that came after a long silence from one a size triggered.
+  const lastSpoke = new Map<string, number>()
   try {
     const rl = createInterface({ input: createReadStream(file), crlfDelay: Number.POSITIVE_INFINITY })
     for await (const line of rl) {
@@ -84,6 +87,7 @@ async function parseFile(file: string, since: number): Promise<Summary> {
         const post = num(m?.postTokens)
         if (!Number.isFinite(ts) || ts < since || !pre || !post) continue
         const t = m?.trigger
+        const before = lastSpoke.get(session)
         const entry: CompactionRow = [
           ts,
           session,
@@ -91,11 +95,20 @@ async function parseFile(file: string, since: number): Promise<Summary> {
           t === 'auto' || t === 'manual' ? t : 'unknown',
           pre,
           post,
+          before === undefined ? -1 : ts - before,
         ]
         out.compactions.push(entry)
+        // The compaction itself is activity: a second one right after it did not follow a silence of its own.
+        lastSpoke.set(session, ts)
         if (!entry[2]) orphans.set(session, [...(orphans.get(session) ?? []), entry])
         continue
       }
+      if (
+        (row?.type === 'assistant' || row?.type === 'user') &&
+        row.isSidechain !== true &&
+        Number.isFinite(ts)
+      )
+        lastSpoke.set(session, ts)
       if (row?.type !== 'assistant' || row.isSidechain === true) continue
       const usage = row.message?.usage
       const model = row.message?.model
@@ -136,7 +149,7 @@ async function parseFile(file: string, since: number): Promise<Summary> {
 }
 
 /** Per-file summaries per Account directory; a file is parsed again only after it changed. */
-export const claudeTuningMemo = new FileMemo<Summary>({ name: 'claude-tuning', version: 2 })
+export const claudeTuningMemo = new FileMemo<Summary>({ name: 'claude-tuning', version: 3 })
 
 /** The Account's configured Compaction Threshold, or null for the Host default. Reads exactly one key. */
 export async function readAutoCompactWindow(dir: string): Promise<number | null> {
@@ -203,7 +216,7 @@ export async function readClaudeTuning(account: Account, ctx: ReadContext): Prom
   const sessionModel = new Map<string, string>()
   for (const t of [...turns.values()].sort((x, y) => x[1] - y[1])) sessionModel.set(t[2], t[3])
   const resolved = compactions.map(
-    (c): CompactionRow => (c[2] ? c : [c[0], c[1], sessionModel.get(c[1]) ?? '', c[3], c[4], c[5]]),
+    (c): CompactionRow => (c[2] ? c : [c[0], c[1], sessionModel.get(c[1]) ?? '', c[3], c[4], c[5], c[6]]),
   )
 
   // Group per model, then per session; a session that switched models is replayed once per model.
@@ -227,7 +240,13 @@ export async function readClaudeTuning(account: Account, ctx: ReadContext): Prom
     const maxCtx = Math.max(0, ...list.flat().map((t) => t.ctx))
     const comps: Compaction[] = resolved
       .filter((c) => c[2] === model && c[0] >= since && c[0] <= now)
-      .map((c) => ({ ts: c[0], trigger: c[3] as Compaction['trigger'], pre: c[4], post: c[5] }))
+      .map((c) => ({
+        ts: c[0],
+        trigger: c[3] as Compaction['trigger'],
+        pre: c[4],
+        post: c[5],
+        idle: c[3] === 'auto' && c[6] >= IDLE_OBSERVED_MS,
+      }))
     const native = NATIVE_1M.test(model)
     // Elsewhere the window comes from the records: a context past 200K means the model runs with 1M.
     const window = native

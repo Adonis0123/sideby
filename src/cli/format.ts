@@ -100,7 +100,7 @@ export function tuningLines(t: TuningResult): string[] {
     return [t.reason === 'no-source' ? 'no public source for this host' : (t.detail ?? t.reason)]
   return t.models.map((m) => {
     const now = m.configured === null ? 'Host default' : `${compactNumber(m.configured)}`
-    const head = `${m.model}  ${m.calls} calls  now ${now}  ${m.compactions.total} compactions`
+    const head = `${m.model}  ${m.calls} calls  now ${now}  ${m.compactions.total} compactions${m.compactions.idle ? ` (${m.compactions.idle} after idle)` : ''}`
     if (m.suggestion) {
       const saved =
         m.suggestion.savedPercent === null

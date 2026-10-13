@@ -1372,7 +1372,11 @@ const MAIN = String.raw`
       pick ? h('div', null, h('span', { class: 'muted small' }, t('tune.best')), h('div', { class: 'tune-num tune-best' }, tokens(pick.threshold))) : null))
     if (pick && pick.savedPercent !== null) rows.push(h('p', { class: 'small' }, t('tune.saved', { n: Math.round(pick.savedPercent) })))
     if (pick) rows.push(h('p', { class: 'muted small' }, t('tune.basis', { model: pick.model, ref: pick.ref })))
-    else {
+    if (pick) {
+      const seen = entries.find((e) => e.ref === pick.ref)
+      const stats = seen && seen.tuning.status === 'ok' ? seen.tuning.models.find((m) => m.model === pick.model) : null
+      if (stats && stats.compactions.idle > 0) rows.push(h('p', { class: 'muted small' }, t('tune.idle', { n: stats.compactions.idle, total: stats.compactions.total })))
+    } else {
       // Say why there is no suggestion: when a model is already at its cheapest, that is the news, not "not enough use".
       const why = entries.flatMap((e) => (e.tuning.status === 'ok' ? e.tuning.models : [])).some((m) => m.reason === 'already-best') ? t('tune.reason.already-best') : t('tune.groupNone')
       rows.push(h('p', { class: 'note' }, why))
@@ -1401,6 +1405,7 @@ const MAIN = String.raw`
       m.suggestion ? h('div', null, h('span', { class: 'muted small' }, t('tune.best')), h('div', { class: 'small' }, tokens(m.suggestion.threshold))) : null))
     if (!m.suggestion) rows.push(h('p', { class: 'muted small' }, t('tune.reason.' + m.reason, { min: minCalls })))
     rows.push(h('p', { class: 'muted small' }, m.compactions.total ? tn('tune.compactions', m.compactions.total, { size: tokens(m.compactions.preTokensP50 || 0) }) : t('tune.noCompactions')))
+    if (m.compactions.idle > 0) rows.push(h('p', { class: 'muted small' }, t('tune.idle', { n: m.compactions.idle, total: m.compactions.total })))
     return h('div', { class: 'tune-detail' }, rows)
   }
   function tuneDetails(entries, minCalls, label) {

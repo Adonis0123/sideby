@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { Compaction, ModelRecords, Turn } from './tuning.ts'
-import { MIN_CALLS, summarizeModel, tuningResult } from './tuning.ts'
+import { MIN_CALLS, replay, summarizeModel, tuningResult } from './tuning.ts'
 
 const WINDOW = 200_000
 
@@ -89,6 +89,41 @@ describe('summarizeModel', () => {
       assert.equal(m.configured, bad)
       assert.equal(m.effective, 190_000)
     }
+  })
+
+  it('counts compactions Claude Code did after idle time, and compares against the default, not against them', () => {
+    const idle: Compaction = { ts: 5, trigger: 'auto', pre: 300_000, post: 20_000, idle: true }
+    const m = summarizeModel(
+      records({ sessions: [steady(210)], compactions: [idle, idle], defaultThreshold: 967_000 }),
+      {
+        ...opts,
+        configured: null,
+      },
+    )
+    assert.equal(m.compactions.idle, 2)
+    assert.equal(m.compactions.auto, 2)
+    // The idle ones say nothing about the size Claude Code was set to; the documented default is the baseline.
+    assert.equal(m.effective, 967_000)
+  })
+
+  it('models the idle compaction too: a long silence with a big context compacts whatever the threshold', () => {
+    // 215 turns growing to about 203K, an hour of silence, then 5 more turns; the threshold is never reached first.
+    const quiet = (): Turn[] => {
+      const t = steady(215)
+      const last = t[t.length - 1] as Turn
+      const after = Array.from({ length: 5 }, (_, i) => ({
+        ...last,
+        ctx: last.ctx + 5_000 + i * 900,
+        ts: last.ts + 60 * 60_000 + i,
+      }))
+      return [...t, ...after]
+    }
+    // The same sessions at a threshold that is never reached: only the idle compaction can change the cost.
+    const off = replay([quiet()], 900_000, 20_000, false)
+    const on = replay([quiet()], 900_000, 20_000, true)
+    assert.notEqual(on, off)
+    // No long silence, no idle compaction: switching it on changes nothing.
+    assert.equal(replay([steady(215)], 900_000, 20_000, true), replay([steady(215)], 900_000, 20_000, false))
   })
 
   it('caps a configured threshold at the model window', () => {

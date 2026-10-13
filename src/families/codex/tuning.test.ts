@@ -70,6 +70,7 @@ describe('codex tuning', () => {
         total: 1,
         auto: 0,
         manual: 0,
+        idle: 0,
         preTokensP50: 230_000,
         preTokensMax: 230_000,
       })

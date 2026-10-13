@@ -141,6 +141,10 @@ const TuningModel = Type.Object({
     }),
     auto: Type.Number(),
     manual: Type.Number(),
+    idle: Type.Number({
+      description:
+        'Automatic compactions Claude Code did after the conversation sat idle; the size setting does not control them.',
+    }),
     preTokensP50: Type.Union([Type.Number(), Type.Null()]),
     preTokensMax: Type.Union([Type.Number(), Type.Null()]),
   }),

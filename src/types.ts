@@ -281,6 +281,8 @@ export interface TuningModel {
     total: number
     auto: number
     manual: number
+    /** Automatic compactions Claude Code did after the conversation sat idle; the size setting does not control them. */
+    idle: number
     preTokensP50: number | null
     preTokensMax: number | null
   }

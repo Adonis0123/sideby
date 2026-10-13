@@ -13,6 +13,21 @@ export const WEIGHT = { input: 1, cacheRead: 0.1, write5m: 1.25, write1h: 2, out
 export const MIN_COMPACT_WINDOW = 100_000
 export const MAX_COMPACT_WINDOW = 1_000_000
 
+/**
+ * Claude Code compacts a conversation on its own when it has sat idle for about 90% of the one-hour prompt cache
+ * and holds at least 200K tokens (read from Claude Code 2.1.296 and matched against real logs: 30 of 31 automatic
+ * compactions came after 54-55 minutes of silence and none was smaller than 202K). `autoCompactWindow` does not
+ * control it. A compaction after this much silence is recorded as `idle`.
+ */
+export const IDLE_AFTER_MS = 54 * 60_000
+export const IDLE_MIN_CTX = 200_000
+/**
+ * How long a silence must be to call a logged compaction `idle`. Deliberately a little below `IDLE_AFTER_MS`, since the log
+ * only has the timestamp of the last message. Replaying with 45, 50 or 54 minutes gave the same simulated counts on real
+ * logs, so the difference does not matter; why the replay finds fewer idle compactions than were logged is not this.
+ */
+export const IDLE_OBSERVED_MS = 50 * 60_000
+
 /** A model with fewer turns than this in the window gets no suggestion. */
 export const MIN_CALLS = 200
 
@@ -38,6 +53,8 @@ export interface Turn {
 export interface Compaction {
   ts: number
   trigger: 'auto' | 'manual' | 'unknown'
+  /** Claude Code did it by itself after the conversation sat idle (not because a size was reached). */
+  idle?: boolean
   pre: number
   post: number
 }
@@ -65,7 +82,7 @@ function writeWeight(t: Turn): number {
 }
 
 /** Weighted cost of one session's turns if the Host compacted whenever the context reached `threshold`. */
-function replaySession(turns: Turn[], threshold: number, post: number): number {
+function replaySession(turns: Turn[], threshold: number, post: number, idle: boolean): number {
   const first = turns[0]
   if (!first) return 0
   const growth: number[] = []
@@ -83,7 +100,9 @@ function replaySession(turns: Turn[], threshold: number, post: number): number {
     if (!t || !prev) continue
     const d = t.ctx - prev.ctx
     const g = d >= 0 ? d : usual
-    if (ctx + g >= threshold) {
+    // Long silence with a big context: Claude Code compacts by itself, whatever the threshold is.
+    const lapsed = idle && t.ts - prev.ts >= IDLE_AFTER_MS && ctx >= IDLE_MIN_CTX
+    if (lapsed || ctx + g >= threshold) {
       // The whole context goes in as input, a summary of about `post` tokens comes out, and the next turn
       // writes that summary to the cache again.
       cost += ctx * WEIGHT.input + post * WEIGHT.output + post * WEIGHT.write5m
@@ -97,9 +116,10 @@ function replaySession(turns: Turn[], threshold: number, post: number): number {
   return cost
 }
 
-function replay(sessions: Turn[][], threshold: number, post: number): number {
+/** Weighted cost of the sessions at a threshold. Exported for the tests of the engine. */
+export function replay(sessions: Turn[][], threshold: number, post: number, idle: boolean): number {
   let total = 0
-  for (const s of sessions) total += replaySession(s, threshold, post)
+  for (const s of sessions) total += replaySession(s, threshold, post, idle)
   return total
 }
 
@@ -119,8 +139,15 @@ export function summarizeModel(rec: ModelRecords, o: SummarizeOptions): TuningMo
   const auto = rec.compactions.filter((c) => c.trigger === 'auto')
   const pre = rec.compactions.map((c) => c.pre).filter((n) => n > 0)
   const posts = rec.compactions.map((c) => c.post).filter((n) => n > 0)
-  const autoPre = auto.map((c) => c.pre).filter((n) => n > 0)
-  // What is in effect: the configured size, else what the Host did, else where it compacts by default.
+  // Threshold-triggered compactions only: the idle ones say nothing about the size Claude Code was set to.
+  const autoPre = auto
+    .filter((c) => !c.idle)
+    .map((c) => c.pre)
+    .filter((n) => n > 0)
+  const idleCount = auto.filter((c) => c.idle).length
+  // Replay idle compaction too once the records show Claude Code doing it for this Account.
+  const idleMode = idleCount > 0
+  // What is in effect: the configured size, else where Claude Code compacts by default, else what it did.
   // A size outside 100K-1M is not one Claude Code runs with (the documentation does not say what it does with it),
   // so it is not taken as the baseline.
   const usable =
@@ -128,7 +155,7 @@ export function summarizeModel(rec: ModelRecords, o: SummarizeOptions): TuningMo
   const effective =
     usable && o.configured !== null
       ? Math.min(o.configured, rec.contextWindow)
-      : (median(autoPre) ?? rec.defaultThreshold ?? null)
+      : (rec.defaultThreshold ?? median(autoPre))
   const base: TuningModel = {
     model: rec.model,
     calls,
@@ -139,6 +166,7 @@ export function summarizeModel(rec: ModelRecords, o: SummarizeOptions): TuningMo
       total: rec.compactions.length,
       auto: auto.length,
       manual: rec.compactions.filter((c) => c.trigger === 'manual').length,
+      idle: idleCount,
       preTokensP50: pre.length ? Math.round(median(pre) as number) : null,
       preTokensMax: pre.length ? Math.max(...pre) : null,
     },
@@ -161,7 +189,7 @@ export function summarizeModel(rec: ModelRecords, o: SummarizeOptions): TuningMo
   if (!sizes.length) return stop('no-optimum')
   let best: { threshold: number; cost: number } | null = null
   for (const threshold of sizes) {
-    const cost = replay(rec.sessions, threshold, post)
+    const cost = replay(rec.sessions, threshold, post, idleMode)
     // On a tie the larger threshold wins: fewer compactions for the same cost.
     if (!best || cost < best.cost || (cost === best.cost && threshold > best.threshold))
       best = { threshold, cost }
@@ -174,7 +202,7 @@ export function summarizeModel(rec: ModelRecords, o: SummarizeOptions): TuningMo
       reason: 'suggested',
       suggestion: { threshold: best.threshold, savedPercent: null, savedWeighted: null },
     }
-  const current = replay(rec.sessions, effective, post)
+  const current = replay(rec.sessions, effective, post, idleMode)
   const saved = current - best.cost
   const percent = current > 0 ? (saved / current) * 100 : 0
   if (percent < MIN_SAVING_PERCENT) return stop('already-best')

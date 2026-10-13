@@ -281,6 +281,8 @@ const en = {
     'The size now in the file ({size}) is outside what Claude Code accepts (100K to 1M). Pick Default or a size from the menu to replace it.',
   'tune.overrides':
     'These models save a size of their own (set with /autocompact), which wins over this one: {list}',
+  'tune.idle':
+    '{n} of its {total} compactions came after the conversation sat idle for about an hour. Claude Code does that by itself, and this size does not change it.',
   'tune.groupNone': 'Not used enough to suggest a size yet. You can still pick one below.',
   'tune.details': 'Details for each account',
   'tune.detailsObserved': 'Only observed (there is no setting to change)',
@@ -694,6 +696,8 @@ const zh: Record<MessageKey, string> = {
     '文件里现在的大小（{size}）超出了 Claude Code 接受的范围（100K 到 1M）。请选「默认」或菜单里的某个大小来替换它。',
   'tune.overrides':
     '这些模型自己保存了一个大小（用 /autocompact 设的），对它们来说那个优先于这里的设置：{list}',
+  'tune.idle':
+    '它的 {total} 次压缩里有 {n} 次是对话安静了大约一小时之后发生的。这是 Claude Code 自己做的，这个大小改不了它。',
   'tune.groupNone': '用得还不够多，暂时给不出建议值。你仍然可以在下面自己选一个。',
   'tune.details': '各账号的详情',
   'tune.detailsObserved': '只做观测（没有可以改的设置）',

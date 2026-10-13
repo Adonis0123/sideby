@@ -213,6 +213,22 @@ describe('claude tuning', () => {
     })
   })
 
+  it('tells a compaction after about an hour of silence (Claude Code on its own) from one a size triggered', async () => {
+    await withFakeHome(async (h) => {
+      const lastTurn = NOW.getTime() - 3_600_000 * 24 + 209 * 1000
+      const at = (ms: number) => new Date(lastTurn + ms).toISOString()
+      const body = session('claude-opus-5-5', 210, [
+        { ...boundary('auto', 300_000), timestamp: at(54 * 60_000) },
+        { ...boundary('auto', 960_000), timestamp: at(54 * 60_000 + 5_000) },
+      ])
+      const r = await readClaudeTuning(await put(h, body), ctx(h))
+      const c = r.status === 'ok' ? r.models[0]?.compactions : undefined
+      assert.equal(c?.auto, 2)
+      // Only the first follows the silence; the second comes right after the first compaction.
+      assert.equal(c?.idle, 1)
+    })
+  })
+
   it('writes nothing into the Account directory', async () => {
     await withFakeHome(async (h) => {
       const a = await put(
