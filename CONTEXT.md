@@ -46,6 +46,8 @@ Avoid: *profile* (Codex already uses it for a config layer that does not change 
 - **Handoff Brief**: the note the next Account starts from: what the task is, what is done, what is left. Written by the old session while it still has Quota, or put together by sideby from the old session's local records when it could not.
 - **Handoff Threshold**: the Quota Pressure at which an Auto Handoff begins.
 - **Auto Handoff**: a Handoff sideby carries out by itself when a running session reaches the Handoff Threshold: the old session writes the Handoff Brief and ends, and the next Account in the Handoff Order starts from it in the same terminal.
+- **Compaction Threshold**: how large a session's context may grow before the Host compacts it by itself. Not the Handoff Threshold, which is about Quota.
+- **Tuning Suggestion**: a Compaction Threshold that sideby estimates would spend fewer tokens for one model in one Account, replaying that Account's recent local session records. An estimate, never applied by sideby.
 
 Avoid: *rotation* (cycling through Accounts per request or on a timer; a Handoff moves on only when Quota runs low and never goes back to a full Account), *failover* (say Auto Handoff), *relay* (people use it for a third-party API endpoint).
 
