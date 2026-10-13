@@ -600,6 +600,7 @@ const MAIN = String.raw`
       a.dir ? { icon: 'folder', label: t('menu.copyDir'), hint: a.dir, run: () => copyText(a.dir) } : null,
       a.identity && a.identity.email ? { icon: 'mail', label: t('menu.copyEmail'), hint: emailText(a.identity.email), run: () => copyText(a.identity.email) } : null,
       '-',
+      family(a.family).tuning ? { icon: 'check', label: t('menu.tune'), run: () => openTune(a) } : null,
       { icon: 'check', label: t('menu.check'), disabled: S.checking || S.fixing || Boolean(ui.checkingRef), run: () => checkAccount(a.ref) },
       BOOT.readOnly ? null : { icon: 'userPlus', label: t('menu.like'), run: () => openCreate({ family: a.family, api: a.kind === 'api' }) },
     ]
@@ -1264,6 +1265,46 @@ const MAIN = String.raw`
     if (!el.open) { el.showModal(); raiseToasts() }
   }
 
+  // Context tuning (spec §3.18): the estimate for one Account, read when the dialog opens.
+  let tuneState = null
+  async function openTune(a) {
+    tuneState = { ref: a.ref, dir: a.dir, family: a.family, loading: true, data: null, error: null }
+    showDialog('tune')
+    renderTune()
+    const mine = tuneState
+    try {
+      const r = await api('/api/tuning', { account: a.ref })
+      if (tuneState === mine) { tuneState.data = r.tuning; tuneState.minCalls = r.minCalls; tuneState.loading = false }
+    } catch (e) { if (tuneState === mine) { tuneState.error = e; tuneState.loading = false } }
+    if (dlg.kind === 'tune' && tuneState === mine) renderTune()
+  }
+  function tuneModel(m) {
+    const rows = [h('div', { class: 'tune-head' },
+      h('b', { class: 'mono' }, m.model),
+      h('span', { class: 'muted small' }, t('tune.calls', { n: m.calls }) + ' · ' + t('tune.window', { size: tokens(m.contextWindow) })))]
+    const now = m.configured === null ? t('tune.hostDefault') : tokens(m.configured)
+    rows.push(h('div', { class: 'tune-vals' },
+      h('div', null, h('span', { class: 'muted small' }, t('tune.now')), h('div', { class: 'tune-num' }, now)),
+      m.suggestion ? h('div', null, h('span', { class: 'muted small' }, t('tune.best')), h('div', { class: 'tune-num tune-best' }, tokens(m.suggestion.threshold))) : null))
+    if (m.suggestion && m.suggestion.savedPercent !== null) rows.push(h('p', { class: 'small' }, t('tune.saved', { n: m.suggestion.savedPercent })))
+    if (m.suggestion && tuneState.family === 'claude')
+      rows.push(h('p', { class: 'small' }, t('tune.snippet')), codeCopy('"autoCompactWindow": ' + m.suggestion.threshold))
+    if (!m.suggestion) rows.push(h('p', { class: 'note' }, t('tune.reason.' + m.reason, { min: tuneState.minCalls })))
+    rows.push(h('p', { class: 'muted small' }, m.compactions.total ? t('tune.compactions', { n: m.compactions.total, size: tokens(m.compactions.preTokensP50 || 0) }) : t('tune.noCompactions')))
+    return h('div', { class: 'tune-model' }, rows)
+  }
+  function renderTune() {
+    if (!tuneState) return
+    const body = [h('p', { class: 'muted small' }, t('tune.intro', { days: BOOT.usageDays }))]
+    const d = tuneState.data
+    if (tuneState.loading) body.push(h('p', { class: 'muted' }, spinner(), ' ', t('tune.loading')))
+    else if (tuneState.error) body.push(errorNote(tuneState.error, () => { const a = S.state.accounts.find((x) => x.ref === tuneState.ref); if (a) openTune(a) }))
+    else if (d && d.status === 'ok') body.push(d.models.map(tuneModel))
+    else if (d) body.push(h('p', { class: 'note', title: d.detail || null }, t(d.reason === 'no-session' ? 'tune.none' : d.reason === 'no-source' ? 'tune.noSource' : 'tune.unreadable')))
+    const foot = [h('button', { class: 'btn', type: 'button', onclick: () => dlg.el.close() }, t('btn.close'))]
+    setKids(dlg.el, dialogFrame(t('tune.title') + ' · ' + tuneState.ref, tuneState.family, body, foot))
+  }
+
   // New account. The form is built once per opening so typing keeps focus; only its derived parts re-render.
   let nf = null
   function familyStatus(f) {
@@ -1843,6 +1884,7 @@ const MAIN = String.raw`
     renderAll()
     if (dlg.kind === 'create' && nf && !nf.creating) renderCreate()
     else if (dlg.kind === 'setup' && qs) renderSetup()
+    else if (dlg.kind === 'tune' && tuneState) renderTune()
   })
   $('theme').addEventListener('click', () => {
     const order = CHOICES.theme

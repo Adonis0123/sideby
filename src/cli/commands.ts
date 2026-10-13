@@ -14,7 +14,7 @@ import { suggestAlias, suggestName } from '../panel/page-logic.ts'
 import { createRuntime, type Runtime, UnknownFamilyError } from '../runtime.ts'
 import type { Finding } from '../types.ts'
 import { type ParsedArgs, UsageError } from './args.ts'
-import { c, clock, quotaText, table, usageText } from './format.ts'
+import { c, clock, quotaText, table, tuningLines, usageText } from './format.ts'
 
 export interface Io {
   out(s: string): void
@@ -336,6 +336,46 @@ export async function cmdDoctor(a: ParsedArgs, io: Io): Promise<number> {
   if (!a.flags.has('fix') && fixable)
     io.out(c.cyan(`\n${fixable} issue(s) can be fixed with \`sideby doctor --fix\`.`))
   return report.status === 'ok' ? 0 : 1
+}
+
+/** `sideby tune [account|family]`: estimated Compaction Threshold per model, read-only (spec §3.18). */
+export async function cmdTune(a: ParsedArgs, io: Io): Promise<number> {
+  if (a.positionals.length > 1) throw new UsageError('usage: sideby tune [account|family] [--json]')
+  const rt = await createRuntime()
+  const target = a.positionals[0]
+  const all = await rt.accounts()
+  let accounts = all
+  if (target) {
+    const ofFamily = all.filter((x) => x.family === target)
+    if (ofFamily.length) accounts = ofFamily
+    else if ((await rt.familyInfo()).some((f) => f.id === target)) accounts = []
+    else accounts = [await rt.resolve(target)]
+  }
+  const rows = await Promise.all(
+    accounts.map(async (x) => ({ ref: x.ref, family: x.family, tuning: await rt.tuning(x) })),
+  )
+  if (a.flags.has('json')) {
+    json(io, { accounts: rows })
+    return 0
+  }
+  if (rows.length === 0) {
+    io.out(
+      target
+        ? `No ${target} accounts yet. Run \`sideby new ${target} <name>\` to add one.`
+        : 'No accounts found yet. Run `sideby` for how to start.',
+    )
+    return 0
+  }
+  for (const r of rows) {
+    io.out(c.bold(r.ref))
+    for (const line of tuningLines(r.tuning)) io.out(`  ${line}`)
+  }
+  io.out(
+    c.dim(
+      `\nEstimates from your last ${USAGE_DAYS} days of local sessions; sideby does not change any setting.`,
+    ),
+  )
+  return 0
 }
 
 export async function cmdQuota(a: ParsedArgs, io: Io): Promise<number> {

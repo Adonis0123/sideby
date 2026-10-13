@@ -23,7 +23,8 @@
               "bin",
               "installUrl",
               "installed",
-              "plugin"
+              "plugin",
+              "tuning"
             ],
             "properties": {
               "id": {
@@ -43,6 +44,9 @@
               },
               "plugin": {
                 "type": "string"
+              },
+              "tuning": {
+                "type": "boolean"
               }
             }
           },

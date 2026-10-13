@@ -325,6 +325,11 @@ a.btn:hover { text-decoration: none; }
 .banner ul { margin: 6px 0 0; padding-left: 18px; }
 .banner-actions { display: flex; gap: 8px; flex: none; }
 .ah-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end; }
+.tune-model { border: 1px solid var(--border); border-radius: calc(var(--radius) - 4px); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.tune-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.tune-vals { display: flex; gap: 24px; }
+.tune-num { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tune-best { color: var(--ok, var(--accent)); }
 .ah-fam { border: 1px solid var(--border); border-radius: calc(var(--radius) - 4px); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 .ah-fam-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ah-order { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }

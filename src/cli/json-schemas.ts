@@ -51,6 +51,7 @@ const FamilyInfo = Type.Object({
   installUrl: Str,
   installed: Type.Boolean(),
   plugin: Str,
+  tuning: Type.Boolean(),
 })
 
 const ShareModeSchema = Type.Union(
@@ -126,6 +127,54 @@ const Quota = Type.Union([
   Type.Object({ status: Type.Literal('unavailable'), reason: Str, detail: Type.Optional(Str) }),
 ])
 
+const TuningModel = Type.Object({
+  model: Str,
+  calls: Type.Number(),
+  contextWindow: Type.Number(),
+  configured: Type.Union([Type.Number(), Type.Null()], {
+    description: 'Configured threshold in tokens; null is the Host default.',
+  }),
+  effective: Type.Union([Type.Number(), Type.Null()]),
+  compactions: Type.Object({
+    total: Type.Number({
+      description: 'All compactions, including those whose trigger the Host does not record.',
+    }),
+    auto: Type.Number(),
+    manual: Type.Number(),
+    preTokensP50: Type.Union([Type.Number(), Type.Null()]),
+    preTokensMax: Type.Union([Type.Number(), Type.Null()]),
+  }),
+  suggestion: Type.Union(
+    [
+      Type.Object({
+        threshold: Type.Number(),
+        savedPercent: Type.Union([Type.Number(), Type.Null()]),
+        savedWeighted: Type.Union([Type.Number(), Type.Null()]),
+      }),
+      Type.Null(),
+    ],
+    { description: 'The estimated cheapest threshold; null when `reason` says why there is none.' },
+  ),
+  reason: Type.Union([
+    Type.Literal('suggested'),
+    Type.Literal('already-best'),
+    Type.Literal('insufficient-calls'),
+    Type.Literal('no-compactions'),
+    Type.Literal('unknown-model'),
+    Type.Literal('observe-only'),
+  ]),
+})
+
+const Tuning = Type.Union([
+  Type.Object({
+    status: Type.Literal('ok'),
+    days: Type.Number(),
+    estimate: Type.Literal(true),
+    models: Type.Array(TuningModel),
+  }),
+  Type.Object({ status: Type.Literal('unavailable'), reason: Str, detail: Type.Optional(Str) }),
+])
+
 const Usage = Type.Union([
   Type.Object({
     status: Type.Literal('ok'),
@@ -196,6 +245,13 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       ),
     },
     { title: 'sideby doctor --json' },
+  ),
+  tune: Type.Object(
+    {
+      schemaVersion: Version,
+      accounts: Type.Array(Type.Object({ ref: Str, family: Str, tuning: Tuning })),
+    },
+    { title: 'sideby tune --json' },
   ),
   quota: Type.Object(
     {

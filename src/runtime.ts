@@ -55,6 +55,7 @@ import type {
   QuotaSetupPlan,
   ReadContext,
   ShareMode,
+  TuningResult,
   UsageResult,
 } from './types.ts'
 
@@ -110,6 +111,8 @@ export interface FamilyInfo {
   installed: boolean
   /** Plugin that provides the Family. */
   plugin: string
+  /** The Family can estimate a Compaction Threshold (spec §3.18). */
+  tuning: boolean
 }
 
 /** One Shared Item as `sideby families` reports it (spec §3.16). */
@@ -227,6 +230,8 @@ export interface Runtime {
   resumeLaunch(familyId: string, userArgs: readonly string[]): Promise<ResumeLaunch>
   quota(account: Account): Promise<QuotaResult>
   usage(account: Account): Promise<UsageResult>
+  /** Estimated Compaction Threshold per model for one Account (spec §3.18); read-only. */
+  tuning(account: Account): Promise<TuningResult>
   /**
    * Which Account of a Family to move on to (spec §3.13). Throws a UserError with code `no-quota-source`
    * when the Family cannot tell, `no-accounts` when it has none.
@@ -392,6 +397,7 @@ export async function createRuntime(
           installUrl: f.installUrl,
           installed: (await which(f.bin, env)) !== null,
           plugin: loaded.familyOwner.get(f.id) ?? 'unknown',
+          tuning: Boolean(f.readTuning),
         })),
       )
     },
@@ -682,6 +688,18 @@ export async function createRuntime(
       await memos.ready()
       try {
         return await f.readUsage(account, readContext())
+      } catch (err) {
+        return { status: 'unavailable', reason: 'unrecognized', detail: (err as Error).message }
+      } finally {
+        memos.saveSoon()
+      }
+    },
+    async tuning(account) {
+      const f = familyOf(account.family)
+      if (!f.readTuning) return { status: 'unavailable', reason: 'no-source' }
+      await memos.ready()
+      try {
+        return await f.readTuning(account, readContext())
       } catch (err) {
         return { status: 'unavailable', reason: 'unrecognized', detail: (err as Error).message }
       } finally {

@@ -32,6 +32,8 @@ Usage:
   sideby quota [account]              quota and 7-day token usage
   sideby quota setup claude [--yes]   turn on Claude quota (shows the change first)
   sideby quota teardown claude        undo it, restoring the original file
+  sideby tune [account|family]        estimate the cheapest auto-compact threshold per model
+                                      from your last 7 days of sessions (read-only)
   sideby handoff status               what Auto Handoff still needs on this machine
   sideby handoff enable [--yes]       turn it on (shows the config change first); --same-family,
                                       --order claude=codex001,cc002, --threshold n, --prepare-at n
@@ -51,7 +53,7 @@ Usage:
   sideby plugins                      list loaded plugins and load errors
 
 Options:
-  --json        machine-readable output (list, new, next, alias, doctor, quota, handoff, families, plugins, app)
+  --json        machine-readable output (list, new, next, alias, doctor, quota, tune, handoff, families, plugins, app)
   -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families
   -v, --version show the version
 
@@ -156,6 +158,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   alias: { flags: ['json'] },
   doctor: { flags: ['fix', 'force', 'json'] },
   quota: { flags: ['json', 'yes'] },
+  tune: { flags: ['json'] },
   handoff: {
     flags: ['json', 'yes', 'same-family', 'no-same-family'],
     valued: ['brief', 'order', 'prepare-at', 'threshold', 'wait-minutes', 'countdown'],
@@ -258,6 +261,8 @@ export async function main(argv: string[]): Promise<number> {
         return await cmds.cmdDoctor(parsed, io)
       case 'quota':
         return await cmds.cmdQuota(parsed, io)
+      case 'tune':
+        return await cmds.cmdTune(parsed, io)
       case 'handoff':
         return await cmds.cmdHandoff(parsed, io)
       case 'ui':

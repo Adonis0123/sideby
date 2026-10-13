@@ -1232,3 +1232,107 @@ describe('sideby handoff status, enable and disable (spec §3.17)', () => {
     })
   })
 })
+
+describe('tune (spec §3.18)', () => {
+  /** A Claude main Account with one session of 210 turns and an auto compaction, dated just now. */
+  async function withSession(h: FakeHome): Promise<void> {
+    await h.write('.claude/settings.json', '{"autoCompactWindow":190000}\n')
+    await h.write('.claude.json', JSON.stringify({ oauthAccount: { id: 'x' } }), 0o600)
+    await fakeHost(h, 'claude')
+    const start = Date.now() - 3_600_000
+    const rows: object[] = []
+    for (let i = 0; i < 210; i++)
+      rows.push({
+        type: 'assistant',
+        timestamp: new Date(start + i * 1000).toISOString(),
+        sessionId: 's1',
+        message: {
+          id: `m${i}`,
+          model: 'claude-opus-5-5',
+          usage: {
+            input_tokens: 10,
+            cache_read_input_tokens: 10_000 + i * 900,
+            cache_creation_input_tokens: 900,
+            output_tokens: 200,
+          },
+        },
+      })
+    rows.push({
+      type: 'system',
+      subtype: 'compact_boundary',
+      timestamp: new Date(start + 5000).toISOString(),
+      sessionId: 's1',
+      compactMetadata: { trigger: 'auto', preTokens: 190_000, postTokens: 20_000 },
+    })
+    await h.write('.claude/projects/p/s1.jsonl', `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`)
+  }
+
+  it('prints a JSON result that matches the schema, for one account, a family and all accounts', async () => {
+    await withFakeHome(async (h) => {
+      await withSession(h)
+      for (const args of [
+        ['tune', '--json'],
+        ['tune', 'claude', '--json'],
+        ['tune', 'claude:main', '--json'],
+      ]) {
+        const r = await sideby(h, args)
+        assert.equal(r.code, 0, args.join(' '))
+        const data = checkSchema('tune', r.out)
+        assert.equal(data.schemaVersion, 1)
+        const accounts = data.accounts as { ref: string; tuning: { status: string; estimate?: boolean } }[]
+        assert.equal(accounts[0]?.ref, 'claude:main')
+        assert.equal(accounts[0]?.tuning.status, 'ok')
+        assert.equal(accounts[0]?.tuning.estimate, true)
+      }
+    })
+  })
+
+  it('prints a readable table and leaves the Host directory untouched', async () => {
+    await withFakeHome(async (h) => {
+      await withSession(h)
+      const before = await snapshot(h.path('.claude'))
+      const r = await sideby(h, ['tune'])
+      assert.equal(r.code, 0)
+      assert.match(r.out, /claude:main/)
+      assert.match(r.out, /claude-opus-5-5/)
+      assert.match(r.out, /Estimates/)
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.path('.claude'))), [])
+    })
+  })
+
+  it('exits 1 for an unknown account, 2 for extra arguments, and gives a JSON error', async () => {
+    await withFakeHome(async (h) => {
+      await withSession(h)
+      const missing = await sideby(h, ['tune', 'claude:nope', '--json'])
+      assert.equal(missing.code, 1)
+      assert.equal((JSON.parse(missing.out) as { schemaVersion: number }).schemaVersion, 1)
+      assert.equal((await sideby(h, ['tune', 'a', 'b'])).code, 2)
+      assert.equal((await sideby(h, ['tune', '--nope'])).code, 2)
+    })
+  })
+
+  it('says a known family has no accounts yet instead of reporting an unknown account', async () => {
+    await withFakeHome(async (h) => {
+      await withSession(h)
+      const human = await sideby(h, ['tune', 'codex'])
+      assert.equal(human.code, 0)
+      assert.match(human.out, /No codex accounts yet.*sideby new codex/s)
+      const data = checkSchema('tune', (await sideby(h, ['tune', 'codex', '--json'])).out)
+      assert.deepEqual(data.accounts, [])
+    })
+  })
+
+  it('marks Grok and pi as having no public source', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.grok/auth.json', JSON.stringify({ a: { email: 'g@example.com' } }), 0o600)
+      await h.mkdir('.grok/skills')
+      await fakeHost(h, 'grok')
+      const r = await sideby(h, ['tune', '--json'])
+      const data = checkSchema('tune', r.out)
+      const grok = (data.accounts as { ref: string; tuning: { reason?: string } }[]).find((a) =>
+        a.ref.startsWith('grok'),
+      )
+      assert.equal(grok?.tuning.reason, 'no-source')
+    })
+  })
+})

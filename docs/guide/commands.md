@@ -19,6 +19,7 @@ English | [中文](commands.zh-CN.md)
 | `sideby quota [acct]` | Quota and 7-day usage | 0 |
 | `sideby quota setup claude [--yes]` | Show the change; with `--yes`, turn the Claude quota source on | 10 when it only showed the change; 0 once on; 1 if blocked or failed |
 | `sideby quota teardown claude` | Turn it off and restore the original file | 0; 1 if refused or failed |
+| `sideby tune [acct\|family]` | Estimate the cheapest auto-compact threshold per model from your last 7 days of sessions (Claude suggests, Codex only observes); read-only | 0; 1 if the account or family does not exist; 2 for extra arguments |
 | `sideby handoff status` | What Auto Handoff still needs on this machine, family by family, with the commands to run next | 0 |
 | `sideby handoff enable [--same-family] [--order <family>=<acct,…>] [--threshold n] [--prepare-at n] [--yes]` | Show the config change; with `--yes`, turn Auto Handoff on (other settings kept) and list what is still to do | 10 when it only showed the change; 0 once written or already so; 1 if an `--order` account is unknown |
 | `sideby handoff disable [--yes]` | Turn it off, keeping the other settings | 10 when it only showed the change; 0 once written or already off |

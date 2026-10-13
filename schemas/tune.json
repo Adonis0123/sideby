@@ -1,0 +1,239 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/tune.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "accounts"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "accounts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "ref",
+          "family",
+          "tuning"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "family": {
+            "type": "string"
+          },
+          "tuning": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "status",
+                  "days",
+                  "estimate",
+                  "models"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "const": "ok"
+                  },
+                  "days": {
+                    "type": "number"
+                  },
+                  "estimate": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "models": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "model",
+                        "calls",
+                        "contextWindow",
+                        "configured",
+                        "effective",
+                        "compactions",
+                        "suggestion",
+                        "reason"
+                      ],
+                      "properties": {
+                        "model": {
+                          "type": "string"
+                        },
+                        "calls": {
+                          "type": "number"
+                        },
+                        "contextWindow": {
+                          "type": "number"
+                        },
+                        "configured": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Configured threshold in tokens; null is the Host default."
+                        },
+                        "effective": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "compactions": {
+                          "type": "object",
+                          "required": [
+                            "total",
+                            "auto",
+                            "manual",
+                            "preTokensP50",
+                            "preTokensMax"
+                          ],
+                          "properties": {
+                            "total": {
+                              "type": "number",
+                              "description": "All compactions, including those whose trigger the Host does not record."
+                            },
+                            "auto": {
+                              "type": "number"
+                            },
+                            "manual": {
+                              "type": "number"
+                            },
+                            "preTokensP50": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "preTokensMax": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        "suggestion": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "threshold",
+                                "savedPercent",
+                                "savedWeighted"
+                              ],
+                              "properties": {
+                                "threshold": {
+                                  "type": "number"
+                                },
+                                "savedPercent": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "savedWeighted": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The estimated cheapest threshold; null when `reason` says why there is none."
+                        },
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "suggested"
+                            },
+                            {
+                              "type": "string",
+                              "const": "already-best"
+                            },
+                            {
+                              "type": "string",
+                              "const": "insufficient-calls"
+                            },
+                            {
+                              "type": "string",
+                              "const": "no-compactions"
+                            },
+                            {
+                              "type": "string",
+                              "const": "unknown-model"
+                            },
+                            {
+                              "type": "string",
+                              "const": "observe-only"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "status",
+                  "reason"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "const": "unavailable"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "title": "sideby tune --json"
+}

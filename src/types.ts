@@ -95,6 +95,11 @@ export interface FamilyDef {
   identity?(account: Account): Promise<AccountIdentity | undefined>
   readQuota?(account: Account, ctx: ReadContext): Promise<QuotaResult>
   readUsage?(account: Account, ctx: ReadContext): Promise<UsageResult>
+  /**
+   * Estimates the best Compaction Threshold per model from the Account's recent local session records
+   * (spec §3.18). Read-only: it never writes a Host directory, and reads one named key of the Host's config at most.
+   */
+  readTuning?(account: Account, ctx: ReadContext): Promise<TuningResult>
   /** One-time, reversible change that lets the Host report Quota (Claude: status line wrapper). */
   quotaSetup?: QuotaSetup
   /**
@@ -249,6 +254,48 @@ export type UsageResult =
       /** ISO time of the newest record the reader saw, not later than now. */
       lastActivityAt?: string
     } & TokenTotals)
+  | { status: 'unavailable'; reason: 'no-source' | 'no-session' | 'unrecognized'; detail?: string }
+
+/** Why a model has no Tuning Suggestion, or `suggested` / `already-best` when it has an answer (spec §3.18). */
+export type TuningReason =
+  | 'suggested'
+  | 'already-best'
+  | 'insufficient-calls'
+  | 'no-compactions'
+  | 'unknown-model'
+  | 'observe-only'
+
+/** What one model's Compaction Threshold looks like in an Account's recent sessions. */
+export interface TuningModel {
+  model: string
+  /** Assistant turns of this model in the window. */
+  calls: number
+  /** Context window in tokens, inferred from the records (spec §3.18). */
+  contextWindow: number
+  /** The Account's configured Compaction Threshold in tokens, or null for the Host default. */
+  configured: number | null
+  /** The threshold in effect (configured, capped by the window), or null when unknown. */
+  effective: number | null
+  compactions: {
+    total: number
+    auto: number
+    manual: number
+    preTokensP50: number | null
+    preTokensMax: number | null
+  }
+  /** The estimated cheapest threshold; savings are null when there is no baseline to compare with. */
+  suggestion: { threshold: number; savedPercent: number | null; savedWeighted: number | null } | null
+  reason: TuningReason
+}
+
+export type TuningResult =
+  | {
+      status: 'ok'
+      days: number
+      /** Always true: the whole result is an estimate from replaying local records, not a measurement. */
+      estimate: true
+      models: TuningModel[]
+    }
   | { status: 'unavailable'; reason: 'no-source' | 'no-session' | 'unrecognized'; detail?: string }
 
 export type FindingLevel = 'ok' | 'warn' | 'fail'

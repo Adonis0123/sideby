@@ -7,6 +7,7 @@ import { UserError } from '../core/errors.ts'
 import { planHandoff } from '../core/handoff.ts'
 import { configureHandoff, type HandoffChange, handoffStatus } from '../core/handoff-status.ts'
 import { tildify } from '../core/paths.ts'
+import { MIN_CALLS } from '../core/tuning.ts'
 import { buildId, packageVersion } from '../core/version.ts'
 import { HOOK_FAMILIES } from '../handoff/hook.ts'
 import type { AccountStatus, DoctorHistory, FamilyInfo, Runtime } from '../runtime.ts'
@@ -417,6 +418,17 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const setup = rt.quotaSetup(family)
         const plan = confirm ? await setup.apply() : await setup.plan()
         return { family, summary: setup.summary, plan }
+      },
+    },
+    // Context tuning (spec §3.18): replays one Account's recent local sessions; reads only, so a read-only Panel allows it.
+    '/api/tuning': {
+      writes: () => false,
+      async run(body) {
+        const account = optString(body, 'account')
+        if (!account) throw new HttpError(400, '"account" is required')
+        const rt = await getRuntime()
+        const found = await rt.resolve(account)
+        return { ref: found.ref, minCalls: MIN_CALLS, tuning: await rt.tuning(found) }
       },
     },
     // Auto Handoff (spec §3.17): readiness reads only; configure shows the config change unless `confirm`.

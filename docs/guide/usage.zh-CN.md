@@ -106,6 +106,19 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 
 `settings.json` 链接到主账号的账号（默认如此）共用这一次 setup。自己有一份 `settings.json` 的账号，额度显示为未开启，要等它自己的 status line 也这样包装后才有数据。Codex 的额度不用设置，sideby 直接读本地会话文件。
 
+## 上下文调优
+
+每个宿主在上下文涨过某个阈值后会自动压缩会话。`sideby tune` 用你最近 7 天的本地会话，重放其他阈值，估算哪个最省 token：
+
+```sh
+sideby tune                  # 所有账号
+sideby tune claude:work      # 一个账号，或一个家族，例如 `claude`
+```
+
+这是估算，不是实测：换一个阈值，摘要保留的内容会变，记录里看不出来。Claude 按模型给推荐值（该模型在窗口内至少 200 次调用，且至少记录过一次压缩）。Codex 的默认阈值没有公开来源，只展示压缩时上下文有多大。Grok 和 pi 没有来源。
+
+sideby 不改任何设置。想试推荐值，自己把 `"autoCompactWindow": <token 数>` 加进该账号的 `settings.json`。为了显示「现在的值」，sideby 只读 `settings.json` 里的这一个键（Claude）或 `config.toml` 里的 `model_auto_compact_token_limit`（Codex），文件里其他内容一概不读。面板里在账号菜单的「上下文调优」中看到同样的内容。
+
 ## 账号撞上限额时
 
 ```sh

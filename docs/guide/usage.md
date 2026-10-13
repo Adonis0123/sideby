@@ -106,6 +106,19 @@ Because Claude Code runs the wrapper on every refresh, `setup` refuses when `sid
 
 Accounts that link `settings.json` to the Main Account (the default) get quota from the same setup. An account with its own `settings.json` shows quota as not enabled until that file's status line is wrapped the same way. Codex quota needs no setup: sideby reads it from local session files.
 
+## Context tuning
+
+Every Host compacts a session by itself once its context grows past a threshold. `sideby tune` replays your last 7 days of local sessions against other thresholds and estimates which one spends the fewest tokens:
+
+```sh
+sideby tune                  # every account
+sideby tune claude:work      # one account, or a family such as `claude`
+```
+
+It is an estimate, not a measurement: a different threshold changes what the summary keeps, which the records cannot show. Claude gets a suggested value per model (needs 200+ calls of that model in the window and at least one recorded compaction). Codex only shows how large the context was when it compacted, because its default threshold has no public source. Grok and pi have none.
+
+sideby changes no setting. To try a suggestion, add `"autoCompactWindow": <tokens>` to that account's `settings.json` yourself. To show your current value, sideby reads exactly that key from `settings.json` (Claude) or `model_auto_compact_token_limit` from `config.toml` (Codex), and nothing else in those files. The panel shows the same on an account's menu, "Context tuning".
+
 ## When an account hits its limit
 
 ```sh

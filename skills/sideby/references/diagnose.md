@@ -45,3 +45,7 @@ Quota is only as fresh as each account's last session; `observedAt` says when it
 `--fix` never replaces a real file with a link, never re-points an existing symlink (wrong or dangling links are only reported), never writes through a link into the Main Account, and never changes credential contents. Findings it skips need a human decision; explain the hint, do not work around it with `rm` or `ln`.
 
 `doctor` exits 1 only when a `fail` finding is left; warnings alone exit 0.
+
+## Context tuning
+
+`sideby tune [ref|family] --json` estimates, per model, the auto-compact threshold that spends the fewest tokens, from the account's last 7 days of local sessions. It is read-only and an estimate: each model has `reason` (`suggested` carries `suggestion.threshold`; the others say why there is none: `insufficient-calls`, `no-compactions`, `unknown-model`, `already-best`, `observe-only`). Only Claude gets suggestions; Codex is observation only; Grok and pi return `no-source`. sideby never changes a setting: show the value and, if the user agrees, let them add `"autoCompactWindow": <tokens>` to that account's `settings.json` themselves (editing a linked `settings.json` changes the Main Account's file for every account that shares it).

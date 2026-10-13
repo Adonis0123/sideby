@@ -899,3 +899,52 @@ describe('Auto Handoff in the Panel (spec §3.17)', () => {
     })
   })
 })
+
+describe('context tuning in the Panel (spec §3.18)', () => {
+  it('answers a token-checked read-only POST, also on a read-only Panel, and reports an unknown account', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/projects/p/s.jsonl', '')
+      const { claudePlugin } = await import('../families/claude/index.ts')
+      const { MIN_CALLS } = await import('../core/tuning.ts')
+      const runtime = () => createRuntime({ env: h.env, builtins: [asBuiltin(claudePlugin)] })
+      for (const readOnly of [false, true]) {
+        const { server, port, handler } = await serve((p) =>
+          createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`], readOnly }),
+        )
+        try {
+          const hdr = {
+            host: `127.0.0.1:${port}`,
+            origin: `http://127.0.0.1:${port}`,
+            'x-sideby-token': handler.token,
+          }
+          const ok = await post(port, '/api/tuning', { account: 'claude:main' }, hdr)
+          assert.equal(ok.status, 200, `readOnly=${readOnly}`)
+          assert.equal(ok.body.ref, 'claude:main')
+          assert.equal(ok.body.minCalls, MIN_CALLS)
+          assert.equal((ok.body.tuning as { status: string }).status, 'unavailable')
+          assert.equal((await post(port, '/api/tuning', {}, hdr)).status, 400)
+          assert.equal((await post(port, '/api/tuning', { account: 'claude:nope' }, hdr)).status, 400)
+          // The checks every POST has stay on.
+          assert.equal(
+            (await post(port, '/api/tuning', { account: 'claude:main' }, { ...hdr, 'x-sideby-token': 'x' }))
+              .status,
+            403,
+          )
+          assert.equal(
+            (
+              await post(
+                port,
+                '/api/tuning',
+                { account: 'claude:main' },
+                { ...hdr, origin: 'http://evil.example' },
+              )
+            ).status,
+            403,
+          )
+        } finally {
+          await close(server)
+        }
+      }
+    })
+  })
+})

@@ -21,7 +21,7 @@ interface Entry {
   cacheWrite: number
 }
 
-async function listJsonl(dir: string, out: string[] = []): Promise<string[]> {
+export async function listJsonl(dir: string, out: string[] = []): Promise<string[]> {
   let entries: import('node:fs').Dirent[]
   try {
     entries = await readdir(dir, { withFileTypes: true })

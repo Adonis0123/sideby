@@ -15,6 +15,7 @@ import {
 import { claudeHandoff } from './handoff.ts'
 import { CLAUDE_LAYOUT } from './layout.ts'
 import { readClaudeQuota } from './quota.ts'
+import { readClaudeTuning } from './tuning.ts'
 import { readClaudeUsage } from './usage.ts'
 
 const LINKED = [
@@ -123,6 +124,7 @@ export const claudeFamily: FamilyDef = {
   identity: claudeIdentity,
   readQuota: readClaudeQuota,
   readUsage: readClaudeUsage,
+  readTuning: readClaudeTuning,
   quotaSetup: claudeStatusline,
   resumedSession: resumeFlagSession,
   sessionWrittenAt: (account, id) =>

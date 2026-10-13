@@ -1,5 +1,6 @@
 import { quotaLevel } from '../core/quota-levels.ts'
-import type { QuotaResult, QuotaWindow, UsageResult } from '../types.ts'
+import { MIN_CALLS } from '../core/tuning.ts'
+import type { QuotaResult, QuotaWindow, TuningReason, TuningResult, UsageResult } from '../types.ts'
 
 const useColor = (): boolean => !process.env.NO_COLOR && Boolean(process.stdout.isTTY)
 const paint = (code: number) => (s: string) => (useColor() ? `\x1b[${code}m${s}\x1b[0m` : s)
@@ -81,4 +82,30 @@ export function usageText(u: UsageResult): string {
     return c.dim(u.reason === 'no-source' ? '—' : u.reason === 'no-session' ? 'none' : u.reason)
   if (u.totalTokens === 0) return c.dim('none')
   return `${compactNumber(u.totalTokens)} tok / ${u.days}d`
+}
+
+const TUNING_REASON: Record<Exclude<TuningReason, 'suggested'>, string> = {
+  'already-best': 'already the cheapest setting we can estimate',
+  'insufficient-calls': `too few calls to estimate (needs ${MIN_CALLS})`,
+  'no-compactions': 'no compaction recorded to estimate from',
+  'unknown-model': 'not a Claude model, so the cost weights do not apply',
+  'observe-only': 'observation only (no public default for this host)',
+}
+
+/** One line per model of a tuning result, or the reason there is none. */
+export function tuningLines(t: TuningResult): string[] {
+  if (t.status === 'unavailable')
+    return [t.reason === 'no-source' ? 'no public source for this host' : (t.detail ?? t.reason)]
+  return t.models.map((m) => {
+    const now = m.configured === null ? 'Host default' : `${compactNumber(m.configured)}`
+    const head = `${m.model}  ${m.calls} calls  now ${now}  ${m.compactions.total} compactions`
+    if (m.suggestion) {
+      const saved =
+        m.suggestion.savedPercent === null
+          ? ''
+          : ` (about ${m.suggestion.savedPercent}% fewer weighted tokens)`
+      return `${head}  suggest ${compactNumber(m.suggestion.threshold)}${saved}`
+    }
+    return `${head}  ${m.reason === 'suggested' ? '' : TUNING_REASON[m.reason]}`
+  })
 }

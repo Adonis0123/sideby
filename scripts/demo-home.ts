@@ -136,6 +136,57 @@ if (variant !== 'empty') {
       claudeTurn('w2', 50 * H, 61_000, 12_000, 7_300_000),
     ].join('\n'),
   )
+  // Context tuning (spec §3.18): one long Claude session that compacted twice, and a Codex rollout that compacted once.
+  const tuneRows: string[] = []
+  for (let i = 0; i < 400; i++) {
+    const at = 3 * H - i * 20_000
+    if (i > 0 && i % 190 === 0)
+      tuneRows.push(
+        JSON.stringify({
+          type: 'system',
+          subtype: 'compact_boundary',
+          timestamp: iso(-at),
+          sessionId: 's-tune',
+          compactMetadata: { trigger: 'auto', preTokens: 190_000, postTokens: 20_000 },
+        }),
+      )
+    tuneRows.push(
+      JSON.stringify({
+        type: 'assistant',
+        timestamp: iso(-at),
+        sessionId: 's-tune',
+        message: {
+          id: `tune-${i}`,
+          model: 'claude-opus-5-5',
+          usage: {
+            input_tokens: 10,
+            output_tokens: 300,
+            cache_read_input_tokens: 19_000 + (i % 190) * 900,
+            cache_creation_input_tokens: 900,
+            cache_creation: { ephemeral_5m_input_tokens: 900, ephemeral_1h_input_tokens: 0 },
+          },
+        },
+      }),
+    )
+  }
+  await write('.claude/projects/demo/tune.jsonl', tuneRows.join('\n'))
+  const tuneCodex = (kind: string, at: number, payload: object) =>
+    JSON.stringify({ timestamp: iso(-at), type: kind, payload })
+  const codexCount = (at: number, input: number) =>
+    tuneCodex('event_msg', at, {
+      type: 'token_count',
+      info: { last_token_usage: { input_tokens: input }, model_context_window: 258_400 },
+    })
+  await write(
+    `.codex/sessions/${new Date(now).toISOString().slice(0, 10).replace(/-/g, '/')}/rollout-demo-tune.jsonl`,
+    [
+      tuneCodex('turn_context', 2 * H, { model: 'gpt-demo' }),
+      codexCount(2 * H - 1000, 120_000),
+      codexCount(2 * H - 2000, 232_000),
+      tuneCodex('compacted', 2 * H - 3000, { message: 'summary' }),
+      codexCount(2 * H - 4000, 36_000),
+    ].join('\n'),
+  )
   const rollout = (at: number, five: number, seven: number) =>
     JSON.stringify({
       timestamp: iso(-at),

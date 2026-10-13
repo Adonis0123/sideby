@@ -7,6 +7,7 @@ import { nestedFileWrittenAt, resumeSubcommandSession } from '../shared/sessions
 import { topLevelTomlString } from '../shared/toml.ts'
 import { codexHandoff } from './handoff.ts'
 import { readCodexQuota, readCodexUsage } from './rollout.ts'
+import { readCodexTuning } from './tuning.ts'
 
 const FILE_STORE_KEY = 'cli_auth_credentials_store'
 
@@ -66,6 +67,7 @@ export const codexFamily: FamilyDef = {
   identity: codexIdentity,
   readQuota: (account) => readCodexQuota(account.dir),
   readUsage: (account, ctx) => readCodexUsage(account.dir, ctx.now),
+  readTuning: readCodexTuning,
   resumedSession: resumeSubcommandSession,
   sessionWrittenAt: (account, id) => nestedFileWrittenAt(join(account.dir, 'sessions'), `-${id}.jsonl`),
   handoff: codexHandoff,
