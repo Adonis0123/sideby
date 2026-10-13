@@ -15,10 +15,11 @@ import {
   writeFileAtomic,
   writeIfUnchanged,
 } from './fs-safe.ts'
+import { MAX_COMPACT_WINDOW, MIN_COMPACT_WINDOW } from './tuning.ts'
 
 export const TUNE_KEY = 'autoCompactWindow'
-export const MIN_WINDOW = 10_000
-export const MAX_WINDOW = 2_000_000
+export const MIN_WINDOW = MIN_COMPACT_WINDOW
+export const MAX_WINDOW = MAX_COMPACT_WINDOW
 const MAX_BYTES = 5_000_000
 
 export interface TuneApplyPlan {
@@ -36,7 +37,14 @@ export interface TuneApplyPlan {
   next: number | null
   /** The file does not exist yet and will be created. */
   creates: boolean
+  /** Models that save a size of their own (`modelSettings`), which wins over this one for them. */
+  overrides: ModelOverride[]
   reason?: string
+}
+
+export interface ModelOverride {
+  model: string
+  value: number
 }
 
 export interface TuneUndoRecord {
@@ -88,6 +96,18 @@ async function readObject(file: string): Promise<{ text: string; obj: Json } | {
   }
   if (!isObj(parsed)) return { error: 'it is not a JSON object' }
   return { text, obj: parsed }
+}
+
+/** The sizes models save for themselves under `modelSettings`: only those `autoCompactWindow` numbers are read. */
+function overridesOf(obj: Json): ModelOverride[] {
+  const ms = obj.modelSettings
+  if (!isObj(ms)) return []
+  const out: ModelOverride[] = []
+  for (const [model, entry] of Object.entries(ms)) {
+    const v = isObj(entry) ? entry[TUNE_KEY] : undefined
+    if (typeof v === 'number' && Number.isFinite(v)) out.push({ model, value: v })
+  }
+  return out
 }
 
 /** Where the Account's settings really live, and whether `settings.json` is a link to it. */
@@ -143,6 +163,7 @@ export async function planTuneApply(
     current: null,
     next: value,
     creates: false,
+    overrides: [] as ModelOverride[],
   }
   if (where.broken)
     return {
@@ -167,7 +188,13 @@ export async function planTuneApply(
     const loc = await locate(other)
     if (loc.exists && loc.file === where.file) affected.push(other.ref)
   }
-  return { ...base, affected, current, status: current === value ? 'unchanged' : 'ready' }
+  return {
+    ...base,
+    affected,
+    current,
+    overrides: overridesOf(read.obj),
+    status: current === value ? 'unchanged' : 'ready',
+  }
 }
 
 export interface TuneChange {
@@ -281,12 +308,20 @@ export async function settingsFileOf(account: Account): Promise<string> {
   return (await locate(account)).file
 }
 
-/** The size in the Account's settings file now, or null when there is none (the default). Reads only that key. */
-export async function currentTuneValue(account: Account): Promise<number | null> {
+/**
+ * The size in the Account's settings file now (null: the default) and the sizes models save for themselves. Reads
+ * only those `autoCompactWindow` numbers.
+ */
+export async function readTuneSettings(
+  account: Account,
+): Promise<{ current: number | null; overrides: ModelOverride[] }> {
   const where = await locate(account)
-  if (!where.exists) return null
+  if (!where.exists) return { current: null, overrides: [] }
   const read = await readObject(where.file)
-  if ('error' in read) return null
+  if ('error' in read) return { current: null, overrides: [] }
   const v = read.obj[TUNE_KEY]
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
+  return {
+    current: typeof v === 'number' && Number.isFinite(v) ? v : null,
+    overrides: overridesOf(read.obj),
+  }
 }

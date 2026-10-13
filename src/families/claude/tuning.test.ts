@@ -196,6 +196,23 @@ describe('claude tuning', () => {
     })
   })
 
+  it('knows the models with a native 1M window compact at about 967K by default, and the others at their window', async () => {
+    await withFakeHome(async (h) => {
+      const native = await readClaudeTuning(
+        await put(h, session('claude-opus-5-5', 210, [boundary('manual', 150_000)])),
+        ctx(h),
+      )
+      const nm = native.status === 'ok' ? native.models[0] : undefined
+      assert.deepEqual([nm?.contextWindow, nm?.effective], [1_000_000, 967_000])
+      const other = await readClaudeTuning(
+        await put(h, session('claude-opus-4-6', 210, [boundary('manual', 150_000)])),
+        ctx(h),
+      )
+      const om = other.status === 'ok' ? other.models[0] : undefined
+      assert.deepEqual([om?.contextWindow, om?.effective], [200_000, 200_000])
+    })
+  })
+
   it('writes nothing into the Account directory', async () => {
     await withFakeHome(async (h) => {
       const a = await put(

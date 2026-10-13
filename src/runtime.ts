@@ -40,11 +40,17 @@ import {
   shellInitScript,
   writeShellInitFile,
 } from './core/shell-init.ts'
-import { groupSuggestion, type TuneEntry, type TuneGroup } from './core/tuning.ts'
+import {
+  groupSuggestion,
+  MAX_COMPACT_WINDOW,
+  MIN_COMPACT_WINDOW,
+  type TuneEntry,
+  type TuneGroup,
+} from './core/tuning.ts'
 import {
   applyTune,
-  currentTuneValue,
   planTuneApply,
+  readTuneSettings,
   settingsFileOf,
   type TuneApplyPlan,
   type TuneChange,
@@ -749,7 +755,7 @@ export async function createRuntime(
         const list: TuneEntry[] = []
         for (const m of members) list.push(await entryOf(m))
         const pick = groupSuggestion(list)
-        const current = await currentTuneValue(members[0] as Account)
+        const { current, overrides } = await readTuneSettings(members[0] as Account)
         const target = members.find((m) => m.ref === pick?.ref) ?? (members[0] as Account)
         const undo = await tuneUndoInfo(target, readContext())
         groups.push({
@@ -757,6 +763,8 @@ export async function createRuntime(
           members: members.map((m) => m.ref),
           target: target.ref,
           current,
+          outOfRange: current !== null && (current < MIN_COMPACT_WINDOW || current > MAX_COMPACT_WINDOW),
+          overrides,
           pick,
           undo: undo ? { value: undo.applied, previous: undo.previous } : null,
         })

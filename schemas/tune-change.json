@@ -95,6 +95,24 @@
         "creates": {
           "type": "boolean"
         },
+        "overrides": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "model",
+              "value"
+            ],
+            "properties": {
+              "model": {
+                "type": "string"
+              },
+              "value": {
+                "type": "number"
+              }
+            }
+          }
+        },
         "reason": {
           "type": "string"
         }

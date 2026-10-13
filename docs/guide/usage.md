@@ -115,7 +115,7 @@ sideby tune                  # every account
 sideby tune claude:work      # one account, or a family such as `claude`
 ```
 
-It is an estimate, not a measurement: a different threshold changes what the summary keeps, which the records cannot show. Claude gets a suggested value per model (needs 200+ calls of that model in the window and at least one recorded compaction). When the cheapest point lands at the bottom of the range tried, sideby says there is no clear best value instead of suggesting that edge. Codex only shows how large the context was when it compacted, because its default threshold has no public source. Grok and pi have none.
+It is an estimate, not a measurement: a different threshold changes what the summary keeps, which the records cannot show. Claude gets a suggested value per model (needs 200+ calls of that model in the window and at least one recorded compaction). Claude Code accepts sizes from 100K to 1M tokens, so sideby never suggests anything below 100K; when 100K is the cheapest, that is the answer ("as low as it allows"). Codex only shows how large the context was when it compacted, because its default threshold has no public source. Grok and pi have none.
 
 Nothing changes until you say so. Open the panel's **Context tuning** tab (or an account's menu), and press **Use 80K**: sideby first shows the file and the change (and which other accounts share that file), and only writes after you confirm. It writes one key, `autoCompactWindow`, in that account's `settings.json`, keeps everything else, and one click on **Undo** puts it back. Sessions already running keep the old value; new ones use the new one. The same from a terminal:
 

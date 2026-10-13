@@ -1012,6 +1012,46 @@ describe('one setting per settings file (spec §3.18)', () => {
   })
 })
 
+describe('what the settings file already says (spec §3.18)', () => {
+  it('flags a size outside what Claude Code accepts and lists the models that keep a size of their own', async () => {
+    await withFakeHome(async (h) => {
+      await h.write(
+        '.claude/settings.json',
+        JSON.stringify({
+          autoCompactWindow: 80_000,
+          modelSettings: { 'claude-opus-5-5': { autoCompactWindow: 300_000, effortLevel: 'high' } },
+        }),
+      )
+      await h.write('.claude/projects/p/s.jsonl', '')
+      const { claudePlugin } = await import('../families/claude/index.ts')
+      const runtime = () => createRuntime({ env: h.env, builtins: [asBuiltin(claudePlugin)] })
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      try {
+        const hdr = {
+          host: `127.0.0.1:${port}`,
+          origin: `http://127.0.0.1:${port}`,
+          'x-sideby-token': handler.token,
+        }
+        const g = (
+          (await post(port, '/api/tuning', {}, hdr)).body as {
+            groups: {
+              current: number | null
+              outOfRange: boolean
+              overrides: { model: string; value: number }[]
+            }[]
+          }
+        ).groups[0]
+        assert.deepEqual([g?.current, g?.outOfRange], [80_000, true])
+        assert.deepEqual(g?.overrides, [{ model: 'claude-opus-5-5', value: 300_000 }])
+      } finally {
+        await close(server)
+      }
+    })
+  })
+})
+
 describe('using a tuning suggestion in the Panel (ADR-0012)', () => {
   it('shows the plan without writing, writes only on confirm, never on a read-only Panel, and undoes', async () => {
     await withFakeHome(async (h) => {

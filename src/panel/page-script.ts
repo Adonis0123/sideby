@@ -1340,6 +1340,7 @@ const MAIN = String.raw`
         h('li', null, t('tune.change') + ': ' + tuneSize(plan.current) + ' → ' + tuneSize(plan.next)),
         h('li', null, t('tune.file') + ': ', h('code', null, plan.file + (plan.creates ? ' ' + t('tune.willCreate') : '')))),
       plan.affected.length > 1 ? h('p', { class: 'note note-warn' }, t('tune.shared', { list: plan.affected.join(', ') })) : null,
+      plan.overrides && plan.overrides.length ? h('p', { class: 'note note-warn' }, t('tune.overrides', { list: plan.overrides.map((o) => o.model + ' (' + tokens(o.value) + ')').join(', ') })) : null,
       h('p', { class: 'muted small' }, t('tune.newSessions')),
       h('div', { class: 'row-actions' },
         h('button', { class: 'btn btn-primary btn-sm', type: 'button', onclick: useConfirm }, t('tune.confirm')),
@@ -1348,12 +1349,12 @@ const MAIN = String.raw`
   // The card for one settings file.
   function tuneGroupCard(g, entries) {
     const pick = g.pick
-    const sizes = new Set([50000, 80000, 100000, 120000, 160000, 200000, 300000, 500000, 800000])
+    const sizes = new Set([100000, 150000, 200000, 300000, 500000, 800000, 1000000])
     let top = 200000
     for (const e of entries) if (e.tuning.status === 'ok') for (const m of e.tuning.models) top = Math.max(top, m.contextWindow)
     for (const v of [...sizes]) if (v > top) sizes.delete(v)
     if (pick) sizes.add(pick.threshold)
-    if (g.current) sizes.add(g.current)
+    if (g.current && !g.outOfRange) sizes.add(g.current)
     const key = (v) => (v === null ? 'default' : String(v))
     const chosen = tuneSel[g.id] !== undefined ? tuneSel[g.id] : key(g.current)
     const sel = h('select', { 'aria-label': t('tune.setting') },
@@ -1371,7 +1372,13 @@ const MAIN = String.raw`
       pick ? h('div', null, h('span', { class: 'muted small' }, t('tune.best')), h('div', { class: 'tune-num tune-best' }, tokens(pick.threshold))) : null))
     if (pick && pick.savedPercent !== null) rows.push(h('p', { class: 'small' }, t('tune.saved', { n: Math.round(pick.savedPercent) })))
     if (pick) rows.push(h('p', { class: 'muted small' }, t('tune.basis', { model: pick.model, ref: pick.ref })))
-    else rows.push(h('p', { class: 'note' }, t('tune.groupNone')))
+    else {
+      // Say why there is no suggestion: when a model is already at its cheapest, that is the news, not "not enough use".
+      const why = entries.flatMap((e) => (e.tuning.status === 'ok' ? e.tuning.models : [])).some((m) => m.reason === 'already-best') ? t('tune.reason.already-best') : t('tune.groupNone')
+      rows.push(h('p', { class: 'note' }, why))
+    }
+    if (g.overrides && g.overrides.length) rows.push(h('p', { class: 'note note-warn' }, t('tune.overrides', { list: g.overrides.map((o) => o.model + ' (' + tokens(o.value) + ')').join(', ') })))
+    if (g.outOfRange) rows.push(h('p', { class: 'note note-warn' }, t('tune.outOfRange', { size: tokens(g.current) })))
     if (!BOOT.readOnly) {
       if (pick && !asking) rows.push(h('div', { class: 'row-actions' }, h('button', { class: 'btn btn-primary', type: 'button', onclick: () => useAsk(g, pick.threshold) }, t('tune.use', { size: tokens(pick.threshold) }))))
       rows.push(h('div', { class: 'tune-setting' },

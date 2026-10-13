@@ -34,16 +34,32 @@ describe('summarizeModel', () => {
   it('suggests an interior threshold when steady growth makes long contexts the expensive part', () => {
     const m = summarizeModel(records({ sessions: [steady(210)] }), { ...opts, configured: 190_000 })
     assert.equal(m.reason, 'suggested')
-    assert.equal(m.suggestion?.threshold, 80_000)
+    assert.equal(m.suggestion?.threshold, 120_000)
     assert.ok((m.suggestion?.savedPercent ?? 0) > 1)
     assert.equal(m.effective, 190_000)
   })
 
-  it('suggests no value when the cheapest point is the lowest candidate, which only cuts the search off', () => {
+  it('suggests the lowest size Claude Code accepts when even that is the cheapest, never anything below it', () => {
     const tiny = records({ sessions: [steady(210)], compactions: [auto(190_000, 100)] })
     const m = summarizeModel(tiny, { ...opts, configured: 190_000 })
+    assert.equal(m.reason, 'suggested')
+    assert.equal(m.suggestion?.threshold, 100_000)
+  })
+
+  it('has nothing to suggest for a model whose window is below the lowest size Claude Code accepts', () => {
+    const m = summarizeModel(records({ contextWindow: 90_000 }), opts)
     assert.equal(m.reason, 'no-optimum')
     assert.equal(m.suggestion, null)
+  })
+
+  it('compares against where the Host compacts by default when nothing is set and it never compacted by itself', () => {
+    const manual: Compaction = { ts: 5, trigger: 'manual', pre: 150_000, post: 100_000 }
+    const m = summarizeModel(
+      records({ sessions: [steady(210)], compactions: [manual], defaultThreshold: 190_000 }),
+      opts,
+    )
+    assert.equal(m.effective, 190_000)
+    assert.notEqual(m.suggestion?.savedPercent, null)
   })
 
   it('suggests a higher threshold when a lot is kept after each compaction, so compacting is costly', () => {
@@ -64,6 +80,15 @@ describe('summarizeModel', () => {
     })
     assert.equal(m.reason, 'already-best')
     assert.equal(m.suggestion, null)
+  })
+
+  it('does not take a configured size outside what Claude Code accepts as the baseline', () => {
+    const base = records({ sessions: [steady(210)], defaultThreshold: 190_000 })
+    for (const bad of [80_000, 2_000_000]) {
+      const m = summarizeModel(base, { ...opts, configured: bad })
+      assert.equal(m.configured, bad)
+      assert.equal(m.effective, 190_000)
+    }
   })
 
   it('caps a configured threshold at the model window', () => {

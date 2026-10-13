@@ -277,6 +277,10 @@ const en = {
   'tune.noCompactions': 'It did not compact in this period.',
   'tune.groupShared': 'One setting for these accounts, because they share a settings file: {list}',
   'tune.basis': 'Based on {model} on {ref}, the one used most.',
+  'tune.outOfRange':
+    'The size now in the file ({size}) is outside what Claude Code accepts (100K to 1M). Pick Default or a size from the menu to replace it.',
+  'tune.overrides':
+    'These models save a size of their own (set with /autocompact), which wins over this one: {list}',
   'tune.groupNone': 'Not used enough to suggest a size yet. You can still pick one below.',
   'tune.details': 'Details for each account',
   'tune.detailsObserved': 'Only observed (there is no setting to change)',
@@ -303,7 +307,8 @@ const en = {
     'The current setting is already about the cheapest we can estimate for how you work.',
   'tune.reason.insufficient-calls': 'Not enough use in this period to estimate (needs {min} calls).',
   'tune.reason.no-compactions': 'It has not compacted in this period, so there is nothing to estimate from.',
-  'tune.reason.no-optimum': 'No clear best value: the cheapest point is outside the range we tried.',
+  'tune.reason.no-optimum':
+    "This model's window is smaller than the lowest size Claude Code accepts (100K), so there is nothing to set.",
   'tune.reason.unknown-model': 'This is not a Claude model, so sideby cannot estimate it.',
   'tune.reason.observe-only': 'For Codex sideby only shows what happened; it cannot suggest a value yet.',
   'tpage.title': 'Context tuning',
@@ -685,6 +690,10 @@ const zh: Record<MessageKey, string> = {
   'tune.noCompactions': '这段时间没有压缩过。',
   'tune.groupShared': '这些账号共用一个设置文件，所以用同一个设置：{list}',
   'tune.basis': '按用得最多的 {model}（{ref}）来定。',
+  'tune.outOfRange':
+    '文件里现在的大小（{size}）超出了 Claude Code 接受的范围（100K 到 1M）。请选「默认」或菜单里的某个大小来替换它。',
+  'tune.overrides':
+    '这些模型自己保存了一个大小（用 /autocompact 设的），对它们来说那个优先于这里的设置：{list}',
   'tune.groupNone': '用得还不够多，暂时给不出建议值。你仍然可以在下面自己选一个。',
   'tune.details': '各账号的详情',
   'tune.detailsObserved': '只做观测（没有可以改的设置）',
@@ -709,7 +718,7 @@ const zh: Record<MessageKey, string> = {
   'tune.reason.already-best': '按你的用法，现在的设置已经差不多是我们能估算出的最省了。',
   'tune.reason.insufficient-calls': '这段时间用得太少，估不准（至少要 {min} 次）。',
   'tune.reason.no-compactions': '这段时间还没压缩过，没有可以参考的数据。',
-  'tune.reason.no-optimum': '没有明确的最佳值：最省的点在我们试的范围之外。',
+  'tune.reason.no-optimum': '这个模型的窗口比 Claude Code 接受的最小值（100K）还小，没有可以设置的值。',
   'tune.reason.unknown-model': '这不是 Claude 的模型，sideby 没法估算。',
   'tune.reason.observe-only': 'Codex 目前只能看到发生了什么，还不能给建议值。',
   'tpage.title': '上下文调优',

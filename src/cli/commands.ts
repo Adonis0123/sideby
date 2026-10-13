@@ -348,6 +348,10 @@ function tuneChangeLines(plan: TuneApplyPlan, home: string): string[] {
   ]
   if (plan.affected.length > 1)
     lines.push(`  Careful: this file is shared, so it also changes ${plan.affected.slice(1).join(', ')}`)
+  if (plan.overrides.length)
+    lines.push(
+      `  Careful: these models save a size of their own, which wins over this one: ${plan.overrides.map((o) => `${o.model} (${compactNumber(o.value)})`).join(', ')}`,
+    )
   lines.push('  Sessions already running keep the old value; new ones use the new one. You can undo it.')
   return lines
 }

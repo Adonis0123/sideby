@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
 import type { Account, ReadContext } from '../types.ts'
-import { applyTune, planTuneApply, tuneUndoInfo, undoTune } from './tuning-apply.ts'
+import { applyTune, planTuneApply, readTuneSettings, tuneUndoInfo, undoTune } from './tuning-apply.ts'
 
 const MARKER = 'not-a-secret-marker-only-for-this-test'
 
@@ -122,13 +122,13 @@ describe('applying a tuning suggestion', () => {
         await mkdir(x.dir, { recursive: true })
         await symlink(join(main.dir, 'settings.json'), join(x.dir, 'settings.json'))
       }
-      const plan = await planTuneApply(a, 90_000, [main, a, b])
+      const plan = await planTuneApply(a, 110_000, [main, a, b])
       assert.deepEqual([plan.link, plan.affected], [true, ['claude:work', 'claude:main', 'claude:extra']])
-      const r = await applyTune(a, 90_000, [main, a, b], ctx(h))
+      const r = await applyTune(a, 110_000, [main, a, b], ctx(h))
       assert.equal(r.ok, true)
       assert.deepEqual(JSON.parse(await read(join(main.dir, 'settings.json'))), {
         theme: 'dark',
-        autoCompactWindow: 90_000,
+        autoCompactWindow: 110_000,
       })
       assert.equal((await lstat(join(a.dir, 'settings.json'))).isSymbolicLink(), true)
       assert.equal(await readlink(join(a.dir, 'settings.json')), join(main.dir, 'settings.json'))
@@ -148,7 +148,7 @@ describe('applying a tuning suggestion', () => {
       // Over a value the user set in between, the record starts again from that value.
       await applyTune(a, 100_000, [a], ctx(h))
       await writeFile(join(a.dir, 'settings.json'), '{"autoCompactWindow":150000}\n')
-      await applyTune(a, 90_000, [a], ctx(h))
+      await applyTune(a, 110_000, [a], ctx(h))
       await undoTune(a, ctx(h))
       assert.equal(JSON.parse(await read(join(a.dir, 'settings.json'))).autoCompactWindow, 150_000)
     })
@@ -164,10 +164,10 @@ describe('applying a tuning suggestion', () => {
       const a = acct(h, 'work')
       await mkdir(a.dir, { recursive: true })
       await symlink(join(real, 'settings.json'), join(a.dir, 'settings.json'))
-      const plan = await planTuneApply(a, 90_000, [main, a])
+      const plan = await planTuneApply(a, 110_000, [main, a])
       assert.deepEqual(plan.affected, ['claude:work', 'claude:main'])
-      await applyTune(a, 90_000, [main, a], ctx(h))
-      assert.equal((await tuneUndoInfo(main, ctx(h)))?.applied, 90_000)
+      await applyTune(a, 110_000, [main, a], ctx(h))
+      assert.equal((await tuneUndoInfo(main, ctx(h)))?.applied, 110_000)
     })
   })
 
@@ -190,10 +190,32 @@ describe('applying a tuning suggestion', () => {
     })
   })
 
+  it('lists the sizes models save for themselves, reading only those numbers', async () => {
+    await withFakeHome(async (h) => {
+      const a = acct(h, 'work')
+      await h.write(
+        '.claude-work/settings.json',
+        JSON.stringify({
+          modelSettings: {
+            'claude-opus-5-5': { autoCompactWindow: 300_000, other: MARKER },
+            'claude-haiku-5-5': { autoCompactWindow: 'auto' },
+            plain: { other: MARKER },
+          },
+          env: { SOME_SETTING: MARKER },
+        }),
+      )
+      const plan = await planTuneApply(a, 150_000, [a])
+      assert.deepEqual(plan.overrides, [{ model: 'claude-opus-5-5', value: 300_000 }])
+      assert.ok(!JSON.stringify(plan).includes(MARKER))
+      const settings = await readTuneSettings(a)
+      assert.deepEqual(settings, { current: null, overrides: [{ model: 'claude-opus-5-5', value: 300_000 }] })
+    })
+  })
+
   it('rejects a value that is not a whole number of tokens in range', async () => {
     await withFakeHome(async (h) => {
       const a = acct(h, 'work')
-      for (const v of [0, -5, 1.5, 9_999, 2_000_001, Number.NaN])
+      for (const v of [0, -5, 1.5, 9_999, 99_999, 1_000_001, 2_000_001, Number.NaN])
         await assert.rejects(planTuneApply(a, v, [a]), /not a usable size/, String(v))
     })
   })

@@ -24,6 +24,13 @@ const SETTINGS_MAX_BYTES = 1_000_000
 export const isKnownClaudeModel = (id: string) => id.startsWith('claude-')
 const windowOf = (maxCtx: number) => (maxCtx > 200_000 ? 1_000_000 : 200_000)
 
+/**
+ * Models with a native 1M window, which compact at about 967K when nothing is set: the Fable models, Sonnet 5 and
+ * later, Haiku 5.5 and Opus 4.7 and later (https://code.claude.com/docs/en/model-config).
+ */
+const NATIVE_1M = /^claude-(fable|sonnet-[5-9]|haiku-[5-9]|opus-(4-[7-9]|[5-9]))/
+const NATIVE_DEFAULT_THRESHOLD = 967_000
+
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0)
 
 /** `[key, ts, session, model, ctx, out, write5m, write1h]` */
@@ -221,8 +228,18 @@ export async function readClaudeTuning(account: Account, ctx: ReadContext): Prom
     const comps: Compaction[] = resolved
       .filter((c) => c[2] === model && c[0] >= since && c[0] <= now)
       .map((c) => ({ ts: c[0], trigger: c[3] as Compaction['trigger'], pre: c[4], post: c[5] }))
-    const window = Math.max(windowOf(maxCtx), windowOf(Math.max(0, ...comps.map((c) => c.pre))))
-    return { model, sessions: list, compactions: comps, contextWindow: window }
+    const native = NATIVE_1M.test(model)
+    // Elsewhere the window comes from the records: a context past 200K means the model runs with 1M.
+    const window = native
+      ? 1_000_000
+      : Math.max(windowOf(maxCtx), windowOf(Math.max(0, ...comps.map((c) => c.pre))))
+    return {
+      model,
+      sessions: list,
+      compactions: comps,
+      contextWindow: window,
+      defaultThreshold: native ? NATIVE_DEFAULT_THRESHOLD : window,
+    }
   })
   return tuningResult(USAGE_DAYS, records, { configured, known: isKnownClaudeModel, mayRecommend: true })
 }

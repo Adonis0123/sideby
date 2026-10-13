@@ -6,6 +6,13 @@ import type { TuningModel, TuningReason, TuningResult } from '../types.ts'
 /** Relative cost of a token, input = 1. These are Anthropic's published multipliers, not prices (spec §3.18). */
 export const WEIGHT = { input: 1, cacheRead: 0.1, write5m: 1.25, write1h: 2, output: 5 } as const
 
+/**
+ * The sizes Claude Code accepts for the auto-compact window: 100K to 1M tokens, never above the model's context
+ * window (https://code.claude.com/docs/en/model-config#set-the-auto-compact-window).
+ */
+export const MIN_COMPACT_WINDOW = 100_000
+export const MAX_COMPACT_WINDOW = 1_000_000
+
 /** A model with fewer turns than this in the window gets no suggestion. */
 export const MIN_CALLS = 200
 
@@ -41,6 +48,8 @@ export interface ModelRecords {
   sessions: Turn[][]
   compactions: Compaction[]
   contextWindow: number
+  /** Where the Host compacts when nothing is set (documented), or null when that is not known. */
+  defaultThreshold?: number | null
 }
 
 function median(values: number[]): number | null {
@@ -111,7 +120,15 @@ export function summarizeModel(rec: ModelRecords, o: SummarizeOptions): TuningMo
   const pre = rec.compactions.map((c) => c.pre).filter((n) => n > 0)
   const posts = rec.compactions.map((c) => c.post).filter((n) => n > 0)
   const autoPre = auto.map((c) => c.pre).filter((n) => n > 0)
-  const effective = o.configured !== null ? Math.min(o.configured, rec.contextWindow) : median(autoPre)
+  // What is in effect: the configured size, else what the Host did, else where it compacts by default.
+  // A size outside 100K-1M is not one Claude Code runs with (the documentation does not say what it does with it),
+  // so it is not taken as the baseline.
+  const usable =
+    o.configured !== null && o.configured >= MIN_COMPACT_WINDOW && o.configured <= MAX_COMPACT_WINDOW
+  const effective =
+    usable && o.configured !== null
+      ? Math.min(o.configured, rec.contextWindow)
+      : (median(autoPre) ?? rec.defaultThreshold ?? null)
   const base: TuningModel = {
     model: rec.model,
     calls,
@@ -136,19 +153,21 @@ export function summarizeModel(rec: ModelRecords, o: SummarizeOptions): TuningMo
   const post = median(posts)
   if (post === null) return stop('no-compactions')
 
+  // Only sizes Claude Code accepts: the lowest allowed one is always a candidate.
+  const top = Math.min(rec.contextWindow, MAX_COMPACT_WINDOW)
+  const candidates = new Set<number>([MIN_COMPACT_WINDOW])
+  for (const pct of CANDIDATE_PERCENTS) candidates.add(roundTokens((rec.contextWindow * pct) / 100))
+  const sizes = [...candidates].filter((t) => t >= MIN_COMPACT_WINDOW && t <= top).sort((x, y) => x - y)
+  if (!sizes.length) return stop('no-optimum')
   let best: { threshold: number; cost: number } | null = null
-  for (const pct of CANDIDATE_PERCENTS) {
-    const threshold = roundTokens((rec.contextWindow * pct) / 100)
+  for (const threshold of sizes) {
     const cost = replay(rec.sessions, threshold, post)
     // On a tie the larger threshold wins: fewer compactions for the same cost.
     if (!best || cost < best.cost || (cost === best.cost && threshold > best.threshold))
       best = { threshold, cost }
   }
   if (!best) return stop('insufficient-calls')
-  // A best value at the lowest candidate means the cheapest point may lie below the range that was replayed, so it
-  // is a cut-off of the search, not an optimum, and is not suggested.
-  if (best.threshold === roundTokens((rec.contextWindow * (CANDIDATE_PERCENTS[0] as number)) / 100))
-    return stop('no-optimum')
+  // The lowest allowed size can still be the cheapest: that is a real answer, "as low as Claude Code lets you".
   if (effective === null)
     return {
       ...base,
@@ -241,6 +260,10 @@ export interface TuneEntry {
 
 /** The Accounts that share one settings file: they get one suggestion and one thing to apply. */
 export interface TuneGroup {
+  /** The size in the file is outside what Claude Code accepts, so it cannot be offered again. */
+  outOfRange: boolean
+  /** Models that save an auto-compact size of their own, which wins over the file's size for them. */
+  overrides: { model: string; value: number }[]
   /** The real settings file. */
   file: string
   members: string[]

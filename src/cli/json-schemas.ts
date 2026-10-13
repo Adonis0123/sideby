@@ -262,6 +262,7 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
           current: Type.Union([Type.Number(), Type.Null()]),
           next: Type.Union([Type.Number(), Type.Null()]),
           creates: Type.Boolean(),
+          overrides: Type.Optional(Type.Array(Type.Object({ model: Str, value: Type.Number() }))),
           reason: Type.Optional(Str),
         }),
       ),

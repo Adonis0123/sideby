@@ -17,7 +17,7 @@ Ways to apply a suggestion:
 ## Decision
 
 - Applying is a separate action: `sideby tune apply` (preview and exit 10 without `--yes`) and a "Use 80K" button in the Panel that first shows what will change. Analysis stays read-only.
-- It writes one key, `autoCompactWindow`, of the Account's `settings.json`, through `writeIfUnchanged`, keeping every other key, the indentation and the file mode. A missing file is created (mode 600). Where the file is a symlink (settings shared with the Main Account) it writes the real file it points to and says which Accounts that also changes; it never creates, replaces or retargets a link.
+- It writes one key, the top-level `autoCompactWindow`, of the Account's `settings.json` (and reads the same setting under `modelSettings`, to warn about models that keep a size of their own), through `writeIfUnchanged`, keeping every other key, the indentation and the file mode. A missing file is created (mode 600). Where the file is a symlink (settings shared with the Main Account) it writes the real file it points to and says which Accounts that also changes; it never creates, replaces or retargets a link.
 - It records the previous value and the written value under the state directory. `undo` restores the previous value only while the key still holds what was written.
 - This is the third exception to "sideby writes nothing into a Host directory", after `quota setup claude --yes` and `handoff setup grok --yes`. Unlike them it is a single value the user picks, not a standing hook.
 - Still never: write any other key, read or print any other value of the file, write through a link it did not resolve to a regular file, or apply without the user's confirmation.
@@ -27,4 +27,4 @@ Ways to apply a suggestion:
 - With shared settings, one Account's suggestion changes every Account that shares the file. The preview says so, and an Account that wants its own value needs its own `settings.json` (a user decision sideby does not make for them).
 - Running sessions keep the old value; a new session picks it up. The UI says so.
 - The estimate behind the number is unchanged (ADR-0011): it can be wrong, which is why the preview, the undo and the "estimate" wording stay.
-- `autoCompactWindow` semantics are still unverified (ADR-0011), so applying it is reversible by design and the acceptance check measures the effect.
+- The meaning of `autoCompactWindow` is documented first-hand (the compaction threshold, 100K to 1M tokens, capped at the model window; https://code.claude.com/docs/en/model-config#set-the-auto-compact-window), so sideby only offers sizes in that range. A model that saves a size of its own with `/autocompact` (under `modelSettings`) keeps it over the top-level key, and `CLAUDE_CODE_AUTO_COMPACT_WINDOW` beats everything; the preview names the first and the docs the second. Applying stays reversible by design.
