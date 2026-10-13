@@ -92,7 +92,14 @@ async function parseFile(file: string, since: number): Promise<Summary> {
       if (row?.type !== 'assistant' || row.isSidechain === true) continue
       const usage = row.message?.usage
       const model = row.message?.model
-      if (typeof usage !== 'object' || usage === null || typeof model !== 'string' || !model) continue
+      if (
+        typeof usage !== 'object' ||
+        usage === null ||
+        typeof model !== 'string' ||
+        !model ||
+        model === '<synthetic>'
+      )
+        continue
       lastModel.set(session, model)
       for (const o of orphans.get(session) ?? []) o[2] = model
       orphans.delete(session)

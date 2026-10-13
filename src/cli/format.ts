@@ -88,6 +88,7 @@ const TUNING_REASON: Record<Exclude<TuningReason, 'suggested'>, string> = {
   'already-best': 'already the cheapest setting we can estimate',
   'insufficient-calls': `too few calls to estimate (needs ${MIN_CALLS})`,
   'no-compactions': 'no compaction recorded to estimate from',
+  'no-optimum': 'the cheapest point is at the bottom of the range tried, so there is no clear best value',
   'unknown-model': 'not a Claude model, so the cost weights do not apply',
   'observe-only': 'observation only (no public default for this host)',
 }

@@ -160,6 +160,7 @@ const TuningModel = Type.Object({
     Type.Literal('already-best'),
     Type.Literal('insufficient-calls'),
     Type.Literal('no-compactions'),
+    Type.Literal('no-optimum'),
     Type.Literal('unknown-model'),
     Type.Literal('observe-only'),
   ]),

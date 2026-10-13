@@ -31,7 +31,7 @@ function records(over: Partial<ModelRecords> = {}): ModelRecords {
 const opts = { configured: null, known: true, mayRecommend: true }
 
 describe('summarizeModel', () => {
-  it('suggests the lowest candidate when steady growth makes long contexts the expensive part', () => {
+  it('suggests an interior threshold when steady growth makes long contexts the expensive part', () => {
     const m = summarizeModel(records({ sessions: [steady(210)] }), { ...opts, configured: 190_000 })
     assert.equal(m.reason, 'suggested')
     assert.equal(m.suggestion?.threshold, 80_000)
@@ -39,8 +39,29 @@ describe('summarizeModel', () => {
     assert.equal(m.effective, 190_000)
   })
 
+  it('suggests no value when the cheapest point is the lowest candidate, which only cuts the search off', () => {
+    const tiny = records({ sessions: [steady(210)], compactions: [auto(190_000, 100)] })
+    const m = summarizeModel(tiny, { ...opts, configured: 190_000 })
+    assert.equal(m.reason, 'no-optimum')
+    assert.equal(m.suggestion, null)
+  })
+
+  it('suggests a higher threshold when a lot is kept after each compaction, so compacting is costly', () => {
+    const keep = [auto(190_000, 100_000)]
+    const m = summarizeModel(records({ sessions: [steady(210)], compactions: keep }), {
+      ...opts,
+      configured: 190_000,
+    })
+    assert.equal(m.reason, 'suggested')
+    assert.equal(m.suggestion?.threshold, 160_000)
+  })
+
   it('says already-best, with no suggestion, when the current threshold is the cheapest', () => {
-    const m = summarizeModel(records({ sessions: [steady(210)] }), { ...opts, configured: 80_000 })
+    const keep = [auto(190_000, 100_000)]
+    const m = summarizeModel(records({ sessions: [steady(210)], compactions: keep }), {
+      ...opts,
+      configured: 150_000,
+    })
     assert.equal(m.reason, 'already-best')
     assert.equal(m.suggestion, null)
   })
@@ -51,7 +72,7 @@ describe('summarizeModel', () => {
   })
 
   it('suggests without a saving when nothing is configured and no auto compaction was seen', () => {
-    const manual: Compaction = { ts: 5, trigger: 'manual', pre: 150_000, post: 20_000 }
+    const manual: Compaction = { ts: 5, trigger: 'manual', pre: 150_000, post: 100_000 }
     const m = summarizeModel(records({ sessions: [steady(210)], compactions: [manual] }), opts)
     assert.equal(m.reason, 'suggested')
     assert.equal(m.suggestion?.savedPercent, null)
@@ -95,7 +116,11 @@ describe('summarizeModel', () => {
 describe('tuningResult', () => {
   it('summarizes every model, busiest first, and marks the result as an estimate', () => {
     const quiet = records({ model: 'claude-haiku', sessions: [steady(5)] })
-    const busy = records({ model: 'claude-opus-5-5', sessions: [steady(210)] })
+    const busy = records({
+      model: 'claude-opus-5-5',
+      sessions: [steady(210)],
+      compactions: [auto(190_000, 100_000)],
+    })
     const r = tuningResult(7, [quiet, busy], {
       configured: 190_000,
       known: (m) => m.startsWith('claude-'),

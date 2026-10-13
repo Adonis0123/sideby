@@ -10,7 +10,9 @@ export const WEIGHT = { input: 1, cacheRead: 0.1, write5m: 1.25, write1h: 2, out
 export const MIN_CALLS = 200
 
 /** Candidate thresholds as a share of the model's context window. */
-export const CANDIDATE_PERCENTS = [40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95] as const
+export const CANDIDATE_PERCENTS = [
+  4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 35, 40, 50, 60, 70, 80, 90, 95,
+] as const
 
 /** A suggestion must save at least this share against the current threshold; otherwise it is already the best. */
 const MIN_SAVING_PERCENT = 1
@@ -143,6 +145,10 @@ export function summarizeModel(rec: ModelRecords, o: SummarizeOptions): TuningMo
       best = { threshold, cost }
   }
   if (!best) return stop('insufficient-calls')
+  // A best value at the lowest candidate means the cheapest point may lie below the range that was replayed, so it
+  // is a cut-off of the search, not an optimum, and is not suggested.
+  if (best.threshold === roundTokens((rec.contextWindow * (CANDIDATE_PERCENTS[0] as number)) / 100))
+    return stop('no-optimum')
   if (effective === null)
     return {
       ...base,

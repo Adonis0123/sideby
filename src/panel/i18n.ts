@@ -278,6 +278,8 @@ const en = {
   'tune.reason.already-best': 'Already the cheapest setting we can estimate for how you work.',
   'tune.reason.insufficient-calls': 'Too few calls in this window to estimate (needs {min}).',
   'tune.reason.no-compactions': 'No compaction was recorded, so what is left after one cannot be estimated.',
+  'tune.reason.no-optimum':
+    'The cheapest point is at the bottom of the range we replayed, so there is no clear best value to suggest.',
   'tune.reason.unknown-model':
     'This is not a Claude model, so the cost weights do not apply and there is no suggestion.',
   'tune.reason.observe-only': "Observation only: this host's default threshold has no public source yet.",
@@ -658,6 +660,7 @@ const zh: Record<MessageKey, string> = {
   'tune.reason.already-best': '按你的用法，已经是我们能估算出的最省设置。',
   'tune.reason.insufficient-calls': '这段时间调用太少，无法估算（至少 {min} 次）。',
   'tune.reason.no-compactions': '没有压缩记录，无法估算压缩后还剩多少。',
+  'tune.reason.no-optimum': '最省的点落在我们重放范围的最低端，没有明确的最优值可以建议。',
   'tune.reason.unknown-model': '这不是 Claude 模型，成本倍率不适用，所以不给建议。',
   'tune.reason.observe-only': '只做观测：这个宿主的默认阈值还没有公开来源。',
 

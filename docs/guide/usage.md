@@ -115,7 +115,7 @@ sideby tune                  # every account
 sideby tune claude:work      # one account, or a family such as `claude`
 ```
 
-It is an estimate, not a measurement: a different threshold changes what the summary keeps, which the records cannot show. Claude gets a suggested value per model (needs 200+ calls of that model in the window and at least one recorded compaction). Codex only shows how large the context was when it compacted, because its default threshold has no public source. Grok and pi have none.
+It is an estimate, not a measurement: a different threshold changes what the summary keeps, which the records cannot show. Claude gets a suggested value per model (needs 200+ calls of that model in the window and at least one recorded compaction). When the cheapest point lands at the bottom of the range tried, sideby says there is no clear best value instead of suggesting that edge. Codex only shows how large the context was when it compacted, because its default threshold has no public source. Grok and pi have none.
 
 sideby changes no setting. To try a suggestion, add `"autoCompactWindow": <tokens>` to that account's `settings.json` yourself. To show your current value, sideby reads exactly that key from `settings.json` (Claude) or `model_auto_compact_token_limit` from `config.toml` (Codex), and nothing else in those files. The panel shows the same on an account's menu, "Context tuning".
 

@@ -115,7 +115,7 @@ sideby tune                  # 所有账号
 sideby tune claude:work      # 一个账号，或一个家族，例如 `claude`
 ```
 
-这是估算，不是实测：换一个阈值，摘要保留的内容会变，记录里看不出来。Claude 按模型给推荐值（该模型在窗口内至少 200 次调用，且至少记录过一次压缩）。Codex 的默认阈值没有公开来源，只展示压缩时上下文有多大。Grok 和 pi 没有来源。
+这是估算，不是实测：换一个阈值，摘要保留的内容会变，记录里看不出来。Claude 按模型给推荐值（该模型在窗口内至少 200 次调用，且至少记录过一次压缩）。最省的点落在重放范围的最低端时，sideby 会说没有明确的最优值，不会把那个边界当成建议。Codex 的默认阈值没有公开来源，只展示压缩时上下文有多大。Grok 和 pi 没有来源。
 
 sideby 不改任何设置。想试推荐值，自己把 `"autoCompactWindow": <token 数>` 加进该账号的 `settings.json`。为了显示「现在的值」，sideby 只读 `settings.json` 里的这一个键（Claude）或 `config.toml` 里的 `model_auto_compact_token_limit`（Codex），文件里其他内容一概不读。面板里在账号菜单的「上下文调优」中看到同样的内容。
 

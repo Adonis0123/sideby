@@ -262,6 +262,7 @@ export type TuningReason =
   | 'already-best'
   | 'insufficient-calls'
   | 'no-compactions'
+  | 'no-optimum'
   | 'unknown-model'
   | 'observe-only'
 
