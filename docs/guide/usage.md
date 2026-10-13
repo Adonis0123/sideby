@@ -127,7 +127,7 @@ sideby tune undo claude:work --yes       # puts the old value back
 
 Under the suggestion each Claude account also has a **size menu** (Default, common sizes, the suggested one marked): pick one and press **Use this**; the same preview, confirmation and undo apply. Choosing Default removes the key.
 
-Accounts that link `settings.json` to the Main Account share one file, so the change reaches all of them; the confirmation names them. To show your current value, sideby reads exactly that key (Claude) or `model_auto_compact_token_limit` from `config.toml` (Codex), and nothing else in those files.
+Accounts that link `settings.json` to the Main Account share one file, so they share one setting: the panel shows one card for them (the suggestion follows the model used most among them), each account's own numbers sit under "Details for each account", and the confirmation names every account the change reaches. To show your current value, sideby reads exactly that key (Claude) or `model_auto_compact_token_limit` from `config.toml` (Codex), and nothing else in those files.
 
 ## When an account hits its limit
 

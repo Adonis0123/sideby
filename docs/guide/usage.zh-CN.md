@@ -127,7 +127,7 @@ sideby tune undo claude:work --yes       # 恢复原来的值
 
 建议下面，每个 Claude 账号还有一个**大小菜单**（默认、几个常用值，建议值会标出来）：选一个，点「使用这个」，同样先预览、确认，也能撤销。选「默认」就是把这个键删掉。
 
-把 `settings.json` 链到主账号的账号共用同一个文件，所以改动会影响它们全部，确认页会把它们列出来。为了显示「现在的值」，sideby 只读这一个键（Claude）或 `config.toml` 里的 `model_auto_compact_token_limit`（Codex），文件里其他内容一概不读。
+把 `settings.json` 链到主账号的账号共用同一个文件，所以共用一个设置：面板里它们只显示一张卡（建议值按其中用得最多的模型来定），各账号自己的数字收在「各账号的详情」里，确认页会列出改动会影响的每个账号。为了显示「现在的值」，sideby 只读这一个键（Claude）或 `config.toml` 里的 `model_auto_compact_token_limit`（Codex），文件里其他内容一概不读。
 
 ## 账号撞上限额时
 

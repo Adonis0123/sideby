@@ -7,7 +7,7 @@ import { UserError } from '../core/errors.ts'
 import { planHandoff } from '../core/handoff.ts'
 import { configureHandoff, type HandoffChange, handoffStatus } from '../core/handoff-status.ts'
 import { tildify } from '../core/paths.ts'
-import { MIN_CALLS, primarySuggestion } from '../core/tuning.ts'
+import { MIN_CALLS } from '../core/tuning.ts'
 import type { TuneApplyPlan } from '../core/tuning-apply.ts'
 import { buildId, packageVersion } from '../core/version.ts'
 import { HOOK_FAMILIES } from '../handoff/hook.ts'
@@ -421,29 +421,21 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return { family, summary: setup.summary, plan }
       },
     },
-    // Context tuning (spec §3.18): replays one Account's recent local sessions; reads only, so a read-only Panel allows it.
+    // Context tuning (spec §3.18): replays recent local sessions; reads only, so a read-only Panel allows it.
+    // The setting lives in a settings file that Accounts often share, so the answer comes grouped by file: one
+    // suggestion and one thing to apply per group, with every Account's details alongside.
     '/api/tuning': {
       writes: () => false,
       async run(body) {
         const account = optString(body, 'account')
         const rt = await getRuntime()
-        const entry = async (a: Account) => {
-          const tuning = await rt.tuning(a)
-          const undo = await rt.tuneUndoInfo(a)
-          return {
-            ref: a.ref,
-            family: a.family,
-            tuning,
-            pick: primarySuggestion(tuning),
-            undo: undo ? { value: undo.applied, previous: undo.previous } : null,
-          }
+        const home = rt.paths.home
+        const { accounts, groups } = await rt.tuneGroups(account ? await rt.resolve(account) : undefined)
+        return {
+          minCalls: MIN_CALLS,
+          accounts,
+          groups: groups.map((g) => ({ ...g, id: g.file, file: tildify(g.file, home) })),
         }
-        if (account) return { minCalls: MIN_CALLS, ...(await entry(await rt.resolve(account))) }
-        // No account: every Account of a Family that can tune, for the Panel's page.
-        const tunable = new Set((await rt.familyInfo()).filter((f) => f.tuning).map((f) => f.id))
-        const accounts = []
-        for (const a of await rt.accounts()) if (tunable.has(a.family)) accounts.push(await entry(a))
-        return { minCalls: MIN_CALLS, accounts }
       },
     },
     // Using a suggestion writes one key of the Account's settings (ADR-0012): without `confirm` it only shows the plan.

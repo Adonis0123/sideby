@@ -1265,12 +1265,13 @@ const MAIN = String.raw`
     if (!el.open) { el.showModal(); raiseToasts() }
   }
 
-  // Context tuning (spec §3.18, ADR-0012). One account's content is the same on the page and in the dialog:
-  // what was seen, what is suggested, and a button that does the change for the user, after saying what it changes.
-  const tuneState = { ref: null, family: null, loading: false, entry: null, error: null }
-  // The one change being made right now: step is 'asking' (fetching the plan), 'confirm', 'busy' or 'done'.
+  // Context tuning (spec §3.18, ADR-0012). The setting lives in one settings file, which Accounts often share, so
+  // there is one card per file: what is suggested, one button that does it (after saying what it changes), one size
+  // menu, and the way back. Each account's own numbers sit behind a click.
+  const tuneState = { ref: null, family: null, loading: false, data: null, error: null }
+  // The one change being made right now: step is asking (fetching the plan), confirm, busy, done or undone.
   let useUi = null
-  // What each account's size menu shows while the user is choosing, by ref; dropped once a change is made.
+  // What each card's size menu shows while the user is choosing, by group id; dropped once a change is made.
   const tuneSel = {}
   const tp = { data: null, loading: false, error: null, at: 0 }
   let curPage = location.hash === '#tuning' ? 'tuning' : 'accounts'
@@ -1283,13 +1284,13 @@ const MAIN = String.raw`
     if (curPage === 'tuning') await loadTuningPage()
     if (dlg.kind === 'tune' && tuneState.ref) await loadTuneDialog()
   }
-  async function useAsk(ref, value) {
-    useUi = { ref, value, step: 'asking', plan: null, error: null, message: '' }
+  async function useAsk(g, value) {
+    useUi = { gid: g.id, target: g.target, value, step: 'asking', plan: null, error: null, message: '' }
     tuneRedraw()
     try {
-      const r = await api('/api/tuning/apply', { account: ref, value })
-      useUi = { ref, value, step: 'confirm', plan: r.plan, error: null, message: '' }
-    } catch (e) { useUi = { ref, value, step: 'confirm', plan: null, error: e, message: '' } }
+      const r = await api('/api/tuning/apply', { account: g.target, value })
+      useUi = { ...useUi, step: 'confirm', plan: r.plan }
+    } catch (e) { useUi = { ...useUi, step: 'confirm', error: e } }
     tuneRedraw()
   }
   async function useConfirm() {
@@ -1297,37 +1298,37 @@ const MAIN = String.raw`
     useUi = { ...cur, step: 'busy' }
     tuneRedraw()
     try {
-      const r = await api('/api/tuning/apply', { account: cur.ref, value: cur.value, confirm: true })
-      useUi = { ref: cur.ref, value: cur.value, step: 'done', plan: r.plan, error: null, message: r.applied ? '' : r.message, ok: r.applied }
-      delete tuneSel[cur.ref]
+      const r = await api('/api/tuning/apply', { account: cur.target, value: cur.value, confirm: true })
+      useUi = { ...cur, step: 'done', plan: r.plan, error: null, message: r.applied ? '' : r.message, ok: r.applied }
+      delete tuneSel[cur.gid]
     } catch (e) { useUi = { ...cur, step: 'confirm', error: e } }
     tuneRedraw()
     await tuneReload()
   }
-  async function useUndo(ref) {
-    useUi = { ref, step: 'busy', plan: null, error: null, message: '' }
+  async function useUndo(g) {
+    useUi = { gid: g.id, target: g.target, step: 'busy', plan: null, error: null, message: '' }
     tuneRedraw()
     try {
-      const r = await api('/api/tuning/undo', { account: ref })
-      useUi = { ref, step: 'undone', plan: null, error: null, message: r.undone ? '' : r.message, ok: r.undone }
-      delete tuneSel[ref]
-    } catch (e) { useUi = { ref, step: 'undone', plan: null, error: e, message: '', ok: false } }
+      const r = await api('/api/tuning/undo', { account: g.target })
+      useUi = { ...useUi, step: 'undone', message: r.undone ? '' : r.message, ok: r.undone }
+      delete tuneSel[g.id]
+    } catch (e) { useUi = { ...useUi, step: 'undone', error: e, ok: false } }
     tuneRedraw()
     await tuneReload()
   }
-  // What the change will do, in words a person can check before saying yes.
-  // ending picks the result of a finished change, which sits under the whole account; the rest sits in the card.
-  function useConfirmBox(ref, ending) {
+  // What the change will do, in words a person can check before saying yes. ending picks the result of a finished
+  // change; the rest (asking, the question, an error) is the part before it.
+  function useBox(g, ending) {
     const u = useUi
-    if (!u || u.ref !== ref) return null
+    if (!u || u.gid !== g.id) return null
     const finished = u.step === 'done' || u.step === 'undone'
     if (finished !== Boolean(ending)) return null
     if (u.step === 'asking' || u.step === 'busy') return h('p', { class: 'muted small' }, spinner(), ' ', t('tune.working'))
-    if (u.step === 'done' || u.step === 'undone') {
+    if (finished) {
       if (u.error) return errorNote(u.error, null)
       if (u.ok === false) return h('p', { class: 'note note-warn' }, u.message)
       return h('p', { class: 'note' }, u.step === 'done' ? t('tune.done', { size: tuneSize(u.value) }) : t('tune.undone'), ' ',
-        u.step === 'done' && !BOOT.readOnly ? h('button', { class: 'btn btn-sm', type: 'button', onclick: () => useUndo(ref) }, t('tune.undo')) : null)
+        u.step === 'done' && !BOOT.readOnly ? h('button', { class: 'btn btn-sm', type: 'button', onclick: () => useUndo(g) }, t('tune.undo')) : null)
     }
     if (u.error) return errorNote(u.error, null)
     const plan = u.plan
@@ -1338,68 +1339,90 @@ const MAIN = String.raw`
       h('ul', { class: 'small' },
         h('li', null, t('tune.change') + ': ' + tuneSize(plan.current) + ' → ' + tuneSize(plan.next)),
         h('li', null, t('tune.file') + ': ', h('code', null, plan.file + (plan.creates ? ' ' + t('tune.willCreate') : '')))),
-      plan.affected.length > 1 ? h('p', { class: 'note note-warn' }, t('tune.shared', { list: plan.affected.slice(1).join(', ') })) : null,
+      plan.affected.length > 1 ? h('p', { class: 'note note-warn' }, t('tune.shared', { list: plan.affected.join(', ') })) : null,
       h('p', { class: 'muted small' }, t('tune.newSessions')),
       h('div', { class: 'row-actions' },
         h('button', { class: 'btn btn-primary btn-sm', type: 'button', onclick: useConfirm }, t('tune.confirm')),
         h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { useUi = null; tuneRedraw() } }, t('btn.cancel'))))
   }
-  function tuneModel(m, entry, minCalls) {
-    const isPick = Boolean(entry.pick && entry.pick.model === m.model)
-    const rows = [h('div', { class: 'tune-head' }, h('b', { class: 'mono' }, m.model), h('span', { class: 'muted small' }, t('tune.calls', { n: m.calls })))]
-    rows.push(h('div', { class: 'tune-vals' },
-      h('div', null, h('span', { class: 'muted small' }, t('tune.now')), h('div', { class: 'tune-num' }, tuneSize(m.configured))),
-      m.suggestion ? h('div', null, h('span', { class: 'muted small' }, t('tune.best')), h('div', { class: 'tune-num tune-best' }, tokens(m.suggestion.threshold))) : null))
-    if (m.suggestion && m.suggestion.savedPercent !== null) rows.push(h('p', { class: 'small' }, t('tune.saved', { n: Math.round(m.suggestion.savedPercent) })))
-    if (isPick && !BOOT.readOnly) {
-      const busy = useUi && useUi.ref === entry.ref && (useUi.step === 'asking' || useUi.step === 'busy')
-      if (!useUi || useUi.ref !== entry.ref || useUi.step === 'done' || useUi.step === 'undone')
-        rows.push(h('div', { class: 'row-actions' }, h('button', { class: 'btn btn-primary', type: 'button', disabled: Boolean(busy), onclick: () => useAsk(entry.ref, m.suggestion.threshold) }, t('tune.use', { size: tokens(m.suggestion.threshold) }))))
-    } else if (m.suggestion && entry.pick) rows.push(h('p', { class: 'muted small' }, t('tune.others', { model: entry.pick.model })))
-    if (!m.suggestion) rows.push(h('p', { class: 'note' }, t('tune.reason.' + m.reason, { min: minCalls })))
-    rows.push(h('p', { class: 'muted small' }, m.compactions.total ? tn('tune.compactions', m.compactions.total, { size: tokens(m.compactions.preTokensP50 || 0) }) : t('tune.noCompactions')))
-    if (isPick && useUi && useUi.value === entry.pick.threshold) rows.push(useConfirmBox(entry.ref, false))
-    return h('div', { class: 'tune-model' }, rows)
-  }
-  // The setting itself: a menu of sizes (the suggested one is marked) and a button, so nobody has to edit a file.
-  function tuneSetting(entry) {
-    const models = entry.tuning.models
-    const cur = models.length ? models[0].configured : null
-    const top = Math.max(200000, ...models.map((m) => m.contextWindow))
-    const sug = entry.pick ? entry.pick.threshold : null
-    const sizes = new Set([50000, 80000, 100000, 120000, 160000, 200000, 300000, 500000, 800000].filter((v) => v <= top))
-    if (sug) sizes.add(sug)
-    if (cur) sizes.add(cur)
+  // The card for one settings file.
+  function tuneGroupCard(g, entries) {
+    const pick = g.pick
+    const sizes = new Set([50000, 80000, 100000, 120000, 160000, 200000, 300000, 500000, 800000])
+    let top = 200000
+    for (const e of entries) if (e.tuning.status === 'ok') for (const m of e.tuning.models) top = Math.max(top, m.contextWindow)
+    for (const v of [...sizes]) if (v > top) sizes.delete(v)
+    if (pick) sizes.add(pick.threshold)
+    if (g.current) sizes.add(g.current)
     const key = (v) => (v === null ? 'default' : String(v))
-    const chosen = tuneSel[entry.ref] !== undefined ? tuneSel[entry.ref] : key(cur)
+    const chosen = tuneSel[g.id] !== undefined ? tuneSel[g.id] : key(g.current)
     const sel = h('select', { 'aria-label': t('tune.setting') },
       h('option', { value: 'default' }, t('tune.hostDefaultLong')),
-      [...sizes].sort((x, y) => x - y).map((v) => h('option', { value: String(v) }, tokens(v) + (v === sug ? ' (' + t('tune.suggestedTag') + ')' : ''))))
+      [...sizes].sort((x, y) => x - y).map((v) => h('option', { value: String(v) }, tokens(v) + (pick && v === pick.threshold ? ' (' + t('tune.suggestedTag') + ')' : ''))))
     sel.value = chosen
-    sel.addEventListener('change', () => { tuneSel[entry.ref] = sel.value; tuneRedraw() })
+    sel.addEventListener('change', () => { tuneSel[g.id] = sel.value; tuneRedraw() })
     const value = chosen === 'default' ? null : Number(chosen)
-    const busy = useUi && useUi.ref === entry.ref && (useUi.step === 'asking' || useUi.step === 'busy')
-    const shownInCard = Boolean(entry.pick && useUi && useUi.value === entry.pick.threshold)
-    return h('div', { class: 'tune-setting' },
-      h('b', { class: 'small' }, t('tune.setting')),
-      h('div', { class: 'row-actions' }, sel,
-        h('button', { class: 'btn btn-sm', type: 'button', disabled: Boolean(busy) || value === cur, onclick: () => useAsk(entry.ref, value) }, t('tune.useThis'))),
-      shownInCard ? null : useConfirmBox(entry.ref, false))
+    const mine = useUi && useUi.gid === g.id
+    const busy = mine && (useUi.step === 'asking' || useUi.step === 'busy')
+    const asking = mine && (useUi.step === 'confirm' || busy)
+    const rows = [h('p', { class: 'small' }, g.members.length > 1 ? t('tune.groupShared', { list: g.members.join(', ') }) : h('b', { class: 'mono' }, g.members[0]))]
+    rows.push(h('div', { class: 'tune-vals' },
+      h('div', null, h('span', { class: 'muted small' }, t('tune.now')), h('div', { class: 'tune-num' }, tuneSize(g.current))),
+      pick ? h('div', null, h('span', { class: 'muted small' }, t('tune.best')), h('div', { class: 'tune-num tune-best' }, tokens(pick.threshold))) : null))
+    if (pick && pick.savedPercent !== null) rows.push(h('p', { class: 'small' }, t('tune.saved', { n: Math.round(pick.savedPercent) })))
+    if (pick) rows.push(h('p', { class: 'muted small' }, t('tune.basis', { model: pick.model, ref: pick.ref })))
+    else rows.push(h('p', { class: 'note' }, t('tune.groupNone')))
+    if (!BOOT.readOnly) {
+      if (pick && !asking) rows.push(h('div', { class: 'row-actions' }, h('button', { class: 'btn btn-primary', type: 'button', onclick: () => useAsk(g, pick.threshold) }, t('tune.use', { size: tokens(pick.threshold) }))))
+      rows.push(h('div', { class: 'tune-setting' },
+        h('b', { class: 'small' }, t('tune.setting')),
+        h('div', { class: 'row-actions' }, sel,
+          h('button', { class: 'btn btn-sm', type: 'button', disabled: Boolean(busy) || value === g.current, onclick: () => useAsk(g, value) }, t('tune.useThis')))))
+      rows.push(useBox(g, false))
+      if (g.undo && !(mine && (useUi.step === 'done' || useUi.step === 'undone')))
+        rows.push(h('p', { class: 'small tune-undo' }, t('tune.applied', { prev: tuneSize(g.undo.previous) }), ' ',
+          h('button', { class: 'btn btn-sm', type: 'button', onclick: () => useUndo(g) }, t('tune.undo'))))
+      rows.push(useBox(g, true))
+    }
+    return h('div', { class: 'tune-model tune-group' }, rows)
   }
-  // The cards of one account, and, when sideby set its value, the way back.
-  function tuneAccountCards(entry, minCalls) {
-    const tu = entry.tuning
-    const cards = tu.status === 'ok' ? tu.models.map((m) => tuneModel(m, entry, minCalls)) : []
-    if (tu.status === 'ok' && entry.family === 'claude' && !BOOT.readOnly) cards.push(tuneSetting(entry))
-    if (entry.undo && !(useUi && useUi.ref === entry.ref && useUi.step === 'done'))
-      cards.push(h('p', { class: 'small tune-undo' }, t('tune.applied', { prev: tuneSize(entry.undo.previous) }), ' ',
-        BOOT.readOnly ? null : h('button', { class: 'btn btn-sm', type: 'button', onclick: () => useUndo(entry.ref) }, t('tune.undo'))))
-    cards.push(useConfirmBox(entry.ref, true))
-    return cards
+  // What was seen for one model: information only, behind a click.
+  function tuneModel(m, minCalls) {
+    const rows = [h('div', { class: 'tune-head' }, h('b', { class: 'mono' }, m.model), h('span', { class: 'muted small' }, t('tune.calls', { n: m.calls })))]
+    rows.push(h('div', { class: 'tune-vals' },
+      h('div', null, h('span', { class: 'muted small' }, t('tune.now')), h('div', { class: 'small' }, tuneSize(m.configured))),
+      m.suggestion ? h('div', null, h('span', { class: 'muted small' }, t('tune.best')), h('div', { class: 'small' }, tokens(m.suggestion.threshold))) : null))
+    if (!m.suggestion) rows.push(h('p', { class: 'muted small' }, t('tune.reason.' + m.reason, { min: minCalls })))
+    rows.push(h('p', { class: 'muted small' }, m.compactions.total ? tn('tune.compactions', m.compactions.total, { size: tokens(m.compactions.preTokensP50 || 0) }) : t('tune.noCompactions')))
+    return h('div', { class: 'tune-detail' }, rows)
+  }
+  function tuneDetails(entries, minCalls, label) {
+    const kids = []
+    for (const e of entries) {
+      if (e.tuning.status !== 'ok' || !e.tuning.models.length) continue
+      kids.push(h('div', { class: 'tune-acct-head title-logo' }, badge(e.family, 'sm'), h('b', { class: 'mono' }, e.ref)))
+      for (const m of e.tuning.models) kids.push(tuneModel(m, minCalls))
+    }
+    return kids.length ? h('details', { class: 'tune-details' }, h('summary', null, label), kids) : null
+  }
+  // Everything for a response: a card per settings file, then what Codex accounts show (it only observes).
+  function tuneBody(data) {
+    const out = []
+    const byRef = {}
+    for (const e of data.accounts) byRef[e.ref] = e
+    for (const g of data.groups) {
+      const entries = g.members.map((r) => byRef[r]).filter(Boolean)
+      out.push(h('div', { class: 'tune-acct' }, tuneGroupCard(g, entries), tuneDetails(entries, data.minCalls, t('tune.details'))))
+    }
+    const rest = data.accounts.filter((e) => !data.groups.some((g) => g.members.includes(e.ref)))
+    const seen = rest.filter((e) => e.tuning.status === 'ok' && e.tuning.models.length)
+    if (seen.length) out.push(h('div', { class: 'tune-acct' }, tuneDetails(seen, data.minCalls, t('tune.detailsObserved'))))
+    return out
   }
   async function openTune(a) {
-    tuneState.ref = a.ref; tuneState.family = a.family; tuneState.entry = null; tuneState.error = null
-    if (!useUi || useUi.ref !== a.ref) useUi = null
+    tuneState.ref = a.ref; tuneState.family = a.family; tuneState.data = null; tuneState.error = null
+    // A finished change is not shown again when the dialog opens next time.
+    if (useUi && (useUi.step === 'done' || useUi.step === 'undone')) useUi = null
     showDialog('tune')
     await loadTuneDialog()
   }
@@ -1409,7 +1432,7 @@ const MAIN = String.raw`
     renderTune()
     try {
       const r = await api('/api/tuning', { account: ref })
-      if (tuneState.ref === ref) { tuneState.entry = r; tuneState.error = null }
+      if (tuneState.ref === ref) { tuneState.data = r; tuneState.error = null }
     } catch (e) { if (tuneState.ref === ref) tuneState.error = e }
     tuneState.loading = false
     if (dlg.kind === 'tune' && tuneState.ref === ref) renderTune()
@@ -1417,11 +1440,13 @@ const MAIN = String.raw`
   function renderTune() {
     if (!tuneState.ref) return
     const body = [h('p', { class: 'muted small' }, t('tune.intro', { days: BOOT.usageDays }))]
-    const e = tuneState.entry
-    if (tuneState.loading && !e) body.push(h('p', { class: 'muted' }, spinner(), ' ', t('tune.loading')))
+    const d = tuneState.data
+    const one = d && d.accounts[0]
+    if (tuneState.loading && !d) body.push(h('p', { class: 'muted' }, spinner(), ' ', t('tune.loading')))
     else if (tuneState.error) body.push(errorNote(tuneState.error, loadTuneDialog))
-    else if (e && e.tuning.status === 'ok') body.push(tuneAccountCards(e, e.minCalls))
-    else if (e) body.push(h('p', { class: 'note', title: e.tuning.detail || null }, t(e.tuning.reason === 'no-session' ? 'tune.none' : e.tuning.reason === 'no-source' ? 'tune.noSource' : 'tune.unreadable')))
+    else if (d && d.groups.length) body.push(tuneBody(d))
+    else if (one && one.tuning.status === 'ok') body.push(tuneBody(d))
+    else if (one) body.push(h('p', { class: 'note', title: one.tuning.detail || null }, t(one.tuning.reason === 'no-session' ? 'tune.none' : one.tuning.reason === 'no-source' ? 'tune.noSource' : 'tune.unreadable')))
     const foot = [h('button', { class: 'btn', type: 'button', onclick: () => dlg.el.close() }, t('btn.close'))]
     setKids(dlg.el, dialogFrame(t('tune.title') + ' · ' + tuneState.ref, tuneState.family, body, foot))
   }
@@ -1469,15 +1494,11 @@ const MAIN = String.raw`
     if (tp.loading && !d) kids.push(h('p', { class: 'muted' }, spinner(), ' ', t('tune.loading')))
     if (tp.error) kids.push(errorNote(tp.error, loadTuningPage))
     if (d) {
-      const shown = d.accounts.filter((a) => a.tuning.status === 'ok' && a.tuning.models.length)
-      const idle = d.accounts.filter((a) => !shown.includes(a) && a.tuning.status === 'unavailable' && a.tuning.reason !== 'unrecognized').map((a) => a.ref)
+      const seen = d.accounts.filter((a) => a.tuning.status === 'ok' && a.tuning.models.length)
+      const idle = d.accounts.filter((a) => !seen.includes(a) && a.tuning.status === 'unavailable' && a.tuning.reason !== 'unrecognized').map((a) => a.ref)
       const broken = d.accounts.filter((a) => a.tuning.status === 'unavailable' && a.tuning.reason === 'unrecognized')
-      const withSuggestion = shown.filter((a) => a.pick).length
-      kids.push(h('p', { class: 'small' }, shown.length ? t('tpage.summary', { accounts: shown.length, suggested: withSuggestion }) : t('tpage.none')))
-      for (const a of shown)
-        kids.push(h('div', { class: 'tune-acct' },
-          h('div', { class: 'tune-acct-head title-logo' }, badge(a.family, 'sm'), h('b', { class: 'mono' }, a.ref)),
-          tuneAccountCards(a, d.minCalls)))
+      if (!seen.length && !d.groups.length) kids.push(h('p', { class: 'small' }, t('tpage.none')))
+      kids.push(tuneBody(d))
       for (const a of broken) kids.push(h('p', { class: 'note note-fail' }, h('b', { class: 'mono' }, a.ref), ' ', a.tuning.detail || t('tune.unreadable')))
       if (idle.length) kids.push(h('p', { class: 'muted small' }, t('tpage.idle', { list: idle.join(', ') })))
     }

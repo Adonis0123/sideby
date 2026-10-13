@@ -202,11 +202,52 @@ export function tuningResult(days: number, records: ModelRecords[], o: TuningOpt
 }
 
 /**
- * The one suggestion an Account takes: its setting covers every model, so it follows the busiest model that has
- * one. The other models' numbers stay as information.
+ * The one suggestion for Accounts that share a settings file: the busiest model across them that has one, with the
+ * Account it was seen on. Their other numbers stay as information.
  */
-export function primarySuggestion(t: TuningResult): { model: string; threshold: number } | null {
-  if (t.status !== 'ok') return null
-  const m = t.models.find((x) => x.suggestion)
-  return m?.suggestion ? { model: m.model, threshold: m.suggestion.threshold } : null
+export function groupSuggestion(
+  entries: readonly { ref: string; tuning: TuningResult }[],
+): { ref: string; model: string; threshold: number; savedPercent: number | null; calls: number } | null {
+  let best: {
+    ref: string
+    model: string
+    threshold: number
+    savedPercent: number | null
+    calls: number
+  } | null = null
+  for (const e of entries) {
+    if (e.tuning.status !== 'ok') continue
+    for (const m of e.tuning.models) {
+      if (!m.suggestion) continue
+      if (!best || m.calls > best.calls)
+        best = {
+          ref: e.ref,
+          model: m.model,
+          threshold: m.suggestion.threshold,
+          savedPercent: m.suggestion.savedPercent,
+          calls: m.calls,
+        }
+    }
+  }
+  return best
+}
+
+/** One Account's result, as the Panel and `sideby tune` list it. */
+export interface TuneEntry {
+  ref: string
+  family: string
+  tuning: TuningResult
+}
+
+/** The Accounts that share one settings file: they get one suggestion and one thing to apply. */
+export interface TuneGroup {
+  /** The real settings file. */
+  file: string
+  members: string[]
+  /** The member to ask for the change and the undo (the one the suggestion came from). */
+  target: string
+  /** The size in the file now, or null for the default. */
+  current: number | null
+  pick: { ref: string; model: string; threshold: number; savedPercent: number | null; calls: number } | null
+  undo: { value: number | null; previous: number | null } | null
 }

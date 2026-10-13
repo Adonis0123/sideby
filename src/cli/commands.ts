@@ -10,7 +10,6 @@ import { runHost } from '../core/launch.ts'
 import { resolvePaths, tildify } from '../core/paths.ts'
 import { USAGE_DAYS } from '../core/quota-levels.ts'
 import { SHELLS, type Shell, type ShellInitWrite } from '../core/shell-init.ts'
-import { primarySuggestion } from '../core/tuning.ts'
 import type { TuneApplyPlan } from '../core/tuning-apply.ts'
 import { suggestAlias, suggestName } from '../panel/page-logic.ts'
 import { createRuntime, type Runtime, UnknownFamilyError } from '../runtime.ts'
@@ -396,7 +395,7 @@ async function cmdTuneChange(a: ParsedArgs, io: Io, action: 'apply' | 'undo'): P
   }
   let value = tokens === undefined ? undefined : parseTokens(tokens)
   if (value === undefined) {
-    const pick = primarySuggestion(await rt.tuning(account))
+    const pick = (await rt.tuneGroups(account)).groups[0]?.pick ?? null
     if (!pick)
       throw new UserError(
         `no suggested size for ${account.ref} to use: give one, for example \`sideby tune apply ${account.ref} 160000\`, or run \`sideby tune ${account.ref}\` to see why`,

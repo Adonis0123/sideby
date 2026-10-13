@@ -123,6 +123,9 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .tune-confirm { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
 .tune-confirm ul { margin: 0; padding-left: 18px; }
 .tune-undo { margin: 0; }
+.tune-details { margin-top: 4px; }
+.tune-details summary { cursor: pointer; color: var(--muted); font-size: var(--small); }
+.tune-detail { border-left: 2px solid var(--border); padding: 4px 0 4px 10px; margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
 .tune-setting { display: flex; flex-direction: column; gap: 8px; border: 1px dashed var(--border-strong); border-radius: calc(var(--radius) - 4px); padding: 10px 12px; }
 .tune-acct { display: flex; flex-direction: column; gap: 8px; margin: 18px 0; }
 .tune-acct-head { display: flex; align-items: center; gap: 8px; }

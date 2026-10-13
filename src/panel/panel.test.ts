@@ -919,9 +919,16 @@ describe('context tuning in the Panel (spec §3.18)', () => {
           }
           const ok = await post(port, '/api/tuning', { account: 'claude:main' }, hdr)
           assert.equal(ok.status, 200, `readOnly=${readOnly}`)
-          assert.equal(ok.body.ref, 'claude:main')
+          assert.deepEqual(
+            (ok.body.accounts as { ref: string }[]).map((x) => x.ref),
+            ['claude:main'],
+          )
+          assert.equal((ok.body.groups as { members: string[] }[])[0]?.members[0], 'claude:main')
           assert.equal(ok.body.minCalls, MIN_CALLS)
-          assert.equal((ok.body.tuning as { status: string }).status, 'unavailable')
+          assert.equal(
+            (ok.body.accounts as { tuning: { status: string } }[])[0]?.tuning.status,
+            'unavailable',
+          )
           const all = await post(port, '/api/tuning', {}, hdr)
           assert.equal(all.status, 200)
           assert.equal(all.body.minCalls, MIN_CALLS)
@@ -950,6 +957,56 @@ describe('context tuning in the Panel (spec §3.18)', () => {
         } finally {
           await close(server)
         }
+      }
+    })
+  })
+})
+
+describe('one setting per settings file (spec §3.18)', () => {
+  it('puts the accounts that share a settings.json in one group, and an account with its own file in another', async () => {
+    await withFakeHome(async (h) => {
+      const { symlink } = await import('node:fs/promises')
+      await h.write('.claude/settings.json', '{"autoCompactWindow":150000}\n')
+      await h.write('.claude/projects/p/s.jsonl', '')
+      for (const name of ['work', 'team']) await h.write(`.claude-${name}/projects/p/s.jsonl`, '')
+      await symlink(h.path('.claude/settings.json'), h.path('.claude-work/settings.json'))
+      await h.write('.claude-team/settings.json', '{}\n')
+      const { claudePlugin } = await import('../families/claude/index.ts')
+      const runtime = () => createRuntime({ env: h.env, builtins: [asBuiltin(claudePlugin)] })
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      try {
+        const hdr = {
+          host: `127.0.0.1:${port}`,
+          origin: `http://127.0.0.1:${port}`,
+          'x-sideby-token': handler.token,
+        }
+        const r = (await post(port, '/api/tuning', {}, hdr)).body as {
+          groups: { members: string[]; current: number | null; file: string }[]
+        }
+        const groups = r.groups.map((g) => [...g.members].sort())
+        assert.deepEqual(groups.sort(), [['claude:main', 'claude:work'], ['claude:team']].sort())
+        const shared = r.groups.find((g) => g.members.length === 2)
+        assert.equal(shared?.current, 150_000)
+        assert.match(shared?.file ?? '', /^~\/\.claude\/settings\.json$/)
+        // Asking about one account returns only its own group.
+        const one = (await post(port, '/api/tuning', { account: 'claude:team' }, hdr)).body as {
+          groups: { members: string[] }[]
+        }
+        assert.deepEqual(
+          one.groups.map((g) => g.members),
+          [['claude:team']],
+        )
+        // From an account that has no sessions itself, its group and the others sharing the file still come back.
+        const work = (await post(port, '/api/tuning', { account: 'claude:work' }, hdr)).body as {
+          accounts: { ref: string }[]
+          groups: { members: string[] }[]
+        }
+        assert.deepEqual(work.accounts.map((x) => x.ref).sort(), ['claude:main', 'claude:work'])
+        assert.equal(work.groups.length, 1)
+      } finally {
+        await close(server)
       }
     })
   })
@@ -1000,9 +1057,9 @@ describe('using a tuning suggestion in the Panel (ADR-0012)', () => {
         assert.equal(done.body.applied, true)
         assert.deepEqual(await settings(), { theme: 'dark', autoCompactWindow: 120_000 })
         const seen = (await post(port, '/api/tuning', { account: 'claude:main' }, hdr)).body as {
-          undo: { value: number; previous: null }
+          groups: { undo: { value: number; previous: null } | null; current: number | null }[]
         }
-        assert.deepEqual(seen.undo, { value: 120_000, previous: null })
+        assert.deepEqual(seen.groups[0]?.undo, { value: 120_000, previous: null })
         assert.equal(
           (await post(port, '/api/tuning/undo', { account: 'claude:main' }, hdr)).body.undone,
           true,

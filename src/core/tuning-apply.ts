@@ -275,3 +275,18 @@ export async function undoTune(
   await rm(recordPath(ctx, where.file), { force: true })
   return { ok: true, message: 'Undone. New sessions go back to the previous setting.' }
 }
+
+/** The real file an Account's setting lives in (canonical, so Accounts sharing it get the same answer). */
+export async function settingsFileOf(account: Account): Promise<string> {
+  return (await locate(account)).file
+}
+
+/** The size in the Account's settings file now, or null when there is none (the default). Reads only that key. */
+export async function currentTuneValue(account: Account): Promise<number | null> {
+  const where = await locate(account)
+  if (!where.exists) return null
+  const read = await readObject(where.file)
+  if ('error' in read) return null
+  const v = read.obj[TUNE_KEY]
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}

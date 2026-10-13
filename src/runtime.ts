@@ -40,9 +40,12 @@ import {
   shellInitScript,
   writeShellInitFile,
 } from './core/shell-init.ts'
+import { groupSuggestion, type TuneEntry, type TuneGroup } from './core/tuning.ts'
 import {
   applyTune,
+  currentTuneValue,
   planTuneApply,
+  settingsFileOf,
   type TuneApplyPlan,
   type TuneChange,
   type TuneUndoRecord,
@@ -241,6 +244,8 @@ export interface Runtime {
   usage(account: Account): Promise<UsageResult>
   /** Estimated Compaction Threshold per model for one Account (spec §3.18); read-only. */
   tuning(account: Account): Promise<TuningResult>
+  /** Suggestions grouped by settings file (Accounts sharing a file share one), with every listed Account's details. */
+  tuneGroups(only?: Account): Promise<{ accounts: TuneEntry[]; groups: TuneGroup[] }>
   /** What using a suggested size would change in the Account's settings; writes nothing (spec §3.18, ADR-0012). */
   tuneApplyPlan(account: Account, value: number | null): Promise<TuneApplyPlan>
   /** Writes the size into the Account's settings (one key; null goes back to the default), and remembers how to undo it. */
@@ -718,6 +723,49 @@ export async function createRuntime(
       } finally {
         memos.saveSoon()
       }
+    },
+    async tuneGroups(only) {
+      const tunable = new Set((await rt.familyInfo()).filter((f) => f.tuning).map((f) => f.id))
+      const all = (await accounts()).filter((a) => tunable.has(a.family))
+      const files = new Map<string, Account[]>()
+      for (const a of all) {
+        if (a.family !== 'claude') continue
+        const file = await settingsFileOf(a)
+        files.set(file, [...(files.get(file) ?? []), a])
+      }
+      const wanted = only
+        ? [...files.entries()].filter(([, m]) => m.some((a) => a.ref === only.ref))
+        : [...files.entries()]
+      const entries = new Map<string, TuneEntry>()
+      const entryOf = async (a: Account): Promise<TuneEntry> => {
+        const have = entries.get(a.ref)
+        if (have) return have
+        const made = { ref: a.ref, family: a.family, tuning: await rt.tuning(a) }
+        entries.set(a.ref, made)
+        return made
+      }
+      const groups: TuneGroup[] = []
+      for (const [file, members] of wanted) {
+        const list: TuneEntry[] = []
+        for (const m of members) list.push(await entryOf(m))
+        const pick = groupSuggestion(list)
+        const current = await currentTuneValue(members[0] as Account)
+        const target = members.find((m) => m.ref === pick?.ref) ?? (members[0] as Account)
+        const undo = await tuneUndoInfo(target, readContext())
+        groups.push({
+          file,
+          members: members.map((m) => m.ref),
+          target: target.ref,
+          current,
+          pick,
+          undo: undo ? { value: undo.applied, previous: undo.previous } : null,
+        })
+      }
+      const shown: TuneEntry[] = []
+      // Asking about one Account also lists the others that share its file: the suggestion is for the whole group.
+      const refs = only ? new Set([only.ref, ...wanted.flatMap(([, m]) => m.map((a) => a.ref))]) : null
+      for (const a of all) if (!refs || refs.has(a.ref)) shown.push(await entryOf(a))
+      return { accounts: shown, groups }
     },
     async tuneApplyPlan(account, value) {
       onlyClaude(account)
