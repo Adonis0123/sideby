@@ -117,7 +117,17 @@ sideby tune claude:work      # 一个账号，或一个家族，例如 `claude`
 
 这是估算，不是实测：换一个阈值，摘要保留的内容会变，记录里看不出来。Claude 按模型给推荐值（该模型在窗口内至少 200 次调用，且至少记录过一次压缩）。最省的点落在重放范围的最低端时，sideby 会说没有明确的最优值，不会把那个边界当成建议。Codex 的默认阈值没有公开来源，只展示压缩时上下文有多大。Grok 和 pi 没有来源。
 
-sideby 不改任何设置。想试推荐值，自己把 `"autoCompactWindow": <token 数>` 加进该账号的 `settings.json`。为了显示「现在的值」，sideby 只读 `settings.json` 里的这一个键（Claude）或 `config.toml` 里的 `model_auto_compact_token_limit`（Codex），文件里其他内容一概不读。面板里在账号菜单的「上下文调优」中看到同样的内容。
+你不点，sideby 就不会改任何东西。打开面板的「上下文调优」页签（或账号菜单里的同名项），点「使用 80K」：sideby 会先告诉你改哪个文件、改什么（以及还有哪些账号共用这个文件），你确认后才写入。它只写一个键，该账号 `settings.json` 里的 `autoCompactWindow`，其余内容原样保留；点一下「撤销」就恢复原来的样子。已经在运行的会话不受影响，新开的会话用新值。在终端里同样可以：
+
+```sh
+sideby tune apply claude:work            # 只展示改动，退出码 10
+sideby tune apply claude:work 120k --yes # 写入（不写大小就用建议值；写 `default` 就恢复默认）
+sideby tune undo claude:work --yes       # 恢复原来的值
+```
+
+建议下面，每个 Claude 账号还有一个**大小菜单**（默认、几个常用值，建议值会标出来）：选一个，点「使用这个」，同样先预览、确认，也能撤销。选「默认」就是把这个键删掉。
+
+把 `settings.json` 链到主账号的账号共用同一个文件，所以改动会影响它们全部，确认页会把它们列出来。为了显示「现在的值」，sideby 只读这一个键（Claude）或 `config.toml` 里的 `model_auto_compact_token_limit`（Codex），文件里其他内容一概不读。
 
 ## 账号撞上限额时
 

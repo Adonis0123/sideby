@@ -197,6 +197,10 @@
                             },
                             {
                               "type": "string",
+                              "const": "no-optimum"
+                            },
+                            {
+                              "type": "string",
                               "const": "unknown-model"
                             },
                             {

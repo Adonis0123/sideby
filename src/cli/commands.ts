@@ -10,11 +10,13 @@ import { runHost } from '../core/launch.ts'
 import { resolvePaths, tildify } from '../core/paths.ts'
 import { USAGE_DAYS } from '../core/quota-levels.ts'
 import { SHELLS, type Shell, type ShellInitWrite } from '../core/shell-init.ts'
+import { primarySuggestion } from '../core/tuning.ts'
+import type { TuneApplyPlan } from '../core/tuning-apply.ts'
 import { suggestAlias, suggestName } from '../panel/page-logic.ts'
 import { createRuntime, type Runtime, UnknownFamilyError } from '../runtime.ts'
 import type { Finding } from '../types.ts'
 import { type ParsedArgs, UsageError } from './args.ts'
-import { c, clock, quotaText, table, tuningLines, usageText } from './format.ts'
+import { c, clock, compactNumber, quotaText, table, tuningLines, usageText } from './format.ts'
 
 export interface Io {
   out(s: string): void
@@ -338,9 +340,110 @@ export async function cmdDoctor(a: ParsedArgs, io: Io): Promise<number> {
   return report.status === 'ok' ? 0 : 1
 }
 
-/** `sideby tune [account|family]`: estimated Compaction Threshold per model, read-only (spec §3.18). */
+/** The words a person reads before agreeing to a change: where, from what to what, and who else it reaches. */
+function tuneChangeLines(plan: TuneApplyPlan, home: string): string[] {
+  const from = plan.current === null ? 'the default' : compactNumber(plan.current)
+  const lines = [
+    `  File:    ${tilde(plan.file, home)}${plan.creates ? ' (will be created)' : ''}`,
+    `  Change:  auto-compact size ${from} -> ${plan.next === null ? 'the default' : compactNumber(plan.next)}`,
+  ]
+  if (plan.affected.length > 1)
+    lines.push(`  Careful: this file is shared, so it also changes ${plan.affected.slice(1).join(', ')}`)
+  lines.push('  Sessions already running keep the old value; new ones use the new one. You can undo it.')
+  return lines
+}
+
+/** `160000`, `160k` or `1m` as a number of tokens, `default` as null (go back to the default); NaN when it is none of those. */
+function parseTokens(text: string): number | null {
+  if (text.trim().toLowerCase() === 'default') return null
+  const m = /^(\d+(?:\.\d+)?)([kKmM]?)$/.exec(text.trim())
+  if (!m) return Number.NaN
+  return Math.round(Number(m[1]) * (m[2] === '' ? 1 : m[2]?.toLowerCase() === 'k' ? 1_000 : 1_000_000))
+}
+
+/** `sideby tune apply <account> [tokens]` and `sideby tune undo <account>` (spec §3.18, ADR-0012). */
+async function cmdTuneChange(a: ParsedArgs, io: Io, action: 'apply' | 'undo'): Promise<number> {
+  const [, ref, tokens] = a.positionals
+  if (!ref || a.positionals.length > (action === 'apply' ? 3 : 2))
+    throw new UsageError(
+      `usage: sideby tune ${action} <account>${action === 'apply' ? ' [tokens]' : ''} [--yes] [--json]`,
+    )
+  const wantJson = a.flags.has('json')
+  const yes = a.flags.has('yes')
+  const rt = await createRuntime()
+  const account = await rt.resolve(ref)
+  const home = rt.paths.home
+  const out = (data: object) => json(io, { account: account.ref, action, ...data })
+  if (action === 'undo') {
+    const info = await rt.tuneUndoInfo(account)
+    if (!info) {
+      if (wantJson) out({ applied: false, message: 'There is nothing from sideby to undo for this account.' })
+      else io.out('There is nothing from sideby to undo for this account.')
+      return 1
+    }
+    if (!yes) {
+      if (wantJson) out({ applied: false, message: 'Run again with --yes to undo.' })
+      else
+        io.out(
+          `Undo: auto-compact size ${info.applied === null ? 'the default' : compactNumber(info.applied)} -> ${info.previous === null ? 'the default' : compactNumber(info.previous)} in ${tilde(info.file, home)}\nRun again with --yes to undo.`,
+        )
+      return 10
+    }
+    const r = await rt.tuneUndo(account)
+    if (wantJson) out({ applied: r.ok, message: r.message })
+    else io.out(r.message)
+    return r.ok ? 0 : 1
+  }
+  let value = tokens === undefined ? undefined : parseTokens(tokens)
+  if (value === undefined) {
+    const pick = primarySuggestion(await rt.tuning(account))
+    if (!pick)
+      throw new UserError(
+        `no suggested size for ${account.ref} to use: give one, for example \`sideby tune apply ${account.ref} 160000\`, or run \`sideby tune ${account.ref}\` to see why`,
+        { code: 'no-suggestion' },
+      )
+    value = pick.threshold
+  }
+  const plan = await rt.tuneApplyPlan(account, value)
+  const planJson = { ...plan, file: tilde(plan.file, home) }
+  if (plan.status === 'blocked') {
+    if (wantJson) out({ applied: false, plan: planJson, message: plan.reason })
+    else io.out(plan.reason ?? 'blocked')
+    return 1
+  }
+  if (plan.status === 'unchanged') {
+    if (wantJson)
+      out({ applied: false, plan: planJson, message: 'It is already set to that value; nothing changed.' })
+    else io.out('It is already set to that value; nothing changed.')
+    return 0
+  }
+  if (!yes) {
+    if (wantJson) out({ applied: false, plan: planJson, message: 'Run again with --yes to apply.' })
+    else
+      io.out(
+        [
+          `${plan.next === null ? 'Go back to the default' : `Use ${compactNumber(plan.next)}`} for ${account.ref}?`,
+          ...tuneChangeLines(plan, home),
+          'Run again with --yes to apply.',
+        ].join('\n'),
+      )
+    return 10
+  }
+  const r = await rt.tuneApply(account, value)
+  if (wantJson)
+    out({ applied: r.ok, plan: { ...r.plan, file: tilde(r.plan.file, home) }, message: r.message })
+  else io.out(r.message)
+  return r.ok ? 0 : 1
+}
+
+/** `sideby tune [account|family]`: estimated Compaction Threshold per model (spec §3.18). */
 export async function cmdTune(a: ParsedArgs, io: Io): Promise<number> {
-  if (a.positionals.length > 1) throw new UsageError('usage: sideby tune [account|family] [--json]')
+  if (a.positionals[0] === 'apply' || a.positionals[0] === 'undo')
+    return cmdTuneChange(a, io, a.positionals[0])
+  if (a.positionals.length > 1 || a.flags.has('yes'))
+    throw new UsageError(
+      'usage: sideby tune [account|family] [--json]  (--yes belongs to `tune apply` and `tune undo`)',
+    )
   const rt = await createRuntime()
   const target = a.positionals[0]
   const all = await rt.accounts()

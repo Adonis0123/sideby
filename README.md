@@ -70,7 +70,7 @@ The agent checks Node and your Host CLIs, installs sideby and the skill, creates
 | Add an API key account (DeepSeek, a gateway, …) | `sideby new claude deepseek --api` | [API accounts](docs/guide/usage.md#api-accounts) |
 | Find and fix config drift between accounts | `sideby doctor --fix` | [Doctor](docs/guide/usage.md#doctor) |
 | See Claude quota (Codex needs no setup) | `sideby quota setup claude --yes` | [Claude quota](docs/guide/usage.md#claude-quota) |
-| Estimate the cheapest auto-compact threshold from your own sessions (read-only) | `sideby tune` | [Context tuning](docs/guide/usage.md#context-tuning) |
+| Find the cheapest auto-compact size from your own sessions, and use it in one click | `sideby tune` (or the panel's Context tuning tab) | [Context tuning](docs/guide/usage.md#context-tuning) |
 | Move on when an account hits its limit | `sideby next claude` | [Handoff](docs/guide/usage.md#when-an-account-hits-its-limit) |
 | Let a running task move to the next account by itself when quota runs low (off by default; see the risk) | `sideby handoff enable` (or the panel) | [Auto Handoff](docs/guide/usage.md#auto-handoff) |
 | Short commands such as `ccw` | `sideby alias add ccw claude:work` | [Shell functions](docs/guide/configuration.md#shell-functions) |

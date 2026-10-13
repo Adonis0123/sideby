@@ -117,7 +117,17 @@ sideby tune claude:work      # one account, or a family such as `claude`
 
 It is an estimate, not a measurement: a different threshold changes what the summary keeps, which the records cannot show. Claude gets a suggested value per model (needs 200+ calls of that model in the window and at least one recorded compaction). When the cheapest point lands at the bottom of the range tried, sideby says there is no clear best value instead of suggesting that edge. Codex only shows how large the context was when it compacted, because its default threshold has no public source. Grok and pi have none.
 
-sideby changes no setting. To try a suggestion, add `"autoCompactWindow": <tokens>` to that account's `settings.json` yourself. To show your current value, sideby reads exactly that key from `settings.json` (Claude) or `model_auto_compact_token_limit` from `config.toml` (Codex), and nothing else in those files. The panel shows the same on an account's menu, "Context tuning".
+Nothing changes until you say so. Open the panel's **Context tuning** tab (or an account's menu), and press **Use 80K**: sideby first shows the file and the change (and which other accounts share that file), and only writes after you confirm. It writes one key, `autoCompactWindow`, in that account's `settings.json`, keeps everything else, and one click on **Undo** puts it back. Sessions already running keep the old value; new ones use the new one. The same from a terminal:
+
+```sh
+sideby tune apply claude:work            # shows the change, exit 10
+sideby tune apply claude:work 120k --yes # writes it (leave the size out to take the suggestion; `default` removes it)
+sideby tune undo claude:work --yes       # puts the old value back
+```
+
+Under the suggestion each Claude account also has a **size menu** (Default, common sizes, the suggested one marked): pick one and press **Use this**; the same preview, confirmation and undo apply. Choosing Default removes the key.
+
+Accounts that link `settings.json` to the Main Account share one file, so the change reaches all of them; the confirmation names them. To show your current value, sideby reads exactly that key (Claude) or `model_auto_compact_token_limit` from `config.toml` (Codex), and nothing else in those files.
 
 ## When an account hits its limit
 

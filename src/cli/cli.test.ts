@@ -1322,6 +1322,63 @@ describe('tune (spec §3.18)', () => {
     })
   })
 
+  it('applies a suggestion only after the change is shown and --yes is given, and undoes it', async () => {
+    await withFakeHome(async (h) => {
+      await withSession(h)
+      const settings = h.path('.claude/settings.json')
+      const before = await readFile(settings, 'utf8')
+      const preview = await sideby(h, ['tune', 'apply', 'claude:main', '120000'])
+      assert.equal(preview.code, 10)
+      assert.match(preview.out, /Use 120K for claude:main/)
+      assert.match(preview.out, /~\/\.claude\/settings\.json/)
+      assert.equal(await readFile(settings, 'utf8'), before)
+      const shown = checkSchema(
+        'tune-change',
+        (await sideby(h, ['tune', 'apply', 'claude:main', '120000', '--json'])).out,
+      )
+      assert.equal(shown.applied, false)
+      const done = await sideby(h, ['tune', 'apply', 'claude:main', '120k', '--yes', '--json'])
+      assert.equal(done.code, 0)
+      assert.equal(checkSchema('tune-change', done.out).applied, true)
+      assert.equal(JSON.parse(await readFile(settings, 'utf8')).autoCompactWindow, 120_000)
+      const undo = await sideby(h, ['tune', 'undo', 'claude:main', '--yes'])
+      assert.equal(undo.code, 0)
+      assert.equal(JSON.parse(await readFile(settings, 'utf8')).autoCompactWindow, 190_000)
+    })
+  })
+
+  it('does not take --yes on the read-only listing', async () => {
+    await withFakeHome(async (h) => {
+      await withSession(h)
+      assert.equal((await sideby(h, ['tune', '--yes'])).code, 2)
+    })
+  })
+
+  it('goes back to the default with the word default', async () => {
+    await withFakeHome(async (h) => {
+      await withSession(h)
+      const settings = h.path('.claude/settings.json')
+      assert.equal((await sideby(h, ['tune', 'apply', 'claude:main', 'default'])).code, 10)
+      assert.equal((await sideby(h, ['tune', 'apply', 'claude:main', 'default', '--yes'])).code, 0)
+      assert.equal('autoCompactWindow' in JSON.parse(await readFile(settings, 'utf8')), false)
+      assert.equal((await sideby(h, ['tune', 'undo', 'claude:main', '--yes'])).code, 0)
+      assert.equal(JSON.parse(await readFile(settings, 'utf8')).autoCompactWindow, 190_000)
+    })
+  })
+
+  it('uses the suggestion when no size is given, and refuses where there is none', async () => {
+    await withFakeHome(async (h) => {
+      await withSession(h)
+      const r = await sideby(h, ['tune', 'apply', 'claude:main', '--json'])
+      assert.equal(r.code, 10)
+      const plan = checkSchema('tune-change', r.out).plan as { next: number }
+      assert.ok(plan.next >= 10_000)
+      assert.equal((await sideby(h, ['tune', 'apply', 'claude:main', 'lots', '--yes'])).code, 1)
+      assert.equal((await sideby(h, ['tune', 'apply'])).code, 2)
+      assert.equal((await sideby(h, ['tune', 'undo', 'claude:main', '--yes'])).code, 1)
+    })
+  })
+
   it('marks Grok and pi as having no public source', async () => {
     await withFakeHome(async (h) => {
       await h.write('.grok/auth.json', JSON.stringify({ a: { email: 'g@example.com' } }), 0o600)

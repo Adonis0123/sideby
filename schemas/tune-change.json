@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/tune-change.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "account",
+    "action",
+    "applied"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "account": {
+      "type": "string"
+    },
+    "action": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "apply"
+        },
+        {
+          "type": "string",
+          "const": "undo"
+        }
+      ]
+    },
+    "applied": {
+      "type": "boolean",
+      "description": "True once the change was written (or undone)."
+    },
+    "plan": {
+      "type": "object",
+      "required": [
+        "status",
+        "file",
+        "link",
+        "affected",
+        "current",
+        "next",
+        "creates"
+      ],
+      "properties": {
+        "status": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "ready"
+            },
+            {
+              "type": "string",
+              "const": "unchanged"
+            },
+            {
+              "type": "string",
+              "const": "blocked"
+            }
+          ]
+        },
+        "file": {
+          "type": "string"
+        },
+        "link": {
+          "type": "boolean"
+        },
+        "affected": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "current": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "creates": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "message": {
+      "type": "string"
+    }
+  },
+  "title": "sideby tune apply|undo --json"
+}

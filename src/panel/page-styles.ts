@@ -117,6 +117,15 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .seg { display: inline-flex; align-items: center; gap: 2px; height: var(--ctl-h); padding: 2px; border: 1px solid var(--border-strong); border-radius: var(--ctl-radius); background: var(--surface); }
 .seg-btn { display: inline-flex; align-items: center; gap: 5px; height: 100%; padding: 0 10px; border: 0; border-radius: calc(var(--ctl-radius) - 2px); background: transparent; color: var(--muted); font: inherit; font-size: var(--control-size); cursor: pointer; }
 .seg-btn:hover { color: var(--text); }
+.seg-btn[aria-selected=true] { background: var(--active); color: var(--text); font-weight: var(--strong-weight); }
+.pages { margin: 0 0 14px; }
+.row-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.tune-confirm { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
+.tune-confirm ul { margin: 0; padding-left: 18px; }
+.tune-undo { margin: 0; }
+.tune-setting { display: flex; flex-direction: column; gap: 8px; border: 1px dashed var(--border-strong); border-radius: calc(var(--radius) - 4px); padding: 10px 12px; }
+.tune-acct { display: flex; flex-direction: column; gap: 8px; margin: 18px 0; }
+.tune-acct-head { display: flex; align-items: center; gap: 8px; }
 .seg-btn[aria-pressed=true] { background: var(--active); color: var(--text); font-weight: var(--strong-weight); }
 .seg-btn:focus-visible { outline: var(--focus-outline); outline-offset: 1px; box-shadow: var(--focus-ring); }
 .acct-head { margin-bottom: 10px; }

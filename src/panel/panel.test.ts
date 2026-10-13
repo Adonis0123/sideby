@@ -922,7 +922,13 @@ describe('context tuning in the Panel (spec §3.18)', () => {
           assert.equal(ok.body.ref, 'claude:main')
           assert.equal(ok.body.minCalls, MIN_CALLS)
           assert.equal((ok.body.tuning as { status: string }).status, 'unavailable')
-          assert.equal((await post(port, '/api/tuning', {}, hdr)).status, 400)
+          const all = await post(port, '/api/tuning', {}, hdr)
+          assert.equal(all.status, 200)
+          assert.equal(all.body.minCalls, MIN_CALLS)
+          assert.deepEqual(
+            (all.body.accounts as { ref: string; family: string }[]).map((x) => [x.ref, x.family]),
+            [['claude:main', 'claude']],
+          )
           assert.equal((await post(port, '/api/tuning', { account: 'claude:nope' }, hdr)).status, 400)
           // The checks every POST has stay on.
           assert.equal(
@@ -944,6 +950,107 @@ describe('context tuning in the Panel (spec §3.18)', () => {
         } finally {
           await close(server)
         }
+      }
+    })
+  })
+})
+
+describe('using a tuning suggestion in the Panel (ADR-0012)', () => {
+  it('shows the plan without writing, writes only on confirm, never on a read-only Panel, and undoes', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/projects/p/s.jsonl', '')
+      await h.write('.claude/settings.json', '{"theme":"dark"}\n')
+      const { claudePlugin } = await import('../families/claude/index.ts')
+      const runtime = () => createRuntime({ env: h.env, builtins: [asBuiltin(claudePlugin)] })
+      const settings = async () => JSON.parse(await readFile(h.path('.claude/settings.json'), 'utf8'))
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      try {
+        const hdr = {
+          host: `127.0.0.1:${port}`,
+          origin: `http://127.0.0.1:${port}`,
+          'x-sideby-token': handler.token,
+        }
+        const plan = await post(port, '/api/tuning/apply', { account: 'claude:main', value: 120_000 }, hdr)
+        assert.equal(plan.status, 200)
+        assert.equal(plan.body.applied, false)
+        assert.equal((plan.body.plan as { next: number; file: string }).next, 120_000)
+        assert.match((plan.body.plan as { file: string }).file, /^~\/\.claude\/settings\.json$/)
+        assert.deepEqual(await settings(), { theme: 'dark' })
+        assert.equal((await post(port, '/api/tuning/apply', { account: 'claude:main' }, hdr)).status, 400)
+        assert.equal(
+          (await post(port, '/api/tuning/apply', { account: 'claude:main', value: 'big' }, hdr)).status,
+          400,
+        )
+        assert.equal(
+          (await post(port, '/api/tuning/apply', { account: 'claude:main', value: null }, hdr)).status,
+          200,
+        )
+        assert.equal(
+          (await post(port, '/api/tuning/apply', { account: 'claude:main', value: 5 }, hdr)).status,
+          400,
+        )
+        const done = await post(
+          port,
+          '/api/tuning/apply',
+          { account: 'claude:main', value: 120_000, confirm: true },
+          hdr,
+        )
+        assert.equal(done.body.applied, true)
+        assert.deepEqual(await settings(), { theme: 'dark', autoCompactWindow: 120_000 })
+        const seen = (await post(port, '/api/tuning', { account: 'claude:main' }, hdr)).body as {
+          undo: { value: number; previous: null }
+        }
+        assert.deepEqual(seen.undo, { value: 120_000, previous: null })
+        assert.equal(
+          (await post(port, '/api/tuning/undo', { account: 'claude:main' }, hdr)).body.undone,
+          true,
+        )
+        assert.deepEqual(await settings(), { theme: 'dark' })
+      } finally {
+        await close(server)
+      }
+      const ro = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`], readOnly: true }),
+      )
+      try {
+        const hdr = {
+          host: `127.0.0.1:${ro.port}`,
+          origin: `http://127.0.0.1:${ro.port}`,
+          'x-sideby-token': ro.handler.token,
+        }
+        assert.equal(
+          (await post(ro.port, '/api/tuning/apply', { account: 'claude:main', value: 120_000 }, hdr)).status,
+          200,
+        )
+        assert.equal(
+          (
+            await post(
+              ro.port,
+              '/api/tuning/apply',
+              { account: 'claude:main', value: 120_000, confirm: true },
+              hdr,
+            )
+          ).status,
+          403,
+        )
+        assert.equal((await post(ro.port, '/api/tuning/undo', { account: 'claude:main' }, hdr)).status, 403)
+        assert.deepEqual(await settings(), { theme: 'dark' })
+        // The checks every POST has stay on.
+        assert.equal(
+          (
+            await post(
+              ro.port,
+              '/api/tuning/apply',
+              { account: 'claude:main', value: 120_000 },
+              { ...hdr, 'x-sideby-token': 'x' },
+            )
+          ).status,
+          403,
+        )
+      } finally {
+        await close(ro.server)
       }
     })
   })

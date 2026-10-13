@@ -94,8 +94,10 @@ export function renderPage(opts: PageOptions): string {
 </header>
 <main class="wrap">
   <div id="banners"></div>
+  <nav id="pages" class="pages" role="tablist" hidden></nav>
   <section id="summary" class="summary" aria-busy="true">${SKELETON_STAT.repeat(4)}</section>
-  <section class="block" aria-labelledby="h-accounts">
+  <section id="tuning-page" class="block" aria-labelledby="h-tuning" hidden></section>
+  <section id="accounts-page" class="block" aria-labelledby="h-accounts">
     <div class="section-head acct-head"><h2 id="h-accounts"><span data-i18n="acct.title">Accounts</span><span id="acct-count" class="muted small"></span></h2></div>
     <div id="toolbar" class="toolbar" hidden></div>
     <div id="accounts" aria-busy="true"><div class="group group-list">${SKELETON_ROW.repeat(4)}</div></div>

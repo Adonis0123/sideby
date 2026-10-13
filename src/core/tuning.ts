@@ -200,3 +200,13 @@ export function tuningResult(days: number, records: ModelRecords[], o: TuningOpt
   models.sort((a, b) => b.calls - a.calls)
   return { status: 'ok', days, estimate: true, models }
 }
+
+/**
+ * The one suggestion an Account takes: its setting covers every model, so it follows the busiest model that has
+ * one. The other models' numbers stay as information.
+ */
+export function primarySuggestion(t: TuningResult): { model: string; threshold: number } | null {
+  if (t.status !== 'ok') return null
+  const m = t.models.find((x) => x.suggestion)
+  return m?.suggestion ? { model: m.model, threshold: m.suggestion.threshold } : null
+}

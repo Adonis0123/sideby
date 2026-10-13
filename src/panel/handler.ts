@@ -7,7 +7,8 @@ import { UserError } from '../core/errors.ts'
 import { planHandoff } from '../core/handoff.ts'
 import { configureHandoff, type HandoffChange, handoffStatus } from '../core/handoff-status.ts'
 import { tildify } from '../core/paths.ts'
-import { MIN_CALLS } from '../core/tuning.ts'
+import { MIN_CALLS, primarySuggestion } from '../core/tuning.ts'
+import type { TuneApplyPlan } from '../core/tuning-apply.ts'
 import { buildId, packageVersion } from '../core/version.ts'
 import { HOOK_FAMILIES } from '../handoff/hook.ts'
 import type { AccountStatus, DoctorHistory, FamilyInfo, Runtime } from '../runtime.ts'
@@ -425,10 +426,55 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       writes: () => false,
       async run(body) {
         const account = optString(body, 'account')
+        const rt = await getRuntime()
+        const entry = async (a: Account) => {
+          const tuning = await rt.tuning(a)
+          const undo = await rt.tuneUndoInfo(a)
+          return {
+            ref: a.ref,
+            family: a.family,
+            tuning,
+            pick: primarySuggestion(tuning),
+            undo: undo ? { value: undo.applied, previous: undo.previous } : null,
+          }
+        }
+        if (account) return { minCalls: MIN_CALLS, ...(await entry(await rt.resolve(account))) }
+        // No account: every Account of a Family that can tune, for the Panel's page.
+        const tunable = new Set((await rt.familyInfo()).filter((f) => f.tuning).map((f) => f.id))
+        const accounts = []
+        for (const a of await rt.accounts()) if (tunable.has(a.family)) accounts.push(await entry(a))
+        return { minCalls: MIN_CALLS, accounts }
+      },
+    },
+    // Using a suggestion writes one key of the Account's settings (ADR-0012): without `confirm` it only shows the plan.
+    '/api/tuning/apply': {
+      writes: (body) => body.confirm === true,
+      async run(body) {
+        const account = optString(body, 'account')
+        if (!account) throw new HttpError(400, '"account" is required')
+        const value = body.value
+        if (typeof value !== 'number' && value !== null)
+          throw new HttpError(400, '"value" must be a number of tokens, or null for the default')
+        const rt = await getRuntime()
+        const found = await rt.resolve(account)
+        const home = rt.paths.home
+        const show = (p: TuneApplyPlan) => ({ ...p, file: tildify(p.file, home) })
+        if (!optBool(body, 'confirm')) {
+          const plan = await rt.tuneApplyPlan(found, value)
+          return { ref: found.ref, applied: false, plan: show(plan), message: plan.reason ?? '' }
+        }
+        const r = await rt.tuneApply(found, value)
+        return { ref: found.ref, applied: r.ok, plan: show(r.plan), message: r.message }
+      },
+    },
+    '/api/tuning/undo': {
+      async run(body) {
+        const account = optString(body, 'account')
         if (!account) throw new HttpError(400, '"account" is required')
         const rt = await getRuntime()
         const found = await rt.resolve(account)
-        return { ref: found.ref, minCalls: MIN_CALLS, tuning: await rt.tuning(found) }
+        const r = await rt.tuneUndo(found)
+        return { ref: found.ref, undone: r.ok, message: r.message }
       },
     },
     // Auto Handoff (spec §3.17): readiness reads only; configure shows the config change unless `confirm`.

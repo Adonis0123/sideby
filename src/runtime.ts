@@ -40,6 +40,15 @@ import {
   shellInitScript,
   writeShellInitFile,
 } from './core/shell-init.ts'
+import {
+  applyTune,
+  planTuneApply,
+  type TuneApplyPlan,
+  type TuneChange,
+  type TuneUndoRecord,
+  tuneUndoInfo,
+  undoTune,
+} from './core/tuning-apply.ts'
 import { packageVersion } from './core/version.ts'
 import { BUILTIN_PLUGINS } from './families/index.ts'
 import { HookBus } from './plugins/bus.ts'
@@ -232,6 +241,14 @@ export interface Runtime {
   usage(account: Account): Promise<UsageResult>
   /** Estimated Compaction Threshold per model for one Account (spec §3.18); read-only. */
   tuning(account: Account): Promise<TuningResult>
+  /** What using a suggested size would change in the Account's settings; writes nothing (spec §3.18, ADR-0012). */
+  tuneApplyPlan(account: Account, value: number | null): Promise<TuneApplyPlan>
+  /** Writes the size into the Account's settings (one key; null goes back to the default), and remembers how to undo it. */
+  tuneApply(account: Account, value: number | null): Promise<TuneChange>
+  /** Puts the setting back as it was, only while it still holds what sideby wrote. */
+  tuneUndo(account: Account): Promise<{ ok: boolean; message: string }>
+  /** What could be undone for the Account, or null. */
+  tuneUndoInfo(account: Account): Promise<TuneUndoRecord | null>
   /**
    * Which Account of a Family to move on to (spec §3.13). Throws a UserError with code `no-quota-source`
    * when the Family cannot tell, `no-accounts` when it has none.
@@ -351,6 +368,14 @@ export async function createRuntime(
     }
   }
 
+  // Only Claude Code has a suggestion to use; Codex only observes (spec §3.18).
+  const onlyClaude = (account: Account): void => {
+    if (account.family !== 'claude')
+      throw new UserError(
+        `${account.ref} has no suggested size to use yet: only Claude Code accounts do. Run \`sideby tune ${account.ref}\` to see what is observed`,
+        { code: 'no-suggestion' },
+      )
+  }
   const readContext = (): ReadContext => ({
     home: paths.home,
     now: now(),
@@ -693,6 +718,21 @@ export async function createRuntime(
       } finally {
         memos.saveSoon()
       }
+    },
+    async tuneApplyPlan(account, value) {
+      onlyClaude(account)
+      return planTuneApply(account, value, await accounts())
+    },
+    async tuneApply(account, value) {
+      onlyClaude(account)
+      return applyTune(account, value, await accounts(), readContext())
+    },
+    async tuneUndo(account) {
+      onlyClaude(account)
+      return undoTune(account, readContext())
+    },
+    async tuneUndoInfo(account) {
+      return account.family === 'claude' ? tuneUndoInfo(account, readContext()) : null
     },
     async tuning(account) {
       const f = familyOf(account.family)

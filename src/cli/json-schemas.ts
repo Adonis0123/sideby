@@ -247,6 +247,28 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     },
     { title: 'sideby doctor --json' },
   ),
+  'tune-change': Type.Object(
+    {
+      schemaVersion: Version,
+      account: Str,
+      action: Type.Union([Type.Literal('apply'), Type.Literal('undo')]),
+      applied: Type.Boolean({ description: 'True once the change was written (or undone).' }),
+      plan: Type.Optional(
+        Type.Object({
+          status: Type.Union([Type.Literal('ready'), Type.Literal('unchanged'), Type.Literal('blocked')]),
+          file: Str,
+          link: Type.Boolean(),
+          affected: Type.Array(Str),
+          current: Type.Union([Type.Number(), Type.Null()]),
+          next: Type.Union([Type.Number(), Type.Null()]),
+          creates: Type.Boolean(),
+          reason: Type.Optional(Str),
+        }),
+      ),
+      message: Type.Optional(Str),
+    },
+    { title: 'sideby tune apply|undo --json' },
+  ),
   tune: Type.Object(
     {
       schemaVersion: Version,

@@ -70,7 +70,7 @@ agent 会检查 Node 和宿主 CLI，装好 sideby 和 skill，建账号，告�
 | 加一个 API key 账号（DeepSeek、网关等） | `sideby new claude deepseek --api` | [API 账号](docs/guide/usage.zh-CN.md#api-账号) |
 | 找出并修复账号之间的配置漂移 | `sideby doctor --fix` | [体检](docs/guide/usage.zh-CN.md#体检doctor) |
 | 看 Claude 额度（Codex 不用设置） | `sideby quota setup claude --yes` | [Claude 额度](docs/guide/usage.zh-CN.md#claude-额度) |
-| 用你自己的会话估算最省的自动压缩阈值（只读） | `sideby tune` | [上下文调优](docs/guide/usage.zh-CN.md#上下文调优) |
+| 用你自己的会话找出最省的自动压缩大小，一键使用 | `sideby tune`（或面板的「上下文调优」页签） | [上下文调优](docs/guide/usage.zh-CN.md#上下文调优) |
 | 账号撞上限额时换一个接着用 | `sideby next claude` | [接力](docs/guide/usage.zh-CN.md#账号撞上限额时) |
 | 额度快用完时，让正在跑的任务自己交给下一个账号（默认关闭，注意风险） | `sideby handoff enable`（或在面板里开启） | [自动交接](docs/guide/usage.zh-CN.md#自动交接auto-handoff) |
 | 用 `ccw` 这样的短命令 | `sideby alias add ccw claude:work` | [Shell 函数](docs/guide/configuration.zh-CN.md#shell-函数) |

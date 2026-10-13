@@ -2,7 +2,7 @@
 
 Date: 2026-10-13 · Status: proposed (accepted once the checks in spec §3.18 and acceptance item 16 pass)
 
-Extends ADR-0003 (local sources only). Amends the Credentials and Host directories wording in AGENTS.md: besides Doctor's `json-key` read, sideby may read one named key of a Host's config file for this feature.
+Extends ADR-0003 (local sources only). Its "only reads" part is amended by ADR-0012, which lets the user apply a suggestion. Amends the Credentials and Host directories wording in AGENTS.md: besides Doctor's `json-key` read, sideby may read one named key of a Host's config file for this feature.
 
 ## Context
 

@@ -158,7 +158,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   alias: { flags: ['json'] },
   doctor: { flags: ['fix', 'force', 'json'] },
   quota: { flags: ['json', 'yes'] },
-  tune: { flags: ['json'] },
+  tune: { flags: ['json', 'yes'] },
   handoff: {
     flags: ['json', 'yes', 'same-family', 'no-same-family'],
     valued: ['brief', 'order', 'prepare-at', 'threshold', 'wait-minutes', 'countdown'],
