@@ -85,7 +85,7 @@ function render(obj: Json, original: string): string {
 
 async function readObject(file: string): Promise<{ text: string; obj: Json } | { error: string }> {
   const st = await stat(file).catch(() => null)
-  if (!st || !st.isFile()) return { error: 'it is not a regular file' }
+  if (!st?.isFile()) return { error: 'it is not a regular file' }
   if (st.size > MAX_BYTES) return { error: 'it is too large to be a settings file' }
   const text = await readFile(file, 'utf8')
   let parsed: unknown

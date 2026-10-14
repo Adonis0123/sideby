@@ -294,7 +294,7 @@ export function suggestName(names: string[]): string {
     }
   }
   if (!taken.work) return 'work'
-  for (let i = 2; ; i++) if (!taken['work' + i]) return 'work' + i
+  for (let i = 2; ; i++) if (!taken[`work${i}`]) return `work${i}`
 }
 
 /**
