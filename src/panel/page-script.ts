@@ -919,7 +919,7 @@ const MAIN = String.raw`
     if (!id || (!id.email && !id.org)) return null
     const email = id.email ? emailText(id.email) : ''
     return h('div', { class: 'ident-email', title: [email, id.org].filter(Boolean).join(' · ') },
-      dots([email ? h('span', { class: 'email' }, email) : null, id.org ? h('span', { class: 'org' }, id.org) : null]))
+      dots([email ? h('button', { class: 'email email-btn', type: 'button', title: t('menu.copyEmail'), 'aria-label': t('menu.copyEmail') + ' ' + email, onclick: (e) => { e.stopPropagation(); copyText(id.email) } }, email) : null, id.org ? h('span', { class: 'org' }, id.org) : null]))
   }
   function subLine(a) {
     const plan = a.quota && a.quota.status === 'ok' && a.quota.plan

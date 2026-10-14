@@ -168,6 +168,9 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .ident-name { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; row-gap: 3px; }
 .ident-name .name { font-weight: var(--strong-weight); font-size: var(--font-size); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .ident-email { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.email-btn { all: unset; cursor: pointer; border-radius: 4px; }
+.email-btn:hover { color: var(--text); text-decoration: underline dotted; }
+.email-btn:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
 .ident-email + .ident-sub { color: var(--faint); margin-top: 0; }
 .tools .tb-icon { width: var(--ctl-h); height: var(--ctl-h); border-color: var(--border-strong); background: var(--surface); }
 .tools .tb-icon:hover { background: var(--hover); }
