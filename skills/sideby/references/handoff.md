@@ -39,7 +39,7 @@ Use this when the user says an account hit its 5-hour or weekly limit ("usage li
 
 With config `"handoff": { "auto": true }`, a session sideby started hands its task to the next account when quota runs low; see the guide's Auto Handoff section for the settings. If you are in such a session (the environment has `SIDEBY_HANDOFF_RUN`):
 
-- When sideby tells you the quota is at 80%, write the handoff brief at the path it names and keep it current: the goal, what is done, the remaining steps, key decisions and why, the files that matter. Reference specs, ADRs, commits and diffs by path; list the skills the next agent should use; never include keys, passwords or personal data.
+- When sideby tells you the quota is at 80%, write the handoff brief at the path it names and keep it current (do not tell the user that another account will take over; sideby decides that and says so itself): the goal, what is done, the remaining steps, key decisions and why, the files that matter. Reference specs, ADRs, commits and diffs by path; list the skills the next agent should use; never include keys, passwords or personal data.
 - When it says the quota is at 95%, finish the current step, update the brief, and end your turn. sideby starts the next account from it.
 - When the user asks to hand over now, update the brief, run `sideby handoff ready` (add `--brief <file>` when the user's own handoff tool wrote one), and end your turn.
 
@@ -51,7 +51,7 @@ With config `"handoff": { "auto": true }`, a session sideby started hands its ta
 4. Work through `nextSteps` in order. `sideby quota setup claude` and `sideby handoff setup grok` also exit 10 first: ask before adding `--yes`. `npm i -g sideby` installs or upgrades sideby on PATH; ask first. Codex needs the user to trust sideby's hooks once per account (`/hooks` in Codex); you cannot do that for them.
 5. Run `sideby handoff status --json` again and report which families are `ready`.
 
-To turn it off: `sideby handoff disable --json`, then `--yes` after the user agrees; the other settings stay. The panel has the same settings under **Auto Handoff** in its top bar.
+To turn it off: `sideby handoff disable --json`, then `--yes` after the user agrees; the other settings stay. The panel's **Auto Handoff** page does all of this in one click (turn on, with one confirmation; turn off) and shows where each account's work goes next; for a user who is not in a terminal, point them there instead of walking through the commands.
 
 ## Picking an account for a subtask
 

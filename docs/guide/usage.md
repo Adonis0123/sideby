@@ -157,7 +157,7 @@ sideby recommends; you start the account. It never switches or rotates by itself
 
 ## Auto Handoff
 
-Off by default. Turn it on with `sideby handoff enable` (it shows the config change first; add `--yes`), or with **Auto Handoff** in the panel's top bar. `sideby handoff status` lists, family by family, what is still missing and the command for each. When it is off and an account passes the threshold, sideby says so once a day after the session ends, and the panel shows a hint with **Set up**.
+Off by default. The easiest way to turn it on is the panel's **Auto Handoff** page: press **Turn on**, read the list of what sideby will change (its settings, the Claude quota display, the Grok hook), and confirm once. The page then shows where each account's work goes next and the recent hand-overs, and finishes any step that is still missing. Accounts of the same tool only switch between each other if you tick that box (the risk is explained there). From a terminal, use `sideby handoff enable` (it shows the config change first; add `--yes`); `sideby handoff status` lists, family by family, what is still missing and the command for each. When it is off and an account passes the threshold, sideby says so once a day after the session ends, and the panel shows a hint with **Set up**.
 
 With it on, a session that sideby started (`sideby run`, a short command or `sideby next`) hands its task to the next account when its quota runs low: the old session writes a handoff brief, sideby ends it, and the next account starts a new session from that brief in the same terminal.
 

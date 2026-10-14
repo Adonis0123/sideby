@@ -1,8 +1,9 @@
 // Panel: spec §5 items 9 and 10 (security rules, per-card errors) and both mounting modes.
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { chmod, readFile, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { asBuiltin, demoFamily, demoPlugin, seedDemoMain } from '../../testing/demo.ts'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
@@ -823,6 +824,68 @@ describe('panel build identity', () => {
 })
 
 describe('Auto Handoff in the Panel (spec §3.17)', () => {
+  it('turns on in one step: plan first, writes on confirm, refuses in a read-only Panel, overview lists no Brief', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}\n')
+      await h.write('.claude-001/projects/.keep', '')
+      await writeFile(join(h.bin, 'sideby'), '#!/bin/sh\necho ok\n')
+      await chmod(join(h.bin, 'sideby'), 0o755)
+      const { claudePlugin } = await import('../families/claude/index.ts')
+      const runtime = () => createRuntime({ env: h.env, builtins: [asBuiltin(claudePlugin)] })
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      try {
+        const hdr = {
+          host: `127.0.0.1:${port}`,
+          origin: `http://127.0.0.1:${port}`,
+          'x-sideby-token': handler.token,
+        }
+        const plan = (await post(port, '/api/handoff/enable', {}, hdr)).body as {
+          alreadyOn: boolean
+          steps: { id: string; file?: string }[]
+        }
+        assert.equal(plan.alreadyOn, false)
+        assert.deepEqual(
+          plan.steps.map((s) => s.id),
+          ['config', 'quota'],
+        )
+        assert.match(plan.steps[0]!.file!, /^~\//)
+        await assert.rejects(readFile(h.path('.config/sideby/config.json'), 'utf8'))
+        const done = (await post(port, '/api/handoff/enable', { confirm: true }, hdr)).body as {
+          results: { ok: boolean }[]
+        }
+        assert.ok(done.results.length === 2 && done.results.every((r) => r.ok))
+        const written = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8'))
+        assert.deepEqual(written.handoff, { auto: true })
+        const overview = (await post(port, '/api/handoff/overview', {}, hdr)).body as {
+          settings: { auto: boolean }
+          recent: unknown[]
+        }
+        assert.equal(overview.settings.auto, true)
+        assert.deepEqual(overview.recent, [])
+        assert.equal((await post(port, '/api/handoff/enable', { sameFamily: 'yes' }, hdr)).status, 400)
+      } finally {
+        await close(server)
+      }
+      const ro = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`], readOnly: true }),
+      )
+      try {
+        const hdr = {
+          host: `127.0.0.1:${ro.port}`,
+          origin: `http://127.0.0.1:${ro.port}`,
+          'x-sideby-token': ro.handler.token,
+        }
+        assert.equal((await post(ro.port, '/api/handoff/overview', {}, hdr)).status, 200)
+        assert.equal((await post(ro.port, '/api/handoff/enable', {}, hdr)).status, 200)
+        assert.equal((await post(ro.port, '/api/handoff/enable', { confirm: true }, hdr)).status, 403)
+      } finally {
+        await close(ro.server)
+      }
+    })
+  })
+
   it('sends the settings with the state, shows readiness, previews without writing and writes only on confirm', async () => {
     await withFakeHome(async (h) => {
       await h.write('.claude-001/projects/.keep', '')

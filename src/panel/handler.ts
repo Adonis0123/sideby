@@ -5,6 +5,8 @@ import { aliasesByAccount } from '../core/accounts.ts'
 import { aliasArgs, aliasRefs, type HandoffSettings } from '../core/config.ts'
 import { UserError } from '../core/errors.ts'
 import { planHandoff } from '../core/handoff.ts'
+import { applyHandoffEnable, type EnablePlan, planHandoffEnable } from '../core/handoff-enable.ts'
+import { handoffOverview } from '../core/handoff-overview.ts'
 import { configureHandoff, type HandoffChange, handoffStatus } from '../core/handoff-status.ts'
 import { tildify } from '../core/paths.ts'
 import { MIN_CALLS } from '../core/tuning.ts'
@@ -483,6 +485,29 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const rt = await getRuntime()
         const r = await configureHandoff(rt, change, { apply: optBool(body, 'confirm') })
         return { ...r, file: tildify(r.file, rt.paths.home) }
+      },
+    },
+    // The Auto Handoff page (spec §3.17): where work would go next and the last hand-overs. Reads only.
+    '/api/handoff/overview': {
+      writes: () => false,
+      async run() {
+        return handoffOverview(await getRuntime())
+      },
+    },
+    // Turning it on in one step (ADR-0013): without `confirm` only the plan; with it, every step in order.
+    '/api/handoff/enable': {
+      writes: (body) => body.confirm === true,
+      async run(body) {
+        const sameFamily = optBool(body, 'sameFamily')
+        const rt = await getRuntime()
+        const home = rt.paths.home
+        const show = (p: EnablePlan): EnablePlan => ({
+          ...p,
+          steps: p.steps.map((s) => (s.file ? { ...s, file: tildify(s.file, home) } : s)),
+        })
+        if (!optBool(body, 'confirm')) return show(await planHandoffEnable(rt, { sameFamily }))
+        const r = await applyHandoffEnable(rt, { sameFamily })
+        return { ...r, plan: show(r.plan) }
       },
     },
     // Undo for the setup above; the Runtime turns a teardown that throws into `{ ok: false, message }`.

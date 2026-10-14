@@ -1274,7 +1274,8 @@ const MAIN = String.raw`
   // What each card's size menu shows while the user is choosing, by group id; dropped once a change is made.
   const tuneSel = {}
   const tp = { data: null, loading: false, error: null, at: 0 }
-  let curPage = location.hash === '#tuning' ? 'tuning' : 'accounts'
+  function pageFromHash() { return location.hash === '#tuning' ? 'tuning' : location.hash === '#handoff' ? 'handoff' : 'accounts' }
+  let curPage = pageFromHash()
   function tuneSize(n) { return n === null || n === undefined ? t('tune.hostDefault') : tokens(n) }
   function tuneRedraw() {
     if (dlg.kind === 'tune') renderTune()
@@ -1467,24 +1468,34 @@ const MAIN = String.raw`
   function tuningAvailable() { return Boolean(S.state && S.state.families.some((f) => f.tuning)) }
   function setPage(next) {
     curPage = next
-    try { history.replaceState(null, '', next === 'tuning' ? '#tuning' : location.pathname + location.search) } catch {}
+    try { history.replaceState(null, '', next === 'accounts' ? location.pathname + location.search : '#' + next) } catch {}
     renderPageChrome()
   }
   // The page tabs, and which sections show; runs with every render, so a reload or a language switch keeps them.
   function renderPageChrome() {
     const nav = $('pages')
-    const can = tuningAvailable()
-    if (!can && curPage === 'tuning' && S.state) curPage = 'accounts'
-    nav.hidden = !can
-    const tabs = [['accounts', t('page.accounts')], ['tuning', t('page.tuning')]]
+    const canTune = tuningAvailable()
+    const canHandoff = Boolean(ahState())
+    if (S.state && ((curPage === 'tuning' && !canTune) || (curPage === 'handoff' && !canHandoff))) curPage = 'accounts'
+    const tabs = [['accounts', t('page.accounts')]]
+    if (canTune) tabs.push(['tuning', t('page.tuning')])
+    if (canHandoff) tabs.push(['handoff', t('page.handoff')])
+    nav.hidden = tabs.length < 2
     setKids(nav, h('div', { class: 'seg', role: 'presentation' }, tabs.map(([id, label]) =>
       h('button', { class: 'seg-btn', type: 'button', role: 'tab', 'aria-selected': curPage === id ? 'true' : 'false', onclick: () => setPage(id) }, label))))
-    const on = can && curPage === 'tuning'
-    for (const id of ['summary', 'accounts-page', 'checkup']) $(id).hidden = on
-    $('tuning-page').hidden = !on
-    if (on) {
+    const away = curPage !== 'accounts' && tabs.some(([id]) => id === curPage)
+    for (const id of ['summary', 'accounts-page', 'checkup']) $(id).hidden = away
+    const onTune = away && curPage === 'tuning'
+    const onHandoff = away && curPage === 'handoff'
+    $('tuning-page').hidden = !onTune
+    $('handoff-page').hidden = !onHandoff
+    if (onTune) {
       if (!tp.data && !tp.loading && !tp.error) loadTuningPage()
       else renderTuningPage()
+    }
+    if (onHandoff) {
+      if (!hp.data && !hp.loading && !hp.error) loadHandoffPage()
+      else renderHandoffPage()
     }
   }
   async function loadTuningPage() {
@@ -1516,7 +1527,7 @@ const MAIN = String.raw`
     }
     setKids(box, kids)
   }
-  window.addEventListener('hashchange', () => { curPage = location.hash === '#tuning' ? 'tuning' : 'accounts'; renderPageChrome() })
+  window.addEventListener('hashchange', () => { curPage = pageFromHash(); renderPageChrome() })
 
   // New account. The form is built once per opening so typing keeps focus; only its derived parts re-render.
   let nf = null
@@ -1989,6 +2000,169 @@ const MAIN = String.raw`
     if (ah.loading) loadHandoffStatus()
   }
 
+  // ---------- the Auto Handoff page ----------
+  // Off: one sentence and one button. On: where each account's work would go next, the last hand-overs and what is
+  // still missing. Turning on is one plan shown first (hp.preview) and one confirmation; no commands to copy.
+  const hp = { data: null, plan: null, loading: false, error: null, preview: null, previewing: false, applying: false, failed: null, sameFamily: false, busyOff: false }
+  async function loadHandoffPage() {
+    hp.loading = true
+    hp.error = null
+    renderHandoffPage()
+    try {
+      // What is missing is only worth the check once it is on; while off the button shows the whole plan.
+      const [data, plan] = await Promise.all([api('/api/handoff/overview', {}), ahState().settings.auto ? api('/api/handoff/enable', {}) : Promise.resolve(null)])
+      hp.data = data
+      hp.plan = plan
+    } catch (e) { hp.error = e }
+    hp.loading = false
+    renderHandoffPage()
+  }
+  async function hpPreview() {
+    hp.previewing = true
+    hp.failed = null
+    renderHandoffPage()
+    try { hp.preview = await api('/api/handoff/enable', { sameFamily: hp.sameFamily }) } catch (e) { hp.failed = { error: e } }
+    hp.previewing = false
+    renderHandoffPage()
+  }
+  async function hpApply() {
+    hp.applying = true
+    hp.failed = null
+    renderHandoffPage()
+    try {
+      const r = await api('/api/handoff/enable', { sameFamily: hp.sameFamily, confirm: true })
+      const bad = r.results.find((x) => !x.ok)
+      if (bad) hp.failed = { step: bad, plan: r.plan }
+      else { hp.preview = null; toast(t('toast.ahOn')) }
+      await load({ silent: true })
+      await loadHandoffPage()
+    } catch (e) { hp.failed = { error: e } }
+    hp.applying = false
+    renderHandoffPage()
+  }
+  async function hpChange(change, message) {
+    hp.busyOff = true
+    renderHandoffPage()
+    try {
+      await api('/api/handoff/configure', { change, confirm: true })
+      toast(message)
+      await load({ silent: true })
+      await loadHandoffPage()
+    } catch (e) { hp.failed = { error: e } }
+    hp.busyOff = false
+    renderHandoffPage()
+  }
+  function hpStepTitle(step) {
+    const host = step.family ? family(step.family).title : ''
+    return t('hp.step.' + step.id, { host })
+  }
+  function hpSteps(plan) {
+    return h('ul', { class: 'hp-steps' }, plan.steps.map((step) => h('li', null, h('div', null,
+      h('div', null, hpStepTitle(step)),
+      step.diff ? h('details', { class: 'small' }, h('summary', null, t('hp.showChange')), h('p', { class: 'muted small' }, tx('ah.changes', { file: h('code', null, step.file) })), diffView(step.diff)) : null))))
+  }
+  function hpManual(plan) {
+    return plan.manual.map((m) => h('p', { class: 'note' }, m.id === 'codex-trust' ? t('hp.manual.codexTrust') : (family(m.family).title + ': ' + (m.message || ''))))
+  }
+  function hpPreviewCard() {
+    const p = hp.preview
+    const kids = [h('h3', { class: 'small' }, t('hp.willDo'))]
+    if (p.blocked) kids.push(h('p', { class: 'note note-fail' }, t('hp.blocked', { why: p.blocked })), codeCopy('npm i -g sideby'))
+    else {
+      kids.push(hpSteps(p), ...hpManual(p))
+      kids.push(hp.sameFamily ? h('p', { class: 'note note-warn' }, t('ah.sameFamilyWarn')) : h('p', { class: 'muted small' }, t('hp.sameFamilyOffNote')))
+    }
+    const foot = [h('button', { class: 'btn', type: 'button', disabled: hp.applying, onclick: () => { hp.preview = null; hp.failed = null; renderHandoffPage() } }, t('btn.cancel'))]
+    if (!p.blocked) foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: hp.applying, 'aria-busy': hp.applying ? 'true' : null, onclick: hpApply }, hp.applying ? spinner() : null, hp.applying ? t('hp.applying') : t('hp.confirmOn')))
+    kids.push(h('div', { class: 'row-actions' }, foot))
+    return h('div', { class: 'ah-fam' }, kids)
+  }
+  function hpFailed() {
+    const f = hp.failed
+    if (!f) return null
+    if (f.error) return errorNote(f.error, null)
+    return h('p', { class: 'note note-fail', role: 'alert' }, t('hp.stepFailed', { step: hpStepTitle(f.step), why: f.step.message || '' }) + ' ' + t('hp.tryAgain'))
+  }
+  function hpDecision(d) {
+    const thr = ahState().settings.threshold
+    if (d.kind === 'pick') return t('hp.goesTo', { to: accountLabel(d.ref), p: thr })
+    if (d.kind === 'wait') return t('hp.waits', { at: clock(d.until) })
+    return d.earliestReset ? t('hp.noneBack', { ref: accountLabel(d.earliestReset.ref), at: clock(d.earliestReset.at) }) : t('hp.none')
+  }
+  function hpRows(d) {
+    if (!d.takeover.length) return h('p', { class: 'muted small' }, t('hp.noAccounts'))
+    return h('ul', { class: 'hp-rows' }, d.takeover.map((r) => {
+      const a = S.state.accounts.find((x) => x.ref === r.ref)
+      const p = a ? quotaPressure(a, Date.now()) : -1
+      return h('li', null,
+        h('span', { class: 'title-logo' }, badge(r.family, 'sm'), h('b', { class: 'mono' }, accountLabel(r.ref))),
+        h('span', { class: 'muted' }, p >= 0 ? t('hp.used', { p: Math.round(p) }) : t('hp.noQuota')),
+        h('span', null, hpDecision(r.decision)))
+    }))
+  }
+  function hpRecent(d) {
+    if (!d.recent.length) return h('p', { class: 'muted small' }, t('hp.noneYet'))
+    return h('ul', { class: 'hp-rows' }, d.recent.map((r) => h('li', null,
+      h('span', { class: 'mono' }, accountLabel(r.from) + ' → ' + accountLabel(r.to)),
+      h('span', { class: 'muted' }, clock(r.at) + ' · ' + ago(r.at)),
+      h('span', { class: 'muted' }, r.trigger ? t('hp.why.' + r.trigger) : ''))))
+  }
+  function hpSameFamilyBox(checked, onchange) {
+    const input = h('input', { type: 'checkbox', disabled: BOOT.readOnly || hp.busyOff || hp.applying })
+    input.checked = checked
+    input.addEventListener('change', () => onchange(input.checked))
+    return h('div', { class: 'check-row' }, h('label', { class: 'check' }, input, h('span', null, h('b', null, t('hp.sameFamily')), h('span', { class: 'muted small' }, t('ah.sameFamilyWarn')))))
+  }
+  function renderHandoffPage() {
+    const box = $('handoff-page')
+    if (box.hidden || !S.state) return
+    const st = ahState()
+    if (!st) return
+    const kids = [h('div', { class: 'section-head' },
+      h('h2', { id: 'h-handoff' }, t('hp.title')),
+      h('div', { class: 'row-actions' },
+        h('button', { class: 'btn btn-sm', type: 'button', onclick: openHandoff }, t('hp.advanced')),
+        h('button', { class: 'btn btn-sm', type: 'button', disabled: hp.loading, onclick: loadHandoffPage }, hp.loading ? spinner() : icon('refresh'), t('top.refresh'))))]
+    const on = st.settings.auto
+    if (hp.loading && !hp.data) kids.push(h('p', { class: 'muted' }, spinner(), ' ', t('hp.loading')))
+    if (hp.error) kids.push(errorNote(hp.error, loadHandoffPage))
+    if (BOOT.readOnly) kids.push(h('p', { class: 'note' }, t('banner.readOnly')))
+    if (!on) {
+      kids.push(h('p', null, t('hp.intro')))
+      kids.push(h('ol', { class: 'hp-how' }, h('li', null, t('hp.how1')), h('li', null, t('hp.how2', { p: st.settings.threshold })), h('li', null, t('hp.how3', { s: st.settings.countdownSeconds }))))
+      if (!st.starters.length) kids.push(h('p', { class: 'note' }, t('hp.noStarters')))
+      else {
+        if (!hp.preview) {
+          kids.push(hpSameFamilyBox(hp.sameFamily, (v) => { hp.sameFamily = v }))
+          kids.push(h('div', { class: 'row-actions' }, h('button', { class: 'btn btn-primary', type: 'button', disabled: BOOT.readOnly || hp.previewing, 'aria-busy': hp.previewing ? 'true' : null, onclick: hpPreview }, hp.previewing ? spinner() : null, t('hp.turnOn'))))
+        } else kids.push(hpPreviewCard())
+      }
+    } else {
+      kids.push(h('p', null, h('span', { class: 'chip chip-ok' }, t('ah.on')), ' ', t('hp.onNote', { p: st.settings.threshold })))
+      const d = hp.data
+      if (d) {
+        kids.push(h('h3', { class: 'small' }, t('hp.takeover')), hpRows(d))
+        kids.push(h('h3', { class: 'small' }, t('hp.recent')), hpRecent(d))
+      }
+      const plan = hp.plan
+      if (plan && (plan.blocked || plan.steps.length)) {
+        kids.push(h('h3', { class: 'small' }, t('hp.missing')))
+        if (!hp.preview) {
+          if (plan.blocked) kids.push(h('p', { class: 'note note-fail' }, t('hp.blocked', { why: plan.blocked })), codeCopy('npm i -g sideby'))
+          else {
+            kids.push(hpSteps(plan))
+            kids.push(h('div', { class: 'row-actions' }, h('button', { class: 'btn btn-primary', type: 'button', disabled: BOOT.readOnly || hp.previewing, onclick: hpPreview }, hp.previewing ? spinner() : null, t('hp.complete'))))
+          }
+        } else kids.push(hpPreviewCard())
+      } else if (plan) kids.push(...hpManual(plan))
+      kids.push(h('p', { class: 'muted small' }, t('hp.onlySideby')))
+      kids.push(hpSameFamilyBox(st.settings.sameFamily, (v) => hpChange({ sameFamily: v }, v ? t('hp.sameOn') : t('hp.sameOff'))))
+      kids.push(h('div', { class: 'row-actions' }, h('button', { class: 'btn', type: 'button', disabled: BOOT.readOnly || hp.busyOff, onclick: () => hpChange({ auto: false }, t('toast.ahOff')) }, hp.busyOff ? spinner() : null, t('hp.turnOff'))))
+    }
+    kids.push(hpFailed())
+    setKids(box, kids)
+  }
+
   // ---------- banners ----------
   function renderBanners() {
     const out = []
@@ -2001,7 +2175,7 @@ const MAIN = String.raw`
       if (hint) out.push(h('div', { class: 'banner', role: 'status' },
         h('div', null, t('ah.hint', { ref: hint.ref, p: hint.pressure })),
         h('div', { class: 'banner-actions' },
-          h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: openHandoff }, t('ah.setUp')),
+          h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => setPage('handoff') }, t('ah.setUp')),
           h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { prefs.ahHintAt = Date.now(); savePrefs(); renderBanners() } }, t('ah.dismiss')))))
       const errs = S.state.pluginErrors
       if (errs.length) out.push(h('div', { class: 'banner banner-warn', role: 'status' }, h('div', null,
@@ -2086,7 +2260,7 @@ const MAIN = String.raw`
   // ---------- start ----------
   $('ver').textContent = BOOT.version ? 'v' + BOOT.version : ''
   $('refresh').addEventListener('click', () => load({ check: true, announce: true }))
-  $('handoff').addEventListener('click', openHandoff)
+  $('handoff').addEventListener('click', () => setPage('handoff'))
   $('lang').addEventListener('click', () => {
     if (LANG_FIXED) return
     lang = lang === 'zh' ? 'en' : 'zh'

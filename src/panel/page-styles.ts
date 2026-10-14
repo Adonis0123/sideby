@@ -339,6 +339,15 @@ a.btn:hover { text-decoration: none; }
 .banner-warn { background: var(--warn-soft); border-color: transparent; color: var(--warn); }
 .banner ul { margin: 6px 0 0; padding-left: 18px; }
 .banner-actions { display: flex; gap: 8px; flex: none; }
+.hp-how { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.hp-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.hp-steps li { display: flex; gap: 8px; }
+.hp-steps li::before { content: '•'; color: var(--muted); }
+.hp-steps li > div { flex: 1; min-width: 0; }
+.hp-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.hp-rows li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.hp-rows li:last-child { border-bottom: 0; }
+#handoff-page > * + * { margin-top: 12px; }
 .ah-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end; }
 .tune-model { border: 1px solid var(--border); border-radius: calc(var(--radius) - 4px); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 .tune-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }

@@ -13,7 +13,7 @@ const RULES =
   'Reference specs, ADRs, commits and diffs by path instead of repeating them, list the skills the next agent should use, and never include keys, passwords or personal data.'
 
 export function prepareMessage(brief: string, pressure: number): string {
-  return `sideby: this account's quota is at ${Math.round(pressure)}%, so another account may take over soon. Write a handoff brief to ${brief} now (${TEMPLATE}). ${RULES} Keep it current after each step, then go on with the task.`
+  return `sideby: this account's quota is at ${Math.round(pressure)}%. Write a handoff brief to ${brief} now (${TEMPLATE}). ${RULES} Keep it current after each step, then go on with the task. Do not tell the user that another account will take over: sideby decides that and tells them itself.`
 }
 
 export function thresholdMessage(brief: string, pressure: number): string {
