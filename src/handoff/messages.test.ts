@@ -8,8 +8,8 @@ describe('hook messages', () => {
     const m = prepareMessage('/x/1-claude-001.md', 81.6)
     assert.match(m, /quota is at 82%/)
     assert.match(m, /Write a handoff brief to \/x\/1-claude-001\.md/)
-    assert.match(m, /Do not tell the user that another account will take over/)
-    assert.doesNotMatch(m, /may take over soon/)
+    assert.match(m, /Do not tell the user that the work will move to another account/)
+    assert.doesNotMatch(m, /take over/)
   })
 
   it('the threshold message still says sideby starts the next account', () => {

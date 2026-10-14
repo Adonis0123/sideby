@@ -279,7 +279,8 @@ const en = {
   'hp.step.config': 'Switch Auto Handoff on in sideby’s settings',
   'hp.step.quota': 'Turn on {host} quota display (hand-over needs it to know how much is used)',
   'hp.step.hook': 'Add sideby’s hand-over hook to {host}',
-  'hp.step.copy': 'Copy the hook to your other {host} accounts',
+  'hp.step.copy':
+    'Copy the hook file into your other {host} accounts ({accounts}); nothing else in them changes',
   'hp.showChange': 'Show the change',
   'hp.sameFamilyOffNote':
     'Accounts of the same tool will not switch between each other. You can turn that on later on this page.',
@@ -308,6 +309,7 @@ const en = {
   'hp.complete': 'Finish setting up',
   'hp.onlySideby':
     'Only sessions started with sideby hand over (a short command such as cc001, or sideby run). Typing claude directly does not.',
+  'hp.sameConfirm': 'Switch it on',
   'hp.sameOn': 'Same-tool hand-over is on.',
   'hp.sameOff': 'Same-tool hand-over is off.',
   'page.accounts': 'Accounts',
@@ -741,7 +743,7 @@ const zh: Record<MessageKey, string> = {
   'hp.step.config': '在 sideby 的设置里打开自动交接',
   'hp.step.quota': '打开 {host} 的额度显示（交接要靠它知道用了多少）',
   'hp.step.hook': '给 {host} 装上 sideby 的交接钩子',
-  'hp.step.copy': '把钩子同步给你的其他 {host} 账号',
+  'hp.step.copy': '把钩子文件复制到你的其他 {host} 账号（{accounts}），它们的其他文件不动',
   'hp.showChange': '查看改动',
   'hp.sameFamilyOffNote': '同一个工具的账号之间不会互相切换，之后可以在本页打开。',
   'hp.manual.codexTrust':
@@ -769,6 +771,7 @@ const zh: Record<MessageKey, string> = {
   'hp.complete': '补全设置',
   'hp.onlySideby':
     '只有用 sideby 启动的会话才会交接（短命令如 cc001，或 sideby run）。直接敲 claude 启动的不会。',
+  'hp.sameConfirm': '确认打开',
   'hp.sameOn': '已开启同工具交接。',
   'hp.sameOff': '已关闭同工具交接。',
   'page.accounts': '账号',

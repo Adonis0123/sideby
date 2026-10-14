@@ -2003,7 +2003,7 @@ const MAIN = String.raw`
   // ---------- the Auto Handoff page ----------
   // Off: one sentence and one button. On: where each account's work would go next, the last hand-overs and what is
   // still missing. Turning on is one plan shown first (hp.preview) and one confirmation; no commands to copy.
-  const hp = { data: null, plan: null, loading: false, error: null, preview: null, previewing: false, applying: false, failed: null, sameFamily: false, busyOff: false }
+  const hp = { data: null, plan: null, loading: false, error: null, preview: null, previewing: false, applying: false, failed: null, sameFamily: false, busyOff: false, askSame: false }
   async function loadHandoffPage() {
     hp.loading = true
     hp.error = null
@@ -2017,11 +2017,13 @@ const MAIN = String.raw`
     hp.loading = false
     renderHandoffPage()
   }
+  // Off, the box on this page decides; on, "finish setting up" keeps whatever is set.
+  function hpBody() { return ahState().settings.auto ? {} : { sameFamily: hp.sameFamily } }
   async function hpPreview() {
     hp.previewing = true
     hp.failed = null
     renderHandoffPage()
-    try { hp.preview = await api('/api/handoff/enable', { sameFamily: hp.sameFamily }) } catch (e) { hp.failed = { error: e } }
+    try { hp.preview = await api('/api/handoff/enable', hpBody()) } catch (e) { hp.failed = { error: e } }
     hp.previewing = false
     renderHandoffPage()
   }
@@ -2030,9 +2032,10 @@ const MAIN = String.raw`
     hp.failed = null
     renderHandoffPage()
     try {
-      const r = await api('/api/handoff/enable', { sameFamily: hp.sameFamily, confirm: true })
+      const r = await api('/api/handoff/enable', Object.assign(hpBody(), { confirm: true }))
       const bad = r.results.find((x) => !x.ok)
-      if (bad) hp.failed = { step: bad, plan: r.plan }
+      if (r.plan.blocked) hp.preview = r.plan
+      else if (bad) hp.failed = { step: bad, plan: r.plan }
       else { hp.preview = null; toast(t('toast.ahOn')) }
       await load({ silent: true })
       await loadHandoffPage()
@@ -2054,7 +2057,7 @@ const MAIN = String.raw`
   }
   function hpStepTitle(step) {
     const host = step.family ? family(step.family).title : ''
-    return t('hp.step.' + step.id, { host })
+    return t('hp.step.' + step.id, { host, accounts: (step.accounts || []).join(', ') })
   }
   function hpSteps(plan) {
     return h('ul', { class: 'hp-steps' }, plan.steps.map((step) => h('li', null, h('div', null,
@@ -2070,7 +2073,7 @@ const MAIN = String.raw`
     if (p.blocked) kids.push(h('p', { class: 'note note-fail' }, t('hp.blocked', { why: p.blocked })), codeCopy('npm i -g sideby'))
     else {
       kids.push(hpSteps(p), ...hpManual(p))
-      kids.push(hp.sameFamily ? h('p', { class: 'note note-warn' }, t('ah.sameFamilyWarn')) : h('p', { class: 'muted small' }, t('hp.sameFamilyOffNote')))
+      kids.push(p.sameFamily ? h('p', { class: 'note note-warn' }, t('ah.sameFamilyWarn')) : h('p', { class: 'muted small' }, t('hp.sameFamilyOffNote')))
     }
     const foot = [h('button', { class: 'btn', type: 'button', disabled: hp.applying, onclick: () => { hp.preview = null; hp.failed = null; renderHandoffPage() } }, t('btn.cancel'))]
     if (!p.blocked) foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: hp.applying, 'aria-busy': hp.applying ? 'true' : null, onclick: hpApply }, hp.applying ? spinner() : null, hp.applying ? t('hp.applying') : t('hp.confirmOn')))
@@ -2130,7 +2133,7 @@ const MAIN = String.raw`
     if (!on) {
       kids.push(h('p', null, t('hp.intro')))
       kids.push(h('ol', { class: 'hp-how' }, h('li', null, t('hp.how1')), h('li', null, t('hp.how2', { p: st.settings.threshold })), h('li', null, t('hp.how3', { s: st.settings.countdownSeconds }))))
-      if (!st.starters.length) kids.push(h('p', { class: 'note' }, t('hp.noStarters')))
+      if (!S.state.accounts.some((a) => a.kind !== 'api' && st.starters.includes(a.family))) kids.push(h('p', { class: 'note' }, t('hp.noStarters')))
       else {
         if (!hp.preview) {
           kids.push(hpSameFamilyBox(hp.sameFamily, (v) => { hp.sameFamily = v }))
@@ -2156,7 +2159,14 @@ const MAIN = String.raw`
         } else kids.push(hpPreviewCard())
       } else if (plan) kids.push(...hpManual(plan))
       kids.push(h('p', { class: 'muted small' }, t('hp.onlySideby')))
-      kids.push(hpSameFamilyBox(st.settings.sameFamily, (v) => hpChange({ sameFamily: v }, v ? t('hp.sameOn') : t('hp.sameOff'))))
+      kids.push(hpSameFamilyBox(st.settings.sameFamily, (v) => {
+        if (v) { hp.askSame = true; renderHandoffPage() } else { hp.askSame = false; hpChange({ sameFamily: false }, t('hp.sameOff')) }
+      }))
+      if (hp.askSame && !st.settings.sameFamily) kids.push(h('div', { class: 'ah-fam' },
+        h('p', { class: 'note note-warn' }, t('ah.sameFamilyWarn')),
+        h('div', { class: 'row-actions' },
+          h('button', { class: 'btn', type: 'button', disabled: hp.busyOff, onclick: () => { hp.askSame = false; renderHandoffPage() } }, t('btn.cancel')),
+          h('button', { class: 'btn btn-primary', type: 'button', disabled: BOOT.readOnly || hp.busyOff, onclick: () => { hp.askSame = false; hpChange({ sameFamily: true }, t('hp.sameOn')) } }, t('hp.sameConfirm')))))
       kids.push(h('div', { class: 'row-actions' }, h('button', { class: 'btn', type: 'button', disabled: BOOT.readOnly || hp.busyOff, onclick: () => hpChange({ auto: false }, t('toast.ahOff')) }, hp.busyOff ? spinner() : null, t('hp.turnOff'))))
     }
     kids.push(hpFailed())

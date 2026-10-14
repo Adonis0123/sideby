@@ -1,13 +1,23 @@
 // Turning Auto Handoff on in one step and the overview the Auto Handoff page shows (spec §3.17 "页面与一键开启").
 import assert from 'node:assert/strict'
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
 import { claudePlugin } from '../families/claude/index.ts'
+import { codexPlugin } from '../families/codex/index.ts'
+import { grokHookFileText } from '../families/grok/handoff.ts'
+import { grokPlugin } from '../families/grok/index.ts'
 import { createRuntime } from '../runtime.ts'
 import { applyHandoffEnable, planHandoffEnable } from './handoff-enable.ts'
 import { readRecentHandoffs } from './handoff-overview.ts'
+
+const all = [claudePlugin, codexPlugin, grokPlugin].map((plugin) => ({
+  plugin,
+  version: '0.1.0',
+  description: '',
+  defaultEnabled: true,
+}))
 
 const builtins = [claudePlugin].map((plugin) => ({
   plugin,
@@ -80,6 +90,88 @@ describe('planHandoffEnable / applyHandoffEnable', () => {
       assert.deepEqual(r.plan.steps, [])
       assert.deepEqual(r.results, [])
       assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+    })
+  })
+})
+
+describe('same-family hand-over', () => {
+  it('keeps an earlier choice when the request says nothing, and sets it when it does', async () => {
+    await withFakeHome(async (h) => {
+      await setup(h)
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ handoff: { auto: false, sameFamily: true } }),
+      )
+      const rt2 = await createRuntime({ env: h.env, builtins })
+      assert.equal((await planHandoffEnable(rt2)).sameFamily, true)
+      assert.equal((await planHandoffEnable(rt2, { sameFamily: false })).sameFamily, false)
+      await applyHandoffEnable(rt2, { sameFamily: false })
+      const config = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8'))
+      assert.deepEqual(config.handoff, { auto: true, sameFamily: false })
+    })
+  })
+})
+
+describe('Grok and Codex steps', () => {
+  async function accounts(h: FakeHome) {
+    await h.write('.grok/auth.json', '{}', 0o600)
+    await h.write('.grok/hooks/pre.sh', '#!/bin/sh\n', 0o755)
+    await h.write('.grok-lab/auth.json', '{}', 0o600)
+    await h.write('.grok-lab/hooks/own.sh', '#!/bin/sh\necho own\n', 0o755)
+    await h.write('.codex/auth.json', '{}', 0o600)
+    await h.write('.codex/config.toml', 'model = "gpt"\n')
+    await writeFile(join(h.bin, 'sideby'), '#!/bin/sh\necho ok\n')
+    await chmod(join(h.bin, 'sideby'), 0o755)
+    return createRuntime({ env: h.env, builtins: all })
+  }
+
+  it('copies only the hook file into the other Grok accounts and names what Codex still needs', async () => {
+    await withFakeHome(async (h) => {
+      const rt = await accounts(h)
+      const plan = await planHandoffEnable(rt)
+      assert.deepEqual(
+        plan.steps.map((s) => s.id),
+        ['config', 'hook', 'copy'],
+      )
+      assert.deepEqual(plan.steps[2]!.accounts, ['grok:lab'])
+      assert.ok(plan.manual.some((m) => m.id === 'codex-trust'))
+      const before = await snapshot(h.home)
+      const r = await applyHandoffEnable(rt)
+      assert.ok(r.results.length === 3 && r.results.every((x) => x.ok))
+      assert.deepEqual(
+        diffSnapshots(before, await snapshot(h.home)).sort(),
+        [
+          '.config',
+          '.config/sideby',
+          '.config/sideby/config.json',
+          '.grok-lab/hooks/sideby-handoff.json',
+          '.grok/hooks/sideby-handoff.json',
+        ].sort(),
+      )
+      assert.equal(await readFile(h.path('.grok-lab/hooks/sideby-handoff.json'), 'utf8'), grokHookFileText())
+      assert.equal(await readFile(h.path('.grok-lab/hooks/own.sh'), 'utf8'), '#!/bin/sh\necho own\n')
+      assert.equal(
+        (await planHandoffEnable(await createRuntime({ env: h.env, builtins: all }))).alreadyOn,
+        true,
+      )
+    })
+  })
+
+  it('stops at the first step that fails and leaves the later ones undone', async () => {
+    await withFakeHome(async (h) => {
+      const rt = await accounts(h)
+      // `hooks` is a file in the lab account, so the copy cannot be made.
+      await rm(h.path('.grok-lab/hooks'), { recursive: true })
+      await h.write('.grok-lab/hooks', 'not a directory')
+      const r = await applyHandoffEnable(rt)
+      assert.deepEqual(
+        r.results.map((x) => [x.id, x.ok]),
+        [
+          ['hook', true],
+          ['copy', false],
+        ],
+      )
+      await assert.rejects(readFile(h.path('.config/sideby/config.json'), 'utf8'))
     })
   })
 })

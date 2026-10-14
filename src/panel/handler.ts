@@ -498,15 +498,17 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
     '/api/handoff/enable': {
       writes: (body) => body.confirm === true,
       async run(body) {
-        const sameFamily = optBool(body, 'sameFamily')
+        // Left out keeps the current setting; true or false sets it.
+        const sameFamily = body.sameFamily === undefined ? undefined : optBool(body, 'sameFamily')
         const rt = await getRuntime()
         const home = rt.paths.home
         const show = (p: EnablePlan): EnablePlan => ({
           ...p,
           steps: p.steps.map((s) => (s.file ? { ...s, file: tildify(s.file, home) } : s)),
         })
-        if (!optBool(body, 'confirm')) return show(await planHandoffEnable(rt, { sameFamily }))
-        const r = await applyHandoffEnable(rt, { sameFamily })
+        const opts = sameFamily === undefined ? {} : { sameFamily }
+        if (!optBool(body, 'confirm')) return show(await planHandoffEnable(rt, opts))
+        const r = await applyHandoffEnable(rt, opts)
         return { ...r, plan: show(r.plan) }
       },
     },
