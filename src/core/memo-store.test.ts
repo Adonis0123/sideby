@@ -66,7 +66,9 @@ describe('memoStore', () => {
       await fill(1)
       store.saveSoon()
       store.saveSoon()
-      await new Promise((r) => setTimeout(r, 40))
+      // The write happens 5 ms later, or later still on a busy machine: wait for the file instead of a fixed time.
+      for (let i = 0; i < 200 && !(await stat(memoCachePath(dir)).catch(() => null)); i++)
+        await new Promise((r) => setTimeout(r, 10))
       assert.deepEqual(JSON.parse(await readFile(memoCachePath(dir), 'utf8')).memos['memo-store-test'].data, {
         acct: { '/log': ['1:1000:1000:7', { n: 1 }] },
       })
