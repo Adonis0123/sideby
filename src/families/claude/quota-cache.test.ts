@@ -7,7 +7,7 @@ import { withFakeHome } from '../../../testing/index.ts'
 import { runStatuslineTap } from '../../quota/statusline-tap.ts'
 import { createRuntime } from '../../runtime.ts'
 import { claudePlugin } from './index.ts'
-import { cacheStateDir, claudeQuotaCacheFile } from './quota-cache.ts'
+import { cacheStateDir, claudeQuotaCacheFile, mergeQuotaCache } from './quota-cache.ts'
 
 const resets = Math.floor(Date.now() / 1000) + 3600
 const input = JSON.stringify({
@@ -72,5 +72,30 @@ describe('Claude quota cache round trip', () => {
       assert.equal(out.text(), 'hi')
       assert.equal(await readFile(h.path('elsewhere.json'), 'utf8'), 'untouched')
     })
+  })
+})
+
+describe('mergeQuotaCache', () => {
+  const at = (iso: string, used: number) => ({
+    label: '5h',
+    windowMinutes: 300,
+    usedPercent: used,
+    resetsAt: iso,
+  })
+  const reading = (used: number, iso: string) => ({
+    version: 1 as const,
+    observedAt: '2030-01-01T05:00:00.000Z',
+    windows: [at(iso, used)],
+  })
+
+  it('treats resets less than a quarter of the window apart as one window', () => {
+    const cached = [at('2030-01-01T06:00:00.000Z', 96)]
+    assert.equal(mergeQuotaCache(cached, reading(90, '2030-01-01T06:10:00.000Z')), null)
+    assert.equal(mergeQuotaCache(cached, reading(5, '2030-01-01T07:30:00.000Z'))?.windows[0]?.usedPercent, 5)
+  })
+
+  it('writes a repeat of the same numbers, so observedAt moves on', () => {
+    const cached = [at('2030-01-01T06:00:00.000Z', 96)]
+    assert.deepEqual(mergeQuotaCache(cached, reading(96, '2030-01-01T06:00:00.000Z'))?.windows, cached)
   })
 })

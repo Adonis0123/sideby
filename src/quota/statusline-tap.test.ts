@@ -106,6 +106,62 @@ describe('statusline-tap', () => {
     assert.equal(accountNameFromEnv({ HOME: home, CLAUDE_CONFIG_DIR: '/x/other' }), null)
   })
 
+  // Several sessions of one Account write one cache; each reports the Quota of its own last request.
+  const T = Math.floor(Date.parse('2030-01-01T06:00:00Z') / 1000)
+  const reading = (five: [number, number], seven?: [number, number]) =>
+    JSON.stringify({
+      rate_limits: {
+        five_hour: { used_percentage: five[0], resets_at: five[1] },
+        ...(seven ? { seven_day: { used_percentage: seven[0], resets_at: seven[1] } } : {}),
+      },
+    })
+  const fiveHour = async (h: FakeHome) => {
+    const c = JSON.parse(await readFile(cacheFile(h, 'main'), 'utf8'))
+    return c.windows.find((w: { label: string }) => w.label === '5h')
+  }
+
+  it('keeps the higher use when an idle session reports an older one for the same window', async () => {
+    await withFakeHome(async (h) => {
+      await tap([], h.env, reading([96, T]))
+      const before = await readFile(cacheFile(h, 'main'), 'utf8')
+      const r = await tap([], h.env, reading([90, T]))
+      assert.equal(r.stdout, '5h 96%\n')
+      assert.equal(await readFile(cacheFile(h, 'main'), 'utf8'), before)
+      await tap([], h.env, reading([97, T]))
+      assert.equal((await fiveHour(h)).usedPercent, 97)
+    })
+  })
+
+  it('ignores a reading of a window that has already reset, and takes a new window even when it is emptier', async () => {
+    await withFakeHome(async (h) => {
+      await tap([], h.env, reading([96, T]))
+      await tap([], h.env, reading([30, T - 5 * 3600]))
+      assert.deepEqual(await fiveHour(h), {
+        label: '5h',
+        windowMinutes: 300,
+        usedPercent: 96,
+        resetsAt: new Date(T * 1000).toISOString(),
+      })
+      await tap([], h.env, reading([3, T + 5 * 3600]))
+      assert.equal((await fiveHour(h)).usedPercent, 3)
+    })
+  })
+
+  it('keeps a window the reading lacks', async () => {
+    await withFakeHome(async (h) => {
+      await tap([], h.env, reading([40, T], [20, T + 86_400]))
+      await tap([], h.env, reading([41, T]))
+      const c = JSON.parse(await readFile(cacheFile(h, 'main'), 'utf8'))
+      assert.deepEqual(
+        c.windows.map((w: { label: string; usedPercent: number }) => [w.label, w.usedPercent]),
+        [
+          ['5h', 41],
+          ['7d', 20],
+        ],
+      )
+    })
+  })
+
   it('does not break pass-through when the state directory cannot be written', async () => {
     await withFakeHome(async (h) => {
       await h.write('blocked', 'a file, not a directory')

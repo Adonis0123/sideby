@@ -8,7 +8,9 @@ import {
   accountNameFromEnv,
   type ClaudeQuotaCache,
   cacheStateDir,
+  mergeQuotaCache,
   parseRateLimits,
+  readQuotaCache,
   writeQuotaCache,
 } from '../families/claude/quota-cache.ts'
 import type { Env } from '../types.ts'
@@ -103,7 +105,17 @@ export async function runStatuslineTap(
       cache = parseRateLimits(input.toString('utf8'), new Date())
       const name = accountNameFromEnv(env)
       if (!cache || !name) return
-      await writeQuotaCache(cacheStateDir(env), name, cache)
+      // Several sessions of one Account share this cache; an idle one must not put back older numbers.
+      const stateDir = cacheStateDir(env)
+      const prev = await readQuotaCache(stateDir, name).catch(() => null)
+      const merged = prev?.status === 'ok' ? mergeQuotaCache(prev.windows, cache) : cache
+      if (!merged) {
+        // Older numbers: write nothing, and show what the cache already knows.
+        if (prev?.status === 'ok') cache = { ...cache, observedAt: prev.observedAt, windows: prev.windows }
+        return
+      }
+      cache = merged
+      await writeQuotaCache(stateDir, name, merged)
     } catch {
       // Caching is best effort.
     }

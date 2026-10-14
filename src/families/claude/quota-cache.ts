@@ -70,6 +70,50 @@ export function parseRateLimits(input: string, observedAt: Date): ClaudeQuotaCac
   return windows.length ? { version: 1, observedAt: observedAt.toISOString(), windows } : null
 }
 
+/** Two readings belong to one window when their resets are less than a quarter of the window apart. */
+function sameWindow(a: QuotaWindow, b: QuotaWindow): boolean {
+  return Math.abs(Date.parse(a.resetsAt) - Date.parse(b.resetsAt)) < (a.windowMinutes * 60_000) / 4
+}
+
+const sameReading = (a: QuotaWindow, b: QuotaWindow) =>
+  a.label === b.label &&
+  a.windowMinutes === b.windowMinutes &&
+  a.usedPercent === b.usedPercent &&
+  a.resetsAt === b.resetsAt
+
+const order = (label: string) => {
+  const i = WINDOWS.findIndex((w) => w.label === label)
+  return i < 0 ? WINDOWS.length : i
+}
+
+/**
+ * Merges a status line reading into the cached windows. Each session reports the Quota of its own last request, so an
+ * idle session of the same Account reports older numbers, sometimes of a window that has already reset: within one
+ * window the higher use wins, otherwise the later reset; a window the reading lacks is kept. Null when the reading
+ * only repeats older numbers, so nothing is written and `observedAt` keeps the time of the newer reading.
+ */
+export function mergeQuotaCache(
+  cached: readonly QuotaWindow[],
+  next: ClaudeQuotaCache,
+): ClaudeQuotaCache | null {
+  let older = false
+  const windows = next.windows.map((w) => {
+    const c = cached.find((x) => x.label === w.label)
+    if (!c) return w
+    const keep = sameWindow(c, w)
+      ? c.usedPercent > w.usedPercent
+      : Date.parse(c.resetsAt) > Date.parse(w.resetsAt)
+    if (keep) older = true
+    return keep ? c : w
+  })
+  for (const c of cached) if (!windows.some((w) => w.label === c.label)) windows.push(c)
+  windows.sort((a, b) => order(a.label) - order(b.label))
+  const unchanged =
+    windows.length === cached.length && windows.every((w) => cached.some((c) => sameReading(c, w)))
+  if (older && unchanged) return null
+  return { ...next, windows }
+}
+
 /** Writes the cache atomically; creates the private parent directory first (writeFileAtomic does not). */
 export async function writeQuotaCache(
   stateDir: string,
