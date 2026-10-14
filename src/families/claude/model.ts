@@ -10,7 +10,7 @@ const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined)
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
 
-async function configured(account: Account, model?: string): Promise<ModelChoice> {
+async function configured(account: Account, model?: string, lastModel?: string): Promise<ModelChoice> {
   try {
     const file = join(account.dir, 'settings.json')
     const st = await stat(file)
@@ -21,7 +21,8 @@ async function configured(account: Account, model?: string): Promise<ModelChoice
     const ms = isObj(s.modelSettings) ? s.modelSettings : {}
     const per = (name?: string) =>
       name && isObj(ms[name]) ? str((ms[name] as Record<string, unknown>).effortLevel) : undefined
-    const effort = per(m ?? model) ?? str(s.effortLevel)
+    // The level saved for the model the session will run: the one passed in, else the file's own, else the last one used.
+    const effort = per(model ?? m ?? lastModel) ?? str(s.effortLevel)
     return { ...(m ? { model: m } : {}), ...(effort ? { effort } : {}) }
   } catch {
     return {}

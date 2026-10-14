@@ -67,7 +67,7 @@ export async function accountModel(rt: Runtime, account: Account, last?: ModelCh
   const sideby = mc.fromArgs(rt.config.accounts?.[account.ref]?.args ?? []).choice
   // An API account's model is the one its proxy.env names (the Family's `model` reader); the effort still comes from settings.
   const apiModel = account.kind === 'api' ? await f.model?.(account).catch(() => undefined) : undefined
-  const configured = await mc.configured(account, sideby.model ?? apiModel ?? seen.model)
+  const configured = await mc.configured(account, sideby.model ?? apiModel, seen.model)
   const host = apiModel ? { ...configured, model: apiModel } : configured
   const models = [...new Set([...mc.models, ...(seen.model ? [seen.model] : [])])]
   const out: AccountModel = {
@@ -129,6 +129,7 @@ export async function setAccountModel(
     rt.paths.configFile,
     (current) => {
       const now = current[account.ref]?.args ?? []
+      const unchanged = (list: string[]) => list.length === now.length && list.every((x, i) => x === now[i])
       const { choice, rest } = mc.fromArgs(now)
       const next: ModelChoice = { ...choice }
       for (const k of ['model', 'effort'] as const) {
@@ -139,6 +140,8 @@ export async function setAccountModel(
       const dd = rest.indexOf('--')
       const add = mc.toArgs(next)
       args = dd < 0 ? [...rest, ...add] : [...rest.slice(0, dd), ...add, ...rest.slice(dd)]
+      // Nothing to write, not even an empty `accounts` key in a config that has none.
+      if (unchanged(args)) return null
       const out = { ...current }
       if (args.length) out[account.ref] = { ...current[account.ref], args }
       else {

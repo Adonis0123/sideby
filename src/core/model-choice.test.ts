@@ -1,7 +1,7 @@
 // Model and effort per Account (spec §3.19, ADR-0014): what is shown and where it comes from, and the one change
 // sideby makes, to the model and effort arguments in its own config.
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
@@ -78,6 +78,23 @@ describe('accountModel', () => {
   })
 })
 
+describe('per-model effort', () => {
+  it('is looked up for the model sideby starts the account with', async () => {
+    await withFakeHome(async (h) => {
+      const rt = await setup(h, { 'claude:main': { args: ['--model', 'opus'] } })
+      await h.write(
+        '.claude/settings.json',
+        JSON.stringify({
+          model: 'sonnet',
+          modelSettings: { sonnet: { effortLevel: 'low' }, opus: { effortLevel: 'high' } },
+        }),
+      )
+      const main = await accountModel(rt, await rt.resolve('claude:main'))
+      assert.deepEqual(main.effort, { value: 'high', from: 'host' })
+    })
+  })
+})
+
 describe('setAccountModel', () => {
   it('shows the change first, then swaps only the model and effort arguments; default removes them', async () => {
     await withFakeHome(async (h) => {
@@ -120,6 +137,21 @@ describe('setAccountModel', () => {
     })
   })
 
+  it('writes nothing when there is nothing to change, not even an empty accounts key', async () => {
+    await withFakeHome(async (h) => {
+      const rt = await setup(h)
+      await rm(h.path('.config/sideby/config.json'))
+      const r = await setAccountModel(
+        rt,
+        await rt.resolve('claude:main'),
+        { model: null, effort: null },
+        { apply: true },
+      )
+      assert.equal(r.changed, false)
+      await assert.rejects(readFile(h.path('.config/sideby/config.json'), 'utf8'))
+    })
+  })
+
   it('drops the account entry when no argument is left, and refuses bad values and API accounts', async () => {
     await withFakeHome(async (h) => {
       const rt = await setup(h, { 'codex:main': { args: ['-m', 'gpt-y'] } })
@@ -128,8 +160,8 @@ describe('setAccountModel', () => {
       assert.deepEqual(accounts, {})
       const codex = await rt.resolve('codex:main')
       await assert.rejects(
-        setAccountModel(rt, codex, { effort: 'max' }, { apply: false }),
-        /low, medium, high, xhigh/,
+        setAccountModel(rt, codex, { effort: 'huge' }, { apply: false }),
+        /minimal, low, medium/,
       )
       await assert.rejects(setAccountModel(rt, codex, { model: 'a b' }, { apply: false }), /not a model name/)
       await assert.rejects(

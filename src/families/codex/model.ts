@@ -43,7 +43,8 @@ function takeEffort(args: readonly string[]): { value?: string; rest: string[] }
 }
 
 export const codexModelChoice: FamilyModelChoice = {
-  efforts: ['low', 'medium', 'high', 'xhigh'],
+  // Codex: "Available levels depend on the model and client"; these are the levels its docs name.
+  efforts: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
   models: [],
   configured,
   toArgs: (c) => [

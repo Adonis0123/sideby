@@ -254,10 +254,11 @@ export interface FamilyModelChoice {
   /** Model names to offer; any other name may be typed. */
   models: readonly string[]
   /**
-   * What the Host's own config sets for new sessions of the Account. Reads only the model and effort keys; `model`
-   * picks the per-model effort when the config has none of its own.
+   * What the Host's own config sets for new sessions of the Account. Reads only the model and effort keys. A
+   * per-model effort is looked up for `model` (the model sideby starts it with), else the config's own model, else
+   * `lastModel` (the model of the newest session).
    */
-  configured(account: Account, model?: string): Promise<ModelChoice>
+  configured(account: Account, model?: string, lastModel?: string): Promise<ModelChoice>
   /** Host arguments that start a session with `choice`. */
   toArgs(choice: ModelChoice): string[]
   /** The choice in `args`, and the other arguments in their order. */

@@ -45,6 +45,7 @@ Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique
 | Turn on Auto Handoff ("自动交接", "hand over when quota runs low"), see what it still needs, hand this session over now, or pick an account with room for a subtask | `sideby handoff status --json`, `sideby handoff enable --json` (exit 10 first), `sideby handoff ready`, `sideby next <family> --json` | `references/handoff.md` |
 | Create an account with a given name, an API account, or a short command | `sideby new`, `sideby alias add` | `references/accounts.md` |
 | Tune the auto-compact threshold ("which compaction setting costs the fewest tokens"), use the suggestion or undo it | `sideby tune --json`, `sideby tune apply` (exit 10 first), `sideby tune undo` | `references/diagnose.md` |
+| See or set the model and effort an account starts with ("用哪个模型", "set effort to high for cc002") | `sideby model <acct> --json`; `sideby model <acct> <model\|default> --effort <level\|default>` (exit 10 first, then `--yes` after the user agrees) | — |
 | See Claude quota (it shows `not-enabled`) | `sideby quota setup claude` (exits 10) | `references/quota.md` |
 | See everything at once | `sideby ui` (local panel on `127.0.0.1:17420`; `--no-open` prints the address) | — |
 | Start an account | give them `sideby run <ref> [-- host args]` | — |

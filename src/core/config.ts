@@ -361,7 +361,8 @@ export type AccountsConfig = NonNullable<Config['accounts']>
  */
 export function editConfigAccounts(
   file: string,
-  edit: (current: AccountsConfig) => AccountsConfig,
+  /** Returns null to leave the file as it is. */
+  edit: (current: AccountsConfig) => AccountsConfig | null,
   opts: { dryRun?: boolean } = {},
 ): Promise<{ changed: boolean; before: AccountsConfig | undefined; after: AccountsConfig | undefined }> {
   return editConfigKey(file, 'accounts', 'run the command', (current) => edit(current ?? {}), opts)
