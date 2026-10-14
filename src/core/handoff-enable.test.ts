@@ -157,6 +157,23 @@ describe('Grok and Codex steps', () => {
     })
   })
 
+  it('copies only where the file is missing, to the accounts the plan listed, and never over another file', async () => {
+    await withFakeHome(async (h) => {
+      const rt = await accounts(h)
+      await h.write('.grok-b/auth.json', '{}', 0o600)
+      await h.write('.grok-b/hooks/own.sh', '#!/bin/sh\n', 0o755)
+      await rm(h.path('.grok-lab/hooks'), { recursive: true })
+      await h.write('.grok-lab/hooks/sideby-handoff.json', '{"mine":true}\n')
+      const plan = await planHandoffEnable(rt)
+      assert.deepEqual(plan.steps.find((s) => s.id === 'copy')!.accounts, ['grok:b'])
+      const r = await applyHandoffEnable(rt)
+      assert.ok(r.results.every((x) => x.ok))
+      assert.deepEqual(r.results.find((x) => x.id === 'copy')!.accounts, ['grok:b'])
+      assert.equal(await readFile(h.path('.grok-lab/hooks/sideby-handoff.json'), 'utf8'), '{"mine":true}\n')
+      assert.equal(await readFile(h.path('.grok-b/hooks/sideby-handoff.json'), 'utf8'), grokHookFileText())
+    })
+  })
+
   it('stops at the first step that fails and leaves the later ones undone', async () => {
     await withFakeHome(async (h) => {
       const rt = await accounts(h)
@@ -171,6 +188,7 @@ describe('Grok and Codex steps', () => {
           ['copy', false],
         ],
       )
+      assert.deepEqual(r.results[1]!.accounts, ['grok:lab'])
       await assert.rejects(readFile(h.path('.config/sideby/config.json'), 'utf8'))
     })
   })

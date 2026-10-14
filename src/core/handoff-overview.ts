@@ -23,7 +23,7 @@ export interface RecentHandoff {
 export interface HandoffOverview {
   settings: HandoffSettings
   /** Where each subscription account of a Family that can start a hand-over would send its work; empty while off. */
-  takeover: { ref: string; family: string; decision: HandoffDecision }[]
+  takeover: { ref: string; family: string; starts: ('quota' | 'limit')[]; decision: HandoffDecision }[]
   recent: RecentHandoff[]
 }
 
@@ -81,7 +81,12 @@ export async function handoffOverview(rt: Runtime): Promise<HandoffOverview> {
       } catch (err) {
         decision = { kind: 'none', reason: (err as Error).message }
       }
-      return { ref: a.ref, family: a.family, decision }
+      return {
+        ref: a.ref,
+        family: a.family,
+        starts: [...(rt.families.get(a.family)?.handoff?.starts ?? [])],
+        decision,
+      }
     }),
   )
   return { settings, takeover, recent }

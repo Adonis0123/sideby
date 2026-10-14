@@ -238,7 +238,7 @@ export const grokHookSetup: QuotaSetup = {
     await rmdir(join(ctx.home, '.grok', 'hooks')).catch(() => {})
     return {
       ok: true,
-      message: `removed ${shown}; run \`sideby doctor grok --fix\` to remove the copies in other Grok accounts`,
+      message: `removed ${shown}; the copies in other Grok accounts (hooks/sideby-handoff.json) stay and do nothing outside a sideby hand-over; delete them yourself if you no longer want them`,
     }
   },
 }

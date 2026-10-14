@@ -38,7 +38,7 @@ export interface EnablePlan {
 
 export interface EnableResult {
   plan: EnablePlan
-  results: { id: EnableStep['id']; family?: string; ok: boolean; message: string }[]
+  results: { id: EnableStep['id']; family?: string; accounts?: string[]; ok: boolean; message: string }[]
 }
 
 const textOrNull = (file: string) => readFile(file, 'utf8').catch(() => null)
@@ -56,8 +56,9 @@ async function throughLink(dir: string, rel: string): Promise<boolean> {
 }
 
 /**
- * The other Accounts of the Family that need the hook file `file` (a path in the Main Account) at the same place in
- * their own directory. Only that one file is ever written: an Account's other files are never touched.
+ * The other Accounts of the Family that lack the hook file `file` (a path in the Main Account) at the same place in
+ * their own directory. Only that one file is ever written, and one that is already there is left as it is: an
+ * Account's other files are never touched.
  */
 async function hookCopies(
   rt: Runtime,
@@ -69,14 +70,14 @@ async function hookCopies(
   if (!main) return []
   const rel = relative(main.dir, file)
   if (!rel || rel.startsWith('..') || isAbsolute(rel)) return []
-  const want = await textOrNull(file)
   const mainReal = await realpathOrNull(main.dir)
   const out: { ref: string; target: string }[] = []
   for (const a of accounts) {
     if (a.isMain || (await realpathOrNull(a.dir)) === mainReal || (await throughLink(a.dir, rel))) continue
     const target = join(a.dir, rel)
     const have = await textOrNull(target)
-    if (have === null || (want !== null && have !== want)) out.push({ ref: a.ref, target })
+    // A file that is already there is not ours to replace, whatever it says.
+    if (have === null) out.push({ ref: a.ref, target })
   }
   return out
 }
@@ -154,7 +155,8 @@ export async function applyHandoffEnable(
           const file = step.file!
           const want = await readFile(file, 'utf8')
           const mode = (await stat(file)).mode & 0o777
-          const copies = await hookCopies(rt, step.family!, file)
+          const listed = new Set(step.accounts)
+          const copies = (await hookCopies(rt, step.family!, file)).filter((c) => listed.has(c.ref))
           for (const c of copies) {
             await mkdir(dirname(c.target), { recursive: true })
             await writeFileAtomic(c.target, want, mode)
@@ -170,7 +172,13 @@ export async function applyHandoffEnable(
         ok = false
         message = (err as Error).message
       }
-      results.push({ id: step.id, ...(step.family ? { family: step.family } : {}), ok, message })
+      results.push({
+        id: step.id,
+        ...(step.family ? { family: step.family } : {}),
+        ...(step.accounts ? { accounts: step.accounts } : {}),
+        ok,
+        message,
+      })
       if (!ok) break
     }
   }

@@ -252,6 +252,8 @@ const MAIN = String.raw`
   // tooltip, a focused field, or a text selection in the account list.
   function uiBusy() {
     if (menu.el || (dlg.el && dlg.el.open) || document.querySelector('.tip.is-open')) return true
+    // A plan on the Auto Handoff page, and the change a person opened to read, stay as they are.
+    if (hp.preview || hp.askSame || document.querySelector('#handoff-page details[open]')) return true
     const el = document.activeElement
     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return true
     const sel = window.getSelection && window.getSelection()
@@ -1494,7 +1496,9 @@ const MAIN = String.raw`
       else renderTuningPage()
     }
     if (onHandoff) {
-      if (!hp.data && !hp.loading && !hp.error) loadHandoffPage()
+      // A change made elsewhere (Advanced settings, the CLI) makes what the page loaded out of date.
+      const stale = hp.data && (hp.data.settings.auto !== ahState().settings.auto || hp.data.settings.sameFamily !== ahState().settings.sameFamily)
+      if ((!hp.data || stale) && !hp.loading && !hp.error) loadHandoffPage()
       else renderHandoffPage()
     }
   }
@@ -2003,7 +2007,7 @@ const MAIN = String.raw`
   // ---------- the Auto Handoff page ----------
   // Off: one sentence and one button. On: where each account's work would go next, the last hand-overs and what is
   // still missing. Turning on is one plan shown first (hp.preview) and one confirmation; no commands to copy.
-  const hp = { data: null, plan: null, loading: false, error: null, preview: null, previewing: false, applying: false, failed: null, sameFamily: false, busyOff: false, askSame: false }
+  const hp = { data: null, plan: null, loading: false, error: null, preview: null, previewing: false, applying: false, failed: null, sameFamily: false, sameTouched: false, busyOff: false, askSame: false }
   async function loadHandoffPage() {
     hp.loading = true
     hp.error = null
@@ -2086,9 +2090,9 @@ const MAIN = String.raw`
     if (f.error) return errorNote(f.error, null)
     return h('p', { class: 'note note-fail', role: 'alert' }, t('hp.stepFailed', { step: hpStepTitle(f.step), why: f.step.message || '' }) + ' ' + t('hp.tryAgain'))
   }
-  function hpDecision(d) {
+  function hpDecision(d, starts) {
     const thr = ahState().settings.threshold
-    if (d.kind === 'pick') return t('hp.goesTo', { to: accountLabel(d.ref), p: thr })
+    if (d.kind === 'pick') return starts.includes('quota') ? t('hp.goesTo', { to: accountLabel(d.ref), p: thr }) : t('hp.goesToLimit', { to: accountLabel(d.ref) })
     if (d.kind === 'wait') return t('hp.waits', { at: clock(d.until) })
     return d.earliestReset ? t('hp.noneBack', { ref: accountLabel(d.earliestReset.ref), at: clock(d.earliestReset.at) }) : t('hp.none')
   }
@@ -2100,7 +2104,7 @@ const MAIN = String.raw`
       return h('li', null,
         h('span', { class: 'title-logo' }, badge(r.family, 'sm'), h('b', { class: 'mono' }, accountLabel(r.ref))),
         h('span', { class: 'muted' }, p >= 0 ? t('hp.used', { p: Math.round(p) }) : t('hp.noQuota')),
-        h('span', null, hpDecision(r.decision)))
+        h('span', null, hpDecision(r.decision, r.starts)))
     }))
   }
   function hpRecent(d) {
@@ -2136,7 +2140,9 @@ const MAIN = String.raw`
       if (!S.state.accounts.some((a) => a.kind !== 'api' && st.starters.includes(a.family))) kids.push(h('p', { class: 'note' }, t('hp.noStarters')))
       else {
         if (!hp.preview) {
-          kids.push(hpSameFamilyBox(hp.sameFamily, (v) => { hp.sameFamily = v }))
+          // Until the person touches the box it shows what is set now, so turning on again keeps an earlier choice.
+          if (!hp.sameTouched) hp.sameFamily = st.settings.sameFamily
+          kids.push(hpSameFamilyBox(hp.sameFamily, (v) => { hp.sameFamily = v; hp.sameTouched = true }))
           kids.push(h('div', { class: 'row-actions' }, h('button', { class: 'btn btn-primary', type: 'button', disabled: BOOT.readOnly || hp.previewing, 'aria-busy': hp.previewing ? 'true' : null, onclick: hpPreview }, hp.previewing ? spinner() : null, t('hp.turnOn'))))
         } else kids.push(hpPreviewCard())
       }
