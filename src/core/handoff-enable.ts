@@ -41,8 +41,6 @@ export interface EnableResult {
   results: { id: EnableStep['id']; family?: string; accounts?: string[]; ok: boolean; message: string }[]
 }
 
-const textOrNull = (file: string) => readFile(file, 'utf8').catch(() => null)
-
 /** Whether `rel` below `dir` goes through a link: a file seen through one is already there, or is not ours to change. */
 async function throughLink(dir: string, rel: string): Promise<boolean> {
   let at = dir
@@ -75,9 +73,13 @@ async function hookCopies(
   for (const a of accounts) {
     if (a.isMain || (await realpathOrNull(a.dir)) === mainReal || (await throughLink(a.dir, rel))) continue
     const target = join(a.dir, rel)
-    const have = await textOrNull(target)
+    // Whether the file is there, not whether it can be read: one that cannot be read is still not ours to replace.
+    const have = await lstat(target).then(
+      () => true,
+      () => false,
+    )
     // A file that is already there is not ours to replace, whatever it says.
-    if (have === null) out.push({ ref: a.ref, target })
+    if (!have) out.push({ ref: a.ref, target })
   }
   return out
 }

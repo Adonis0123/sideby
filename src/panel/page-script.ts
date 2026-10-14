@@ -253,7 +253,7 @@ const MAIN = String.raw`
   function uiBusy() {
     if (menu.el || (dlg.el && dlg.el.open) || document.querySelector('.tip.is-open')) return true
     // A plan on the Auto Handoff page, and the change a person opened to read, stay as they are.
-    if (hp.preview || hp.askSame || document.querySelector('#handoff-page details[open]')) return true
+    if (!$('handoff-page').hidden && (hp.preview || hp.askSame || document.querySelector('#handoff-page details[open]'))) return true
     const el = document.activeElement
     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return true
     const sel = window.getSelection && window.getSelection()
@@ -2052,6 +2052,8 @@ const MAIN = String.raw`
     renderHandoffPage()
     try {
       await api('/api/handoff/configure', { change, confirm: true })
+      hp.preview = null
+      hp.askSame = false
       toast(message)
       await load({ silent: true })
       await loadHandoffPage()

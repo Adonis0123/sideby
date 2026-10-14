@@ -164,6 +164,8 @@ describe('Grok and Codex steps', () => {
       await h.write('.grok-b/hooks/own.sh', '#!/bin/sh\n', 0o755)
       await rm(h.path('.grok-lab/hooks'), { recursive: true })
       await h.write('.grok-lab/hooks/sideby-handoff.json', '{"mine":true}\n')
+      await h.write('.grok-c/auth.json', '{}', 0o600)
+      await h.write('.grok-c/hooks/sideby-handoff.json', '{"locked":true}\n', 0o000)
       const plan = await planHandoffEnable(rt)
       assert.deepEqual(plan.steps.find((s) => s.id === 'copy')!.accounts, ['grok:b'])
       const r = await applyHandoffEnable(rt)
