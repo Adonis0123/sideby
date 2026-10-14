@@ -47,6 +47,15 @@ const AccountStatus = Type.Intersect([
       ),
     ),
     problems: Type.Optional(Type.Array(Str)),
+    desktopApp: Type.Optional(
+      Type.Object(
+        { app: Str, installed: Type.Boolean(), running: Type.Boolean() },
+        {
+          description:
+            "The family's desktop app for this account (macOS, subscription accounts of claude and codex): whether it is installed and whether this account's own window runs now. Open it with `sideby desktop <account>`.",
+        },
+      ),
+    ),
   }),
 ])
 
@@ -542,6 +551,36 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       skipped: Type.Array(Type.Object({ path: Str, reason: Str })),
     },
     { title: 'sideby app uninstall --json' },
+  ),
+  desktop: Type.Object(
+    {
+      schemaVersion: Version,
+      ref: Str,
+      family: Str,
+      app: Type.String({ description: 'The desktop app, for example `Claude Desktop`.' }),
+      appPath: Str,
+      action: Type.Union(
+        [Type.Literal('started'), Type.Literal('focused'), Type.Literal('already-running')],
+        {
+          description:
+            '`started`: a new window for this account; `focused`: its running window was brought to the front; `already-running`: it runs but could not be brought to the front.',
+        },
+      ),
+      appData: Type.Optional(
+        Type.String({
+          description:
+            "This account's app data folder; absent for the main account, which uses the app's default.",
+        }),
+      ),
+      createdAppData: Type.Boolean(),
+      linked: Type.Array(Str, {
+        description:
+          "Files linked into a new app data folder from the main account's (claude_desktop_config.json).",
+      }),
+      command: Type.Optional(Type.Array(Str, { description: 'The `open` command sideby ran.' })),
+      notices: Type.Array(Str),
+    },
+    { title: 'sideby desktop --json' },
   ),
   error: Type.Object(
     {

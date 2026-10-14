@@ -13,6 +13,9 @@ Glossary for sideby. Defines words only. Decisions live in `docs/adr/`, designs 
 - **API Account**: an Account whose directory holds a Secret File. It talks to an API endpoint instead of a subscription. Exception: a Family may keep a Secret File in every Account only to provide keys (pi does); there the file does not make an Account an API Account.
 - **Secret File**: `proxy.env` inside an API Account, readable only by its owner. Its variables exist only in the launched Host process.
 
+- **Desktop App**: a Family's desktop application (Claude Desktop, the Codex app), which sideby starts for one Account but never modifies. Optional per Family. Not a Host.
+- **App Data**: the data directory a Desktop App keeps for one Account.
+
 Avoid: *profile* (Codex already uses it for a config layer that does not change the login), *provider* (an endpoint plus key, which does not cover subscriptions), *switch* (sideby never changes which Account is globally active).
 
 ## Sharing

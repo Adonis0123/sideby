@@ -1420,3 +1420,22 @@ describe('tune (spec §3.18)', () => {
     })
   })
 })
+
+describe('sideby desktop (spec §3.20)', () => {
+  it('refuses before starting anything: no account, an API account, a family without a desktop app', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}\n')
+      await h.write('.claude-deepseek/proxy.env', 'ANTHROPIC_BASE_URL=https://example.invalid\n', 0o600)
+      await h.write('.grok/skills/x.md', 'x\n')
+      assert.equal((await sideby(h, ['desktop'])).code, 2)
+      const api = await sideby(h, ['desktop', 'claude:deepseek', '--json'])
+      assert.equal(api.code, 1)
+      assert.equal(checkSchema('error', api.out).code, 'api-account')
+      const grok = await sideby(h, ['desktop', 'grok:main'])
+      assert.equal(grok.code, 1)
+      assert.match(grok.err, /no desktop app sideby can open \(only claude and codex accounts do\)/)
+      const help = await sideby(h, ['desktop', '--help'])
+      assert.match(help.out, /sideby desktop <account>/)
+    })
+  })
+})

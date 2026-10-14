@@ -42,6 +42,11 @@ export interface DoctorInput {
   force?: boolean
   /** This sideby's version: when set, installed sideby skills of the checked Families are compared with it. */
   skillVersion?: string
+  /**
+   * More core checks for an Account that is not the Main Account, merged after its Shared Items. They are not
+   * counted in `shared`; a result's `fix` runs with the others under `--fix` and must stay within what it checked.
+   */
+  extraChecks?: (account: Account) => Promise<CheckResult[]>
 }
 
 const BACKUP_ENTRY = /(\.bak|backup|\.tmp)/i
@@ -82,6 +87,23 @@ async function checkAccount(input: DoctorInput, family: FamilyDef, account: Acco
         if (res.results[0]?.level === 'ok') okCount++
       }
       for (const r of res.results) if (r.level !== 'ok') findings.push(toFinding(r, account.ref, 'core'))
+    }
+    // Extra checks (for example a Desktop App's data folder) add Findings but never count toward `shared`.
+    // A failing extra check costs only its own Findings, never the whole run.
+    try {
+      for (const r of (await input.extraChecks?.(account)) ?? [])
+        if (r.level !== 'ok') findings.push(toFinding(r, account.ref, 'core'))
+    } catch (e) {
+      findings.push({
+        level: 'warn',
+        account: account.ref,
+        item: 'extra',
+        code: 'extra-check.error',
+        message: `could not finish an extra check of ${account.ref}: ${e instanceof Error ? e.message : String(e)}`,
+        hint: 'run sideby doctor again; if it keeps failing, check that the folder it names is readable',
+        fixable: false,
+        source: 'core',
+      })
     }
     if (looksLikeBackup(account.name))
       findings.push({

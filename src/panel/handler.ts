@@ -3,6 +3,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { aliasesByAccount } from '../core/accounts.ts'
 import { aliasArgs, aliasRefs, type HandoffSettings } from '../core/config.ts'
+import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import { UserError } from '../core/errors.ts'
 import { planHandoff } from '../core/handoff.ts'
 import { applyHandoffEnable, type EnablePlan, planHandoffEnable } from '../core/handoff-enable.ts'
@@ -290,22 +291,25 @@ async function buildState(
   ])
   const health = healthByAccount(history)
   const aliases = aliasesByAccount(aliasRefs(rt.config.aliases), accounts)
-  const list = await Promise.all(
-    accounts.map(async (a): Promise<PanelAccount> => {
-      const st = await accountState(rt, a, families)
-      const h = health.get(a.ref)
-      const names = aliases.get(a.ref)
-      const withArgs = (names ?? [])
-        .map((n) => [n, aliasArgs(rt.config.aliases?.[n])] as const)
-        .filter(([, args]) => args.length)
-      return {
-        ...st,
-        ...(h ? { health: h } : {}),
-        ...(names ? { aliases: names } : {}),
-        ...(withArgs.length ? { aliasArgs: Object.fromEntries(withArgs) } : {}),
-      }
-    }),
+  // Desktop Apps (spec §3.20): one process listing for every Account, run alongside the per-Account reads.
+  const states = await withDesktopApps(
+    rt,
+    accounts,
+    Promise.all(accounts.map((a) => accountState(rt, a, families))),
   )
+  const list = states.map((st): PanelAccount => {
+    const h = health.get(st.ref)
+    const names = aliases.get(st.ref)
+    const withArgs = (names ?? [])
+      .map((n) => [n, aliasArgs(rt.config.aliases?.[n])] as const)
+      .filter(([, args]) => args.length)
+    return {
+      ...st,
+      ...(h ? { health: h } : {}),
+      ...(names ? { aliases: names } : {}),
+      ...(withArgs.length ? { aliasArgs: Object.fromEntries(withArgs) } : {}),
+    }
+  })
   const handoff = handoffByFamily(rt, list, ctx.now)
   return {
     schemaVersion: 1,
@@ -525,6 +529,22 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const found = await rt.resolve(account)
         const r = await setAccountModel(rt, found, change, { apply: optBool(body, 'confirm') })
         return { ref: found.ref, ...r, file: tildify(r.file, rt.paths.home) }
+      },
+    },
+    // Opens the Account's Desktop App, or brings its window to the front (spec §3.20). It creates the Account's
+    // app data folder and starts a program, so a read-only Panel refuses it (writes defaults to true).
+    '/api/account/desktop': {
+      async run(body) {
+        const account = optString(body, 'account')
+        if (!account) throw new HttpError(400, '"account" is required')
+        const rt = await getRuntime()
+        const r = await openDesktopApp(rt, account)
+        const home = rt.paths.home
+        return {
+          ...r,
+          appPath: tildify(r.appPath, home),
+          ...(r.appData ? { appData: tildify(r.appData, home) } : {}),
+        }
       },
     },
     // The Auto Handoff page (spec §3.17): where work would go next and the last hand-overs. Reads only.

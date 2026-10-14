@@ -1281,3 +1281,62 @@ describe('using a tuning suggestion in the Panel (ADR-0012)', () => {
     })
   })
 })
+
+describe('panel: desktop apps (spec §3.20)', () => {
+  it('shows which accounts can open their desktop app, opens it through the fake seam, and a read-only panel refuses', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}\n')
+      await h.write('.claude-work/settings.json', '{}\n')
+      await h.write('.claude-deepseek/proxy.env', 'ANTHROPIC_BASE_URL=https://example.invalid\n', 0o600)
+      await h.write(
+        'Apps/Claude.app/Contents/Info.plist',
+        '<plist><dict><key>CFBundleExecutable</key><string>Claude</string><key>CFBundleIdentifier</key><string>com.anthropic.claudefordesktop</string></dict></plist>\n',
+      )
+      const calls: { cmd: string; args: readonly string[] }[] = []
+      const rt = await createRuntime({
+        env: h.env,
+        desktop: {
+          platform: 'darwin',
+          appDirs: [h.path('Apps')],
+          exec: async (cmd, args) => {
+            calls.push({ cmd, args })
+            return { code: 0, stdout: '', stderr: '' }
+          },
+        },
+      })
+      const { server, port, handler } = await serve((port) =>
+        createPanelHandler({ runtime: rt, allowedHosts: [`127.0.0.1:${port}`] }),
+      )
+      const ro = await serve((port) =>
+        createPanelHandler({ runtime: rt, allowedHosts: [`127.0.0.1:${port}`], readOnly: true }),
+      )
+      try {
+        const state = (await (await fetch(`http://127.0.0.1:${port}/api/state`)).json()) as PanelState
+        const work = state.accounts.find((a) => a.ref === 'claude:work')!
+        assert.deepEqual(work.desktopApp, { app: 'Claude Desktop', installed: true, running: false })
+        assert.equal(state.accounts.find((a) => a.ref === 'claude:deepseek')!.desktopApp, undefined)
+
+        const hdr = { origin: `http://127.0.0.1:${port}`, 'x-sideby-token': handler.token }
+        const r = await post(port, '/api/account/desktop', { account: 'claude:work' }, hdr)
+        assert.equal(r.status, 200)
+        assert.equal(r.body.action, 'started')
+        assert.equal(r.body.appData, '~/Library/Application Support/sideby/claude/work')
+        assert.equal(calls.filter((c) => c.cmd === '/usr/bin/open').length, 1)
+
+        const api = await post(port, '/api/account/desktop', { account: 'claude:deepseek' }, hdr)
+        assert.equal(api.status, 400)
+        assert.equal(api.body.code, 'api-account')
+
+        const roHdr = { origin: `http://127.0.0.1:${ro.port}`, 'x-sideby-token': ro.handler.token }
+        assert.equal(
+          (await post(ro.port, '/api/account/desktop', { account: 'claude:work' }, roHdr)).status,
+          403,
+        )
+        assert.equal(calls.filter((c) => c.cmd === '/usr/bin/open').length, 1)
+      } finally {
+        await close(server)
+        await close(ro.server)
+      }
+    })
+  })
+})

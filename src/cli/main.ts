@@ -47,6 +47,8 @@ Usage:
   sideby ui [--port n] [--no-open]    open the local panel
   sideby ui --background              same, without a terminal: keeps running after this command exits
   sideby ui --stop                    stop the background panel
+  sideby desktop <account>            open the desktop app (Claude Desktop, the Codex app) as this
+                                      account, next to the others (macOS)
   sideby app install [--url <url>]    add a sideby app that opens the panel (macOS, Linux)
   sideby app uninstall                remove that app
   sideby shell-init zsh|bash          print shell functions, e.g. eval "$(sideby shell-init zsh)"
@@ -55,8 +57,9 @@ Usage:
   sideby plugins                      list loaded plugins and load errors
 
 Options:
-  --json        machine-readable output (list, new, next, alias, doctor, quota, tune, handoff, families, plugins, app)
-  -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families
+  --json        machine-readable output (list, new, next, alias, doctor, quota, tune, handoff, families, plugins, app,
+                desktop)
+  -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, desktop
   -v, --version show the version
 
 An <account> is <family>:<name> (claude:work) or just <name> when it is unique.
@@ -128,6 +131,24 @@ Examples:
   sideby doctor --json
   sideby doctor claude:008 --fix
 Exit: 0 when nothing fails (warnings allowed); 1 when a check fails.`,
+  desktop: `sideby desktop <account> [--json]
+
+Open the host's desktop app as one account: Claude Desktop for claude accounts, the Codex app (ChatGPT.app) for codex
+accounts. Each account gets its own window, side by side with the others; macOS only for now.
+
+The main account opens the app as usual. Any other subscription account opens a new window with that account's
+directory (CLAUDE_CONFIG_DIR, CODEX_HOME) and its own app data folder,
+~/Library/Application Support/sideby/<family>/<name>/. When that account's window is already open, sideby brings it
+to the front instead of starting another one. API accounts are refused: the apps sign in with a subscription only.
+
+sideby never copies or changes the app, and never closes a window. The first time, sign in inside Claude Desktop;
+close other Claude Desktop windows while you do, because the sign-in may come back to one of them.
+
+Examples:
+  sideby desktop claude:work
+  sideby desktop cc008 --json
+Exit: 0 opened or brought to the front; 1 not macOS, no desktop app for that host, API account, app not installed,
+or the app did not open; 2 malformed command line.`,
   families: `sideby families [family] [--json]
 
 For each host (built in or from a plugin): where its accounts live, the variable that selects one, how to sign
@@ -168,6 +189,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   },
   ui: { flags: ['no-open', 'background', 'stop', 'serve-detached'], valued: ['port'] },
   app: { flags: ['json'], valued: ['url'] },
+  desktop: { flags: ['json'] },
   'shell-init': { flags: ['write'] },
   plugins: { flags: ['json'] },
   families: { flags: ['json'] },
@@ -274,6 +296,8 @@ export async function main(argv: string[]): Promise<number> {
         return await cmds.cmdUi(parsed, io)
       case 'app':
         return await cmds.cmdApp(parsed, io)
+      case 'desktop':
+        return await cmds.cmdDesktop(parsed, io)
       case 'shell-init':
         return await cmds.cmdShellInit(parsed, io)
       case 'plugins':

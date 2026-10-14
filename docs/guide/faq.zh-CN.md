@@ -30,7 +30,8 @@ Node 从 22.18 起默认会剥掉 TypeScript 类型，sideby 才能直接 `impor
 | 配置（sideby 只写其中的 `aliases` 和 `handoff`：前者来自 `new --alias`、`sideby alias` 或面板，后者来自 `sideby handoff enable`、`sideby handoff disable` 或面板） | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
 | 你的插件 | `${XDG_CONFIG_HOME:-~/.config}/sideby/plugins/` |
 | 状态：额度缓存、上次体检结果、`settings.json` 原始字节、后台面板的 pid 和日志 | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
-| 桌面应用（`sideby app install`） | macOS `~/Applications/sideby.app`；Linux `~/.local/share/applications/sideby.desktop`、`~/.local/share/sideby/`、`~/.local/share/icons/hicolor/*/apps/sideby.*` |
+| 每个账号的桌面应用数据（`sideby desktop`） | macOS `~/Library/Application Support/sideby/<家族>/<账号名>/` |
+| 面板应用（`sideby app install`） | macOS `~/Applications/sideby.app`；Linux `~/.local/share/applications/sideby.desktop`、`~/.local/share/sideby/`、`~/.local/share/icons/hicolor/*/apps/sideby.*` |
 
 sideby 不往宿主的账号目录里写自己的文件。唯一的例外是 `quota setup claude --yes`，它会修改 `~/.claude/settings.json`。用 `sideby new` 建出来的账号目录归宿主所有。
 
@@ -49,7 +50,7 @@ sideby 不往宿主的账号目录里写自己的文件。唯一的例外是 `qu
 
 ```sh
 sideby quota teardown claude                  # 跑过 quota setup 的话先执行；status line 会调用 sideby
-sideby ui --stop && sideby app uninstall       # 用过桌面应用的话
+sideby ui --stop && sideby app uninstall       # 用过面板应用的话
 npm rm -g sideby
 rm -rf ~/.config/sideby ~/.local/state/sideby  # 设置过 XDG_CONFIG_HOME / XDG_STATE_HOME 的话换成对应路径
 ```

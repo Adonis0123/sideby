@@ -30,7 +30,8 @@
 | `sideby handoff teardown grok` | 文件未被改动时删除它 | 0；拒绝或失败为 1 |
 | `sideby ui [--port n] [--no-open]` | 本地面板，按 Ctrl+C 停止 | — |
 | `sideby ui --background` / `--stop` | 脱离终端启动面板（已有就复用，sideby 升级后则替换旧的）并打开 / 停掉它 | 0；启动或停止失败为 1 |
-| `sideby app install [--url <url>]` | 添加打开面板（或 `<url>`）的桌面应用（macOS、Linux） | 0；平台不支持或目标位置有不是它创建的文件为 1 |
+| `sideby desktop <acct>` | 用这个账号打开 Claude Desktop 或 Codex 应用，和其他账号的窗口同时开着；已经开着就切到前台（macOS） | 0；不是 macOS、这个宿主没有桌面应用、API 账号、应用没装或没能打开为 1 |
+| `sideby app install [--url <url>]` | 添加打开面板（或 `<url>`）的面板应用（macOS、Linux） | 0；平台不支持或目标位置有不是它创建的文件为 1 |
 | `sideby app uninstall` | 删除 `app install` 创建的文件 | 0；留下了不是它创建的文件为 1 |
 | `sideby shell-init zsh\|bash` | 输出每个账号和每个别名的 shell 函数 | 0 |
 | `sideby shell-init [zsh\|bash] --write` | 用这份输出重写 config 里配置的 `shellInitFile` | 0；写不了或没有配置为 1 |

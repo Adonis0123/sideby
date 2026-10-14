@@ -110,6 +110,25 @@ Accounts that link `settings.json` to the Main Account (the default) get quota f
 
 Each account row shows the model and effort it runs with, for example `opus · high`; hover to see where each comes from: set by sideby for this account, the tool's own settings, or the last session. Click it (or **Model and effort…** in the account menu) to pick a model and effort for that account alone. sideby saves the choice as that account's launch arguments in its own config (`--model` and `--effort` for Claude Code, `-m` and `-c model_reasoning_effort=…` for Codex), so accounts that share one `settings.json` can still differ, and the tool's own files stay as they are. It applies to new sessions started with sideby (a short command, `sideby run`, `sideby next`, Auto Handoff); a plain `claude` ignores it. `ANTHROPIC_MODEL` or `CLAUDE_CODE_EFFORT_LEVEL` in your shell and settings from your organization still win, and sideby cannot see them. From a terminal: `sideby model cc002 opus --effort high` (add `--yes`); `default` clears one.
 
+## Desktop apps
+
+On macOS, sideby can open Claude Desktop or the Codex app as one account, and keep several accounts' windows open side by side:
+
+```sh
+sideby desktop claude:work     # or a short command: sideby desktop ccw
+```
+
+In the panel, click **Open desktop app** in the account's row (it says **Desktop app open** while that account's window runs; a click brings it to the front). `sideby list` shows a DESKTOP column, and `--json` a `desktopApp` field per account.
+
+- The main account opens the app as usual. Any other subscription account opens a new window that uses that account's directory (`CLAUDE_CONFIG_DIR`, so Claude Desktop's Code tab uses the account's Claude Code settings; `CODEX_HOME`, so the Codex app shares the account's terminal sign-in) and its own data folder, `~/Library/Application Support/sideby/<family>/<name>/`.
+- When that account's window is already open, sideby brings it to the front instead of opening a second one. It never closes a window and never copies or changes the app.
+- API accounts cannot open a desktop app: the apps sign in with a subscription only.
+- The first time, sign in inside Claude Desktop. Close the other Claude Desktop windows while you do: the browser sends the sign-in back through a `claude://` link, and another window may catch it. Codex usually needs no sign-in in the app; run `sideby login <account>` first if the account is signed out.
+- The sign-in screen may suggest your main account, for example the Codex app's "Welcome back" with your main email. Do not pick it for another account: that signs this account in as your main one. Choose to use another account, or for Codex sign in with `sideby login <account>` first.
+- Claude Desktop's MCP settings, `claude_desktop_config.json`, link to the main account's when a new account's data folder is made. `sideby doctor` checks that link: it never replaces a file there. If the main account had no such file yet, Claude Desktop makes its own copy (it may also replace the link later); doctor shows that as a warning with the command to share the main account's file instead.
+
+Known limits: every window has the same Dock icon. While another account's window runs and the main one does not, clicking the Dock icon brings that other window forward; open the main account from sideby then. After the app updates itself it restarts on the main account; open the others again from sideby. Claude in Chrome cannot pair with a window that uses another data folder. sideby opens the apps with settings they read today (`--user-data-dir`, and for Codex `CODEX_ELECTRON_USER_DATA_PATH`); a future app version may change them. An app opened from inside a Claude Code or Codex session does not inherit that session's variables. Other platforms and hosts are not supported yet.
+
 ## Context tuning
 
 Every Host compacts a session by itself once its context grows past a threshold. `sideby tune` replays your last 7 days of local sessions against other thresholds and estimates which one spends the fewest tokens:

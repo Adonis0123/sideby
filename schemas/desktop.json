@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/desktop.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "ref",
+    "family",
+    "app",
+    "appPath",
+    "action",
+    "createdAppData",
+    "linked",
+    "notices"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "ref": {
+      "type": "string"
+    },
+    "family": {
+      "type": "string"
+    },
+    "app": {
+      "type": "string",
+      "description": "The desktop app, for example `Claude Desktop`."
+    },
+    "appPath": {
+      "type": "string"
+    },
+    "action": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "started"
+        },
+        {
+          "type": "string",
+          "const": "focused"
+        },
+        {
+          "type": "string",
+          "const": "already-running"
+        }
+      ],
+      "description": "`started`: a new window for this account; `focused`: its running window was brought to the front; `already-running`: it runs but could not be brought to the front."
+    },
+    "appData": {
+      "type": "string",
+      "description": "This account's app data folder; absent for the main account, which uses the app's default."
+    },
+    "createdAppData": {
+      "type": "boolean"
+    },
+    "linked": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Files linked into a new app data folder from the main account's (claude_desktop_config.json)."
+    },
+    "command": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The `open` command sideby ran."
+    },
+    "notices": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "title": "sideby desktop --json"
+}

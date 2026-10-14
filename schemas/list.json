@@ -152,6 +152,26 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "desktopApp": {
+                "type": "object",
+                "required": [
+                  "app",
+                  "installed",
+                  "running"
+                ],
+                "properties": {
+                  "app": {
+                    "type": "string"
+                  },
+                  "installed": {
+                    "type": "boolean"
+                  },
+                  "running": {
+                    "type": "boolean"
+                  }
+                },
+                "description": "The family's desktop app for this account (macOS, subscription accounts of claude and codex): whether it is installed and whether this account's own window runs now. Open it with `sideby desktop <account>`."
               }
             }
           }

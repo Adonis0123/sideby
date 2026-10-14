@@ -78,7 +78,7 @@ const MAIN = String.raw`
     silent: false, lastTry: 0, pending: false, fastUntil: 0, fastFamily: null,
   }
   // View state that is not saved: the search text, the attention filter, the Health check filter.
-  const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, highlight: null, fade: true }
+  const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, desktopRef: null, highlight: null, fade: true }
   const $ = (id) => document.getElementById(id)
 
   // ---------- preferences ----------
@@ -598,6 +598,7 @@ const MAIN = String.raw`
     const items = [
       { icon: 'terminal', label: t('menu.copyRun'), hint: run, run: () => copyText(run) },
       ...(a.aliases || []).slice(0, 2).map((x) => ({ icon: 'terminal', label: t('menu.copyAlias'), hint: x, run: () => copyText(x) })),
+      a.desktopApp && a.desktopApp.installed && a.kind !== 'api' && !BOOT.readOnly ? { icon: 'terminal', label: t(a.desktopApp.running ? 'desk.show' : 'desk.open', { app: a.desktopApp.app }), disabled: Boolean(ui.desktopRef), run: () => openDesktop(a) } : null,
       a.kind !== 'api' ? { icon: 'key', label: t('menu.copyLogin'), hint: 'sideby login ' + a.ref, run: () => copyText('sideby login ' + a.ref) } : null,
       a.dir ? { icon: 'folder', label: t('menu.copyDir'), hint: a.dir, run: () => copyText(a.dir) } : null,
       a.identity && a.identity.email ? { icon: 'mail', label: t('menu.copyEmail'), hint: emailText(a.identity.email), run: () => copyText(a.identity.email) } : null,
@@ -931,7 +932,33 @@ const MAIN = String.raw`
       a.kind === 'api' && a.model ? h('span', { class: 'mono', title: t('acct.model') }, a.model) : null,
       a.kind !== 'api' ? modelChip(a) : null,
       a.kind !== 'api' && plan ? h('span', { class: 'plan' }, plan) : null,
+      desktopButton(a),
     ]))
+  }
+  // The family's desktop app as this account (spec §3.20): only where it is installed, never for API accounts or a
+  // read-only panel. A running window shows as "open"; the click brings it to the front instead of a second one.
+  function desktopButton(a) {
+    const d = a.desktopApp
+    if (!d || !d.installed || a.kind === 'api' || BOOT.readOnly) return null
+    const busy = ui.desktopRef === a.ref
+    const label = busy ? t('desk.opening', { app: d.app }) : t(d.running ? 'desk.show' : 'desk.open', { app: d.app })
+    return h('button', { class: 'tag tag-btn' + (d.running ? ' tag-ok' : ''), type: 'button', disabled: busy, title: t(d.running ? 'desk.showHint' : 'desk.openHint', { app: d.app, ref: a.ref }), 'aria-label': label + ' (' + a.ref + ')', onclick: (e) => { e.stopPropagation(); openDesktop(a) } },
+      d.running ? h('span', { class: 'dot dot-ok', 'aria-hidden': 'true' }) : null, label)
+  }
+  async function openDesktop(a) {
+    if (ui.desktopRef) return
+    ui.desktopRef = a.ref
+    renderAccounts()
+    try {
+      const r = await api('/api/account/desktop', { account: a.ref })
+      const text = r.action === 'started' ? t('desk.started', { app: r.app, ref: r.ref }) : r.action === 'focused' ? t('desk.focused', { app: r.app, ref: r.ref }) : ''
+      if (text) toast(text)
+      // Notices say what to do next (sign in, close other windows while signing in); they stay a little longer.
+      for (const n of r.notices || []) toast(n, { kind: 'info', duration: 12000 })
+    } catch (e) { toast(t('desk.failed', { ref: a.ref, msg: e.message }), { kind: 'fail' }) }
+    ui.desktopRef = null
+    renderAccounts()
+    load({ silent: true })
   }
   function notes(a) {
     const fam = family(a.family)
@@ -945,7 +972,7 @@ const MAIN = String.raw`
   }
   // What a row or card shows depends on more than the account (health, view preferences, language); the
   // fingerprint covers what its click handlers use.
-  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a)]) }
+  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref]) }
   // The Account 'sideby next <family>' would pick; the server ranks it with the CLI's rule (spec §3.13).
   function isNext(a) { return Boolean(S.state && S.state.handoff && S.state.handoff[a.family] === a.ref) }
   function row(a, now, cols) {

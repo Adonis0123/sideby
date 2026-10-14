@@ -15,6 +15,7 @@ import {
   removeConfigAlias,
 } from './core/config.ts'
 import { type CreateResult, createAccount } from './core/create.ts'
+import { bindDesktopDeps, checkAppData, type DesktopDeps } from './core/desktop-app.ts'
 import { applyFixes, type DoctorReport, runDoctor } from './core/doctor.ts'
 import { UserError } from './core/errors.ts'
 import { type HandoffPlan, planHandoff } from './core/handoff.ts'
@@ -170,6 +171,11 @@ export interface AccountStatus extends Account {
   identity?: AccountIdentity
   /** Plugin errors met while reading this Account (for example an unreadable settings file). */
   problems?: string[]
+  /**
+   * The Family's Desktop App for this Account (spec §3.20): macOS only, Subscription Accounts of claude and codex.
+   * Filled by `sideby list` and the Panel, which list processes once for all Accounts; `status()` leaves it out.
+   */
+  desktopApp?: { app: string; installed: boolean; running: boolean }
 }
 
 export interface DoctorOptions {
@@ -297,7 +303,17 @@ async function readIdentity(f: FamilyDef, account: Account): Promise<AccountIden
 }
 
 export async function createRuntime(
-  opts: { env?: Env; builtins?: BuiltinPlugin[]; now?: () => Date } = {},
+  opts: {
+    env?: Env
+    builtins?: BuiltinPlugin[]
+    now?: () => Date
+    /**
+     * Internal, for tests: replaces the machine the Desktop App calls use (platform, app folders and the programs
+     * `open`, `ps`, `osascript`, `plutil`, `mdfind`; spec §3.20). Omitted, the real machine is used. Not part of
+     * the plugin or Portal contract; it may change without notice.
+     */
+    desktop?: Partial<DesktopDeps>
+  } = {},
 ): Promise<Runtime> {
   const env = opts.env ?? process.env
   const paths = resolvePaths(env)
@@ -531,6 +547,8 @@ export async function createRuntime(
         // Checked for every Family in the run, also when Doctor is aimed at one Account, so the saved result
         // of that Family keeps its skill warning.
         skillVersion: packageVersion(),
+        // Desktop App data folders sideby made for an Account (spec §3.20).
+        extraChecks: (a: Account) => checkAppData(loaded.plugins, paths.home, a),
       }
       // Auto Handoff warnings (spec §3.17) join the general Findings; they never fail Doctor.
       const all = await accounts()
@@ -878,5 +896,6 @@ export async function createRuntime(
     },
     readContext,
   }
+  if (opts.desktop) bindDesktopDeps(rt, opts.desktop)
   return rt
 }

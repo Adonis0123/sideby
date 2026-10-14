@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import { aliasesByAccount } from '../core/accounts.ts'
 import { aliasRefs } from '../core/config.ts'
+import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import type { DoctorReport } from '../core/doctor.ts'
 import { UserError } from '../core/errors.ts'
 import { requestHandoff } from '../core/handoff-chain.ts'
@@ -66,7 +67,8 @@ function tilde(text: string, home: string): string {
 export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
   const rt = await createRuntime()
   const accounts = await rt.accounts()
-  const statuses = await Promise.all(accounts.map((x) => rt.status(x)))
+  const statuses = await withDesktopApps(rt, accounts, Promise.all(accounts.map((x) => rt.status(x))))
+  const hasDesktop = statuses.some((s) => s.desktopApp)
   const families = await rt.familyInfo()
   if (a.flags.has('json')) {
     json(io, { families, accounts: statuses, pluginErrors: [...rt.pluginErrors] })
@@ -93,8 +95,11 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
       s.identity?.email ?? c.dim('—'),
       s.model ?? c.dim('—'),
       s.hostInstalled ? tildify(s.dir, home) : `${tildify(s.dir, home)} ${c.yellow('(host not installed)')}`,
+      ...(hasDesktop ? [s.desktopApp?.running ? c.green('open') : c.dim('—')] : []),
     ])
-    io.out(table(rows, ['ACCOUNT', 'TYPE', 'LOGIN', 'EMAIL', 'MODEL', 'DIR']))
+    io.out(
+      table(rows, ['ACCOUNT', 'TYPE', 'LOGIN', 'EMAIL', 'MODEL', 'DIR', ...(hasDesktop ? ['DESKTOP'] : [])]),
+    )
     io.out(c.dim('\nsideby run <account>  ·  sideby new <family> <name>  ·  sideby quota  ·  sideby ui'))
   }
   for (const s of statuses) for (const p of s.problems ?? []) io.err(c.yellow(`${s.ref}: ${p}`))
@@ -976,6 +981,26 @@ export async function cmdApp(a: ParsedArgs, io: Io): Promise<number> {
     if (!r.removed.length && !r.skipped.length) io.out('No sideby app is installed.')
   }
   return r.skipped.length ? 1 : 0
+}
+
+/** `sideby desktop <account>`: the Family's Desktop App as that Account (spec §3.20). */
+export async function cmdDesktop(a: ParsedArgs, io: Io): Promise<number> {
+  const [ref, ...extra] = a.positionals
+  if (!ref || extra.length || a.rest.length) throw new UsageError('usage: sideby desktop <account>')
+  const rt = await createRuntime()
+  const r = await openDesktopApp(rt, ref)
+  if (a.flags.has('json')) {
+    json(io, r)
+    return 0
+  }
+  const home = rt.paths.home
+  if (r.action === 'started') io.out(`${c.green('✓')} opened ${r.app} as ${c.bold(r.ref)}`)
+  else if (r.action === 'focused')
+    io.out(`${c.green('✓')} ${r.app} is already open as ${c.bold(r.ref)}; brought it to the front`)
+  if (r.appData) io.out(c.dim(`  its data: ${tildify(r.appData, home)}`))
+  for (const f of r.linked) io.out(c.dim(`  linked ${f} to the main account's`))
+  for (const n of r.notices) io.err(c.cyan(n))
+  return 0
 }
 
 export async function cmdAlias(a: ParsedArgs, io: Io): Promise<number> {

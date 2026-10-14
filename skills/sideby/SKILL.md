@@ -58,7 +58,9 @@ Read only the reference the task needs.
 
 When a terminal manager such as Orca reopens a pane with a bare `claude --resume <id>` (or `codex resume <id>`, `grok --resume <id>`) and the Host says `No conversation found`, the session lives in another account. Suggest config `"resumeRouting": true` followed by `sideby shell-init --write` (or a new shell with `eval`): `shell-init` then defines Host-named functions that call `sideby resume <family>`, which starts the account holding that session. For a one-off, find it with `ls -d ~/.claude*/projects/*/<id>.jsonl` and run `sideby run <ref> -- --resume <id>`. When no account has that file, the session was opened but never got a message, so there is nothing to resume: `ls -d ~/.claude*/session-env/<id>` names the account that started it, and with routing on `sideby resume` starts a new session there by itself.
 
-For someone who would rather double-click than use a terminal, `sideby app install` adds a desktop app (macOS `~/Applications/sideby.app`, Linux app menu) that runs `sideby ui --background`; `sideby ui --stop` stops it and `sideby app uninstall` removes the app. Ask before `app install`: it writes outside sideby's own directories.
+To open Claude Desktop or the Codex app as one account (macOS, subscription accounts), run `sideby desktop <ref> --json` yourself: it opens a new window for that account, or brings its open window to the front, and never closes anything. Relay its `notices`: the first Claude Desktop sign-in should happen while other Claude Desktop windows are closed, and a sign-in screen that suggests the main account ("Welcome back" in the Codex app) must not be used for another account.
+
+For someone who would rather double-click than use a terminal, `sideby app install` adds a panel app (macOS `~/Applications/sideby.app`, Linux app menu) that runs `sideby ui --background`; `sideby ui --stop` stops it and `sideby app uninstall` removes the app. Ask before `app install`: it writes outside sideby's own directories.
 
 ## Keeping this skill current
 

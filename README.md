@@ -76,7 +76,8 @@ The agent checks Node and your Host CLIs, installs sideby and the skill, creates
 | Let a running task move to the next account by itself when quota runs low (off by default; see the risk) | `sideby handoff enable` (or the panel) | [Auto Handoff](docs/guide/usage.md#auto-handoff) |
 | Short commands such as `ccw` | `sideby alias add ccw claude:work` | [Shell functions](docs/guide/configuration.md#shell-functions) |
 | Reopen a session from Orca and the like in the account that holds it | `"resumeRouting": true` in config | [Resuming from other tools](docs/guide/configuration.md#resuming-from-other-tools) |
-| Open the panel from the Dock or app menu | `sideby app install` | [Desktop app](docs/guide/panel.md#desktop-app) |
+| Open Claude Desktop or the Codex app as one account, several side by side (macOS) | `sideby desktop claude:work` (or the panel) | [Desktop apps](docs/guide/usage.md#desktop-apps) |
+| Open the panel from the Dock or app menu | `sideby app install` | [Panel app](docs/guide/panel.md#panel-app) |
 | Show the panel inside your own local page | `createPanelHandler()` | [Embed the panel](docs/guide/panel.md#embed-the-panel) |
 | Add a Host or a pre-launch check | a local plugin | [Plugins](docs/guide/plugins.md) |
 
@@ -114,7 +115,7 @@ Usage questions and ideas go in [Discussions](https://github.com/Adonis0123/side
 - [Using sideby](docs/guide/usage.md): accounts, API accounts, Doctor, quota, Handoff, Host notes
 - [Commands](docs/guide/commands.md): every command, exit codes and `--json`
 - [Configuration](docs/guide/configuration.md): `config.json`, aliases, shell functions
-- [Panel](docs/guide/panel.md): the panel, desktop app and embedding
+- [Panel](docs/guide/panel.md): the panel, panel app and embedding
 - [Plugins](docs/guide/plugins.md): write your own Family or launch hook
 - [FAQ](docs/guide/faq.md): terms of service, data locations, alternatives, uninstall
 - [Changelog](https://github.com/Adonis0123/sideby/releases)

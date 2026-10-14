@@ -30,7 +30,8 @@ sideby then checks the version itself. Below 22.18, `--help`, `--version` and ev
 | Config (sideby only writes `aliases`, from `new --alias`, `sideby alias` or the panel, and `handoff`, from `sideby handoff enable`, `sideby handoff disable` or the panel) | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
 | Your plugins | `${XDG_CONFIG_HOME:-~/.config}/sideby/plugins/` |
 | State: quota cache, last Doctor result, original `settings.json` bytes, background panel pid and logs | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
-| Desktop app (`sideby app install`) | macOS `~/Applications/sideby.app`; Linux `~/.local/share/applications/sideby.desktop`, `~/.local/share/sideby/`, `~/.local/share/icons/hicolor/*/apps/sideby.*` |
+| Desktop app data per account (`sideby desktop`) | macOS `~/Library/Application Support/sideby/<family>/<name>/` |
+| Panel app (`sideby app install`) | macOS `~/Applications/sideby.app`; Linux `~/.local/share/applications/sideby.desktop`, `~/.local/share/sideby/`, `~/.local/share/icons/hicolor/*/apps/sideby.*` |
 
 sideby writes nothing of its own into Host account directories. The one exception is `quota setup claude --yes`, which changes `~/.claude/settings.json`. Account directories you create with `sideby new` belong to the Host.
 
@@ -49,7 +50,7 @@ They solve related problems with different trade-offs; pick the one that fits ho
 
 ```sh
 sideby quota teardown claude                  # first, if you ran quota setup; the status line calls sideby
-sideby ui --stop && sideby app uninstall       # if you use the desktop app
+sideby ui --stop && sideby app uninstall       # if you use the panel app
 npm rm -g sideby
 rm -rf ~/.config/sideby ~/.local/state/sideby  # or your XDG_CONFIG_HOME / XDG_STATE_HOME paths
 ```

@@ -30,7 +30,8 @@ English | [中文](commands.zh-CN.md)
 | `sideby handoff teardown grok` | Remove that file while it is unchanged | 0; 1 if refused or failed |
 | `sideby ui [--port n] [--no-open]` | Local panel; runs until Ctrl+C | — |
 | `sideby ui --background` / `--stop` | Start the panel detached from the terminal (reusing a running one, or replacing it after sideby was upgraded) and open it / stop it | 0; 1 if it could not start or stop |
-| `sideby app install [--url <url>]` | Add a desktop app (macOS, Linux) that opens the panel, or `<url>` | 0; 1 on an unsupported platform or a file it did not create in the way |
+| `sideby desktop <acct>` | Open Claude Desktop or the Codex app as that account, alongside the other accounts; brings its window to the front when it is already open (macOS) | 0; 1 not macOS, no desktop app for that host, an API account, app not installed, or it did not open |
+| `sideby app install [--url <url>]` | Add a panel app (macOS, Linux) that opens the panel, or `<url>` | 0; 1 on an unsupported platform or a file it did not create in the way |
 | `sideby app uninstall` | Remove what `app install` created | 0; 1 if it left a file it did not create |
 | `sideby shell-init zsh\|bash` | Print shell functions for every account and your aliases | 0 |
 | `sideby shell-init [zsh\|bash] --write` | Rewrite the configured `shellInitFile` with that output | 0; 1 if a file could not be written or none is configured |

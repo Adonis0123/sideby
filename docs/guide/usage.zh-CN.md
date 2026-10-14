@@ -110,6 +110,25 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 
 每个账号行会显示它用的模型和 effort，例如 `opus · high`；鼠标悬停能看到来源：sideby 为这个账号设置、工具自己的设置，或最近一次会话。点它（或账号菜单里的 **模型和 effort…**）就能只为这个账号选模型和 effort。sideby 把选择存成这个账号在它自己配置里的启动参数（Claude Code 用 `--model`、`--effort`，Codex 用 `-m` 和 `-c model_reasoning_effort=…`），所以共用同一个 `settings.json` 的账号也能各用各的，工具自己的文件不变。它只影响之后用 sideby 启动的会话（短命令、`sideby run`、`sideby next`、自动交接）；直接敲 `claude` 不受影响。shell 里的 `ANTHROPIC_MODEL`、`CLAUDE_CODE_EFFORT_LEVEL` 和组织下发的设置仍然优先，sideby 看不到它们。在终端里：`sideby model cc002 opus --effort high`（加 `--yes`）；用 `default` 清掉某一项。
 
+## 桌面应用
+
+在 macOS 上，sideby 可以用某个账号打开 Claude Desktop 或 Codex 应用，几个账号的窗口可以同时开着：
+
+```sh
+sideby desktop claude:work     # 也可以用短命令：sideby desktop ccw
+```
+
+在面板里，点账号行里的 **打开桌面应用**（这个账号的窗口开着时显示 **桌面应用已打开**，点一下切到前台）。`sideby list` 多一列 DESKTOP，`--json` 里每个账号多一个 `desktopApp` 字段。
+
+- 主账号照常打开应用。其他订阅账号打开一个新窗口，用这个账号的目录（`CLAUDE_CONFIG_DIR`，Claude Desktop 的 Code 标签页就用这个账号的 Claude Code 设置；`CODEX_HOME`，Codex 应用和终端里的这个账号共用登录）和它自己的数据目录 `~/Library/Application Support/sideby/<家族>/<账号名>/`。
+- 这个账号的窗口已经开着时，sideby 把它切到前台，不会再开第二个。它从不关窗口，也不复制或修改应用。
+- API 账号不能打开桌面应用：应用只认订阅登录。
+- 第一次要在 Claude Desktop 里登录。登录时先关掉其他 Claude Desktop 窗口：浏览器通过 `claude://` 链接把登录结果送回来，可能被别的窗口接走。Codex 一般不用在应用里登录；账号没登录时先运行 `sideby login <账号>`。
+- 登录页可能推荐你的主账号，比如 Codex 应用显示「Welcome back」加主账号邮箱。给其他账号登录时不要点它：点了这个账号就登成了主账号。选「使用其他账号」，Codex 也可以先用 `sideby login <账号>` 登录。
+- 新账号的数据目录建好时，Claude Desktop 的 MCP 设置 `claude_desktop_config.json` 会链接到主账号那份。`sideby doctor` 会检查这个链接，从不替换那里的文件。主账号当时还没有这个文件的话，Claude Desktop 会自己建一份（之后也可能把链接换成文件）；doctor 把它显示为警告，并给出改成共享主账号那份的命令。
+
+已知限制：所有窗口在 Dock 里的图标一样。主账号没开、别的账号的窗口开着时，点 Dock 图标切到的是那个账号的窗口，这时主账号要从 sideby 打开。应用自动更新后会以主账号重启，其他账号要从 sideby 再开一次。用别的数据目录的窗口不能和 Claude in Chrome 配对。sideby 用应用现在认的设置打开它们（`--user-data-dir`，Codex 还有 `CODEX_ELECTRON_USER_DATA_PATH`），以后的版本可能会改。从 Claude Code 或 Codex 会话里打开的应用不会继承那个会话的环境变量。其他平台和宿主暂不支持。
+
 ## 上下文调优
 
 每个宿主在上下文涨过某个阈值后会自动压缩会话。`sideby tune` 用你最近 7 天的本地会话，重放其他阈值，估算哪个最省 token：
