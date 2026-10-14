@@ -800,6 +800,124 @@ describe('next (Handoff, spec §3.13)', () => {
   })
 })
 
+describe('same login (spec §3.21)', () => {
+  const iso = (hours: number) => new Date(Date.now() + hours * 3600_000).toISOString()
+  const cache = (h: FakeHome, name: string, five: number, ageHours: number) =>
+    h.write(
+      `.local/state/sideby/quota/claude/${name}.json`,
+      JSON.stringify({
+        observedAt: iso(-ageHours),
+        windows: [
+          { label: '5h', windowMinutes: 300, usedPercent: five, resetsAt: iso(2) },
+          { label: '7d', windowMinutes: 10080, usedPercent: five, resetsAt: iso(90) },
+        ],
+      }),
+    )
+  const login = (email: string, org?: string) =>
+    JSON.stringify({ oauthAccount: { emailAddress: email, ...(org ? { organizationName: org } : {}) } })
+  /** main and 001 signed in as one login, work as another one. */
+  async function twoDirsOneLogin(h: FakeHome) {
+    await h.write('.claude/settings.json', '{}\n')
+    await h.write('.claude.json', login('me@example.com', 'Acme'), 0o600)
+    await h.write('.claude-001/settings.json', '{}\n')
+    await h.write('.claude-001/.claude.json', login('ME@example.com', 'acme'), 0o600)
+    await h.write('.claude-work/settings.json', '{}\n')
+    await h.write('.claude-work/.claude.json', login('me@example.com', 'Other'), 0o600)
+    await fakeHost(h, 'claude')
+  }
+
+  it('lists the same login on each member, in valid --json and as `= main` in the table', async () => {
+    await withFakeHome(async (h) => {
+      await twoDirsOneLogin(h)
+      const r = await sideby(h, ['list', '--json'])
+      const data = checkSchema('list', r.out) as { accounts: { ref: string; sameLogin?: string[] }[] }
+      const by = Object.fromEntries(data.accounts.map((a) => [a.ref, a.sameLogin]))
+      assert.deepEqual(by, {
+        'claude:main': ['claude:001'],
+        'claude:001': ['claude:main'],
+        'claude:work': undefined,
+      })
+      const human = await sideby(h, ['list'])
+      assert.match(human.out, /claude:001 = main/)
+      assert.match(human.out, /claude:main = 001/)
+      assert.match(human.out, /share one quota/)
+    })
+  })
+
+  it('shows the freshest reading of the login on every member, with where it came from', async () => {
+    await withFakeHome(async (h) => {
+      await twoDirsOneLogin(h)
+      await cache(h, 'main', 25, 6)
+      await cache(h, '001', 64, 0.1)
+      await cache(h, 'work', 10, 0.1)
+      const r = await sideby(h, ['quota', '--json'])
+      const data = checkSchema('quota', r.out) as {
+        accounts: { ref: string; quota: { windows?: { usedPercent: number }[]; from?: string } }[]
+      }
+      const by = Object.fromEntries(data.accounts.map((a) => [a.ref, a.quota]))
+      assert.equal(by['claude:main']?.from, 'claude:001')
+      assert.equal(by['claude:main']?.windows?.[0]?.usedPercent, 64)
+      assert.equal(by['claude:001']?.from, undefined)
+      assert.equal(by['claude:work']?.from, undefined)
+      assert.equal(by['claude:work']?.windows?.[0]?.usedPercent, 10)
+      const human = await sideby(h, ['quota'])
+      assert.match(human.out, /read from claude:001 \(same login\)/)
+    })
+  })
+
+  it('next from 001 never picks main, which shares its quota', async () => {
+    await withFakeHome(async (h) => {
+      await twoDirsOneLogin(h)
+      await cache(h, 'main', 25, 6)
+      await cache(h, '001', 30, 0.1)
+      await cache(h, 'work', 50, 0.1)
+      const plain = checkSchema('next', (await sideby(h, ['next', 'claude', '--json'])).out) as {
+        pick: string
+      }
+      assert.equal(plain.pick, 'claude:main', 'without a current account main wins the tie of one quota')
+      const j = await sideby(h, ['next', 'claude', '--json'], { SIDEBY_ACCOUNT: 'claude:001' })
+      const plan = checkSchema('next', j.out) as {
+        from: string
+        pick: string
+        accounts: { ref: string; sameLoginAs?: string; quotaFrom?: string }[]
+      }
+      assert.equal(plan.from, 'claude:001')
+      assert.notEqual(plan.pick, 'claude:main')
+      const main = plan.accounts.find((a) => a.ref === 'claude:main')
+      assert.equal(main?.sameLoginAs, 'claude:001')
+      assert.equal(main?.quotaFrom, 'claude:001')
+      const dry = await sideby(h, ['next', 'claude', '--dry-run'], { SIDEBY_ACCOUNT: 'claude:001' })
+      assert.match(dry.out, /same login as claude:001, which shares its quota; skipped/)
+      // Another Family's current Account does not count.
+      const other = await sideby(h, ['next', 'claude', '--json'], { SIDEBY_ACCOUNT: 'codex:main' })
+      assert.equal((JSON.parse(other.out) as { from?: string }).from, undefined)
+    })
+  })
+
+  it('does not group codex accounts with the same email (v1)', async () => {
+    await withFakeHome(async (h) => {
+      await codexMain(h)
+      await fakeHost(h, 'codex')
+      assert.equal((await sideby(h, ['new', 'codex', 'team'])).code, 0)
+      const claims = Buffer.from(JSON.stringify({ email: 'codex@example.com' })).toString('base64url')
+      for (const dir of ['.codex', '.codex-team'])
+        await h.write(
+          `${dir}/auth.json`,
+          JSON.stringify({ tokens: { id_token: `e30.${claims}.fake-sig` } }),
+          0o600,
+        )
+      const data = checkSchema('list', (await sideby(h, ['list', '--json'])).out) as {
+        accounts: { identity?: { email?: string }; sameLogin?: string[] }[]
+      }
+      assert.equal(data.accounts.length, 2)
+      for (const a of data.accounts) {
+        assert.equal(a.identity?.email, 'codex@example.com')
+        assert.equal(a.sameLogin, undefined)
+      }
+    })
+  })
+})
+
 describe('confirmation exit code', () => {
   it('quota setup without --yes shows the change and exits 10, changing nothing', async () => {
     await withFakeHome(async (h) => {

@@ -15,7 +15,7 @@ Use this when the user says an account hit its 5-hour or weekly limit ("usage li
    | `full` | A live window is at 85% or more; `resetsAt` is when it is usable again | No |
    | `logged-out` | Needs `sideby login <ref>` | No |
 
-   Each entry's `observedAt` says when its quota was recorded. If `hasQuota` is `false`, no account has quota data: the pick is only a guess, so say so and suggest turning quota on (see the routing table in SKILL.md) or letting the user choose.
+   Each entry's `observedAt` says when its quota was recorded (`quotaFrom` when it was read from another account of the same login). An entry with `sameLoginAs` is signed in as the same login as the account you run in: it shares that quota and is never picked. If `hasQuota` is `false`, no account has quota data: the pick is only a guess, so say so and suggest turning quota on (see the routing table in SKILL.md) or letting the user choose.
 3. Give the user the command to run in their own terminal: `sideby next <family>` (starts the pick) or `sideby run <pick>`. Host arguments go after `--`. Do not run it yourself.
 4. Offer a handoff note: the new session starts empty, because each account keeps its own sessions. Write a short note the user can paste into it: the goal, what is done, what is in progress, the files involved, and the next step.
 

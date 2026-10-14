@@ -137,6 +137,14 @@ describe('page logic', () => {
     )
   })
 
+  it('warns about a shared Quota once per Same Login: only where it was read, not where it is borrowed', () => {
+    const own = acct('001', { quota: quota(64), sameLogin: ['claude:main'] })
+    const borrowed = acct('main', { quota: { ...quota(64)!, from: 'claude:001' }, sameLogin: ['claude:001'] })
+    assert.deepEqual(attentionReasons(own, null, NOW, 60), ['quota-high'])
+    assert.deepEqual(attentionReasons(borrowed, null, NOW, 60), [])
+    assert.equal(attentionWhy(borrowed, null, NOW, 60), null)
+  })
+
   it('sorts by pressure, name or last use, the Main Account leading ties', () => {
     const list = [
       acct('b', { quota: quota(10, 90) }),

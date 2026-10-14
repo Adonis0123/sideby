@@ -152,7 +152,9 @@ describe('account identity', () => {
       assert.equal((await rt.status(work)).identity?.email, 'work@example.com')
       const before = { ...identityMemoStats }
       assert.equal((await rt.status(work)).identity?.email, 'work@example.com')
-      assert.equal(identityMemoStats.hits - before.hits, 1)
+      // status() also reads the other Claude Accounts' identities for Same Login (spec §3.21): all from the cache.
+      assert.equal(identityMemoStats.misses - before.misses, 0)
+      assert.ok(identityMemoStats.hits - before.hits >= 1)
       await h.write(
         '.claude-work/.claude.json',
         JSON.stringify({ oauthAccount: { emailAddress: 'other-work@example.com' } }),

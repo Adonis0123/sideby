@@ -159,4 +159,33 @@ describe('planHandoff', () => {
       'claude:main',
     )
   })
+
+  it("never picks an Account of the current Account's Same Login, and marks it (spec §3.21)", () => {
+    const shared = quota([30, 2])
+    const main = cand('main', shared, { sameLogin: ['claude:001'] })
+    const one = cand('001', shared, { sameLogin: ['claude:main'] })
+    const work = cand('work', quota([50, 2]))
+    const plan = planHandoff('claude', [main, one, work], NOW, { from: 'claude:001' })
+    assert.equal(plan.from, 'claude:001')
+    assert.equal(plan.accounts.find((e) => e.ref === 'claude:main')?.sameLoginAs, 'claude:001')
+    assert.equal(plan.accounts.at(-1)?.ref, 'claude:main', 'it cannot be picked, so it comes last')
+    assert.equal(plan.pick, 'claude:001', 'main would win the tie, but it shares the quota of 001')
+    // Without a current Account nothing is skipped.
+    assert.equal(planHandoff('claude', [main, one, work], NOW).pick, 'claude:main')
+    // Only the same login left: the current one itself is full, so nothing can be picked.
+    const full = quota([95, 2])
+    const p2 = planHandoff(
+      'claude',
+      [cand('main', full, { sameLogin: ['claude:001'] }), cand('001', full, { sameLogin: ['claude:main'] })],
+      NOW,
+      { from: 'claude:001' },
+    )
+    assert.equal(p2.pick, null)
+  })
+
+  it('reports where a shared Quota was read from', () => {
+    const borrowed = { ...quota([30, 2]), from: 'claude:001' } as QuotaResult
+    const plan = planHandoff('claude', [cand('main', borrowed)], NOW)
+    assert.equal(plan.accounts[0]?.quotaFrom, 'claude:001')
+  })
 })

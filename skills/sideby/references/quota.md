@@ -11,4 +11,6 @@ Accounts with their own (not linked) `settings.json` show quota `not-enabled` un
 
 After setup, each account shows quota once it has had one session with a reply. Codex quota needs no setup: sideby reads it from Codex's own session files.
 
+Two Claude accounts signed in as the same login (same email and organization; `sameLogin` in `sideby list --json`) share one quota: both show the freshest reading, and `quota.from` names the account it was read from. Explain that to the user rather than calling the numbers wrong; usage stays per account, and sideby never merges or deletes either directory.
+
 Usage (7-day tokens) is read by sideby itself from Claude Code and Codex local records; no ccusage is needed. Grok and pi have no quota or usage source.

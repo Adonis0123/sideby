@@ -10,6 +10,7 @@ Glossary for sideby. Defines words only. Decisions live in `docs/adr/`, designs 
 - **Main Account**: the Host's default directory (for example `~/.claude`). It is the source every Shared Item points back to.
 - **Subscription Account**: an Account that logs in with the Host's own sign-in (OAuth). Its credentials stay where the Host puts them.
 - **Identity**: who a Subscription Account is signed in as (email, and for Claude Code the organization), read from identity fields of the Host's login file only, never from a token (ADR-0003). The Panel can mask it.
+- **Same Login**: two or more Subscription Accounts of one Family that are signed in as the same Identity (the same email and organization). They are separate directories with separate sessions, but the vendor counts one Quota for all of them. The Panel says *same login*.
 - **API Account**: an Account whose directory holds a Secret File. It talks to an API endpoint instead of a subscription. Exception: a Family may keep a Secret File in every Account only to provide keys (pi does); there the file does not make an Account an API Account.
 - **Secret File**: `proxy.env` inside an API Account, readable only by its owner. Its variables exist only in the launched Host process.
 

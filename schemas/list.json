@@ -147,6 +147,13 @@
                 },
                 "description": "Who the account is signed in as, from the host's login file: identity fields only, never a token (ADR-0003)."
               },
+              "sameLogin": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The other accounts signed in as the same login (same family, email and organization), which share one quota (spec §3.21). Absent when there are none."
+              },
               "problems": {
                 "type": "array",
                 "items": {

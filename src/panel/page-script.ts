@@ -862,7 +862,9 @@ const MAIN = String.raw`
     if (q.status !== 'ok') return h('div', { class: 'quota' }, quotaNote(a, q))
     const stale = isStale(q.observedAt, now)
     const wins = q.windows || []
-    return h('div', { class: 'quota' + (stale ? ' is-stale' : ''), title: stale ? null : t('quota.dataFrom', { ago: ago(q.observedAt) }) },
+    // A reading borrowed from another Account of the same login says where it came from (spec §3.21).
+    const from = q.from ? t('quota.sharedFrom', { name: refName(q.from), ago: ago(q.observedAt) }) : null
+    return h('div', { class: 'quota' + (stale ? ' is-stale' : ''), title: from || (stale ? null : t('quota.dataFrom', { ago: ago(q.observedAt) })) },
       wins.length ? cols.map((c) => {
         const w = wins.find((x) => x.label === c)
         return w ? meter(w, now, stale, q.observedAt) : noMeter(c)
@@ -909,6 +911,9 @@ const MAIN = String.raw`
         return h('span', { class: 'tag tag-alias', title: args ? t('acct.aliasArgs', { args: args.join(' ') }) : t('acct.alias') }, x)
       }),
       a.kind === 'api' ? h('span', { class: 'tag tag-warn', title: t('tip.api.body') }, t('acct.api')) : null,
+      a.sameLogin && a.sameLogin.length
+        ? h('span', { class: 'tag', title: t('acct.sameLoginHint', { names: a.sameLogin.map(refName).join(', ') }) }, t('acct.sameLogin', { names: a.sameLogin.map(refName).join(', ') }))
+        : null,
       isNext(a)
         ? h('button', { class: 'tag tag-ok tag-btn', type: 'button', title: t('acct.nextHint', { family: a.family }), 'aria-label': t('acct.nextLabel', { ref: a.ref, family: a.family }), onclick: () => copyText('sideby next ' + a.family) }, t('acct.next'))
         : null,
@@ -917,6 +922,8 @@ const MAIN = String.raw`
         : null,
       a.hostInstalled === false ? h('span', { class: 'tag tag-warn' }, t('acct.notInstalled')) : null)
   }
+  // The name part of a ref (claude:001 gives 001), as rows show other Accounts of the same Family.
+  function refName(ref) { return String(ref).slice(String(ref).indexOf(':') + 1) }
   // Who the account is signed in as, under its name; masked while "Hide emails" is on.
   function emailLine(a) {
     const id = a.identity

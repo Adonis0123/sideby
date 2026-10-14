@@ -231,7 +231,18 @@ export type QuotaUnavailableReason =
   | 'api-account'
 
 export type QuotaResult =
-  | { status: 'ok'; windows: QuotaWindow[]; observedAt: string; source: string; plan?: string }
+  | {
+      status: 'ok'
+      windows: QuotaWindow[]
+      observedAt: string
+      source: string
+      plan?: string
+      /**
+       * Set by sideby, never by a Family's reader: the Account this reading was taken from, when it is another
+       * Account signed in as the same login (spec §3.21). `observedAt` is that Account's time.
+       */
+      from?: string
+    }
   | { status: 'unavailable'; reason: QuotaUnavailableReason; detail?: string }
 
 export interface TokenTotals {

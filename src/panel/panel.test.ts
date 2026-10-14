@@ -8,8 +8,15 @@ import { describe, it } from 'node:test'
 import { asBuiltin, demoFamily, demoPlugin, seedDemoMain } from '../../testing/demo.ts'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
 import { packageVersion } from '../core/version.ts'
+import type { Runtime } from '../runtime.ts'
 import { createRuntime } from '../runtime.ts'
-import { createPanelHandler, MAX_BODY_BYTES, type PanelState } from './handler.ts'
+import {
+  createPanelHandler,
+  handoffByFamily,
+  MAX_BODY_BYTES,
+  type PanelAccount,
+  type PanelState,
+} from './handler.ts'
 import { jsonForScript, pageStyles, renderPage } from './page.ts'
 import { startPanelServer } from './server.ts'
 import { resolveTheme } from './theme.ts'
@@ -759,6 +766,51 @@ describe('panel handoff (spec §3.13)', () => {
   })
 })
 
+describe('same login in the Panel (spec §3.21)', () => {
+  it('marks each member and shows the freshest quota of the login, borrowed with where it came from', async () => {
+    await withFakeHome(async (h) => {
+      const login = JSON.stringify({ oauthAccount: { emailAddress: 'me@example.com' } })
+      await h.write('.claude/settings.json', '{}\n')
+      await h.write('.claude.json', login, 0o600)
+      await h.write('.claude-001/settings.json', '{}\n')
+      await h.write('.claude-001/.claude.json', login, 0o600)
+      const iso = (hours: number) => new Date(Date.now() + hours * 3600_000).toISOString()
+      const cache = (name: string, pct: number, age: number) =>
+        h.write(
+          `.local/state/sideby/quota/claude/${name}.json`,
+          JSON.stringify({
+            observedAt: iso(-age),
+            windows: [{ label: '5h', windowMinutes: 300, usedPercent: pct, resetsAt: iso(2) }],
+          }),
+        )
+      await cache('main', 25, 6)
+      await cache('001', 64, 0.1)
+      const { claudePlugin } = await import('../families/claude/index.ts')
+      const runtime = () => createRuntime({ env: h.env, builtins: [asBuiltin(claudePlugin)] })
+      const { server, port } = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      try {
+        const state = JSON.parse(
+          (await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text,
+        ) as PanelState
+        const by = Object.fromEntries(state.accounts.map((a) => [a.ref, a]))
+        assert.deepEqual(by['claude:main']?.sameLogin, ['claude:001'])
+        assert.deepEqual(by['claude:001']?.sameLogin, ['claude:main'])
+        const main = by['claude:main']?.quota
+        assert.equal(main?.status === 'ok' && main.from, 'claude:001')
+        assert.equal(main?.status === 'ok' && main.windows[0]?.usedPercent, 64)
+        const own = by['claude:001']?.quota
+        assert.equal(own?.status === 'ok' && own.from, undefined)
+        const page = (await request(port, 'GET', '/', { host: `127.0.0.1:${port}` })).text
+        assert.ok(page.includes('acct.sameLogin') || page.includes('Same login as'), 'the page knows the tag')
+      } finally {
+        await close(server)
+      }
+    })
+  })
+})
+
 describe('panel lang', () => {
   it('serves a host lang in the page boot data, and auto when none is given', async () => {
     await withFakeHome(async (h) => {
@@ -1338,5 +1390,42 @@ describe('panel: desktop apps (spec §3.20)', () => {
         await close(ro.server)
       }
     })
+  })
+})
+
+describe('panel next tag and Same Login (spec §3.21)', () => {
+  const rt = {
+    families: new Map([['claude', { readQuota: async () => ({ status: 'ok', windows: [] }) }]]),
+  } as unknown as Runtime
+  const now = new Date('2026-10-14T10:00:00Z')
+  const quota = (used: number) => ({
+    status: 'ok' as const,
+    observedAt: '2026-10-14T09:59:00Z',
+    windows: [{ label: '5h', usedPercent: used, resetsAt: '2026-10-14T12:00:00Z' }],
+  })
+  const acct = (name: string, used: number, sameLogin?: string[]) =>
+    ({
+      ref: `claude:${name}`,
+      name,
+      family: 'claude',
+      isMain: name === 'main',
+      kind: 'subscription',
+      login: 'logged-in',
+      quota: quota(used),
+      ...(sameLogin ? { sameLogin } : {}),
+    }) as unknown as PanelAccount
+
+  it('tags no next account when the only two subscriptions are one login', () => {
+    const out = handoffByFamily(rt, [acct('main', 10, ['claude:001']), acct('001', 10, ['claude:main'])], now)
+    assert.deepEqual(out, {})
+  })
+
+  it('still tags one when another login exists', () => {
+    const out = handoffByFamily(
+      rt,
+      [acct('main', 80, ['claude:001']), acct('001', 80, ['claude:main']), acct('002', 10)],
+      now,
+    )
+    assert.equal(out.claude, 'claude:002')
   })
 })

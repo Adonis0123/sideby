@@ -23,7 +23,11 @@ export interface LogicAccount {
     windows?: { label: string; windowMinutes: number; usedPercent: number; resetsAt: string }[]
     observedAt?: string
     plan?: string
+    /** The Account the reading came from, when it is another Account of the same login (spec §3.21). */
+    from?: string
   }
+  /** The other Accounts of its Same Login (spec §3.21). */
+  sameLogin?: string[]
   usage?: {
     status: string
     inputTokens?: number
@@ -95,7 +99,8 @@ export function quotaPressure(a: LogicAccount, now: number): number {
 
 /**
  * Why an Account needs a look, most serious first: `error`, `health-fail`, `signed-out`, `not-installed`,
- * `quota-high` (a live window at or over the warning level), `health-warn`. Empty when all is well.
+ * `quota-high` (a live window at or over the warning level), `health-warn`. Empty when all is well. A Quota read from
+ * another Account of the same login (`quota.from`, spec §3.21) is that Account's warning, so it counts once per group.
  */
 export function attentionReasons(
   a: LogicAccount,
@@ -109,7 +114,7 @@ export function attentionReasons(
   if (a.login === 'logged-out' && a.kind !== 'api') out.push('signed-out')
   if (a.hostInstalled === false) out.push('not-installed')
   const q = a.quota
-  if (q && q.status === 'ok' && q.windows)
+  if (q && q.status === 'ok' && q.windows && !q.from)
     for (const w of q.windows) {
       const reset = Date.parse(w.resetsAt)
       if (Number.isFinite(reset) && reset <= now) continue

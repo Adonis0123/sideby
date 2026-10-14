@@ -14,16 +14,29 @@ export interface SelectCandidate {
   login: LoginState | 'not-needed'
   quota: QuotaResult
   identity?: AccountIdentity
+  /** The other Accounts of its Same Login (spec §3.21); they share its Quota. */
+  sameLogin?: readonly string[]
   /** Whether the Account's Host is on PATH. */
   installed: boolean
   /** Whether its Family can start as the next Account (has `handoff`, and the run would be eligible). */
   receive: boolean
 }
 
+/** An Account the Handoff Order lists that was left out, and why (spec §3.21). */
+export interface SkippedAccount {
+  ref: string
+  reason: string
+}
+
 export type HandoffDecision =
-  | { kind: 'pick'; ref: string }
+  | { kind: 'pick'; ref: string; skipped?: SkippedAccount[] }
   | { kind: 'wait'; until: string }
-  | { kind: 'none'; reason: string; earliestReset?: { ref: string; at: string } }
+  | {
+      kind: 'none'
+      reason: string
+      earliestReset?: { ref: string; at: string }
+      skipped?: SkippedAccount[]
+    }
 
 const domain = (email: string) => email.slice(email.lastIndexOf('@') + 1).toLowerCase()
 
@@ -112,8 +125,15 @@ export function selectNext(input: {
     list = [...ranked, ...input.candidates.filter((c) => c.family !== origin.family && c.kind === 'api')]
   }
 
+  // The same login shares the origin's Quota, so taking over there gains nothing (spec §3.21).
+  const sameLogin = new Set(origin.sameLogin ?? [])
+  const skipped: SkippedAccount[] = list
+    .filter((c) => sameLogin.has(c.ref))
+    .map((c) => ({ ref: c.ref, reason: `same login as ${origin.ref}, so it shares the same quota` }))
+  const withSkipped = skipped.length ? { skipped } : {}
   const eligible = list.filter(
     (c) =>
+      !sameLogin.has(c.ref) &&
       !used.has(c.ref) &&
       c.installed &&
       c.receive &&
@@ -125,7 +145,7 @@ export function selectNext(input: {
   const first =
     states.find(({ e }) => e.state === 'ready' || e.state === 'unknown') ??
     states.find(({ e }) => e.state === 'api')
-  if (first) return { kind: 'pick', ref: first.c.ref }
+  if (first) return { kind: 'pick', ref: first.c.ref, ...withSkipped }
 
   const full = states
     .filter(({ e }) => e.state === 'full' && e.resetsAt)
@@ -136,5 +156,6 @@ export function selectNext(input: {
       ? 'every account that may take over is full or signed out'
       : 'no account may take over',
     ...(full ? { earliestReset: { ref: full.c.ref, at: full.e.resetsAt! } } : {}),
+    ...withSkipped,
   }
 }

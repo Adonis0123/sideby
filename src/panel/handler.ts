@@ -128,7 +128,10 @@ export function handoffByFamily(
   const out: Record<string, string> = {}
   for (const [id, f] of rt.families) {
     const list = accounts.filter((a) => a.family === id)
-    if (!f.readQuota || list.filter((a) => a.kind === 'subscription').length < 2) continue
+    // Count logins, not directories: a Same Login group (spec §3.21) is one Quota, so it alone is no alternative.
+    const subs = list.filter((a) => a.kind === 'subscription')
+    const logins = subs.filter((a, i) => !subs.slice(0, i).some((b) => a.sameLogin?.includes(b.ref))).length
+    if (!f.readQuota || logins < 2) continue
     const plan = planHandoff(
       id,
       list.map((a) => ({

@@ -98,6 +98,17 @@ export async function handoffStatus(rt: Runtime): Promise<HandoffStatus> {
     }
     if (unknown.length)
       notes.push(`order names ${unknown.join(', ')}, which sideby cannot find; they are skipped`)
+    // Same Login (spec §3.21): one note per group, so a skipped account in the order is no surprise.
+    const seen = new Set<string>()
+    for (const a of accounts.filter((x) => x.family === f.id)) {
+      if (seen.has(a.ref)) continue
+      const peers = await rt.sameLogin(a)
+      if (!peers.length) continue
+      for (const r of [a.ref, ...peers]) seen.add(r)
+      notes.push(
+        `${[a.ref, ...peers].join(', ')} are signed in as the same login and share one quota; a handoff from one never goes to another`,
+      )
+    }
     families.push({
       family: f.id,
       starts,

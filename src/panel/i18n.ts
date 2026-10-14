@@ -155,6 +155,9 @@ const en = {
   'acct.nextHint':
     'The account to move on to when this family runs low: most quota left. Click to copy `sideby next {family}`.',
   'acct.nextLabel': '{ref} is next: copy `sideby next {family}`',
+  'acct.sameLogin': 'Same login as {names}',
+  'acct.sameLoginHint':
+    'Signed in as the same login as {names}. The vendor counts one quota for all of them, so they show the same quota and a handoff never moves between them.',
   'acct.notInstalled': 'Tool missing',
   'acct.readError': 'Could not read this account.',
   'acct.installHost': '{host} is not installed on this machine. {link}',
@@ -170,6 +173,7 @@ const en = {
   'quota.resetNoData': 'Window reset · no new data since {date}',
   'quota.dataFrom': 'Data from {ago}',
   'quota.asOf': 'As of {ago}',
+  'quota.sharedFrom': 'Same login as {name}; quota read from {name}, {ago}',
   'quota.noWindows': 'No quota windows reported.',
   'quota.off': 'Quota not on',
   'quota.turnOnFamily': 'Turn on quota',
@@ -657,6 +661,9 @@ const zh: Record<MessageKey, string> = {
   'acct.next': '下一个',
   'acct.nextHint': '这个家族额度用完时换到这里：剩余额度最多。点击复制 `sideby next {family}`。',
   'acct.nextLabel': '{ref} 是下一个：复制 `sideby next {family}`',
+  'acct.sameLogin': '与 {names} 同一登录',
+  'acct.sameLoginHint':
+    '与 {names} 用同一个身份登录。供应商只算一份额度，所以它们显示同一份额度，交接也不会在它们之间进行。',
   'acct.notInstalled': '未安装工具',
   'acct.readError': '无法读取这个账号。',
   'acct.installHost': '本机没有安装 {host}。{link}',
@@ -672,6 +679,7 @@ const zh: Record<MessageKey, string> = {
   'quota.resetNoData': '已重置，{date}后无新数据',
   'quota.dataFrom': '数据来自 {ago}',
   'quota.asOf': '截至 {ago}',
+  'quota.sharedFrom': '与 {name} 同一登录；额度读自 {name}，{ago}',
   'quota.noWindows': '没有额度窗口数据。',
   'quota.off': '额度未开启',
   'quota.turnOnFamily': '开启额度显示',

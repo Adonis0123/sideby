@@ -17,6 +17,10 @@
     "family": {
       "type": "string"
     },
+    "from": {
+      "type": "string",
+      "description": "The account `sideby next` runs in (SIDEBY_ACCOUNT, set by sideby for the sessions it starts), when it belongs to this family."
+    },
     "pick": {
       "anyOf": [
         {
@@ -97,6 +101,14 @@
           "observedAt": {
             "type": "string",
             "description": "When the account's quota was recorded (its last session)."
+          },
+          "quotaFrom": {
+            "type": "string",
+            "description": "The account the quota was read from, when it is another account of the same login."
+          },
+          "sameLoginAs": {
+            "type": "string",
+            "description": "The current account (`from`), when this one is signed in as the same login: it shares that quota and is never picked."
           }
         }
       },

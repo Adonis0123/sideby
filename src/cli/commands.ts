@@ -82,8 +82,11 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
       io.out(`Install a host first: ${families.map((f) => `${f.title} (${f.installUrl})`).join(', ')}`)
     else io.out(`Run ${installed.map((f) => f.bin).join(' or ')} once, then \`sideby new <family> <name>\`.`)
   } else {
+    // `= main`: the other Accounts of its Same Login, which share its Quota (spec §3.21).
+    const sameMark = (refs: readonly string[] | undefined) =>
+      refs?.length ? ` ${c.dim(`= ${refs.map((r) => r.slice(r.indexOf(':') + 1)).join(', ')}`)}` : ''
     const rows = statuses.map((s) => [
-      c.bold(s.ref),
+      `${c.bold(s.ref)}${sameMark(s.sameLogin)}`,
       s.isMain ? 'main' : s.kind === 'api' ? c.cyan('api') : 'sub',
       s.login === 'logged-in'
         ? c.green('✓')
@@ -100,6 +103,8 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
     io.out(
       table(rows, ['ACCOUNT', 'TYPE', 'LOGIN', 'EMAIL', 'MODEL', 'DIR', ...(hasDesktop ? ['DESKTOP'] : [])]),
     )
+    if (statuses.some((s) => s.sameLogin?.length))
+      io.out(c.dim('\n= <account>: signed in as the same login as that account, so they share one quota.'))
     io.out(c.dim('\nsideby run <account>  ·  sideby new <family> <name>  ·  sideby quota  ·  sideby ui'))
   }
   for (const s of statuses) for (const p of s.problems ?? []) io.err(c.yellow(`${s.ref}: ${p}`))
@@ -237,6 +242,7 @@ export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
   }
   const now = rt.readContext().now
   const note = (e: (typeof plan.accounts)[number]): string => {
+    if (e.sameLoginAs) return `same login as ${e.sameLoginAs}, which shares its quota; skipped`
     if (e.state === 'ready') return `fullest window ${Math.round(e.pressure ?? 0)}%`
     if (e.state === 'unknown') return 'no quota data yet'
     if (e.state === 'api')
@@ -262,11 +268,13 @@ export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
     const why = plan.earliestReset
       ? `every ${family} account is at its limit; ${plan.earliestReset.ref} is back at ${clock(plan.earliestReset.at, now)}`
       : `no ${family} account can be used now`
+    const same = plan.accounts.filter((e) => e.sameLoginAs).map((e) => e.ref)
+    const sameNote = same.length ? `; ${same.join(', ')} share the quota of ${plan.from}` : ''
     const next = [
       ...(out.length ? [`sign in with \`${out.join('` or `')}\``] : []),
       ...(apiLeft ? ['add --include-api to use an API account'] : []),
     ]
-    io.err(c.yellow(`\n${why}${next.length ? `; ${next.join(', or ')}` : ''}.`))
+    io.err(c.yellow(`\n${why}${sameNote}${next.length ? `; ${next.join(', or ')}` : ''}.`))
     return 1
   }
   const picked = plan.accounts.find((e) => e.ref === plan.pick)!
@@ -590,7 +598,11 @@ export async function cmdQuota(a: ParsedArgs, io: Io): Promise<number> {
   const now = new Date()
   io.out(
     table(
-      rows.map((r) => [c.bold(r.ref), quotaText(r.quota, now), usageText(r.usage)]),
+      rows.map((r) => [
+        c.bold(r.ref),
+        `${quotaText(r.quota, now)}${r.quota.status === 'ok' && r.quota.from ? c.dim(` read from ${r.quota.from} (same login)`) : ''}`,
+        usageText(r.usage),
+      ]),
       ['ACCOUNT', 'QUOTA', `USAGE (${USAGE_DAYS}d)`],
     ),
   )

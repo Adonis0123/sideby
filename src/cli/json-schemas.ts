@@ -46,6 +46,12 @@ const AccountStatus = Type.Intersect([
         },
       ),
     ),
+    sameLogin: Type.Optional(
+      Type.Array(Str, {
+        description:
+          'The other accounts signed in as the same login (same family, email and organization), which share one quota (spec §3.21). Absent when there are none.',
+      }),
+    ),
     problems: Type.Optional(Type.Array(Str)),
     desktopApp: Type.Optional(
       Type.Object(
@@ -138,6 +144,12 @@ const Quota = Type.Union([
     observedAt: Str,
     source: Str,
     plan: Type.Optional(Str),
+    from: Type.Optional(
+      Type.String({
+        description:
+          'The account this reading was taken from, when it is another account of the same login (spec §3.21); observedAt is its time.',
+      }),
+    ),
   }),
   Type.Object({ status: Type.Literal('unavailable'), reason: Str, detail: Type.Optional(Str) }),
 ])
@@ -337,6 +349,12 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     {
       schemaVersion: Version,
       family: Str,
+      from: Type.Optional(
+        Type.String({
+          description:
+            'The account `sideby next` runs in (SIDEBY_ACCOUNT, set by sideby for the sessions it starts), when it belongs to this family.',
+        }),
+      ),
       pick: Type.Union([Str, Type.Null()], {
         description: 'The recommended account; null when none can be used now (exit code 1).',
       }),
@@ -365,6 +383,18 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
           ),
           observedAt: Type.Optional(
             Type.String({ description: "When the account's quota was recorded (its last session)." }),
+          ),
+          quotaFrom: Type.Optional(
+            Type.String({
+              description:
+                'The account the quota was read from, when it is another account of the same login.',
+            }),
+          ),
+          sameLoginAs: Type.Optional(
+            Type.String({
+              description:
+                'The current account (`from`), when this one is signed in as the same login: it shares that quota and is never picked.',
+            }),
           ),
         }),
         { description: 'Every account of the family, best first.' },

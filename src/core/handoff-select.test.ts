@@ -231,4 +231,52 @@ describe('sameOrganization', () => {
     assert.equal(sameOrganization({ email: 'a@work.dev' }, undefined), true)
     assert.equal(sameOrganization(undefined, undefined), true)
   })
+
+  it('never hands over to the same login, and says so when the Handoff Order names it (spec §3.21)', () => {
+    const from = acct('claude:001', { quota: quota(96, 300), sameLogin: ['claude:main'] })
+    const main = acct('claude:main', { quota: quota(96, 300), sameLogin: ['claude:001'] })
+    const s = settings({
+      auto: true,
+      sameFamily: true,
+      families: { claude: { policy: 'order', order: ['claude:main', 'claude:002'] } },
+    })
+    const d = selectNext({
+      origin: from,
+      candidates: [from, main, acct('claude:002')],
+      settings: s,
+      aliases: {},
+      used: [],
+      now: NOW,
+    })
+    assert.equal(d.kind, 'pick')
+    assert.equal(d.kind === 'pick' && d.ref, 'claude:002')
+    assert.deepEqual(d.kind === 'pick' && d.skipped, [
+      { ref: 'claude:main', reason: 'same login as claude:001, so it shares the same quota' },
+    ])
+    // Only the same login in the order: no account may take over, and the reason names it.
+    const only = selectNext({
+      origin: from,
+      candidates: [from, { ...main, quota: quota(10) }],
+      settings: settings({
+        auto: true,
+        sameFamily: true,
+        families: { claude: { policy: 'order', order: ['claude:main'] } },
+      }),
+      aliases: {},
+      used: [],
+      now: NOW,
+    })
+    assert.equal(only.kind, 'none')
+    assert.equal(only.kind === 'none' && only.skipped?.[0]?.ref, 'claude:main')
+    // By pressure as well: main has room on paper, but it is the same quota.
+    const byPressure = selectNext({
+      origin: from,
+      candidates: [from, { ...main, quota: quota(10) }, acct('claude:002', { quota: quota(40) })],
+      settings: settings({ auto: true, sameFamily: true }),
+      aliases: {},
+      used: [],
+      now: NOW,
+    })
+    assert.equal(byPressure.kind === 'pick' && byPressure.ref, 'claude:002')
+  })
 })

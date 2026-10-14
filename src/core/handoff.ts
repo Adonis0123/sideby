@@ -12,6 +12,8 @@ export interface HandoffCandidate {
   kind: Account['kind']
   login: LoginState | 'not-needed'
   quota: QuotaResult
+  /** The other Accounts of its Same Login (spec §3.21). */
+  sameLogin?: readonly string[]
 }
 
 export interface HandoffEntry {
@@ -24,10 +26,19 @@ export interface HandoffEntry {
   resetsAt?: string
   /** When the Quota was recorded; it is only as fresh as the Account's last session. */
   observedAt?: string
+  /** The Account the Quota was read from, when it is another Account of the same login (spec §3.21). */
+  quotaFrom?: string
+  /**
+   * The current Account, when this one is signed in as the same login (spec §3.21): it shares that Quota, so it is
+   * never picked.
+   */
+  sameLoginAs?: string
 }
 
 export interface HandoffPlan {
   family: string
+  /** The Account this process runs in (`SIDEBY_ACCOUNT`), when it belongs to the Family. */
+  from?: string
   /** The recommended Account, or null when none can be used now. */
   pick: string | null
   /** Every Account, best first; the ones that cannot be picked come last. */
@@ -52,6 +63,7 @@ function entry(c: HandoffCandidate, now: Date): HandoffEntry {
     kind: c.kind,
     pressure,
     ...(c.quota.status === 'ok' ? { observedAt: c.quota.observedAt } : {}),
+    ...(c.quota.status === 'ok' && c.quota.from ? { quotaFrom: c.quota.from } : {}),
   }
   if (c.kind === 'api') return { ...base, state: 'api' }
   if (c.login === 'logged-out') return { ...base, state: 'logged-out' }
@@ -72,8 +84,9 @@ export function planHandoff(
   family: string,
   candidates: readonly HandoffCandidate[],
   now: Date,
-  opts: { includeApi?: boolean } = {},
+  opts: { includeApi?: boolean; from?: string } = {},
 ): HandoffPlan {
+  const current = opts.from ? candidates.find((c) => c.ref === opts.from) : undefined
   const byRef = new Map(candidates.map((c) => [c.ref, c]))
   const tie = (a: HandoffEntry, b: HandoffEntry) => {
     const x = byRef.get(a.ref)!
@@ -81,19 +94,25 @@ export function planHandoff(
     return Number(y.isMain) - Number(x.isMain) || x.name.localeCompare(y.name, undefined, { numeric: true })
   }
   const accounts = candidates
-    .map((c) => entry(c, now))
+    .map((c) => {
+      const e = entry(c, now)
+      return current?.sameLogin?.includes(c.ref) ? { ...e, sameLoginAs: current.ref } : e
+    })
     .sort(
       (a, b) =>
+        // A Same Login partner of the current Account can never be picked, so it goes with the others that cannot.
+        Number(Boolean(a.sameLoginAs)) - Number(Boolean(b.sameLoginAs)) ||
         ORDER[a.state] - ORDER[b.state] ||
         (a.state === 'ready' ? a.pressure! - b.pressure! : 0) ||
         (a.state === 'full' ? resetTime(a) - resetTime(b) || 0 : 0) ||
         tie(a, b),
     )
   const usable = (e: HandoffEntry) =>
-    e.state === 'ready' || e.state === 'unknown' || (e.state === 'api' && Boolean(opts.includeApi))
+    !e.sameLoginAs &&
+    (e.state === 'ready' || e.state === 'unknown' || (e.state === 'api' && Boolean(opts.includeApi)))
   const pick = accounts.find(usable)?.ref ?? null
   const hasQuota = accounts.some((e) => e.state === 'ready' || e.state === 'full')
-  const plan: HandoffPlan = { family, pick, accounts, hasQuota }
+  const plan: HandoffPlan = { family, ...(current ? { from: current.ref } : {}), pick, accounts, hasQuota }
   if (pick === null) {
     const first = accounts.find((e) => e.state === 'full' && e.resetsAt)
     if (first?.resetsAt) plan.earliestReset = { ref: first.ref, at: first.resetsAt }

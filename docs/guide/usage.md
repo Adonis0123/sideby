@@ -106,6 +106,16 @@ Because Claude Code runs the wrapper on every refresh, `setup` refuses when `sid
 
 Accounts that link `settings.json` to the Main Account (the default) get quota from the same setup. An account with its own `settings.json` shows quota as not enabled until that file's status line is wrapped the same way. Codex quota needs no setup: sideby reads it from local session files.
 
+### Two directories, one login
+
+Sometimes two accounts of Claude Code are signed in as the same claude.ai login, for example `~/.claude` and `~/.claude-001` with the same email and organization. Claude counts one quota for that login, but each directory only records the numbers its own sessions saw, so one could look half full and the other almost empty. sideby notices this by itself (it compares the email and organization it already shows) and:
+
+- shows the same, freshest quota on both, with where it was read: `sideby quota` says `read from claude:001 (same login)`, the panel says so when you hover the quota;
+- marks them: `claude:001 = main` in `sideby list`, a **Same login as main** tag in the panel; the quota warning shows once, on the account that has the reading;
+- never hands over between them: `sideby next` run inside a session sideby started skips the other directory of that login, and Auto Handoff skips it too, also when your `order` lists it, and says why.
+
+Usage (tokens) still counts per directory. Nothing is moved or deleted; keep both or remove one yourself. Codex is not grouped yet: one email can belong to several ChatGPT workspaces, each with its own quota.
+
 ## Model and effort
 
 Each account row shows the model and effort it runs with, for example `opus · high`; hover to see where each comes from: set by sideby for this account, the tool's own settings, or the last session. Click it (or **Model and effort…** in the account menu) to pick a model and effort for that account alone. sideby saves the choice as that account's launch arguments in its own config (`--model` and `--effort` for Claude Code, `-m` and `-c model_reasoning_effort=…` for Codex), so accounts that share one `settings.json` can still differ, and the tool's own files stay as they are. It applies to new sessions started with sideby (a short command, `sideby run`, `sideby next`, Auto Handoff); a plain `claude` ignores it. `ANTHROPIC_MODEL` or `CLAUDE_CODE_EFFORT_LEVEL` in your shell and settings from your organization still win, and sideby cannot see them. From a terminal: `sideby model cc002 opus --effort high` (add `--yes`); `default` clears one.
@@ -175,6 +185,7 @@ sideby next claude -- --model opus  # Host arguments go after --
 - When every account is full, nothing starts and sideby tells you which one comes back first. When no account has quota data yet, nothing starts either: the pick would only be a guess. Turn quota on (`sideby quota setup claude`) or choose with `sideby run`.
 - The new account starts a new session: each account keeps its own sessions. Ask the old session for a short handoff note and paste it in.
 - Claude and Codex only; Grok and pi publish no quota, so `next grok` lists the accounts for you to choose.
+- Two directories signed in as the same login share one quota (see [Two directories, one login](#two-directories-one-login)); run inside a session sideby started, `next` never picks the other one.
 
 sideby recommends; you start the account. It never switches or rotates by itself unless you turn on Auto Handoff below (see the FAQ). The panel marks the same pick as **Next** in each family.
 
@@ -194,7 +205,7 @@ sideby handoff disable --yes
 The same settings live under `handoff` in the config file (see the [configuration](configuration.md) schema).
 
 - **When.** At 80% of the fullest window (`prepareAt`) the session is asked to start a brief and keep it current; at 95% (`threshold`) it finishes the current step, updates the brief and ends its turn. If the window resets within 30 minutes (`waitIfResetWithinMinutes`), sideby waits instead.
-- **Where to.** `policy: "order"` follows your list (accounts or short commands, any family); without it sideby picks the family's account with the most room, then API accounts of other families. Each account is used once per chain, a full or signed-out account is skipped (so is one already at your `threshold`), and so is an account of another organization (compared by organization, else by email domain) unless it is listed in `crossOrganization`.
+- **Where to.** `policy: "order"` follows your list (accounts or short commands, any family); without it sideby picks the family's account with the most room, then API accounts of other families. Each account is used once per chain, a full or signed-out account is skipped (so is one already at your `threshold`), and so is an account of another organization (compared by organization, else by email domain) unless it is listed in `crossOrganization`. An account signed in as the same login as the old one is always skipped, even when `order` lists it: it has the same quota.
 - **Same family.** `auto` alone hands over to API accounts (of any family) and to accounts of other families that you list in `order`. Moving between two accounts of the same vendor (cc001 → cc002) also needs `"sameFamily": true`. Vendors may treat that as getting past a usage limit and act on the account; the risk is yours.
 - **Before it moves.** A 10-second countdown (`countdownSeconds`); press Enter to stay, and sideby resumes the same session in the old account.
 - **By hand.** Inside such a session, run `sideby handoff ready` (or ask the agent to), optionally with `--brief <file>` from your own handoff tool; the next account starts when the turn ends.

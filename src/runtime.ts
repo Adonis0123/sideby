@@ -33,6 +33,7 @@ import { type HostLaunch, type PreparedLaunch, prepareLaunch, which } from './co
 import { memoStore } from './core/memo-store.ts'
 import { type Paths, resolvePaths } from './core/paths.ts'
 import { findResumeRoute } from './core/resume.ts'
+import { SAME_LOGIN_FAMILIES, sameLoginGroups, sharedQuota } from './core/same-login.ts'
 import { shareMeaning } from './core/share-meaning.ts'
 import {
   SHELLS,
@@ -169,6 +170,10 @@ export interface AccountStatus extends Account {
   model?: string
   /** Who the Account is signed in as (email, organization), when its Family can tell. */
   identity?: AccountIdentity
+  /**
+   * The other Accounts signed in as the same login, which share its Quota (spec §3.21); absent when there are none.
+   */
+  sameLogin?: string[]
   /** Plugin errors met while reading this Account (for example an unreadable settings file). */
   problems?: string[]
   /**
@@ -252,7 +257,13 @@ export interface Runtime {
    * (spec §3.15). Throws UnknownFamilyError, or a UserError when the Family cannot route sessions.
    */
   resumeLaunch(familyId: string, userArgs: readonly string[]): Promise<ResumeLaunch>
+  /**
+   * The Account's Quota. For an Account of a Same Login (spec §3.21) it is the group's freshest reading, with `from`
+   * naming the Account it was read from when that is another one.
+   */
   quota(account: Account): Promise<QuotaResult>
+  /** The other Accounts signed in as the same login as this one (spec §3.21), in discovery order; empty when none. */
+  sameLogin(account: Account): Promise<string[]>
   usage(account: Account): Promise<UsageResult>
   /** Estimated Compaction Threshold per model for one Account (spec §3.18); read-only. */
   tuning(account: Account): Promise<TuningResult>
@@ -361,6 +372,59 @@ export async function createRuntime(
     const out: Account[] = []
     for (const f of families.values()) out.push(...(await discoverAccounts(f, paths.home, ignore)))
     return out
+  }
+
+  /** Same Login groups (spec §3.21) among `list`: ref → the other refs. Only Families that group take part. */
+  const groupsOf = async (list: readonly Account[]): Promise<Map<string, string[]>> => {
+    const members = await Promise.all(
+      list
+        .filter(
+          (a) => a.kind === 'subscription' && SAME_LOGIN_FAMILIES.has(a.family) && families.has(a.family),
+        )
+        .map(async (a) => {
+          const identity = await readIdentity(familyOf(a.family), a)
+          return { ref: a.ref, family: a.family, kind: a.kind, ...(identity ? { identity } : {}) }
+        }),
+    )
+    return sameLoginGroups(members)
+  }
+
+  /** The Accounts of `account`'s Same Login, other than itself; reads only its own Family. */
+  const peersOf = async (account: Account): Promise<Account[]> => {
+    const f = families.get(account.family)
+    if (!f || account.kind === 'api' || !SAME_LOGIN_FAMILIES.has(f.id)) return []
+    const list = await discoverAccounts(f, paths.home, ignore)
+    const peers = (await groupsOf(list)).get(account.ref) ?? []
+    return list.filter((a) => peers.includes(a.ref))
+  }
+
+  /** Every Account's Quota as shown (shared within a Same Login), reading each Account's own cache once. */
+  const quotasOf = async (list: readonly Account[]): Promise<Map<string, QuotaResult>> => {
+    const [own, groups] = await Promise.all([
+      Promise.all(list.map(async (a) => [a.ref, await ownQuota(a)] as const)).then((e) => new Map(e)),
+      groupsOf(list),
+    ])
+    return new Map(list.map((a) => [a.ref, sharedQuota(a.ref, own, groups.get(a.ref) ?? [])]))
+  }
+
+  const ownQuota = async (account: Account): Promise<QuotaResult> => {
+    if (account.kind === 'api') return { status: 'unavailable', reason: 'api-account' }
+    const f = familyOf(account.family)
+    if (!f.readQuota) return { status: 'unavailable', reason: 'no-source' }
+    await memos.ready()
+    try {
+      const q = await f.readQuota(account, readContext())
+      // Only sideby marks a reading as borrowed from another Account (spec §3.21); a reader's own `from` is dropped.
+      if (q.status === 'ok' && q.from !== undefined) {
+        const { from: _from, ...own } = q
+        return own
+      }
+      return q
+    } catch (err) {
+      return { status: 'unavailable', reason: 'unrecognized', detail: (err as Error).message }
+    } finally {
+      memos.saveSoon()
+    }
   }
 
   const loginOf = async (a: Account): Promise<LoginState | 'not-needed'> => {
@@ -501,13 +565,14 @@ export async function createRuntime(
           return undefined
         }
       }
-      const [installed, login, model, identity] = await Promise.all([
+      const [installed, login, model, identity, peers] = await Promise.all([
         which(f.bin, env),
         account.kind === 'api'
           ? undefined
           : safe('login state', f.loginState && (() => f.loginState!(account))),
         safe('model', f.model && (() => f.model!(account))),
         readIdentity(f, account),
+        peersOf(account).catch(() => []),
       ])
       return {
         ...account,
@@ -516,6 +581,7 @@ export async function createRuntime(
         login: account.kind === 'api' ? 'not-needed' : (login ?? 'unknown'),
         ...(model ? { model } : {}),
         ...(identity ? { identity } : {}),
+        ...(peers.length ? { sameLogin: peers.map((p) => p.ref) } : {}),
         ...(problems.length ? { problems } : {}),
       }
     },
@@ -729,17 +795,12 @@ export async function createRuntime(
       }
     },
     async quota(account) {
-      if (account.kind === 'api') return { status: 'unavailable', reason: 'api-account' }
-      const f = familyOf(account.family)
-      if (!f.readQuota) return { status: 'unavailable', reason: 'no-source' }
-      await memos.ready()
-      try {
-        return await f.readQuota(account, readContext())
-      } catch (err) {
-        return { status: 'unavailable', reason: 'unrecognized', detail: (err as Error).message }
-      } finally {
-        memos.saveSoon()
-      }
+      const peers = await peersOf(account)
+      if (!peers.length) return ownQuota(account)
+      return (await quotasOf([account, ...peers])).get(account.ref)!
+    },
+    async sameLogin(account) {
+      return (await peersOf(account)).map((a) => a.ref)
     },
     async usage(account) {
       const f = familyOf(account.family)
@@ -839,24 +900,39 @@ export async function createRuntime(
         throw new UserError(`no ${f.title} accounts yet; create one with \`sideby new ${f.id} <name>\``, {
           code: 'no-accounts',
         })
-      // Only the login state and Quota: no identity, model or Host lookups are needed to rank.
+      // Login state, Quota and Same Login (spec §3.21): no model or Host lookups are needed to rank.
+      const [quotas, groups] = await Promise.all([quotasOf(list), groupsOf(list)])
       const candidates = await Promise.all(
         list.map(async (a) => {
-          const [login, quota] = await Promise.all([loginOf(a), rt.quota(a)])
-          return { ref: a.ref, name: a.name, isMain: a.isMain, kind: a.kind, login, quota }
+          const peers = groups.get(a.ref)
+          return {
+            ref: a.ref,
+            name: a.name,
+            isMain: a.isMain,
+            kind: a.kind,
+            login: await loginOf(a),
+            quota: quotas.get(a.ref)!,
+            ...(peers ? { sameLogin: peers } : {}),
+          }
         }),
       )
-      return planHandoff(f.id, candidates, readContext().now, o)
+      // The current Account: the one sideby started this process from, when it belongs to this Family.
+      const current = env.SIDEBY_ACCOUNT
+      const from = current && list.some((a) => a.ref === current) ? current : undefined
+      return planHandoff(f.id, candidates, readContext().now, { ...o, ...(from ? { from } : {}) })
     },
     handoffSettings: () => handoffSettings(config),
     async handoffDecision(origin, used, opts = {}) {
+      const all = await accounts()
+      const [quotas, groups] = await Promise.all([quotasOf(all), groupsOf(all)])
       const candidates = await Promise.all(
-        (await accounts()).map(async (a): Promise<SelectCandidate> => {
+        all.map(async (a): Promise<SelectCandidate> => {
           const f = familyOf(a.family)
-          const [installed, login, quota, identity] = await Promise.all([
+          const quota = quotas.get(a.ref)!
+          const peers = groups.get(a.ref)
+          const [installed, login, identity] = await Promise.all([
             which(f.bin, env),
             loginOf(a),
-            rt.quota(a),
             readIdentity(f, a),
           ])
           let receive = false
@@ -877,6 +953,7 @@ export async function createRuntime(
             login,
             quota,
             ...(identity ? { identity } : {}),
+            ...(peers ? { sameLogin: peers } : {}),
             installed: installed !== null,
             receive,
           }

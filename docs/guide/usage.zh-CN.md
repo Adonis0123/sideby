@@ -106,6 +106,16 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 
 `settings.json` 链接到主账号的账号（默认如此）共用这一次 setup。自己有一份 `settings.json` 的账号，额度显示为未开启，要等它自己的 status line 也这样包装后才有数据。Codex 的额度不用设置，sideby 直接读本地会话文件。
 
+### 两个目录，同一个登录
+
+有时同一工具的两个账号登录的是同一个 claude.ai 账号，例如 `~/.claude` 和 `~/.claude-001` 的 email 和组织都一样。Claude 只给这个登录算一份额度，但每个目录只记下自己会话看到的数字，所以可能一个显示快用了一半、另一个几乎没用。sideby 会自己认出来（比较它已经显示的 email 和组织），然后：
+
+- 两边显示同一份、最新的额度，并说明读自哪里：`sideby quota` 写 `read from claude:001 (same login)`，面板里鼠标悬停在额度上也会说明；
+- 标出来：`sideby list` 里是 `claude:001 = main`，面板里是「与 main 同一登录」标记；额度提醒只出现一次，在有这份数据的账号上；
+- 不在它们之间交接：在 sideby 启动的会话里运行 `sideby next` 时，跳过这个登录的另一个目录；自动交接也跳过它，`order` 里写了也一样，并说明原因。
+
+用量（token）仍按目录分别统计。sideby 不移动、不删除任何目录；两个都留着，或者你自己删掉一个。Codex 暂时不分组：同一个 email 可能属于几个 ChatGPT 工作区，各有各的额度。
+
 ## 模型与 effort
 
 每个账号行会显示它用的模型和 effort，例如 `opus · high`；鼠标悬停能看到来源：sideby 为这个账号设置、工具自己的设置，或最近一次会话。点它（或账号菜单里的 **模型和 effort…**）就能只为这个账号选模型和 effort。sideby 把选择存成这个账号在它自己配置里的启动参数（Claude Code 用 `--model`、`--effort`，Codex 用 `-m` 和 `-c model_reasoning_effort=…`），所以共用同一个 `settings.json` 的账号也能各用各的，工具自己的文件不变。它只影响之后用 sideby 启动的会话（短命令、`sideby run`、`sideby next`、自动交接）；直接敲 `claude` 不受影响。shell 里的 `ANTHROPIC_MODEL`、`CLAUDE_CODE_EFFORT_LEVEL` 和组织下发的设置仍然优先，sideby 看不到它们。在终端里：`sideby model cc002 opus --effort high`（加 `--yes`）；用 `default` 清掉某一项。
@@ -175,6 +185,7 @@ sideby next claude -- --model opus  # 宿主参数放在 -- 之后
 - 全部用满时什么都不启动，并告诉你哪个账号最先恢复。所有账号都还没有额度数据时也不启动，因为那样的推荐只是猜测：先开启额度（`sideby quota setup claude`），或用 `sideby run` 自己选。
 - 新账号会开一个新会话，因为每个账号各存各的会话。可以先让旧会话写一份简短的交接说明，再贴进新会话。
 - 只支持 Claude 和 Codex。Grok、pi 没有公开额度，`next grok` 会列出账号让你自己选。
+- 登录同一个身份的两个目录共用一份额度（见[两个目录，同一个登录](#两个目录同一个登录)）；在 sideby 启动的会话里运行时，`next` 不会选另一个。
 
 sideby 只推荐，账号由你启动；除非你打开下面的自动交接，它从不自己切换或轮换（见常见问题）。面板在每个家族里把同一个推荐账号标成「下一个」。
 
@@ -194,7 +205,7 @@ sideby handoff disable --yes
 这些设置都存在 config 文件的 `handoff` 下（见[配置](configuration.zh-CN.md)的 schema）。
 
 - **什么时候。** 最满的窗口到 80%（`prepareAt`）时，会话被要求开始写交接说明并随时更新；到 95%（`threshold`）时，它做完当前一步、更新交接说明、结束这一轮。满了的窗口 30 分钟内就重置时（`waitIfResetWithinMinutes`），sideby 选择等待，不交接。
-- **交给谁。** `policy: "order"` 按你写的列表（账号或短命令，可以跨家族）；不写时选本家族余量最多的账号，再补其他家族的 API 账号。一条链里每个账号只用一次，跳过已满和未登录的账号（已经到你设的 `threshold` 的也跳过），也跳过不同组织的账号（先比 organization，没有就比 email 域名），除非它写在 `crossOrganization` 里。
+- **交给谁。** `policy: "order"` 按你写的列表（账号或短命令，可以跨家族）；不写时选本家族余量最多的账号，再补其他家族的 API 账号。一条链里每个账号只用一次，跳过已满和未登录的账号（已经到你设的 `threshold` 的也跳过），也跳过不同组织的账号（先比 organization，没有就比 email 域名），除非它写在 `crossOrganization` 里。和旧账号是同一登录的账号一律跳过，`order` 里写了也跳过：它们是同一份额度。
 - **同一家族。** 只开 `auto` 时，会交给 API 账号（任何家族），以及你写进 `order` 的其他家族账号。同一家厂商的两个账号之间接力（cc001 → cc002）还要写 `"sameFamily": true`。厂商可能认为这是在绕过用量限制并处理账号，风险由你承担。
 - **交接之前。** 有 10 秒倒计时（`countdownSeconds`）；按回车留下，sideby 会在原账号里续接刚才的会话。
 - **手动交接。** 在这类会话里运行 `sideby handoff ready`（或让 agent 运行），可以加 `--brief <file>` 用你自己的交接工具写的说明；这一轮结束后下一个账号启动。

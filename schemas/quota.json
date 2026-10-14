@@ -86,6 +86,10 @@
                   },
                   "plan": {
                     "type": "string"
+                  },
+                  "from": {
+                    "type": "string",
+                    "description": "The account this reading was taken from, when it is another account of the same login (spec §3.21); observedAt is its time."
                   }
                 }
               },

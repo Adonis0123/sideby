@@ -43,13 +43,21 @@ const hookCommand = (family: string) => (event: HandoffHookEvent) => `sideby han
 const clock = (iso: string) =>
   new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 
+/** Accounts the decision left out and why (spec §3.21), as `; skipped claude:main (…)`, or ''. */
+export function skippedText(d: HandoffDecision): string {
+  if (d.kind === 'wait' || !d.skipped?.length) return ''
+  return `; skipped ${d.skipped.map((x) => `${x.ref} (${x.reason})`).join(', ')}`
+}
+
 export function explain(d: HandoffDecision): string {
   if (d.kind === 'wait') return `the full window resets at ${clock(d.until)}, so waiting beats moving on`
   if (d.kind === 'none')
-    return d.earliestReset
-      ? `${d.reason}; ${d.earliestReset.ref} is back first, at ${clock(d.earliestReset.at)}`
-      : d.reason
-  return `next: ${d.ref}`
+    return `${
+      d.earliestReset
+        ? `${d.reason}; ${d.earliestReset.ref} is back first, at ${clock(d.earliestReset.at)}`
+        : d.reason
+    }${skippedText(d)}`
+  return `next: ${d.ref}${skippedText(d)}`
 }
 
 /** Resolves with the ready file once the hook writes one for `runId`; `stop()` ends the watch. */
@@ -330,7 +338,7 @@ export async function runWithHandoff(
     await rm(join(dir, FILES.request), { force: true })
 
     io.err(
-      `sideby: ${account.ref} saved its session and is handing over because ${WHY[ready.trigger]}; next is ${decision.ref}. Brief: ${done.path}`,
+      `sideby: ${account.ref} saved its session and is handing over because ${WHY[ready.trigger]}; next is ${decision.ref}${skippedText(decision)}. Brief: ${done.path}`,
     )
     if (
       settings.countdownSeconds > 0 &&
