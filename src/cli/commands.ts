@@ -7,6 +7,7 @@ import { requestHandoff } from '../core/handoff-chain.ts'
 import { explain, type HandoffIo, readyDecision, runWithHandoff } from '../core/handoff-run.ts'
 import { configureHandoff, type HandoffChange, handoffHint, handoffStatus } from '../core/handoff-status.ts'
 import { runHost } from '../core/launch.ts'
+import { accountModel, type ModelChange, setAccountModel } from '../core/model-choice.ts'
 import { resolvePaths, tildify } from '../core/paths.ts'
 import { USAGE_DAYS } from '../core/quota-levels.ts'
 import { SHELLS, type Shell, type ShellInitWrite } from '../core/shell-init.ts'
@@ -437,6 +438,82 @@ async function cmdTuneChange(a: ParsedArgs, io: Io, action: 'apply' | 'undo'): P
     out({ applied: r.ok, plan: { ...r.plan, file: tilde(r.plan.file, home) }, message: r.message })
   else io.out(r.message)
   return r.ok ? 0 : 1
+}
+
+const FROM: Record<string, string> = {
+  sideby: 'set by sideby',
+  host: 'from the host config',
+  last: 'last session',
+}
+
+/**
+ * `sideby model <account> [<model>|default] [--effort <level>|default] [--yes]` (spec §3.19, ADR-0014): shows the
+ * Account's model and effort; with a change, shows it (exit 10) and writes it with --yes.
+ */
+export async function cmdModel(a: ParsedArgs, io: Io): Promise<number> {
+  const [ref, model] = a.positionals
+  if (!ref || a.positionals.length > 2 || a.flags.get('effort') === true)
+    throw new UsageError(
+      'usage: sideby model <account> [<model>|default] [--effort <level>|default] [--yes] [--json]',
+    )
+  const wantJson = a.flags.has('json')
+  const rt = await createRuntime()
+  const account = await rt.resolve(ref)
+  const effort = a.flags.get('effort')
+  const view = await accountModel(rt, account)
+  const shown = {
+    account: account.ref,
+    family: account.family,
+    settable: view.settable,
+    ...(view.reason ? { reason: view.reason } : {}),
+    efforts: view.efforts,
+    models: view.models,
+    sideby: view.sideby,
+    host: view.host,
+    last: view.last,
+    ...(view.model ? { model: view.model } : {}),
+    ...(view.effort ? { effort: view.effort } : {}),
+  }
+  if (model === undefined && effort === undefined) {
+    if (a.flags.has('yes'))
+      throw new UsageError('--yes needs a change: sideby model <account> <model> or --effort <level>')
+    if (wantJson) json(io, shown)
+    else {
+      io.out(account.ref)
+      io.out(
+        `  model   ${view.model ? `${view.model.value}  (${FROM[view.model.from]})` : 'the host default'}`,
+      )
+      io.out(
+        `  effort  ${view.effort ? `${view.effort.value}  (${FROM[view.effort.from]})` : 'the host default'}`,
+      )
+      if (view.settable)
+        io.out(
+          c.dim(
+            `Change it: sideby model ${account.ref} <model|default> --effort <${view.efforts.join('|')}|default>`,
+          ),
+        )
+      else if (view.reason) io.out(c.dim(view.reason))
+    }
+    return 0
+  }
+  const asChange = (v: string | undefined) => (v === undefined ? undefined : v === 'default' ? null : v)
+  const change: ModelChange = {
+    ...(model !== undefined ? { model: asChange(model) } : {}),
+    ...(typeof effort === 'string' ? { effort: asChange(effort) } : {}),
+  }
+  const yes = a.flags.has('yes')
+  const r = await setAccountModel(rt, account, change, { apply: yes })
+  const home = rt.paths.home
+  const result = { ...r, file: tilde(r.file, home) }
+  if (wantJson) json(io, { ...shown, change: result })
+  else if (!r.changed) io.out('Nothing to change.')
+  else if (!yes)
+    io.out(`${r.diff}Run again with --yes to apply. It affects sessions started with sideby from now on.`)
+  else
+    io.out(
+      `Saved. New sessions of ${account.ref} started with sideby use: ${r.args.join(' ') || 'the host defaults'}`,
+    )
+  return r.changed && !yes ? 10 : 0
 }
 
 /** `sideby tune [account|family]`: estimated Compaction Threshold per model (spec §3.18). */

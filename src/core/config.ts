@@ -267,7 +267,7 @@ async function configTarget(file: string): Promise<string> {
  * while sideby wrote it. `edit` returns null to leave the file alone; `dryRun` returns the change without writing.
  * `retry` names what to do again after a fix.
  */
-async function editConfigKey<K extends 'aliases' | 'handoff'>(
+async function editConfigKey<K extends 'aliases' | 'handoff' | 'accounts'>(
   file: string,
   key: K,
   retry: string,
@@ -351,6 +351,20 @@ export function editConfigHandoff(
   opts: { dryRun?: boolean } = {},
 ): Promise<{ changed: boolean; before: HandoffConfig | undefined; after: HandoffConfig | undefined }> {
   return editConfigKey(file, 'handoff', 'run the command', (current) => edit(current ?? {}), opts)
+}
+
+export type AccountsConfig = NonNullable<Config['accounts']>
+
+/**
+ * `sideby model` (spec §3.19): changes the config `accounts` key with `edit` (see `editConfigKey` for how the file is
+ * written). With `dryRun`, shows the change without writing.
+ */
+export function editConfigAccounts(
+  file: string,
+  edit: (current: AccountsConfig) => AccountsConfig,
+  opts: { dryRun?: boolean } = {},
+): Promise<{ changed: boolean; before: AccountsConfig | undefined; after: AccountsConfig | undefined }> {
+  return editConfigKey(file, 'accounts', 'run the command', (current) => edit(current ?? {}), opts)
 }
 
 /**

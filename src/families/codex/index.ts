@@ -6,6 +6,7 @@ import { BUILTIN_LOGOS } from '../logos.ts'
 import { nestedFileWrittenAt, resumeSubcommandSession } from '../shared/sessions.ts'
 import { topLevelTomlString } from '../shared/toml.ts'
 import { codexHandoff } from './handoff.ts'
+import { codexModelChoice } from './model.ts'
 import { readCodexQuota, readCodexUsage } from './rollout.ts'
 import { readCodexTuning } from './tuning.ts'
 
@@ -64,6 +65,7 @@ export const codexFamily: FamilyDef = {
     }
   },
   model: readModel,
+  modelChoice: codexModelChoice,
   identity: codexIdentity,
   readQuota: (account) => readCodexQuota(account.dir),
   readUsage: (account, ctx) => readCodexUsage(account.dir, ctx.now),

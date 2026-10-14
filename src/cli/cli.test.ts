@@ -1233,6 +1233,33 @@ describe('sideby handoff status, enable and disable (spec §3.17)', () => {
   })
 })
 
+describe('model (spec §3.19)', () => {
+  it('shows the model and effort, previews a change with exit 10 and writes it only with --yes', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{"model":"sonnet"}\n')
+      await fakeHost(h, 'claude')
+      const shown = await sideby(h, ['model', 'claude:main'])
+      assert.equal(shown.code, 0)
+      assert.match(shown.out, /model {3}sonnet {2}\(from the host config\)/)
+      const data = checkSchema('model', (await sideby(h, ['model', 'claude:main', '--json'])).out)
+      assert.deepEqual(data.model, { value: 'sonnet', from: 'host' })
+      const preview = await sideby(h, ['model', 'claude:main', 'opus', '--effort', 'high'])
+      assert.equal(preview.code, 10)
+      await assert.rejects(readFile(h.path('.config/sideby/config.json'), 'utf8'))
+      const done = await sideby(h, ['model', 'claude:main', 'opus', '--effort', 'high', '--yes', '--json'])
+      assert.equal(done.code, 0)
+      const out = checkSchema('model', done.out) as { change: { applied: boolean; args: string[] } }
+      assert.equal(out.change.applied, true)
+      assert.deepEqual(out.change.args, ['--model', 'opus', '--effort', 'high'])
+      assert.equal(JSON.parse(await readFile(h.path('.claude/settings.json'), 'utf8')).model, 'sonnet')
+      const bad = await sideby(h, ['model', 'claude:main', '--effort', 'huge', '--json'])
+      assert.equal(bad.code, 1)
+      assert.equal(JSON.parse(bad.out).code, 'bad-value')
+      assert.equal((await sideby(h, ['model', 'claude:main', '--yes'])).code, 2)
+    })
+  })
+})
+
 describe('tune (spec §3.18)', () => {
   /** A Claude main Account with one session of 210 turns and an auto compaction, dated just now. */
   async function withSession(h: FakeHome): Promise<void> {

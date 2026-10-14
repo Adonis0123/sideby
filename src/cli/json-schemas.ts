@@ -7,6 +7,12 @@ const Str = Type.String()
 const Level = Type.Union([Type.Literal('ok'), Type.Literal('warn'), Type.Literal('fail')])
 const Kind = Type.Union([Type.Literal('subscription'), Type.Literal('api')])
 const Version = Type.Literal(1)
+
+const Choice = Type.Object({ model: Type.Optional(Str), effort: Type.Optional(Str) })
+const Shown = Type.Object({
+  value: Str,
+  from: Type.Union([Type.Literal('sideby'), Type.Literal('host'), Type.Literal('last')]),
+})
 const AppPlatform = Type.Union([Type.Literal('darwin'), Type.Literal('linux')])
 
 const Account = Type.Object({
@@ -196,6 +202,8 @@ const Usage = Type.Union([
       }),
     ),
     lastActivityAt: Type.Optional(Str),
+    lastModel: Type.Optional(Str),
+    lastEffort: Type.Optional(Str),
   }),
   Type.Object({ status: Type.Literal('unavailable'), reason: Str, detail: Type.Optional(Str) }),
 ])
@@ -273,6 +281,34 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       message: Type.Optional(Str),
     },
     { title: 'sideby tune apply|undo --json' },
+  ),
+  model: Type.Object(
+    {
+      schemaVersion: Version,
+      account: Str,
+      family: Str,
+      settable: Type.Boolean({
+        description: 'Whether sideby can set the model and effort for this account.',
+      }),
+      reason: Type.Optional(Str),
+      efforts: Type.Array(Str),
+      models: Type.Array(Str, { description: 'Model names to offer; any other name may be given.' }),
+      sideby: Choice,
+      host: Choice,
+      last: Choice,
+      model: Type.Optional(Shown),
+      effort: Type.Optional(Shown),
+      change: Type.Optional(
+        Type.Object({
+          changed: Type.Boolean(),
+          applied: Type.Boolean(),
+          file: Str,
+          diff: Str,
+          args: Type.Array(Str, { description: 'The account arguments in the config after the change.' }),
+        }),
+      ),
+    },
+    { title: 'sideby model --json' },
   ),
   tune: Type.Object(
     {

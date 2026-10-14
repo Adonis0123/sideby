@@ -602,6 +602,7 @@ const MAIN = String.raw`
       a.dir ? { icon: 'folder', label: t('menu.copyDir'), hint: a.dir, run: () => copyText(a.dir) } : null,
       a.identity && a.identity.email ? { icon: 'mail', label: t('menu.copyEmail'), hint: emailText(a.identity.email), run: () => copyText(a.identity.email) } : null,
       '-',
+      a.modelInfo && a.modelInfo.settable ? { icon: 'terminal', label: t('menu.model'), run: () => openModel(a) } : null,
       family(a.family).tuning ? { icon: 'check', label: t('menu.tune'), run: () => openTune(a) } : null,
       { icon: 'check', label: t('menu.check'), disabled: S.checking || S.fixing || Boolean(ui.checkingRef), run: () => checkAccount(a.ref) },
       BOOT.readOnly ? null : { icon: 'userPlus', label: t('menu.like'), run: () => openCreate({ family: a.family, api: a.kind === 'api' }) },
@@ -928,6 +929,7 @@ const MAIN = String.raw`
     return h('div', { class: 'ident-sub' }, dots([
       h('span', { class: 'mono' }, a.ref),
       a.kind === 'api' && a.model ? h('span', { class: 'mono', title: t('acct.model') }, a.model) : null,
+      a.kind !== 'api' ? modelChip(a) : null,
       a.kind !== 'api' && plan ? h('span', { class: 'plan' }, plan) : null,
     ]))
   }
@@ -2004,6 +2006,117 @@ const MAIN = String.raw`
     if (ah.loading) loadHandoffStatus()
   }
 
+  // ---------- model and effort (spec §3.19) ----------
+  // Shown under the account name; the dialog changes what sideby starts this account with, never the Host's files.
+  let md = null
+  function modelFrom(a, from) { return t('md.from.' + from, { host: family(a.family).title }) }
+  function modelChip(a) {
+    const mi = a.modelInfo
+    if (!mi || (!mi.model && !mi.effort)) return null
+    const text = [mi.model && mi.model.value, mi.effort && mi.effort.value].filter(Boolean).join(' · ')
+    const title = [
+      mi.model ? t('md.model') + ': ' + mi.model.value + ' (' + modelFrom(a, mi.model.from) + ')' : null,
+      mi.effort ? t('md.effort') + ': ' + mi.effort.value + ' (' + modelFrom(a, mi.effort.from) + ')' : null,
+      mi.settable ? t('md.click') : null,
+    ].filter(Boolean).join('\n')
+    if (!mi.settable) return h('span', { class: 'mono', title }, text)
+    return h('button', { class: 'mono model-btn' + (mi.model && mi.model.from === 'sideby' ? ' model-set' : ''), type: 'button', title, 'aria-label': t('menu.model') + ' ' + a.ref + ': ' + text, onclick: (e) => { e.stopPropagation(); openModel(a) } }, text)
+  }
+  function mdAccount() { return S.state && S.state.accounts.find((x) => x.ref === md.ref) }
+  function openModel(a) {
+    md = { ref: a.ref, family: a.family, preview: null, busy: false, error: null, form: null }
+    showDialog('model')
+    renderModel()
+  }
+  // The inputs are built once per opening, so typing keeps focus; everything else re-renders around them.
+  function mdForm(a) {
+    if (md.form) return md.form
+    const mi = a.modelInfo
+    const host = family(a.family).title
+    const list = h('datalist', { id: 'md-models' }, mi.models.map((m) => h('option', { value: m })))
+    const model = h('input', { type: 'text', list: 'md-models', autocomplete: 'off', spellcheck: 'false', placeholder: t('md.default') + ' (' + t('md.decides', { host }) + ')', disabled: BOOT.readOnly })
+    model.value = mi.sideby.model || ''
+    const effort = h('select', { disabled: BOOT.readOnly }, h('option', { value: '' }, t('md.default') + ' (' + t('md.decides', { host }) + ')'), mi.efforts.map((e) => h('option', { value: e }, e)))
+    effort.value = mi.sideby.effort || ''
+    const changed = () => { md.preview = null; md.error = null; renderModel() }
+    model.addEventListener('input', () => { if (md.preview) changed() })
+    effort.addEventListener('change', changed)
+    md.form = { model, effort, list }
+    return md.form
+  }
+  function mdChange(a, reset) {
+    const mi = a.modelInfo
+    if (reset) return { model: mi.sideby.model ? null : undefined, effort: mi.sideby.effort ? null : undefined }
+    const f = md.form
+    const m = f.model.value.trim()
+    const ch = {}
+    if (m !== (mi.sideby.model || '')) ch.model = m || null
+    if (f.effort.value !== (mi.sideby.effort || '')) ch.effort = f.effort.value || null
+    return ch
+  }
+  async function mdReview(reset) {
+    const a = mdAccount()
+    if (!a) return
+    const change = mdChange(a, reset)
+    for (const k of Object.keys(change)) if (change[k] === undefined) delete change[k]
+    md.error = null
+    if (!Object.keys(change).length) { md.preview = { nothing: true }; renderModel(); return }
+    md.busy = true
+    renderModel()
+    try {
+      const r = await api('/api/account/model', Object.assign({ account: a.ref }, change))
+      md.preview = r.changed ? { change, diff: r.diff } : { nothing: true }
+    } catch (e) { md.error = e }
+    md.busy = false
+    renderModel()
+  }
+  async function mdApply() {
+    const a = mdAccount()
+    if (!a || !md.preview || !md.preview.change) return
+    md.busy = true
+    dlg.busy = true
+    renderModel()
+    try {
+      await api('/api/account/model', Object.assign({ account: a.ref, confirm: true }, md.preview.change))
+      dlg.busy = false
+      toast(t('md.saved', { ref: a.ref }))
+      dlg.el.close()
+      await load({ silent: true })
+      return
+    } catch (e) { md.error = e }
+    md.busy = false
+    dlg.busy = false
+    renderModel()
+  }
+  function renderModel() {
+    if (!md || dlg.kind !== 'model') return
+    const a = mdAccount()
+    if (!a || !a.modelInfo) { dlg.el.close(); return }
+    const mi = a.modelInfo
+    const host = family(a.family).title
+    const f = mdForm(a)
+    const now = (key) => mi[key] ? h('span', null, h('b', { class: 'mono' }, mi[key].value), ' ', h('span', { class: 'muted small' }, '(' + modelFrom(a, mi[key].from) + ')')) : h('span', { class: 'muted' }, t('md.none'))
+    const body = [h('p', { class: 'muted small' }, t('md.intro', { ref: a.ref, host }))]
+    if (BOOT.readOnly) body.push(h('p', { class: 'note' }, t('banner.readOnly')))
+    body.push(h('div', { class: 'md-now' },
+      h('div', null, h('span', { class: 'muted' }, t('md.model') + ': '), now('model')),
+      h('div', null, h('span', { class: 'muted' }, t('md.effort') + ': '), now('effort'))))
+    body.push(h('div', { class: 'ah-grid' },
+      h('label', { class: 'field' }, h('span', null, t('md.model')), f.model, f.list),
+      h('label', { class: 'field' }, h('span', null, t('md.effort')), f.effort)))
+    if (a.family === 'claude') body.push(h('p', { class: 'muted small' }, t('md.envNote')))
+    if (md.error) body.push(errorNote(md.error, null))
+    if (md.preview && md.preview.nothing) body.push(h('p', { class: 'muted small' }, t('md.nothing')))
+    if (md.preview && md.preview.diff) body.push(h('p', { class: 'small' }, t('md.changes')), diffView(md.preview.diff))
+    const foot = [h('button', { class: 'btn', type: 'button', disabled: md.busy, onclick: () => dlg.el.close() }, t('btn.close'))]
+    if (!BOOT.readOnly) {
+      if (mi.sideby.model || mi.sideby.effort) foot.push(h('button', { class: 'btn', type: 'button', disabled: md.busy, onclick: () => mdReview(true) }, t('md.reset')))
+      if (md.preview && md.preview.change) foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: md.busy, 'aria-busy': md.busy ? 'true' : null, onclick: mdApply }, md.busy ? spinner() : null, t('md.apply')))
+      else foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: md.busy, onclick: () => mdReview(false) }, md.busy ? spinner() : null, t('md.review')))
+    }
+    setKids(dlg.el, dialogFrame(t('md.title') + ' · ' + a.ref, a.family, body, foot))
+  }
+
   // ---------- the Auto Handoff page ----------
   // Off: one sentence and one button. On: where each account's work would go next, the last hand-overs and what is
   // still missing. Turning on is one plan shown first (hp.preview) and one confirmation; no commands to copy.
@@ -2299,6 +2412,7 @@ const MAIN = String.raw`
     if (dlg.kind === 'create' && nf && !nf.creating) renderCreate()
     else if (dlg.kind === 'setup' && qs) renderSetup()
     else if (dlg.kind === 'tune' && tuneState) renderTune()
+    else if (dlg.kind === 'model' && md) { md.form = null; renderModel() }
   })
   $('theme').addEventListener('click', () => {
     const order = CHOICES.theme

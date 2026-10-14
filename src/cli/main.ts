@@ -34,6 +34,8 @@ Usage:
   sideby quota teardown claude        undo it, restoring the original file
   sideby tune [account|family]        estimate the cheapest auto-compact threshold per model
                                       from your last 7 days of sessions (read-only)
+  sideby model <account> [<model>|default] [--effort <level>|default] [--yes]
+                                      show or set the model and effort sideby starts this account with
   sideby handoff status               what Auto Handoff still needs on this machine
   sideby handoff enable [--yes]       turn it on (shows the config change first); --same-family,
                                       --order claude=codex001,cc002, --threshold n, --prepare-at n
@@ -159,6 +161,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   doctor: { flags: ['fix', 'force', 'json'] },
   quota: { flags: ['json', 'yes'] },
   tune: { flags: ['json', 'yes'] },
+  model: { flags: ['json', 'yes'], valued: ['effort'] },
   handoff: {
     flags: ['json', 'yes', 'same-family', 'no-same-family'],
     valued: ['brief', 'order', 'prepare-at', 'threshold', 'wait-minutes', 'countdown'],
@@ -263,6 +266,8 @@ export async function main(argv: string[]): Promise<number> {
         return await cmds.cmdQuota(parsed, io)
       case 'tune':
         return await cmds.cmdTune(parsed, io)
+      case 'model':
+        return await cmds.cmdModel(parsed, io)
       case 'handoff':
         return await cmds.cmdHandoff(parsed, io)
       case 'ui':

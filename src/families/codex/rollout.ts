@@ -203,11 +203,46 @@ export function fileTokens(events: { total: Totals; turn: Totals | null }[]): To
   return fileDeltas(events).reduce(plus, ZERO)
 }
 
+/** The newest `turn_context` of a rollout: the model and effort its last turn ran with. */
+async function lastContext(
+  file: string,
+  read: { failed: boolean },
+): Promise<{ at: number; model?: string; effort?: string } | null> {
+  const lines = createInterface({ input: createReadStream(file), crlfDelay: Number.POSITIVE_INFINITY })
+  let best: { at: number; model?: string; effort?: string } | null = null
+  try {
+    for await (const line of lines) {
+      if (!line.includes('turn_context')) continue
+      let o: unknown
+      try {
+        o = JSON.parse(line)
+      } catch {
+        continue
+      }
+      if (!isObj(o) || o.type !== 'turn_context' || !isObj(o.payload)) continue
+      const at = typeof o.timestamp === 'string' ? Date.parse(o.timestamp) : Number.NaN
+      if (!Number.isFinite(at) || (best && at < best.at)) continue
+      const { model, effort } = o.payload
+      best = {
+        at,
+        ...(typeof model === 'string' && model ? { model } : {}),
+        ...(typeof effort === 'string' && effort ? { effort } : {}),
+      }
+    }
+  } catch {
+    read.failed = true
+  } finally {
+    lines.close()
+  }
+  return best
+}
+
 interface FileUsage {
   /** Time of every `token_count` event, with or without totals. */
   times: number[]
   events: { at: number; total: Totals; turn: Totals | null }[]
   deltas: Totals[]
+  context: { at: number; model?: string; effort?: string } | null
   failed: boolean
 }
 
@@ -220,11 +255,12 @@ async function fileUsage(file: string): Promise<FileUsage> {
     const t = totals(payload)
     if (t) events.push({ at, ...t })
   }
-  return { times, events, deltas: fileDeltas(events), failed: read.failed }
+  const context = await lastContext(file, read)
+  return { times, events, deltas: fileDeltas(events), context, failed: read.failed }
 }
 
 /** Parsed token totals per Account directory; a rollout is read again only after it changed. */
-export const codexUsageMemo = new FileMemo<FileUsage>({ name: 'codex-usage', version: 1 })
+export const codexUsageMemo = new FileMemo<FileUsage>({ name: 'codex-usage', version: 2 })
 
 /**
  * Token totals for events in the last `days` x 24 h, from rollout files modified in that window (mtime only
@@ -245,17 +281,20 @@ export async function readCodexUsage(dir: string, now: Date, days = USAGE_DAYS):
   let sawTokenCount = false
   let sawTotals = false
   let last = Number.NEGATIVE_INFINITY
+  let lastContextSeen: FileUsage['context'] = null
   const daily = dailyBuckets(now, days)
   const sum = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
   const memo = codexUsageMemo.pass(dir)
   for (const f of files) {
-    const { times, events, deltas } = await memo.get(
+    const { times, events, deltas, context } = await memo.get(
       f.path,
       f.stats,
       () => fileUsage(f.path),
       (v) => !v.failed,
     )
     if (times.length) sawTokenCount = true
+    if (context?.model && context.at <= end && (!lastContextSeen || context.at >= lastContextSeen.at))
+      lastContextSeen = context
     for (const at of times) if (at <= end && at > last) last = at
     if (events.length) sawTotals = true
     let used = ZERO
@@ -287,5 +326,7 @@ export async function readCodexUsage(dir: string, now: Date, days = USAGE_DAYS):
     totalTokens: sum.inputTokens + sum.outputTokens + sum.cacheReadTokens + sum.cacheWriteTokens,
     daily: daily.daily,
     ...(Number.isFinite(last) ? { lastActivityAt: new Date(last).toISOString() } : {}),
+    ...(lastContextSeen?.model ? { lastModel: lastContextSeen.model } : {}),
+    ...(lastContextSeen?.effort ? { lastEffort: lastContextSeen.effort } : {}),
   }
 }

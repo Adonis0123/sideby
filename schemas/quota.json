@@ -171,6 +171,12 @@
                   },
                   "lastActivityAt": {
                     "type": "string"
+                  },
+                  "lastModel": {
+                    "type": "string"
+                  },
+                  "lastEffort": {
+                    "type": "string"
                   }
                 }
               },

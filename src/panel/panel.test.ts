@@ -824,6 +824,72 @@ describe('panel build identity', () => {
 })
 
 describe('Auto Handoff in the Panel (spec §3.17)', () => {
+  it('changes an account’s model and effort only on confirm, and not from a read-only Panel', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}\n')
+      const { claudePlugin } = await import('../families/claude/index.ts')
+      const runtime = () => createRuntime({ env: h.env, builtins: [asBuiltin(claudePlugin)] })
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      const config = h.path('.config/sideby/config.json')
+      try {
+        const hdr = {
+          host: `127.0.0.1:${port}`,
+          origin: `http://127.0.0.1:${port}`,
+          'x-sideby-token': handler.token,
+        }
+        const plan = (await post(port, '/api/account/model', { account: 'claude:main', effort: 'high' }, hdr))
+          .body as {
+          changed: boolean
+          diff: string
+        }
+        assert.equal(plan.changed, true)
+        await assert.rejects(readFile(config, 'utf8'))
+        await post(port, '/api/account/model', { account: 'claude:main', effort: 'high', confirm: true }, hdr)
+        assert.deepEqual(JSON.parse(await readFile(config, 'utf8')).accounts, {
+          'claude:main': { args: ['--effort', 'high'] },
+        })
+        const state = JSON.parse(
+          (await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text,
+        ) as PanelState
+        assert.deepEqual(state.accounts.find((a) => a.ref === 'claude:main')!.modelInfo!.effort, {
+          value: 'high',
+          from: 'sideby',
+        })
+        assert.equal(
+          (await post(port, '/api/account/model', { account: 'claude:main', effort: 3 }, hdr)).status,
+          400,
+        )
+      } finally {
+        await close(server)
+      }
+      const ro = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`], readOnly: true }),
+      )
+      try {
+        const hdr = {
+          host: `127.0.0.1:${ro.port}`,
+          origin: `http://127.0.0.1:${ro.port}`,
+          'x-sideby-token': ro.handler.token,
+        }
+        assert.equal(
+          (
+            await post(
+              ro.port,
+              '/api/account/model',
+              { account: 'claude:main', effort: 'low', confirm: true },
+              hdr,
+            )
+          ).status,
+          403,
+        )
+      } finally {
+        await close(ro.server)
+      }
+    })
+  })
+
   it('turns on in one step: plan first, writes on confirm, refuses in a read-only Panel, overview lists no Brief', async () => {
     await withFakeHome(async (h) => {
       await h.write('.claude/settings.json', '{}\n')

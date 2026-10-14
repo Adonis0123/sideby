@@ -19,6 +19,8 @@ interface Entry {
   output: number
   cacheRead: number
   cacheWrite: number
+  model?: string
+  effort?: string
 }
 
 export async function listJsonl(dir: string, out: string[] = []): Promise<string[]> {
@@ -44,7 +46,8 @@ interface Row {
   timestamp?: unknown
   sessionId?: unknown
   requestId?: unknown
-  message?: { id?: unknown; usage?: Record<string, unknown> | null } | null
+  effort?: unknown
+  message?: { id?: unknown; model?: unknown; usage?: Record<string, unknown> | null } | null
 }
 
 /** What one session log holds: its usage rows in file order, keyed for the "last line wins" dedupe. */
@@ -89,6 +92,13 @@ async function parseFile(file: string): Promise<Parsed> {
           output: count(usage.output_tokens),
           cacheRead: count(usage.cache_read_input_tokens),
           cacheWrite: count(usage.cache_creation_input_tokens),
+          // Claude Code logs a placeholder model for some local rows; it is not a model anyone chose.
+          ...(typeof row.message?.model === 'string' &&
+          row.message.model &&
+          row.message.model !== '<synthetic>'
+            ? { model: row.message.model }
+            : {}),
+          ...(typeof row.effort === 'string' && row.effort ? { effort: row.effort } : {}),
         },
       ])
     }
@@ -100,7 +110,7 @@ async function parseFile(file: string): Promise<Parsed> {
 }
 
 /** Parsed session logs per Account directory; a file is parsed again only after it changed. */
-export const claudeUsageMemo = new FileMemo<Parsed>({ name: 'claude-usage', version: 1 })
+export const claudeUsageMemo = new FileMemo<Parsed>({ name: 'claude-usage', version: 2 })
 
 export async function readClaudeUsage(account: Account, ctx: ReadContext): Promise<UsageResult> {
   const files = await listJsonl(join(account.dir, 'projects'))
@@ -145,6 +155,7 @@ export async function readClaudeUsage(account: Account, ctx: ReadContext): Promi
   const sessions = new Set<string>()
   const days = dailyBuckets(ctx.now)
   let last = Number.NEGATIVE_INFINITY
+  let lastTurn: Entry | undefined
   let inputTokens = 0
   let outputTokens = 0
   let cacheReadTokens = 0
@@ -152,6 +163,7 @@ export async function readClaudeUsage(account: Account, ctx: ReadContext): Promi
   for (const e of entries.values()) {
     if (!Number.isFinite(e.timestamp) || e.timestamp > now) continue
     if (e.timestamp > last) last = e.timestamp
+    if (e.model && (!lastTurn || e.timestamp >= lastTurn.timestamp)) lastTurn = e
     if (e.timestamp < since) continue
     sessions.add(e.session)
     inputTokens += e.input
@@ -171,5 +183,7 @@ export async function readClaudeUsage(account: Account, ctx: ReadContext): Promi
     totalTokens: inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens,
     daily: days.daily,
     ...(Number.isFinite(last) ? { lastActivityAt: new Date(last).toISOString() } : {}),
+    ...(lastTurn?.model ? { lastModel: lastTurn.model } : {}),
+    ...(lastTurn?.effort ? { lastEffort: lastTurn.effort } : {}),
   }
 }

@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/model.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "account",
+    "family",
+    "settable",
+    "efforts",
+    "models",
+    "sideby",
+    "host",
+    "last"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "account": {
+      "type": "string"
+    },
+    "family": {
+      "type": "string"
+    },
+    "settable": {
+      "type": "boolean",
+      "description": "Whether sideby can set the model and effort for this account."
+    },
+    "reason": {
+      "type": "string"
+    },
+    "efforts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Model names to offer; any other name may be given."
+    },
+    "sideby": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        }
+      }
+    },
+    "last": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": [
+        "value",
+        "from"
+      ],
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "from": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "sideby"
+            },
+            {
+              "type": "string",
+              "const": "host"
+            },
+            {
+              "type": "string",
+              "const": "last"
+            }
+          ]
+        }
+      }
+    },
+    "effort": {
+      "type": "object",
+      "required": [
+        "value",
+        "from"
+      ],
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "from": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "sideby"
+            },
+            {
+              "type": "string",
+              "const": "host"
+            },
+            {
+              "type": "string",
+              "const": "last"
+            }
+          ]
+        }
+      }
+    },
+    "change": {
+      "type": "object",
+      "required": [
+        "changed",
+        "applied",
+        "file",
+        "diff",
+        "args"
+      ],
+      "properties": {
+        "changed": {
+          "type": "boolean"
+        },
+        "applied": {
+          "type": "boolean"
+        },
+        "file": {
+          "type": "string"
+        },
+        "diff": {
+          "type": "string"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The account arguments in the config after the change."
+        }
+      }
+    }
+  },
+  "title": "sideby model --json"
+}

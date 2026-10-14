@@ -8,6 +8,7 @@ import { planHandoff } from '../core/handoff.ts'
 import { applyHandoffEnable, type EnablePlan, planHandoffEnable } from '../core/handoff-enable.ts'
 import { handoffOverview } from '../core/handoff-overview.ts'
 import { configureHandoff, type HandoffChange, handoffStatus } from '../core/handoff-status.ts'
+import { type AccountModel, accountModel, setAccountModel } from '../core/model-choice.ts'
 import { tildify } from '../core/paths.ts'
 import { MIN_CALLS } from '../core/tuning.ts'
 import type { TuneApplyPlan } from '../core/tuning-apply.ts'
@@ -70,6 +71,8 @@ export type PanelAccount = (AccountStatus | (Account & Partial<AccountStatus>)) 
   aliases?: string[]
   /** Host arguments of those aliases that add any (alias → arguments); absent when none do. */
   aliasArgs?: Record<string, string[]>
+  /** The model and effort it starts with and where each comes from (spec §3.19); absent for Families without a choice. */
+  modelInfo?: Omit<AccountModel, 'ref' | 'family'>
 }
 
 export type { DoctorHistory }
@@ -250,8 +253,24 @@ async function accountState(rt: Runtime, account: Account, families: FamilyInfo[
     login: 'unknown',
   }
   errors.push(...(status?.problems ?? []))
+  let modelInfo: PanelAccount['modelInfo']
+  if (rt.families.get(account.family)?.modelChoice) {
+    const last =
+      usage?.status === 'ok'
+        ? {
+            ...(usage.lastModel ? { model: usage.lastModel } : {}),
+            ...(usage.lastEffort ? { effort: usage.lastEffort } : {}),
+          }
+        : {}
+    const info = await guard(accountModel(rt, account, last))
+    if (info) {
+      const { ref: _r, family: _f, ...rest } = info
+      modelInfo = rest
+    }
+  }
   return {
     ...base,
+    ...(modelInfo ? { modelInfo } : {}),
     ...(quota ? { quota } : {}),
     ...(usage ? { usage } : {}),
     ...(errors.length ? { error: errors.join('; ') } : {}),
@@ -485,6 +504,27 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const rt = await getRuntime()
         const r = await configureHandoff(rt, change, { apply: optBool(body, 'confirm') })
         return { ...r, file: tildify(r.file, rt.paths.home) }
+      },
+    },
+    // Model and effort per Account (spec §3.19, ADR-0014): without `confirm` only the config diff.
+    // `model` / `effort`: left out keeps it, null goes back to the Host's default, a string sets it.
+    '/api/account/model': {
+      writes: (body) => body.confirm === true,
+      async run(body) {
+        const account = optString(body, 'account')
+        if (!account) throw new HttpError(400, '"account" is required')
+        const change: { model?: string | null; effort?: string | null } = {}
+        for (const k of ['model', 'effort'] as const) {
+          const v = body[k]
+          if (v === undefined) continue
+          if (v !== null && typeof v !== 'string')
+            throw new HttpError(400, `"${k}" must be a string, or null for the default`)
+          change[k] = v
+        }
+        const rt = await getRuntime()
+        const found = await rt.resolve(account)
+        const r = await setAccountModel(rt, found, change, { apply: optBool(body, 'confirm') })
+        return { ref: found.ref, ...r, file: tildify(r.file, rt.paths.home) }
       },
     },
     // The Auto Handoff page (spec §3.17): where work would go next and the last hand-overs. Reads only.

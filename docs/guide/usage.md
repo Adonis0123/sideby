@@ -106,6 +106,10 @@ Because Claude Code runs the wrapper on every refresh, `setup` refuses when `sid
 
 Accounts that link `settings.json` to the Main Account (the default) get quota from the same setup. An account with its own `settings.json` shows quota as not enabled until that file's status line is wrapped the same way. Codex quota needs no setup: sideby reads it from local session files.
 
+## Model and effort
+
+Each account row shows the model and effort it runs with, for example `opus · high`; hover to see where each comes from: set by sideby for this account, the tool's own settings, or the last session. Click it (or **Model and effort…** in the account menu) to pick a model and effort for that account alone. sideby saves the choice as that account's launch arguments in its own config (`--model` and `--effort` for Claude Code, `-m` and `-c model_reasoning_effort=…` for Codex), so accounts that share one `settings.json` can still differ, and the tool's own files stay as they are. It applies to new sessions started with sideby (a short command, `sideby run`, `sideby next`, Auto Handoff); a plain `claude` ignores it. `ANTHROPIC_MODEL` or `CLAUDE_CODE_EFFORT_LEVEL` in your shell and settings from your organization still win, and sideby cannot see them. From a terminal: `sideby model cc002 opus --effort high` (add `--yes`); `default` clears one.
+
 ## Context tuning
 
 Every Host compacts a session by itself once its context grows past a threshold. `sideby tune` replays your last 7 days of local sessions against other thresholds and estimates which one spends the fewest tokens:

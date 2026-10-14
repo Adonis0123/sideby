@@ -1,4 +1,5 @@
 // Built-in Family Plugin for Claude Code (spec §3.4, checked against Claude Code 2.1.289).
+
 import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { identityFromJsonFile, identityOf } from '../../core/identity.ts'
@@ -14,6 +15,7 @@ import {
 } from '../shared/sessions.ts'
 import { claudeHandoff } from './handoff.ts'
 import { CLAUDE_LAYOUT } from './layout.ts'
+import { claudeModelChoice } from './model.ts'
 import { readClaudeQuota } from './quota.ts'
 import { readClaudeTuning } from './tuning.ts'
 import { readClaudeUsage } from './usage.ts'
@@ -121,6 +123,7 @@ export const claudeFamily: FamilyDef = {
   },
   loginState,
   model,
+  modelChoice: claudeModelChoice,
   identity: claudeIdentity,
   readQuota: readClaudeQuota,
   readUsage: readClaudeUsage,

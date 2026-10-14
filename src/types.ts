@@ -87,6 +87,8 @@ export interface FamilyDef {
   keepTitle?: { args: string[]; key: string }
   loginState?(account: Account): Promise<LoginState>
   model?(account: Account): Promise<string | undefined>
+  /** Choosing the model and effort an Account starts with, as Host arguments (spec §3.19, ADR-0014). */
+  modelChoice?: FamilyModelChoice
   /**
    * Who the Account is signed in as, from the Host's own login file: identity fields such as the email and the
    * organization only, never a token or any other credential value (ADR-0003). Return undefined when unknown; an
@@ -240,6 +242,28 @@ export interface TokenTotals {
   totalTokens: number
 }
 
+/** A model and an effort level; a field left out means the Host's own default. */
+export interface ModelChoice {
+  model?: string
+  effort?: string
+}
+
+export interface FamilyModelChoice {
+  /** Effort levels the Host accepts at launch, lowest first. */
+  efforts: readonly string[]
+  /** Model names to offer; any other name may be typed. */
+  models: readonly string[]
+  /**
+   * What the Host's own config sets for new sessions of the Account. Reads only the model and effort keys; `model`
+   * picks the per-model effort when the config has none of its own.
+   */
+  configured(account: Account, model?: string): Promise<ModelChoice>
+  /** Host arguments that start a session with `choice`. */
+  toArgs(choice: ModelChoice): string[]
+  /** The choice in `args`, and the other arguments in their order. */
+  fromArgs(args: readonly string[]): { choice: ModelChoice; rest: string[] }
+}
+
 export type UsageResult =
   | ({
       status: 'ok'
@@ -253,6 +277,9 @@ export type UsageResult =
       daily?: { date: string; totalTokens: number }[]
       /** ISO time of the newest record the reader saw, not later than now. */
       lastActivityAt?: string
+      /** Model and effort of the newest turn the reader saw, when the logs record them (spec §3.19). */
+      lastModel?: string
+      lastEffort?: string
     } & TokenTotals)
   | { status: 'unavailable'; reason: 'no-source' | 'no-session' | 'unrecognized'; detail?: string }
 
