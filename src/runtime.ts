@@ -269,9 +269,14 @@ export interface Runtime {
   handoffSettings(): HandoffSettings
   /**
    * Where an Auto Handoff from `origin` would go now (spec §3.17 "选号"): every Account of every Family is a
-   * candidate; `used` lists the chain's Accounts so far.
+   * candidate; `used` lists the chain's Accounts so far. `ahead` decides early what happens once the origin's fullest
+   * window reaches the threshold, as plan.json and the Panel need.
    */
-  handoffDecision(origin: Account, used: readonly string[]): Promise<HandoffDecision>
+  handoffDecision(
+    origin: Account,
+    used: readonly string[],
+    opts?: { ahead?: boolean },
+  ): Promise<HandoffDecision>
   readContext(): ReadContext
 }
 
@@ -826,7 +831,7 @@ export async function createRuntime(
       return planHandoff(f.id, candidates, readContext().now, o)
     },
     handoffSettings: () => handoffSettings(config),
-    async handoffDecision(origin, used) {
+    async handoffDecision(origin, used, opts = {}) {
       const candidates = await Promise.all(
         (await accounts()).map(async (a): Promise<SelectCandidate> => {
           const f = familyOf(a.family)
@@ -868,6 +873,7 @@ export async function createRuntime(
         aliases: aliasRefs(config.aliases),
         used,
         now: now(),
+        ...(opts.ahead ? { ahead: true } : {}),
       })
     },
     readContext,

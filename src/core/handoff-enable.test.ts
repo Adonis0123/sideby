@@ -65,6 +65,28 @@ describe('planHandoffEnable / applyHandoffEnable', () => {
     })
   })
 
+  it('applies only the plan that was shown: a changed plan writes nothing and comes back to be shown', async () => {
+    await withFakeHome(async (h) => {
+      const shown = await planHandoffEnable(await setup(h))
+      assert.match(shown.key, /^[0-9a-f]{16}$/)
+      // Something else turns it on in sideby's settings in between, so the config step is gone.
+      await h.write('.config/sideby/config.json', JSON.stringify({ handoff: { auto: true } }))
+      const rt = await createRuntime({ env: h.env, builtins })
+      const before = await snapshot(h.home)
+      const r = await applyHandoffEnable(rt, { expect: shown.key })
+      assert.equal(r.changed, true)
+      assert.deepEqual(r.results, [])
+      assert.deepEqual(
+        r.plan.steps.map((s) => s.id),
+        ['quota'],
+      )
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+      const again = await applyHandoffEnable(rt, { expect: r.plan.key })
+      assert.equal(again.changed, undefined)
+      assert.ok(again.results.length === 1 && again.results[0]!.ok)
+    })
+  })
+
   it('turns on same-family hand-over only when asked', async () => {
     await withFakeHome(async (h) => {
       await applyHandoffEnable(await setup(h))

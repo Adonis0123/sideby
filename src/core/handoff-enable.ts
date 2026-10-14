@@ -1,6 +1,7 @@
 // Turning Auto Handoff on in one step (spec §3.17 "页面与一键开启", ADR-0013): the Panel's button does what the CLI's
 // `handoff enable`, `quota setup` and `handoff setup` do, shown first as one plan and applied together after one
 // confirmation. Every step is an existing, reversible setup; nothing new is written.
+import { createHash } from 'node:crypto'
 import { lstat, mkdir, readFile, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import type { Runtime } from '../runtime.ts'
@@ -34,12 +35,22 @@ export interface EnablePlan {
   manual: EnableManual[]
   /** Same-Family hand-over as it will be once the plan is applied. */
   sameFamily: boolean
+  /** Names this plan; a confirmation that sends it back as `expect` applies only this plan. */
+  key: string
 }
 
 export interface EnableResult {
   plan: EnablePlan
   results: { id: EnableStep['id']; family?: string; accounts?: string[]; ok: boolean; message: string }[]
+  /** The plan is no longer the one that was shown (`expect`), so nothing was written; `plan` is the new one. */
+  changed?: boolean
 }
+
+const keyOf = (p: Omit<EnablePlan, 'key'>) =>
+  createHash('sha256')
+    .update(JSON.stringify([p.blocked ?? null, p.sameFamily, p.steps]))
+    .digest('hex')
+    .slice(0, 16)
 
 /** Whether `rel` below `dir` goes through a link: a file seen through one is already there, or is not ours to change. */
 async function throughLink(dir: string, rel: string): Promise<boolean> {
@@ -95,8 +106,16 @@ export async function planHandoffEnable(
   opts: { sameFamily?: boolean } = {},
 ): Promise<EnablePlan> {
   const st = await handoffStatus(rt)
-  if (st.sideby.problem)
-    return { alreadyOn: false, blocked: st.sideby.problem, steps: [], manual: [], sameFamily: st.sameFamily }
+  if (st.sideby.problem) {
+    const plan = {
+      alreadyOn: false,
+      blocked: st.sideby.problem,
+      steps: [],
+      manual: [],
+      sameFamily: st.sameFamily,
+    }
+    return { ...plan, key: keyOf(plan) }
+  }
   const steps: EnableStep[] = []
   const manual: EnableManual[] = []
   const cfg = await configureHandoff(rt, changeOf(opts), { apply: false })
@@ -131,15 +150,20 @@ export async function planHandoffEnable(
     }
     if (f.family === 'codex') manual.push({ id: 'codex-trust', family: 'codex' })
   }
-  return { alreadyOn: steps.length === 0, steps, manual, sameFamily: cfg.settings.sameFamily }
+  const plan = { alreadyOn: steps.length === 0, steps, manual, sameFamily: cfg.settings.sameFamily }
+  return { ...plan, key: keyOf(plan) }
 }
 
-/** Applies the plan in an order where "on" means "working": the setups first, the config key last. Stops at the first failure. */
+/**
+ * Applies the plan in an order where "on" means "working": the setups first, the config key last. Stops at the first
+ * failure. With `expect`, writes nothing unless the plan is still the one that was shown.
+ */
 export async function applyHandoffEnable(
   rt: Runtime,
-  opts: { sameFamily?: boolean } = {},
+  opts: { sameFamily?: boolean; expect?: string } = {},
 ): Promise<EnableResult> {
   const plan = await planHandoffEnable(rt, opts)
+  if (opts.expect !== undefined && opts.expect !== plan.key) return { plan, results: [], changed: true }
   const results: EnableResult['results'] = []
   if (!plan.blocked) {
     const order = ['quota', 'hook', 'copy', 'config'] as const
@@ -165,7 +189,9 @@ export async function applyHandoffEnable(
           }
           const left = await hookCopies(rt, step.family!, file)
           ok = left.length === 0
-          message = left.length ? `${left.map((c) => c.ref).join(', ')} still miss the hook file` : ''
+          message = left.length
+            ? `${left.map((c) => c.ref).join(', ')} still lack ${file}; try again, and if it keeps failing, check that you may write to their hooks folder`
+            : ''
         } else {
           const r = await configureHandoff(rt, changeOf(opts), { apply: true })
           ok = r.applied || !r.changed

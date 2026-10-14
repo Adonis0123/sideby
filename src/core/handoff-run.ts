@@ -250,7 +250,8 @@ export async function runWithHandoff(
     const writePlan = () => {
       pending = pending.then(async () => {
         try {
-          const d = await rt.handoffDecision(account, used)
+          // Read by the hook once the threshold is crossed, so it answers for that moment (spec §3.17 "选号" 1).
+          const d = await rt.handoffDecision(account, used, { ahead: true })
           if (stopped) return
           const plan: PlanFile = {
             runId,

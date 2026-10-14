@@ -508,7 +508,9 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         })
         const opts = sameFamily === undefined ? {} : { sameFamily }
         if (!optBool(body, 'confirm')) return show(await planHandoffEnable(rt, opts))
-        const r = await applyHandoffEnable(rt, opts)
+        // `expect`: the key of the plan the person saw; a different plan now is shown again, not applied.
+        const expect = optString(body, 'expect')
+        const r = await applyHandoffEnable(rt, expect === undefined ? opts : { ...opts, expect })
         return { ...r, plan: show(r.plan) }
       },
     },

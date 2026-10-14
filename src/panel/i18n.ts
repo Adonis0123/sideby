@@ -298,6 +298,9 @@ const en = {
   'hp.goesTo': 'at {p}% it moves to {to}',
   'hp.goesToLimit': 'when it hits its usage limit it moves to {to}',
   'hp.waits': 'at the limit it waits: quota is back at {at}',
+  'hp.waitRule': 'If its quota comes back within {w} minutes at that point, it waits instead of switching.',
+  'hp.planChanged':
+    'Something changed since you looked, so sideby has not changed anything yet. This is what it would do now; confirm again.',
   'hp.none': 'no account can take over right now',
   'hp.noneBack': 'no account can take over now; {ref} is back at {at}',
   'hp.noAccounts': 'No subscription account can start a hand-over.',
@@ -761,6 +764,8 @@ const zh: Record<MessageKey, string> = {
   'hp.goesTo': '到 {p}% 时交给 {to}',
   'hp.goesToLimit': '撞到用量上限时交给 {to}',
   'hp.waits': '到上限时会等待：{at} 额度恢复',
+  'hp.waitRule': '如果那时离额度恢复不到 {w} 分钟，就原地等，不换号。',
+  'hp.planChanged': '你查看之后设置有了变化，所以还没有改任何东西。下面是现在要做的改动，请再确认一次。',
   'hp.none': '现在没有能接手的账号',
   'hp.noneBack': '现在没有能接手的账号；{ref} 在 {at} 恢复',
   'hp.noAccounts': '没有能发起交接的订阅账号。',

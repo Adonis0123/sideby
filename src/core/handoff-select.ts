@@ -34,12 +34,23 @@ export function sameOrganization(a?: AccountIdentity, b?: AccountIdentity): bool
   return true
 }
 
-/** The latest reset of the origin's windows at or above the threshold, when they all reset in time to wait. */
-function waitUntil(origin: SelectCandidate, s: HandoffSettings, now: Date): string | undefined {
+/**
+ * The latest reset of the origin's full windows, when they all reset in time to wait. Full means at the threshold;
+ * `ahead` also counts the fullest window once it is past `prepareAt`, since it answers what happens when that window
+ * reaches the threshold (spec §3.17 "选号" 1: plan.json and the Panel, decided before the moment comes).
+ */
+function waitUntil(
+  origin: SelectCandidate,
+  s: HandoffSettings,
+  now: Date,
+  ahead: boolean,
+): string | undefined {
   if (origin.quota.status !== 'ok' || s.waitIfResetWithinMinutes <= 0) return undefined
+  const open = origin.quota.windows.filter((w) => !windowReset(w.resetsAt, now))
+  const top = Math.max(0, ...open.map((w) => w.usedPercent))
   let last: number | undefined
-  for (const w of origin.quota.windows) {
-    if (w.usedPercent < s.threshold || windowReset(w.resetsAt, now)) continue
+  for (const w of open) {
+    if (w.usedPercent < s.threshold && !(ahead && w.usedPercent === top && top >= s.prepareAt)) continue
     const t = Date.parse(w.resetsAt)
     if (!Number.isFinite(t)) return undefined
     last = Math.max(last ?? t, t)
@@ -76,9 +87,11 @@ export function selectNext(input: {
   /** Accounts this chain already used, the origin included. */
   used: readonly string[]
   now: Date
+  /** Decide now what happens when the origin's fullest window reaches the threshold (see `waitUntil`). */
+  ahead?: boolean
 }): HandoffDecision {
   const { origin, settings: s, now } = input
-  const until = waitUntil(origin, s, now)
+  const until = waitUntil(origin, s, now, input.ahead === true)
   if (until) return { kind: 'wait', until }
 
   const refOf = (name: string) => input.aliases[name] ?? name

@@ -1,12 +1,13 @@
 // Auto Handoff end to end with fake Hosts (spec §3.17): the parent ends a ready Host and starts the next Account in
 // the same terminal, never kills a Host that will not exit, stays when cancelled, and does nothing when it is off.
 import assert from 'node:assert/strict'
-import { chmod, writeFile } from 'node:fs/promises'
+import { chmod, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { describe, it } from 'node:test'
 import { type FakeHome, fakeHost, readHostLog, withFakeHome } from '../../testing/index.ts'
 import { claudePlugin } from '../families/claude/index.ts'
+import { cacheStateDir, writeQuotaCache } from '../families/claude/quota-cache.ts'
 import { codexPlugin } from '../families/codex/index.ts'
 import { createRuntime } from '../runtime.ts'
 import { runWithHandoff } from './handoff-run.ts'
@@ -68,6 +69,24 @@ describe('runWithHandoff', () => {
       assert.match(two.argv[dashes + 1]!, /handed over from claude:001.*Read .*1-claude-001\.md/)
       assert.ok(two.argv.includes('--add-dir'))
       assert.ok(lines.some((l) => /handing over from claude:001 to claude:002/.test(l)))
+    })
+  })
+
+  it('writes a plan that already says wait when the fullest window resets soon, so the hook does not interrupt', async () => {
+    await withFakeHome(async (h) => {
+      await fakeHost(h, 'claude', { sleep: 1 })
+      const resetsAt = new Date(Date.now() + 20 * 60_000).toISOString()
+      await writeQuotaCache(cacheStateDir(h.env), '001', {
+        version: 1,
+        observedAt: new Date().toISOString(),
+        windows: [{ label: '5h', windowMinutes: 300, usedPercent: 90, resetsAt }],
+      })
+      const rt = await setup(h, { auto: true, sameFamily: true, countdownSeconds: 0 })
+      await runWithHandoff(rt, 'cc001', [], { err: () => {}, stdin: terminal() })
+      const root = join(rt.paths.stateDir, 'handoffs')
+      const [dir] = await readdir(root)
+      const plan = JSON.parse(await readFile(join(root, dir!, 'plan.json'), 'utf8'))
+      assert.equal(plan.decision, 'wait')
     })
   })
 

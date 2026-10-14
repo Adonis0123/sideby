@@ -77,7 +77,7 @@ export async function handoffOverview(rt: Runtime): Promise<HandoffOverview> {
     subs.map(async (a) => {
       let decision: HandoffDecision
       try {
-        decision = await rt.handoffDecision(a, [a.ref])
+        decision = await rt.handoffDecision(a, [a.ref], { ahead: true })
       } catch (err) {
         decision = { kind: 'none', reason: (err as Error).message }
       }

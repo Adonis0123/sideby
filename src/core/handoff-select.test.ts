@@ -51,6 +51,42 @@ describe('selectNext', () => {
     )
   })
 
+  it('ahead, counts the fullest window past prepareAt as full: the plan read at the threshold already says wait', () => {
+    const base = { candidates: [acct('claude:002')], aliases: {}, used: [], now: NOW }
+    const s = settings({ auto: true, sameFamily: true })
+    const at = (used: number) => acct('claude:001', { quota: quota(used, 20) })
+    assert.deepEqual(selectNext({ ...base, origin: at(90), settings: s }), pick('claude:002'))
+    assert.deepEqual(selectNext({ ...base, origin: at(90), settings: s, ahead: true }), {
+      kind: 'wait',
+      until: inMinutes(20),
+    })
+    // Below prepareAt it is too early to say the window will be full before it resets.
+    assert.deepEqual(selectNext({ ...base, origin: at(70), settings: s, ahead: true }), pick('claude:002'))
+  })
+
+  it('ahead, looks only at the fullest window: a weekly window that resets in days means no wait', () => {
+    const base = { candidates: [acct('claude:002')], aliases: {}, used: [], now: NOW }
+    const s = settings({ auto: true, sameFamily: true })
+    const two = (weekly: number): QuotaResult => ({
+      status: 'ok',
+      windows: [
+        { label: '5h', windowMinutes: 300, usedPercent: 90, resetsAt: inMinutes(20) },
+        { label: '7d', windowMinutes: 10_080, usedPercent: weekly, resetsAt: inMinutes(3 * 1440) },
+      ],
+      observedAt: NOW.toISOString(),
+      source: 'test',
+    })
+    const origin = (weekly: number) => acct('claude:001', { quota: two(weekly) })
+    assert.deepEqual(
+      selectNext({ ...base, origin: origin(94), settings: s, ahead: true }),
+      pick('claude:002'),
+    )
+    assert.deepEqual(selectNext({ ...base, origin: origin(50), settings: s, ahead: true }), {
+      kind: 'wait',
+      until: inMinutes(20),
+    })
+  })
+
   it('follows an order list and resolves short commands', () => {
     const r = selectNext({
       origin,

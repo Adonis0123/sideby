@@ -2007,7 +2007,7 @@ const MAIN = String.raw`
   // ---------- the Auto Handoff page ----------
   // Off: one sentence and one button. On: where each account's work would go next, the last hand-overs and what is
   // still missing. Turning on is one plan shown first (hp.preview) and one confirmation; no commands to copy.
-  const hp = { data: null, plan: null, loading: false, error: null, preview: null, previewing: false, applying: false, failed: null, sameFamily: false, sameTouched: false, busyOff: false, askSame: false }
+  const hp = { data: null, plan: null, loading: false, error: null, preview: null, previewing: false, applying: false, failed: null, changed: false, sameFamily: false, sameTouched: false, busyOff: false, askSame: false }
   async function loadHandoffPage() {
     hp.loading = true
     hp.error = null
@@ -2026,6 +2026,7 @@ const MAIN = String.raw`
   async function hpPreview() {
     hp.previewing = true
     hp.failed = null
+    hp.changed = false
     renderHandoffPage()
     try { hp.preview = await api('/api/handoff/enable', hpBody()) } catch (e) { hp.failed = { error: e } }
     hp.previewing = false
@@ -2036,9 +2037,11 @@ const MAIN = String.raw`
     hp.failed = null
     renderHandoffPage()
     try {
-      const r = await api('/api/handoff/enable', Object.assign(hpBody(), { confirm: true }))
+      const r = await api('/api/handoff/enable', Object.assign(hpBody(), { confirm: true, expect: hp.preview && hp.preview.key }))
       const bad = r.results.find((x) => !x.ok)
-      if (r.plan.blocked) hp.preview = r.plan
+      // A plan that changed since it was shown is shown again; one with nothing left to do means it is already on.
+      hp.changed = Boolean(r.changed) && !r.plan.alreadyOn
+      if (hp.changed || r.plan.blocked) hp.preview = r.plan
       else if (bad) hp.failed = { step: bad, plan: r.plan }
       else { hp.preview = null; toast(t('toast.ahOn')) }
       await load({ silent: true })
@@ -2076,12 +2079,13 @@ const MAIN = String.raw`
   function hpPreviewCard() {
     const p = hp.preview
     const kids = [h('h3', { class: 'small' }, t('hp.willDo'))]
+    if (hp.changed) kids.push(h('p', { class: 'note note-warn', role: 'status' }, t('hp.planChanged')))
     if (p.blocked) kids.push(h('p', { class: 'note note-fail' }, t('hp.blocked', { why: p.blocked })), codeCopy('npm i -g sideby'))
     else {
       kids.push(hpSteps(p), ...hpManual(p))
       kids.push(p.sameFamily ? h('p', { class: 'note note-warn' }, t('ah.sameFamilyWarn')) : h('p', { class: 'muted small' }, t('hp.sameFamilyOffNote')))
     }
-    const foot = [h('button', { class: 'btn', type: 'button', disabled: hp.applying, onclick: () => { hp.preview = null; hp.failed = null; renderHandoffPage() } }, t('btn.cancel'))]
+    const foot = [h('button', { class: 'btn', type: 'button', disabled: hp.applying, onclick: () => { hp.preview = null; hp.failed = null; hp.changed = false; renderHandoffPage() } }, t('btn.cancel'))]
     if (!p.blocked) foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: hp.applying, 'aria-busy': hp.applying ? 'true' : null, onclick: hpApply }, hp.applying ? spinner() : null, hp.applying ? t('hp.applying') : t('hp.confirmOn')))
     kids.push(h('div', { class: 'row-actions' }, foot))
     return h('div', { class: 'ah-fam' }, kids)
@@ -2097,6 +2101,11 @@ const MAIN = String.raw`
     if (d.kind === 'pick') return starts.includes('quota') ? t('hp.goesTo', { to: accountLabel(d.ref), p: thr }) : t('hp.goesToLimit', { to: accountLabel(d.ref) })
     if (d.kind === 'wait') return t('hp.waits', { at: clock(d.until) })
     return d.earliestReset ? t('hp.noneBack', { ref: accountLabel(d.earliestReset.ref), at: clock(d.earliestReset.at) }) : t('hp.none')
+  }
+  // The one case where reaching the threshold does not switch (spec §3.17 "选号" 1); none when waiting is off.
+  function hpWaitRule(st) {
+    const w = st.settings.waitIfResetWithinMinutes
+    return w > 0 ? ' ' + t('hp.waitRule', { w }) : null
   }
   function hpRows(d) {
     if (!d.takeover.length) return h('p', { class: 'muted small' }, t('hp.noAccounts'))
@@ -2138,7 +2147,7 @@ const MAIN = String.raw`
     if (BOOT.readOnly) kids.push(h('p', { class: 'note' }, t('banner.readOnly')))
     if (!on) {
       kids.push(h('p', null, t('hp.intro')))
-      kids.push(h('ol', { class: 'hp-how' }, h('li', null, t('hp.how1')), h('li', null, t('hp.how2', { p: st.settings.threshold })), h('li', null, t('hp.how3', { s: st.settings.countdownSeconds }))))
+      kids.push(h('ol', { class: 'hp-how' }, h('li', null, t('hp.how1')), h('li', null, t('hp.how2', { p: st.settings.threshold }), hpWaitRule(st)), h('li', null, t('hp.how3', { s: st.settings.countdownSeconds }))))
       if (!S.state.accounts.some((a) => a.kind !== 'api' && st.starters.includes(a.family))) kids.push(h('p', { class: 'note' }, t('hp.noStarters')))
       else {
         if (!hp.preview) {
@@ -2149,7 +2158,7 @@ const MAIN = String.raw`
         } else kids.push(hpPreviewCard())
       }
     } else {
-      kids.push(h('p', null, h('span', { class: 'chip chip-ok' }, t('ah.on')), ' ', t('hp.onNote', { p: st.settings.threshold })))
+      kids.push(h('p', null, h('span', { class: 'chip chip-ok' }, t('ah.on')), ' ', t('hp.onNote', { p: st.settings.threshold }), hpWaitRule(st)))
       const d = hp.data
       if (d) {
         kids.push(h('h3', { class: 'small' }, t('hp.takeover')), hpRows(d))
