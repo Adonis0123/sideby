@@ -182,11 +182,22 @@ export function instanceOf(app: FoundApp, appData: string | null, procs: readonl
   })
 }
 
-/** Brings a running app to the front through NSRunningApplication (no Automation permission needed). */
+/**
+ * Brings a running app to the front as a Dock click does: a reopen event (`aevt/rapp`) to that one process, so an
+ * app whose windows were all closed opens one again, then NSRunningApplication activation. Activation alone makes
+ * such an app frontmost with nothing on screen (seen 2026-10-14 with the Codex app). Neither needs the Automation
+ * permission.
+ */
 async function activate(deps: DesktopDeps, pid: number): Promise<boolean> {
+  const p = Math.trunc(pid)
   const script = [
     "ObjC.import('AppKit');",
-    `const app = $.NSRunningApplication.runningApplicationWithProcessIdentifier(${Math.trunc(pid)});`,
+    `const app = $.NSRunningApplication.runningApplicationWithProcessIdentifier(${p});`,
+    'if (!app.isNil()) {',
+    `  const target = $.NSAppleEventDescriptor.descriptorWithProcessIdentifier(${p});`,
+    '  const reopen = $.NSAppleEventDescriptor.appleEventWithEventClassEventIDTargetDescriptorReturnIDTransactionID(0x61657674, 0x72617070, target, -1, 0);',
+    '  reopen.sendEventWithOptionsTimeoutError(1, 5, null);',
+    '}',
     "app.isNil() ? 'missing' : (app.activateWithOptions($.NSApplicationActivateAllWindows | $.NSApplicationActivateIgnoringOtherApps) ? 'ok' : 'refused')",
   ].join(' ')
   const r = await deps.exec(OSASCRIPT, ['-l', 'JavaScript', '-e', script])
