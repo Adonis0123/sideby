@@ -72,6 +72,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
     "@types/node": "^22.18.0",
+    "motion": "13.4.3",
     "typescript": "^7.0.2"
   },
   "packageManager": "pnpm@10.15.0"

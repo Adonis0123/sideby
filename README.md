@@ -55,7 +55,7 @@ The agent checks Node and your Host CLIs, installs sideby and the skill, creates
 
 ## What it looks like
 
-<img alt="Two terminals: the personal account and the work account running at the same time, then the local quota panel" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/demo.gif" width="1280">
+<img alt="Two terminals: the personal account and the work account running at the same time, both linked to the main account's skills and settings, then the local quota panel, and at 95% Auto Handoff moving work's session to the next account" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/demo.gif" width="1280">
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/panel-dark.png">

@@ -1,0 +1,995 @@
+<!doctype html>
+<!--
+  README demo scene, animated with Motion (https://motion.dev).
+  scripts/record-demo.ts fills it with the output of two real `sideby run` processes, a fresh Panel
+  screenshot and where that Panel's rows sit, and a real Auto Handoff from work to the next account,
+  then seeks the timeline frame by frame into docs/assets/demo.gif.
+  Opened by hand (after pnpm install), it plays the same timeline with the defaults below and
+  docs/assets/panel-dark.png; click to replay.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>sideby demo</title>
+    <style>
+      :root {
+        --bg: #070b12;
+        --term: #0d131d;
+        --line: #1c2637;
+        --text: #dbe3ef;
+        --muted: #71809a;
+        --personal: #f5a97f;
+        --work: #7dc4e4;
+        --linked: #a6e3a1;
+        --mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+        --ui: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        background: var(--bg);
+      }
+      #stage {
+        position: relative;
+        width: 1280px;
+        height: 760px;
+        overflow: hidden;
+        perspective: 1400px;
+        background: var(--bg);
+        font-family: var(--ui);
+        color: var(--text);
+      }
+      #stage > * {
+        position: absolute;
+      }
+      .blob {
+        width: 620px;
+        height: 620px;
+        border-radius: 50%;
+        filter: blur(90px);
+      }
+      #b0 {
+        left: -120px;
+        top: -200px;
+        background: radial-gradient(circle, #f5a97f55, transparent 65%);
+      }
+      #b1 {
+        right: -120px;
+        top: -200px;
+        background: radial-gradient(circle, #7dc4e455, transparent 65%);
+      }
+      #grid {
+        inset: 0;
+        background-image: radial-gradient(#ffffff14 1px, transparent 1.4px);
+        background-size: 28px 28px;
+        mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, #000 30%, transparent 80%);
+      }
+
+      /* Intro and outro mark: the Panel's logo, its two halves in the two accounts' colours. */
+      .mark {
+        left: 0;
+        right: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        pointer-events: none;
+      }
+      #intro {
+        top: 236px;
+      }
+      #outro {
+        top: 170px;
+      }
+      .logo {
+        width: 150px;
+        height: 150px;
+        overflow: visible;
+      }
+      .logo path {
+        filter: drop-shadow(0 0 18px currentColor);
+      }
+      .logo .h0 {
+        color: var(--personal);
+        fill: var(--personal);
+      }
+      .logo .h1 {
+        color: var(--work);
+        fill: var(--work);
+      }
+      .word {
+        margin-top: 18px;
+        font-size: 64px;
+        font-weight: 800;
+        letter-spacing: -0.035em;
+      }
+      .word span {
+        display: inline-block;
+        opacity: 0;
+      }
+      .tagline {
+        margin-top: 10px;
+        font-size: 22px;
+        color: #9aa7bd;
+        opacity: 0;
+      }
+      .install {
+        position: relative;
+        margin-top: 34px;
+        padding: 16px 30px;
+        border-radius: 14px;
+        background: #0d141f;
+        font-family: var(--mono);
+        font-size: 26px;
+        opacity: 0;
+      }
+      .repo {
+        margin-top: 22px;
+        font-family: var(--mono);
+        font-size: 17px;
+        color: var(--muted);
+        opacity: 0;
+      }
+
+      /* A light running round a border, turned by the clock (--a). */
+      .beam {
+        position: absolute;
+        inset: 0;
+        padding: 1.5px;
+        border-radius: inherit;
+        background: conic-gradient(
+          from var(--a, 0deg),
+          transparent 0 62%,
+          var(--accent, var(--linked)) 80%,
+          #fff 84%,
+          transparent 88% 100%
+        );
+        mask:
+          linear-gradient(#000 0 0) content-box,
+          linear-gradient(#000 0 0);
+        mask-composite: exclude;
+        pointer-events: none;
+      }
+
+      .cap {
+        left: 0;
+        right: 0;
+        top: 30px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 14px;
+        font-size: 26px;
+        font-weight: 650;
+        letter-spacing: -0.015em;
+        opacity: 0;
+      }
+      .cap code,
+      .tag {
+        font-family: var(--mono);
+        font-size: 0.8em;
+        font-weight: 500;
+      }
+      .tag {
+        padding: 5px 13px;
+        border: 1px solid #2c3d58;
+        border-radius: 999px;
+        background: #111b2b;
+        color: #a9bddb;
+      }
+      .cap code {
+        color: var(--linked);
+      }
+
+      .term {
+        top: 106px;
+        width: 572px;
+        height: 352px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: var(--term);
+        box-shadow:
+          0 30px 70px -24px #000,
+          0 0 80px -30px var(--accent);
+        opacity: 0;
+      }
+      #t0 {
+        left: 48px;
+        --accent: var(--personal);
+      }
+      #t1 {
+        left: 660px;
+        --accent: var(--work);
+      }
+      .bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 44px;
+        padding: 0 16px;
+        border-bottom: 1px solid var(--line);
+        border-radius: 16px 16px 0 0;
+        background: #0a0f18;
+        font-size: 15px;
+        color: var(--muted);
+      }
+      .bar i {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #263044;
+      }
+      .bar i:nth-child(1) {
+        background: #ff5f57;
+      }
+      .bar i:nth-child(2) {
+        background: #febc2e;
+      }
+      .bar i:nth-child(3) {
+        background: #28c840;
+      }
+      .bar .title {
+        margin-left: 10px;
+        font-family: var(--mono);
+      }
+      .bar .title b {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      .live {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        opacity: 0;
+      }
+      .live em {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--linked);
+        box-shadow: 0 0 10px var(--linked);
+      }
+      .body {
+        padding: 16px 20px;
+        font-family: var(--mono);
+        font-size: 19.5px;
+        line-height: 31px;
+        white-space: pre;
+      }
+      .ln {
+        position: relative;
+        height: 31px;
+      }
+      .hide {
+        opacity: 0;
+      }
+      .dim {
+        color: var(--muted);
+      }
+      .acc {
+        color: var(--accent);
+      }
+      .ok {
+        color: var(--linked);
+        text-shadow: 0 0 14px #a6e3a155;
+      }
+      .strong {
+        font-weight: 700;
+      }
+      .cursor {
+        display: inline-block;
+        width: 11px;
+        height: 22px;
+        margin-left: 1px;
+        vertical-align: -4px;
+        background: var(--accent, var(--text));
+        box-shadow: 0 0 12px var(--accent, var(--text));
+      }
+      .think {
+        position: absolute;
+        inset: 0;
+        color: var(--accent);
+        opacity: 0;
+      }
+      .think .spin {
+        display: inline-block;
+        font-weight: 400;
+      }
+
+      #links {
+        inset: 0;
+        overflow: visible;
+      }
+      #links path {
+        fill: none;
+        stroke-width: 3;
+        stroke-linecap: round;
+        filter: drop-shadow(0 0 6px #a6e3a1aa);
+      }
+      .pulse {
+        left: 0;
+        top: 0;
+        width: 10px;
+        height: 10px;
+        margin: -5px 0 0 -5px;
+        border-radius: 50%;
+        background: #effbe9;
+        box-shadow:
+          0 0 10px 3px #a6e3a1,
+          0 0 26px 8px #a6e3a155;
+        opacity: 0;
+      }
+      #main-card {
+        left: 270px;
+        top: 552px;
+        width: 740px;
+        padding: 18px 22px 20px;
+        border: 1px solid #2d5240;
+        border-radius: 18px;
+        background: linear-gradient(180deg, #0f2219, #0c1520);
+        box-shadow:
+          0 30px 70px -24px #000,
+          0 0 90px -20px #a6e3a144;
+        opacity: 0;
+      }
+      #main-card .head {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        font-family: var(--mono);
+        font-size: 22px;
+        font-weight: 700;
+      }
+      #main-card .head span {
+        font-family: var(--ui);
+        font-size: 15px;
+        font-weight: 500;
+        color: var(--muted);
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 9px;
+        margin-top: 14px;
+      }
+      .chip {
+        padding: 6px 12px;
+        border: 1px solid #2b4a3a;
+        border-radius: 9px;
+        background: #11281d;
+        font-family: var(--mono);
+        font-size: 15px;
+        color: #cdf0c8;
+        opacity: 0;
+      }
+      .own {
+        top: 474px;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 7px 14px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #0d131d;
+        font-size: 15px;
+        color: #8d9ab0;
+        opacity: 0;
+      }
+      #own0 {
+        left: 48px;
+      }
+      #own1 {
+        right: 48px;
+      }
+      .own svg {
+        width: 15px;
+        height: 15px;
+      }
+
+      #browser {
+        left: 90px;
+        top: 104px;
+        width: 1100px;
+        height: 630px;
+        border: 1px solid #24314a;
+        border-radius: 16px;
+        background: #0d1420;
+        box-shadow:
+          0 40px 90px -24px #000,
+          0 0 120px -40px #7dc4e455;
+        overflow: hidden;
+        opacity: 0;
+      }
+      #browser .bar {
+        position: relative;
+        z-index: 2;
+      }
+      .url {
+        margin: 0 auto;
+        padding: 5px 18px;
+        border-radius: 8px;
+        background: #151e2d;
+        font-family: var(--mono);
+        font-size: 14px;
+        color: #a9bddb;
+      }
+      #viewport {
+        position: relative;
+        height: 586px;
+        overflow: hidden;
+      }
+      #zoom {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 1100px;
+        transform-origin: 0 0;
+      }
+      #zoom img {
+        display: block;
+        width: 1100px;
+      }
+      #shine {
+        position: absolute;
+        top: -20%;
+        left: 0;
+        width: 380px;
+        height: 140%;
+        background: linear-gradient(100deg, transparent 20%, #ffffff1c 50%, transparent 80%);
+        pointer-events: none;
+        opacity: 0;
+      }
+      #ring {
+        position: absolute;
+        border-radius: 10px;
+        opacity: 0;
+        --accent: #fbbf24;
+      }
+      #ring .edge {
+        position: absolute;
+        inset: 0;
+        border: 2px solid #fbbf24;
+        border-radius: inherit;
+        box-shadow:
+          0 0 0 4px #fbbf2426,
+          0 0 26px #fbbf2466;
+      }
+      #shine {
+        position: absolute;
+      }
+
+      /* The hand-over: one wide terminal, work's session ending and the next account taking over. */
+      #t2 {
+        left: 50px;
+        top: 100px;
+        width: 1180px;
+        height: auto;
+        --accent: var(--work);
+      }
+      #t2 .body {
+        font-size: 17.5px;
+        line-height: 28px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      #t2 .ln {
+        height: auto;
+        min-height: 28px;
+      }
+      #t2 .cursor {
+        height: 20px;
+      }
+      #t2 .title {
+        display: grid;
+      }
+      #t2 .title > span {
+        grid-area: 1 / 1;
+      }
+      #t2 .title .to b {
+        color: var(--personal);
+      }
+      .sb {
+        color: #c7b3f5;
+      }
+      .quota {
+        margin-left: auto;
+        padding: 3px 11px;
+        border: 1px solid #3a3320;
+        border-radius: 999px;
+        background: #1d1a10;
+        color: #fbbf24;
+        font-family: var(--mono);
+        font-size: 14px;
+        opacity: 0;
+      }
+      .quota.full {
+        border-color: #4a2330;
+        background: #22121a;
+        color: #f38ba8;
+      }
+      #t2 .live {
+        margin-left: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage">
+      <div class="blob" id="b0"></div>
+      <div class="blob" id="b1"></div>
+      <div id="grid"></div>
+
+      <div class="mark" id="intro">
+        <svg class="logo" viewBox="0 0 40 40" aria-hidden="true">
+          <path class="h0" d="M18.5 8A10.5 10.5 0 0 0 18.5 29Z" />
+          <path class="h1" d="M21.5 11A10.5 10.5 0 0 1 21.5 32Z" />
+        </svg>
+        <div class="word"></div>
+        <div class="tagline">Every AI coding account, side by side.</div>
+      </div>
+
+      <div class="cap" id="cap0"><span class="tag">sideby run</span>Two accounts in two terminals, at the same time</div>
+      <div class="cap" id="cap1"><span class="tag">link</span>Skills, hooks and settings: one copy, in the main account</div>
+      <div class="cap" id="cap2"><span class="tag">sideby ui</span>Every account's quota, read from local files</div>
+      <div class="cap" id="cap3"></div>
+      <div class="cap" id="cap4"><span class="tag">Auto Handoff</span>At 95%, the session moves to the next account by itself</div>
+
+      <svg id="links" aria-hidden="true" viewBox="0 0 1280 760" width="1280" height="760">
+        <defs>
+          <linearGradient id="g0" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#f5a97f" />
+            <stop offset="1" stop-color="#a6e3a1" />
+          </linearGradient>
+          <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#7dc4e4" />
+            <stop offset="1" stop-color="#a6e3a1" />
+          </linearGradient>
+        </defs>
+        <path id="l0" stroke="url(#g0)" d="M334 458 C334 520 560 500 560 552" />
+        <path id="l1" stroke="url(#g1)" d="M946 458 C946 520 720 500 720 552" />
+      </svg>
+
+      <div class="term" id="t0"></div>
+      <div class="term" id="t1"></div>
+      <div class="term" id="t2"></div>
+      <div class="own" id="own0"></div>
+      <div class="own" id="own1"></div>
+      <div id="main-card">
+        <div class="head">~/.claude <span>main account · every other account links here</span></div>
+        <div class="chips"></div>
+      </div>
+
+      <div id="browser">
+        <div class="bar"><i></i><i></i><i></i><span class="url">127.0.0.1:17420</span></div>
+        <div id="viewport">
+          <div id="zoom">
+            <img id="panel" alt="" />
+            <div id="ring"><div class="beam"></div><div class="edge"></div></div>
+          </div>
+          <div id="shine"></div>
+        </div>
+      </div>
+
+      <div class="mark" id="outro">
+        <svg class="logo" viewBox="0 0 40 40" aria-hidden="true">
+          <path class="h0" d="M18.5 8A10.5 10.5 0 0 0 18.5 29Z" />
+          <path class="h1" d="M21.5 11A10.5 10.5 0 0 1 21.5 32Z" />
+        </svg>
+        <div class="word"></div>
+        <div class="install"><div class="beam"></div><span class="dim">$ </span>npm i -g sideby</div>
+        <div class="repo">github.com/Adonis0123/sideby</div>
+      </div>
+    </div>
+
+    <script src="../../node_modules/motion/dist/motion.js"></script>
+    <script>
+      const { animate, motionValue } = Motion
+
+      // What scripts/record-demo.ts passes in `?data=`. The defaults are what demo-host.sh prints and
+      // where the rows sit in docs/assets/panel-dark.png, so the page also plays when opened by hand.
+      const DEFAULTS = {
+        panel: 'panel-dark.png',
+        terminals: [
+          {
+            command: 'sideby run claude:main',
+            banner: ['Claude Code (demo)', 'account: personal', 'config:  ~/.claude'],
+            question: 'where do skills live?',
+            answer: 'linked to the main account',
+          },
+          {
+            command: 'sideby run work',
+            banner: ['Claude Code (demo)', 'account: work', 'config:  ~/.claude-work'],
+            question: 'quota for this account?',
+            answer: 'its own 5h and 7d windows',
+          },
+        ],
+        shared: ['settings.json', 'skills/', 'commands/', 'plugins/', 'hooks/', 'themes/', 'CLAUDE.md', 'mcpServers'],
+        // Panel CSS pixels: [left, top, width, height].
+        layout: {
+          group: [74, 338, 1132, 397],
+          week: [577, 437, 148, 29],
+          next: [75, 545, 1130, 125],
+          weekUsed: '91%',
+          nextName: 'claude:main',
+        },
+        // What `sideby run work` prints when it hands over (scripts/record-demo.ts records the real lines).
+        handoff: {
+          question: 'write the release notes',
+          answer: 'drafted docs/notes.md',
+          saved:
+            'sideby: claude:work saved its session and is handing over because its quota reached the hand-over level; next is claude:main. Brief: ~/.local/state/sideby/handoffs/mv7qe7d8-18e0a086/1-claude-work.md',
+          countdown: { line: 'sideby: starting claude:main in 10s; press Enter to stay in claude:work', from: 10 },
+          handing: 'sideby: handing over from claude:work to claude:main',
+          next: {
+            banner: ['Claude Code (demo)', 'account: personal', 'config:  ~/.claude'],
+            prompt:
+              'This task was handed over from claude:work by sideby because its quota ran low. Read ~/.local/state/sideby/handoffs/mv7qe7d8-18e0a086/1-claude-work.md first, then continue the task it describes.',
+            answer: 'read the brief; carrying on',
+          },
+        },
+        threshold: 95,
+      }
+      const params = new URLSearchParams(location.search)
+      const data = { ...DEFAULTS, ...JSON.parse(params.get('data') || '{}') }
+
+      const $ = (sel, root = document) => root.querySelector(sel)
+      const $$ = (sel, root = document) => [...root.querySelectorAll(sel)]
+      const el = (tag, cls, text) => {
+        const node = document.createElement(tag)
+        if (cls) node.className = cls
+        if (text !== undefined) node.textContent = text
+        return node
+      }
+      const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])
+      const lock =
+        '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>'
+
+      // Typed text: the sequence animates a count, this writes that many characters.
+      function typer(target, text) {
+        const count = motionValue(0)
+        count.on('change', (v) => {
+          target.textContent = text.slice(0, Math.round(v))
+        })
+        return count
+      }
+      // Decoded text: a few noise characters run ahead of the real ones. Same progress, same frame.
+      const NOISE = '01<>/\\_=+*#%$&@'
+      function decoder(target, text) {
+        const progress = motionValue(0)
+        progress.on('change', (p) => {
+          const shown = p * (text.length + 5)
+          let s = ''
+          for (let i = 0; i < text.length; i++) {
+            if (i < shown - 5 || p >= 1) s += text[i]
+            else if (i < shown) s += text[i] === ' ' ? ' ' : NOISE[(i * 7 + Math.floor(p * 60)) % NOISE.length]
+          }
+          target.textContent = s
+        })
+        return progress
+      }
+
+      function field(line) {
+        const m = /^(\w+):(\s+)(.*)$/.exec(line)
+        return m ? `<span class="dim">${m[1]}:${m[2]}</span><span class="acc">${esc(m[3])}</span>` : null
+      }
+
+      function buildTerminal(i, t) {
+        const root = $(`#t${i}`)
+        const value = (key) => new RegExp(`${key}:\\s*(.*)`).exec(t.banner.join('\n'))?.[1] ?? ''
+        root.innerHTML = `<div class="beam"></div><div class="bar"><i></i><i></i><i></i><span class="title"><b>${esc(value('account'))}</b>  ${esc(value('config'))}</span><span class="live"><em></em>running</span></div><div class="body"></div>`
+        $(`#own${i}`).innerHTML = `${lock}own sign-in, sessions and history`
+        const body = $('.body', root)
+        const line = (html, hide = true) => {
+          const node = el('div', `ln${hide ? ' hide' : ''}`)
+          node.innerHTML = html
+          body.append(node)
+          return node
+        }
+        const typed = (node) => $('.typed', node)
+        const cmd = line('<span class="dim">$ </span><span class="typed"></span>', false)
+        const banner = t.banner.map((b, k) => line(field(b) ?? `<span class="${k === 0 ? 'strong' : ''}">${esc(b)}</span>`))
+        line('')
+        const ask = line('<span class="dim">&gt; </span><span class="typed"></span>')
+        const reply = line('<span class="think"><span class="spin">✻</span> thinking…</span><span class="ok typed"></span>')
+        line('')
+        const next = line('<span class="dim">&gt; </span><span class="typed"></span>')
+        return { root, cmd, banner, ask, reply, next, typed, beam: $('.beam', root), live: $('.live', root) }
+      }
+
+      // The hand-over terminal: work's session, sideby's lines, then the next account in the same window.
+      function buildHandover(h, work, weekUsed) {
+        const root = $('#t2')
+        const value = (key, banner) => new RegExp(`${key}:\\s*(.*)`).exec(banner.join('\n'))?.[1] ?? ''
+        const title = (cls, banner, hidden) =>
+          `<span class="${cls}"${hidden ? ' style="opacity:0"' : ''}><b>${esc(value('account', banner))}</b>  ${esc(value('config', banner))}</span>`
+        root.innerHTML = `<div class="beam"></div><div class="bar"><i></i><i></i><i></i><span class="title">${title('from', work.banner)}${title('to', h.next.banner, true)}</span><span class="quota"></span><span class="live"><em></em>running</span></div><div class="body"></div>`
+        const body = $('.body', root)
+        const line = (html, hide = true) => {
+          const node = el('div', `ln${hide ? ' hide' : ''}`)
+          node.innerHTML = html
+          body.append(node)
+          return node
+        }
+        line(`<span class="dim">$ ${esc(work.command)}</span>`, false)
+        const ask = line('<span class="dim">&gt; </span><span class="typed"></span>', false)
+        const reply = line('<span class="think"><span class="spin">✻</span> thinking…</span><span class="ok typed"></span>')
+        line('')
+        const saved = line(`<span class="sb">${esc(h.saved)}</span>`)
+        const [pre, post = ''] = h.countdown.line.split(` in ${h.countdown.from}s`)
+        const count = line(`<span class="sb">${esc(pre)} in <span class="n">${h.countdown.from}</span>s${esc(post)}</span>`)
+        const handing = line(`<span class="sb">${esc(h.handing)}</span>`)
+        line('')
+        const banner = h.next.banner.map((b, k) => {
+          const node = line(field(b) ?? `<span class="${k === 0 ? 'strong' : ''}">${esc(b)}</span>`)
+          node.style.setProperty('--accent', 'var(--personal)')
+          return node
+        })
+        const prompt = line('<span class="dim">&gt; </span><span class="typed"></span>')
+        const done = line('<span class="ok typed"></span>')
+        const next = line('<span class="dim">&gt; </span>')
+        next.style.setProperty('--accent', 'var(--personal)')
+
+        // The quota climbs to the threshold and turns red there; the countdown counts down in place.
+        const quota = $('.quota', root)
+        const used = motionValue(Number.parseInt(weekUsed, 10) || 0)
+        used.on('change', (v) => {
+          quota.textContent = `7d ${Math.round(v)}%`
+          quota.classList.toggle('full', Math.round(v) >= data.threshold)
+        })
+        quota.textContent = `7d ${weekUsed}`
+        const left = motionValue(h.countdown.from)
+        left.on('change', (v) => {
+          $('.n', count).textContent = String(Math.round(v))
+        })
+        return {
+          root, ask, reply, saved, count, handing, banner, prompt, done, next, quota, used, left,
+          from: $('.from', root), to: $('.to', root), beam: $('.beam', root), live: $('.live', root),
+        }
+      }
+
+      function spellWord(root, word) {
+        return [...word].map((ch) => {
+          const span = el('span', '', ch)
+          root.append(span)
+          return span
+        })
+      }
+
+      const spring = (bounce = 0.25, duration = 0.8) => ({ type: 'spring', bounce, duration })
+      const glide = [0.65, 0, 0.35, 1]
+      const CHAR = 0.05
+
+      function build() {
+        const seq = []
+        const add = (target, keyframes, options) => seq.push([target, keyframes, options])
+        const cursors = [[], [], []]
+
+        // Intro: the two halves of the mark meet, then part to make room for two terminals.
+        // The background never moves: in a GIF every changed pixel costs bytes.
+        add('#intro .h0', { x: [-60, 0], opacity: [0, 1] }, { ...spring(0.35, 0.8), at: 0.05 })
+        add('#intro .h1', { x: [60, 0], opacity: [0, 1] }, { ...spring(0.35, 0.8), at: 0.05 })
+        spellWord($('#intro .word'), 'sideby').forEach((span, k) => {
+          add(span, { opacity: [0, 1], y: [24, 0], filter: ['blur(10px)', 'blur(0px)'] }, { duration: 0.45, ease: 'easeOut', at: 0.35 + k * 0.045 })
+        })
+        add('#intro .tagline', { opacity: [0, 1], y: [10, 0] }, { duration: 0.5, at: 0.75 })
+        add('#intro .h0', { x: -90, opacity: 0 }, { duration: 0.55, ease: glide, at: 1.55 })
+        add('#intro .h1', { x: 90, opacity: 0 }, { duration: 0.55, ease: glide, at: 1.55 })
+        add('#intro .word', { opacity: [1, 0], scale: [1, 1.15], filter: ['blur(0px)', 'blur(10px)'] }, { duration: 0.4, ease: 'easeIn', at: 1.5 })
+        add('#intro .tagline', { opacity: 0 }, { duration: 0.3, at: 1.5 })
+
+        // Scene 1: two terminals out of the middle, two `sideby run` processes at once.
+        let end = 0
+        add('#cap0', { opacity: [0, 1], y: [12, 0], filter: ['blur(6px)', 'blur(0px)'] }, { duration: 0.5, at: 2.0 })
+        data.terminals.forEach((t, i) => {
+          const term = buildTerminal(i, t)
+          const side = i === 0 ? 1 : -1
+          add(term.root, { opacity: [0, 1], x: [306 * side, 0], y: [80, 60], scale: [0.35, 1], rotateY: [55 * side, 0] }, { ...spring(0.25, 1.0), at: 1.7 })
+          add(term.beam, { opacity: [0, 1] }, { duration: 0.6, at: 2.3 })
+
+          const tCmd = 2.45 + i * 0.35
+          add(typer(term.typed(term.cmd), t.command), t.command.length, { duration: t.command.length * CHAR, ease: 'linear', at: tCmd })
+          cursors[i].push([1.9, term.cmd])
+          const tOut = tCmd + t.command.length * CHAR + 0.25
+          add(term.live, { opacity: [0, 1], x: [10, 0] }, { duration: 0.4, at: tOut })
+          ;[...term.banner, term.ask].forEach((node, k) => {
+            add(node, { opacity: [0, 1], x: [-14, 0], filter: ['blur(4px)', 'blur(0px)'] }, { duration: 0.32, ease: 'easeOut', at: tOut + k * 0.07 })
+          })
+          cursors[i].push([tOut + 0.3, term.ask])
+
+          const tAsk = 4.45 + i * 0.4
+          add(typer(term.typed(term.ask), t.question), t.question.length, { duration: t.question.length * CHAR, ease: 'linear', at: tAsk })
+          const tThink = tAsk + t.question.length * CHAR + 0.12
+          const think = $('.think', term.reply)
+          add(term.reply, { opacity: [0, 1] }, { duration: 0.01, at: tThink })
+          add(think, { opacity: [0, 1, 1, 0] }, { duration: 0.7, times: [0, 0.15, 0.8, 1], at: tThink })
+          add($('.spin', think), { rotate: [0, 360], scale: [0.8, 1.2] }, { duration: 0.7, ease: 'linear', at: tThink })
+          cursors[i].push([tThink, null])
+          add(decoder(term.typed(term.reply), t.answer), 1, { duration: 0.6, ease: 'linear', at: tThink + 0.62 })
+          add(term.next, { opacity: [0, 1] }, { duration: 0.2, at: tThink + 1.25 })
+          cursors[i].push([tThink + 1.25, term.next])
+          end = Math.max(end, tThink + 1.25)
+        })
+
+        // Scene 2: both link to the main account; sign-in and sessions stay apart.
+        const s2 = end + 0.45
+        add('#cap0', { opacity: 0, y: -12, filter: 'blur(6px)' }, { duration: 0.35, at: s2 })
+        add('#cap1', { opacity: [0, 1], y: [12, 0], filter: ['blur(6px)', 'blur(0px)'] }, { duration: 0.5, at: s2 + 0.25 })
+        add('#t0', { y: 0 }, { ...spring(0.2, 0.8), at: s2 })
+        add('#t1', { y: 0 }, { ...spring(0.2, 0.8), at: s2 + 0.06 })
+        add('#main-card', { opacity: [0, 1], y: [60, 0], scale: [0.85, 1], rotateX: [-35, 0] }, { ...spring(0.3, 0.9), at: s2 + 0.35 })
+        add('#l0', { pathLength: [0, 1], opacity: [0, 1] }, { duration: 0.6, ease: 'easeInOut', at: s2 + 0.5 })
+        add('#l1', { pathLength: [0, 1], opacity: [0, 1] }, { duration: 0.6, ease: 'easeInOut', at: s2 + 0.58 })
+        const chips = $('#main-card .chips')
+        data.shared.forEach((name, k) => {
+          const chip = el('span', 'chip', name)
+          chips.append(chip)
+          add(chip, { opacity: [0, 1], y: [12, 0], scale: [0.6, 1] }, { ...spring(0.5, 0.55), at: s2 + 0.75 + k * 0.05 })
+        })
+        const paths = ['l0', 'l1'].map((id) => $(`#${id}`).getAttribute('d'))
+        paths.forEach((d, k) => {
+          for (let n = 0; n < 6; n++) {
+            const dot = el('div', 'pulse')
+            dot.style.offsetPath = `path('${d}')`
+            $('#stage').append(dot)
+            const at = s2 + 1.05 + n * 0.32 + k * 0.12
+            add(dot, { offsetDistance: ['0%', '100%'], opacity: [0, 1, 1, 0], scale: [0.6, 1, 1.4] }, { duration: 0.7, ease: 'easeIn', at })
+          }
+          add(`#own${k}`, { opacity: [0, 1], y: [-8, 0] }, { duration: 0.45, ease: 'easeOut', at: s2 + 1.4 + k * 0.12 })
+        })
+
+        // Scene 3: everything tips back, the Panel stands up.
+        const s3 = s2 + 3.3
+        add('#cap1', { opacity: 0, y: -12, filter: 'blur(6px)' }, { duration: 0.35, at: s3 })
+        for (const [k, sel] of ['#t0', '#t1', '#main-card', '#own0', '#own1', '#links'].entries()) {
+          add(sel, { opacity: 0, y: -60, scale: 0.8, rotateX: 40 }, { duration: 0.45, ease: 'easeIn', at: s3 + k * 0.03 })
+        }
+        add('#cap2', { opacity: [0, 1], y: [12, 0], filter: ['blur(6px)', 'blur(0px)'] }, { duration: 0.5, at: s3 + 0.4 })
+        add('#browser', { opacity: [0, 1], y: [160, 0], scale: [0.8, 1], rotateX: [38, 0] }, { ...spring(0.2, 0.9), at: s3 + 0.3 })
+        add('#shine', { opacity: [0, 1, 1, 0], x: [-420, 1150] }, { duration: 1.0, ease: 'easeInOut', at: s3 + 1.1 })
+
+        // Zoom onto the Claude Code group: from its left edge to work's 7-day column.
+        const K = 1100 / 1280
+        const L = data.layout
+        const rx0 = L.group[0] * K
+        const ry0 = L.group[1] * K
+        const rx1 = (L.week[0] + L.week[2] + 18) * K
+        const ry1 = (L.next[1] + L.next[3] + 10) * K
+        const imageH = (1100 * 860) / 1280
+        const s = Math.min(1.7, 1080 / (rx1 - rx0), 570 / (ry1 - ry0))
+        const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
+        const zx = clamp(550 - ((rx0 + rx1) / 2) * s, 1100 - 1100 * s, 0)
+        const zy = clamp(293 - ((ry0 + ry1) / 2) * s, 586 - imageH * s, 0)
+        const tZoom = s3 + 2.1
+        add('#zoom', { scale: [1, s], x: [0, zx], y: [0, zy] }, { duration: 1.1, ease: glide, at: tZoom })
+        const nextName = L.nextName.split(':').pop()
+        $('#cap3').innerHTML = `work has used ${esc(L.weekUsed)} of its week · next up: <code>${esc(nextName)}</code>`
+        add('#cap2', { opacity: 0, y: -12, filter: 'blur(6px)' }, { duration: 0.35, at: tZoom + 0.6 })
+        add('#cap3', { opacity: [0, 1], y: [12, 0], filter: ['blur(6px)', 'blur(0px)'] }, { duration: 0.5, at: tZoom + 0.85 })
+
+        // The ring lands on work's 7-day window, then glides to the account marked Next.
+        const px = ([x, y, w, h], pad) => ({
+          left: `${(x - pad) * K}px`,
+          top: `${(y - pad) * K}px`,
+          width: `${(w + pad * 2) * K}px`,
+          height: `${(h + pad * 2) * K}px`,
+        })
+        const ring = $('#ring')
+        Object.assign(ring.style, px(L.week, 4))
+        const nextBox = [L.next[0], L.next[1], L.week[0] + L.week[2] - L.next[0] + 8, L.next[3]]
+        add(ring, { opacity: [0, 1], scale: [1.6, 1] }, { ...spring(0.35, 0.6), at: tZoom + 1.1 })
+        add(ring, px(nextBox, 2), { duration: 0.75, ease: glide, at: tZoom + 2.3 })
+
+        // Scene 4: work reaches the hand-over level; sideby saves the session, counts down and starts the next account.
+        const s4 = tZoom + 3.1
+        const H = data.handoff
+        const h4 = buildHandover(H, data.terminals[1], L.weekUsed)
+        const typedIn = (node) => $('.typed', node)
+        add('#cap3', { opacity: 0, y: -12, filter: 'blur(6px)' }, { duration: 0.35, at: s4 })
+        add('#browser', { opacity: 0, y: -60, scale: 0.8, rotateX: 40 }, { duration: 0.45, ease: 'easeIn', at: s4 })
+        add('#cap4', { opacity: [0, 1], y: [12, 0], filter: ['blur(6px)', 'blur(0px)'] }, { duration: 0.5, at: s4 + 0.4 })
+        add(h4.root, { opacity: [0, 1], y: [120, 0], scale: [0.85, 1], rotateX: [-30, 0] }, { ...spring(0.25, 0.9), at: s4 + 0.25 })
+        // The border light only greets the terminal: a moving border on every frame costs the GIF too many bytes.
+        add(h4.beam, { opacity: [0, 1, 1, 0] }, { duration: 1.8, times: [0, 0.3, 0.7, 1], at: s4 + 0.7 })
+        add(h4.live, { opacity: [0, 1], x: [10, 0] }, { duration: 0.4, at: s4 + 0.6 })
+        add(h4.quota, { opacity: [0, 1], x: [10, 0] }, { duration: 0.4, at: s4 + 0.6 })
+        cursors[2].push([s4 + 0.6, h4.ask])
+        const tQ = s4 + 0.9
+        add(typer(typedIn(h4.ask), H.question), H.question.length, { duration: H.question.length * CHAR, ease: 'linear', at: tQ })
+        const tA = tQ + H.question.length * CHAR + 0.12
+        const think = $('.think', h4.reply)
+        add(h4.reply, { opacity: [0, 1] }, { duration: 0.01, at: tA })
+        add(think, { opacity: [0, 1, 1, 0] }, { duration: 0.7, times: [0, 0.15, 0.8, 1], at: tA })
+        add($('.spin', think), { rotate: [0, 360], scale: [0.8, 1.2] }, { duration: 0.7, ease: 'linear', at: tA })
+        cursors[2].push([tA, null])
+        add(decoder(typedIn(h4.reply), H.answer), 1, { duration: 0.5, ease: 'linear', at: tA + 0.62 })
+        const tFull = tA + 1.35
+        add(h4.used, data.threshold, { duration: 0.6, ease: 'easeOut', at: tFull })
+        add(h4.quota, { scale: [1, 1.18, 1] }, { duration: 0.45, at: tFull + 0.6 })
+        const tSb = tFull + 1.0
+        const slide = { opacity: [0, 1], x: [-14, 0], filter: ['blur(4px)', 'blur(0px)'] }
+        add(h4.saved, slide, { duration: 0.35, ease: 'easeOut', at: tSb })
+        add(h4.count, slide, { duration: 0.35, ease: 'easeOut', at: tSb + 0.55 })
+        add(h4.left, 0, { duration: 1.6, ease: 'linear', at: tSb + 0.75 })
+        const tGo = tSb + 2.5
+        add(h4.handing, slide, { duration: 0.35, ease: 'easeOut', at: tGo })
+        add(h4.from, { opacity: 0, y: -8 }, { duration: 0.3, at: tGo + 0.25 })
+        add(h4.to, { opacity: [0, 1], y: [8, 0] }, { duration: 0.3, at: tGo + 0.3 })
+        add(h4.quota, { opacity: 0 }, { duration: 0.3, at: tGo + 0.25 })
+        h4.banner.forEach((node, k) => {
+          add(node, slide, { duration: 0.32, ease: 'easeOut', at: tGo + 0.5 + k * 0.07 })
+        })
+        add(h4.prompt, { opacity: [0, 1] }, { duration: 0.2, at: tGo + 0.85 })
+        add(decoder(typedIn(h4.prompt), H.next.prompt), 1, { duration: 0.9, ease: 'linear', at: tGo + 0.9 })
+        add(h4.done, { opacity: [0, 1] }, { duration: 0.01, at: tGo + 2.0 })
+        add(decoder(typedIn(h4.done), H.next.answer), 1, { duration: 0.45, ease: 'linear', at: tGo + 2.0 })
+        add(h4.next, { opacity: [0, 1] }, { duration: 0.2, at: tGo + 2.55 })
+        cursors[2].push([tGo + 2.55, h4.next])
+
+        // Outro: the halves meet again, with the install command.
+        const tOut = tGo + 3.2
+        add('#cap4', { opacity: 0, y: -12, filter: 'blur(6px)' }, { duration: 0.35, at: tOut })
+        add(h4.root, { opacity: 0, scale: 0.85, y: 60 }, { duration: 0.4, ease: 'easeIn', at: tOut })
+        add('#outro .h0', { x: [-110, 0], opacity: [0, 1] }, { ...spring(0.35, 0.8), at: tOut + 0.35 })
+        add('#outro .h1', { x: [110, 0], opacity: [0, 1] }, { ...spring(0.35, 0.8), at: tOut + 0.35 })
+        spellWord($('#outro .word'), 'sideby').forEach((span, k) => {
+          add(span, { opacity: [0, 1], y: [24, 0], filter: ['blur(10px)', 'blur(0px)'] }, { duration: 0.45, ease: 'easeOut', at: tOut + 0.55 + k * 0.045 })
+        })
+        add('#outro .install', { opacity: [0, 1], y: [20, 0], scale: [0.9, 1] }, { ...spring(0.35, 0.7), at: tOut + 0.95 })
+        add('#outro .repo', { opacity: [0, 1] }, { duration: 0.5, at: tOut + 1.25 })
+        const total = tOut + 2.8
+        add('#outro', { opacity: [1, 0], scale: [1, 0.96] }, { duration: 0.45, ease: 'easeIn', at: total - 0.45 })
+
+        // Cursors, the live dots and the border lights follow one clock, so any seek lands in the same state.
+        const clock = motionValue(0)
+        add(clock, total, { duration: total, ease: 'linear', at: 0 })
+        const carets = cursors.map(() => el('span', 'cursor'))
+        const lives = $$('.live em')
+        const beams = $$('.beam')
+        clock.on('change', (t) => {
+          cursors.forEach((events, i) => {
+            const host = events.filter(([at]) => at <= t).at(-1)?.[1]
+            const c = carets[i]
+            if (host && c.parentNode !== host) host.append(c)
+            if (!host) c.remove()
+            c.style.opacity = Math.floor(t / 0.5) % 2 === 0 ? '1' : '0.15'
+          })
+          for (const dot of lives) dot.style.opacity = String(0.55 + 0.45 * Math.cos(t * 5))
+          for (const [k, beam] of beams.entries()) beam.style.setProperty('--a', `${(t * 150 + k * 90) % 360}deg`)
+        })
+        return { seq, total }
+      }
+
+      async function ready() {
+        const img = $('#panel')
+        img.src = data.panel
+        await Promise.all([img.decode(), document.fonts.ready])
+      }
+
+      const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+      const { seq, total } = build()
+      const controls = animate(seq)
+      controls.pause()
+
+      window.demo = {
+        total,
+        ready: ready().then(() => true),
+        // Used by scripts/record-demo.ts: put the timeline at `t` seconds and wait for paint.
+        async seek(t) {
+          controls.pause()
+          controls.time = t
+          await frame()
+        },
+      }
+
+      if (!params.has('record')) {
+        window.demo.ready.then(() => controls.play())
+        document.addEventListener('click', () => {
+          controls.time = 0
+          controls.play()
+        })
+      }
+    </script>
+  </body>
+</html>
