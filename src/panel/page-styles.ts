@@ -160,6 +160,16 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .row:first-child { border-top: 0; }
 .row:last-child { border-radius: 0 0 var(--radius) var(--radius); }
 .row-error .ident-name .name { color: var(--fail); }
+/* One account folded to its name line, opened again with the arrow at its start. */
+.row-toggle { width: 28px; height: 28px; margin: -4px -6px -4px -8px; }
+.fold-hit { cursor: pointer; }
+.row > .ident.fold-hit { align-self: stretch; margin: -11px 0 -11px -16px; padding: 11px 0 11px 16px; }
+.fold-hit:hover .row-toggle { background: var(--hover); color: var(--text); }
+.row-toggle[aria-expanded=true] .chev { transform: rotate(90deg); }
+.row-toggle[aria-expanded=true]:not(:hover) { background: transparent; color: var(--muted); }
+.fold-hit:hover .row-toggle[aria-expanded=true] { background: var(--hover); color: var(--text); }
+.row-folded { grid-template-areas: "id id id id id more"; padding-top: 7px; padding-bottom: 7px; }
+.card-folded .card-head { align-items: center; }
 .col-head { position: sticky; top: 0; z-index: 2; padding: 7px 10px 7px 16px; border-top: 1px solid var(--border); background: var(--surface); color: var(--faint); font-size: 11.5px; font-weight: var(--strong-weight); line-height: 1.3; white-space: nowrap; }
 .col-head > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .col-head .quota > span { overflow: hidden; text-overflow: ellipsis; }
@@ -516,6 +526,7 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 @media (max-width: 1100px) {
   .col-head { display: none; }
   .row { grid-template-columns: minmax(0, 1fr) auto var(--m-w); grid-template-areas: "id health more" "quota quota quota" "usage usage last" "notes notes notes"; row-gap: 10px; }
+  .row-folded { grid-template-areas: "id id more"; }
   .row > .quota { grid-template-columns: repeat(var(--qn), minmax(0, 1fr)); max-width: 560px; }
   .rows .m-label, .rows .m-unit, .rows .u-unit { display: inline; }
   .rows .usage { justify-content: flex-start; }

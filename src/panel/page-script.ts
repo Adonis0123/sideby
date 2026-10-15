@@ -90,13 +90,15 @@ const MAIN = String.raw`
   function loadPrefs() {
     let raw = {}
     try { raw = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') || {} } catch {}
-    const p = { view: 'list', sort: 'pressure', quota: 'used', theme: 'system', lang: '', family: '', collapsed: {}, hideEmail: false }
+    const p = { view: 'list', sort: 'pressure', quota: 'used', theme: 'system', lang: '', family: '', collapsed: {}, rows: {}, hideEmail: false }
     for (const k of Object.keys(CHOICES)) if (CHOICES[k].includes(raw[k])) p[k] = raw[k]
     if (raw.hideEmail === true) p.hideEmail = true
     if (typeof raw.ahHintAt === 'number') p.ahHintAt = raw.ahHintAt
     if (typeof raw.family === 'string') p.family = raw.family
     if (raw.collapsed && typeof raw.collapsed === 'object')
       for (const k of Object.keys(raw.collapsed)) if (raw.collapsed[k] === true) p.collapsed[k] = true
+    if (raw.rows && typeof raw.rows === 'object')
+      for (const k of Object.keys(raw.rows)) if (raw.rows[k] === true) p.rows[k] = true
     return p
   }
   function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)) } catch {} }
@@ -979,12 +981,63 @@ const MAIN = String.raw`
   }
   // What a row or card shows depends on more than the account (health, view preferences, language); the
   // fingerprint covers what its click handlers use.
-  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref]) }
+  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref, folded(a)]) }
+  // Each account can be folded to one line (its name) and opened again, like a family group; the choice is kept in
+  // this browser's preferences.
+  function folded(a) { return prefs.rows[a.ref] === true }
+  function rowToggle(a) {
+    const open = !folded(a)
+    const label = t(open ? 'row.collapse' : 'row.expand', { name: a.name })
+    return h('button', { class: 'icon-btn row-toggle', type: 'button', 'aria-expanded': String(open), 'aria-label': label, title: label, onclick: (e) => { e.stopPropagation(); toggleRow(a) } }, icon('chevron', 'chev'))
+  }
+  // The whole account cell (and a folded row anywhere) folds and opens it, not only the arrow; the buttons and links
+  // inside keep their own action, and a click that ends a text selection does nothing.
+  function foldClick(a) {
+    return (e) => {
+      if (e.target.closest('button, a, input, select, textarea, .tip')) return
+      if (window.getSelection && String(window.getSelection())) return
+      toggleRow(a)
+    }
+  }
+  // Folding animates: the details fade out, then the row's height eases to one line; opening eases the height out
+  // and fades the details in. The arrow turns with it. Reduced motion just switches.
+  const EASE = 'cubic-bezier(.2, 0, 0, 1)'
+  function rowDetails(el) { return Array.from(el.querySelectorAll(':scope > :not(.ident):not(.more):not(.card-head), .ident-email, .ident-sub')) }
+  function toggleRow(a) {
+    const closing = !folded(a)
+    const find = () => document.querySelector('[data-ref="' + CSS.escape(a.ref) + '"]')
+    const apply = () => {
+      if (closing) prefs.rows[a.ref] = true; else delete prefs.rows[a.ref]
+      savePrefs()
+      renderAccounts()
+    }
+    const old = find()
+    // A hidden page delays animation events; switch at once there too.
+    if (REDUCED || document.hidden || !old || !old.animate) { apply(); return }
+    const from = old.getBoundingClientRect().height
+    const fade = closing ? rowDetails(old).map((d) => d.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 110, easing: 'ease-out', fill: 'forwards' }).finished) : []
+    Promise.all(fade).catch(() => {}).then(() => {
+      apply()
+      const el = find()
+      if (!el) return
+      const to = el.getBoundingClientRect().height
+      el.style.overflow = 'hidden'
+      const done = () => { el.style.overflow = '' }
+      el.animate([{ height: from + 'px' }, { height: to + 'px' }], { duration: 220, easing: EASE }).finished.then(done, done)
+      const chev = el.querySelector('.row-toggle .chev')
+      if (chev) chev.animate([{ transform: closing ? 'rotate(90deg)' : 'rotate(0deg)' }, { transform: closing ? 'rotate(0deg)' : 'rotate(90deg)' }], { duration: 220, easing: EASE })
+      if (!closing) for (const d of rowDetails(el)) d.animate([{ opacity: 0, transform: 'translateY(-4px)' }, { opacity: 1, transform: 'none' }], { duration: 200, delay: 60, easing: 'ease-out', fill: 'backwards' })
+    })
+  }
   // The Account 'sideby next <family>' would pick; the server ranks it with the CLI's rule (spec §3.13).
   function isNext(a) { return Boolean(S.state && S.state.handoff && S.state.handoff[a.family] === a.ref) }
   function row(a, now, cols) {
+    if (folded(a))
+      return h('div', { class: 'row row-folded fold-hit' + (a.error ? ' row-error' : ''), role: 'listitem', 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a), onclick: foldClick(a) },
+        h('div', { class: 'ident' }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a))),
+        moreButton(a))
     return h('div', { class: 'row' + (a.error ? ' row-error' : ''), role: 'listitem', 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a) },
-      h('div', { class: 'ident' }, badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a), emailLine(a), subLine(a))),
+      h('div', { class: 'ident fold-hit', onclick: foldClick(a) }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a), emailLine(a), subLine(a))),
       quotaBlock(a, now, cols),
       usageBlock(a),
       lastUsed(a),
@@ -993,8 +1046,12 @@ const MAIN = String.raw`
       notes(a))
   }
   function card(a, now, cols) {
+    if (folded(a))
+      return h('article', { class: 'card card-folded fold-hit' + (a.error ? ' card-error' : ''), 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a), 'aria-label': a.ref, onclick: foldClick(a) },
+        h('header', { class: 'card-head' }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a)), moreButton(a)))
     return h('article', { class: 'card' + (a.error ? ' card-error' : ''), 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a), 'aria-label': a.ref },
-      h('header', { class: 'card-head' },
+      h('header', { class: 'card-head fold-hit', onclick: foldClick(a) },
+        rowToggle(a),
         badge(a.family, 'sm'),
         h('div', { class: 'ident-text' }, nameLine(a), emailLine(a), subLine(a)),
         moreButton(a)),

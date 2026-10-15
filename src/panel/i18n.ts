@@ -139,6 +139,8 @@ const en = {
 
   'group.expand': 'Show accounts',
   'group.collapse': 'Hide accounts',
+  'row.collapse': 'Collapse {name}',
+  'row.expand': 'Expand {name}',
   'group.toggle': '{title} ({count}): {action}',
   'group.attention.one': '{n} needs attention',
   'group.attention.other': '{n} need attention',
@@ -646,6 +648,8 @@ const zh: Record<MessageKey, string> = {
 
   'group.expand': '展开账号',
   'group.collapse': '收起账号',
+  'row.collapse': '收起 {name}',
+  'row.expand': '展开 {name}',
   'group.toggle': '{title}（{count}）：{action}',
   'group.attention.one': '{n} 个需要处理',
   'group.attention.other': '{n} 个需要处理',
