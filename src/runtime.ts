@@ -32,6 +32,13 @@ import {
 import { type HostLaunch, type PreparedLaunch, prepareLaunch, which } from './core/launch.ts'
 import { memoStore } from './core/memo-store.ts'
 import { type Paths, resolvePaths } from './core/paths.ts'
+import {
+  type RemoteControlChange,
+  type RemoteControlGroup,
+  remoteControlGroups,
+  turnRemoteControlOff,
+  undoRemoteControlOff,
+} from './core/remote-control.ts'
 import { findResumeRoute } from './core/resume.ts'
 import { SAME_LOGIN_FAMILIES, sameLoginGroups, sharedQuota } from './core/same-login.ts'
 import { shareMeaning } from './core/share-meaning.ts'
@@ -277,6 +284,12 @@ export interface Runtime {
   tuneUndo(account: Account): Promise<{ ok: boolean; message: string }>
   /** What could be undone for the Account, or null. */
   tuneUndoInfo(account: Account): Promise<TuneUndoRecord | null>
+  /** Whether each Claude settings file starts Remote Control by itself (spec §3.22, ADR-0017); grouped by file. */
+  remoteControl(): Promise<RemoteControlGroup[]>
+  /** Sets `remoteControlAtStartup` to false wherever it is on or left to the default, remembering how to undo it. */
+  remoteControlOff(): Promise<RemoteControlChange>
+  /** Puts back what `remoteControlOff` replaced, only where the key still holds false. */
+  remoteControlUndo(): Promise<RemoteControlChange>
   /**
    * Which Account of a Family to move on to (spec §3.13). Throws a UserError with code `no-quota-source`
    * when the Family cannot tell, `no-accounts` when it has none.
@@ -870,6 +883,15 @@ export async function createRuntime(
     async tuneUndo(account) {
       onlyClaude(account)
       return undoTune(account, readContext())
+    },
+    async remoteControl() {
+      return remoteControlGroups(await accounts(), readContext())
+    },
+    async remoteControlOff() {
+      return turnRemoteControlOff(await accounts(), readContext())
+    },
+    async remoteControlUndo() {
+      return undoRemoteControlOff(await accounts(), readContext())
     },
     async tuneUndoInfo(account) {
       return account.family === 'claude' ? tuneUndoInfo(account, readContext()) : null

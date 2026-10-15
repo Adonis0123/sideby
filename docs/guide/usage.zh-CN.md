@@ -162,6 +162,21 @@ sideby tune undo claude:work --yes       # 恢复原来的值
 
 把 `settings.json` 链到主账号的账号共用同一个文件，所以共用一个设置：面板里它们只显示一张卡（建议值按其中用得最多的模型来定），各账号自己的数字收在「各账号的详情」里，确认页会列出改动会影响的每个账号。为了显示「现在的值」，sideby 只读这一个键（Claude）或 `config.toml` 里的 `model_auto_compact_token_limit`（Codex），文件里其他内容一概不读。
 
+## Remote Control
+
+Claude Code 的 Remote Control 把会话连到 claude.ai/code 和 Claude 手机 App，登录同一个 claude.ai 账号的设备都能看到并继续这些对话。在 `/config` 里打开「Enable Remote Control for all sessions」会在 `settings.json` 里存下 `remoteControlAtStartup: true`；账号一般都把这个文件链接到主账号，所以每个账号都会自动连接。
+
+它开着时，面板顶部会出提示条和 **全部关闭** 按钮。点了先列出每个设置文件、改动（`remoteControlAtStartup true → false`）和用到它的账号，确认后才写入；之后的提示里有 **撤销**。**保持开启** 只在这个浏览器里不再提示。命令行同样可以：
+
+```sh
+sideby remote-control            # 每个设置文件的状态：on、default（由 Claude Code 决定）、off
+sideby remote-control off        # 只展示改动，退出码 10
+sideby remote-control off --yes  # 写入
+sideby remote-control undo --yes # 恢复原来的值
+```
+
+它只让会话不再自动连接：需要时仍可在会话里运行 `/remote-control` 手动打开。已经开着的会话要重开才断开。sideby 只写这一个键，文件里其他内容不变；链接的文件写到真实文件上；不会新建 `settings.json`（没有这个文件的账号先运行 `sideby doctor --fix` 共享主账号的）。API 账号不登录 claude.ai，提示条不算它们。
+
 ## 账号撞上限额时
 
 ```sh

@@ -162,6 +162,21 @@ Under the suggestion each Claude account also has a **size menu** (Default, comm
 
 Accounts that link `settings.json` to the Main Account share one file, so they share one setting: the panel shows one card for them (the suggestion follows the model used most among them), each account's own numbers sit under "Details for each account", and the confirmation names every account the change reaches. To show your current value, sideby reads exactly that key (Claude) or `model_auto_compact_token_limit` from `config.toml` (Codex), and nothing else in those files.
 
+## Remote Control
+
+Claude Code's Remote Control connects a session to claude.ai/code and the Claude mobile app, where every device signed in to that claude.ai account can read and continue it. Turning on "Enable Remote Control for all sessions" in `/config` saves `remoteControlAtStartup: true` in `settings.json`, and since accounts usually link that file to the main one, every account connects.
+
+When that is on, the panel shows a banner with **Turn all off**. It first lists each settings file, the change (`remoteControlAtStartup true → false`) and the accounts that use it, and writes only after you confirm; the toast that follows has **Undo**. **Keep it on** hides the banner in that browser. The same from a terminal:
+
+```sh
+sideby remote-control            # each settings file: on, default (Claude Code decides), off
+sideby remote-control off        # shows the change, exit 10
+sideby remote-control off --yes  # writes it
+sideby remote-control undo --yes # puts back what was there
+```
+
+It only stops sessions from connecting by themselves: you can still run `/remote-control` in a session when you want it. Sessions already running stay connected until you restart them. sideby writes that one key, keeps everything else in the file, writes a linked file at its real target, and never creates a `settings.json` (an account without one should share the main one first: `sideby doctor --fix`). API accounts never sign in to claude.ai, so the banner leaves them out.
+
 ## When an account hits its limit
 
 ```sh

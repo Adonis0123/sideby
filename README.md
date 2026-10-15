@@ -72,6 +72,7 @@ The agent checks Node and your Host CLIs, installs sideby and the skill, creates
 | See Claude quota (Codex needs no setup) | `sideby quota setup claude --yes` | [Claude quota](docs/guide/usage.md#claude-quota) |
 | Find the cheapest auto-compact size from your own sessions, and use it in one click | `sideby tune` (or the panel's Context tuning tab) | [Context tuning](docs/guide/usage.md#context-tuning) |
 | See each account's model and effort, and set them per account | `sideby model <account>` (or click the model in the panel) | [Model and effort](docs/guide/usage.md#model-and-effort) |
+| Stop Claude sessions from connecting to claude.ai by themselves (Remote Control), for every account at once | `sideby remote-control off` (or the panel's banner) | [Remote Control](docs/guide/usage.md#remote-control) |
 | Move on when an account hits its limit | `sideby next claude` | [Handoff](docs/guide/usage.md#when-an-account-hits-its-limit) |
 | Let a running task move to the next account by itself when quota runs low (off by default; see the risk) | `sideby handoff enable` (or the panel) | [Auto Handoff](docs/guide/usage.md#auto-handoff) |
 | Short commands such as `ccw` | `sideby alias add ccw claude:work` | [Shell functions](docs/guide/configuration.md#shell-functions) |

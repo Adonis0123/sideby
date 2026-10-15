@@ -36,6 +36,9 @@ Usage:
                                       from your last 7 days of sessions (read-only)
   sideby model <account> [<model>|default] [--effort <level>|default] [--yes]
                                       show or set the model and effort sideby starts this account with
+  sideby remote-control [off|undo] [--yes]
+                                      whether Claude sessions connect to claude.ai by themselves;
+                                      off stops that for every account (shows the change first)
   sideby handoff status               what Auto Handoff still needs on this machine
   sideby handoff enable [--yes]       turn it on (shows the config change first); --same-family,
                                       --order claude=codex001,cc002, --threshold n, --prepare-at n
@@ -58,8 +61,8 @@ Usage:
   sideby plugins                      list loaded plugins and load errors
 
 Options:
-  --json        machine-readable output (list, new, next, alias, doctor, quota, tune, handoff, families, plugins, app,
-                desktop)
+  --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, remote-control, handoff,
+                families, plugins, app, desktop)
   -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, desktop
   -v, --version show the version
 
@@ -184,6 +187,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   quota: { flags: ['json', 'yes'] },
   tune: { flags: ['json', 'yes'] },
   model: { flags: ['json', 'yes'], valued: ['effort'] },
+  'remote-control': { flags: ['json', 'yes'] },
   handoff: {
     flags: ['json', 'yes', 'same-family', 'no-same-family'],
     valued: ['brief', 'to', 'order', 'prepare-at', 'threshold', 'wait-minutes', 'countdown'],
@@ -291,6 +295,8 @@ export async function main(argv: string[]): Promise<number> {
         return await cmds.cmdTune(parsed, io)
       case 'model':
         return await cmds.cmdModel(parsed, io)
+      case 'remote-control':
+        return await cmds.cmdRemoteControl(parsed, io)
       case 'handoff':
         return await cmds.cmdHandoff(parsed, io)
       case 'ui':

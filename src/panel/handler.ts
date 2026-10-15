@@ -11,6 +11,7 @@ import { handoffOverview } from '../core/handoff-overview.ts'
 import { configureHandoff, type HandoffChange, handoffStatus } from '../core/handoff-status.ts'
 import { type AccountModel, accountModel, setAccountModel } from '../core/model-choice.ts'
 import { tildify } from '../core/paths.ts'
+import type { RemoteControlGroup } from '../core/remote-control.ts'
 import { MIN_CALLS } from '../core/tuning.ts'
 import type { TuneApplyPlan } from '../core/tuning-apply.ts'
 import { buildId, packageVersion } from '../core/version.ts'
@@ -117,6 +118,8 @@ export interface PanelState {
   handoff?: Record<string, string>
   /** Auto Handoff settings (spec §3.17) and the Families that can start one; readiness comes from /api/handoff/status. */
   autoHandoff: { settings: HandoffSettings; starters: string[] }
+  /** Claude settings files grouped as `sideby remote-control` shows them (spec §3.22); absent without Claude Accounts. */
+  remoteControl?: RemoteControlView[]
 }
 
 /** The `handoff` map of the Panel state, from the statuses and Quota already read for the page. */
@@ -281,16 +284,23 @@ async function accountState(rt: Runtime, account: Account, families: FamilyInfo[
   }
 }
 
+export type RemoteControlView = Omit<RemoteControlGroup, 'file'> & { file: string }
+
+function rcView(groups: readonly RemoteControlGroup[], home: string): RemoteControlView[] {
+  return groups.map((g) => ({ ...g, file: tildify(g.file, home) }))
+}
+
 async function buildState(
   rt: Runtime,
   opts: { version: string; build: string; readOnly: boolean },
 ): Promise<PanelState> {
   const ctx = rt.readContext()
-  const [families, accounts, history, quotaSetups] = await Promise.all([
+  const [families, accounts, history, quotaSetups, remoteControl] = await Promise.all([
     rt.familyInfo(),
     rt.accounts(),
     rt.doctorHistory(),
     rt.quotaSetups(),
+    rt.remoteControl(),
   ])
   const health = healthByAccount(history)
   const aliases = aliasesByAccount(aliasRefs(rt.config.aliases), accounts)
@@ -330,6 +340,7 @@ async function buildState(
     ...(history ? { history } : {}),
     ...(rt.config.aliases ? { configAliases: aliasRefs(rt.config.aliases) } : {}),
     ...(Object.keys(handoff).length ? { handoff } : {}),
+    ...(remoteControl.length ? { remoteControl: rcView(remoteControl, ctx.home) } : {}),
     autoHandoff: {
       settings: rt.handoffSettings(),
       starters: [...rt.families.values()]
@@ -495,6 +506,24 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const found = await rt.resolve(account)
         const r = await rt.tuneUndo(found)
         return { ref: found.ref, undone: r.ok, message: r.message }
+      },
+    },
+    // Remote Control off by default (spec §3.22, ADR-0017): writes `remoteControlAtStartup: false` into each Claude
+    // settings file that turns it on or leaves it to the default; the page shows the files first, from the state.
+    '/api/remote-control/off': {
+      async run() {
+        const rt = await getRuntime()
+        const r = await rt.remoteControlOff()
+        const home = rt.paths.home
+        return { ...r, results: r.results.map((x) => ({ ...x, file: tildify(x.file, home) })) }
+      },
+    },
+    '/api/remote-control/undo': {
+      async run() {
+        const rt = await getRuntime()
+        const r = await rt.remoteControlUndo()
+        const home = rt.paths.home
+        return { ...r, results: r.results.map((x) => ({ ...x, file: tildify(x.file, home) })) }
       },
     },
     // Auto Handoff (spec §3.17): readiness reads only; configure shows the config change unless `confirm`.

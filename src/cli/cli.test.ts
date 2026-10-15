@@ -1428,6 +1428,40 @@ describe('model (spec §3.19)', () => {
   })
 })
 
+describe('remote-control (spec §3.22)', () => {
+  it('shows the state, previews turning it off with exit 10, writes only with --yes, and undoes it', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{"model":"sonnet","remoteControlAtStartup":true}\n')
+      await fakeHost(h, 'claude')
+      const status = checkSchema('remote-control', (await sideby(h, ['remote-control', '--json'])).out)
+      assert.deepEqual(
+        (status.groups as { state: string; accounts: string[] }[]).map((g) => [g.state, g.accounts]),
+        [['on', ['claude:main']]],
+      )
+      const before = await snapshot(h.home)
+      const preview = await sideby(h, ['remote-control', 'off'])
+      assert.equal(preview.code, 10)
+      assert.match(preview.out, /remoteControlAtStartup true -> false/)
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+      const done = await sideby(h, ['remote-control', 'off', '--yes', '--json'])
+      assert.equal(done.code, 0)
+      assert.equal(checkSchema('remote-control', done.out).applied, true)
+      assert.deepEqual(JSON.parse(await readFile(h.path('.claude/settings.json'), 'utf8')), {
+        model: 'sonnet',
+        remoteControlAtStartup: false,
+      })
+      assert.equal((await sideby(h, ['remote-control', 'undo'])).code, 10)
+      assert.equal((await sideby(h, ['remote-control', 'undo', '--yes'])).code, 0)
+      assert.equal(
+        JSON.parse(await readFile(h.path('.claude/settings.json'), 'utf8')).remoteControlAtStartup,
+        true,
+      )
+      assert.equal((await sideby(h, ['remote-control', 'undo', '--yes'])).code, 1)
+      assert.equal((await sideby(h, ['remote-control', 'nope'])).code, 2)
+    })
+  })
+})
+
 describe('tune (spec §3.18)', () => {
   /** A Claude main Account with one session of 210 turns and an auto compaction, dated just now. */
   async function withSession(h: FakeHome): Promise<void> {

@@ -94,6 +94,7 @@ const MAIN = String.raw`
     for (const k of Object.keys(CHOICES)) if (CHOICES[k].includes(raw[k])) p[k] = raw[k]
     if (raw.hideEmail === true) p.hideEmail = true
     if (typeof raw.ahHintAt === 'number') p.ahHintAt = raw.ahHintAt
+    if (raw.rcHide === true) p.rcHide = true
     if (typeof raw.family === 'string') p.family = raw.family
     if (raw.collapsed && typeof raw.collapsed === 'object')
       for (const k of Object.keys(raw.collapsed)) if (raw.collapsed[k] === true) p.collapsed[k] = true
@@ -2405,6 +2406,59 @@ const MAIN = String.raw`
     setKids(box, kids)
   }
 
+  // ---------- Remote Control (spec §3.22) ----------
+  // Shown while some Claude settings file turns Remote Control on. "Turn all off" first lists each file, the change
+  // and the accounts it reaches, in the banner itself; the toast after it carries the undo.
+  const rc = { confirm: false, busy: false }
+  const shortRef = (ref) => ref.replace(/^claude:/, '')
+  function remoteControlBanner() {
+    const groups = S.state.remoteControl || []
+    // API Accounts never sign in to claude.ai, so Remote Control cannot reach their sessions.
+    const api = new Set(S.state.accounts.filter((a) => a.kind === 'api').map((a) => a.ref))
+    const refs = groups.filter((g) => g.state === 'on').flatMap((g) => g.accounts).filter((r) => !api.has(r)).map(shortRef)
+    if (!refs.length || prefs.rcHide) return null
+    const todo = groups.filter((g) => g.state === 'on' || g.state === 'default')
+    const text = h('div', null, h('b', null, t('rc.title') + ' '), tn('rc.body', refs.length, { refs: refs.join(', ') }))
+    if (BOOT.readOnly) return h('div', { class: 'banner banner-warn', role: 'status' }, h('div', null, text, ' ', t('rc.readOnly')))
+    if (!rc.confirm)
+      return h('div', { class: 'banner banner-warn', role: 'status' }, text,
+        h('div', { class: 'banner-actions' },
+          h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => { rc.confirm = true; renderBanners() } }, t('rc.turnOff')),
+          h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { prefs.rcHide = true; savePrefs(); renderBanners(); toast(t('rc.hidden')) } }, t('rc.keep'))))
+    const lines = todo.map((g) => h('li', null, h('code', null, g.file), ' ',
+      t('rc.change', { from: g.state === 'on' ? 'true' : t('rc.notSet') }), ' ',
+      h('span', { class: 'muted' }, t('rc.usedBy', { refs: g.accounts.map(shortRef).join(', ') }))))
+    return h('div', { class: 'banner banner-warn', role: 'status' },
+      h('div', null, h('b', null, t('rc.confirmTitle')), h('ul', null, lines), h('div', { class: 'small' }, t('rc.confirmNote'))),
+      h('div', { class: 'banner-actions' },
+        h('button', { class: 'btn btn-sm btn-primary', type: 'button', disabled: rc.busy, onclick: remoteControlOff }, rc.busy ? spinner() : null, t('rc.confirm')),
+        h('button', { class: 'btn btn-sm', type: 'button', disabled: rc.busy, onclick: () => { rc.confirm = false; renderBanners() } }, t('btn.cancel'))))
+  }
+  async function remoteControlOff() {
+    rc.busy = true
+    renderBanners()
+    try {
+      const r = await api('/api/remote-control/off', {})
+      if (r.ok) {
+        // Hide the banner now; the reload that follows confirms it.
+        S.state.remoteControl = (S.state.remoteControl || []).map((g) => g.state === 'on' || g.state === 'default' ? { ...g, state: 'off', undo: true } : g)
+        toast(t('rc.done'), { action: { label: t('toast.undo'), run: remoteControlUndo }, duration: 12000 })
+      }
+      else toast(t('rc.failed', { msg: r.message }), { kind: 'fail' })
+    } catch (e) { toast(t('rc.failed', { msg: e.message }), { kind: 'fail' }) }
+    rc.busy = false
+    rc.confirm = false
+    renderBanners()
+    await load({ silent: true })
+  }
+  async function remoteControlUndo() {
+    try {
+      const r = await api('/api/remote-control/undo', {})
+      toast(r.ok ? t('rc.undone') : r.message, { kind: r.ok ? 'ok' : 'fail' })
+    } catch (e) { toast(t('toast.undoFailed', { msg: e.message }), { kind: 'fail' }) }
+    await load({ silent: true })
+  }
+
   // ---------- banners ----------
   function renderBanners() {
     const out = []
@@ -2419,6 +2473,8 @@ const MAIN = String.raw`
         h('div', { class: 'banner-actions' },
           h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => setPage('handoff') }, t('ah.setUp')),
           h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { prefs.ahHintAt = Date.now(); savePrefs(); renderBanners() } }, t('ah.dismiss')))))
+      const rcBanner = remoteControlBanner()
+      if (rcBanner) out.push(rcBanner)
       const errs = S.state.pluginErrors
       if (errs.length) out.push(h('div', { class: 'banner banner-warn', role: 'status' }, h('div', null,
         h('b', null, tn('banner.plugins', errs.length) + ' '), t('banner.pluginsHint'),

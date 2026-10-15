@@ -303,6 +303,44 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     },
     { title: 'sideby tune apply|undo --json' },
   ),
+  'remote-control': Type.Object(
+    {
+      schemaVersion: Version,
+      action: Type.Union([Type.Literal('status'), Type.Literal('off'), Type.Literal('undo')]),
+      applied: Type.Optional(Type.Boolean({ description: 'True once the change was written (or undone).' })),
+      groups: Type.Optional(
+        Type.Array(
+          Type.Object({
+            file: Str,
+            accounts: Type.Array(Str, { description: 'Claude accounts whose settings.json is this file.' }),
+            state: Type.Union(
+              [
+                Type.Literal('on'),
+                Type.Literal('default'),
+                Type.Literal('off'),
+                Type.Literal('missing'),
+                Type.Literal('blocked'),
+              ],
+              {
+                description:
+                  'on: remoteControlAtStartup is true; default: not set; off: false; missing: no settings.json; blocked: cannot be changed safely (see reason).',
+              },
+            ),
+            reason: Type.Optional(Str),
+            undo: Type.Boolean({
+              description: 'sideby turned it off here and can put the earlier value back.',
+            }),
+          }),
+          { description: 'For status, every file; for a preview, the files that would change.' },
+        ),
+      ),
+      results: Type.Optional(
+        Type.Array(Type.Object({ file: Str, accounts: Type.Array(Str), ok: Type.Boolean(), message: Str })),
+      ),
+      message: Type.Optional(Str),
+    },
+    { title: 'sideby remote-control [off|undo] --json' },
+  ),
   model: Type.Object(
     {
       schemaVersion: Version,

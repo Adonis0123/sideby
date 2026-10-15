@@ -46,6 +46,7 @@ Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique
 | Create an account with a given name, an API account, or a short command | `sideby new`, `sideby alias add` | `references/accounts.md` |
 | Tune the auto-compact threshold ("which compaction setting costs the fewest tokens"), use the suggestion or undo it | `sideby tune --json`, `sideby tune apply` (exit 10 first), `sideby tune undo` | `references/diagnose.md` |
 | See or set the model and effort an account starts with ("用哪个模型", "set effort to high for cc002") | `sideby model <acct> --json`; `sideby model <acct> <model\|default> --effort <level\|default>` (exit 10 first, then `--yes` after the user agrees) | — |
+| Stop Claude sessions from connecting to claude.ai / the Claude app by themselves ("关闭 remote control", "别让别人远程看到对话") for every account | `sideby remote-control --json`, then `sideby remote-control off` (exits 10 with the change; rerun with `--yes` after they agree); `sideby remote-control undo` puts it back | — |
 | See Claude quota (it shows `not-enabled`) | `sideby quota setup claude` (exits 10) | `references/quota.md` |
 | See everything at once | `sideby ui` (local panel on `127.0.0.1:17420`; `--no-open` prints the address) | — |
 | Start an account | give them `sideby run <ref> [-- host args]` | — |

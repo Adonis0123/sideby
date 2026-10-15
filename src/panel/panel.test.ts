@@ -1233,6 +1233,59 @@ describe('what the settings file already says (spec §3.18)', () => {
   })
 })
 
+describe('turning Remote Control off in the Panel (spec §3.22)', () => {
+  it('lists the files in the state, writes only on the off route, never on a read-only Panel, and undoes', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{"theme":"dark","remoteControlAtStartup":true}\n')
+      const { claudePlugin } = await import('../families/claude/index.ts')
+      const runtime = () => createRuntime({ env: h.env, builtins: [asBuiltin(claudePlugin)] })
+      const settings = async () => JSON.parse(await readFile(h.path('.claude/settings.json'), 'utf8'))
+      const ro = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`], readOnly: true }),
+      )
+      try {
+        const hdr = {
+          host: `127.0.0.1:${ro.port}`,
+          origin: `http://127.0.0.1:${ro.port}`,
+          'x-sideby-token': ro.handler.token,
+        }
+        assert.equal((await post(ro.port, '/api/remote-control/off', {}, hdr)).status, 403)
+        assert.equal((await post(ro.port, '/api/remote-control/undo', {}, hdr)).status, 403)
+        assert.equal((await settings()).remoteControlAtStartup, true)
+      } finally {
+        await close(ro.server)
+      }
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      try {
+        const state = JSON.parse(
+          (await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text,
+        )
+        assert.deepEqual(state.remoteControl, [
+          { file: '~/.claude/settings.json', accounts: ['claude:main'], state: 'on', undo: false },
+        ])
+        const hdr = {
+          host: `127.0.0.1:${port}`,
+          origin: `http://127.0.0.1:${port}`,
+          'x-sideby-token': handler.token,
+        }
+        const off = await post(port, '/api/remote-control/off', {}, hdr)
+        assert.equal(off.body.ok, true)
+        assert.deepEqual(await settings(), { theme: 'dark', remoteControlAtStartup: false })
+        const after = JSON.parse(
+          (await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text,
+        )
+        assert.equal(after.remoteControl[0].undo, true)
+        assert.equal((await post(port, '/api/remote-control/undo', {}, hdr)).body.ok, true)
+        assert.deepEqual(await settings(), { theme: 'dark', remoteControlAtStartup: true })
+      } finally {
+        await close(server)
+      }
+    })
+  })
+})
+
 describe('using a tuning suggestion in the Panel (ADR-0012)', () => {
   it('shows the plan without writing, writes only on confirm, never on a read-only Panel, and undoes', async () => {
     await withFakeHome(async (h) => {

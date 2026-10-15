@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/remote-control.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "action"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "action": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "status"
+        },
+        {
+          "type": "string",
+          "const": "off"
+        },
+        {
+          "type": "string",
+          "const": "undo"
+        }
+      ]
+    },
+    "applied": {
+      "type": "boolean",
+      "description": "True once the change was written (or undone)."
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "file",
+          "accounts",
+          "state",
+          "undo"
+        ],
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Claude accounts whose settings.json is this file."
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "on"
+              },
+              {
+                "type": "string",
+                "const": "default"
+              },
+              {
+                "type": "string",
+                "const": "off"
+              },
+              {
+                "type": "string",
+                "const": "missing"
+              },
+              {
+                "type": "string",
+                "const": "blocked"
+              }
+            ],
+            "description": "on: remoteControlAtStartup is true; default: not set; off: false; missing: no settings.json; blocked: cannot be changed safely (see reason)."
+          },
+          "reason": {
+            "type": "string"
+          },
+          "undo": {
+            "type": "boolean",
+            "description": "sideby turned it off here and can put the earlier value back."
+          }
+        }
+      },
+      "description": "For status, every file; for a preview, the files that would change."
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "file",
+          "accounts",
+          "ok",
+          "message"
+        ],
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "message": {
+      "type": "string"
+    }
+  },
+  "title": "sideby remote-control [off|undo] --json"
+}
