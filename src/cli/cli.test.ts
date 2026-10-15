@@ -1262,6 +1262,15 @@ describe('sideby handoff (spec §3.17)', () => {
         (await sideby(h, ['handoff', 'ready', '--to', 'cc008'], env)).out,
         /^claude:008 takes over/,
       )
+
+      // A parent from before --to would ignore it and pick another account: refuse instead of naming the wrong one.
+      await h.write(
+        '.local/state/sideby/handoffs/c1/plan.json',
+        JSON.stringify({ runId: 'r2', brief: '', at: '', decision: 'pick', prepareAt: 80, threshold: 95 }),
+      )
+      const old = await sideby(h, ['handoff', 'ready', '--to', 'cc008', '--json'], env)
+      assert.equal(old.code, 1)
+      assert.equal((JSON.parse(old.out) as { code: string }).code, 'parent-too-old')
     })
   })
 

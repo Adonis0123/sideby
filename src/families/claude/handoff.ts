@@ -88,6 +88,7 @@ export const claudeHandoff: FamilyHandoff = {
     ]
     const settings = {
       hooks: {
+        SessionStart: hook('SessionStart'),
         PostToolUse: hook('PostToolUse'),
         Stop: hook('Stop'),
         StopFailure: [

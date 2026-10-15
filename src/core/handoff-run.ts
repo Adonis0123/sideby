@@ -10,6 +10,7 @@ import { firstPrompt } from '../handoff/messages.ts'
 import type { Runtime } from '../runtime.ts'
 import type { Account, Env, HandoffHookEvent } from '../types.ts'
 import { aliasArgs } from './config.ts'
+import { UserError } from './errors.ts'
 import { finishBrief } from './handoff-brief.ts'
 import {
   briefPath,
@@ -275,6 +276,7 @@ export async function runWithHandoff(
             prepareAt: settings.prepareAt,
             threshold: settings.threshold,
             ...(elig.agentBrief === false ? { agentBrief: false } : {}),
+            acceptsTo: true,
           }
           await writeJsonFile(join(dir, FILES.plan), plan)
         } catch {
@@ -407,6 +409,14 @@ export async function readyDecision(rt: Runtime, env: Env, to?: string): Promise
   const dir = env[HANDOFF_ENV.dir]
   const ref = env.SIDEBY_ACCOUNT
   if (!env[HANDOFF_ENV.run] || !dir || !ref) return null
+  if (to !== undefined) {
+    const plan = await readJsonFile<PlanFile>(join(dir, FILES.plan))
+    if (plan && plan.runId === env[HANDOFF_ENV.run] && !plan.acceptsTo)
+      throw new UserError(
+        `this session was started by an older sideby, which cannot hand over to a named account; exit it and start ${to} yourself (\`sideby run ${to}\`), or run \`sideby handoff ready\` without --to`,
+        { code: 'parent-too-old' },
+      )
+  }
   const account = await rt.resolve(ref)
   const chain = await readJsonFile<ChainFile>(join(dir, FILES.chain))
   return decide(rt, account, chain?.hops.map((h) => h.ref) ?? [account.ref], to)

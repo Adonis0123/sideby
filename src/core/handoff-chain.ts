@@ -29,6 +29,8 @@ export interface PlanFile {
   threshold: number
   /** False when the session cannot write its Brief: no preparing step, and the threshold only ends the turn. */
   agentBrief?: boolean
+  /** The parent reads `to` from a manual request; a parent from before 0.9.3 does not write it and ignores `to`. */
+  acceptsTo?: true
 }
 
 /** What the hook already did in one run. */

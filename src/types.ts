@@ -123,7 +123,7 @@ export interface FamilyDef {
 }
 
 /** A Host hook event sideby's handoff hook listens to. */
-export type HandoffHookEvent = 'PostToolUse' | 'Stop' | 'StopFailure'
+export type HandoffHookEvent = 'SessionStart' | 'PostToolUse' | 'Stop' | 'StopFailure'
 
 /** Whether one run may start a Handoff, or start as the next Account of one, and why not. */
 export interface HandoffEligibility {

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
 import { ensureChainDir, FILES, type PlanFile, readJsonFile, writeJsonFile } from '../core/handoff-chain.ts'
 import { writeQuotaCache } from '../families/claude/quota-cache.ts'
-import type { Env } from '../types.ts'
+import type { Env, HandoffHookEvent } from '../types.ts'
 import { decide, runHandoffHook } from './hook.ts'
 
 const NOW = new Date('2026-10-09T12:00:00Z')
@@ -46,10 +46,30 @@ async function pressure(env: Env, used: number) {
   })
 }
 
-const call = (env: Env, event: 'PostToolUse' | 'Stop' | 'StopFailure', input = {}, family = 'claude') =>
+const call = (env: Env, event: HandoffHookEvent, input = {}, family = 'claude') =>
   decide({ family, event, input, env, now: NOW })
 
 describe('handoff hook', () => {
+  it('tells a session at start how to move the task to another account when the user asks', async () => {
+    await withFakeHome(async (h) => {
+      const { env, brief } = await setup(h)
+      const out = (await call({ ...env, SIDEBY_ACCOUNT: 'claude:001' }, 'SessionStart')).output as {
+        hookSpecificOutput: { hookEventName: string; additionalContext: string }
+      }
+      assert.equal(out.hookSpecificOutput.hookEventName, 'SessionStart')
+      const text = out.hookSpecificOutput.additionalContext
+      assert.match(text, /runs in claude:001/)
+      assert.match(text, /sideby handoff ready --to <account>/)
+      assert.ok(text.includes(brief))
+      // Nothing to say outside a run, or when the account is unknown.
+      assert.deepEqual(
+        await call({ ...env, SIDEBY_HANDOFF_RUN: undefined, SIDEBY_ACCOUNT: 'claude:001' }, 'SessionStart'),
+        {},
+      )
+      assert.deepEqual(await call(env, 'SessionStart'), {})
+    })
+  })
+
   it('stays silent outside a handoff run and for another Family’s hook', async () => {
     await withFakeHome(async (h) => {
       const { env } = await setup(h)

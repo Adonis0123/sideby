@@ -83,6 +83,8 @@ describe('runWithHandoff', () => {
       assert.equal(starts.length, 2)
       assert.equal(starts[1]!.env.CLAUDE_CONFIG_DIR, h.path('.claude-003'))
       assert.match(starts[1]!.argv.at(-1)!, /because the user asked to hand over/)
+      const plan = JSON.parse(await readFile(join(starts[1]!.env.SIDEBY_HANDOFF_DIR!, 'plan.json'), 'utf8'))
+      assert.equal(plan.acceptsTo, true)
     })
   })
 

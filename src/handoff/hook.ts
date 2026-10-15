@@ -16,7 +16,13 @@ import { claudeHookReader } from '../families/claude/handoff-hook.ts'
 import { codexHookReader } from '../families/codex/handoff-hook.ts'
 import { grokHookReader } from '../families/grok/handoff-hook.ts'
 import type { Env, HandoffHookEvent } from '../types.ts'
-import { endTurnMessage, prepareMessage, stopMessage, thresholdMessage } from './messages.ts'
+import {
+  endTurnMessage,
+  prepareMessage,
+  sessionStartMessage,
+  stopMessage,
+  thresholdMessage,
+} from './messages.ts'
 import { field, type HookInput, type HookReader } from './reader.ts'
 
 export const HOOK_COMMAND = 'sideby handoff-hook'
@@ -30,7 +36,7 @@ const READERS: Record<string, HookReader> = {
 /** Families whose hooks this entry understands; only they can start a Handoff. */
 export const HOOK_FAMILIES: readonly string[] = Object.keys(READERS)
 
-const EVENTS = new Set<string>(['PostToolUse', 'Stop', 'StopFailure'])
+const EVENTS = new Set<string>(['SessionStart', 'PostToolUse', 'Stop', 'StopFailure'])
 
 async function readAll(stream: AsyncIterable<Uint8Array | string>): Promise<string> {
   const chunks: Buffer[] = []
@@ -42,8 +48,8 @@ async function readAll(stream: AsyncIterable<Uint8Array | string>): Promise<stri
   return Buffer.concat(chunks).toString('utf8')
 }
 
-const contextOutput = (text: string) => ({
-  hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: text },
+const contextOutput = (text: string, hookEventName: 'SessionStart' | 'PostToolUse' = 'PostToolUse') => ({
+  hookSpecificOutput: { hookEventName, additionalContext: text },
 })
 const blockOutput = (reason: string) => ({ decision: 'block', reason })
 
@@ -85,6 +91,15 @@ export async function decide(opts: {
   const ready = async (r: Omit<ReadyFile, 'runId' | 'at'>) => {
     if (await readJsonFile<ReadyFile>(readyFile)) return
     await writeJsonFile(readyFile, { runId, at: now.toISOString(), ...session, ...r })
+  }
+
+  // The session learns it may move the task on when the user asks; without this it tells the user to start the
+  // other account by hand.
+  if (event === 'SessionStart') {
+    const ref = env.SIDEBY_ACCOUNT
+    return ref && usable
+      ? { output: contextOutput(sessionStartMessage(ref, usable.brief), 'SessionStart') }
+      : {}
   }
 
   const threshold = usable?.threshold ?? 95

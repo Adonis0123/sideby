@@ -60,6 +60,7 @@ describe('claude handoff', () => {
       assert.equal((await stat(args[1]!)).mode & 0o777, 0o600)
       const s = JSON.parse(await readFile(args[1]!, 'utf8'))
       assert.equal(s.hooks.PostToolUse[0].hooks[0].command, 'sideby handoff-hook claude PostToolUse')
+      assert.equal(s.hooks.SessionStart[0].hooks[0].command, 'sideby handoff-hook claude SessionStart')
       assert.equal(s.hooks.StopFailure[0].matcher, 'rate_limit')
     })
   })

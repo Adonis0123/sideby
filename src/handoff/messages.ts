@@ -29,6 +29,11 @@ export function stopMessage(brief: string): string {
   return `sideby: before you stop, update the handoff brief at ${brief} (${TEMPLATE}; ${RULES}), then end your turn.`
 }
 
+/** At session start (Claude): this session may hand its task to another account when the user asks. */
+export function sessionStartMessage(ref: string, brief: string): string {
+  return `sideby: this session runs in ${ref} under sideby with Auto Handoff. If the user wants this task to go on in another account ("continue in cc008", "hand it back to cc008"), do not ask them to start that account: write a handoff brief to ${brief} (${TEMPLATE}; ${RULES}), run \`sideby handoff ready --to <account>\` (an account or short command), tell the user the account it prints, and end your turn. sideby then ends this session and starts that account in this terminal.`
+}
+
 const WHY = {
   threshold: 'its quota ran low',
   limit: 'its quota ran out',
