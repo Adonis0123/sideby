@@ -283,6 +283,7 @@ const en = {
   'md.from.sideby': 'set by sideby for this account',
   'md.from.host': 'from {host}’s settings',
   'md.from.last': 'used in the last session',
+  'md.newDefault': 'new sessions start with {value} ({from})',
   'md.none': 'not known yet',
   'md.click': 'Click to change.',
   'md.envNote':
@@ -791,6 +792,7 @@ const zh: Record<MessageKey, string> = {
   'md.from.sideby': 'sideby 为这个账号设置',
   'md.from.host': '来自 {host} 的设置',
   'md.from.last': '最近一次会话用的',
+  'md.newDefault': '新会话默认是 {value}（{from}）',
   'md.none': '暂时不知道',
   'md.click': '点击修改。',
   'md.envNote':

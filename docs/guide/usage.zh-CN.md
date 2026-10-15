@@ -118,7 +118,7 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 
 ## 模型与 effort
 
-每个账号行会显示它用的模型和 effort，例如 `opus · high`；鼠标悬停能看到来源：sideby 为这个账号设置、工具自己的设置，或最近一次会话。点它（或账号菜单里的 **模型和 effort…**）就能只为这个账号选模型和 effort。sideby 把选择存成这个账号在它自己配置里的启动参数（Claude Code 用 `--model`、`--effort`，Codex 用 `-m` 和 `-c model_reasoning_effort=…`），所以共用同一个 `settings.json` 的账号也能各用各的，工具自己的文件不变。它只影响之后用 sideby 启动的会话（短命令、`sideby run`、`sideby next`、自动交接）；直接敲 `claude` 不受影响。shell 里的 `ANTHROPIC_MODEL`、`CLAUDE_CODE_EFFORT_LEVEL` 和组织下发的设置仍然优先，sideby 看不到它们。在终端里：`sideby model cc002 opus --effort high`（加 `--yes`）；用 `default` 清掉某一项。
+每个账号行会显示它用的模型和 effort，例如 `opus · high`；鼠标悬停能看到来源：sideby 为这个账号设置、最近一次会话，或工具自己的设置（账号还没有会话时才用）。点它（或账号菜单里的 **模型和 effort…**）就能只为这个账号选模型和 effort。sideby 把选择存成这个账号在它自己配置里的启动参数（Claude Code 用 `--model`、`--effort`，Codex 用 `-m` 和 `-c model_reasoning_effort=…`），所以共用同一个 `settings.json` 的账号也能各用各的，工具自己的文件不变。它只影响之后用 sideby 启动的会话（短命令、`sideby run`、`sideby next`、自动交接）；直接敲 `claude` 不受影响。shell 里的 `ANTHROPIC_MODEL`、`CLAUDE_CODE_EFFORT_LEVEL` 和组织下发的设置仍然优先，sideby 看不到它们。在终端里：`sideby model cc002 opus --effort high`（加 `--yes`）；用 `default` 清掉某一项。
 
 ## 桌面应用
 

@@ -1,7 +1,7 @@
 // Model and effort per Account (spec §3.19, ADR-0014): what is shown and where it comes from, and the one change
 // sideby makes, to the model and effort arguments in its own config.
 import assert from 'node:assert/strict'
-import { readFile, rm } from 'node:fs/promises'
+import { readFile, rm, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
@@ -55,7 +55,7 @@ async function setup(h: FakeHome, accounts: object = {}) {
 }
 
 describe('accountModel', () => {
-  it('takes each value from sideby, else the host config, else the last session, and says which', async () => {
+  it('takes each value from sideby, else the last session, else the host config, and says which', async () => {
     await withFakeHome(async (h) => {
       const rt = await setup(h, { 'claude:main': { args: ['--effort', 'xhigh'] } })
       const main = await accountModel(rt, await rt.resolve('claude:main'))
@@ -74,6 +74,26 @@ describe('accountModel', () => {
       assert.equal(api.settable, false)
       assert.deepEqual(api.model, { value: 'm1', from: 'host' })
       assert.ok(!JSON.stringify([main, one, codex, api]).includes('SHOULD-NOT-LEAK'))
+    })
+  })
+
+  it('shows what the last session ran over the shared settings default, and sideby over both', async () => {
+    await withFakeHome(async (h) => {
+      const rt = await setup(h, { 'claude:002': { args: ['--effort', 'max'] } })
+      const shared = h.path('.claude/settings.json')
+      await symlink(shared, h.path('.claude-001/settings.json'))
+      await h.write(
+        '.claude-002/projects/p/s1.jsonl',
+        await readFile(h.path('.claude-001/projects/p/s1.jsonl'), 'utf8'),
+      )
+      await symlink(shared, h.path('.claude-002/settings.json'))
+      const one = await accountModel(rt, await rt.resolve('claude:001'))
+      assert.deepEqual(one.host, { model: 'sonnet', effort: 'low' })
+      assert.deepEqual(one.model, { value: 'claude-opus-5-5', from: 'last' })
+      assert.deepEqual(one.effort, { value: 'medium', from: 'last' })
+      const two = await accountModel(rt, await rt.resolve('claude:002'))
+      assert.deepEqual(two.model, { value: 'claude-opus-5-5', from: 'last' })
+      assert.deepEqual(two.effort, { value: 'max', from: 'sideby' })
     })
   })
 })

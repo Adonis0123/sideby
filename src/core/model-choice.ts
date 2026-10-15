@@ -32,9 +32,11 @@ function pick(
   host: ModelChoice,
   last: ModelChoice,
 ): { value: string; from: ChoiceSource } | undefined {
+  // What the Account really ran last beats the Host's default: subscription Accounts often share one settings.json,
+  // so its value would show the same for all of them.
   if (sideby[key]) return { value: sideby[key]!, from: 'sideby' }
-  if (host[key]) return { value: host[key]!, from: 'host' }
   if (last[key]) return { value: last[key]!, from: 'last' }
+  if (host[key]) return { value: host[key]!, from: 'host' }
   return undefined
 }
 

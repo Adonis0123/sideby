@@ -14,7 +14,7 @@ Options:
 
 ## Decision
 
-- sideby shows the effective model and effort per Account: what sideby sets for it, else the Host's config, else what the last session used (from the session logs), with the source.
+- sideby shows the model and effort per Account: what sideby sets for it, else what the last session used (from the session logs), else the Host's config, with the source. (Amended 2026-10-15: the last session used to come after the Host's config, but Accounts that share one `settings.json` then all showed the same value, not what each one runs.)
 - Changing them edits only the model and effort arguments in `accounts.<ref>.args`, after a preview the user confirms; "default" removes them. No Host file is written.
 - It reads only the model and effort keys of the Host's config files; nothing else of them reaches an output.
 

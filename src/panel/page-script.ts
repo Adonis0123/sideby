@@ -2104,10 +2104,21 @@ const MAIN = String.raw`
   function modelChip(a) {
     const mi = a.modelInfo
     if (!mi || (!mi.model && !mi.effort)) return null
-    const text = [mi.model && mi.model.value, mi.effort && mi.effort.value].filter(Boolean).join(' · ')
+    // The row has little room; the hover text keeps the full model id.
+    const text = [mi.model && mi.model.value.replace(/^claude-/, ''), mi.effort && mi.effort.value].filter(Boolean).join(' · ')
+    // A value from the last session may differ from what a new session starts with; say both.
+    const line = (label, v, key) => {
+      if (!v) return null
+      const out = label + ': ' + v.value + ' (' + modelFrom(a, v.from) + ')'
+      const host = mi.host && mi.host[key]
+      // 'opus' and 'claude-opus-5-5' name the same model: only a real difference is worth a line.
+      return v.from === 'last' && host && !v.value.includes(host)
+        ? out + '; ' + t('md.newDefault', { value: host, from: modelFrom(a, 'host') })
+        : out
+    }
     const title = [
-      mi.model ? t('md.model') + ': ' + mi.model.value + ' (' + modelFrom(a, mi.model.from) + ')' : null,
-      mi.effort ? t('md.effort') + ': ' + mi.effort.value + ' (' + modelFrom(a, mi.effort.from) + ')' : null,
+      line(t('md.model'), mi.model, 'model'),
+      line(t('md.effort'), mi.effort, 'effort'),
       mi.settable ? t('md.click') : null,
     ].filter(Boolean).join('\n')
     if (!mi.settable) return h('span', { class: 'mono', title }, text)
