@@ -102,15 +102,25 @@ export function selectNext(input: {
   now: Date
   /** Decide now what happens when the origin's fullest window reaches the threshold (see `waitUntil`). */
   ahead?: boolean
+  /**
+   * `sideby handoff ready --to`: the only candidate, which may be an Account this chain already used (handing back to
+   * an Account whose Quota came back); every other rule still applies.
+   */
+  to?: string
 }): HandoffDecision {
   const { origin, settings: s, now } = input
+  const refOf = (name: string) => input.aliases[name] ?? name
+  const byRef = new Map(input.candidates.map((c) => [c.ref, c]))
+  if (input.to !== undefined) {
+    const target = byRef.get(refOf(input.to))
+    if (!target) return { kind: 'none', reason: `${input.to} is not an account sideby can find` }
+    return toTarget(origin, target, s, new Set(s.crossOrganization.map(refOf)), now)
+  }
   const until = waitUntil(origin, s, now, input.ahead === true)
   if (until) return { kind: 'wait', until }
 
-  const refOf = (name: string) => input.aliases[name] ?? name
   const allowed = new Set(s.crossOrganization.map(refOf))
   const used = new Set([origin.ref, ...input.used])
-  const byRef = new Map(input.candidates.map((c) => [c.ref, c]))
   const family = s.families[origin.family]
 
   let list: SelectCandidate[]
@@ -157,5 +167,43 @@ export function selectNext(input: {
       : 'no account may take over',
     ...(full ? { earliestReset: { ref: full.c.ref, at: full.e.resetsAt! } } : {}),
     ...withSkipped,
+  }
+}
+
+/** Why `target` may not take over from `origin`, or null when it may; the same rules as `selectNext` but `used`. */
+function refusal(
+  origin: SelectCandidate,
+  target: SelectCandidate,
+  s: HandoffSettings,
+  allowed: ReadonlySet<string>,
+): string | null {
+  if (target.ref === origin.ref) return 'it is the account this session runs in'
+  if (origin.sameLogin?.includes(target.ref))
+    return `it is the same login as ${origin.ref}, so it shares the same quota`
+  if (!target.installed) return 'its host is not installed'
+  if (!target.receive) return 'it cannot take over a task'
+  if (!s.sameFamily && target.family === origin.family && target.kind !== 'api')
+    return 'handing over within one host is off; turn on `handoff.sameFamily`'
+  if (!allowed.has(target.ref) && !sameOrganization(origin.identity, target.identity))
+    return `it is signed in to another organization; add it to \`handoff.crossOrganization\` to allow it`
+  return null
+}
+
+function toTarget(
+  origin: SelectCandidate,
+  target: SelectCandidate,
+  s: HandoffSettings,
+  allowed: ReadonlySet<string>,
+  now: Date,
+): HandoffDecision {
+  const why = refusal(origin, target, s, allowed)
+  if (why) return { kind: 'none', reason: `${target.ref} may not take over: ${why}` }
+  const e = stateOf(target, s, now)
+  if (e.state === 'ready' || e.state === 'unknown' || e.state === 'api')
+    return { kind: 'pick', ref: target.ref }
+  return {
+    kind: 'none',
+    reason: `${target.ref} cannot take over now: ${e.state === 'full' ? 'its quota is full' : 'it is signed out'}`,
+    ...(e.state === 'full' && e.resetsAt ? { earliestReset: { ref: target.ref, at: e.resetsAt } } : {}),
   }
 }

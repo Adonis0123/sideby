@@ -220,6 +220,45 @@ describe('selectNext', () => {
     })
     assert.deepEqual(r, pick('claude:003'))
   })
+  it('with to, picks only that Account, also one the chain already used, and says why it cannot', () => {
+    const s = settings({ auto: true, sameFamily: true })
+    const base = {
+      origin,
+      aliases: { cc008: 'claude:008' },
+      used: ['claude:008', 'claude:001'],
+      now: NOW,
+      settings: s,
+    }
+    const back = acct('claude:008', { quota: quota(20) })
+    const candidates = [acct('claude:002'), back]
+    assert.deepEqual(
+      selectNext({ ...base, candidates }),
+      pick('claude:002'),
+      'without to, a used Account is left out',
+    )
+    assert.deepEqual(selectNext({ ...base, candidates, to: 'cc008' }), pick('claude:008'))
+    // The origin about to reset would mean wait; the user named an Account, so that applies only without to.
+    const resetting = acct('claude:001', { quota: quota(96, 10) })
+    assert.deepEqual(
+      selectNext({ ...base, origin: resetting, candidates, to: 'claude:008' }),
+      pick('claude:008'),
+    )
+
+    const full = acct('claude:008', { quota: quota(97, 60) })
+    assert.deepEqual(selectNext({ ...base, candidates: [full], to: 'claude:008' }), {
+      kind: 'none',
+      reason: 'claude:008 cannot take over now: its quota is full',
+      earliestReset: { ref: 'claude:008', at: inMinutes(60) },
+    })
+    const self = selectNext({ ...base, candidates: [origin], to: 'claude:001' })
+    assert.equal(self.kind, 'none')
+    const off = selectNext({ ...base, settings: settings({ auto: true }), candidates, to: 'claude:008' })
+    assert.match(off.kind === 'none' ? off.reason : '', /sameFamily/)
+    assert.deepEqual(selectNext({ ...base, candidates, to: 'claude:009' }), {
+      kind: 'none',
+      reason: 'claude:009 is not an account sideby can find',
+    })
+  })
 })
 
 describe('sameOrganization', () => {

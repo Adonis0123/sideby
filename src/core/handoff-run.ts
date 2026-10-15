@@ -168,9 +168,14 @@ export function hookEntryWorks(env: Env): Promise<boolean> {
 }
 
 /** The decision, or `none` with the reason when sideby cannot tell (an account removed mid-chain, say). */
-async function decide(rt: Runtime, account: Account, used: readonly string[]): Promise<HandoffDecision> {
+async function decide(
+  rt: Runtime,
+  account: Account,
+  used: readonly string[],
+  to?: string,
+): Promise<HandoffDecision> {
   try {
-    return await rt.handoffDecision(account, used)
+    return await rt.handoffDecision(account, used, to !== undefined ? { to } : {})
   } catch (err) {
     return { kind: 'none', reason: (err as Error).message }
   }
@@ -297,7 +302,7 @@ export async function runWithHandoff(
     }
 
     // Nothing to move on to (or better to wait): leave the session alone and say why once it ends.
-    const decision = await decide(rt, account, used)
+    const decision = await decide(rt, account, used, outcome.ready.to)
     if (decision.kind !== 'pick') {
       await rm(join(dir, FILES.ready), { force: true })
       const code = await host.exited
@@ -369,7 +374,7 @@ export async function runWithHandoff(
     hop = {
       ref: next.ref,
       args: next.family === account.family ? h.continueArgs(hop.args) : [],
-      prompt: firstPrompt(account.ref, done.path),
+      prompt: firstPrompt(account.ref, done.path, ready.trigger),
     }
     n++
   }
@@ -396,13 +401,13 @@ async function noteUnhandedHighQuota(
 
 /**
  * For `sideby handoff ready`: where a Handoff from the session running under `env` would go now, using the chain's
- * Accounts so far; null when `env` is not a run sideby started with Auto Handoff.
+ * Accounts so far (or to `to` only); null when `env` is not a run sideby started with Auto Handoff.
  */
-export async function readyDecision(rt: Runtime, env: Env): Promise<HandoffDecision | null> {
+export async function readyDecision(rt: Runtime, env: Env, to?: string): Promise<HandoffDecision | null> {
   const dir = env[HANDOFF_ENV.dir]
   const ref = env.SIDEBY_ACCOUNT
   if (!env[HANDOFF_ENV.run] || !dir || !ref) return null
   const account = await rt.resolve(ref)
   const chain = await readJsonFile<ChainFile>(join(dir, FILES.chain))
-  return decide(rt, account, chain?.hops.map((h) => h.ref) ?? [account.ref])
+  return decide(rt, account, chain?.hops.map((h) => h.ref) ?? [account.ref], to)
 }

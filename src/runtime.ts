@@ -287,12 +287,12 @@ export interface Runtime {
   /**
    * Where an Auto Handoff from `origin` would go now (spec §3.17 "选号"): every Account of every Family is a
    * candidate; `used` lists the chain's Accounts so far. `ahead` decides early what happens once the origin's fullest
-   * window reaches the threshold, as plan.json and the Panel need.
+   * window reaches the threshold, as plan.json and the Panel need. `to` names the only candidate (`handoff ready --to`).
    */
   handoffDecision(
     origin: Account,
     used: readonly string[],
-    opts?: { ahead?: boolean },
+    opts?: { ahead?: boolean; to?: string },
   ): Promise<HandoffDecision>
   readContext(): ReadContext
 }
@@ -969,6 +969,7 @@ export async function createRuntime(
         used,
         now: now(),
         ...(opts.ahead ? { ahead: true } : {}),
+        ...(opts.to !== undefined ? { to: opts.to } : {}),
       })
     },
     readContext,

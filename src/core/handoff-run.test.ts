@@ -72,6 +72,20 @@ describe('runWithHandoff', () => {
     })
   })
 
+  it('hands over to the account a manual request names, not the first in line', async () => {
+    await withFakeHome(async (h) => {
+      const toThree = READY_ON_FIRST_RUN.replace("sessionId: 's1'", "sessionId: 's1', to: 'claude:003'")
+      await fakeHost(h, 'claude', { sleep: 20, onStart: toThree })
+      const rt = await setup(h, { auto: true, sameFamily: true, countdownSeconds: 0 }, ['001', '002', '003'])
+      const code = await runWithHandoff(rt, 'cc001', [], { err: () => {}, stdin: terminal() })
+      assert.equal(code, 0)
+      const starts = (await readHostLog(h, 'claude')).filter((r) => r.argv)
+      assert.equal(starts.length, 2)
+      assert.equal(starts[1]!.env.CLAUDE_CONFIG_DIR, h.path('.claude-003'))
+      assert.match(starts[1]!.argv.at(-1)!, /because the user asked to hand over/)
+    })
+  })
+
   it('writes a plan that already says wait when the fullest window resets soon, so the hook does not interrupt', async () => {
     await withFakeHome(async (h) => {
       await fakeHost(h, 'claude', { sleep: 1 })

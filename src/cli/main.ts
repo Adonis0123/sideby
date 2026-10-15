@@ -41,7 +41,8 @@ Usage:
                                       --order claude=codex001,cc002, --threshold n, --prepare-at n
   sideby handoff disable [--yes]      turn it off, keeping the other settings
   sideby handoff ready [--brief <f>]  inside a session sideby started with Auto Handoff: hand over to
-                                      the next account when this turn ends (config \`handoff\`)
+                                      the next account when this turn ends (config \`handoff\`);
+                                      --to <account> names it, also one this chain already used
   sideby handoff setup grok [--yes]   add sideby's hook file so Grok can hand over at its limit
   sideby handoff teardown grok        remove it
   sideby ui [--port n] [--no-open]    open the local panel
@@ -185,7 +186,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   model: { flags: ['json', 'yes'], valued: ['effort'] },
   handoff: {
     flags: ['json', 'yes', 'same-family', 'no-same-family'],
-    valued: ['brief', 'order', 'prepare-at', 'threshold', 'wait-minutes', 'countdown'],
+    valued: ['brief', 'to', 'order', 'prepare-at', 'threshold', 'wait-minutes', 'countdown'],
   },
   ui: { flags: ['no-open', 'background', 'stop', 'serve-detached'], valued: ['port'] },
   app: { flags: ['json'], valued: ['url'] },

@@ -811,18 +811,26 @@ export async function cmdHandoff(a: ParsedArgs, io: Io): Promise<number> {
   if (sub === 'enable' || sub === 'disable') return cmdHandoffSwitch(a, io, sub)
   if (sub !== 'ready')
     throw new UsageError(
-      'usage: sideby handoff status | enable [--same-family] [--order <family>=<acct,…>] [--threshold n] [--prepare-at n] [--yes] | disable [--yes] | ready [--brief <file>] | setup|teardown <family> [--yes]',
+      'usage: sideby handoff status | enable [--same-family] [--order <family>=<acct,…>] [--threshold n] [--prepare-at n] [--yes] | disable [--yes] | ready [--to <account>] [--brief <file>] | setup|teardown <family> [--yes]',
     )
   const flag = a.flags.get('brief')
   const brief = typeof flag === 'string' ? flag : undefined
-  const decision = await readyDecision(await createRuntime(), process.env)
+  const toFlag = a.flags.get('to')
+  if (toFlag === true) throw new UsageError('usage: sideby handoff ready --to <account> [--brief <file>]')
+  const rt = await createRuntime()
+  // An Account or a short command; resolve() says what to do when there is no such Account.
+  const to = toFlag === undefined ? undefined : (await rt.resolve(toFlag)).ref
+  const decision = await readyDecision(rt, process.env, to)
   if (decision && decision.kind !== 'pick')
-    throw new UserError(`nothing can take over now: ${explain(decision)}; keep working in this account`, {
-      code: 'no-pick',
-    })
+    throw new UserError(
+      to
+        ? `cannot hand over to ${to}: ${explain(decision)}; keep working in this account or pick another with --to`
+        : `nothing can take over now: ${explain(decision)}; keep working in this account`,
+      { code: 'no-pick' },
+    )
   let request: Awaited<ReturnType<typeof requestHandoff>>
   try {
-    request = await requestHandoff(process.env, brief)
+    request = await requestHandoff(process.env, brief, to)
   } catch (err) {
     throw new UserError(
       `cannot read the brief ${brief}: ${(err as Error).message}; check the path and retry`,
@@ -836,8 +844,18 @@ export async function cmdHandoff(a: ParsedArgs, io: Io): Promise<number> {
       'not inside a session sideby started with Auto Handoff; set `handoff.auto` in the config and start the account with sideby (`sideby run`, a short command), or use `sideby next <family>`',
       { code: 'not-in-handoff-run' },
     )
-  if (a.flags.has('json')) json(io, { requested: true, ...(request.brief ? { brief: request.brief } : {}) })
-  else io.out('The next account starts when this turn ends; finish the turn now.')
+  // The account that will really take over; `sideby next` cannot tell, it does not know the chain.
+  const next = decision?.kind === 'pick' ? decision.ref : undefined
+  if (a.flags.has('json'))
+    json(io, {
+      requested: true,
+      ...(next ? { next } : {}),
+      ...(request.brief ? { brief: request.brief } : {}),
+    })
+  else
+    io.out(
+      `${next ? `${next} takes over` : 'The next account starts'} when this turn ends; finish the turn now.`,
+    )
   return 0
 }
 

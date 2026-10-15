@@ -48,6 +48,8 @@ export interface ReadyFile {
   /** The Brief file, when the session or the user wrote one. */
   brief?: string
   briefSource?: 'agent' | 'user'
+  /** `sideby handoff ready --to`: the Account ref to hand over to. */
+  to?: string
   sessionId?: string
   transcriptPath?: string
 }
@@ -109,12 +111,14 @@ export async function writeJsonFile(path: string, value: unknown): Promise<void>
 
 /**
  * `sideby handoff ready` (spec §3.17): asks the parent to hand over after this turn. Works only inside a run sideby
- * started with Auto Handoff; `briefFile`, when given, is copied into the chain directory (mode 600).
+ * started with Auto Handoff; `briefFile`, when given, is copied into the chain directory (mode 600); `to` is the
+ * Account ref to hand over to.
  * Returns the request, or null outside such a run.
  */
 export async function requestHandoff(
   env: Readonly<Record<string, string | undefined>>,
   briefFile?: string,
+  to?: string,
 ): Promise<ReadyFile | null> {
   const runId = env[HANDOFF_ENV.run]
   const dir = env[HANDOFF_ENV.dir]
@@ -129,6 +133,7 @@ export async function requestHandoff(
     at: new Date().toISOString(),
     trigger: 'manual',
     ...(brief ? { brief, briefSource: 'user' as const } : {}),
+    ...(to ? { to } : {}),
   }
   await writeJsonFile(join(dir, FILES.request), request)
   return request

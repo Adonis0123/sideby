@@ -1224,6 +1224,47 @@ describe('sideby handoff (spec §3.17)', () => {
     })
   })
 
+  it('ready --to hands back to an account the chain already used, and names who takes over', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude-003/projects/.keep', '')
+      await h.write('.claude-008/projects/.keep', '')
+      await fakeHost(h, 'claude')
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ aliases: { cc008: 'claude:008' }, handoff: { auto: true, sameFamily: true } }),
+      )
+      const dir = await h.mkdir('.local/state/sideby/handoffs/c1')
+      await h.write(
+        '.local/state/sideby/handoffs/c1/chain.json',
+        JSON.stringify({
+          hops: [
+            { ref: 'claude:008', startedAt: '' },
+            { ref: 'claude:003', startedAt: '' },
+          ],
+        }),
+      )
+      const env = {
+        SIDEBY_HANDOFF_RUN: 'r2',
+        SIDEBY_HANDOFF_DIR: dir,
+        SIDEBY_HANDOFF_FAMILY: 'claude',
+        SIDEBY_ACCOUNT: 'claude:003',
+      }
+      const plain = await sideby(h, ['handoff', 'ready', '--json'], env)
+      assert.equal(plain.code, 1, 'without --to the chain never goes back to claude:008')
+      assert.equal((JSON.parse(plain.out) as { code: string }).code, 'no-pick')
+
+      const r = await sideby(h, ['handoff', 'ready', '--to', 'cc008', '--json'], env)
+      assert.equal(r.code, 0, r.err)
+      assert.equal(checkSchema('handoff-ready', r.out).next, 'claude:008')
+      const request = JSON.parse(await readFile(join(dir, 'request.json'), 'utf8')) as { to: string }
+      assert.equal(request.to, 'claude:008')
+      assert.match(
+        (await sideby(h, ['handoff', 'ready', '--to', 'cc008'], env)).out,
+        /^claude:008 takes over/,
+      )
+    })
+  })
+
   it('ready exits 1 and writes nothing when no account can take over', async () => {
     await withFakeHome(async (h) => {
       await h.write('.claude-001/projects/.keep', '')

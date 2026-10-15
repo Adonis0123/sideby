@@ -476,7 +476,12 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     ]),
   ),
   'handoff-ready': Type.Object(
-    { schemaVersion: Version, requested: Type.Literal(true), brief: Type.Optional(Str) },
+    {
+      schemaVersion: Version,
+      requested: Type.Literal(true),
+      next: Type.Optional(Str),
+      brief: Type.Optional(Str),
+    },
     { title: 'sideby handoff ready --json' },
   ),
   'handoff-setup': Type.Object(

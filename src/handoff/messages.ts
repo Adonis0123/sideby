@@ -29,7 +29,13 @@ export function stopMessage(brief: string): string {
   return `sideby: before you stop, update the handoff brief at ${brief} (${TEMPLATE}; ${RULES}), then end your turn.`
 }
 
+const WHY = {
+  threshold: 'its quota ran low',
+  limit: 'its quota ran out',
+  manual: 'the user asked to hand over',
+} as const
+
 /** The next session's first prompt: the Brief's path only, never its text (it would show in a process list). */
-export function firstPrompt(fromRef: string, brief: string): string {
-  return `This task was handed over from ${fromRef} by sideby because its quota ran low. Read ${brief} first, then continue the task it describes.`
+export function firstPrompt(fromRef: string, brief: string, trigger: keyof typeof WHY): string {
+  return `This task was handed over from ${fromRef} by sideby because ${WHY[trigger]}. Read ${brief} first, then continue the task it describes. If the user asks to move the task to another account (back to ${fromRef}, say), run \`sideby handoff ready --to <account>\` and end your turn.`
 }

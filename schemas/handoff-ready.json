@@ -15,6 +15,9 @@
       "type": "boolean",
       "const": true
     },
+    "next": {
+      "type": "string"
+    },
     "brief": {
       "type": "string"
     }

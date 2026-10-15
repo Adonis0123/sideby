@@ -57,8 +57,17 @@ describe('finishBrief', () => {
 
 describe('firstPrompt', () => {
   it('names the previous account and the Brief path, not its text', () => {
-    const p = firstPrompt('claude:001', '/state/handoffs/c/2-claude-002.md')
+    const p = firstPrompt('claude:001', '/state/handoffs/c/2-claude-002.md', 'threshold')
     assert.match(p, /claude:001/)
     assert.match(p, /\/state\/handoffs\/c\/2-claude-002\.md/)
+  })
+
+  it('says why it was handed over and how to hand it on or back', () => {
+    assert.match(firstPrompt('claude:008', '/b.md', 'threshold'), /because its quota ran low/)
+    assert.match(firstPrompt('claude:008', '/b.md', 'limit'), /because its quota ran out/)
+    const manual = firstPrompt('claude:008', '/b.md', 'manual')
+    assert.match(manual, /because the user asked to hand over/)
+    assert.doesNotMatch(manual, /quota/)
+    assert.match(manual, /sideby handoff ready --to <account>/)
   })
 })
