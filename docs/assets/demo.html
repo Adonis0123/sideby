@@ -68,7 +68,7 @@
         mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, #000 30%, transparent 80%);
       }
 
-      /* Intro and outro mark: the Panel's logo, its two halves in the two accounts' colours. */
+      /* Outro mark: the Panel's logo (src/core/brand-mark.ts), two faces that meet side by side. */
       .mark {
         left: 0;
         right: 0;
@@ -77,42 +77,33 @@
         align-items: center;
         pointer-events: none;
       }
-      #intro {
-        top: 236px;
-      }
       #outro {
         top: 170px;
       }
       .logo {
-        width: 150px;
+        width: 210px;
         height: 150px;
         overflow: visible;
       }
-      .logo path {
+      .logo g {
         filter: drop-shadow(0 0 18px currentColor);
       }
       .logo .h0 {
-        color: var(--personal);
-        fill: var(--personal);
+        color: #f2b35e88;
       }
       .logo .h1 {
-        color: var(--work);
-        fill: var(--work);
+        color: #3f8fc4aa;
       }
       .word {
         margin-top: 18px;
         font-size: 64px;
         font-weight: 800;
         letter-spacing: -0.035em;
+        /* The brand blue, lifted for the dark stage. */
+        color: #5aa9dc;
       }
       .word span {
         display: inline-block;
-        opacity: 0;
-      }
-      .tagline {
-        margin-top: 10px;
-        font-size: 22px;
-        color: #9aa7bd;
         opacity: 0;
       }
       .install {
@@ -521,15 +512,6 @@
       <div class="blob" id="b1"></div>
       <div id="grid"></div>
 
-      <div class="mark" id="intro">
-        <svg class="logo" viewBox="0 0 40 40" aria-hidden="true">
-          <path class="h0" d="M18.5 8A10.5 10.5 0 0 0 18.5 29Z" />
-          <path class="h1" d="M21.5 11A10.5 10.5 0 0 1 21.5 32Z" />
-        </svg>
-        <div class="word"></div>
-        <div class="tagline">Every AI coding account, side by side.</div>
-      </div>
-
       <div class="cap" id="cap0"><span class="tag">sideby run</span>Two accounts in two terminals, at the same time</div>
       <div class="cap" id="cap1"><span class="tag">link</span>Skills, hooks and settings: one copy, in the main account</div>
       <div class="cap" id="cap2"><span class="tag">sideby ui</span>Every account's quota, read from local files</div>
@@ -573,9 +555,11 @@
       </div>
 
       <div class="mark" id="outro">
-        <svg class="logo" viewBox="0 0 40 40" aria-hidden="true">
-          <path class="h0" d="M18.5 8A10.5 10.5 0 0 0 18.5 29Z" />
-          <path class="h1" d="M21.5 11A10.5 10.5 0 0 1 21.5 32Z" />
+        <svg class="logo" viewBox="0 40 256 176" aria-hidden="true">
+          <!-- The mark from src/core/brand-mark.ts: the amber face behind, the blue one in front. -->
+          <mask id="gap" maskUnits="userSpaceOnUse" x="-200" y="0" width="656" height="256"><rect x="-200" width="656" height="256" fill="#fff" /><path fill="#000" d="M162 58H198A58 58 0 0 1 256 116V140A58 58 0 0 1 198 198H162A58 58 0 0 1 104 140V116A58 58 0 0 1 162 58Z" /></mask>
+          <g class="h0" mask="url(#gap)"><path fill="#f2b35e" d="M56 82H96A44 44 0 0 1 140 126V142A44 44 0 0 1 96 186H56A44 44 0 0 1 12 142V126A44 44 0 0 1 56 82Z" /><path fill="#1e2a44" d="M52 119H52A7 7 0 0 1 59 126V138A7 7 0 0 1 52 145H52A7 7 0 0 1 45 138V126A7 7 0 0 1 52 119ZM90 119H90A7 7 0 0 1 97 126V138A7 7 0 0 1 90 145H90A7 7 0 0 1 83 138V126A7 7 0 0 1 90 119Z" /></g>
+          <g class="h1"><path fill="#3f8fc4" d="M162 70H198A46 46 0 0 1 244 116V140A46 46 0 0 1 198 186H162A46 46 0 0 1 116 140V116A46 46 0 0 1 162 70Z" /><path fill="#1e2a44" d="M162 111H162A7 7 0 0 1 169 118V130A7 7 0 0 1 162 137H162A7 7 0 0 1 155 130V118A7 7 0 0 1 162 111ZM200 111H200A7 7 0 0 1 207 118V130A7 7 0 0 1 200 137H200A7 7 0 0 1 193 130V118A7 7 0 0 1 200 111Z" /></g>
         </svg>
         <div class="word"></div>
         <div class="install"><div class="beam"></div><span class="dim">$ </span>npm i -g sideby</div>
@@ -766,18 +750,8 @@
         const add = (target, keyframes, options) => seq.push([target, keyframes, options])
         const cursors = [[], [], []]
 
-        // Intro: the two halves of the mark meet, then part to make room for two terminals.
-        // The background never moves: in a GIF every changed pixel costs bytes.
-        add('#intro .h0', { x: [-60, 0], opacity: [0, 1] }, { ...spring(0.35, 0.8), at: 0.05 })
-        add('#intro .h1', { x: [60, 0], opacity: [0, 1] }, { ...spring(0.35, 0.8), at: 0.05 })
-        spellWord($('#intro .word'), 'sideby').forEach((span, k) => {
-          add(span, { opacity: [0, 1], y: [24, 0], filter: ['blur(10px)', 'blur(0px)'] }, { duration: 0.45, ease: 'easeOut', at: 0.35 + k * 0.045 })
-        })
-        add('#intro .tagline', { opacity: [0, 1], y: [10, 0] }, { duration: 0.5, at: 0.75 })
-        add('#intro .h0', { x: -90, opacity: 0 }, { duration: 0.55, ease: glide, at: 1.55 })
-        add('#intro .h1', { x: 90, opacity: 0 }, { duration: 0.55, ease: glide, at: 1.55 })
-        add('#intro .word', { opacity: [1, 0], scale: [1, 1.15], filter: ['blur(0px)', 'blur(10px)'] }, { duration: 0.4, ease: 'easeIn', at: 1.5 })
-        add('#intro .tagline', { opacity: 0 }, { duration: 0.3, at: 1.5 })
+        // No title card: the README shows the GIF under the banner, so it opens straight on the terminals.
+        // Scene 1 keeps its times; START below skips the empty lead-in before it.
 
         // Scene 1: two terminals out of the middle, two `sideby run` processes at once.
         let end = 0
@@ -968,7 +942,9 @@
       }
 
       const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-      const { seq, total } = build()
+      const { seq, total: end } = build()
+      const START = 2.0
+      const total = end - START
       const controls = animate(seq)
       controls.pause()
 
@@ -978,15 +954,18 @@
         // Used by scripts/record-demo.ts: put the timeline at `t` seconds and wait for paint.
         async seek(t) {
           controls.pause()
-          controls.time = t
+          controls.time = t + START
           await frame()
         },
       }
 
       if (!params.has('record')) {
-        window.demo.ready.then(() => controls.play())
+        window.demo.ready.then(() => {
+          controls.time = START
+          controls.play()
+        })
         document.addEventListener('click', () => {
-          controls.time = 0
+          controls.time = START
           controls.play()
         })
       }
