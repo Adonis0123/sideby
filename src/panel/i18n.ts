@@ -232,6 +232,8 @@ const en = {
   'login.hint':
     '{names} are signed in as the same login. The vendor counts one quota for all of them, so it shows once here, and a handoff never moves between them.',
   'login.sharedAbove': 'Uses the quota above',
+  'login.collapse': 'Hide {names}',
+  'login.expand': 'Show {names}',
   'quota.noWindows': 'No quota windows reported.',
   'quota.off': 'Quota not on',
   'quota.turnOnFamily': 'Turn on quota',
@@ -899,6 +901,8 @@ const zh: Record<MessageKey, string> = {
   'login.hint':
     '{names} 用同一个身份登录。供应商只算一份额度，所以这里只显示一次，交接也不会在它们之间进行。',
   'login.sharedAbove': '共用上方的额度',
+  'login.collapse': '收起 {names}',
+  'login.expand': '展开 {names}',
   'quota.noWindows': '没有额度窗口数据。',
   'quota.off': '额度未开启',
   'quota.turnOnFamily': '开启额度显示',

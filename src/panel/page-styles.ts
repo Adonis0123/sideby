@@ -183,7 +183,6 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .login:first-child { border-top: 0; }
 .rows .login > .login-head { border-top: 0; padding-bottom: 4px; }
 .rows .login > .login-head:hover { background: transparent; }
-.login-gap { flex: none; width: 14px; }
 .login-rows > .row, .login-rows > .row:first-child { border-top: 1px dashed var(--border); padding-left: 40px; }
 .login-rows > .row:last-child { border-radius: 0 0 var(--radius) var(--radius); }
 /* The arrow at a row's start opens and closes its details; so does a click anywhere else in the row. */

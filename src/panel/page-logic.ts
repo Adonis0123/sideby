@@ -494,3 +494,8 @@ export function remoteControlSummary(
 export function remoteControlTodo<G extends { state: string }>(groups: readonly G[], to: 'on' | 'off'): G[] {
   return groups.filter((g) => g.state === 'default' || g.state === (to === 'on' ? 'off' : 'on'))
 }
+
+/** The key a Same Login group keeps its folded state under: its members, in a fixed order. */
+export function loginKey(refs: readonly string[]): string {
+  return `login:${[...refs].sort().join(',')}`
+}

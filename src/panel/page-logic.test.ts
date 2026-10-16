@@ -14,6 +14,7 @@ import {
   handoffHintAccount,
   type LogicAccount,
   loginClusters,
+  loginKey,
   maskEmail,
   matchesQuery,
   mergeDaily,
@@ -540,6 +541,13 @@ describe('Auto Handoff helpers', () => {
         orders: [{ family: 'claude', order: [] }],
       },
     )
+  })
+})
+
+describe('Same Login fold key', () => {
+  it('names the group by its members in a fixed order, so the fold survives another sort', () => {
+    assert.equal(loginKey(['claude:main', 'claude:001']), 'login:claude:001,claude:main')
+    assert.equal(loginKey(['claude:001', 'claude:main']), loginKey(['claude:main', 'claude:001']))
   })
 })
 

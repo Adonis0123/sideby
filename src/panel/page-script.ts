@@ -10,6 +10,7 @@ import {
   handoffChangeOf,
   handoffHintAccount,
   loginClusters,
+  loginKey,
   maskEmail,
   matchesQuery,
   mergeDaily,
@@ -38,6 +39,7 @@ const LOGIC = [
   handoffChangeOf,
   handoffHintAccount,
   loginClusters,
+  loginKey,
   maskEmail,
   matchesQuery,
   mergeDaily,
@@ -1149,12 +1151,13 @@ const MAIN = String.raw`
   document.addEventListener('mousedown', (e) => {
     if (e.detail > 1 && e.target.closest && e.target.closest('.fold-hit') && !e.target.closest('input, select, textarea')) e.preventDefault()
   })
-  function foldClick(a) {
+  function foldClick(a) { return foldHit(() => toggleRow(a)) }
+  function foldHit(run) {
     return (e) => {
       if (e.target.closest('button, a, input, select, textarea, .tip')) return
       const dragged = downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 4
       if (dragged && window.getSelection && String(window.getSelection())) return
-      toggleRow(a)
+      run()
     }
   }
   // Folding animates: the height eases while the details fade and the arrow turns. A click during the motion turns
@@ -1241,6 +1244,31 @@ const MAIN = String.raw`
     ease(now, from, [], parts, 1, () => {})
     for (const p of parts) p.style.opacity = ''
   }
+  // A Same Login group folds its directory rows like a family group, and remembers it the same way.
+  function toggleLogin(key) {
+    const find = () => document.querySelector('#accounts .login[data-key="' + CSS.escape(key) + '"]')
+    const el = find()
+    const open = prefs.collapsed[key] === true
+    if (open) delete prefs.collapsed[key]; else prefs.collapsed[key] = true
+    savePrefs()
+    if (!el || !moving()) { renderAccounts(); return }
+    const from = el.getBoundingClientRect().height
+    const rowsOf = (x) => Array.from(x.querySelectorAll(':scope > .login-rows'))
+    if (!open) {
+      const btn = el.querySelector('.login-head .row-toggle')
+      if (btn) btn.setAttribute('aria-expanded', 'false')
+      const parts = rowsOf(el)
+      ease(el, from, parts, parts, 0, renderAccounts)
+      return
+    }
+    renderAccounts()
+    const now = find()
+    if (!now) return
+    const parts = rowsOf(now)
+    for (const p of parts) p.style.opacity = '0'
+    ease(now, from, [], parts, 1, () => {})
+    for (const p of parts) p.style.opacity = ''
+  }
   // The Account 'sideby next <family>' would pick; the server ranks it with the CLI's rule (spec §3.13).
   function isNext(a) { return Boolean(S.state && S.state.handoff && S.state.handoff[a.family] === a.ref) }
   function row(a, now, cols) {
@@ -1266,18 +1294,22 @@ const MAIN = String.raw`
     const m = source.quota && source.quota.status === 'ok' ? attentionWhy({ family: source.family, name: source.name, ref: source.ref, quota: source.quota }, null, now, WARN) : null
     const why = m ? t(m.key, m.vars) : ''
     const email = id.email ? emailText(id.email) : ''
-    return h('div', { class: 'login', role: 'listitem', 'aria-label': t('login.label', { names }), 'data-key': 'login:' + members.map((a) => a.ref).join(',') },
-      h('div', { class: 'row login-head' },
-        h('div', { class: 'ident' }, h('span', { class: 'login-gap', 'aria-hidden': 'true' }), badge(first.family, 'sm'),
+    const key = loginKey(members.map((a) => a.ref))
+    const collapsed = prefs.collapsed[key] === true
+    const label = t(collapsed ? 'login.expand' : 'login.collapse', { names })
+    const toggle = h('button', { class: 'icon-btn row-toggle', type: 'button', 'aria-expanded': String(!collapsed), 'aria-label': label, title: label, onclick: (e) => { e.stopPropagation(); toggleLogin(key) } }, icon('chevron', 'chev'))
+    return h('div', { class: 'login' + (collapsed ? ' is-collapsed' : ''), role: 'listitem', 'aria-label': t('login.label', { names }), 'data-key': key },
+      h('div', { class: 'row login-head fold-hit', onclick: foldHit(() => toggleLogin(key)) },
+        h('div', { class: 'ident' }, toggle, badge(first.family, 'sm'),
           h('div', { class: 'ident-text' },
             h('div', { class: 'ident-name' },
               email ? h('button', { class: 'name email-btn', type: 'button', title: t('menu.copyEmail'), 'aria-label': t('menu.copyEmail') + ' ' + email, onclick: () => copyText(id.email) }, email) : h('span', { class: 'name' }, names),
               why ? h('span', { class: 'dot dot-warn att-dot', title: why, role: 'img', 'aria-label': why }) : null),
-            h('div', { class: 'ident-sub', title: hint }, dots([id.org ? h('span', null, id.org) : null, h('span', null, t('login.count', { n: members.length }))])))),
+            h('div', { class: 'ident-sub', title: hint }, dots([id.org ? h('span', null, id.org) : null, h('span', null, t('login.count', { n: members.length })), collapsed ? h('span', null, names) : null])))),
         quotaBlock(source, now, cols, source.quota && source.quota.status === 'ok' ? source.ref : null),
         h('div', { class: 'last' }),
         h('div', { class: 'more' })),
-      h('div', { class: 'login-rows', role: 'list', 'data-key': 'rows', 'data-patch': '' }, members.map((a) => row(a, now, cols))))
+      collapsed ? null : h('div', { class: 'login-rows', role: 'list', 'data-key': 'rows', 'data-patch': '' }, members.map((a) => row(a, now, cols))))
   }
   // What a click on a row opens: how it runs (ref, model and effort, a shared login), its tokens and its Health.
   function sameLoginNote(a) {
