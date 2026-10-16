@@ -544,6 +544,13 @@ describe('Auto Handoff helpers', () => {
   })
 })
 
+describe('Same Login rows', () => {
+  it('keep their Chrome user button on the second line, as the email line moves to the group head', () => {
+    assert.match(PAGE_SCRIPT, /function rowEmail\(a\) \{ return inLogin\(a\) \? null : emailLine\(a\) \}/)
+    assert.match(PAGE_SCRIPT, /inLogin\(a\) \? browserButton\(a\) : null,\n {4}\]\)\)/)
+  })
+})
+
 describe('Same Login fold key', () => {
   it('names the group by its members in a fixed order, so the fold survives another sort', () => {
     assert.equal(loginKey(['claude:main', 'claude:001']), 'login:claude:001,claude:main')

@@ -993,6 +993,8 @@ const MAIN = String.raw`
       a.kind === 'api' && a.model ? h('span', { class: 'mono', title: t('acct.model') }, a.model) : null,
       a.kind !== 'api' ? modelChip(a) : null,
       a.kind !== 'api' && plan ? h('span', { class: 'plan' }, plan) : null,
+      // In a Same Login group the email line moves to the head, so the row's own Chrome user goes here instead.
+      inLogin(a) ? browserButton(a) : null,
     ]))
   }
   async function openDesktop(a) {
