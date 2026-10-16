@@ -716,6 +716,9 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
         Type.Object({
           dir: Type.String({ description: "The browser user's folder, such as `Default` or `Profile 7`." }),
           name: Type.String({ description: 'The name Chrome shows; it may be an email.' }),
+          email: Type.Optional(
+            Type.String({ description: 'The Google account this browser user is signed in to Chrome with.' }),
+          ),
           signIns: Type.Array(Str, {
             description:
               "Refs of the accounts this browser user signed in to on the vendor's website, as far as its local data shows; it may be left over from before a sign-out.",

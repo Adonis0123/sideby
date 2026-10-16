@@ -1,9 +1,9 @@
 // Browser Sign-ins (spec §3.24, ADR-0023): which Browser Profile of Google Chrome signed in to each Account's vendor
-// website, from Chrome's local data on this computer only. Read-only: `Local State` gives each profile's folder and
-// display name, `Local Storage/leveldb` the key names of claude.ai and chatgpt.com (core/leveldb-keys.ts). Never
-// Cookies, Login Data, IndexedDB or the Keychain, never a value, never the network. The Host-side id each match
-// needs (families/browser.ts) is compared in memory and never leaves this module. Opening a website starts Chrome
-// unchanged with `open`, through `DesktopDeps.exec`, so tests never start a real browser.
+// website, from Chrome's local data on this computer only. Read-only: `Local State` gives each profile's folder,
+// display name and the email of the Google account it is signed in to Chrome with, `Local Storage/leveldb` the key
+// names of claude.ai and chatgpt.com (core/leveldb-keys.ts). Never Cookies, Login Data, IndexedDB or the Keychain,
+// never a value, never the network. The Host-side id each match needs (families/browser.ts) is compared in memory
+// and never leaves this module. Opening a website starts Chrome unchanged with `open`, through `DesktopDeps.exec`,
 // so tests never start a real browser.
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -34,6 +34,8 @@ export interface BrowserProfile {
   dir: string
   /** The name Chrome shows for it. May be an email; the Panel masks it with identities. */
   name: string
+  /** The Google account this browser user is signed in to Chrome with, if any. */
+  email?: string
   /** Refs of the Accounts this profile signed in to, as far as its local data shows. */
   signIns: string[]
   /** When its Local Storage last changed (ISO 8601), if known. */
@@ -57,9 +59,15 @@ export interface BrowserReport {
 interface ProfileEntry {
   dir: string
   name: string
+  email?: string
 }
 
-/** Each profile's folder and display name from `Local State`; nothing else of the file is kept. */
+const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}$/
+
+/**
+ * Each profile's folder, display name and Google account email (`user_name`, kept only when it is an email) from
+ * `Local State`; nothing else of the file is kept.
+ */
 async function profileEntries(userData: string, problems: string[]): Promise<ProfileEntry[] | null> {
   const file = join(userData, 'Local State')
   let text: string
@@ -88,7 +96,9 @@ async function profileEntries(userData: string, problems: string[]): Promise<Pro
     if (!/^[\w .-]{1,64}$/.test(dir) || dir.startsWith('.')) continue
     const n = (info as { name?: unknown } | null)?.name
     const name = typeof n === 'string' && n.trim() && !/\p{Cc}/u.test(n) ? n.trim().slice(0, 80) : dir
-    out.push({ dir, name })
+    const u = (info as { user_name?: unknown } | null)?.user_name
+    const email = typeof u === 'string' && EMAIL.test(u.trim()) ? u.trim() : undefined
+    out.push({ dir, name, ...(email ? { email } : {}) })
   }
   return out
 }
@@ -187,6 +197,7 @@ export async function browserReport(rt: Runtime, accounts: readonly Account[]): 
     return {
       dir: e.dir,
       name: e.name,
+      ...(e.email ? { email: e.email } : {}),
       signIns,
       ...(changedAt ? { changedAt } : {}),
     }
@@ -238,7 +249,9 @@ export async function openInBrowser(
   if (profile) {
     pick = entries.find((e) => e.dir === profile)
     if (!pick) {
-      const byName = entries.filter((e) => e.name.toLowerCase() === profile.toLowerCase())
+      const p = profile.toLowerCase()
+      const byName = entries.filter((e) => e.name.toLowerCase() === p)
+      if (!byName.length) byName.push(...entries.filter((e) => e.email?.toLowerCase() === p))
       if (byName.length > 1)
         throw new UserError(
           `several browser users are named "${profile}"; pass the folder instead: ${byName.map((e) => e.dir).join(', ')}`,
@@ -288,7 +301,7 @@ export async function openInBrowser(
 
 /** What turning Browser Sign-ins on reads, for the confirmation in the CLI and the Panel. */
 export const BROWSER_READS = [
-  "the name of each Google Chrome browser user (from Chrome's Local State)",
+  "the name of each Google Chrome browser user and the Google account email it uses in Chrome (from Chrome's Local State)",
   'the key names claude.ai and chatgpt.com keep in each browser user’s Local Storage, never their values',
   'the account id in each Claude and Codex login file, only to compare; it is never shown or saved',
 ] as const

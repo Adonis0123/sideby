@@ -46,6 +46,10 @@
             "type": "string",
             "description": "The name Chrome shows; it may be an email."
           },
+          "email": {
+            "type": "string",
+            "description": "The Google account this browser user is signed in to Chrome with."
+          },
           "signIns": {
             "type": "array",
             "items": {

@@ -333,7 +333,7 @@ const en = {
   'br.offIntro':
     'sideby can find which Chrome browser user you signed in to {ref} with, and open {url} right there.',
   'br.reads': 'To find it, sideby reads on this computer:',
-  'br.read1': 'the name of each Chrome browser user',
+  'br.read1': 'the name of each Chrome browser user and the Google account it uses in Chrome',
   'br.read2': 'the key names claude.ai and chatgpt.com keep in Chrome, never their values',
   'br.read3': 'the account id in each Claude and Codex login file, only to compare',
   'br.never':
@@ -969,7 +969,7 @@ const zh: Record<MessageKey, string> = {
   'br.title': '在浏览器打开',
   'br.offIntro': 'sideby 可以找出你在哪个 Chrome 浏览器用户里登录过 {ref}，并直接在那里打开 {url}。',
   'br.reads': '为此，sideby 会在本机读取：',
-  'br.read1': '每个 Chrome 浏览器用户的名字',
+  'br.read1': '每个 Chrome 浏览器用户的名字，和它在 Chrome 里登录的 Google 账号',
   'br.read2': 'claude.ai 和 chatgpt.com 在 Chrome 里存的键名，不读内容',
   'br.read3': '每个 Claude、Codex 登录文件里的账号 ID，只用来比对',
   'br.never': '不打开 Cookie、已存密码和钥匙串，不改 Chrome，不向任何地方发送数据。',

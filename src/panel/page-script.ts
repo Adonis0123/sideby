@@ -1015,11 +1015,14 @@ const MAIN = String.raw`
   }
   // A browser user's name may be an email; it hides with the others.
   function profileName(name) { return String(name).includes('@') ? emailText(name) : name }
-  // Two browser users may share a name; the folder then tells them apart.
+  // A browser user shows as the Google account it uses in Chrome, else its name. Two that would show the same get
+  // their folder after it.
   function profileLabel(p) {
     const b = browserInfo()
-    const twin = b && b.profiles.some((o) => o.dir !== p.dir && o.name === p.name)
-    return profileName(p.name) + (twin ? ' (' + p.dir + ')' : '')
+    const full = (b && b.profiles.find((o) => o.dir === p.dir)) || p
+    const key = (x) => x.email || x.name
+    const twin = b && b.profiles.some((o) => o.dir !== full.dir && key(o) === key(full))
+    return (full.email ? emailText(full.email) : profileName(full.name)) + (twin ? ' (' + full.dir + ')' : '')
   }
   function browserButton(a) {
     const info = browserFor(a)
@@ -1071,7 +1074,7 @@ const MAIN = String.raw`
   function brProfileRow(a, p) {
     const busy = ui.browserRef === a.ref
     return h('li', { class: 'br-row' },
-      h('span', null, h('b', null, profileName(p.name)), ' ', h('span', { class: 'muted small mono' }, p.dir), p.changedAt ? h('span', { class: 'muted small' }, ' · ' + t('br.changed', { when: ago(p.changedAt) })) : null),
+      h('span', null, h('b', null, profileName(p.name)), p.email ? h('span', { class: 'muted small' }, ' · ' + emailText(p.email)) : null, ' ', h('span', { class: 'muted small mono' }, p.dir), p.changedAt ? h('span', { class: 'muted small' }, ' · ' + t('br.changed', { when: ago(p.changedAt) })) : null),
       h('button', { class: 'btn btn-sm', type: 'button', disabled: Boolean(ui.browserRef), 'aria-busy': busy ? 'true' : null, onclick: () => openBrowser(a, p) }, t('br.openIt')))
   }
   function renderBrowser() {

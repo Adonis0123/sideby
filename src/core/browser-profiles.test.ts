@@ -188,7 +188,7 @@ async function seed(h: FakeHome, opts: { enabled?: boolean } = {}) {
       profile: {
         info_cache: {
           Default: { name: 'Personal', user_name: 'someone@gmail.example', gaia_id: '123' },
-          'Profile 1': { name: 'Work' },
+          'Profile 1': { name: 'Work', user_name: 'not an email' },
           'Profile 2': { name: 'Work' },
         },
       },
@@ -334,8 +334,14 @@ describe('sideby browser: report', () => {
         ],
       )
       const text = JSON.stringify(r)
-      for (const secret of [CLAUDE_MAIN, CLAUDE_WORK, CODEX_USER, SECRET, 'someone@gmail.example'])
+      for (const secret of [CLAUDE_MAIN, CLAUDE_WORK, CODEX_USER, SECRET])
         assert.ok(!text.includes(secret), secret)
+      // The Google account each browser user uses in Chrome is shown; nothing else of Local State is.
+      assert.deepEqual(
+        r.profiles.map((p) => p.email),
+        ['someone@gmail.example', undefined, undefined],
+      )
+      assert.ok(!text.includes('gaia'), 'gaia_id')
       assert.ok(Value.Check(OUTPUT_SCHEMAS.browser!, { schemaVersion: 1, ...r }))
     })
   })
@@ -395,6 +401,14 @@ describe('sideby browser: open', () => {
         ],
       )
       assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+    })
+  })
+
+  it('opens a browser user named by the Google account it uses in Chrome', async () => {
+    await withFakeHome(async (h) => {
+      const { rt } = await setup(h)
+      const r = await openInBrowser(rt, await rt.resolve('grok:main'), 'Someone@gmail.example')
+      assert.deepEqual(r.profile, { dir: 'Default', name: 'Personal' })
     })
   })
 

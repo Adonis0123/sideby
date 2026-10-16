@@ -1373,11 +1373,12 @@ export async function cmdBrowser(a: ParsedArgs, io: Io): Promise<number> {
     table(
       r.profiles.map((p) => [
         p.name,
+        p.email ?? c.dim('-'),
         p.dir,
         p.signIns.join(', ') || c.dim('-'),
         p.changedAt ? clock(p.changedAt, now) : '-',
       ]),
-      ['Browser user', 'Folder', 'Signed in to', 'Changed'],
+      ['Browser user', 'Google account', 'Folder', 'Signed in to', 'Changed'],
     ),
   )
   const missing = accounts.filter(
