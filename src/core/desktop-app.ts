@@ -458,7 +458,7 @@ export async function withDesktopApps<T extends { ref: string }>(
  * Doctor's extra checks for an Account's App Data (spec §3.20): the Desktop App's shared files under `link` rules,
  * only when that Account's App Data folder exists, never for the Main Account (it uses the app's default) or an API
  * Account. Results are named `app-data/<path>` and are not counted in `shared`. The App Data is the repair boundary:
- * a fix may only add a missing link inside it, never replace a real file.
+ * a fix may only add a missing link inside it or sync a file's `key` there, never replace a real file.
  */
 export async function checkAppData(
   plugins: readonly LoadedPlugin[],
@@ -475,12 +475,16 @@ export async function checkAppData(
     const item: SharedItemDef = { path: f.path, mode: 'link' }
     const mainPath = join(home, f.mainPath)
     const p = join(dir, item.path)
-    const res = await checkItem({ account, item, mainPath, accountPath: p, accountDir: dir, force: false })
+    const ctx = { account, item, mainPath, accountPath: p, accountDir: dir, force: false }
+    let res = await checkItem(ctx)
+    // The Desktop App writes its own file when the Main Account had none at first open, and replaces the link when
+    // it saves its preferences: not the user's doing, and a new link would be replaced again. With a `key`, only
+    // that key has to match the main file; `--fix` syncs it inside the App Data.
+    const own = res.results.some((r) => r.code === 'link.real-file')
+    if (own && f.key) res = await checkItem({ ...ctx, item: { path: f.path, mode: 'json-key', key: f.key } })
     for (const r of res.results) {
       if (r.level === 'ok') continue
-      // The Desktop App writes its own file when the Main Account had none at first open, and may replace the link
-      // later: not the user's doing, so a warning with the way to share, never a failure and never replaced.
-      const own: Partial<CheckResult> =
+      const mine: Partial<CheckResult> =
         r.code === 'link.real-file'
           ? {
               level: 'warn',
@@ -490,9 +494,9 @@ export async function checkAppData(
           : {}
       out.push({
         ...r,
-        ...own,
-        item: `app-data/${item.path}`,
-        message: `${def.title} data: ${own.message ?? r.message}`,
+        ...mine,
+        item: `app-data/${r.item.startsWith(item.path) ? r.item : item.path}`,
+        message: `${def.title} data: ${mine.message ?? r.message}`,
       })
     }
   }

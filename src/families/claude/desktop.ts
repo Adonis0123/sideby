@@ -25,6 +25,7 @@ export const claudeDesktop: DesktopAppDef = {
     {
       path: 'claude_desktop_config.json',
       mainPath: 'Library/Application Support/Claude/claude_desktop_config.json',
+      key: 'mcpServers',
     },
   ],
 }

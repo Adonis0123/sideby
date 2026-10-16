@@ -31,7 +31,7 @@ Options:
 - `CODEX_ELECTRON_USER_DATA_PATH` and the Code tab's use of `CLAUDE_CONFIG_DIR` are internal behaviour of those apps and may change; the guide says so, and a real-app check is part of acceptance.
 - Claude in Chrome's local pairing does not work for a non-default data folder.
 - The Codex app's sign-in screen for a new Account can offer "Welcome back" with the main account's email (that state lives outside the App Data); picking it signs the Account in as the main one. sideby's notice and the guide say to choose another account, or to run `sideby login <account>` first.
-- Claude Desktop writes its own `claude_desktop_config.json` when the main one does not exist yet, and may later replace the link. Doctor reports a real file there as a warning, not a failure, and never replaces it.
+- Claude Desktop writes its own `claude_desktop_config.json` when the main one does not exist yet, and replaces the link with a file when it saves its preferences, so a new link would not last. Doctor never replaces that file; it checks only its `mcpServers` key, the MCP settings worth sharing, under `json-key` rules: no Finding while it matches the main one, and `--fix` syncs that key inside the App Data, keeping the app's other keys. (Amended 2026-10-16; it was a warning with a manual `mv` and `ln -s` command.)
 
 ## Real-app check (2026-10-14)
 

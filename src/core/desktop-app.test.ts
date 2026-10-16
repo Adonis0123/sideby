@@ -420,29 +420,52 @@ describe('sideby desktop: claude_desktop_config.json', () => {
     })
   })
 
-  it("checkAppData: a real file is the app's own copy, a warning that is never replaced", async () => {
+  it("checkAppData: the app's own copy is fine while its mcpServers match the main account's", async () => {
     await withFakeHome(async (h) => {
       const { rt } = await setup(h)
       const file = `${SUPPORT}/sideby/claude/work/claude_desktop_config.json`
-      await h.write(file, '{"own":true}\n')
+      // Claude Desktop replaces the link with its own file when it saves its preferences.
+      await h.write(file, '{"preferences":{"own":true},"mcpServers":{}}\n')
+      const before = await snapshot(h.home)
+      assert.deepEqual(await checkAppData(rt.plugins, h.home, await rt.resolve('claude:work')), [])
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+    })
+  })
+
+  it("checkAppData: other mcpServers in the app's own copy are fixable, and the fix keeps the rest of the file", async () => {
+    await withFakeHome(async (h) => {
+      const { rt } = await setup(h)
+      await h.write(`${SUPPORT}/Claude/claude_desktop_config.json`, '{"mcpServers":{"fs":{"command":"x"}}}\n')
+      const file = `${SUPPORT}/sideby/claude/work/claude_desktop_config.json`
+      await h.write(file, '{"preferences":{"own":true}}\n')
       const rs = await checkAppData(rt.plugins, h.home, await rt.resolve('claude:work'))
       assert.equal(rs.length, 1)
       const r = rs[0]!
-      assert.equal(r.item, 'app-data/claude_desktop_config.json')
-      assert.equal(r.code, 'link.real-file')
-      // The app makes its own copy when the main account had none: a warning, not a failure.
-      assert.equal(r.level, 'warn')
-      assert.ok(!(r.fixable && r.fix))
-      assert.equal(
-        r.message,
-        "Claude Desktop data: claude_desktop_config.json is Claude Desktop's own copy for this account, not a link to the main account's",
-      )
-      const p = h.path(file)
-      assert.equal(
-        r.hint,
-        `Claude Desktop made it itself; that is fine. To share the main account's instead, quit that window, then: mv "${p}" "${p}.local" && ln -s "${join(h.home, SUPPORT, 'Claude/claude_desktop_config.json')}" "${p}"`,
-      )
-      assert.equal(await readFile(p, 'utf8'), '{"own":true}\n')
+      assert.equal(r.item, 'app-data/claude_desktop_config.json#mcpServers')
+      assert.equal(r.code, 'json-key.drift')
+      assert.match(r.message, /^Claude Desktop data: mcpServers differs from the main account \(adds fs\)/)
+      assert.ok(r.fixable && r.fix)
+      const before = await snapshot(h.home)
+      assert.equal((await r.fix()).ok, true)
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [file])
+      assert.equal((await lstat(h.path(file))).isFile(), true)
+      assert.deepEqual(JSON.parse(await readFile(h.path(file), 'utf8')), {
+        preferences: { own: true },
+        mcpServers: { fs: { command: 'x' } },
+      })
+    })
+  })
+
+  it('checkAppData: a server only the app has is never removed without --force', async () => {
+    await withFakeHome(async (h) => {
+      const { rt } = await setup(h)
+      const file = `${SUPPORT}/sideby/claude/work/claude_desktop_config.json`
+      await h.write(file, '{"mcpServers":{"mine":{"command":"y"}}}\n')
+      const rs = await checkAppData(rt.plugins, h.home, await rt.resolve('claude:work'))
+      assert.equal(rs.length, 1)
+      assert.equal(rs[0]!.code, 'json-key.would-remove')
+      assert.ok(!(rs[0]!.fixable && rs[0]!.fix))
+      assert.equal(await readFile(h.path(file), 'utf8'), '{"mcpServers":{"mine":{"command":"y"}}}\n')
     })
   })
 
@@ -519,11 +542,16 @@ describe('sideby desktop: claude_desktop_config.json', () => {
       const plain = await rt.doctor({ target: 'claude:work2' })
       await h.mkdir(`${SUPPORT}/sideby/claude/work2`)
       const report = await rt.doctor({ target: 'claude', fix: true })
+      // Its mcpServers match the main account's, so the app's own copy is fine.
       const work = report.accounts.find((a) => a.ref === 'claude:work')!
-      const f = work.findings.find((x) => x.item === 'app-data/claude_desktop_config.json')!
-      assert.equal(f.level, 'warn')
-      assert.equal(f.source, 'core')
-      assert.equal(f.fixable, false)
+      assert.equal(
+        work.findings.some((x) => x.item.startsWith('app-data/')),
+        false,
+      )
+      assert.equal(
+        await readFile(h.path(`${SUPPORT}/sideby/claude/work/claude_desktop_config.json`), 'utf8'),
+        '{"own":true}\n',
+      )
       const work2 = report.accounts.find((a) => a.ref === 'claude:work2')!
       assert.deepEqual(work2.shared, plain.accounts[0]!.shared)
       assert.ok(
@@ -545,7 +573,7 @@ describe('sideby desktop: claude_desktop_config.json', () => {
 })
 
 describe('sideby desktop: the app replaces the shared link', () => {
-  it('a real file the app wrote over the link is a warning, never a failure', async () => {
+  it('a real file the app wrote over the link is fine while mcpServers match, and is never replaced', async () => {
     await withFakeHome(async (h) => {
       const { rt } = await setup(h)
       await openDesktopApp(rt, 'claude:work')
@@ -553,10 +581,8 @@ describe('sideby desktop: the app replaces the shared link', () => {
       await rm(link)
       await writeFile(link, '{"written":"by the app"}\n')
       const report = await rt.doctor({ target: 'claude:work', fix: true })
-      const f = report.accounts[0]!.findings.find((x) => x.item === 'app-data/claude_desktop_config.json')!
-      assert.equal(f.level, 'warn')
       assert.deepEqual(
-        report.accounts[0]!.findings.filter((x) => x.item.startsWith('app-data/') && x.level === 'fail'),
+        report.accounts[0]!.findings.filter((x) => x.item.startsWith('app-data/')),
         [],
       )
       assert.equal(await readFile(link, 'utf8'), '{"written":"by the app"}\n')

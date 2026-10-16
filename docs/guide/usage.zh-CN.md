@@ -135,7 +135,7 @@ sideby desktop claude:work     # 也可以用短命令：sideby desktop ccw
 - API 账号不能打开桌面应用：应用只认订阅登录。
 - 第一次要在 Claude Desktop 里登录。登录时先关掉其他 Claude Desktop 窗口：浏览器通过 `claude://` 链接把登录结果送回来，可能被别的窗口接走。Codex 一般不用在应用里登录；账号没登录时先运行 `sideby login <账号>`。
 - 登录页可能推荐你的主账号，比如 Codex 应用显示「Welcome back」加主账号邮箱。给其他账号登录时不要点它：点了这个账号就登成了主账号。选「使用其他账号」，Codex 也可以先用 `sideby login <账号>` 登录。
-- 新账号的数据目录建好时，Claude Desktop 的 MCP 设置 `claude_desktop_config.json` 会链接到主账号那份。`sideby doctor` 会检查这个链接，从不替换那里的文件。主账号当时还没有这个文件的话，Claude Desktop 会自己建一份（之后也可能把链接换成文件）；doctor 把它显示为警告，并给出改成共享主账号那份的命令。
+- 新账号的数据目录建好时，Claude Desktop 的 MCP 设置 `claude_desktop_config.json` 会链接到主账号那份。`sideby doctor` 会检查这个链接，从不替换那里的文件。Claude Desktop 经常自己建一份（主账号当时还没有这个文件，或者它保存偏好设置时），这没有问题。这时 doctor 只核对里面的 MCP 服务器：和主账号不一样时，`sideby doctor --fix`（或面板里的“全部修复”）把主账号的服务器同步进去，文件其他内容保持不变。
 
 已知限制：所有窗口在 Dock 里的图标一样。主账号没开、别的账号的窗口开着时，点 Dock 图标切到的是那个账号的窗口，这时主账号要从 sideby 打开。应用自动更新后会以主账号重启，其他账号要从 sideby 再开一次。用别的数据目录的窗口不能和 Claude in Chrome 配对。sideby 用应用现在认的设置打开它们（`--user-data-dir`，Codex 还有 `CODEX_ELECTRON_USER_DATA_PATH`），以后的版本可能会改。从 Claude Code 或 Codex 会话里打开的应用不会继承那个会话的环境变量。其他平台和宿主暂不支持。
 

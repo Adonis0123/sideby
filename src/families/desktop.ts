@@ -23,8 +23,11 @@ export interface DesktopAppDef {
   clearVars: readonly string[]
   /** The first sign-in happens inside the app, through a URL callback another running instance may catch. */
   signInInApp: boolean
-  /** Files of the App Data shared from the Main Account's default App Data as links (`mainPath` relative to HOME). */
-  sharedFiles: readonly { path: string; mainPath: string }[]
+  /**
+   * Files of the App Data shared from the Main Account's default App Data as links (`mainPath` relative to HOME).
+   * With `key`, a real file the app made in place of the link is fine while that JSON key matches the main one.
+   */
+  sharedFiles: readonly { path: string; mainPath: string; key?: string }[]
 }
 
 const DESKTOP_APPS: ReadonlyMap<string, DesktopAppDef> = new Map(
