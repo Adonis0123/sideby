@@ -58,6 +58,6 @@ createServer(async (req, res) => {
 
 `updates`（默认 `true`）会在面板页头显示「新版本」标签，以及带「更新」按钮和自动更新开关的更新对话框（见[更新](configuration.zh-CN.md#更新)）。从这里发起的更新会安装新包；像作者的 Portal 那样从已安装的包加载 sideby 的页面会自己换上新版本，面板提示刷新页面。你的页面自己管理 sideby 版本时传 `updates: false`：面板不再显示任何更新相关内容，并拒绝 `/api/update*`。
 
-`<basePath>/icon.svg` 提供 sideby 标志（面板自己的 favicon 用 `<basePath>/favicon.svg`，只有前面那张脸）。在你自己的标签页或菜单里直接引用它，不要另存一份，这样换了新标志，你的页面跟着下一个 sideby 版本更新。
+`<basePath>/icon.svg` 提供 sideby 标志（面板自己的 favicon 用 `<basePath>/favicon.svg`，小尺寸版，只有蓝色那个小伙伴）。在你自己的标签页或菜单里直接引用它，不要另存一份，这样换了新标志，你的页面跟着下一个 sideby 版本更新。
 
 `lang`（`'auto'`、`'en'` 或 `'zh'`）让面板语言和你的页面一致。设为 `'en'` 或 `'zh'` 时，它优先于面板里选过的语言，并隐藏面板的语言切换按钮；面板里选过的语言仍然保存着，改回 `'auto'` 后照常生效。`'auto'`（默认）先用面板里选过的语言，再看浏览器语言。其他值会在创建 handler 时抛出 `TypeError`。handler 只在创建时读一次 `lang`：要切换语言，就重新创建 handler。

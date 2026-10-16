@@ -58,6 +58,6 @@ createServer(async (req, res) => {
 
 `updates` (default `true`) shows a "new version" label in the panel's header and the update dialog with its **Update** button and Auto Update switch (see [Updates](configuration.md#updates)). An update started there installs the new package; a page that loads sideby from the installed package, as the author's portal does, picks it up by itself, and the panel says to reload. Pass `updates: false` when your page manages sideby's version: the panel then shows nothing about updates and refuses `/api/update*`.
 
-`<basePath>/icon.svg` serves the sideby mark (the panel uses `<basePath>/favicon.svg`, the small cut, as its favicon). Show it in your own tab or menu instead of keeping a copy, so a new mark reaches your page with the next sideby.
+`<basePath>/icon.svg` serves the sideby mark (the panel uses `<basePath>/favicon.svg`, the small cut with the blue buddy alone, as its favicon). Show it in your own tab or menu instead of keeping a copy, so a new mark reaches your page with the next sideby.
 
 `lang` (`'auto'`, `'en'` or `'zh'`) keeps the panel's language in step with your page. `'en'` or `'zh'` wins over the language picked in the panel and hides the panel's language switch; the choice picked there stays saved and applies again under `'auto'`. `'auto'` (the default) uses the language picked in the panel, then the browser language. Any other value throws a `TypeError` when the handler is created. The handler reads `lang` once: to switch language, create the handler again.

@@ -40,7 +40,7 @@ The follow-up that gave `createPanelHandler` a `lang` option is built, so a Port
 
 ADR-0021 adds two promises, added like every other option (compatible):
 
-- `GET <basePath>/icon.svg` answers the sideby mark (ADR-0020) as `image/svg+xml`: the full two-face mark on a transparent square, for a Portal's tab or menu. The Panel page uses it as its favicon too. A Portal draws it inside its own tile when it wants one; it never keeps a copy, so a new mark reaches it with the next sideby.
+- `GET <basePath>/icon.svg` answers the sideby mark (ADR-0022) as `image/svg+xml`: both buddies on a transparent square, for a Portal's tab or menu. `GET <basePath>/favicon.svg` answers the small cut, the blue buddy alone, which the Panel page uses as its favicon. A Portal draws the mark inside its own tile when it wants one; it never keeps a copy, so a new mark reaches it with the next sideby.
 - `updates?: boolean`, default `true`. With `false` the Panel shows no update label, update button or Auto Update setting, and refuses `/api/update*` with 403, for a Portal that manages sideby's version itself. With `true`, an Update started from a Portal's Panel installs the new package; the Portal loads it as it does any reinstall, and the Panel tells the viewer to reload the page.
 
 ## Why not the others

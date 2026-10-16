@@ -9,6 +9,7 @@ import { inflateSync } from 'node:zlib'
 import { Value } from 'typebox/value'
 import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
 import { OUTPUT_SCHEMAS } from '../cli/json-schemas.ts'
+import { highlights, MARK, MARK_VIEWBOX, type PlacedBuddy } from '../core/brand-mark.ts'
 import { UserError } from '../core/errors.ts'
 import {
   type AppContext,
@@ -58,7 +59,7 @@ function ctx(h: FakeHome, platform: NodeJS.Platform, calls: string[][] = []): Ap
 }
 
 describe('app icon', () => {
-  it('draws the Panel logo with antialiased edges at every iconset size', () => {
+  it('draws the two buddies with antialiased edges at every iconset size', () => {
     assert.deepEqual(
       ICONSET.map((i) => i.size),
       [16, 32, 32, 64, 128, 256, 256, 512, 512, 1024],
@@ -67,15 +68,27 @@ describe('app icon', () => {
     assert.deepEqual([width, height], [256, 256])
     assert.deepEqual(text, [`Software\0${APP_MARKER}`])
     assert.deepEqual(px(0, 0), [0, 0, 0, 0], 'outside the tile is transparent')
-    assert.deepEqual(px(128, 60), [0xe5, 0xf2, 0xfb, 255], 'the tile is the Panel logo tint')
-    // The mark (core/brand-mark.ts, 256-unit grid) is drawn in a 297-unit square starting at -20.5 on the tile,
-    // and the tile is 824/1024 of the canvas, centred.
-    const at = (u: number) => Math.floor(25 + ((u + 20.5) * 206) / 297)
     const tile = [0xe5, 0xf2, 0xfb, 255]
-    assert.deepEqual(px(at(30), at(165)), [0xf2, 0xb3, 0x5e, 255], 'the back face is amber')
-    assert.deepEqual(px(at(220), at(165)), [0x3f, 0x8f, 0xc4, 255], 'the front face is blue')
-    assert.deepEqual(px(at(162), at(124)), [0x1e, 0x2a, 0x44, 255], 'an eye on the front face')
-    assert.deepEqual(px(at(110), at(150)), tile, 'a gap between the faces')
+    // The tile is 824/1024 of the canvas, centred, and MARK_VIEWBOX (mark units) fills it; a buddy's 64-unit grid is
+    // placed in mark units by its translate and scale (core/brand-mark.ts).
+    const side = (256 * 824) / 1024
+    const off = (256 - side) / 2
+    const at = (b: PlacedBuddy, gx: number, gy: number) =>
+      px(
+        Math.floor(off + ((b.x + b.scale * gx - MARK_VIEWBOX.x) * side) / MARK_VIEWBOX.size),
+        Math.floor(off + ((b.y + b.scale * gy - MARK_VIEWBOX.y) * side) / MARK_VIEWBOX.size),
+      )
+    assert.deepEqual(at(MARK.back, 32, 36), [0xf2, 0xb3, 0x5e, 255], 'the back buddy is amber')
+    assert.deepEqual(at(MARK.front, 32, 36), [0x3f, 0x8f, 0xc4, 255], 'the front buddy is blue')
+    assert.deepEqual(at(MARK.front, 22, 42), [0x1e, 0x2a, 0x44, 255], 'an eye of the front buddy is ink')
+    assert.deepEqual(at(MARK.back, 42, 42), [0x1e, 0x2a, 0x44, 255], 'an eye of the back buddy is ink')
+    assert.deepEqual(at(MARK.back, 32, 12), tile, 'above the back buddy is the tile')
+    const hl = highlights(MARK.front.look)[0]!
+    assert.deepEqual(at(MARK.front, hl.cx, hl.cy), [0xf6, 0xf0, 0xe5, 255], 'an eye highlight is light')
+    // 3 px inside the tile's corner arc (radius a quarter of the tile) on the diagonal.
+    const corner = Math.floor(off + (side / 4) * (1 - Math.SQRT1_2) + 3)
+    assert.deepEqual(px(corner, corner), tile, 'inside the rounded corner is the tile')
+    assert.deepEqual(px(corner - 6, corner - 6)[3], 0, 'outside the rounded corner is transparent')
     const edge = Array.from({ length: 256 }, (_, y) => px(25, y)[3]!)
     assert.ok(
       edge.some((a) => a > 0 && a < 255),

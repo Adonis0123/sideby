@@ -2,7 +2,8 @@
 // that read them. Every color, radius and size below comes from a token, so a host theme reaches every component.
 import { type ResolvedTheme, resolveTheme } from './theme.ts'
 
-// Colors defined from other tokens; repeated in both schemes so they follow that scheme's base colors.
+// Colors defined from other tokens; repeated in both schemes so they follow that scheme's base colors. Dark mode keeps
+// the logo tile light: the mark's ink outline (core/brand-mark.ts) needs a light ground.
 const DERIVED_COLORS = `
   --btn-text: var(--text); --btn-hover-text: var(--accent); --check: var(--focus);
   --logo-bg: var(--accent-soft); --logo-fg: var(--focus); --logo-line: var(--border);
@@ -35,7 +36,8 @@ const DARK_TOKENS = `
   --ok: #4ade80; --ok-bar: #22c55e; --ok-soft: #13291c; --warn: #fbbf24; --warn-bar: #f59e0b; --warn-soft: #2d2410;
   --fail: #f87171; --fail-bar: #ef4444; --fail-soft: #331717; --track: #1f2c3a;
   --spark: oklch(from var(--accent) clamp(0.7, l, 0.78) max(c, 0.14) h); --spark-soft: oklch(from var(--accent) 0.45 calc(max(c, 0.14) * 0.6) h);
-  --shadow: 0 1px 2px rgba(0,0,0,.3); --float-shadow: 0 12px 32px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.3);${DERIVED_COLORS}`
+  --shadow: 0 1px 2px rgba(0,0,0,.3); --float-shadow: 0 12px 32px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.3);${DERIVED_COLORS}
+  --logo-bg: #dcebf7; --logo-line: transparent;`
 
 /**
  * The page's style block: default tokens, the host's tokens over them, then the rules that read them. With
