@@ -64,6 +64,6 @@
   "copy": {
     "files": ["README.md", "README.zh-CN.md"],
     "commits": "^(\\S+ )?feat(\\(|:|!)",
-    "checked": "40d60f9"
+    "checked": "f8c5882"
   }
 }
