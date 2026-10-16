@@ -2,7 +2,7 @@
 // through a fake `exec`, so no test reads a real browser or starts one.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdir, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, utimes, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -337,6 +337,33 @@ describe('sideby browser: report', () => {
       for (const secret of [CLAUDE_MAIN, CLAUDE_WORK, CODEX_USER, SECRET, 'someone@gmail.example'])
         assert.ok(!text.includes(secret), secret)
       assert.ok(Value.Check(OUTPUT_SCHEMAS.browser!, { schemaVersion: 1, ...r }))
+    })
+  })
+
+  it('keeps only the strongest trace: a key left from an earlier sign-in does not count', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      const state = JSON.parse(await readFile(h.path(`${CHROME}/Local State`), 'utf8'))
+      state.profile.info_cache['Profile 3'] = { name: 'Lab' }
+      await h.write(`${CHROME}/Local State`, JSON.stringify(state))
+      const main = (n: string) => ({ key: lsKey('https://claude.ai', `${n}.${CLAUDE_MAIN}`), value: '1' })
+      const work = (n: string) => ({ key: lsKey('https://claude.ai', `${n}:${CLAUDE_WORK}`), value: '1' })
+      await bin(h, `${CHROME}/Default/Local Storage/leveldb/000007.log`, logFile([main('a'), main('b')], 200))
+      // Profile 3 is signed in to work now, and keeps one key of main from before.
+      await bin(
+        h,
+        `${CHROME}/Profile 3/Local Storage/leveldb/000003.log`,
+        logFile([work('a'), work('b'), work('c'), main('read-state')]),
+      )
+      const rt = await createRuntime({ env: h.env, desktop: fakeDeps(h).deps })
+      const r = await browserReport(rt, await rt.accounts())
+      const by = Object.fromEntries(r.profiles.map((p) => [p.dir, p.signIns]))
+      assert.deepEqual(by, {
+        Default: ['claude:main', 'codex:main'],
+        'Profile 1': [],
+        'Profile 2': [],
+        'Profile 3': ['claude:work'],
+      })
     })
   })
 

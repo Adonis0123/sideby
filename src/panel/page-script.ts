@@ -1022,12 +1022,18 @@ const MAIN = String.raw`
   }
   // A browser user's name may be an email; it hides with the others.
   function profileName(name) { return String(name).includes('@') ? emailText(name) : name }
+  // Two browser users may share a name; the folder then tells them apart.
+  function profileLabel(p) {
+    const b = browserInfo()
+    const twin = b && b.profiles.some((o) => o.dir !== p.dir && o.name === p.name)
+    return profileName(p.name) + (twin ? ' (' + p.dir + ')' : '')
+  }
   function browserButton(a) {
     const info = browserFor(a)
     if (!info) return null
     const busy = ui.browserRef === a.ref
     const first = info.found[0]
-    const label = first ? t(info.found.length > 1 ? 'br.signedInMore' : 'br.signedIn', { name: profileName(first.name), n: info.found.length }) : t('br.open')
+    const label = first ? t(info.found.length > 1 ? 'br.signedInMore' : 'br.signedIn', { name: profileLabel(first), n: info.found.length }) : t('br.open')
     return h('button', { class: 'tag tag-btn', type: 'button', disabled: busy, title: t('br.hint', { url: BR_URL[a.family], ref: a.ref }), 'aria-label': label + ' (' + a.ref + ')', onclick: (e) => { e.stopPropagation(); if (info.found.length === 1) openBrowser(a, first); else openBrowserDialog(a) } },
       busy ? spinner() : null, label)
   }
@@ -1038,7 +1044,7 @@ const MAIN = String.raw`
     if (dlg.kind === 'browser') renderBrowser()
     try {
       const r = await api('/api/browser/open', { account: a.ref, profile: p.dir })
-      toast(t('br.opened', { url: r.url.replace(/^https:\/\//, ''), name: profileName(r.profile.name) }))
+      toast(t('br.opened', { url: r.url.replace(/^https:\/\//, ''), name: profileLabel(r.profile) }))
       if (dlg.kind === 'browser') dlg.el.close()
     } catch (e) { toast(t('br.failed', { ref: a.ref, msg: e.message }), { kind: 'fail' }) }
     ui.browserRef = null

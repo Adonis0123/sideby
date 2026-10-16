@@ -4,6 +4,7 @@
 // Cookies, Login Data, IndexedDB or the Keychain, never a value, never the network. The Host-side id each match
 // needs (families/browser.ts) is compared in memory and never leaves this module. Opening a website starts Chrome
 // unchanged with `open`, through `DesktopDeps.exec`, so tests never start a real browser.
+// so tests never start a real browser.
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { matchedOrigins, websiteDef } from '../families/browser.ts'
@@ -160,16 +161,36 @@ export async function browserReport(rt: Runtime, accounts: readonly Account[]): 
     if (m && id) ids.push({ ref: a.ref, origin: m.origin, id })
   }
   const origins = matchedOrigins()
-  const profiles: BrowserProfile[] = []
+  const read: { e: ProfileEntry; counts: number[]; changedAt?: string }[] = []
   for (const e of entries) {
     const r = await profileKeys(join(userData, e.dir, 'Local Storage', 'leveldb'), origins)
     for (const p of r.problems) problems.push(`${e.name}: ${p}`)
-    const signIns = ids
-      .filter(({ origin, id }) => [...(r.keys.get(origin) ?? [])].some((k) => keyHasId(k, id)))
-      .map((x) => x.ref)
+    const counts = ids.map(
+      ({ origin, id }) => [...(r.keys.get(origin) ?? [])].filter((k) => keyHasId(k, id)).length,
+    )
     const changedAt = 'changedAt' in r && r.changedAt ? new Date(r.changedAt).toISOString() : undefined
-    profiles.push({ dir: e.dir, name: e.name, signIns, ...(changedAt ? { changedAt } : {}) })
+    read.push({ e, counts, ...(changedAt ? { changedAt } : {}) })
   }
+  // A site keeps a few keys for whoever is signed in, and may leave one behind after a sign-out or a switch. So a
+  // trace counts only when it is at least half as strong as the strongest one of the same id (across profiles) and of
+  // the same website in the same profile (across ids).
+  const bestOfId = ids.map((_, i) => Math.max(0, ...read.map((x) => x.counts[i] as number)))
+  const profiles: BrowserProfile[] = read.map(({ e, counts, changedAt }) => {
+    const bestOfSite = (origin: string) =>
+      Math.max(0, ...ids.map((x, i) => (x.origin === origin ? (counts[i] as number) : 0)))
+    const signIns = ids
+      .filter((x, i) => {
+        const n = counts[i] as number
+        return n > 0 && n * 2 >= (bestOfId[i] as number) && n * 2 >= bestOfSite(x.origin)
+      })
+      .map((x) => x.ref)
+    return {
+      dir: e.dir,
+      name: e.name,
+      signIns,
+      ...(changedAt ? { changedAt } : {}),
+    }
+  })
   profiles.sort((a, b) => (b.changedAt ?? '').localeCompare(a.changedAt ?? '') || a.dir.localeCompare(b.dir))
   return { ...base, found: true, profiles, problems }
 }
