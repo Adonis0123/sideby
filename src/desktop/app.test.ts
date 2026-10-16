@@ -68,16 +68,14 @@ describe('app icon', () => {
     assert.deepEqual(text, [`Software\0${APP_MARKER}`])
     assert.deepEqual(px(0, 0), [0, 0, 0, 0], 'outside the tile is transparent')
     assert.deepEqual(px(128, 60), [0xe5, 0xf2, 0xfb, 255], 'the tile is the Panel logo tint')
-    // Halves of radius 10.5 at 18.5,18.5 (left) and 21.5,21.5 (right) in the 40-unit logo; the tile is
-    // 824/1024 of the canvas, centred.
-    const at = (u: number) => Math.floor(25 + (u * 206) / 40)
+    // The mark (core/brand-mark.ts, 256-unit grid) is drawn in a 297-unit square starting at -20.5 on the tile,
+    // and the tile is 824/1024 of the canvas, centred.
+    const at = (u: number) => Math.floor(25 + ((u + 20.5) * 206) / 297)
     const tile = [0xe5, 0xf2, 0xfb, 255]
-    assert.deepEqual(px(at(13), at(18.5)), [0x3f, 0x8f, 0xc4, 255], 'left half opaque')
-    const second = px(at(27), at(21.5))
-    assert.equal(second[0], Math.round(0x3f * 0.55 + 0xe5 * 0.45), 'right half at 55%')
-    assert.deepEqual(px(at(20), at(20)), tile, 'gap between the halves')
-    assert.deepEqual(px(at(17), at(9)), [0x3f, 0x8f, 0xc4, 255], 'left half starts higher')
-    assert.deepEqual(px(at(23), at(9)), tile, 'right half starts lower')
+    assert.deepEqual(px(at(30), at(165)), [0xf2, 0xb3, 0x5e, 255], 'the back face is amber')
+    assert.deepEqual(px(at(220), at(165)), [0x3f, 0x8f, 0xc4, 255], 'the front face is blue')
+    assert.deepEqual(px(at(162), at(124)), [0x1e, 0x2a, 0x44, 255], 'an eye on the front face')
+    assert.deepEqual(px(at(110), at(150)), tile, 'a gap between the faces')
     const edge = Array.from({ length: 256 }, (_, y) => px(25, y)[3]!)
     assert.ok(
       edge.some((a) => a > 0 && a < 255),
@@ -91,7 +89,7 @@ describe('app icon', () => {
     assert.equal(icns.toString('latin1', 0, 4), 'icns')
     assert.equal(icns.readUInt32BE(4), icns.length)
     assert.equal(icns.toString('latin1', 8, 12), 'icp4')
-    assert.match(iconSvg(), new RegExp(`<svg[^]*${APP_MARKER}[^]*fill-opacity="0.55"`))
+    assert.match(iconSvg(), new RegExp(`<svg[^]*${APP_MARKER}[^]*fill="#f2b35e"[^]*fill="#3f8fc4"`))
   })
 })
 

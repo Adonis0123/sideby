@@ -1,6 +1,7 @@
 // The Panel page: one self-contained HTML document with inline CSS and JS, no external resources. The parts live in
 // sibling modules: page-styles.ts (tokens and CSS), page-script.ts (behaviour, with page-logic.ts helpers) and
 // i18n.ts (English and Chinese text); this module assembles them under the CSP nonce.
+import { MARK_SVG } from '../core/brand-mark.ts'
 import { ALIAS_NAME, RESERVED_ALIASES } from '../core/config.ts'
 import { QUOTA_FAIL_PERCENT, QUOTA_WARN_PERCENT, USAGE_DAYS } from '../core/quota-levels.ts'
 import { MESSAGES } from './i18n.ts'
@@ -77,7 +78,7 @@ export function renderPage(opts: PageOptions): string {
 <header class="top">
   <div class="top-in">
     <div class="brand">
-      <span class="logo" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M18.5 8A10.5 10.5 0 0 0 18.5 29Z"/><path d="M21.5 11A10.5 10.5 0 0 1 21.5 32Z" fill-opacity=".55"/></svg></span>
+      <span class="logo" aria-hidden="true">${MARK_SVG}</span>
       <div>
         <h1>sideby</h1>
         <p class="tagline" data-i18n="top.tagline">Every AI coding account, side by side.</p>

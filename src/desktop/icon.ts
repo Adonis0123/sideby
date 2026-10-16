@@ -1,21 +1,19 @@
-// The sideby mark drawn without dependencies: the Panel header's logo (a dark rounded tile with a light disc
-// split into two halves, offset along the diagonal, the second at 55% opacity) rasterised with analytic
-// antialiasing and encoded as PNG, SVG or ICNS.
+// The sideby mark drawn without dependencies: the Panel header's logo (two faces side by side on a light rounded
+// tile, core/brand-mark.ts) rasterised with analytic antialiasing and encoded as PNG, SVG or ICNS.
 import { deflateSync } from 'node:zlib'
+import { MARK, MARK_COLORS, MARK_TILE_VIEWBOX, markSvgBody, type RoundedRect } from '../core/brand-mark.ts'
 
 /** Text stored in every generated file, so `sideby app uninstall` deletes only what it wrote. */
 export const APP_MARKER = 'sideby-app-install'
 
-// Geometry in the Panel's 40-unit logo box (page.ts: .logo 40×40, radius 10; halves of radius 10.5 centred at
-// 18.5,18.5 facing left and 21.5,21.5 facing right, so they sit 3 apart and mirror through the centre).
+// The Panel's logo tile (page-styles.ts: .logo 40×40, radius 10), with the mark in MARK_TILE_VIEWBOX units on it.
 const TILE = { size: 40, radius: 10, color: [0xe5, 0xf2, 0xfb] as const }
-const MARK = { color: [0x3f, 0x8f, 0xc4] as const, opacities: [1, 0.55] }
-const HALVES = [
-  { cx: 18.5, cy: 18.5, r: 10.5, side: -1 },
-  { cx: 21.5, cy: 21.5, r: 10.5, side: 1 },
-] as const
 // The tile sits on the macOS icon grid: 824 of 1024 units, centred.
 const GRID = { canvas: 1024, tile: 824 }
+
+type Rgb = readonly [number, number, number]
+const rgb = (hex: string): Rgb =>
+  [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16)) as unknown as Rgb
 
 interface Rect {
   x: number
@@ -25,21 +23,24 @@ interface Rect {
   r: number
 }
 
-/** Half of a disc: `side` -1 keeps the part left of the centre, 1 the part right of it. */
-interface Half {
-  cx: number
-  cy: number
-  r: number
-  side: number
-}
-
-function shapes(size: number): { tile: Rect; halves: Half[] } {
+function shapes(size: number) {
   const tilePx = (size * GRID.tile) / GRID.canvas
   const off = (size - tilePx) / 2
-  const u = tilePx / TILE.size
+  const u = tilePx / MARK_TILE_VIEWBOX.size
+  const place = ([x, y, w, h, r]: RoundedRect): Rect => ({
+    x: off + (x - MARK_TILE_VIEWBOX.x) * u,
+    y: off + (y - MARK_TILE_VIEWBOX.y) * u,
+    w: w * u,
+    h: h * u,
+    r: r * u,
+  })
   return {
-    tile: { x: off, y: off, w: tilePx, h: tilePx, r: TILE.radius * u },
-    halves: HALVES.map((h) => ({ cx: off + h.cx * u, cy: off + h.cy * u, r: h.r * u, side: h.side })),
+    tile: { x: off, y: off, w: tilePx, h: tilePx, r: (TILE.radius * tilePx) / TILE.size },
+    back: place(MARK.back),
+    front: place(MARK.front),
+    gap: place(MARK.gap),
+    backEyes: MARK.backEyes.map(place),
+    frontEyes: MARK.frontEyes.map(place),
   }
 }
 
@@ -53,21 +54,19 @@ function roundedRectDistance(px: number, py: number, s: Rect): number {
   return outside + Math.min(Math.max(qx, qy), 0) - s.r
 }
 
-/** Signed distance from (px, py) to a half disc: the disc intersected with the half-plane on its side. */
-function halfDistance(px: number, py: number, h: Half): number {
-  return Math.max(Math.hypot(px - h.cx, py - h.cy) - h.r, (px - h.cx) * -h.side)
-}
-
 /** RGBA pixels (straight alpha) of the icon at `size`×`size`. */
 export function renderIcon(size: number): Uint8Array {
-  const { tile, halves } = shapes(size)
+  const sh = shapes(size)
+  const d = (r: Rect) => (x: number, y: number) => roundedRectDistance(x, y, r)
+  // Inside `r` and outside the gap around the front face.
+  const cut = (r: Rect) => (x: number, y: number) =>
+    Math.max(roundedRectDistance(x, y, r), -roundedRectDistance(x, y, sh.gap))
   const layers = [
-    { dist: (x: number, y: number) => roundedRectDistance(x, y, tile), color: TILE.color, opacity: 1 },
-    ...halves.map((h, i) => ({
-      dist: (x: number, y: number) => halfDistance(x, y, h),
-      color: MARK.color,
-      opacity: MARK.opacities[i]!,
-    })),
+    { dist: d(sh.tile), color: TILE.color },
+    { dist: cut(sh.back), color: rgb(MARK_COLORS.back) },
+    ...sh.backEyes.map((e) => ({ dist: cut(e), color: rgb(MARK_COLORS.eye) })),
+    { dist: d(sh.front), color: rgb(MARK_COLORS.front) },
+    ...sh.frontEyes.map((e) => ({ dist: d(e), color: rgb(MARK_COLORS.eye) })),
   ]
   const px = new Uint8Array(size * size * 4)
   for (let y = 0; y < size; y++)
@@ -78,8 +77,7 @@ export function renderIcon(size: number): Uint8Array {
       let b = 0
       let a = 0
       for (const l of layers) {
-        const cover = Math.min(1, Math.max(0, 0.5 - l.dist(x + 0.5, y + 0.5)))
-        const la = cover * l.opacity
+        const la = Math.min(1, Math.max(0, 0.5 - l.dist(x + 0.5, y + 0.5)))
         if (la === 0) continue
         r = (l.color[0] / 255) * la + r * (1 - la)
         g = (l.color[1] / 255) * la + g * (1 - la)
@@ -184,19 +182,14 @@ export function encodeIcns(pngs: ReadonlyMap<string, Buffer>): Buffer {
 
 /** The same mark as an SVG (1024-unit canvas), for Linux icon themes. */
 export function iconSvg(): string {
-  const { tile, halves } = shapes(GRID.canvas)
+  const { tile } = shapes(GRID.canvas)
   const hex = (c: readonly number[]) => `#${c.map((v) => v.toString(16).padStart(2, '0')).join('')}`
-  const opacityAttr = (opacity: number) => (opacity === 1 ? '' : ` fill-opacity="${opacity}"`)
-  const rect = (s: Rect, fill: string) =>
-    `  <rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" rx="${s.r}" fill="${fill}"/>`
-  // From the top of the cut to its bottom, bulging to the half's side.
-  const half = (h: Half, fill: string, opacity: number) =>
-    `  <path d="M${h.cx} ${h.cy - h.r}A${h.r} ${h.r} 0 0 ${h.side > 0 ? 1 : 0} ${h.cx} ${h.cy + h.r}Z" fill="${fill}"${opacityAttr(opacity)}/>`
+  const V = MARK_TILE_VIEWBOX
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${GRID.canvas} ${GRID.canvas}" width="${GRID.canvas}" height="${GRID.canvas}">`,
     `  <!-- ${APP_MARKER} -->`,
-    rect(tile, hex(TILE.color)),
-    ...halves.map((h, i) => half(h, hex(MARK.color), MARK.opacities[i]!)),
+    `  <rect x="${tile.x}" y="${tile.y}" width="${tile.w}" height="${tile.h}" rx="${tile.r}" fill="${hex(TILE.color)}"/>`,
+    `  <svg x="${tile.x}" y="${tile.y}" width="${tile.w}" height="${tile.h}" viewBox="${V.x} ${V.y} ${V.size} ${V.size}">${markSvgBody('gap', MARK_COLORS.front)}</svg>`,
     '</svg>',
     '',
   ].join('\n')
