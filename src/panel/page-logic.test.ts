@@ -22,6 +22,7 @@ import {
   panelLang,
   passedWindow,
   quotaPressure,
+  remoteControlSummary,
   sortAccounts,
   suggestAlias,
   suggestName,
@@ -515,5 +516,22 @@ describe('Auto Handoff helpers', () => {
         orders: [{ family: 'claude', order: [] }],
       },
     )
+  })
+})
+
+describe('Remote Control button state', () => {
+  const g = (state: string, ...accounts: string[]) => ({ state, accounts })
+  it('says on while a subscription Account starts it, default when one is left to Claude Code, off otherwise', () => {
+    assert.equal(remoteControlSummary([], []), null)
+    assert.equal(remoteControlSummary([g('off', 'claude:main'), g('on', 'claude:001')], []), 'on')
+    assert.equal(remoteControlSummary([g('off', 'claude:main'), g('default', 'claude:001')], []), 'default')
+    assert.equal(
+      remoteControlSummary([g('off', 'claude:main', 'claude:001'), g('missing', 'claude:002')], []),
+      'off',
+    )
+  })
+  it('ignores groups used only by API Accounts', () => {
+    assert.equal(remoteControlSummary([g('off', 'claude:main'), g('on', 'claude:ds')], ['claude:ds']), 'off')
+    assert.equal(remoteControlSummary([g('on', 'claude:main', 'claude:ds')], ['claude:ds']), 'on')
   })
 })

@@ -453,3 +453,19 @@ export function handoffChangeOf(s: HandoffSettingsView, f: HandoffForm): Record<
   if (orders.length) c.orders = orders
   return c
 }
+
+/**
+ * What the Panel's Remote Control button says (spec §3.22): `on` when a group used by a subscription Account turns it
+ * on, else `default` when one leaves it to Claude Code, else `off`; null without groups. Groups used only by API
+ * Accounts do not count: those never sign in to claude.ai.
+ */
+export function remoteControlSummary(
+  groups: readonly { accounts: readonly string[]; state: string }[],
+  apiRefs: readonly string[],
+): 'on' | 'default' | 'off' | null {
+  if (!groups.length) return null
+  const reach = groups.filter((g) => g.accounts.some((r) => !apiRefs.includes(r)))
+  if (reach.some((g) => g.state === 'on')) return 'on'
+  if (reach.some((g) => g.state === 'default')) return 'default'
+  return 'off'
+}

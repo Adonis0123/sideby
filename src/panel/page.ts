@@ -95,6 +95,7 @@ export function renderPage(opts: PageOptions): string {
       <button id="lang" class="icon-btn lang-btn" type="button"${lang === 'auto' ? '' : ' hidden'}>${lang === 'zh' ? 'EN' : '中文'}</button>
       <button id="theme" class="icon-btn" type="button" hidden></button>
       <button id="update" class="btn update-btn" type="button" hidden></button>
+      <button id="rc" class="btn" type="button" aria-haspopup="dialog" hidden></button>
       <button id="handoff" class="btn" type="button" hidden></button>
       <button id="refresh" class="btn" type="button" aria-label="Refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg><span class="hide-sm" data-i18n="top.refresh">Refresh</span></button>
     </div>

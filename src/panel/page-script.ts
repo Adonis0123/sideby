@@ -18,6 +18,7 @@ import {
   panelLang,
   passedWindow,
   quotaPressure,
+  remoteControlSummary,
   sortAccounts,
   suggestAlias,
   suggestName,
@@ -43,6 +44,7 @@ const LOGIC = [
   panelLang,
   passedWindow,
   quotaPressure,
+  remoteControlSummary,
   sortAccounts,
   suggestAlias,
   suggestName,
@@ -697,6 +699,7 @@ const MAIN = String.raw`
   function renderTop() {
     renderUpdated()
     renderHandoffButton()
+    renderRcButton()
     renderUpdateButton()
     const u = updState()
     $('foot-text').textContent = t(u && !u.checksOff ? 'foot.textChecks' : 'foot.text')
@@ -2782,6 +2785,7 @@ const MAIN = String.raw`
   async function remoteControlOff() {
     rc.busy = true
     renderBanners()
+    if (dlg.kind === 'rc') renderRc()
     try {
       const r = await api('/api/remote-control/off', {})
       if (r.ok) {
@@ -2794,6 +2798,7 @@ const MAIN = String.raw`
     rc.busy = false
     rc.confirm = false
     renderBanners()
+    if (dlg.kind === 'rc') renderRc()
     await load({ silent: true })
   }
   async function remoteControlUndo() {
@@ -2802,6 +2807,44 @@ const MAIN = String.raw`
       toast(r.ok ? t('rc.undone') : r.message, { kind: r.ok ? 'ok' : 'fail' })
     } catch (e) { toast(t('toast.undoFailed', { msg: e.message }), { kind: 'fail' }) }
     await load({ silent: true })
+  }
+  // The header button keeps the setting in reach after the banner is gone (turned off, or "Keep it on").
+  function rcSummary() {
+    const api = S.state.accounts.filter((a) => a.kind === 'api').map((a) => a.ref)
+    return remoteControlSummary(S.state.remoteControl || [], api)
+  }
+  function renderRcButton() {
+    const b = $('rc')
+    const sum = S.state ? rcSummary() : null
+    b.hidden = !sum
+    if (!sum) return
+    const chip = sum === 'on' ? 'chip-warn' : sum === 'off' ? 'chip-ok' : ''
+    setKids(b, [h('span', { class: 'hide-sm' }, t('rc.button')), h('span', { class: 'chip chip-sm ' + chip }, t('rc.state.' + sum))])
+    b.setAttribute('aria-label', t('rc.button') + ': ' + t('rc.state.' + sum))
+    if (dlg.kind === 'rc') renderRc()
+  }
+  function openRc() {
+    if (!S.state || !rcSummary()) return
+    showDialog('rc')
+    renderRc()
+  }
+  function renderRc() {
+    const groups = S.state.remoteControl || []
+    const todo = groups.filter((g) => g.state === 'on' || g.state === 'default')
+    const undo = groups.some((g) => g.undo && g.state === 'off')
+    const rows = groups.map((g) => h('li', { class: 'rc-row' },
+      h('div', null, h('code', null, g.file), ' ', h('span', { class: 'chip chip-sm ' + (g.state === 'on' ? 'chip-warn' : g.state === 'off' ? 'chip-ok' : g.state === 'blocked' ? 'chip-fail' : '') }, t('rc.state.' + g.state))),
+      h('div', { class: 'muted small' }, t('rc.usedBy', { refs: g.accounts.map(shortRef).join(', ') })),
+      g.reason ? h('div', { class: 'muted small' }, g.reason) : null,
+      g.state === 'on' || g.state === 'default' ? h('div', { class: 'small' }, t('rc.change', { from: g.state === 'on' ? 'true' : t('rc.notSet') })) : null))
+    const body = [h('p', { class: 'small' }, t('rc.explain')), h('ul', { class: 'rc-list' }, rows)]
+    if (todo.length) body.push(h('p', { class: 'small muted' }, t('rc.confirmNote')))
+    else body.push(h('p', { class: 'small muted' }, t('rc.allOff')))
+    if (BOOT.readOnly && todo.length) body.push(h('p', { class: 'small' }, t('rc.readOnly')))
+    const foot = [h('button', { class: 'btn', type: 'button', disabled: rc.busy, onclick: () => dlg.el.close() }, t('btn.close'))]
+    if (!BOOT.readOnly && undo && !todo.length) foot.push(h('button', { class: 'btn', type: 'button', disabled: rc.busy, onclick: async () => { rc.busy = true; renderRc(); await remoteControlUndo(); rc.busy = false; if (dlg.kind === 'rc') renderRc() } }, t('rc.undo')))
+    if (!BOOT.readOnly && todo.length) foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: rc.busy, 'aria-busy': rc.busy ? 'true' : null, onclick: remoteControlOff }, rc.busy ? spinner() : null, t('rc.confirm')))
+    setKids(dlg.el, dialogFrame(t('rc.dialogTitle'), null, body, foot))
   }
 
   // ---------- banners ----------
@@ -3116,6 +3159,7 @@ const MAIN = String.raw`
   $('ver-top').addEventListener('click', () => openVerPop($('ver-top')))
   $('refresh').addEventListener('click', () => load({ check: true, announce: true }))
   $('handoff').addEventListener('click', () => setPage('handoff'))
+  $('rc').addEventListener('click', openRc)
   $('lang').addEventListener('click', () => {
     if (LANG_FIXED) return
     lang = lang === 'zh' ? 'en' : 'zh'
@@ -3130,6 +3174,7 @@ const MAIN = String.raw`
     else if (dlg.kind === 'model' && md) { md.form = null; renderModel() }
     else if (dlg.kind === 'browser') renderBrowser()
     else if (dlg.kind === 'update' && up) renderUpdate()
+    else if (dlg.kind === 'rc') renderRc()
   })
   $('theme').addEventListener('click', () => {
     const order = CHOICES.theme

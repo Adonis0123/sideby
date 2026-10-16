@@ -392,6 +392,9 @@ a.btn:hover { text-decoration: none; }
 .banner-fail { background: var(--fail-soft); border-color: transparent; color: var(--fail); }
 .banner-warn { background: var(--warn-soft); border-color: transparent; color: var(--warn); }
 .banner ul { margin: 6px 0 0; padding-left: 18px; }
+.rc-list { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 8px; }
+.rc-row { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 2px; }
+.rc-row code { word-break: break-all; }
 .banner-actions { display: flex; gap: 8px; flex: none; }
 .hp-how { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
 .hp-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
