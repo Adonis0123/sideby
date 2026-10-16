@@ -16,28 +16,17 @@
 
 <p align="center">English | <a href="README.zh-CN.md">中文</a></p>
 
-## Why not just an alias?
-
-`CLAUDE_CONFIG_DIR` plus a shell alias already starts a second account. It does not keep skills and settings in one place, and it does not show quota for every account. [Does this break a provider's terms?](docs/guide/faq.md#terms)
-
-| | At the same time | Skills, hooks, settings | Quota and usage | Setup |
-|---|---|---|---|---|
-| `CLAUDE_CONFIG_DIR` and an alias | Yes. Each terminal exports the variable. | Each directory is its own copy. They drift unless you symlink by hand. | That session's status line | One alias per account |
-| [cc-switch](https://github.com/farion1231/cc-switch) | Enabling a provider writes the host's live config, so open sessions share that switch. | Plugin settings are copied across providers as a separate step. | The active provider, from its quota endpoint | Install the desktop app |
-| sideby | Yes. `sideby run` selects the directory for that process and leaves your shell alone. | Linked to the main account. `sideby doctor --fix` repairs copies. Sign-in and sessions stay separate. | Every account, from local files. Claude needs `quota setup`. | `npm i -g sideby`, then `sideby new` and sign in |
-
-cc-switch's docs describe that switch: it writes the live settings file ([README](https://github.com/farion1231/cc-switch#readme)). [#1105](https://github.com/farion1231/cc-switch/issues/1105) and [#2908](https://github.com/farion1231/cc-switch/issues/2908) ask for several sessions at once. [#1106](https://github.com/farion1231/cc-switch/issues/1106) is closed; the maintainer says Claude Code's "open terminal" can start one provider without changing the global config.
-
 ## Quick start
 
 Requires Node 22.18+ and at least one Host CLI (Claude Code, Codex, Grok Build or pi) installed. AI agents: follow the setup steps in [`llms.txt`](llms.txt) ("Set up sideby for a user") instead.
 
 ```sh
 npm i -g sideby
-sideby new claude work        # create ~/.claude-work, sharing ~/.claude's skills and hooks
-sideby login claude:work      # sign in once
-sideby run work               # Claude Code on the work account
-sideby ui                     # every account's quota at http://127.0.0.1:17420
+sideby new claude work           # create ~/.claude-work, sharing ~/.claude's skills and hooks
+sideby login claude:work         # sign in once
+sideby run work                  # Claude Code on the work account
+sideby quota setup claude --yes  # Claude quota in the panel; undo: sideby quota teardown claude
+sideby ui                        # every account's quota at http://127.0.0.1:17420
 ```
 
 `sideby run claude:main` keeps using `~/.claude` in another terminal at the same time. Arguments after `--` go to the Host: `sideby run work -- --resume`. To try it without installing, run `npx sideby`.
@@ -62,6 +51,18 @@ The agent checks Node and your Host CLIs, installs sideby and the skill, creates
   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/panel.png">
   <img alt="sideby panel: every account's 5h and 7d quota, 7-day token usage and health in one page" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/panel.png" width="1280">
 </picture>
+
+## Why not just an alias?
+
+`CLAUDE_CONFIG_DIR` plus a shell alias already starts a second account. It does not keep skills and settings in one place, and it does not show quota for every account. [Does this break a provider's terms?](docs/guide/faq.md#terms)
+
+| | At the same time | Skills, hooks, settings | Quota and usage | Setup |
+|---|---|---|---|---|
+| `CLAUDE_CONFIG_DIR` and an alias | Yes. Each terminal exports the variable. | Each directory is its own copy. They drift unless you symlink by hand. | That session's status line | One alias per account |
+| [cc-switch](https://github.com/farion1231/cc-switch) | Enabling a provider writes the host's live config, so open sessions share that switch. | Plugin settings are copied across providers as a separate step. | The active provider, from its quota endpoint | Install the desktop app |
+| sideby | Yes. `sideby run` selects the directory for that process and leaves your shell alone. | Linked to the main account. `sideby doctor --fix` repairs copies. Sign-in and sessions stay separate. | Every account, from local files. Claude needs `quota setup`. | `npm i -g sideby`, then `sideby new` and sign in |
+
+cc-switch's docs describe that switch: it writes the live settings file ([README](https://github.com/farion1231/cc-switch#readme)). [#1105](https://github.com/farion1231/cc-switch/issues/1105) and [#2908](https://github.com/farion1231/cc-switch/issues/2908) ask for several sessions at once. [#1106](https://github.com/farion1231/cc-switch/issues/1106) is closed; the maintainer says Claude Code's "open terminal" can start one provider without changing the global config.
 
 ## What else it does
 

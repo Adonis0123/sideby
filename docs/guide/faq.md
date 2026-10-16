@@ -27,14 +27,21 @@ sideby then checks the version itself. Below 22.18, `--help`, `--version` and ev
 
 | What | Where |
 |---|---|
-| Config (sideby only writes `aliases`, from `new --alias`, `sideby alias` or the panel, and `handoff`, from `sideby handoff enable`, `sideby handoff disable` or the panel) | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
+| Config (sideby only writes `aliases`, from `new --alias`, `sideby alias` or the panel, `handoff`, from `sideby handoff enable`, `sideby handoff disable` or the panel, and an account's model and effort arguments in `accounts.<ref>.args`, from `sideby model` or the panel) | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
 | Your plugins | `${XDG_CONFIG_HOME:-~/.config}/sideby/plugins/` |
 | State: quota cache, last Doctor result, original `settings.json` bytes, background panel pid and logs | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
 | Desktop app data per account (`sideby desktop`) | macOS `~/Library/Application Support/sideby/<family>/<name>/` |
 | Grok Bot windows (`sideby desktop grok-bot:<name>`) | macOS `~/Library/Application Support/sideby/grok-bot/<name>/` |
 | Panel app (`sideby app install`) | macOS `~/Applications/sideby.app`; Linux `~/.local/share/applications/sideby.desktop`, `~/.local/share/sideby/`, `~/.local/share/icons/hicolor/*/apps/sideby.*` |
 
-sideby writes nothing of its own into Host account directories. The one exception is `quota setup claude --yes`, which changes `~/.claude/settings.json`. Account directories you create with `sideby new` belong to the Host.
+sideby writes nothing of its own into Host account directories, except in these commands. Each shows the change first and writes only after you confirm:
+
+- `sideby quota setup claude --yes` wraps the status line in `~/.claude/settings.json` ([Claude quota](usage.md#claude-quota)).
+- `sideby handoff setup grok --yes` adds `~/.grok/hooks/sideby-handoff.json` ([Auto Handoff](usage.md#auto-handoff)).
+- `sideby tune apply` sets `autoCompactWindow` in an account's `settings.json` ([Context tuning](usage.md#context-tuning)).
+- `sideby remote-control off` sets `remoteControlAtStartup` to `false` in Claude's `settings.json` ([Remote Control](usage.md#remote-control)).
+
+Each has a way back: `quota teardown claude`, `handoff teardown grok`, `tune undo`, `remote-control undo`. Account directories you create with `sideby new` belong to the Host.
 
 ## How is it different from aimux, agenv, cc-switch or magpie?
 
@@ -44,13 +51,14 @@ They solve related problems with different trade-offs; pick the one that fits ho
 |---|---|---|---|---|---|
 | Model | one directory per account, run side by side | one directory per profile, run side by side | isolated profile with its own Host binary | switch the active provider in the Host's config | set each agent's model and provider from the menu bar |
 | Hosts | Claude Code, Codex, Grok Build, pi | Claude Code, Codex, Gemini CLI | Claude Code, Codex, Gemini CLI | many, including Grok Build and pi | several agents |
-| Quota | local records and status line data only | live limit probe; `run --auto` picks the subscription with the most headroom | — | — | — |
+| Quota | local records and status line data only | live limit probe; `run --auto` picks the subscription with the most headroom | — | remaining quota and balance on provider cards and the tray (some providers need "Configure usage query") | — |
 | Shape | CLI, local web panel, local plugins | CLI with TUI | CLI with TUI | desktop app | menu bar app |
 
 ## How do I uninstall?
 
 ```sh
 sideby quota teardown claude                  # first, if you ran quota setup; the status line calls sideby
+sideby handoff teardown grok                  # if you ran handoff setup grok; the hook calls sideby
 sideby ui --stop && sideby app uninstall       # if you use the panel app
 npm rm -g sideby
 rm -rf ~/.config/sideby ~/.local/state/sideby  # or your XDG_CONFIG_HOME / XDG_STATE_HOME paths

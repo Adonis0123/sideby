@@ -9,7 +9,8 @@ English | [中文](commands.zh-CN.md)
 | `sideby` | Same as `sideby list` | 0 |
 | `sideby list` | Accounts, type (main, sub or api), login state, model, directory; reading problems go to stderr | 0 |
 | `sideby run <acct> [-- args]` | Start the Host for one account | the Host's code; 128+n if killed by signal n |
-| `sideby new <family> <name> [--api] [--alias <short>]` | Create an account and lay out its Shared Items; `--alias` also adds a short command such as `cc008` to `aliases` | 0; 1 if partly failed or the alias was not added |
+| `sideby new <family> <name>\|--next [--api] [--alias <short>]` | Create an account and lay out its Shared Items; `--next` picks the next free name and short command (`cc008`); `--alias` also adds a short command such as `cc008` to `aliases` | 0; 1 if partly failed or the alias was not added |
+| `sideby families [family]` | What each Host's accounts share with the main account, where they live and how they sign in | 0 |
 | `sideby alias add <short> <acct> [-- args]` | Add a short command for an existing account, optionally with Host arguments that `sideby run` adds | 0, also when it already exists; 1 if the name is taken, invalid or the account does not exist |
 | `sideby alias rm <short>` | Remove a short command | 0, also when it is not there |
 | `sideby resume <family> [-- args]` | Run the Host; when the arguments resume a session by id (`claude --resume <id>`, `codex resume <id>`, `grok --resume <id>`), start the account that holds it, as `run` would. A Claude session that was never saved starts anew in the account that started it. Otherwise run the Host unchanged | the Host's code; 1 if the family is unknown or cannot route sessions (pi) |
@@ -41,5 +42,5 @@ English | [中文](commands.zh-CN.md)
 
 - Every command exits 2 on a usage error (unknown option, missing argument) and 1 when sideby itself fails (unknown account, invalid name, unreadable config). Exit code 10 means a change was shown and waits for your yes: run the same command again with `--yes`.
 - `<acct>` is `<family>:<name>`, or just `<name>` when it is unique across families. An ambiguous name is an error that lists the candidates.
-- `list`, `new`, `next`, `alias`, `doctor`, `quota` (including `setup` and `teardown`), `plugins` and `app` accept `--json`. JSON output carries `schemaVersion: 1`, and the JSON Schemas ship in [`schemas/`](../../schemas/). With `--json`, an error prints `{ "schemaVersion": 1, "error": "…", "code": "…" }`, where `code` is `usage` for a malformed command line or a reason such as `no-quota-source`. Adding a field keeps the version; removing, renaming or changing the meaning of a field bumps it.
+- `list`, `new`, `next`, `alias`, `doctor`, `quota` (including `setup` and `teardown`), `tune`, `model`, `remote-control`, `handoff`, `families`, `plugins`, `app` and `desktop` accept `--json`. JSON output carries `schemaVersion: 1`, and the JSON Schemas ship in [`schemas/`](../../schemas/). With `--json`, an error prints `{ "schemaVersion": 1, "error": "…", "code": "…" }`, where `code` is `usage` for a malformed command line or a reason such as `no-quota-source`. Adding a field keeps the version; removing, renaming or changing the meaning of a field bumps it.
 - No output, log or error message ever contains a credential value.

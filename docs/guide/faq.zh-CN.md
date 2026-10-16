@@ -27,14 +27,21 @@ Node 从 22.18 起默认会剥掉 TypeScript 类型，sideby 才能直接 `impor
 
 | 内容 | 位置 |
 |---|---|
-| 配置（sideby 只写其中的 `aliases` 和 `handoff`：前者来自 `new --alias`、`sideby alias` 或面板，后者来自 `sideby handoff enable`、`sideby handoff disable` 或面板） | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
+| 配置（sideby 只写其中的 `aliases`、`handoff` 和 `accounts.<ref>.args`：`aliases` 来自 `new --alias`、`sideby alias` 或面板，`handoff` 来自 `sideby handoff enable`、`sideby handoff disable` 或面板，`accounts.<ref>.args` 里的模型和 effort 参数来自 `sideby model` 或面板） | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
 | 你的插件 | `${XDG_CONFIG_HOME:-~/.config}/sideby/plugins/` |
 | 状态：额度缓存、上次体检结果、`settings.json` 原始字节、后台面板的 pid 和日志 | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
 | 每个账号的桌面应用数据（`sideby desktop`） | macOS `~/Library/Application Support/sideby/<家族>/<账号名>/` |
 | Grok Bot 窗口（`sideby desktop grok-bot:<名字>`） | macOS `~/Library/Application Support/sideby/grok-bot/<名字>/` |
 | 面板应用（`sideby app install`） | macOS `~/Applications/sideby.app`；Linux `~/.local/share/applications/sideby.desktop`、`~/.local/share/sideby/`、`~/.local/share/icons/hicolor/*/apps/sideby.*` |
 
-sideby 不往宿主的账号目录里写自己的文件。唯一的例外是 `quota setup claude --yes`，它会修改 `~/.claude/settings.json`。用 `sideby new` 建出来的账号目录归宿主所有。
+sideby 不往宿主的账号目录里写自己的文件，只有下面几个命令例外。它们都会先展示改动，你确认后才写入：
+
+- `sideby quota setup claude --yes` 包装 `~/.claude/settings.json` 里的 status line（[Claude 额度](usage.zh-CN.md#claude-额度)）。
+- `sideby handoff setup grok --yes` 添加 `~/.grok/hooks/sideby-handoff.json`（[自动交接](usage.zh-CN.md#自动交接auto-handoff)）。
+- `sideby tune apply` 设置账号 `settings.json` 里的 `autoCompactWindow`（[上下文调优](usage.zh-CN.md#上下文调优)）。
+- `sideby remote-control off` 把 Claude `settings.json` 里的 `remoteControlAtStartup` 设成 `false`（[Remote Control](usage.zh-CN.md#remote-control)）。
+
+每一项都能撤回：`quota teardown claude`、`handoff teardown grok`、`tune undo`、`remote-control undo`。用 `sideby new` 建出来的账号目录归宿主所有。
 
 ## 和 aimux、agenv、cc-switch、magpie 有什么区别？
 
@@ -44,13 +51,14 @@ sideby 不往宿主的账号目录里写自己的文件。唯一的例外是 `qu
 |---|---|---|---|---|---|
 | 思路 | 每个账号一个目录，并排运行 | 每个 profile 一个目录，并排运行 | 每个 profile 隔离，自带一份宿主可执行文件 | 在宿主配置里切换当前 provider | 在菜单栏为每个 agent 设模型和 provider |
 | 宿主 | Claude Code、Codex、Grok Build、pi | Claude Code、Codex、Gemini CLI | Claude Code、Codex、Gemini CLI | 很多，包括 Grok Build 和 pi | 多个 agent |
-| 额度 | 只用本地记录和 status line 数据 | 实时探测额度；`run --auto` 自动选余量最多的订阅 | — | — | — |
+| 额度 | 只用本地记录和 status line 数据 | 实时探测额度；`run --auto` 自动选余量最多的订阅 | — | 供应商卡片和托盘显示剩余额度与余额（部分供应商要先开启「Configure usage query」） | — |
 | 形态 | CLI、本地网页面板、本地插件 | 带 TUI 的 CLI | 带 TUI 的 CLI | 桌面应用 | 菜单栏应用 |
 
 ## 怎么卸载？
 
 ```sh
 sideby quota teardown claude                  # 跑过 quota setup 的话先执行；status line 会调用 sideby
+sideby handoff teardown grok                  # 跑过 handoff setup grok 的话执行；这个 hook 会调用 sideby
 sideby ui --stop && sideby app uninstall       # 用过面板应用的话
 npm rm -g sideby
 rm -rf ~/.config/sideby ~/.local/state/sideby  # 设置过 XDG_CONFIG_HOME / XDG_STATE_HOME 的话换成对应路径

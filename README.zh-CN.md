@@ -16,28 +16,17 @@
 
 <p align="center"><a href="README.md">English</a> | 中文</p>
 
-## 为什么不直接写个别名？
-
-每个账号一条别名，再配上 `CLAUDE_CONFIG_DIR`，第二个账号确实能开起来。但它不会帮你把 skills 和设置收成一份，也看不到每个账号还剩多少额度。[会不会违反服务条款？](docs/guide/faq.zh-CN.md#terms)
-
-| | 同时开 | skills、hooks、设置 | 额度和用量 | 准备 |
-|---|---|---|---|---|
-| `CLAUDE_CONFIG_DIR` 加别名 | 能。每个终端自己 export。 | 每个目录各一份。不自己做软链接，过一阵就不一样了。 | 只有当前这个会话的 status line | 一个账号一条别名 |
-| [cc-switch](https://github.com/farion1231/cc-switch) | 启用一个供应商会写进宿主正在用的配置，已经打开的会话跟着变。 | 插件配置要另外复制一次。 | 当前启用的那一个，走对方的额度接口 | 装一个桌面应用 |
-| sideby | 能。`sideby run` 只给这个进程选目录，不改你的 shell。 | 链到主账号。副本用 `sideby doctor --fix` 拉齐。登录和会话各留各的。 | 所有账号，只读本地文件。Claude 要先跑 `quota setup`。 | `npm i -g sideby`，然后 `sideby new`，登录一次 |
-
-cc-switch 自己的说明是：切换时把配置写进宿主正在用的文件（[README](https://github.com/farion1231/cc-switch#readme)）。[#1105](https://github.com/farion1231/cc-switch/issues/1105) 和 [#2908](https://github.com/farion1231/cc-switch/issues/2908) 要的是同时开好几个会话。[#1106](https://github.com/farion1231/cc-switch/issues/1106) 已经关闭，维护者说 Claude Code 的「打开终端」可以用某个供应商的配置启动，而不改全局配置。
-
 ## 快速上手
 
 需要 Node 22.18 或更高版本，并且至少装好一个宿主 CLI（Claude Code、Codex、Grok Build 或 pi）。AI agent 请改按 [`llms.txt`](llms.txt) 里 "Set up sideby for a user" 的步骤做。
 
 ```sh
 npm i -g sideby
-sideby new claude work        # 新建 ~/.claude-work，共用 ~/.claude 的 skills 和 hooks
-sideby login claude:work      # 登录一次
-sideby run work               # 用 work 账号启动 Claude Code
-sideby ui                     # 在 http://127.0.0.1:17420 查看所有账号的额度
+sideby new claude work           # 新建 ~/.claude-work，共用 ~/.claude 的 skills 和 hooks
+sideby login claude:work         # 登录一次
+sideby run work                  # 用 work 账号启动 Claude Code
+sideby quota setup claude --yes  # 在面板里显示 Claude 额度；撤回：sideby quota teardown claude
+sideby ui                        # 在 http://127.0.0.1:17420 查看所有账号的额度
 ```
 
 `sideby run claude:main` 可以同时在另一个终端里继续用 `~/.claude`。`--` 之后的参数原样交给宿主：`sideby run work -- --resume`。不想安装，可以先跑 `npx sideby` 试试。
@@ -62,6 +51,18 @@ agent 会检查 Node 和宿主 CLI，装好 sideby 和 skill，建账号，告�
   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/panel.zh-CN.png">
   <img alt="sideby 面板：每个账号的 5h、7d 额度，近 7 天 token 用量和健康状态" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/panel.zh-CN.png" width="1280">
 </picture>
+
+## 为什么不直接写个别名？
+
+每个账号一条别名，再配上 `CLAUDE_CONFIG_DIR`，第二个账号确实能开起来。但它不会帮你把 skills 和设置收成一份，也看不到每个账号还剩多少额度。[会不会违反服务条款？](docs/guide/faq.zh-CN.md#terms)
+
+| | 同时开 | skills、hooks、设置 | 额度和用量 | 准备 |
+|---|---|---|---|---|
+| `CLAUDE_CONFIG_DIR` 加别名 | 能。每个终端自己 export。 | 每个目录各一份。不自己做软链接，过一阵就不一样了。 | 只有当前这个会话的 status line | 一个账号一条别名 |
+| [cc-switch](https://github.com/farion1231/cc-switch) | 启用一个供应商会写进宿主正在用的配置，已经打开的会话跟着变。 | 插件配置要另外复制一次。 | 当前启用的那一个，走对方的额度接口 | 装一个桌面应用 |
+| sideby | 能。`sideby run` 只给这个进程选目录，不改你的 shell。 | 链到主账号。副本用 `sideby doctor --fix` 拉齐。登录和会话各留各的。 | 所有账号，只读本地文件。Claude 要先跑 `quota setup`。 | `npm i -g sideby`，然后 `sideby new`，登录一次 |
+
+cc-switch 自己的说明是：切换时把配置写进宿主正在用的文件（[README](https://github.com/farion1231/cc-switch#readme)）。[#1105](https://github.com/farion1231/cc-switch/issues/1105) 和 [#2908](https://github.com/farion1231/cc-switch/issues/2908) 要的是同时开好几个会话。[#1106](https://github.com/farion1231/cc-switch/issues/1106) 已经关闭，维护者说 Claude Code 的「打开终端」可以用某个供应商的配置启动，而不改全局配置。
 
 ## 还能做什么
 
