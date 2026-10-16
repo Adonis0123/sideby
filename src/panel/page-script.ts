@@ -2735,7 +2735,7 @@ const MAIN = String.raw`
     renderUpdate()
     try {
       const r = await api('/api/update', { confirm: true, version: u.latest })
-      if (r.changed) {
+      if (!r.updated) {
         // The registry names another version than the dialog showed: show the new plan and let the person look again.
         Object.assign(S.state.update, { latest: r.latest, available: r.available, command: r.command, canRun: r.canRun, releaseNotes: r.releaseNotes, method: r.method })
         up.changed = true

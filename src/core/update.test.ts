@@ -252,7 +252,10 @@ describe('Update and Auto Update', () => {
       machine(h, { alive: () => true })
       const method = await installMethod(h.env)
       assert.match((await autoUpdateBlocker(paths, planFrom(method, CURRENT, CURRENT))) ?? '', /up to date/)
-      assert.match((await autoUpdateBlocker(paths, planFrom(method, CURRENT, NEXT_MAJOR))) ?? '', /major/)
+      assert.match(
+        (await autoUpdateBlocker(paths, planFrom(method, CURRENT, NEXT_MAJOR))) ?? '',
+        /new major version/,
+      )
       assert.equal(await autoUpdateBlocker(paths, planFrom(method, CURRENT, NEXT_MINOR)), null)
       await markRunning(paths, 4242)
       assert.match((await autoUpdateBlocker(paths, planFrom(method, CURRENT, NEXT_MINOR))) ?? '', /pid 4242/)
@@ -288,7 +291,14 @@ describe('Update and Auto Update', () => {
       const major = machine(h, { latest: NEXT_MAJOR })
       await backgroundCheck(paths, envWithChecks(h), { update: { auto: true } }, async () => null)
       assert.equal(major.execs.length, 0)
-      assert.equal((await readUpdateCache(paths)).latest, NEXT_MAJOR)
+      const after = await readUpdateCache(paths)
+      assert.equal(after.latest, NEXT_MAJOR)
+      // Said once, and not looked at again for a day.
+      assert.match(autoUpdateLine(after) ?? '', /new major version/)
+      assert.equal(
+        autoPending(after, CURRENT, { update: { auto: true } }, new Date(Date.now() + 2 * 3600_000)),
+        false,
+      )
     })
   })
 })

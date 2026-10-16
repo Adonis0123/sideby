@@ -720,8 +720,10 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const rt = await getRuntime()
         const plan = await update.planUpdate(rt.paths, rt.env)
         const shown = update.shownPlan(plan)
-        if (!optBool(body, 'confirm') || !plan.available) return { ...shown, updated: false }
-        if (body.version !== plan.latest) return { ...shown, updated: false, changed: true }
+        if (!optBool(body, 'confirm')) return { ...shown, updated: false }
+        // A confirmation that runs nothing always says why: the registry names another version (or none newer) now.
+        if (body.version !== plan.latest || !plan.available)
+          return { ...shown, updated: false, changed: true }
         const { backgroundPanelPort } = await import('./background.ts')
         const r = await update.applyUpdate(rt.paths, plan, rt.env, {
           panelPort: () => backgroundPanelPort(rt.paths),

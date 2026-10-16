@@ -679,15 +679,23 @@ export async function applyUpdate(
   }
 }
 
+/** What keeps an Auto Update from installing `plan` until the user acts (an install it cannot update, a major version). */
+export function lastingBlocker(plan: UpdatePlan): string | null {
+  if (!plan.available) return 'already up to date'
+  if (!plan.canRun)
+    return `${plan.method.reason ?? 'this install cannot update itself'}; run \`${plan.command}\` yourself`
+  if (!sameLine(plan.current, plan.latest))
+    return `${plan.latest} is a new major version; update by hand with \`sideby update\``
+  return null
+}
+
 /**
  * Whether an Auto Update may install `plan` now (spec §3.23), and if not, why. Running sessions are looked up
  * last because that removes records of ended processes.
  */
 export async function autoUpdateBlocker(paths: Paths, plan: UpdatePlan): Promise<string | null> {
-  if (!plan.available) return 'already up to date'
-  if (!plan.canRun) return plan.method.reason ?? 'this install cannot update itself'
-  if (!sameLine(plan.current, plan.latest))
-    return `${plan.latest} is a major version; update by hand with \`sideby update\``
+  const lasting = lastingBlocker(plan)
+  if (lasting) return lasting
   const running = await runningSessions(paths)
   if (running.length) return `a session is running (pid ${running.join(', ')})`
   return null
@@ -714,6 +722,15 @@ export async function backgroundCheck(
     if (!autoPending(cache, current, config, now)) return
     const plan = planFrom(await installMethod(env), current, cache.latest!, env)
     await updateUpdateCache(paths, { autoTriedAt: now.toISOString() })
+    // A blocker only the user can lift is said once and looked at again a day later, like a failed install; a
+    // running session only delays it (the next look is within the hour).
+    const lasting = lastingBlocker(plan)
+    if (lasting) {
+      await updateUpdateCache(paths, {
+        auto: { from: current, to: plan.latest, at: now.toISOString(), ok: false, message: lasting },
+      })
+      return
+    }
     if (await autoUpdateBlocker(paths, plan)) return
     const r = await applyUpdate(paths, plan, env, { panelPort })
     // A manual Update holding the lock is not a failed Auto Update; the next look comes within the hour.

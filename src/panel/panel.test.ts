@@ -1569,6 +1569,7 @@ describe('panel updates (spec §3.23, ADR-0021)', () => {
       const { bindUpdateDeps } = await import('../core/update.ts')
       const asked: string[] = []
       const execs: string[][] = []
+      let unbindNone = () => {}
       const unbind = bindUpdateDeps({
         fetch: (async (url: string | URL) => {
           asked.push(String(url))
@@ -1634,6 +1635,14 @@ describe('panel updates (spec §3.23, ADR-0021)', () => {
         const ran = await post(on.port, '/api/update', { confirm: true, version: '99.0.0' }, good)
         assert.equal(ran.body.updated, true)
         assert.equal(execs.length, 1)
+        // The registry now names no newer version: a confirmation runs nothing and says so.
+        unbindNone = bindUpdateDeps({
+          fetch: (async () => new Response(JSON.stringify({ latest: '0.0.1' }))) as typeof fetch,
+        })
+        const none = await post(on.port, '/api/update', { confirm: true, version: '99.0.0' }, good)
+        assert.deepEqual([none.body.updated, none.body.changed, none.body.available], [false, true, false])
+        assert.equal(execs.length, 1)
+        unbindNone()
 
         const offGood = { origin: `http://127.0.0.1:${off.port}`, 'x-sideby-token': off.handler.token }
         assert.equal((await post(off.port, '/api/update', {}, offGood)).status, 403)
