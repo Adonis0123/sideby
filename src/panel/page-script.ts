@@ -2841,7 +2841,7 @@ const MAIN = String.raw`
     if (todo.length) body.push(h('p', { class: 'small muted' }, t('rc.confirmNote')))
     else body.push(h('p', { class: 'small muted' }, t('rc.allOff')))
     if (BOOT.readOnly && todo.length) body.push(h('p', { class: 'small' }, t('rc.readOnly')))
-    const foot = [h('button', { class: 'btn', type: 'button', disabled: rc.busy, onclick: () => dlg.el.close() }, t('btn.close'))]
+    const foot = [h('button', { class: 'btn', type: 'button', disabled: rc.busy, onclick: () => dlg.el.close() }, t(todo.length && !BOOT.readOnly ? 'btn.cancel' : 'btn.close'))]
     if (!BOOT.readOnly && undo && !todo.length) foot.push(h('button', { class: 'btn', type: 'button', disabled: rc.busy, onclick: async () => { rc.busy = true; renderRc(); await remoteControlUndo(); rc.busy = false; if (dlg.kind === 'rc') renderRc() } }, t('rc.undo')))
     if (!BOOT.readOnly && todo.length) foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: rc.busy, 'aria-busy': rc.busy ? 'true' : null, onclick: remoteControlOff }, rc.busy ? spinner() : null, t('rc.confirm')))
     setKids(dlg.el, dialogFrame(t('rc.dialogTitle'), null, body, foot))
