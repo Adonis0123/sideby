@@ -178,6 +178,23 @@ export function sortAccounts<T extends LogicAccount>(list: T[], mode: string, no
 }
 
 /**
+ * The sorted list with each Same Login together (spec §3.21): an Account, or the shown members of one login, in
+ * order, at the place of its first member. A login with one shown member stays a plain Account.
+ */
+export function loginClusters<T extends LogicAccount>(list: T[]): (T | T[])[] {
+  const out: (T | T[])[] = []
+  const placed = new Set<string>()
+  for (const a of list) {
+    if (placed.has(a.ref)) continue
+    const peers = a.sameLogin || []
+    const members = list.filter((b) => b.ref === a.ref || peers.includes(b.ref))
+    for (const m of members) placed.add(m.ref)
+    out.push(members.length > 1 ? members : a)
+  }
+  return out
+}
+
+/**
  * Whether every word of the query appears in the Account's name, ref, aliases (with their arguments), Family title,
  * model, plan, email or organization.
  */

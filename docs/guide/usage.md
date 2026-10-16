@@ -111,7 +111,7 @@ Accounts that link `settings.json` to the Main Account (the default) get quota f
 Sometimes two accounts of Claude Code are signed in as the same claude.ai login, for example `~/.claude` and `~/.claude-001` with the same email and organization. Claude counts one quota for that login, but each directory only records the numbers its own sessions saw, so one could look half full and the other almost empty. sideby notices this by itself (it compares the email and organization it already shows) and:
 
 - shows the same, freshest quota on both, with where it was read: `sideby quota` says `read from claude:001 (same login)`, the panel says so when you hover the quota;
-- marks them: `claude:001 = main` in `sideby list`, a **Same login as main** tag in the panel; the quota warning shows once, on the account that has the reading;
+- marks them: `claude:001 = main` in `sideby list`, in the panel they sit together under one line with the email and the quota, shown once; the quota warning shows once too;
 - never hands over between them: `sideby next` run inside a session sideby started skips the other directory of that login, and Auto Handoff skips it too, also when your `order` lists it, and says why.
 
 Usage (tokens) still counts per directory. Nothing is moved or deleted; keep both or remove one yourself. Codex is not grouped yet: one email can belong to several ChatGPT workspaces, each with its own quota.

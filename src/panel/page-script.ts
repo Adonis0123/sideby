@@ -9,6 +9,7 @@ import {
   formatDuration,
   handoffChangeOf,
   handoffHintAccount,
+  loginClusters,
   maskEmail,
   matchesQuery,
   mergeDaily,
@@ -36,6 +37,7 @@ const LOGIC = [
   formatDuration,
   handoffChangeOf,
   handoffHintAccount,
+  loginClusters,
   maskEmail,
   matchesQuery,
   mergeDaily,
@@ -82,7 +84,7 @@ const MAIN = String.raw`
     silent: false, lastTry: 0, pending: false, fastUntil: 0, fastFamily: null,
   }
   // View state that is not saved: the search text, the attention filter, the Health check filter.
-  const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, desktopRef: null, browserRef: null, appBusy: null, appRemove: null, appNew: null, highlight: null, fade: true }
+  const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, desktopRef: null, browserRef: null, appBusy: null, appRemove: null, appNew: null, highlight: null, fade: true, loginRefs: new Set() }
   const $ = (id) => document.getElementById(id)
 
   // ---------- preferences ----------
@@ -895,14 +897,16 @@ const MAIN = String.raw`
     const text = { 'no-session': 'quota.noSession', 'no-source': 'quota.noSource', unrecognized: 'quota.unrecognized' }[q.reason]
     return h('div', { class: 'q-note', title: q.reason === 'no-session' ? t('quota.noSessionHint') : q.detail || null }, text ? t(text) : t('quota.unavailable', { reason: q.reason }))
   }
-  function quotaBlock(a, now, cols) {
+  // readFrom: the Account a login group's head shows the quota of, named on hover instead of "same login as".
+  function quotaBlock(a, now, cols, readFrom) {
     const q = a.quota
     if (!q) return h('div', { class: 'quota' }, h('div', { class: 'q-note' }, '—'))
     if (q.status !== 'ok') return h('div', { class: 'quota' }, quotaNote(a, q))
     const stale = isStale(q.observedAt, now)
     const wins = q.windows || []
     // A reading borrowed from another Account of the same login says where it came from (spec §3.21).
-    const from = q.from ? t('quota.sharedFrom', { name: refName(q.from), ago: ago(q.observedAt) }) : null
+    const from = readFrom ? t('quota.readFrom', { name: refName(readFrom), ago: ago(q.observedAt) })
+      : q.from ? t('quota.sharedFrom', { name: refName(q.from), ago: ago(q.observedAt) }) : null
     return h('div', { class: 'quota' + (stale ? ' is-stale' : ''), title: from || (stale ? null : t('quota.dataFrom', { ago: ago(q.observedAt) })) },
       wins.length ? cols.map((c) => {
         const w = wins.find((x) => x.label === c)
@@ -944,11 +948,13 @@ const MAIN = String.raw`
   }
   // A dot after the name when the account needs a look that no tag shows: a fuller quota window or a Health
   // finding. Its reason is on hover; the details say more.
+  // Inside a login group the quota warning is the head's, so a row's dot is only about the row itself.
   function attentionDot(a) {
-    const r = reasonsOf(a, Date.now())
+    const subject = inLogin(a) ? Object.assign({}, a, { quota: undefined }) : a
+    const r = reasonsOf(subject, Date.now())
     const lvl = r.includes('health-fail') ? 'fail' : r.includes('quota-high') || r.includes('health-warn') ? 'warn' : ''
     if (!lvl) return null
-    const why = whyOf(a, Date.now())
+    const why = whyOf(subject, Date.now())
     return h('span', { class: 'dot dot-' + lvl + ' att-dot', title: why, role: 'img', 'aria-label': why })
   }
   function nameLine(a) {
@@ -1122,7 +1128,10 @@ const MAIN = String.raw`
   }
   // What a row or card shows depends on more than the account (health, view preferences, language); the
   // fingerprint covers what its click handlers use.
-  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref, ui.browserRef === a.ref, browserFor(a), prefs.hideEmail, isOpen(a)]) }
+  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref, ui.browserRef === a.ref, browserFor(a), prefs.hideEmail, isOpen(a), inLogin(a)]) }
+  // Whether the row sits in a login group (spec §3.21): the group's head then shows the email and the quota.
+  function inLogin(a) { return ui.loginRefs.has(a.ref) }
+  function rowEmail(a) { return inLogin(a) ? null : emailLine(a) }
   // A row shows who the account is, its quota and its last use; a click opens the details under it (model, tokens,
   // Health) and closes them again. The choice is kept in this browser's preferences.
   function isOpen(a) { return prefs.open[a.ref] === true }
@@ -1193,7 +1202,7 @@ const MAIN = String.raw`
     el.dataset.sig = rowSig(a)
     let detail = rowDetails(el)[0]
     if (open && !detail) {
-      detail = rowDetail(a, Boolean(emailLine(a)))
+      detail = rowDetail(a, Boolean(rowEmail(a)))
       const more = el.querySelector(':scope > .more')
       el.insertBefore(detail, more ? more.nextSibling : null)
       detail.style.opacity = '0'
@@ -1236,18 +1245,43 @@ const MAIN = String.raw`
   function isNext(a) { return Boolean(S.state && S.state.handoff && S.state.handoff[a.family] === a.ref) }
   function row(a, now, cols) {
     const open = isOpen(a)
-    const email = emailLine(a)
+    const email = rowEmail(a)
     return h('div', { class: 'row fold-hit' + (open ? ' row-open' : '') + (a.error ? ' row-error' : ''), role: 'listitem', 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a), onclick: foldClick(a) },
-      h('div', { class: 'ident' }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a), email || subLine(a))),
-      quotaBlock(a, now, cols),
+      h('div', { class: 'ident' }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a), email || subLine(a),
+        inLogin(a) ? h('span', { class: 'sr-only' }, t('login.sharedAbove')) : null)),
+      inLogin(a) ? null : quotaBlock(a, now, cols),
       lastUsed(a),
       moreButton(a),
       open ? rowDetail(a, Boolean(email)) : null,
       notes(a))
   }
+  // Directories signed in as one login (spec §3.21): the vendor counts one quota, so the head shows the email and
+  // that quota once, and each directory keeps a row of its own for what is its own (name, model, tokens, Health).
+  function loginGroup(members, now, cols) {
+    const first = members[0]
+    const source = members.find((a) => a.quota && a.quota.status === 'ok' && !a.quota.from) || first
+    const id = first.identity || {}
+    const names = members.map((a) => a.name).join(', ')
+    const hint = t('login.hint', { names })
+    const m = source.quota && source.quota.status === 'ok' ? attentionWhy({ family: source.family, name: source.name, ref: source.ref, quota: source.quota }, null, now, WARN) : null
+    const why = m ? t(m.key, m.vars) : ''
+    const email = id.email ? emailText(id.email) : ''
+    return h('div', { class: 'login', role: 'listitem', 'aria-label': t('login.label', { names }), 'data-key': 'login:' + members.map((a) => a.ref).join(',') },
+      h('div', { class: 'row login-head' },
+        h('div', { class: 'ident' }, h('span', { class: 'login-gap', 'aria-hidden': 'true' }), badge(first.family, 'sm'),
+          h('div', { class: 'ident-text' },
+            h('div', { class: 'ident-name' },
+              email ? h('button', { class: 'name email-btn', type: 'button', title: t('menu.copyEmail'), 'aria-label': t('menu.copyEmail') + ' ' + email, onclick: () => copyText(id.email) }, email) : h('span', { class: 'name' }, names),
+              why ? h('span', { class: 'dot dot-warn att-dot', title: why, role: 'img', 'aria-label': why }) : null),
+            h('div', { class: 'ident-sub', title: hint }, dots([id.org ? h('span', null, id.org) : null, h('span', null, t('login.count', { n: members.length }))])))),
+        quotaBlock(source, now, cols, source.quota && source.quota.status === 'ok' ? source.ref : null),
+        h('div', { class: 'last' }),
+        h('div', { class: 'more' })),
+      h('div', { class: 'login-rows', role: 'list', 'data-key': 'rows', 'data-patch': '' }, members.map((a) => row(a, now, cols))))
+  }
   // What a click on a row opens: how it runs (ref, model and effort, a shared login), its tokens and its Health.
   function sameLoginNote(a) {
-    if (!a.sameLogin || !a.sameLogin.length) return null
+    if (!a.sameLogin || !a.sameLogin.length || inLogin(a)) return null
     const names = a.sameLogin.map(refName).join(', ')
     return h('div', { class: 'rd-note', title: t('acct.sameLoginHint', { names }) }, t('acct.sameLogin', { names }))
   }
@@ -1462,7 +1496,7 @@ const MAIN = String.raw`
         off && setup && setup.plan.status === 'blocked' ? h('span', { class: 'muted small label-tip' }, t('quota.blocked'), tipRaw(t('quota.blocked'), setup.plan.message)) : null))
     const body = collapsed ? null : cards
       ? h('div', { class: 'grid', id: bodyId, 'data-key': 'cards', 'data-patch': '' }, list.map((a) => card(a, now, cols)))
-      : h('div', { class: 'rows', id: bodyId, role: 'list', 'data-key': 'rows', 'data-patch': '' }, list.map((a) => row(a, now, cols)))
+      : h('div', { class: 'rows', id: bodyId, role: 'list', 'data-key': 'rows', 'data-patch': '' }, loginClusters(list).map((x) => Array.isArray(x) ? loginGroup(x, now, cols) : row(x, now, cols)))
     return h('section', { class: 'group' + (cards ? ' group-cards' : ' group-list') + (collapsed ? ' is-collapsed' : ''), 'aria-label': info.title, 'data-key': 'g:' + fam, 'data-patch': '' },
       head, collapsed || cards ? null : colHead(cols, list), body)
   }
@@ -1521,6 +1555,9 @@ const MAIN = String.raw`
     if (!shown.length && !apps.length) { patch(box, noMatch()); return }
     const cols = quotaColumns(shown)
     box.style.setProperty('--qn', String(cols.length))
+    ui.loginRefs = new Set()
+    if (prefs.view !== 'cards')
+      for (const x of loginClusters(shown)) if (Array.isArray(x)) for (const a of x) ui.loginRefs.add(a.ref)
     const ids = S.state.families.map((f) => f.id)
     for (const a of all) if (!ids.includes(a.family)) ids.push(a.family)
     const groups = []

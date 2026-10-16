@@ -178,6 +178,14 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .row:first-child { border-top: 0; }
 .row:last-child { border-radius: 0 0 var(--radius) var(--radius); }
 .row-error .ident-name .name { color: var(--fail); }
+/* A login group (spec §3.21): the head carries the email and the one quota; the directories sit indented under it. */
+.login { border-top: 1px solid var(--border); }
+.login:first-child { border-top: 0; }
+.rows .login > .login-head { border-top: 0; padding-bottom: 4px; }
+.rows .login > .login-head:hover { background: transparent; }
+.login-gap { flex: none; width: 14px; }
+.login-rows > .row, .login-rows > .row:first-child { border-top: 1px dashed var(--border); padding-left: 40px; }
+.login-rows > .row:last-child { border-radius: 0 0 var(--radius) var(--radius); }
 /* The arrow at a row's start opens and closes its details; so does a click anywhere else in the row. */
 .row-toggle { width: 28px; height: 28px; margin: -4px -6px -4px -8px; }
 .fold-hit { cursor: pointer; }
@@ -593,6 +601,7 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .app-actions { width: 100%; justify-content: flex-start; }
   .row { grid-template-columns: minmax(0, 1fr) auto var(--m-w); grid-template-areas: "id last more" "quota quota quota" "detail detail detail" "notes notes notes"; row-gap: 10px; }
   .row-detail { margin-left: 0; }
+  .login-rows > .row, .login-rows > .row:first-child { padding-left: 28px; }
   .row > .quota { grid-template-columns: repeat(var(--qn), minmax(0, 1fr)); max-width: 560px; }
   .rows .m-label, .rows .m-unit, .rows .u-unit { display: inline; }
   .rows .usage { justify-content: flex-start; }

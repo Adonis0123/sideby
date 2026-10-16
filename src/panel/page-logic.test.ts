@@ -13,6 +13,7 @@ import {
   handoffChangeOf,
   handoffHintAccount,
   type LogicAccount,
+  loginClusters,
   maskEmail,
   matchesQuery,
   mergeDaily,
@@ -145,6 +146,19 @@ describe('page logic', () => {
     assert.deepEqual(attentionReasons(own, null, NOW, 60), ['quota-high'])
     assert.deepEqual(attentionReasons(borrowed, null, NOW, 60), [])
     assert.equal(attentionWhy(borrowed, null, NOW, 60), null)
+  })
+
+  it('puts the shown members of a Same Login together, at the place of the first one', () => {
+    const list = [
+      acct('001', { sameLogin: ['claude:main'] }),
+      acct('work'),
+      acct('main', { sameLogin: ['claude:001'] }),
+      acct('solo', { sameLogin: ['claude:hidden'] }),
+    ]
+    const names = loginClusters(list).map((x) => (Array.isArray(x) ? x.map((a) => a.name) : x.name))
+    // A login whose other member is filtered out stays one plain row.
+    assert.deepEqual(names, [['001', 'main'], 'work', 'solo'])
+    assert.deepEqual(loginClusters([]), [])
   })
 
   it('sorts by pressure, name or last use, the Main Account leading ties', () => {
