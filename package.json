@@ -62,6 +62,7 @@
     "schemas": "node src/cli/schemas.ts",
     "leak-check": "sh scripts/leak-check.sh",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm leak-check",
+    "preversion": "node scripts/readme-assets.ts",
     "version": "node scripts/sync-skill-version.ts && git add skills/sideby/SKILL.md",
     "prepublishOnly": "node scripts/pin-english-npm-readme.ts",
     "postpublish": "node scripts/pin-english-npm-readme.ts --restore"

@@ -165,7 +165,7 @@ npm version patch -m "🔖 chore(release): v%s"   # 新功能用 minor
 git push --follow-tags
 ```
 
-`npm version` 会改 `package.json` 的版本号，并运行 `version` 脚本（`scripts/sync-skill-version.ts`），把 `skills/sideby/SKILL.md` 的 `metadata.version` 改成同一个版本，两者一起提交一次，再打上 `v<版本号>` tag。版本不一致时 `pnpm check` 会失败。推送后 `release.yml` 依次执行：
+`npm version` 先跑 `preversion`（`scripts/readme-assets.ts`），列出可能过期的 README 截图、GIF、banner、开场视频和文案。它只提醒、不拦发版；有输出就先让 agent 跑 `readme-assets` skill，处理完再发版。接着它会改 `package.json` 的版本号，并运行 `version` 脚本（`scripts/sync-skill-version.ts`），把 `skills/sideby/SKILL.md` 的 `metadata.version` 改成同一个版本，两者一起提交一次，再打上 `v<版本号>` tag。版本不一致时 `pnpm check` 会失败。推送后 `release.yml` 依次执行：
 
 1. `publish` job（environment `npm`，权限 `contents: read` 加 `id-token: write`，不用任何缓存）：
    - 升级到最新 npm，并确认版本不低于 11.5.1。

@@ -1,0 +1,66 @@
+{
+  "$comment": "README media and the code each depends on. `node scripts/readme-assets.ts` lists what may be stale; the readme-assets skill (.claude/skills/readme-assets/SKILL.md) retakes it. `auto` media is retaken by a script; `creative` media costs money and taste, so a person approves each retake.",
+  "assets": [
+    {
+      "id": "panel-screenshots",
+      "kind": "auto",
+      "files": [
+        "docs/assets/panel.png",
+        "docs/assets/panel-dark.png",
+        "docs/assets/panel.zh-CN.png",
+        "docs/assets/panel-dark.zh-CN.png"
+      ],
+      "watch": [
+        "src/panel/page.ts",
+        "src/panel/page-script.ts",
+        "src/panel/page-styles.ts",
+        "src/panel/page-logic.ts",
+        "src/panel/i18n.ts",
+        "src/panel/theme.ts",
+        "src/core/brand-mark.ts",
+        "src/core/quota-levels.ts",
+        "scripts/demo-home.ts",
+        "scripts/shoot-panel.ts"
+      ],
+      "retake": "node scripts/shoot-panel.ts"
+    },
+    {
+      "id": "demo-gif",
+      "kind": "auto",
+      "files": ["docs/assets/demo.gif"],
+      "watch": [
+        "docs/assets/demo.html",
+        "scripts/record-demo.ts",
+        "scripts/chrome.ts",
+        "scripts/demo-host.sh",
+        "scripts/demo-home.ts",
+        "src/core/launch.ts",
+        "src/core/handoff-*.ts",
+        "src/core/brand-mark.ts",
+        "src/panel/page-script.ts",
+        "src/panel/page-styles.ts"
+      ],
+      "retake": "node scripts/record-demo.ts"
+    },
+    {
+      "id": "banner",
+      "kind": "creative",
+      "files": ["docs/assets/banner.jpg"],
+      "watch": ["src/core/brand-mark.ts"],
+      "retake": "Codex image generation, 1920×960 JPEG, painted scene with the brand characters",
+      "checked": "54791c2"
+    },
+    {
+      "id": "intro-video",
+      "kind": "creative",
+      "url": "https://github.com/user-attachments/assets/3a470c03-9009-4f1d-b7f6-8b4625d74958",
+      "checked": "54791c2",
+      "watch": ["src/core/brand-mark.ts"],
+      "retake": "painted-animation skill, in the intro film's own project (kept outside this repository)"
+    }
+  ],
+  "copy": {
+    "files": ["README.md", "README.zh-CN.md"],
+    "commits": "^(\\S+ )?feat(\\(|:|!)"
+  }
+}

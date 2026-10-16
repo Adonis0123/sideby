@@ -19,6 +19,7 @@ Design every feature for a beginner. The first screen is simple, the default pat
 | Regenerate JSON Schemas | `pnpm schemas` (commit the result; CI fails if `schemas/` is stale) |
 | Check publish contents | `npm pack --dry-run` (no `.ts` sources except `.d.ts`) |
 | Demo HOME for manual testing | `node scripts/demo-home.ts <dir> [normal\|empty\|error\|slow]` |
+| README media and copy that may be stale | `node scripts/readme-assets.ts` (then the `readme-assets` skill) |
 
 Tests run the `.ts` sources directly with Node 22.18+; no build is needed. Run `pnpm check` before you hand work back.
 
@@ -67,7 +68,7 @@ src/
 testing/          fake HOME, fake Host binaries, snapshots; also published as `sideby/testing`
 schemas/          generated JSON Schemas for config and every `--json` output
 skills/sideby/    Agent Skill shipped in the package: SKILL.md routes to references/*.md; metadata.version = package version
-scripts/          leak-check.sh, demo-home.ts, record-demo.ts (README demo GIF), sync-skill-version.ts (run by `npm version`), write-build-id.ts (run by `pnpm build`), pin-english-npm-readme.ts (run by `prepublishOnly`, so the npm readme is README.md)
+scripts/          leak-check.sh, demo-home.ts, record-demo.ts (README demo GIF), shoot-panel.ts (README screenshots), chrome.ts (shared by both), readme-assets.ts (run by `preversion`), sync-skill-version.ts (run by `npm version`), write-build-id.ts (run by `pnpm build`), pin-english-npm-readme.ts (run by `prepublishOnly`, so the npm readme is README.md)
 docs/             adr/, specs/, plans/, verification/, guide/ (user guide, English and .zh-CN.md), assets/ (README banner and screenshots), release.md
 ```
 

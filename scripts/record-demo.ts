@@ -7,13 +7,13 @@
 //   node scripts/record-demo.ts                 write docs/assets/demo.gif
 //   node scripts/record-demo.ts --frames 2,8,14 write only those seconds as PNGs, for a quick look
 // Do not point it at a real HOME: everything runs inside a throwaway demo HOME.
-import { type ChildProcess, execFileSync, spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { cli, demoHome, fail, openChrome, root, startPanel, track, workDir } from './chrome.ts'
 
-const root = resolve(import.meta.dirname, '..')
 const out = join(root, 'docs/assets/demo.gif')
 const FPS = 10
 const WIDTH = 1280
@@ -44,27 +44,6 @@ if (preview && (preview.length === 0 || preview.some(Number.isNaN))) {
   fail('--frames takes seconds separated by commas, for example --frames 2,8,14')
 }
 
-function fail(message: string): never {
-  console.error(message)
-  process.exit(1)
-}
-
-function findChrome(): string {
-  const candidates = [
-    process.env.CHROME,
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    '/Applications/Chromium.app/Contents/MacOS/Chromium',
-  ]
-  for (const name of ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser']) {
-    const found = spawnSync('sh', ['-c', `command -v ${name}`], { encoding: 'utf8' }).stdout.trim()
-    if (found) candidates.push(found)
-  }
-  const chrome = candidates.find((c) => c && existsSync(c))
-  return (
-    chrome ?? fail('Chrome not found. Install Google Chrome or set CHROME to its binary and run this again.')
-  )
-}
-
 for (const tool of preview ? [] : ['ffmpeg', 'gifsicle']) {
   if (spawnSync(tool, ['--version']).error) {
     fail(`${tool} is not on PATH. Install it (for example \`brew install ${tool}\`) and run this again.`)
@@ -74,29 +53,12 @@ if (!existsSync(join(root, 'node_modules/motion/dist/motion.js'))) {
   fail('Motion is not installed. Run `pnpm install --frozen-lockfile` and run this again.')
 }
 
-const work = mkdtempSync(join(tmpdir(), 'sideby-record-'))
+const work = workDir('sideby-record-')
 const demo = join(work, 'demo')
-const children: ChildProcess[] = []
-process.on('exit', () => {
-  for (const child of children) child.kill()
-  try {
-    rmSync(work, { recursive: true, force: true, maxRetries: 5 })
-  } catch {
-    console.error(`could not remove ${work}; delete it by hand`)
-  }
-})
 
 // The demo HOME, with the fixture Host standing in for Claude Code.
-execFileSync(process.execPath, [join(root, 'scripts/demo-home.ts'), demo, 'normal'], { stdio: 'ignore' })
+const env = demoHome(demo)
 execFileSync('install', ['-m', '755', join(root, 'scripts/demo-host.sh'), join(demo, 'bin/claude')])
-const env = {
-  ...process.env,
-  HOME: join(demo, 'home'),
-  XDG_CONFIG_HOME: join(demo, 'home/.config'),
-  XDG_STATE_HOME: join(demo, 'home/.local/state'),
-  PATH: `${join(demo, 'bin')}:${process.env.PATH}`,
-}
-const cli = join(root, 'src/cli/main.ts')
 
 // Two real `sideby run` processes, each asked one question on stdin.
 function session(target: string, question: string) {
@@ -130,8 +92,7 @@ writeFileSync(join(demo, 'bin/sideby'), '#!/bin/sh\necho ok\n', { mode: 0o755 })
 // sideby counts down and starts the next account with the Brief.
 async function handoff() {
   const question = 'write the release notes'
-  const child = spawn(process.execPath, [import.meta.filename, '--handoff'], { env, cwd: demo })
-  children.push(child)
+  const child = track(spawn(process.execPath, [import.meta.filename, '--handoff'], { env, cwd: demo }))
   let log = ''
   await new Promise<void>((done) => {
     const timer = setTimeout(() => fail(`the hand-over did not finish; its output:\n${log}`), 60_000)
@@ -176,89 +137,9 @@ async function handoff() {
 }
 const handover = await handoff()
 
-// The Panel on the demo HOME.
-const panel = spawn(process.execPath, [cli, 'ui', '--no-open', '--port', '17421'], { env })
-children.push(panel)
-const panelUrl = await new Promise<string>((done) => {
-  let log = ''
-  const timer = setTimeout(() => fail(`the Panel did not start; its output:\n${log}`), 15_000)
-  const read = (chunk: Buffer) => {
-    log += chunk
-    const url = /sideby panel: (http:\/\/127\.0\.0\.1:\d+\/)/.exec(log)?.[1]
-    if (url) {
-      clearTimeout(timer)
-      done(url)
-    }
-  }
-  panel.stdout?.on('data', read)
-  panel.stderr?.on('data', read)
-})
-
-// A small Chrome DevTools Protocol client over Node's built-in WebSocket.
-const chrome = spawn(findChrome(), [
-  '--headless=new',
-  '--no-first-run',
-  '--no-default-browser-check',
-  '--hide-scrollbars',
-  '--force-color-profile=srgb',
-  '--lang=en-US',
-  '--allow-file-access-from-files',
-  `--user-data-dir=${join(work, 'chrome')}`,
-  '--remote-debugging-port=0',
-  'about:blank',
-])
-children.push(chrome)
-const wsUrl = await new Promise<string>((done) => {
-  let log = ''
-  const timer = setTimeout(() => fail(`Chrome did not start; its output:\n${log}`), 20_000)
-  chrome.stderr?.on('data', (chunk: Buffer) => {
-    log += chunk
-    const url = /DevTools listening on (ws:\/\/\S+)/.exec(log)?.[1]
-    if (url) {
-      clearTimeout(timer)
-      done(url)
-    }
-  })
-})
-const socket = new WebSocket(wsUrl)
-await new Promise((done) => socket.addEventListener('open', done, { once: true }))
-// biome-ignore lint/suspicious/noExplicitAny: CDP replies are untyped JSON; each caller reads the fields it asked for
-type Reply = any
-let nextId = 1
-const pending = new Map<number, { done: (v: Reply) => void; reject: (e: Error) => void }>()
-socket.addEventListener('message', (event) => {
-  const msg = JSON.parse(String(event.data))
-  const waiter = msg.id ? pending.get(msg.id) : undefined
-  if (!waiter) return
-  pending.delete(msg.id)
-  if (msg.error) waiter.reject(new Error(msg.error.message))
-  else waiter.done(msg.result)
-})
-function send(method: string, params: object = {}, sessionId?: string): Promise<Reply> {
-  const id = nextId++
-  socket.send(JSON.stringify({ id, method, params, sessionId }))
-  return new Promise((done, reject) => pending.set(id, { done, reject }))
-}
-const { targetId } = await send('Target.createTarget', { url: 'about:blank' })
-const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true })
-const page = (method: string, params: object = {}) => send(method, params, sessionId)
-async function evaluate(expression: string) {
-  const { result, exceptionDetails } = await page('Runtime.evaluate', {
-    expression,
-    awaitPromise: true,
-    returnByValue: true,
-  })
-  if (exceptionDetails)
-    fail(`page script failed: ${exceptionDetails.exception?.description ?? exceptionDetails.text}`)
-  return result.value
-}
-async function until(expression: string, what: string) {
-  for (let i = 0; i < 100; i++) {
-    if (await evaluate(expression)) return
-    await new Promise((r) => setTimeout(r, 150))
-  }
-  fail(`timed out waiting for ${what}`)
-}
+// The Panel on the demo HOME, in headless Chrome.
+const panelUrl = await startPanel(env, 17421)
+const { page, evaluate, until, screenshot, close } = await openChrome(work)
 
 // Dark Panel at twice the pixels, so the zoom stays sharp.
 await page('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] })
@@ -288,9 +169,8 @@ if (!layout)
   fail(
     'The Panel has no Claude Code group with claude:work and a Next account. Check scripts/demo-home.ts normal.',
   )
-const shot = await page('Page.captureScreenshot', { format: 'png' })
 const panelPng = join(work, 'panel.png')
-writeFileSync(panelPng, Buffer.from(shot.data, 'base64'))
+writeFileSync(panelPng, await screenshot())
 
 // The scene, one seek and one screenshot per frame.
 await page('Emulation.setDeviceMetricsOverride', {
@@ -313,14 +193,10 @@ if (preview) mkdirSync(previewDir, { recursive: true })
 const times = preview ?? Array.from({ length: Math.ceil(total * FPS) }, (_, i) => i / FPS)
 for (const [i, t] of times.entries()) {
   await evaluate(`window.demo.seek(${t})`)
-  const png = await page('Page.captureScreenshot', { format: 'png' })
   const name = preview ? `demo-${t}s.png` : `${String(i).padStart(4, '0')}.png`
-  writeFileSync(join(preview ? previewDir : frames, name), Buffer.from(png.data, 'base64'))
+  writeFileSync(join(preview ? previewDir : frames, name), await screenshot())
 }
-// Close Chrome before the temp directory goes, or it is still writing its profile there.
-const closed = new Promise((done) => chrome.once('exit', done))
-await send('Browser.close').catch(() => undefined)
-await closed
+await close()
 
 if (preview) {
   console.log(`wrote ${times.map((t) => `demo-${t}s.png`).join(', ')} to ${previewDir}`)
