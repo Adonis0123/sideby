@@ -11,6 +11,7 @@ import {
   readdir,
   readFile,
   readlink,
+  realpath,
   rename,
   rm,
   symlink,
@@ -161,7 +162,8 @@ async function build(d: LocalDirs): Promise<{ stage: string; id: string; commit:
   }
   await chmod(join(stage, BIN), 0o755)
   for (const f of COPIED) await cp(join(ROOT, f), join(stage, f), { recursive: true }).catch(() => {})
-  await symlink(join(ROOT, 'node_modules'), join(stage, 'node_modules'), 'dir')
+  // The real folder: a worktree's node_modules is often itself a link that goes away with the worktree.
+  await symlink(await realpath(join(ROOT, 'node_modules')), join(stage, 'node_modules'), 'dir')
   const commit = await git(['rev-parse', '--short', 'HEAD']).catch(() => '')
   const dirty = (await git(['status', '--porcelain']).catch(() => '')) !== ''
   const info = { id, local: true, commit, dirty, builtAt: new Date().toISOString() }
