@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../../testing/index.ts'
@@ -62,7 +62,12 @@ const boundary = (trigger: string, pre = 190_000, post = 20_000) => ({
 async function put(h: FakeHome, body: string, settings?: string): Promise<Account> {
   const dir = h.path('.claude-work')
   await mkdir(join(dir, 'projects', 'p'), { recursive: true })
-  await writeFile(join(dir, 'projects', 'p', 'sess-a.jsonl'), body)
+  // Written aside and renamed over, so a second put in one test is a new file (a new inode) to the reader's memo.
+  // Overwriting in place could keep size, inode and, within the clock's few-ms grain, mtime and ctime: the memo
+  // would then return the first parse (core/file-memo.ts).
+  const file = join(dir, 'projects', 'p', 'sess-a.jsonl')
+  await writeFile(`${file}.tmp`, body)
+  await rename(`${file}.tmp`, file)
   if (settings !== undefined) await writeFile(join(dir, 'settings.json'), settings)
   return account(dir)
 }
