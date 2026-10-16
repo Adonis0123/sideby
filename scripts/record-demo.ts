@@ -151,7 +151,8 @@ await page('Emulation.setDeviceMetricsOverride', {
 })
 await page('Page.navigate', { url: panelUrl })
 await until(
-  `document.body?.innerText.includes('Claude Code') && document.body.innerText.includes('cache hits')`,
+  // Token usage moved behind a click (6ea716b); the 7-day quota of claude:work is what the scene zooms into.
+  `/\\d+%/.test(document.querySelector('.row[data-ref="claude:work"] .quota')?.innerText ?? '')`,
   'the Panel to load quota',
 )
 await new Promise((r) => setTimeout(r, 800))

@@ -47,8 +47,25 @@ if (markArg !== -1) {
   process.exit(0)
 }
 
+const warnings: string[] = []
+/** True when `c` is a commit of this branch's history (a `checked` from an amended or unpushed commit is not). */
+function inHistory(c: string): boolean {
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', c, 'HEAD'], { cwd: root, stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** The later of the last commit that changed `files` and `checked`: the point a medium was last known good. */
-function baseline(files: string[] = [], checked?: string): string | undefined {
+function baseline(files: string[] = [], checked?: string, id = 'copy'): string | undefined {
+  if (checked && !inHistory(checked)) {
+    warnings.push(
+      `${id}: checked commit ${checked} is not in this branch's history; check it, then --mark ${id}`,
+    )
+    checked = undefined
+  }
   const candidates = [
     files.length ? git('log', '-1', '--format=%h', '--', ...files) : '',
     checked ?? '',
@@ -63,9 +80,9 @@ const commits = (base: string, ...args: string[]) =>
 
 const report: string[] = []
 for (const asset of manifest.assets) {
-  const base = baseline(asset.files, asset.checked)
+  const base = baseline(asset.files, asset.checked, asset.id)
   if (!base) {
-    report.push(`${asset.id} (${asset.kind}): never committed; retake with: ${asset.retake}`)
+    report.push(`${asset.id} (${asset.kind}): never checked; retake with: ${asset.retake}`)
     continue
   }
   const hits = commits(base, '--', ...asset.watch)
@@ -88,6 +105,7 @@ if (feats.length) {
   )
 }
 
+for (const w of warnings) console.log(`readme-assets: ${w}`)
 if (!report.length) {
   console.log('readme-assets: README media and copy are up to date')
 } else {
