@@ -22,7 +22,8 @@
         "scripts/demo-home.ts",
         "scripts/shoot-panel.ts"
       ],
-      "retake": "node scripts/shoot-panel.ts"
+      "retake": "node scripts/shoot-panel.ts",
+      "checked": "934df31"
     },
     {
       "id": "demo-gif",
@@ -40,7 +41,8 @@
         "src/panel/page-script.ts",
         "src/panel/page-styles.ts"
       ],
-      "retake": "node scripts/record-demo.ts"
+      "retake": "node scripts/record-demo.ts",
+      "checked": "934df31"
     },
     {
       "id": "banner",
