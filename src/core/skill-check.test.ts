@@ -59,8 +59,24 @@ describe('doctor and the installed skill', () => {
       assert.equal(found[0]!.level, 'warn')
       assert.equal(found[0]!.account, 'claude:main')
       assert.match(found[0]!.message, /for sideby 0\.0\.1; this sideby is/)
-      assert.match(found[0]!.hint ?? '', /npx skills add Adonis0123\/sideby -g/)
+      assert.match(found[0]!.hint ?? '', /run `sideby update`, which updates the skill too/)
       assert.equal(report.status, 'ok', 'a warning alone keeps doctor healthy')
+    })
+  })
+
+  it('points a skill that a git repository owns back to that repository', async () => {
+    await withFakeHome(async (h) => {
+      await claudeMain(h)
+      await h.write('.agents/skills/sideby/SKILL.md', skill('0.0.1'))
+      await mkdir(h.path('.agents/.git'), { recursive: true })
+      await mkdir(h.path('.claude/skills'), { recursive: true })
+      await symlink(h.path('.agents/skills/sideby'), h.path('.claude/skills/sideby'))
+      const report = await (await createRuntime({ env: h.env })).doctor({ persist: false })
+      const [found] = report.general.filter((f) => f.code === 'skill.outdated')
+      assert.match(
+        found?.hint ?? '',
+        /git repository ~\/\.agents: update it where that repository comes from/,
+      )
     })
   })
 

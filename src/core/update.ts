@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import type { Env } from '../types.ts'
 import { writeFileAtomic } from './fs-safe.ts'
 import type { Paths } from './paths.ts'
-import { installedSkills, SKILL_INSTALL, SKILL_UPDATE } from './skill-check.ts'
+import { gitRootOf, installedSkills, SKILL_INSTALL, SKILL_UPDATE } from './skill-check.ts'
 import { localBuild, packageVersion, parseLocalBuild } from './version.ts'
 
 export const DEFAULT_REGISTRY = 'https://registry.npmjs.org'
@@ -684,19 +684,6 @@ export interface SkillUpdatePlan {
   /** False when sideby must not run it; `reason` says why and the user runs `command` where it belongs. */
   canRun: boolean
   reason?: string
-}
-
-/** The folder holding `dir` that is a git work tree, if any: a skill there is managed by that repository. */
-async function gitRootOf(dir: string): Promise<string | null> {
-  for (let d = dir; ; d = dirname(d)) {
-    try {
-      await stat(join(d, '.git'))
-      return d
-    } catch {
-      // keep looking up
-    }
-    if (dirname(d) === d) return null
-  }
 }
 
 /** The skill part of an Update toward `target`; null when no sideby skill is installed. Reads two files. */

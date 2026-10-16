@@ -1,13 +1,26 @@
 // Doctor's look at an installed sideby Agent Skill (spec §3.11). Read-only: a skill written for another
 // sideby version teaches commands this CLI may not have, so a version mismatch is a warning with the
 // reinstall command. Not installed is not a problem.
-import { readFile, realpath } from 'node:fs/promises'
+import { readFile, realpath, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { FamilyDef, Finding } from '../types.ts'
 import { mainDirOf } from './accounts.ts'
 import { tildify } from './paths.ts'
 
 export const SKILL_INSTALL = 'npx skills add Adonis0123/sideby -g'
+
+/** The folder holding `dir` that is a git work tree, if any: a skill there is managed by that repository. */
+export async function gitRootOf(dir: string): Promise<string | null> {
+  for (let d = dir; ; d = dirname(d)) {
+    try {
+      await stat(join(d, '.git'))
+      return d
+    } catch {
+      // keep looking up
+    }
+    if (dirname(d) === d) return null
+  }
+}
 
 /** `metadata.version` from a SKILL.md frontmatter, or null when there is none. */
 export function skillVersionOf(text: string): string | null {
@@ -76,13 +89,17 @@ export async function checkInstalledSkills(
     const found = skillVersionOf(text)
     if (found === version) continue
     const where = tildify(path, home)
+    // `sideby update` brings the skill along, except one a git repository owns (a dotfiles clone, say).
+    const repo = await gitRootOf(dirname(real))
     out.push({
       level: 'warn',
       account: `${family.id}:main`,
       item: where,
       code: 'skill.outdated',
       message: `the sideby skill at ${where} is ${found ? `for sideby ${found}` : 'from before skills had a version'}; this sideby is ${version}`,
-      hint: `update it with \`${SKILL_INSTALL}\`, so agents learn this version's commands`,
+      hint: repo
+        ? `it lives in the git repository ${tildify(repo, home)}: update it where that repository comes from (\`npx skills update sideby -g\` there), so agents learn this version's commands`
+        : `run \`sideby update\`, which updates the skill too (or \`${SKILL_INSTALL}\` by hand), so agents learn this version's commands`,
       source: 'core',
       fixable: false,
     })
