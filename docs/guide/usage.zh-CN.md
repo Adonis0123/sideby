@@ -171,7 +171,7 @@ sideby browser open grok:main --profile Work
 - sideby 读取这三样：每个浏览器用户的名字和它在 Chrome 里登录的 Google 账号；claude.ai 和 chatgpt.com 在 Chrome Local Storage 里存的键名（不读内容）；每个 Claude、Codex 登录文件里的账号 ID，只用来比对。它不打开 Cookie、已存密码和钥匙串，也不改 Chrome。
 - "登录过"的意思是：这个浏览器用户的数据里，有以这个账号登录的记录。退出登录后，记录可能还在；一个浏览器用户也可能对应好几个账号。
 - grok.com 没有保存能比对的信息，所以 Grok 账号要你自己选浏览器用户打开。
-- 目前只支持 macOS 上的 Google Chrome。网站改变存数据的方式后，sideby 会找不到，并直接告诉你没找到。
+- 目前只支持 Google Chrome：macOS 上的，以及 WSL 里用的 Windows 上装的那个。网站改变存数据的方式后，sideby 会找不到，并直接告诉你没找到。
 
 ## 上下文调优
 

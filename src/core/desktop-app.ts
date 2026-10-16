@@ -3,6 +3,7 @@
 // program sideby runs here (`open`, `ps`, `osascript`, `plutil`, `mdfind`) goes through `DesktopDeps.exec`, so
 // tests never start a real app.
 import { execFile } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { chmod, mkdir, readdir, readFile, symlink } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { type DesktopAppDef, desktopDef, profileAppFor } from '../families/desktop.ts'
@@ -26,6 +27,8 @@ export interface DesktopDeps {
   appDirs: readonly string[]
   /** Runs a program and resolves with its exit code and output; never rejects. */
   exec(cmd: string, args: readonly string[], env?: Env): Promise<ExecResult>
+  /** On WSL, where Windows drives are mounted (normally `/mnt`, so C: is `/mnt/c`); undefined elsewhere. */
+  wslMount?: string
 }
 
 const OPEN = '/usr/bin/open'
@@ -58,12 +61,25 @@ export function bindDesktopDeps(rt: Runtime, deps: Partial<DesktopDeps>): void {
   overrides.set(rt, deps)
 }
 
+/** This Linux runs under WSL: `WSL_DISTRO_NAME` is set, or the kernel says Microsoft. */
+function isWsl(): boolean {
+  if (process.platform !== 'linux') return false
+  if (process.env.WSL_DISTRO_NAME) return true
+  try {
+    return /microsoft/i.test(readFileSync('/proc/sys/kernel/osrelease', 'utf8'))
+  } catch {
+    return false
+  }
+}
+
 export function depsFor(rt: Runtime): DesktopDeps {
   const o = overrides.get(rt) ?? {}
+  const wslMount = 'platform' in o || 'wslMount' in o ? o.wslMount : isWsl() ? '/mnt' : undefined
   return {
     platform: o.platform ?? process.platform,
     appDirs: o.appDirs ?? ['/Applications', join(rt.paths.home, 'Applications')],
     exec: o.exec ?? defaultExec,
+    ...(wslMount ? { wslMount } : {}),
   }
 }
 

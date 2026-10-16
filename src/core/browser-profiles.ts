@@ -4,14 +4,15 @@
 // names of claude.ai and chatgpt.com (core/leveldb-keys.ts). Never Cookies, Login Data, IndexedDB or the Keychain,
 // never a value, never the network. The Host-side id each match needs (families/browser.ts) is compared in memory
 // and never leaves this module. Opening a website starts Chrome unchanged with `open`, through `DesktopDeps.exec`,
-// so tests never start a real browser.
+// so tests never start a real browser. On WSL the Chrome is the one installed on Windows: its folders come from one
+// `cmd.exe` call, and it is started with `cmd.exe /c start` (spec §3.24, WSL).
 import { readdir, readFile, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, win32 } from 'node:path'
 import { matchedOrigins, websiteDef } from '../families/browser.ts'
 import type { Runtime } from '../runtime.ts'
 import type { Account } from '../types.ts'
 import { type BrowserConfig, editConfigBrowser } from './config.ts'
-import { depsFor, findApp } from './desktop-app.ts'
+import { type DesktopDeps, depsFor, findApp } from './desktop-app.ts'
 import { UserError } from './errors.ts'
 import { localStorageKeys } from './leveldb-keys.ts'
 
@@ -28,6 +29,85 @@ const MAX_LOCAL_STATE = 16 * 1024 * 1024
 export function chromeUserData(home: string): string {
   return join(home, 'Library', 'Application Support', 'Google', 'Chrome')
 }
+
+/** Windows folders sideby needs on WSL, each as a Windows path and as the WSL path it is mounted at. */
+interface WindowsDirs {
+  localAppData?: { win: string; unix: string }
+  programs: { win: string; unix: string }[]
+}
+
+/** A Windows drive path (`C:\Windows`) as WSL mounts it (`/mnt/c/Windows`); undefined for anything else. */
+function toUnix(win: string, mount: string): string | undefined {
+  const m = /^([A-Za-z]):\\(.*)$/.exec(win.trim())
+  if (!m) return undefined
+  return join(mount, (m[1] as string).toLowerCase(), ...(m[2] as string).split('\\').filter(Boolean))
+}
+
+const windowsMemo = new Map<string, WindowsDirs>()
+
+/**
+ * `%LOCALAPPDATA%` and the Program Files folders, from one `cmd.exe` call, remembered for the process. When cmd.exe
+ * fails, the only Windows user with Chrome data under `<mount>/c/Users`; several are not guessed between.
+ */
+async function windowsDirs(deps: DesktopDeps, mount: string, problems: string[]): Promise<WindowsDirs> {
+  const hit = windowsMemo.get(mount)
+  if (hit) return hit
+  const r = await deps.exec(join(mount, 'c', 'Windows', 'System32', 'cmd.exe'), [
+    '/d',
+    '/c',
+    'echo %LOCALAPPDATA%^|%ProgramFiles%^|%ProgramFiles(x86)%',
+  ])
+  const parts = r.code === 0 ? r.stdout.trim().split('|') : []
+  const dir = (win: string | undefined) => {
+    const unix = win ? toUnix(win, mount) : undefined
+    return win && unix ? { win: win.trim(), unix } : undefined
+  }
+  const local = dir(parts[0])
+  if (local) {
+    const found: WindowsDirs = {
+      localAppData: local,
+      programs: [dir(parts[1]), dir(parts[2])].filter((d) => d !== undefined),
+    }
+    windowsMemo.set(mount, found)
+    return found
+  }
+  // cmd.exe did not answer (interop off, or no C: drive): look for the one Windows user that has Chrome.
+  const users = join(mount, 'c', 'Users')
+  const withChrome: string[] = []
+  for (const u of await readdir(users).catch(() => [] as string[])) {
+    const st = await stat(
+      join(users, u, 'AppData', 'Local', 'Google', 'Chrome', 'User Data', 'Local State'),
+    ).catch(() => null)
+    if (st?.isFile()) withChrome.push(u)
+  }
+  if (withChrome.length > 1)
+    problems.push(
+      `several Windows users have Chrome data (${withChrome.join(', ')}) and cmd.exe did not say which is yours; check that WSL can run Windows programs (\`cmd.exe /c ver\`)`,
+    )
+  const only = withChrome.length === 1 ? withChrome[0] : undefined
+  return {
+    ...(only
+      ? {
+          localAppData: {
+            win: `C:\\Users\\${only}\\AppData\\Local`,
+            unix: join(users, only, 'AppData', 'Local'),
+          },
+        }
+      : {}),
+    programs: [],
+  }
+}
+
+/** Where Chrome keeps its data: under the home folder on macOS, in Windows' own folder on WSL; null elsewhere. */
+async function userDataFor(rt: Runtime, deps: DesktopDeps, problems: string[]): Promise<string | null> {
+  if (deps.platform === 'darwin') return chromeUserData(rt.paths.home)
+  if (!deps.wslMount) return null
+  const win = await windowsDirs(deps, deps.wslMount, problems)
+  return win.localAppData ? join(win.localAppData.unix, 'Google', 'Chrome', 'User Data') : null
+}
+
+/** Characters cmd.exe would treat as more than a path, even inside quotes. */
+const CMD_UNSAFE = /["%&|<>^\r\n]/
 
 export interface BrowserProfile {
   /** The profile's folder inside Chrome's user data, such as `Default` or `Profile 7`. */
@@ -46,7 +126,7 @@ export interface BrowserReport {
   /** config `browser.signIns`; when false nothing of the browser was read. */
   enabled: boolean
   browser: string
-  /** Chrome's user data folder exists (macOS only). */
+  /** Chrome's user data folder exists (macOS, and Windows' Chrome on WSL). */
   found: boolean
   /** Newest change first. */
   profiles: BrowserProfile[]
@@ -158,10 +238,10 @@ export async function browserReport(rt: Runtime, accounts: readonly Account[]): 
     openOnly: fams.filter((f) => !websiteDef(f)?.match),
   }
   const base = { enabled, browser: CHROME.title, families }
-  if (!enabled || depsFor(rt).platform !== 'darwin')
-    return { ...base, found: false, profiles: [], problems: [] }
+  if (!enabled) return { ...base, found: false, profiles: [], problems: [] }
   const problems: string[] = []
-  const userData = chromeUserData(rt.paths.home)
+  const userData = await userDataFor(rt, depsFor(rt), problems)
+  if (userData === null) return { ...base, found: false, profiles: [], problems }
   const entries = await profileEntries(userData, problems)
   if (entries === null) return { ...base, found: false, profiles: [], problems }
   const ids: { ref: string; origin: string; id: string }[] = []
@@ -224,8 +304,11 @@ export async function openInBrowser(
   profile?: string,
 ): Promise<BrowserOpenResult> {
   const deps = depsFor(rt)
-  if (deps.platform !== 'darwin')
-    throw new UserError('opening a browser user is supported on macOS only for now', { code: 'unsupported' })
+  if (deps.platform !== 'darwin' && !deps.wslMount)
+    throw new UserError(
+      `opening a browser user works on macOS and WSL only for now (this is ${deps.platform}); open ${websiteDef(account.family)?.url ?? 'the website'} yourself`,
+      { code: 'unsupported' },
+    )
   const site = websiteDef(account.family)
   if (!site || account.kind === 'api' || !eligible(rt, [account]).length)
     throw new UserError(
@@ -234,13 +317,13 @@ export async function openInBrowser(
         code: 'no-website',
       },
     )
-  const app = await findApp(CHROME, deps, { spotlight: true })
-  if (!app)
+  const problems: string[] = []
+  const launch = await chromeLauncher(deps, problems)
+  if (!launch)
     throw new UserError(`${CHROME.title} is not installed; get it from ${CHROME_DOWNLOAD}`, {
       code: 'not-installed',
     })
-  const problems: string[] = []
-  const entries = (await profileEntries(chromeUserData(rt.paths.home), problems)) ?? []
+  const entries = (await profileEntries(launch.userData ?? chromeUserData(rt.paths.home), problems)) ?? []
   if (!entries.length)
     throw new UserError(`${CHROME.title} has no browser users yet; open it once, then try again`, {
       code: 'no-profiles',
@@ -284,19 +367,52 @@ export async function openInBrowser(
         code: 'profile-unknown',
       })
   }
-  const args = ['-na', app.path, '--args', `--profile-directory=${pick.dir}`, site.url]
-  const r = await deps.exec(OPEN, args)
+  const [cmd, ...args] = launch.command(`--profile-directory=${pick.dir}`, site.url)
+  const r = await deps.exec(cmd as string, args)
   if (r.code !== 0)
     throw new UserError(
-      `could not open ${CHROME.title}: ${r.stderr.trim() || `open exited with ${r.code}`}; open it once by hand, then try again`,
+      `could not open ${CHROME.title}: ${launch.windows ? `cmd.exe exited with ${r.code}` : r.stderr.trim() || `open exited with ${r.code}`}; open it once by hand, then try again`,
       { code: 'open-failed' },
     )
   return {
     ref: account.ref,
     url: site.url,
     profile: { dir: pick.dir, name: pick.name },
-    command: [OPEN, ...args],
+    command: [cmd as string, ...args],
   }
+}
+
+interface ChromeLauncher {
+  /** Chrome's data folder when it is not the macOS one under the home folder. */
+  userData?: string
+  windows: boolean
+  /** The program and arguments that open Chrome with these arguments. */
+  command(...chromeArgs: string[]): string[]
+}
+
+/** How to start Chrome here: `open` on macOS, `cmd.exe /c start` with Windows' chrome.exe on WSL; null when absent. */
+async function chromeLauncher(deps: DesktopDeps, problems: string[]): Promise<ChromeLauncher | null> {
+  if (deps.platform === 'darwin') {
+    const app = await findApp(CHROME, deps, { spotlight: true })
+    return app && { windows: false, command: (...a) => [OPEN, '-na', app.path, '--args', ...a] }
+  }
+  const mount = deps.wslMount as string
+  const win = await windowsDirs(deps, mount, problems)
+  const local = win.localAppData
+  if (!local) return null
+  for (const d of [...win.programs, local]) {
+    const exe = join(d.unix, 'Google', 'Chrome', 'Application', 'chrome.exe')
+    if (!(await stat(exe).catch(() => null))?.isFile()) continue
+    const winExe = win32.join(d.win, 'Google', 'Chrome', 'Application', 'chrome.exe')
+    if (CMD_UNSAFE.test(winExe)) continue
+    const cmd = join(mount, 'c', 'Windows', 'System32', 'cmd.exe')
+    return {
+      userData: join(local.unix, 'Google', 'Chrome', 'User Data'),
+      windows: true,
+      command: (...a) => [cmd, '/d', '/c', 'start', '', winExe, ...a],
+    }
+  }
+  return null
 }
 
 /** What turning Browser Sign-ins on reads, for the confirmation in the CLI and the Panel. */

@@ -1380,7 +1380,7 @@ export async function cmdBrowser(a: ParsedArgs, io: Io): Promise<number> {
     return 0
   }
   if (!r.found) {
-    io.out('Google Chrome has no data on this Mac yet; open it once, then try again.')
+    io.out('Google Chrome has no data on this computer yet; open it once, then try again.')
     return 0
   }
   const signedIn = new Set(r.profiles.flatMap((p) => p.signIns))

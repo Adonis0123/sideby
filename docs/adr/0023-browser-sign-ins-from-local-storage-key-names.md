@@ -39,3 +39,7 @@ Options considered:
 - A few keys left from an old sign-in are outweighed by the current one's, but a profile that signed out and signed in to nothing else still shows the old Account.
 - Grok Build has no match until grok.com stores an id that `auth.json` also has.
 - Other Chromium browsers (Arc, Brave, Edge, Chrome Beta) share the format and need only their directory added.
+
+## Amendment 2026-10-16: WSL
+
+On WSL, sideby reads the Chrome installed on Windows, because that is the only browser a WSL user has. It asks Windows for `%LOCALAPPDATA%` and the Program Files folders with one `cmd.exe /d /c echo` call through `DesktopDeps.exec`, and turns `X:\...` into `/mnt/x/...`. When `cmd.exe` fails it uses `/mnt/c/Users/*/AppData/Local/Google/Chrome` only when exactly one Windows user has Chrome data. What it reads and how it matches are unchanged; reading `Local State` and Local Storage through `/mnt/c` works while Chrome runs (checked on 2026-10-16: five profiles, 0.6 s on the first read). It opens a website with `cmd.exe /d /c start "" "<chrome.exe>" --profile-directory=<dir> <url>`: `start` returns at once, while `chrome.exe` itself would wait as long as a Chrome it started keeps running. Native Linux Chrome stays out until it can be tested on a Linux machine.

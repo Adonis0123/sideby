@@ -171,7 +171,7 @@ sideby browser open grok:main --profile Work
 - sideby reads each browser user's name and the Google account it uses in Chrome, the key names (never the values) claude.ai and chatgpt.com keep in Chrome's Local Storage, and the account id in each Claude and Codex login file, only to compare. It never opens cookies, saved passwords or the Keychain, and never changes Chrome.
 - "Signed in to" means that browser user's data shows a sign-in as that account. It may be left over from before a sign-out, and one browser user can show several accounts.
 - grok.com keeps nothing sideby can compare, so Grok accounts open in a browser user you pick.
-- Only Google Chrome on macOS for now. The websites can change how they store data; when they do, sideby finds nothing and says so.
+- Only Google Chrome, on macOS and in WSL (where sideby uses the Chrome installed on Windows), for now. The websites can change how they store data; when they do, sideby finds nothing and says so.
 
 ## Context tuning
 

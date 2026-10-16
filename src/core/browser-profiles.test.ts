@@ -2,7 +2,7 @@
 // through a fake `exec`, so no test reads a real browser or starts one.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, utimes, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -438,6 +438,97 @@ describe('sideby browser: open', () => {
       none.deps.appDirs = [h.path('Nowhere')]
       const noChrome = await createRuntime({ env: h.env, desktop: none.deps })
       await refused(openInBrowser(noChrome, await noChrome.resolve('claude:work')), 'not-installed')
+    })
+  })
+})
+
+describe('sideby browser: WSL', () => {
+  const USERS = ['mnt', 'c', 'Users'].join('/')
+  const WIN_CHROME = `${USERS}/Me/AppData/Local/Google/Chrome/User Data`
+  const CMD = 'mnt/c/Windows/System32/cmd.exe'
+  const EXE = 'mnt/c/Program Files/Google/Chrome/Application/chrome.exe'
+
+  /** The fixture's Chrome moved to where Windows keeps it, and a `cmd.exe` that answers `cmdOut` (or fails). */
+  async function wsl(h: FakeHome, cmdOut: string | null) {
+    await seed(h)
+    await cp(h.path(CHROME), h.path(WIN_CHROME), { recursive: true, preserveTimestamps: true })
+    await rm(h.path(CHROME), { recursive: true })
+    const f: Fake = { calls: [], deps: {}, openCode: 0 }
+    const exec = async (cmd: string, args: readonly string[]): Promise<ExecResult> => {
+      f.calls.push({ cmd, args: [...args] })
+      if (cmd !== h.path(CMD)) return { code: 1, stdout: '', stderr: `unexpected ${cmd}` }
+      if (args.includes('start')) return { code: f.openCode, stdout: '', stderr: '' }
+      return cmdOut === null
+        ? { code: 1, stdout: '', stderr: 'no interop' }
+        : { code: 0, stdout: cmdOut, stderr: '' }
+    }
+    f.deps = { platform: 'linux', wslMount: h.path('mnt'), appDirs: [], exec }
+    return { rt: await createRuntime({ env: h.env, desktop: f.deps }), fake: f }
+  }
+  const ANSWER = 'C:\\Users\\Me\\AppData\\Local|C:\\Program Files|C:\\Program Files (x86)\r\n'
+
+  it("reads Windows' Chrome from the folders cmd.exe names, asking once", async () => {
+    await withFakeHome(async (h) => {
+      const { rt, fake } = await wsl(h, ANSWER)
+      for (let i = 0; i < 2; i++) {
+        const r = await browserReport(rt, await rt.accounts())
+        assert.equal(r.found, true)
+        assert.deepEqual(
+          r.profiles.map((p) => [p.dir, p.signIns]),
+          [
+            ['Default', ['claude:main', 'codex:main']],
+            ['Profile 2', []],
+            ['Profile 1', ['claude:work']],
+          ],
+        )
+      }
+      assert.equal(fake.calls.length, 1)
+      assert.deepEqual(fake.calls[0]?.args, [
+        '/d',
+        '/c',
+        'echo %LOCALAPPDATA%^|%ProgramFiles%^|%ProgramFiles(x86)%',
+      ])
+    })
+  })
+
+  it('without cmd.exe, uses the only Windows user with Chrome and does not guess between several', async () => {
+    await withFakeHome(async (h) => {
+      const { rt } = await wsl(h, null)
+      const r = await browserReport(rt, await rt.accounts())
+      assert.equal(r.found, true)
+      assert.equal(r.profiles.length, 3)
+      await h.write(`${USERS}/Other/AppData/Local/Google/Chrome/User Data/Local State`, '{}')
+      const two = await browserReport(rt, await rt.accounts())
+      assert.equal(two.found, false)
+      assert.match(
+        two.problems.join('\n'),
+        /several Windows users .*Me, Other|several Windows users .*Other, Me/,
+      )
+    })
+  })
+
+  it("opens Windows' chrome.exe with cmd.exe start, nothing written, and refuses when it is missing or fails", async () => {
+    await withFakeHome(async (h) => {
+      const { rt, fake } = await wsl(h, ANSWER)
+      await refused(openInBrowser(rt, await rt.resolve('claude:work')), 'not-installed')
+      await h.write(EXE, 'MZ')
+      const before = await snapshot(h.home)
+      const r = await openInBrowser(rt, await rt.resolve('claude:work'))
+      assert.deepEqual(r.profile, { dir: 'Profile 1', name: 'Work' })
+      assert.deepEqual(r.command, [
+        h.path(CMD),
+        '/d',
+        '/c',
+        'start',
+        '',
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        '--profile-directory=Profile 1',
+        'https://claude.ai',
+      ])
+      assert.deepEqual(fake.calls.at(-1)?.args, r.command.slice(1))
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+      fake.openCode = 1
+      await refused(openInBrowser(rt, await rt.resolve('claude:work')), 'open-failed')
     })
   })
 })
