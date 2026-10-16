@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/browser-switch.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "enabled",
+    "changed",
+    "applied",
+    "file",
+    "reads"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "The value asked for."
+    },
+    "changed": {
+      "type": "boolean"
+    },
+    "applied": {
+      "type": "boolean",
+      "description": "False when only the change was shown; run again with --yes (exit 10)."
+    },
+    "file": {
+      "type": "string",
+      "description": "The config file."
+    },
+    "reads": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "What sideby reads while it is on, all on this computer."
+    }
+  },
+  "title": "sideby browser --enable|--disable --json"
+}

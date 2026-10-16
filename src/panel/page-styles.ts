@@ -201,6 +201,8 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .model-btn:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
 .model-set { color: var(--accent); }
 .md-now { display: flex; flex-direction: column; gap: 4px; }
+.br-list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.br-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--ctl-radius); }
 .email-btn:hover { color: var(--text); text-decoration: underline dotted; }
 .email-btn:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
 .ident-email + .ident-sub { color: var(--faint); margin-top: 0; }
@@ -510,14 +512,14 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 /* The hint gives way first: it shrinks to an ellipsis so a long label never pushes it past the menu's edge. */
 .menu-hint { min-width: 0; margin-left: auto; padding-left: 12px; color: var(--faint); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .menu-sep { height: 1px; margin: 4px 6px; background: var(--border); }
-.tip { display: inline-flex; position: relative; vertical-align: middle; }
-.tip-btn { display: inline-grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--surface); color: var(--muted); font: 700 10px/1 var(--font); cursor: help; }
-.tip-btn:hover, .tip.is-open .tip-btn { color: var(--text); border-color: var(--muted); }
 /* Popover: the menu's floating box with free content (text, a few buttons), lighter than a dialog. */
 .popover { width: 280px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
 .popover p { margin: 0; }
 .popover-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .popover-foot { padding-top: 8px; border-top: 1px solid var(--border); }
+.tip { display: inline-flex; position: relative; vertical-align: middle; }
+.tip-btn { display: inline-grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--surface); color: var(--muted); font: 700 10px/1 var(--font); cursor: help; }
+.tip-btn:hover, .tip.is-open .tip-btn { color: var(--text); border-color: var(--muted); }
 .tip-btn:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
 .tip-body { display: none; position: fixed; z-index: 60; width: max-content; max-width: min(280px, calc(100vw - 16px)); padding: 7px 10px; border-radius: 7px; background: var(--text); color: var(--bg); font-size: 12px; font-weight: 400; line-height: 1.45; letter-spacing: 0; box-shadow: var(--float-shadow); pointer-events: none; text-align: left; white-space: normal; }
 .tip.is-open .tip-body { display: block; }

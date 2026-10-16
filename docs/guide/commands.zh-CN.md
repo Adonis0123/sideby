@@ -33,6 +33,8 @@
 | `sideby ui [--port n] [--no-open]` | 本地面板，按 Ctrl+C 停止 | — |
 | `sideby ui --background` / `--stop` | 脱离终端启动面板（已有就复用，sideby 升级后则替换旧的）并打开 / 停掉它 | 0；启动或停止失败为 1 |
 | `sideby desktop <acct>` | 用这个账号打开 Claude Desktop 或 Codex 应用，和其他账号的窗口同时开着；已经开着就切到前台（macOS） | 0；不是 macOS、这个宿主没有桌面应用、API 账号、应用没装或没能打开为 1 |
+| `sideby browser [--enable\|--disable] [--yes]` | 每个账号的网站在哪个 Chrome 浏览器用户里登录过，只在本机读取；`--enable --yes` 之前不读（macOS） | 0；`--enable`/`--disable` 不带 `--yes` 为 10 |
+| `sideby browser open <acct> [--profile <名字>]` | 用登录过这个账号的浏览器用户打开 claude.ai、chatgpt.com 或 grok.com，或者用 `--profile` 指定的那个（macOS） | 0；不是 macOS、没装 Chrome、没有或有多个浏览器用户可选、没能打开为 1 |
 | `sideby desktop grok-bot:<名字> [--remove [--yes]]` | 按名字打开一个 Grok Bot 窗口，新名字就新建一个未登录的窗口；`--remove` 删掉你建的窗口和它的数据（macOS） | 0；不是 macOS、名字不对、应用没装、窗口开着（`--remove` 时）或没能打开为 1；`--remove` 不带 `--yes` 为 10 |
 | `sideby app install [--url <url>]` | 添加打开面板（或 `<url>`）的面板应用（macOS、Linux） | 0；平台不支持或目标位置有不是它创建的文件为 1 |
 | `sideby app uninstall` | 删除 `app install` 创建的文件 | 0；留下了不是它创建的文件为 1 |

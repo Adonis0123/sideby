@@ -155,6 +155,24 @@ In the panel, the **Grok Bot** group lists the windows after your accounts: whet
 - Each new window keeps its data in `~/Library/Application Support/sideby/grok-bot/<name>/`. `sideby desktop grok-bot:<name> --remove --yes` (or **Remove** in the panel) deletes that folder, which signs the window out and deletes its data on this Mac. Quit the window first. The main window is Grok Bot's own and cannot be removed.
 - sideby opens Grok Bot with `--user-data-dir`, which Grok Bot reads today, and clears `SAND_DATA_ROOT` and `SAND_USER_DATA_DIR`, which would override it. A future Grok Bot version may change this.
 
+## Which browser you signed in with
+
+With many accounts it is easy to forget which Chrome browser user (the "Work" or "Personal" person in Chrome) you signed in to claude.ai or chatgpt.com with. sideby can find it and open the website right there. Everything is read on this computer and sent nowhere.
+
+In the panel, click **Open in browser** next to the account's email. The first time, it says what it reads and offers **Turn on**. After that the button names the browser user, such as **Chrome: Work**, and opens it in one click. From a terminal:
+
+```sh
+sideby browser --enable        # shows what it reads; add --yes to turn it on
+sideby browser                 # each Chrome browser user and the accounts it signed in to
+sideby browser open cc008      # open claude.ai in the browser user that signed in to it
+sideby browser open grok:main --profile Work
+```
+
+- sideby reads each browser user's name, the key names (never the values) claude.ai and chatgpt.com keep in Chrome's Local Storage, and the account id in each Claude and Codex login file, only to compare. It never opens cookies, saved passwords or the Keychain, and never changes Chrome.
+- "Signed in to" means that browser user's data shows a sign-in as that account. It may be left over from before a sign-out, and one browser user can show several accounts.
+- grok.com keeps nothing sideby can compare, so Grok accounts open in a browser user you pick.
+- Only Google Chrome on macOS for now. The websites can change how they store data; when they do, sideby finds nothing and says so.
+
 ## Context tuning
 
 Every Host compacts a session by itself once its context grows past a threshold. `sideby tune` replays your last 7 days of local sessions against other thresholds and estimates which one spends the fewest tokens:

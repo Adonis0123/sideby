@@ -54,6 +54,10 @@ Usage:
   sideby desktop <account>            open the desktop app (Claude Desktop, the Codex app) as this
                                       account, next to the others (macOS)
   sideby desktop grok-bot:<name>      open a Grok Bot window, a new one for a new name (macOS)
+  sideby browser [--enable [--yes]]   which Chrome browser user signed in to each account's website
+                                      (read on this computer only; off until you enable it)
+  sideby browser open <account> [--profile <name>]
+                                      open claude.ai, chatgpt.com or grok.com in that browser user
   sideby app install [--url <url>]    add a sideby app that opens the panel (macOS, Linux)
   sideby app uninstall                remove that app
   sideby shell-init zsh|bash          print shell functions, e.g. eval "$(sideby shell-init zsh)"
@@ -64,8 +68,8 @@ Usage:
 
 Options:
   --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, remote-control, handoff,
-                families, plugins, app, desktop, update)
-  -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, desktop
+                families, plugins, app, desktop, browser, update)
+  -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, desktop, browser
   -v, --version show the version
 
 An <account> is <family>:<name> (claude:work) or just <name> when it is unique.
@@ -167,6 +171,30 @@ Examples:
   sideby desktop grok-bot:002 --remove --yes
 Exit: 0 opened, brought to the front or removed; 1 not macOS, no desktop app for that host, API account, app not
 installed, a bad window name, or the app did not open; 10 --remove without --yes; 2 malformed command line.`,
+  browser: `sideby browser [--enable|--disable] [--yes] [--json]
+       sideby browser open <account> [--profile <folder|name>] [--json]
+
+Find which Google Chrome browser user signed in to each account's website (claude.ai for claude accounts,
+chatgpt.com for codex accounts), and open the website in that browser user. macOS only for now.
+
+Everything is read on this computer and sent nowhere. sideby reads each browser user's name, the key names (never
+the values) claude.ai and chatgpt.com keep in that browser user's Local Storage, and the account id in each Claude and
+Codex login file, only to compare. It never opens cookies, saved passwords or the Keychain, and never changes Chrome.
+It is off until you turn it on: --enable shows what it reads and changes config browser.signIns after --yes.
+
+"Signed in to" means that browser user's data shows a sign-in as that account; it may be left over from before a
+sign-out. grok.com keeps no id to match, so grok accounts can only be opened with --profile.
+
+open uses the one browser user that signed in to the account, or the one --profile names (folder such as
+"Profile 7", or the name Chrome shows). It runs: open -na "Google Chrome" --args --profile-directory=<folder> <url>.
+
+Examples:
+  sideby browser --enable --yes
+  sideby browser
+  sideby browser open cc008
+  sideby browser open grok:main --profile Work
+Exit: 0 shown, changed or opened; 1 not macOS, Chrome not installed, no or several browser users to choose from, or
+Chrome did not open; 10 --enable/--disable without --yes; 2 malformed command line.`,
   families: `sideby families [family] [--json]
 
 For each host (built in or from a plugin): where its accounts live, the variable that selects one, how to sign
@@ -209,6 +237,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   ui: { flags: ['no-open', 'background', 'stop', 'serve-detached'], valued: ['port'] },
   app: { flags: ['json'], valued: ['url'] },
   desktop: { flags: ['json', 'remove', 'yes'] },
+  browser: { flags: ['json', 'enable', 'disable', 'yes'], valued: ['profile'] },
   'shell-init': { flags: ['write'] },
   plugins: { flags: ['json'] },
   families: { flags: ['json'] },
@@ -383,6 +412,8 @@ async function dispatch(
       return await cmds.cmdApp(parsed, io)
     case 'desktop':
       return await cmds.cmdDesktop(parsed, io)
+    case 'browser':
+      return await cmds.cmdBrowser(parsed, io)
     case 'shell-init':
       return await cmds.cmdShellInit(parsed, io)
     case 'plugins':

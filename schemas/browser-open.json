@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/browser-open.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "ref",
+    "url",
+    "profile",
+    "command"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "ref": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    },
+    "profile": {
+      "type": "object",
+      "required": [
+        "dir",
+        "name"
+      ],
+      "properties": {
+        "dir": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "command": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The `open` command sideby ran."
+    }
+  },
+  "title": "sideby browser open --json"
+}

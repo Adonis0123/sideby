@@ -199,6 +199,19 @@ export const ConfigSchema = Type.Object(
         { additionalProperties: false, description: 'Update Check and Auto Update (ADR-0021).' },
       ),
     ),
+    browser: Type.Optional(
+      Type.Object(
+        {
+          signIns: Type.Optional(
+            Type.Boolean({
+              description:
+                "Look in Google Chrome's local data for which browser user signed in to each Account's website (key names only, never cookies or passwords; nothing leaves this computer). Off by default.",
+            }),
+          ),
+        },
+        { additionalProperties: false, description: 'Browser Sign-ins (spec §3.24, ADR-0023).' },
+      ),
+    ),
     shellInitFile: Type.Optional(
       Type.Object(
         {
@@ -280,13 +293,13 @@ async function configTarget(file: string): Promise<string> {
 
 /**
  * Re-reads the config file, lets `edit` change one top-level `key` (sideby writes only `aliases`, `handoff`,
- * `accounts` and `update`, spec §3.10), and writes the result: every other key and their order kept (with `$schema`), 2-space JSON
+ * `accounts`, `update` and `browser`, spec §3.10), and writes the result: every other key and their order kept (with `$schema`), 2-space JSON
  * with a trailing newline, atomically, keeping the file's mode (0600 for a new file). Refuses, without writing, a
  * file that is not valid JSON or not a valid config, a result that is not a valid config, or a file that changed
  * while sideby wrote it. `edit` returns null to leave the file alone; `dryRun` returns the change without writing.
  * `retry` names what to do again after a fix.
  */
-async function editConfigKey<K extends 'aliases' | 'handoff' | 'accounts' | 'update'>(
+async function editConfigKey<K extends 'aliases' | 'handoff' | 'accounts' | 'update' | 'browser'>(
   file: string,
   key: K,
   retry: string,
@@ -384,6 +397,20 @@ export function editConfigUpdate(
   opts: { dryRun?: boolean } = {},
 ): Promise<{ changed: boolean; before: UpdateConfig | undefined; after: UpdateConfig | undefined }> {
   return editConfigKey(file, 'update', 'change the setting', (current) => edit(current ?? {}), opts)
+}
+
+export type BrowserConfig = NonNullable<Config['browser']>
+
+/**
+ * `sideby browser --enable|--disable` and the Panel's switch (spec §3.24): changes the config `browser` key with
+ * `edit` (see `editConfigKey` for how the file is written). With `dryRun`, shows the change without writing.
+ */
+export function editConfigBrowser(
+  file: string,
+  edit: (current: BrowserConfig) => BrowserConfig,
+  opts: { dryRun?: boolean } = {},
+): Promise<{ changed: boolean; before: BrowserConfig | undefined; after: BrowserConfig | undefined }> {
+  return editConfigKey(file, 'browser', 'change the setting', (current) => edit(current ?? {}), opts)
 }
 
 export type AccountsConfig = NonNullable<Config['accounts']>

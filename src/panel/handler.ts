@@ -9,6 +9,12 @@ import {
   removeAppProfile,
 } from '../core/app-profiles.ts'
 import { FAVICON_SVG, ICON_SVG } from '../core/brand-mark.ts'
+import {
+  type BrowserReport,
+  browserReport,
+  openInBrowser,
+  setBrowserSignIns,
+} from '../core/browser-profiles.ts'
 import { aliasArgs, aliasRefs, editConfigUpdate, type HandoffSettings } from '../core/config.ts'
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import { UserError } from '../core/errors.ts'
@@ -159,6 +165,11 @@ export interface PanelState {
   appProfiles?: AppProfileStatus[]
   /** Update Check result and Auto Update setting (spec §3.23); absent with `updates: false`. */
   update?: PanelUpdate
+  /**
+   * Browser Sign-ins (spec §3.24): which Chrome browser user signed in to which Account, read on this computer only.
+   * Absent without Claude, Codex or Grok subscription Accounts. Nothing of the browser is read while `enabled` is false.
+   */
+  browser?: BrowserReport
 }
 
 // One Update Check at a time per process, started by a state read when one is due (the cache also keeps a failed
@@ -395,6 +406,8 @@ async function buildState(
     }
   })
   const handoff = handoffByFamily(rt, list, ctx.now)
+  const browser = await browserReport(rt, accounts).catch(() => undefined)
+  const showBrowser = browser && (browser.families.matched.length || browser.families.openOnly.length)
   return {
     schemaVersion: 1,
     version: opts.version,
@@ -427,6 +440,7 @@ async function buildState(
         .map((f) => f.id),
     },
     ...(upd ? { update: upd } : {}),
+    ...(showBrowser ? { browser } : {}),
   }
 }
 
@@ -658,6 +672,27 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           appPath: tildify(r.appPath, home),
           ...(r.appData ? { appData: tildify(r.appData, home) } : {}),
         }
+      },
+    },
+    // Browser Sign-ins on or off (spec §3.24): config `browser.signIns`, shown first like every config change.
+    '/api/browser/settings': {
+      writes: (body) => body.confirm === true,
+      async run(body) {
+        if (typeof body.enabled !== 'boolean') throw new HttpError(400, '"enabled" must be true or false')
+        const rt = await getRuntime()
+        const r = await setBrowserSignIns(rt, body.enabled, { apply: optBool(body, 'confirm') })
+        return { ...r, file: tildify(r.file, rt.paths.home) }
+      },
+    },
+    // Opens the Account's website in one Chrome browser user (spec §3.24). It starts a program, so a read-only Panel
+    // refuses it (writes defaults to true).
+    '/api/browser/open': {
+      async run(body) {
+        const account = optString(body, 'account')
+        if (!account) throw new HttpError(400, '"account" is required')
+        const rt = await getRuntime()
+        const profile = optString(body, 'profile')
+        return openInBrowser(rt, await rt.resolve(account), profile)
       },
     },
     // Opens a Grok Bot window, creating it when the name is new, or brings it to the front (ADR-0019).

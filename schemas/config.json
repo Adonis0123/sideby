@@ -241,6 +241,17 @@
       "additionalProperties": false,
       "description": "Update Check and Auto Update (ADR-0021)."
     },
+    "browser": {
+      "type": "object",
+      "properties": {
+        "signIns": {
+          "type": "boolean",
+          "description": "Look in Google Chrome's local data for which browser user signed in to each Account's website (key names only, never cookies or passwords; nothing leaves this computer). Off by default."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Browser Sign-ins (spec §3.24, ADR-0023)."
+    },
     "shellInitFile": {
       "type": "object",
       "properties": {

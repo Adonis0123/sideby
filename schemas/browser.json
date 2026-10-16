@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/browser.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "enabled",
+    "browser",
+    "found",
+    "profiles",
+    "families",
+    "problems"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "config `browser.signIns`. When false nothing of the browser was read and `profiles` is empty."
+    },
+    "browser": {
+      "type": "string",
+      "description": "The browser read, `Google Chrome`."
+    },
+    "found": {
+      "type": "boolean",
+      "description": "Chrome's user data folder exists on this Mac."
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "dir",
+          "name",
+          "signIns"
+        ],
+        "properties": {
+          "dir": {
+            "type": "string",
+            "description": "The browser user's folder, such as `Default` or `Profile 7`."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name Chrome shows; it may be an email."
+          },
+          "signIns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Refs of the accounts this browser user signed in to on the vendor's website, as far as its local data shows; it may be left over from before a sign-out."
+          },
+          "changedAt": {
+            "type": "string",
+            "description": "When its Local Storage last changed (ISO 8601)."
+          }
+        }
+      },
+      "description": "Most recently changed first."
+    },
+    "families": {
+      "type": "object",
+      "required": [
+        "matched",
+        "openOnly"
+      ],
+      "properties": {
+        "matched": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Families whose accounts can be matched (claude, codex)."
+        },
+        "openOnly": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Families that can only be opened in a browser user given with --profile (grok)."
+        }
+      }
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "title": "sideby browser --json"
+}

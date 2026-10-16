@@ -63,6 +63,8 @@ To open Claude Desktop or the Codex app as one account (macOS, subscription acco
 
 Grok Bot is not a grok account's app: it signs in with a Cursor account, apart from Grok Build. For several Grok Bot windows at once, run `sideby desktop grok-bot:<name> --json` (a new name makes a new, signed-out window; `grok-bot` is its default one) and relay the notice: sign in inside the new window with the account meant for it, with the other Grok Bot windows closed. `sideby list --json` lists them under `appProfiles`. Removing one (`--remove --yes`) signs it out and deletes its data: do it only when the user asks, after they quit that window.
 
+To find which Chrome browser user the user signed in to an account's website with, or to open claude.ai, chatgpt.com or grok.com there, run `sideby browser --json` and `sideby browser open <ref> --json`. Finding is off until the user agrees: run `sideby browser --enable` to show them what it reads (all on this computer), and add `--yes` only after they say yes. A match may be left over from before a sign-out; say so. Grok accounts need `--profile <name>`.
+
 For someone who would rather double-click than use a terminal, `sideby app install` adds a panel app (macOS `~/Applications/sideby.app`, Linux app menu) that runs `sideby ui --background`; `sideby ui --stop` stops it and `sideby app uninstall` removes the app. Ask before `app install`: it writes outside sideby's own directories.
 
 ## Updating sideby

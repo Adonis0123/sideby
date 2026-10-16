@@ -18,7 +18,10 @@ Glossary for sideby. Defines words only. Decisions live in `docs/adr/`, designs 
 - **App Data**: the data directory a Desktop App keeps for one Account.
 - **App Profile**: one named window of a desktop app that signs in apart from every Account (Grok Bot), with its own App Data; ref `grok-bot:<name>`, `grok-bot:main` being the app's default data. Not an Account.
 
-Avoid: *profile* (Codex already uses it for a config layer that does not change the login), *provider* (an endpoint plus key, which does not cover subscriptions), *switch* (sideby never changes which Account is globally active).
+- **Browser Profile** (the Panel says *browser user*): one person's own space in a web browser, such as a Chrome profile named "Work", with its own sign-ins to vendor websites. Not an Account and not an App Profile.
+- **Browser Sign-in**: a trace in a Browser Profile's local data that it signed in to the vendor's website as the same vendor account as one Account. It may be out of date; sideby says the Browser Profile *signed in to* the Account, never that it is signed in now.
+
+Avoid: *profile* on its own (Codex already uses it for a config layer that does not change the login), *provider* (an endpoint plus key, which does not cover subscriptions), *switch* (sideby never changes which Account is globally active).
 
 ## Sharing
 

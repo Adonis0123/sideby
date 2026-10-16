@@ -78,7 +78,7 @@ const MAIN = String.raw`
     silent: false, lastTry: 0, pending: false, fastUntil: 0, fastFamily: null,
   }
   // View state that is not saved: the search text, the attention filter, the Health check filter.
-  const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, desktopRef: null, appBusy: null, appRemove: null, appNew: null, highlight: null, fade: true }
+  const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, desktopRef: null, browserRef: null, appBusy: null, appRemove: null, appNew: null, highlight: null, fade: true }
   const $ = (id) => document.getElementById(id)
 
   // ---------- preferences ----------
@@ -628,6 +628,7 @@ const MAIN = String.raw`
       { icon: 'terminal', label: t('menu.copyRun'), hint: run, run: () => copyText(run) },
       ...(a.aliases || []).slice(0, 2).map((x) => ({ icon: 'terminal', label: t('menu.copyAlias'), hint: x, run: () => copyText(x) })),
       a.desktopApp && a.desktopApp.installed && a.kind !== 'api' && !BOOT.readOnly ? { icon: 'terminal', label: t(a.desktopApp.running ? 'desk.show' : 'desk.open', { app: a.desktopApp.app }), disabled: Boolean(ui.desktopRef), run: () => openDesktop(a) } : null,
+      browserFor(a) ? { icon: 'terminal', label: t('br.open'), disabled: Boolean(ui.browserRef), run: () => openBrowserDialog(a) } : null,
       a.kind !== 'api' ? { icon: 'key', label: t('menu.copyLogin'), hint: 'sideby login ' + a.ref, run: () => copyText('sideby login ' + a.ref) } : null,
       a.dir ? { icon: 'folder', label: t('menu.copyDir'), hint: a.dir, run: () => copyText(a.dir) } : null,
       a.identity && a.identity.email ? { icon: 'mail', label: t('menu.copyEmail'), hint: emailText(a.identity.email), run: () => copyText(a.identity.email) } : null,
@@ -971,7 +972,7 @@ const MAIN = String.raw`
     if (!id || (!id.email && !id.org)) return null
     const email = id.email ? emailText(id.email) : ''
     return h('div', { class: 'ident-email', title: [email, id.org].filter(Boolean).join(' · ') },
-      dots([email ? h('button', { class: 'email email-btn', type: 'button', title: t('menu.copyEmail'), 'aria-label': t('menu.copyEmail') + ' ' + email, onclick: (e) => { e.stopPropagation(); copyText(id.email) } }, email) : null, id.org ? h('span', { class: 'org' }, id.org) : null]))
+      dots([browserButton(a), email ? h('button', { class: 'email email-btn', type: 'button', title: t('menu.copyEmail'), 'aria-label': t('menu.copyEmail') + ' ' + email, onclick: (e) => { e.stopPropagation(); copyText(id.email) } }, email) : null, id.org ? h('span', { class: 'org' }, id.org) : null]))
   }
   function subLine(a) {
     const plan = a.quota && a.quota.status === 'ok' && a.quota.plan
@@ -981,6 +982,7 @@ const MAIN = String.raw`
       a.kind !== 'api' ? modelChip(a) : null,
       a.kind !== 'api' && plan ? h('span', { class: 'plan' }, plan) : null,
       desktopButton(a),
+      emailLine(a) ? null : browserButton(a),
     ]))
   }
   // The family's desktop app as this account (spec §3.20): only where it is installed, never for API accounts or a
@@ -1008,6 +1010,96 @@ const MAIN = String.raw`
     renderAccounts()
     load({ silent: true })
   }
+  // Browser Sign-ins (spec §3.24): which Chrome browser user signed in to the account's website, read on this
+  // computer only. Off: the button explains what turning it on reads. On: it names the browser user, and opens it.
+  const BR_URL = { claude: 'claude.ai', codex: 'chatgpt.com', grok: 'grok.com' }
+  function browserInfo() { return S.state && S.state.browser }
+  function browserFor(a) {
+    const b = browserInfo()
+    if (!b || a.kind === 'api' || BOOT.readOnly) return null
+    if (!b.families.matched.includes(a.family) && !b.families.openOnly.includes(a.family)) return null
+    return { b, found: b.enabled ? b.profiles.filter((p) => p.signIns.includes(a.ref)) : [] }
+  }
+  // A browser user's name may be an email; it hides with the others.
+  function profileName(name) { return String(name).includes('@') ? emailText(name) : name }
+  function browserButton(a) {
+    const info = browserFor(a)
+    if (!info) return null
+    const busy = ui.browserRef === a.ref
+    const first = info.found[0]
+    const label = first ? t(info.found.length > 1 ? 'br.signedInMore' : 'br.signedIn', { name: profileName(first.name), n: info.found.length }) : t('br.open')
+    return h('button', { class: 'tag tag-btn', type: 'button', disabled: busy, title: t('br.hint', { url: BR_URL[a.family], ref: a.ref }), 'aria-label': label + ' (' + a.ref + ')', onclick: (e) => { e.stopPropagation(); if (info.found.length === 1) openBrowser(a, first); else openBrowserDialog(a) } },
+      busy ? spinner() : null, label)
+  }
+  async function openBrowser(a, p) {
+    if (ui.browserRef) return
+    ui.browserRef = a.ref
+    renderAccounts()
+    if (dlg.kind === 'browser') renderBrowser()
+    try {
+      const r = await api('/api/browser/open', { account: a.ref, profile: p.dir })
+      toast(t('br.opened', { url: r.url.replace(/^https:\/\//, ''), name: profileName(r.profile.name) }))
+      if (dlg.kind === 'browser') dlg.el.close()
+    } catch (e) { toast(t('br.failed', { ref: a.ref, msg: e.message }), { kind: 'fail' }) }
+    ui.browserRef = null
+    renderAccounts()
+    if (dlg.kind === 'browser') renderBrowser()
+  }
+  let br = null
+  function openBrowserDialog(a) {
+    br = { ref: a.ref, busy: false, error: null }
+    showDialog('browser')
+    // Rows skip background renders while a dialog is open; turning the finding on changes what they show.
+    dlg.onClose = () => renderAccounts()
+    renderBrowser()
+  }
+  async function brSwitch(on) {
+    br.busy = true
+    dlg.busy = true
+    br.error = null
+    renderBrowser()
+    try {
+      await api('/api/browser/settings', { enabled: on, confirm: true })
+      toast(t(on ? 'br.enabled' : 'br.disabled'))
+      await load({ silent: true })
+    } catch (e) { br.error = e }
+    br.busy = false
+    dlg.busy = false
+    if (!on && !br.error) { dlg.el.close(); return }
+    renderBrowser()
+  }
+  function brProfileRow(a, p) {
+    const busy = ui.browserRef === a.ref
+    return h('li', { class: 'br-row' },
+      h('span', null, h('b', null, profileName(p.name)), ' ', h('span', { class: 'muted small mono' }, p.dir), p.changedAt ? h('span', { class: 'muted small' }, ' · ' + t('br.changed', { when: ago(p.changedAt) })) : null),
+      h('button', { class: 'btn btn-sm', type: 'button', disabled: Boolean(ui.browserRef), 'aria-busy': busy ? 'true' : null, onclick: () => openBrowser(a, p) }, t('br.openIt')))
+  }
+  function renderBrowser() {
+    if (!br || dlg.kind !== 'browser') return
+    const a = S.state && S.state.accounts.find((x) => x.ref === br.ref)
+    const info = a && browserFor(a)
+    if (!info) { dlg.el.close(); return }
+    const url = BR_URL[a.family]
+    const body = []
+    const foot = [h('button', { class: 'btn', type: 'button', disabled: br.busy, onclick: () => dlg.el.close() }, t('btn.close'))]
+    if (!info.b.enabled) {
+      body.push(h('p', null, t('br.offIntro', { ref: a.ref, url })))
+      body.push(h('p', { class: 'small' }, t('br.reads')), h('ul', { class: 'small' }, ['br.read1', 'br.read2', 'br.read3'].map((k) => h('li', null, t(k)))))
+      body.push(h('p', { class: 'muted small' }, t('br.never')))
+      foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: br.busy, 'aria-busy': br.busy ? 'true' : null, onclick: () => brSwitch(true) }, br.busy ? spinner() : null, t('br.enable')))
+    } else if (!info.b.found) {
+      body.push(h('p', { class: 'note' }, t('br.noChrome')))
+    } else {
+      const others = info.b.profiles.filter((p) => !info.found.includes(p))
+      if (info.found.length) body.push(h('p', { class: 'small' }, t('br.found', { ref: a.ref })), h('ul', { class: 'br-list' }, info.found.map((p) => brProfileRow(a, p))))
+      else body.push(h('p', { class: 'muted small' }, t(info.b.families.matched.includes(a.family) ? 'br.none' : 'br.noMatch', { ref: a.ref, url })))
+      if (others.length) body.push(h('p', { class: 'small' }, t(info.found.length ? 'br.others' : 'br.all')), h('ul', { class: 'br-list' }, others.map((p) => brProfileRow(a, p))))
+      body.push(h('p', { class: 'muted small' }, t('br.local')))
+      foot.unshift(h('button', { class: 'btn', type: 'button', disabled: br.busy, onclick: () => brSwitch(false) }, t('br.disable')))
+    }
+    if (br.error) body.push(errorNote(br.error, null))
+    setKids(dlg.el, dialogFrame(t('br.title') + ' · ' + a.ref, a.family, body, foot))
+  }
   // How to get a Host that cannot run: the sentence, then on its own line the install command to copy (with the
   // install page next to it) when the Family has one; without a command the sentence ends with the page's link.
   function hostNote(fam) {
@@ -1031,7 +1123,7 @@ const MAIN = String.raw`
   }
   // What a row or card shows depends on more than the account (health, view preferences, language); the
   // fingerprint covers what its click handlers use.
-  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref, folded(a)]) }
+  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref, ui.browserRef === a.ref, browserFor(a), prefs.hideEmail, folded(a)]) }
   // Each account can be folded to one line (its name) and opened again, like a family group; the choice is kept in
   // this browser's preferences.
   function folded(a) { return prefs.rows[a.ref] === true }
@@ -2777,6 +2869,7 @@ const MAIN = String.raw`
       b.title = t('upd.labelLong', { v: u.latest, cur: u.current })
     }
     if (dlg.kind === 'update' && up && !up.busy) renderUpdate()
+    if (!vp.checking) renderVerPop()
   }
   function openUpdate() {
     if (!BOOT.updates) return
@@ -2792,7 +2885,6 @@ const MAIN = String.raw`
     up.error = null
     renderUpdate()
     try {
-    if (!vp.checking) renderVerPop()
       const r = await api('/api/update', { confirm: true, version: u.latest })
       if (!r.updated) {
         // The registry names another version than the dialog showed: show the new plan and let the person look again.
@@ -2975,6 +3067,7 @@ const MAIN = String.raw`
     else if (dlg.kind === 'setup' && qs) renderSetup()
     else if (dlg.kind === 'tune' && tuneState) renderTune()
     else if (dlg.kind === 'model' && md) { md.form = null; renderModel() }
+    else if (dlg.kind === 'browser') renderBrowser()
     else if (dlg.kind === 'update' && up) renderUpdate()
   })
   $('theme').addEventListener('click', () => {

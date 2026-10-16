@@ -1710,3 +1710,62 @@ describe('panel updates (spec §3.23, ADR-0021)', () => {
     })
   })
 })
+
+describe('Browser Sign-ins in the Panel (spec §3.24)', () => {
+  it('shows the switch off without reading the browser, writes config only on confirm, and refuses opening when read-only', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}\n')
+      await h.write(
+        '.claude.json',
+        '{"oauthAccount":{"accountUuid":"11111111-2222-4333-8444-555555555555"}}\n',
+        0o600,
+      )
+      const { claudePlugin } = await import('../families/claude/index.ts')
+      const runtime = () => createRuntime({ env: h.env, builtins: [asBuiltin(claudePlugin)] })
+      const config = h.path('.config/sideby/config.json')
+      const ro = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`], readOnly: true }),
+      )
+      try {
+        const hdr = {
+          host: `127.0.0.1:${ro.port}`,
+          origin: `http://127.0.0.1:${ro.port}`,
+          'x-sideby-token': ro.handler.token,
+        }
+        assert.equal((await post(ro.port, '/api/browser/open', { account: 'claude:main' }, hdr)).status, 403)
+        assert.equal(
+          (await post(ro.port, '/api/browser/settings', { enabled: true, confirm: true }, hdr)).status,
+          403,
+        )
+      } finally {
+        await close(ro.server)
+      }
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      try {
+        const state = JSON.parse(
+          (await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text,
+        )
+        assert.deepEqual(
+          [state.browser.enabled, state.browser.profiles, state.browser.families],
+          [false, [], { matched: ['claude'], openOnly: [] }],
+        )
+        assert.ok(!JSON.stringify(state).includes('11111111-2222'))
+        const hdr = {
+          host: `127.0.0.1:${port}`,
+          origin: `http://127.0.0.1:${port}`,
+          'x-sideby-token': handler.token,
+        }
+        const plan = await post(port, '/api/browser/settings', { enabled: true }, hdr)
+        assert.deepEqual([plan.body.changed, plan.body.applied], [true, false])
+        await assert.rejects(readFile(config, 'utf8'))
+        const done = await post(port, '/api/browser/settings', { enabled: true, confirm: true }, hdr)
+        assert.equal(done.body.applied, true)
+        assert.equal(JSON.parse(await readFile(config, 'utf8')).browser.signIns, true)
+      } finally {
+        await close(server)
+      }
+    })
+  })
+})

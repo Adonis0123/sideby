@@ -155,6 +155,24 @@ sideby desktop grok-bot        # Grok Bot 自己的默认窗口（grok-bot:main�
 - 每个新窗口的数据放在 `~/Library/Application Support/sideby/grok-bot/<名字>/`。`sideby desktop grok-bot:<名字> --remove --yes`（或面板里的 **删除**）删掉这个目录，也就是退出这个窗口的登录、删掉它在这台 Mac 上的数据。先退出那个窗口。主窗口是 Grok Bot 自己的，不能删。
 - sideby 用 Grok Bot 现在认的 `--user-data-dir` 打开它，并清掉会盖过它的 `SAND_DATA_ROOT`、`SAND_USER_DATA_DIR`。以后的 Grok Bot 版本可能会改。
 
+## 在哪个浏览器登录过
+
+账号一多，很容易忘记在哪个 Chrome 浏览器用户（Chrome 里的"工作""个人"这类用户）登录过 claude.ai 或 chatgpt.com。sideby 能把它找出来，并直接在那里打开网站。所有数据都只在本机读取，不会发到任何地方。
+
+在面板里，点账号邮箱旁边的 **在浏览器打开**。第一次点，它会说明要读取哪些数据，并提供 **开启** 按钮。开启后，按钮会显示浏览器用户的名字，比如 **Chrome：Work**，点一下就能打开。在终端里：
+
+```sh
+sideby browser --enable        # 显示会读哪些数据；加 --yes 开启
+sideby browser                 # 每个 Chrome 浏览器用户，以及它登录过的账号
+sideby browser open cc008      # 用登录过 cc008 的浏览器用户打开 claude.ai
+sideby browser open grok:main --profile Work
+```
+
+- sideby 读取这三样：每个浏览器用户的名字；claude.ai 和 chatgpt.com 在 Chrome Local Storage 里存的键名（不读内容）；每个 Claude、Codex 登录文件里的账号 ID，只用来比对。它不打开 Cookie、已存密码和钥匙串，也不改 Chrome。
+- "登录过"的意思是：这个浏览器用户的数据里，有以这个账号登录的记录。退出登录后，记录可能还在；一个浏览器用户也可能对应好几个账号。
+- grok.com 没有保存能比对的信息，所以 Grok 账号要你自己选浏览器用户打开。
+- 目前只支持 macOS 上的 Google Chrome。网站改变存数据的方式后，sideby 会找不到，并直接告诉你没找到。
+
 ## 上下文调优
 
 每个宿主在上下文涨过某个阈值后会自动压缩会话。`sideby tune` 用你最近 7 天的本地会话，重放其他阈值，估算哪个最省 token：

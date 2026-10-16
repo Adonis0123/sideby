@@ -40,12 +40,37 @@ const H = 3_600_000
 for (const host of ['claude', 'codex', 'grok', 'pi'])
   await writeFile(join(bin, host), '#!/bin/sh\necho "demo host"\n', { mode: 0o755 })
 
-/** A Codex auth.json whose id_token carries a fake email claim (no real token, no signature). */
-function codexAuth(email: string): string {
+/** A Codex auth.json whose id_token carries fake email and ChatGPT user id claims (no real token, no signature). */
+function codexAuth(email: string, userId: string): string {
   const part = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
+  const claims = { email, 'https://api.openai.com/auth': { chatgpt_user_id: userId } }
   return JSON.stringify({
-    tokens: { id_token: `${part({ alg: 'none' })}.${part({ email })}.demo`, access_token: 'demo' },
+    tokens: { id_token: `${part({ alg: 'none' })}.${part(claims)}.demo`, access_token: 'demo' },
   })
+}
+
+// Fake ids that tie the demo accounts to the fake Chrome browser users below (spec §3.24).
+const CLAUDE_MAIN_ID = '00000000-0000-4000-8000-00000000c1a1'
+const CLAUDE_WORK_ID = '00000000-0000-4000-8000-00000000c1a2'
+const CODEX_MAIN_ID = 'user-DemoMain00000001'
+
+/**
+ * A Chrome Local Storage `.log` holding the given key names (one WriteBatch, values empty), enough for the reader in
+ * core/leveldb-keys.ts. Checksums are left zero; the reader does not check them.
+ */
+function chromeLog(origin: string, names: string[]): Buffer {
+  const varint = (n: number) => {
+    const out: number[] = []
+    for (; n >= 0x80; n >>>= 7) out.push((n & 0x7f) | 0x80)
+    out.push(n)
+    return out
+  }
+  const body: number[] = [1, 0, 0, 0, 0, 0, 0, 0, names.length, 0, 0, 0]
+  for (const n of names) {
+    const key = Buffer.from(`_${origin}\u0000\u0001${n}`, 'latin1')
+    body.push(1, ...varint(key.length), ...key, 1, 1)
+  }
+  return Buffer.from([0, 0, 0, 0, body.length & 0xff, body.length >> 8, 1, ...body])
 }
 
 if (variant !== 'empty') {
@@ -56,7 +81,11 @@ if (variant !== 'empty') {
   await write(
     '.claude.json',
     JSON.stringify({
-      oauthAccount: { emailAddress: 'me@example.com', organizationName: "me@example.com's Organization" },
+      oauthAccount: {
+        emailAddress: 'me@example.com',
+        organizationName: "me@example.com's Organization",
+        accountUuid: CLAUDE_MAIN_ID,
+      },
       mcpServers: { github: { command: 'gh-mcp' } },
     }),
     0o600,
@@ -65,7 +94,7 @@ if (variant !== 'empty') {
   await write('.codex/config.toml', 'model = "gpt-5.5"\n')
   await write('.codex/AGENTS.md', '# My rules\n')
   await mkdir(join(home, '.codex/skills'), { recursive: true })
-  await write('.codex/auth.json', codexAuth('me@example.com'), 0o600)
+  await write('.codex/auth.json', codexAuth('me@example.com', CODEX_MAIN_ID), 0o600)
   await write('.grok/config.toml', 'model = "grok-code"\n')
   await mkdir(join(home, '.grok/skills'), { recursive: true })
   await mkdir(join(home, '.grok/hooks'), { recursive: true })
@@ -91,7 +120,11 @@ if (variant !== 'empty') {
   await write(
     '.claude-work/.claude.json',
     JSON.stringify({
-      oauthAccount: { emailAddress: 'work@example.com', organizationName: 'Example Team' },
+      oauthAccount: {
+        emailAddress: 'work@example.com',
+        organizationName: 'Example Team',
+        accountUuid: CLAUDE_WORK_ID,
+      },
       mcpServers: { github: { command: 'gh-mcp' } },
     }),
     0o600,
@@ -101,7 +134,37 @@ if (variant !== 'empty') {
     'ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic\nANTHROPIC_AUTH_TOKEN=demo\nANTHROPIC_MODEL=deepseek-v4\n',
     0o600,
   )
-  await write('.codex-team/auth.json', codexAuth('team@example.com'), 0o600)
+  await write('.codex-team/auth.json', codexAuth('team@example.com', 'user-DemoTeam00000002'), 0o600)
+
+  // Chrome with three browser users, for "Open in browser" (spec §3.24). Finding sign-ins stays off, as for a new
+  // user; turn it on in the Panel to see Personal and Work matched.
+  const chrome = 'Library/Application Support/Google/Chrome'
+  await write(
+    `${chrome}/Local State`,
+    JSON.stringify({
+      profile: {
+        info_cache: {
+          Default: { name: 'Personal' },
+          'Profile 1': { name: 'Work' },
+          'Profile 2': { name: 'School' },
+        },
+      },
+    }),
+  )
+  const ls = (dir: string) => join(home, chrome, dir, 'Local Storage/leveldb')
+  for (const dir of ['Default', 'Profile 1', 'Profile 2']) await mkdir(ls(dir), { recursive: true })
+  await writeFile(
+    join(ls('Default'), '000003.log'),
+    Buffer.concat([
+      chromeLog('https://claude.ai', [`persisted.ccd-session-presets.${CLAUDE_MAIN_ID}.demo-org`]),
+      chromeLog('https://chatgpt.com', [`cache/${CODEX_MAIN_ID}/demo-workspace/models`]),
+    ]),
+  )
+  await writeFile(
+    join(ls('Profile 1'), '000003.log'),
+    chromeLog('https://claude.ai', [`frame-design-systems:demo-org:${CLAUDE_WORK_ID}`]),
+  )
+  await writeFile(join(ls('Profile 2'), '000003.log'), chromeLog('https://claude.ai', ['theme']))
   // A fixable issue for the health section: Grok refuses linked hooks.
   await rm(join(home, '.grok-lab/hooks'), { recursive: true, force: true })
   await symlink(join(home, '.grok/hooks'), join(home, '.grok-lab/hooks'))

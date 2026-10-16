@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import { aliasesByAccount } from '../core/accounts.ts'
 import { listAppProfiles, openAppProfile, parseProfileRef, removeAppProfile } from '../core/app-profiles.ts'
+import { browserReport, openInBrowser, setBrowserSignIns } from '../core/browser-profiles.ts'
 import { aliasRefs } from '../core/config.ts'
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import type { DoctorReport } from '../core/doctor.ts'
@@ -1304,6 +1305,91 @@ export async function cmdDesktop(a: ParsedArgs, io: Io): Promise<number> {
   if (r.appData) io.out(c.dim(`  its data: ${tildify(r.appData, home)}`))
   for (const f of r.linked) io.out(c.dim(`  linked ${f} to the main account's`))
   for (const n of r.notices) io.err(c.cyan(n))
+  return 0
+}
+
+/** `sideby browser [--enable|--disable] [--yes]` and `sideby browser open <account> [--profile <p>]` (spec §3.24). */
+export async function cmdBrowser(a: ParsedArgs, io: Io): Promise<number> {
+  const [sub, ref, ...extra] = a.positionals
+  const rt = await createRuntime()
+  const home = rt.paths.home
+  if (sub === 'open') {
+    if (!ref || extra.length || a.rest.length)
+      throw new UsageError('usage: sideby browser open <account> [--profile <folder|name>]')
+    const profile = a.flags.get('profile')
+    const r = await openInBrowser(
+      rt,
+      await rt.resolve(ref),
+      typeof profile === 'string' ? profile : undefined,
+    )
+    if (a.flags.has('json')) json(io, r)
+    else io.out(`${c.green('✓')} opened ${r.url} in Chrome as ${c.bold(r.profile.name)} for ${c.bold(r.ref)}`)
+    return 0
+  }
+  if (sub !== undefined || a.rest.length)
+    throw new UsageError('usage: sideby browser [--enable|--disable] [--yes] | sideby browser open <account>')
+  const enable = a.flags.has('enable')
+  if (enable || a.flags.has('disable')) {
+    if (enable && a.flags.has('disable')) throw new UsageError('pass --enable or --disable, not both')
+    const r = await setBrowserSignIns(rt, enable, { apply: a.flags.has('yes') })
+    if (a.flags.has('json')) json(io, r)
+    else if (!r.changed)
+      io.out(`Finding browser sign-ins is already ${enable ? 'on' : 'off'}; nothing to change.`)
+    else if (!r.applied) {
+      if (enable) {
+        io.out('sideby will read, on this computer only (nothing is sent anywhere):')
+        for (const x of r.reads) io.out(`  - ${x}`)
+        io.out('It never opens cookies, saved passwords or the Keychain, and never changes Chrome.')
+      }
+      io.out(`\nChange to ${tildify(r.file, home)}: browser.signIns ${enable ? 'off → on' : 'on → off'}`)
+      io.out(c.cyan(`Apply it with \`sideby browser --${enable ? 'enable' : 'disable'} --yes\`.`))
+    } else io.out(`${c.green('✓')} finding browser sign-ins is ${enable ? 'on' : 'off'}.`)
+    return r.changed && !r.applied ? 10 : 0
+  }
+  const accounts = await rt.accounts()
+  const r = await browserReport(rt, accounts)
+  if (a.flags.has('json')) {
+    json(io, r)
+    return 0
+  }
+  for (const p of r.problems) io.err(c.yellow(p))
+  if (!r.enabled) {
+    io.out('Finding which Chrome browser user signed in to each account is off.')
+    io.out(c.cyan('Turn it on with `sideby browser --enable` (it shows what it reads first).'))
+    io.out(
+      c.dim(
+        'Without it, open a website in a browser user you name: sideby browser open <account> --profile <name>',
+      ),
+    )
+    return 0
+  }
+  if (!r.found) {
+    io.out('Google Chrome has no data on this Mac yet; open it once, then try again.')
+    return 0
+  }
+  const signedIn = new Set(r.profiles.flatMap((p) => p.signIns))
+  const now = new Date()
+  io.out(
+    table(
+      r.profiles.map((p) => [
+        p.name,
+        p.dir,
+        p.signIns.join(', ') || c.dim('-'),
+        p.changedAt ? clock(p.changedAt, now) : '-',
+      ]),
+      ['Browser user', 'Folder', 'Signed in to', 'Changed'],
+    ),
+  )
+  const missing = accounts.filter(
+    (x) => r.families.matched.includes(x.family) && x.kind !== 'api' && !signedIn.has(x.ref),
+  )
+  if (missing.length) io.out(c.dim(`\nNo browser user found for: ${missing.map((x) => x.ref).join(', ')}`))
+  if (r.families.openOnly.length)
+    io.out(
+      c.dim(`${r.families.openOnly.join(', ')}: the website keeps no id to match; open it with --profile.`),
+    )
+  io.out(c.dim('\nRead from Chrome on this computer only; a browser user that signed out may still show.'))
+  io.out(c.dim('Open one: sideby browser open <account> [--profile <name>]'))
   return 0
 }
 

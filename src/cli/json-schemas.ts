@@ -703,6 +703,62 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     },
     { title: 'sideby desktop grok-bot:<name> --remove --json' },
   ),
+  browser: Type.Object(
+    {
+      schemaVersion: Version,
+      enabled: Type.Boolean({
+        description:
+          'config `browser.signIns`. When false nothing of the browser was read and `profiles` is empty.',
+      }),
+      browser: Type.String({ description: 'The browser read, `Google Chrome`.' }),
+      found: Type.Boolean({ description: "Chrome's user data folder exists on this Mac." }),
+      profiles: Type.Array(
+        Type.Object({
+          dir: Type.String({ description: "The browser user's folder, such as `Default` or `Profile 7`." }),
+          name: Type.String({ description: 'The name Chrome shows; it may be an email.' }),
+          signIns: Type.Array(Str, {
+            description:
+              "Refs of the accounts this browser user signed in to on the vendor's website, as far as its local data shows; it may be left over from before a sign-out.",
+          }),
+          changedAt: Type.Optional(
+            Type.String({ description: 'When its Local Storage last changed (ISO 8601).' }),
+          ),
+        }),
+        { description: 'Most recently changed first.' },
+      ),
+      families: Type.Object({
+        matched: Type.Array(Str, { description: 'Families whose accounts can be matched (claude, codex).' }),
+        openOnly: Type.Array(Str, {
+          description: 'Families that can only be opened in a browser user given with --profile (grok).',
+        }),
+      }),
+      problems: Type.Array(Str),
+    },
+    { title: 'sideby browser --json' },
+  ),
+  'browser-switch': Type.Object(
+    {
+      schemaVersion: Version,
+      enabled: Type.Boolean({ description: 'The value asked for.' }),
+      changed: Type.Boolean(),
+      applied: Type.Boolean({
+        description: 'False when only the change was shown; run again with --yes (exit 10).',
+      }),
+      file: Type.String({ description: 'The config file.' }),
+      reads: Type.Array(Str, { description: 'What sideby reads while it is on, all on this computer.' }),
+    },
+    { title: 'sideby browser --enable|--disable --json' },
+  ),
+  'browser-open': Type.Object(
+    {
+      schemaVersion: Version,
+      ref: Str,
+      url: Str,
+      profile: Type.Object({ dir: Str, name: Str }),
+      command: Type.Array(Str, { description: 'The `open` command sideby ran.' }),
+    },
+    { title: 'sideby browser open --json' },
+  ),
   update: Type.Object(
     {
       schemaVersion: Version,
