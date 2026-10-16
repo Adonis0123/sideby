@@ -13,6 +13,7 @@ import { highlights, MARK, MARK_VIEWBOX, type PlacedBuddy } from '../core/brand-
 import { UserError } from '../core/errors.ts'
 import {
   type AppContext,
+  appInstalled,
   desktopEntry,
   installApp,
   launcherScript,
@@ -181,6 +182,59 @@ describe('app install on Linux', () => {
         installApp(ctx(h, 'win32'), { node: NODE, entry: ENTRY, version: '1' }),
         /macOS and Linux/,
       )
+    })
+  })
+})
+
+describe('app install again', () => {
+  for (const platform of ['linux', 'darwin'] as const) {
+    it(`keeps the --url address without --url, until uninstall (${platform})`, async () => {
+      await withFakeHome(async (h) => {
+        const c = ctx(h, platform)
+        assert.equal(await appInstalled(c), false)
+        const first = await installApp(c, {
+          node: NODE,
+          entry: ENTRY,
+          url: 'http://accounts.localhost:17333',
+          version: '1',
+        })
+        assert.equal(await appInstalled(c), true)
+        const launcher =
+          platform === 'darwin'
+            ? h.path('Applications/sideby.app/Contents/MacOS/sideby')
+            : h.path('.local/share/sideby/sideby-launcher')
+        const again = await installApp(c, { node: '/opt/node2/bin/node', entry: ENTRY, version: '2' })
+        assert.deepEqual([again.updated, again.mode, again.url], [true, 'url', first.url])
+        assert.ok(again.hints.some((x) => /Kept the address.*sideby app uninstall/.test(x)))
+        const script = await readFile(launcher, 'utf8')
+        assert.match(script, /^URL='http:\/\/accounts\.localhost:17333\/'$/m)
+        assert.match(script, /^NODE='\/opt\/node2\/bin\/node'$/m, 'the new Node is recorded')
+        // A new --url replaces it; uninstall, then install, drops it.
+        const other = await installApp(c, {
+          node: NODE,
+          entry: ENTRY,
+          url: 'https://tools.test/sideby/',
+          version: '2',
+        })
+        assert.equal(other.url, 'https://tools.test/sideby/')
+        assert.ok(!other.hints.some((x) => /Kept the address/.test(x)))
+        await uninstallApp(c)
+        assert.equal(await appInstalled(c), false)
+        const fresh = await installApp(c, { node: NODE, entry: ENTRY, version: '2' })
+        assert.deepEqual([fresh.updated, fresh.mode, fresh.url], [false, 'panel', undefined])
+        assert.match(await readFile(launcher, 'utf8'), /^URL=''$/m)
+      })
+    })
+  }
+  it('ignores a recorded address that is not http(s)', async () => {
+    await withFakeHome(async (h) => {
+      const c = ctx(h, 'linux')
+      await installApp(c, { node: NODE, entry: ENTRY, version: '1' })
+      const launcher = h.path('.local/share/sideby/sideby-launcher')
+      const text = await readFile(launcher, 'utf8')
+      await writeFile(launcher, text.replace(/^URL=''$/m, "URL='file:///etc/passwd'"))
+      const again = await installApp(c, { node: NODE, entry: ENTRY, version: '1' })
+      assert.deepEqual([again.mode, again.url], ['panel', undefined])
     })
   })
 })

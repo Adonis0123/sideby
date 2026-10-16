@@ -102,6 +102,10 @@
       "type": "boolean",
       "description": "A background Panel was running and starts again with the new version."
     },
+    "refreshedApp": {
+      "type": "boolean",
+      "description": "The desktop app (`sideby app install`) was installed and was written again by the new version."
+    },
     "skill": {
       "type": "string",
       "description": "The command that updates the sideby skill; sideby never runs it."

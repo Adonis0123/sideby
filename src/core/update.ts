@@ -66,6 +66,10 @@ export interface UpdateDeps {
   ) => Promise<{ code: number; output: string }>
   /** Starts `sideby ui --background --no-open --port <port>` from the newly installed code, detached; false when it could not start. */
   restartPanel: (env: Env, port: number) => Promise<boolean>
+  /** Whether `sideby app install` put a desktop app in this home (its files carry the app marker). */
+  appInstalled: (home: string, env: Env) => Promise<boolean>
+  /** Runs `sideby app install --json` from the newly installed code and waits; false when it failed. */
+  refreshApp: (env: Env) => Promise<boolean>
 }
 
 /** The folder of the sideby package this module belongs to: two levels above src/, three above dist/src/. */
@@ -131,6 +135,21 @@ const realDeps: UpdateDeps = {
         resolve(true)
       })
       child.once('error', () => resolve(false))
+    }),
+  appInstalled: async (home, env) => {
+    const { appInstalled } = await import('../desktop/app.ts')
+    return appInstalled({ home, env, platform: process.platform })
+  },
+  refreshApp: (env) =>
+    new Promise((resolve) => {
+      // By name, like restartPanel: the new code records its own Node and entry and draws the current mark.
+      const child = spawn('sideby', ['app', 'install', '--json'], {
+        env: env as NodeJS.ProcessEnv,
+        stdio: 'ignore',
+        timeout: 120_000,
+      })
+      child.once('error', () => resolve(false))
+      child.once('close', (code) => resolve(code === 0))
     }),
 }
 
@@ -616,12 +635,15 @@ export interface UpdateResult {
   message: string
   /** A background Panel was running and is starting again from the new code. */
   restartedPanel: boolean
+  /** The desktop app was installed and `sideby app install` ran again from the new code. */
+  refreshedApp: boolean
   /** Another Update held the lock; nothing ran. */
   busy?: boolean
 }
 
 /**
- * Runs the Update the plan names, then starts a running background Panel again from the new code. The caller has
+ * Runs the Update the plan names, then starts a running background Panel again from the new code and, when the
+ * desktop app is installed, runs `sideby app install` again from the new code. The caller has
  * shown the plan and got a confirmation (or this is an Auto Update). One Update runs at a time on this machine (the
  * CLI, a Panel and an Auto Update share the lock). `panelPort` gives the port of the background Panel to restart, or
  * null when none runs. A successful Update is recorded as said, so no notice for it follows.
@@ -638,6 +660,7 @@ export async function applyUpdate(
     output: '',
     message,
     restartedPanel: false,
+    refreshedApp: false,
     ...extra,
   })
   if (!cmd.run)
@@ -667,12 +690,17 @@ export async function applyUpdate(
     }).catch(() => {})
     const port = opts.panelPort ? await opts.panelPort().catch(() => null) : null
     const restarted = port !== null && (await d.restartPanel(env, port).catch(() => false))
+    // The desktop app records the Node and entry it starts and carries the icon of the version that wrote it, so
+    // the new code writes it again. Only where one is installed; a failure here never fails the Update.
+    const installed = await d.appInstalled(paths.home, env).catch(() => false)
+    const refreshed = installed && (await d.refreshApp(env).catch(() => false))
     return {
       ok: true,
       code: 0,
       output: r.output,
       message: `updated sideby from ${plan.current} to ${plan.latest}`,
       restartedPanel: restarted,
+      refreshedApp: refreshed,
     }
   } finally {
     await release().catch(() => {})

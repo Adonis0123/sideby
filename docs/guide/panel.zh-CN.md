@@ -23,7 +23,7 @@ sideby ui --stop         # 停掉后台面板
 
 双击应用就能打开面板。没有面板在运行时，它在后台启动一个（`sideby ui --background`）；已经有了就直接复用，然后打开浏览器。关掉标签页后，后台面板继续运行，日志写到 `${XDG_STATE_HOME:-~/.local/state}/sideby/panel.log`。从 Finder 或桌面菜单启动的程序只拿到很短的 PATH，所以后台面板会向你的登录 shell（`$SHELL -ilc`）要 PATH，好找到 `~/.local/bin` 这类目录里的宿主。
 
-应用运行的是安装时那份 Node 和 sideby：升级其中任何一个后，再跑一次 `sideby app install`，就地更新应用。如果你自己的页面嵌入了面板（见下文），`sideby app install --url http://accounts.localhost:17333/` 让应用改为打开这个地址。安装和卸载只动 `sideby app install` 自己创建的文件。这个应用是本机未签名的启动脚本，不适合拷到别的机器上用。
+应用运行的是安装时那份 Node 和 sideby。`sideby update`（以及面板的「更新」按钮和自动更新）会用新版本重新安装应用，图标也一起换新。升级了 Node，或用别的方式装了 sideby，就自己再跑一次 `sideby app install`。如果你自己的页面嵌入了面板（见下文），`sideby app install --url http://accounts.localhost:17333/` 让应用改为打开这个地址；再次安装会沿用这个地址。要让应用改回启动面板，先跑 `sideby app uninstall`，再跑 `sideby app install`。安装和卸载只动 `sideby app install` 自己创建的文件。这个应用是本机未签名的启动脚本，不适合拷到别的机器上用。
 
 ## 嵌入面板
 

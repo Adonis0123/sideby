@@ -23,7 +23,7 @@ sideby ui --stop         # stop the background panel
 
 Double-click the app to open the panel. It starts the panel in the background when none is running (`sideby ui --background`), reuses it when one is, and opens your browser. The background panel keeps running after you close the tab and logs to `${XDG_STATE_HOME:-~/.local/state}/sideby/panel.log`. Apps started from Finder or a desktop menu get a minimal PATH, so the background panel asks your login shell (`$SHELL -ilc`) for its PATH to find hosts in places like `~/.local/bin`.
 
-The app runs the Node and sideby it was installed with: after upgrading either, run `sideby app install` again to update it in place. If your own page embeds the panel (see below), `sideby app install --url http://accounts.localhost:17333/` makes the app open that address instead. Install and uninstall only touch files that `sideby app install` created. The app is a local, unsigned launcher script; it is not meant to be copied to other machines.
+The app runs the Node and sideby it was installed with. `sideby update` (and the panel's Update button, and Auto Update) installs the app again from the new version, with its new icon. Run `sideby app install` yourself after upgrading Node or installing sideby another way. If your own page embeds the panel (see below), `sideby app install --url http://accounts.localhost:17333/` makes the app open that address instead; installing again keeps that address. To make the app start the panel again, run `sideby app uninstall`, then `sideby app install`. Install and uninstall only touch files that `sideby app install` created. The app is a local, unsigned launcher script; it is not meant to be copied to other machines.
 
 ## Embed the panel
 

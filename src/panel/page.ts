@@ -1,13 +1,17 @@
 // The Panel page: one self-contained HTML document with inline CSS and JS, no external resources. The parts live in
 // sibling modules: page-styles.ts (tokens and CSS), page-script.ts (behaviour, with page-logic.ts helpers) and
 // i18n.ts (English and Chinese text); this module assembles them under the CSP nonce.
-import { MARK_SVG } from '../core/brand-mark.ts'
+import { createHash } from 'node:crypto'
+import { FAVICON_SVG, MARK_SVG } from '../core/brand-mark.ts'
 import { ALIAS_NAME, RESERVED_ALIASES } from '../core/config.ts'
 import { QUOTA_FAIL_PERCENT, QUOTA_WARN_PERCENT, USAGE_DAYS } from '../core/quota-levels.ts'
 import { MESSAGES } from './i18n.ts'
 import { PAGE_SCRIPT } from './page-script.ts'
 import { pageStyles } from './page-styles.ts'
 import { type ResolvedTheme, resolveTheme } from './theme.ts'
+
+/** Browsers keep a favicon past `no-cache`; a link that changes with the mark makes them fetch the new one. */
+export const FAVICON_VERSION = createHash('sha256').update(FAVICON_SVG).digest('hex').slice(0, 10)
 
 export { pageStyles }
 
@@ -74,7 +78,7 @@ export function renderPage(opts: PageOptions): string {
 <meta name="color-scheme" content="${scheme}">
 <meta name="referrer" content="no-referrer">
 <title>sideby</title>
-<link rel="icon" type="image/svg+xml" href="${attr(opts.basePath)}/favicon.svg">
+<link rel="icon" type="image/svg+xml" href="${attr(opts.basePath)}/favicon.svg?v=${FAVICON_VERSION}">
 <style${nonce}>${pageStyles(theme)}</style>
 </head>
 <body${theme.header === 'bar' ? ' class="header-bar"' : ''}>

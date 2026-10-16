@@ -99,7 +99,7 @@ export function launcherScript(s: LauncherSpec): string {
       : `command -v notify-send >/dev/null 2>&1 && notify-send "sideby could not start" "Run sideby app install again in a terminal. Details: $LOG"`
   const lines = [
     '#!/bin/sh',
-    `# ${APP_MARKER}: written by \`sideby app install\`. Run that again after upgrading sideby or Node.`,
+    `# ${APP_MARKER}: written by \`sideby app install\` (\`sideby update\` runs it again). Run it yourself after upgrading Node.`,
     `NODE=${shq(s.node)}`,
     `ENTRY=${shq(s.entry)}`,
     `URL=${shq(s.url ?? '')}`,
@@ -266,6 +266,36 @@ async function ownership(entry: string): Promise<Ownership> {
   return markerTest(entry)(data) ? { state: 'ours' } : foreign(entry, NOT_OURS)
 }
 
+/** The launcher script inside what install writes: the bundle's executable on macOS, the launcher file on Linux. */
+function launcherPath(l: ReturnType<typeof layout>, platform: AppPlatform): string {
+  return platform === 'darwin' ? join(l.primary, 'Contents', 'MacOS', APP_NAME) : l.linux!.launcher!
+}
+
+/** The `URL='…'` an earlier install wrote into the launcher, when it is a valid http(s) address; never follows a link. */
+async function recordedUrl(launcher: string): Promise<string | undefined> {
+  let text: string
+  try {
+    text = (await readNoFollow(launcher)).toString('utf8')
+  } catch {
+    return undefined
+  }
+  if (text.split('\n', 2)[1]?.startsWith(`# ${APP_MARKER}: `) !== true) return undefined
+  const m = /^URL='((?:[^']|'\\'')*)'$/m.exec(text)
+  const value = m?.[1]?.replace(/'\\''/g, "'")
+  if (!value) return undefined
+  try {
+    return checkAppUrl(value)
+  } catch {
+    return undefined
+  }
+}
+
+/** Whether a sideby desktop app is installed for this home: its main file exists and carries APP_MARKER. */
+export async function appInstalled(ctx: AppContext): Promise<boolean> {
+  if (ctx.platform !== 'darwin' && ctx.platform !== 'linux') return false
+  return (await ownership(layout(ctx, ctx.platform).primary)).state === 'ours'
+}
+
 /** Refuses to replace anything at `entry` that `sideby app install` did not write; true when it is ours. */
 async function assertOwned(entry: string, verb: string): Promise<boolean> {
   const o = await ownership(entry)
@@ -279,10 +309,12 @@ export async function installApp(ctx: AppContext, opts: InstallOptions): Promise
   const run = ctx.run ?? defaultRunner
   if (!isAbsolute(opts.node) || !isAbsolute(opts.entry))
     throw new UserError('node and the sideby entry must be absolute paths')
-  const url = opts.url === undefined ? undefined : checkAppUrl(opts.url)
   const l = layout(ctx, platform)
   let updated = false
   for (const e of l.entries) if (await assertOwned(e, 'install')) updated = true
+  // Without --url, a reinstall (by hand or after `sideby update`) keeps the address an earlier --url recorded.
+  const kept = opts.url === undefined && updated ? await recordedUrl(launcherPath(l, platform)) : undefined
+  const url = opts.url === undefined ? kept : checkAppUrl(opts.url)
   const xdg: LauncherSpec['xdg'] = {}
   for (const k of ['XDG_CONFIG_HOME', 'XDG_STATE_HOME'] as const) {
     const v = ctx.env[k]
@@ -357,10 +389,14 @@ export async function installApp(ctx: AppContext, opts: InstallOptions): Promise
     hints.push('Find "sideby" in your application menu.')
   }
   if (url) hints.push(`The app opens ${url}.`)
+  if (kept)
+    hints.push(
+      'Kept the address from the earlier install; to start the panel instead, run `sideby app uninstall`, then `sideby app install`.',
+    )
   else
     hints.push(
       'The app starts the panel in the background and opens it; stop the panel with `sideby ui --stop`.',
-      'Run `sideby app install` again after upgrading sideby or Node, so the app starts the new version.',
+      '`sideby update` refreshes the app; run `sideby app install` again after upgrading Node or installing sideby another way.',
     )
   if (/[/\\]_npx[/\\]/.test(opts.entry))
     hints.push(

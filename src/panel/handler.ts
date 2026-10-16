@@ -729,7 +729,13 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           panelPort: () => backgroundPanelPort(rt.paths),
         })
         if (!r.ok) throw new UserError(r.message)
-        return { ...shown, updated: true, message: r.message, restartedPanel: r.restartedPanel }
+        return {
+          ...shown,
+          updated: true,
+          message: r.message,
+          restartedPanel: r.restartedPanel,
+          refreshedApp: r.refreshedApp,
+        }
       },
     },
     // The Auto Update switch: config `update.auto`, shown as a diff first like every config change.

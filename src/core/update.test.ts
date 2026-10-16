@@ -56,10 +56,11 @@ function registry(latest: string | Error) {
 interface Machine {
   execs: { file: string; args: readonly string[] }[]
   restarts: number[]
+  appRefreshes: number
 }
 
 function machine(h: FakeHome, over: Partial<UpdateDeps> & { latest?: string | Error } = {}): Machine {
-  const m: Machine = { execs: [], restarts: [] }
+  const m: Machine = { execs: [], restarts: [], appRefreshes: 0 }
   const reg = registry(over.latest ?? NEXT_MINOR)
   unbind = bindUpdateDeps({
     fetch: reg.fetch,
@@ -72,6 +73,11 @@ function machine(h: FakeHome, over: Partial<UpdateDeps> & { latest?: string | Er
     },
     restartPanel: async (_env, port) => {
       m.restarts.push(port)
+      return true
+    },
+    appInstalled: async () => false,
+    refreshApp: async () => {
+      m.appRefreshes++
       return true
     },
     ...over,
@@ -234,16 +240,56 @@ describe('Update and Auto Update', () => {
       assert.equal(r.ok, true)
       assert.equal(m.execs[0]?.file, 'npm')
       assert.deepEqual(m.restarts, [17420])
+      assert.equal(r.restartedPanel, true)
+      assert.deepEqual(
+        [r.refreshedApp, m.appRefreshes],
+        [false, 0],
+        'no desktop app installed: nothing to refresh',
+      )
+    })
+  })
+  it('writes an installed desktop app again from the new code', async () => {
+    await withFakeHome(async (h) => {
+      const homes: string[] = []
+      const m = machine(h, {
+        appInstalled: async (home) => {
+          homes.push(home)
+          return true
+        },
+      })
+      const plan = planFrom(await installMethod(h.env), CURRENT, NEXT_MINOR)
+      const r = await applyUpdate(resolvePaths(h.env), plan, h.env)
+      assert.equal(r.ok, true)
+      assert.deepEqual([r.refreshedApp, m.appRefreshes, homes], [true, 1, [h.home]])
+    })
+  })
+  it('keeps a successful Update when refreshing the desktop app fails', async () => {
+    await withFakeHome(async (h) => {
+      for (const refreshApp of [
+        async () => false,
+        async () => Promise.reject(new Error('spawn sideby ENOENT')),
+      ]) {
+        unbind?.()
+        machine(h, { appInstalled: async () => true, refreshApp })
+        const plan = planFrom(await installMethod(h.env), CURRENT, NEXT_MINOR)
+        const r = await applyUpdate(resolvePaths(h.env), plan, h.env)
+        assert.deepEqual([r.ok, r.code, r.refreshedApp], [true, 0, false])
+        assert.match(r.message, /^updated sideby from/)
+      }
     })
   })
   it('reports a failed install and restarts nothing', async () => {
     await withFakeHome(async (h) => {
-      const m = machine(h, { exec: async () => ({ code: 243, output: 'EACCES' }) })
+      const m = machine(h, {
+        exec: async () => ({ code: 243, output: 'EACCES' }),
+        appInstalled: async () => true,
+      })
       const plan = planFrom(await installMethod(h.env), CURRENT, NEXT_MINOR)
       const r = await applyUpdate(resolvePaths(h.env), plan, h.env, { panelPort: async () => 17420 })
       assert.equal(r.ok, false)
       assert.match(r.message, /exit 243/)
       assert.deepEqual(m.restarts, [])
+      assert.deepEqual([r.refreshedApp, m.appRefreshes], [false, 0])
     })
   })
   it('names what blocks an Auto Update', async () => {

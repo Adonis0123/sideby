@@ -1,5 +1,6 @@
 // Panel: spec §5 items 9 and 10 (security rules, per-card errors) and both mounting modes.
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { chmod, readFile, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -7,6 +8,7 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { asBuiltin, demoFamily, demoPlugin, seedDemoMain } from '../../testing/demo.ts'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
+import { FAVICON_SVG } from '../core/brand-mark.ts'
 import { packageVersion } from '../core/version.ts'
 import type { Runtime } from '../runtime.ts'
 import { createRuntime } from '../runtime.ts'
@@ -1581,6 +1583,8 @@ describe('panel updates (spec §3.23, ADR-0021)', () => {
           execs.push([file, ...args])
           return { code: 0, output: '' }
         },
+        appInstalled: async () => true,
+        refreshApp: async () => true,
       })
       const { SIDEBY_NO_UPDATE_NOTIFIER: _off, ...env } = h.env
       const make = (updates?: boolean) => (port: number) =>
@@ -1596,7 +1600,15 @@ describe('panel updates (spec §3.23, ADR-0021)', () => {
         assert.equal(icon.status, 200)
         assert.match(icon.text, /^<svg xmlns=.*#f2b35e.*#3f8fc4/s)
         const page = await request(on.port, 'GET', '/', { host: `127.0.0.1:${on.port}` })
-        assert.match(page.text, /<link rel="icon" type="image\/svg\+xml" href="\/favicon\.svg">/)
+        // The link changes with the mark, so a browser fetches a new favicon after an Update changes it.
+        const v = createHash('sha256').update(FAVICON_SVG).digest('hex').slice(0, 10)
+        assert.ok(
+          page.text.includes(`<link rel="icon" type="image/svg+xml" href="/favicon.svg?v=${v}">`),
+          'favicon link carries the mark version',
+        )
+        const fav = await request(on.port, 'GET', `/favicon.svg?v=${v}`, { host: `127.0.0.1:${on.port}` })
+        assert.equal(fav.status, 200)
+        assert.equal(fav.text, FAVICON_SVG)
         // The running version stays in sight in the header and opens the dialog with "Check for updates" (spec §3.23).
         assert.match(
           page.text,
@@ -1640,6 +1652,7 @@ describe('panel updates (spec §3.23, ADR-0021)', () => {
         assert.equal(execs.length, 0)
         const ran = await post(on.port, '/api/update', { confirm: true, version: '99.0.0' }, good)
         assert.equal(ran.body.updated, true)
+        assert.equal(ran.body.refreshedApp, true)
         assert.equal(execs.length, 1)
         // The registry now names no newer version: a confirmation runs nothing and says so.
         unbindNone = bindUpdateDeps({

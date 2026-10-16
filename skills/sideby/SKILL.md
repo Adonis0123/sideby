@@ -67,7 +67,7 @@ For someone who would rather double-click than use a terminal, `sideby app insta
 
 ## Updating sideby
 
-To update sideby, run `sideby update --json` yourself: it shows `current`, `latest`, the `command` and whether sideby can run it (`canRun`; exit 10). Ask the user, then run `sideby update --yes --json`. When `canRun` is false (npx, a project dependency, a source checkout, a global folder they cannot write), hand them the `command` as one line instead. Updating restarts a background panel by itself; a `sideby ui` in a terminal and running sessions keep the old version until restarted. sideby checks the registry once a day on its own and turns that off with `NO_UPDATE_NOTIFIER=1` or config `"update": { "check": false }`; `"update": { "auto": true }` (off by default) installs new non-major versions by itself. Never turn Auto Update on without the user asking.
+To update sideby, run `sideby update --json` yourself: it shows `current`, `latest`, the `command` and whether sideby can run it (`canRun`; exit 10). Ask the user, then run `sideby update --yes --json`. When `canRun` is false (npx, a project dependency, a source checkout, a global folder they cannot write), hand them the `command` as one line instead. Updating restarts a background panel by itself and reinstalls an installed panel app (`refreshedApp`), so do not run `app install` again after an update; a `sideby ui` in a terminal and running sessions keep the old version until restarted. sideby checks the registry once a day on its own and turns that off with `NO_UPDATE_NOTIFIER=1` or config `"update": { "check": false }`; `"update": { "auto": true }` (off by default) installs new non-major versions by itself. Never turn Auto Update on without the user asking.
 
 ## Keeping this skill current
 

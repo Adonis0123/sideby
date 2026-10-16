@@ -729,6 +729,12 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
           description: 'A background Panel was running and starts again with the new version.',
         }),
       ),
+      refreshedApp: Type.Optional(
+        Type.Boolean({
+          description:
+            'The desktop app (`sideby app install`) was installed and was written again by the new version.',
+        }),
+      ),
       skill: Type.Optional(
         Type.String({ description: 'The command that updates the sideby skill; sideby never runs it.' }),
       ),

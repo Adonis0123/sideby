@@ -102,7 +102,7 @@ sideby 每天向 npm registry 查一次自己的最新版本（一次 `GET https
 | Volta（`volta install sideby`） | 不执行：打印 `volta install sideby@<版本>` |
 | `npx sideby`、项目依赖、源码目录，或你没有写权限的全局目录 | 不执行：sideby 打印命令，由你自己运行 |
 
-更新后，后台面板（`sideby ui --background`）会自己重启，打开的页面自动刷新。终端里运行的 `sideby ui` 和已经在跑的会话要重启后才用新版本。装了 sideby skill 的话也更新一下：`npx skills add Adonis0123/sideby -g`。
+更新后，后台面板（`sideby ui --background`）会自己重启，打开的页面自动刷新。装了面板应用（`sideby app install`）的话，会用新版本重新安装，图标也一起换新。终端里运行的 `sideby ui` 和已经在跑的会话要重启后才用新版本。装了 sideby skill 的话也更新一下：`npx skills add Adonis0123/sideby -g`。
 
 | 设置 | 含义 |
 |---|---|

@@ -1188,6 +1188,7 @@ export async function cmdUpdate(a: ParsedArgs, io: Io): Promise<number> {
       updated: r.ok,
       message: r.message,
       restartedPanel: r.restartedPanel,
+      refreshedApp: r.refreshedApp,
       skill: SKILL_INSTALL,
       ...(r.ok ? {} : { output: r.output }),
     })
@@ -1200,6 +1201,7 @@ export async function cmdUpdate(a: ParsedArgs, io: Io): Promise<number> {
   io.out(`${c.green('✓')} ${r.message}.`)
   if (r.restartedPanel)
     io.out('  The background panel is restarting with the new version; open pages reload by themselves.')
+  if (r.refreshedApp) io.out('  The desktop app now starts the new version and shows its icon.')
   io.out(
     '  A `sideby ui` running in a terminal and sessions already running keep the old version until you restart them.',
   )
