@@ -90,7 +90,7 @@ const MAIN = String.raw`
   function loadPrefs() {
     let raw = {}
     try { raw = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') || {} } catch {}
-    const p = { view: 'list', sort: 'pressure', quota: 'used', theme: 'system', lang: '', family: '', collapsed: {}, rows: {}, hideEmail: false }
+    const p = { view: 'list', sort: 'pressure', quota: 'used', theme: 'system', lang: '', family: '', collapsed: {}, open: {}, hideEmail: false }
     for (const k of Object.keys(CHOICES)) if (CHOICES[k].includes(raw[k])) p[k] = raw[k]
     if (raw.hideEmail === true) p.hideEmail = true
     if (typeof raw.ahHintAt === 'number') p.ahHintAt = raw.ahHintAt
@@ -98,8 +98,8 @@ const MAIN = String.raw`
     if (typeof raw.family === 'string') p.family = raw.family
     if (raw.collapsed && typeof raw.collapsed === 'object')
       for (const k of Object.keys(raw.collapsed)) if (raw.collapsed[k] === true) p.collapsed[k] = true
-    if (raw.rows && typeof raw.rows === 'object')
-      for (const k of Object.keys(raw.rows)) if (raw.rows[k] === true) p.rows[k] = true
+    if (raw.open && typeof raw.open === 'object')
+      for (const k of Object.keys(raw.open)) if (raw.open[k] === true) p.open[k] = true
     return p
   }
   function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)) } catch {} }
@@ -283,8 +283,10 @@ const MAIN = String.raw`
     bot: 'M6 9h12a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2zM12 5v4M9.5 13.5v1M14.5 13.5v1',
     grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
     list: 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01',
+    sliders: 'M4 7h10M18 7h2M4 17h4M12 17h8M16 5v4M10 15v4',
     clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2',
     mail: 'M3 6h18v12H3zM3 7l9 6 9-6',
+    globe: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c2.5 2.5 3.8 5.5 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.5-3.8-9S9.5 5.5 12 3z',
     eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
     eyeOff: 'M3 3l18 18M10.6 5.1A10.8 10.8 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.2M6.6 6.6A17.4 17.4 0 0 0 2 12s3.5 7 10 7a10.4 10.4 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2',
   }
@@ -583,12 +585,12 @@ const MAIN = String.raw`
     if (first) first.focus()
   }
   // A popover: a small panel of text and buttons, lighter than a dialog. A second click on its anchor closes it.
-  function openPopover(anchor, kind, label, render) {
+  function openPopover(anchor, kind, label, render, align = 'start') {
     if (menu.anchor === anchor) { closeMenu(true); return }
     const el = h('div', { class: 'menu popover', role: 'dialog', 'aria-label': label })
     el.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeMenu(true) } })
     setKids(el, render())
-    openFloat(anchor, el, kind, 'start')
+    openFloat(anchor, el, kind, align)
     menu.render = render
     const first = el.querySelector('button:not(:disabled), a[href]')
     if (first) first.focus()
@@ -803,34 +805,30 @@ const MAIN = String.raw`
       CHOICES.sort.map((v) => h('option', { value: v }, t('sort.' + v))))
     tb.sort.value = prefs.sort
     tb.sort.addEventListener('change', () => { prefs.sort = tb.sort.value; savePrefs(); renderAccounts() })
-    const quota = seg(t('tb.quota'), [['used', t('tb.used')], ['left', t('tb.left')]], prefs.quota, (v) => { prefs.quota = v; savePrefs(); renderAccounts() })
-    const view = seg(t('tb.view'), [['list', icon('list'), t('tb.list')], ['cards', icon('grid'), t('tb.cards')]], prefs.view, (v) => { prefs.view = v; savePrefs(); ui.fade = true; renderAccounts() })
-    tb.hideEmail = h('button', { class: 'icon-btn tb-icon', type: 'button', 'aria-pressed': String(prefs.hideEmail), onclick: () => {
-      prefs.hideEmail = !prefs.hideEmail
-      savePrefs()
-      renderEmailToggle()
-      renderAccounts()
-    } })
+    const display = h('button', { class: 'btn tb-display', type: 'button', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', title: t('tb.display') }, icon('sliders'), h('span', null, t('tb.display')))
+    display.addEventListener('click', () => openPopover(display, 'display', t('tb.display'), displayPanel, 'end'))
     const create = BOOT.readOnly ? null : h('button', { class: 'btn btn-primary', type: 'button', 'aria-label': t('tb.new'), onclick: () => openCreate(null) }, icon('plus'), h('span', null, t('tb.new')))
     setKids($('toolbar'), [
       h('label', { class: 'search' }, icon('search', 'search-ic'), tb.search, h('kbd', { class: 'kbd', 'aria-hidden': 'true' }, '/')),
-      h('div', { class: 'tools' }, tb.family, tb.sort, quota, view, tb.hideEmail),
+      h('div', { class: 'tools' }, tb.family, tb.sort, display),
       create,
     ])
     renderFamilyFilter()
-    renderEmailToggle()
     if (hadFocus) tb.search.focus()
   }
-  // "Hide emails": shown once any account has one; its icon and label say what a click does.
-  function renderEmailToggle() {
-    const b = tb.hideEmail
-    if (!b) return
-    b.hidden = !(S.state && S.state.accounts.some((a) => a.identity && a.identity.email))
-    b.setAttribute('aria-pressed', String(prefs.hideEmail))
-    const label = t(prefs.hideEmail ? 'tb.showEmails' : 'tb.hideEmails')
-    b.setAttribute('aria-label', label)
-    b.title = label
-    setKids(b, icon(prefs.hideEmail ? 'eyeOff' : 'eye'))
+  // "Display": the view settings people change rarely, one popover instead of three buttons in the toolbar.
+  // "Hide emails" shows once any account has one.
+  function displayPanel() {
+    const redo = () => { savePrefs(); renderAccounts(); refreshPopover('display') }
+    const emails = S.state && S.state.accounts.some((a) => a.identity && a.identity.email)
+    return h('div', { class: 'display-panel' },
+      h('div', { class: 'dp-row' }, h('span', { class: 'dp-label' }, t('tb.quota')),
+        seg(t('tb.quota'), [['used', t('tb.used')], ['left', t('tb.left')]], prefs.quota, (v) => { prefs.quota = v; redo() })),
+      h('div', { class: 'dp-row' }, h('span', { class: 'dp-label' }, t('tb.view')),
+        seg(t('tb.view'), [['list', icon('list'), t('tb.list')], ['cards', icon('grid'), t('tb.cards')]], prefs.view, (v) => { prefs.view = v; ui.fade = true; redo() })),
+      emails ? h('label', { class: 'dp-row dp-check' },
+        h('input', { type: 'checkbox', checked: prefs.hideEmail, onchange: (e) => { prefs.hideEmail = e.target.checked; redo() } }),
+        h('span', null, t('tb.hideEmails'))) : null)
   }
   function renderFamilyFilter() {
     if (!tb.family) return
@@ -945,17 +943,24 @@ const MAIN = String.raw`
     return h('button', { class: 'chip chip-btn health' + (lvl ? ' chip-' + lvl : ''), type: 'button', title: t('health.filterHint'), 'aria-label': t('health.chipLabel', { ref: a.ref, status: text }), onclick: () => filterHealth(a.ref) },
       h('span', { class: 'dot' + (lvl ? ' dot-' + lvl : ''), 'aria-hidden': 'true' }), text)
   }
+  // A dot after the name when the account needs a look that no tag shows: a fuller quota window or a Health
+  // finding. Its reason is on hover; the details say more.
+  function attentionDot(a) {
+    const r = reasonsOf(a, Date.now())
+    const lvl = r.includes('health-fail') ? 'fail' : r.includes('quota-high') || r.includes('health-warn') ? 'warn' : ''
+    if (!lvl) return null
+    const why = whyOf(a, Date.now())
+    return h('span', { class: 'dot dot-' + lvl + ' att-dot', title: why, role: 'img', 'aria-label': why })
+  }
   function nameLine(a) {
     return h('div', { class: 'ident-name' },
       h('span', { class: 'name', title: a.name }, a.name),
+      attentionDot(a),
       (a.aliases || []).slice(0, 3).map((x) => {
         const args = aliasArgsOf(a, x)
         return h('span', { class: 'tag tag-alias', title: args ? t('acct.aliasArgs', { args: args.join(' ') }) : t('acct.alias') }, x)
       }),
       a.kind === 'api' ? h('span', { class: 'tag tag-warn', title: t('tip.api.body') }, t('acct.api')) : null,
-      a.sameLogin && a.sameLogin.length
-        ? h('span', { class: 'tag', title: t('acct.sameLoginHint', { names: a.sameLogin.map(refName).join(', ') }) }, t('acct.sameLogin', { names: a.sameLogin.map(refName).join(', ') }))
-        : null,
       isNext(a)
         ? h('button', { class: 'tag tag-ok tag-btn', type: 'button', title: t('acct.nextHint', { family: a.family }), 'aria-label': t('acct.nextLabel', { ref: a.ref, family: a.family }), onclick: () => copyText('sideby next ' + a.family) }, t('acct.next'))
         : null,
@@ -969,10 +974,10 @@ const MAIN = String.raw`
   // Who the account is signed in as, under its name; masked while "Hide emails" is on.
   function emailLine(a) {
     const id = a.identity
-    if (!id || (!id.email && !id.org)) return null
+    if (!id || (!id.email && !browserButton(a))) return null
     const email = id.email ? emailText(id.email) : ''
     return h('div', { class: 'ident-email', title: [email, id.org].filter(Boolean).join(' · ') },
-      dots([browserButton(a), email ? h('button', { class: 'email email-btn', type: 'button', title: t('menu.copyEmail'), 'aria-label': t('menu.copyEmail') + ' ' + email, onclick: (e) => { e.stopPropagation(); copyText(id.email) } }, email) : null, id.org ? h('span', { class: 'org' }, id.org) : null]))
+      dots([email ? h('button', { class: 'email email-btn', type: 'button', title: t('menu.copyEmail'), 'aria-label': t('menu.copyEmail') + ' ' + email, onclick: (e) => { e.stopPropagation(); copyText(id.email) } }, email) : null, browserButton(a)]))
   }
   function subLine(a) {
     const plan = a.quota && a.quota.status === 'ok' && a.quota.plan
@@ -981,19 +986,7 @@ const MAIN = String.raw`
       a.kind === 'api' && a.model ? h('span', { class: 'mono', title: t('acct.model') }, a.model) : null,
       a.kind !== 'api' ? modelChip(a) : null,
       a.kind !== 'api' && plan ? h('span', { class: 'plan' }, plan) : null,
-      desktopButton(a),
-      emailLine(a) ? null : browserButton(a),
     ]))
-  }
-  // The family's desktop app as this account (spec §3.20): only where it is installed, never for API accounts or a
-  // read-only panel. A running window shows as "open"; the click brings it to the front instead of a second one.
-  function desktopButton(a) {
-    const d = a.desktopApp
-    if (!d || !d.installed || a.kind === 'api' || BOOT.readOnly) return null
-    const busy = ui.desktopRef === a.ref
-    const label = busy ? t('desk.opening', { app: d.app }) : t(d.running ? 'desk.show' : 'desk.open', { app: d.app })
-    return h('button', { class: 'tag tag-btn' + (d.running ? ' tag-ok' : ''), type: 'button', disabled: busy, title: t(d.running ? 'desk.showHint' : 'desk.openHint', { app: d.app, ref: a.ref }), 'aria-label': label + ' (' + a.ref + ')', onclick: (e) => { e.stopPropagation(); openDesktop(a) } },
-      d.running ? h('span', { class: 'dot dot-ok', 'aria-hidden': 'true' }) : null, label)
   }
   async function openDesktop(a) {
     if (ui.desktopRef) return
@@ -1033,9 +1026,10 @@ const MAIN = String.raw`
     if (!info) return null
     const busy = ui.browserRef === a.ref
     const first = info.found[0]
-    const label = first ? t(info.found.length > 1 ? 'br.signedInMore' : 'br.signedIn', { name: profileLabel(first), n: info.found.length }) : t('br.open')
-    return h('button', { class: 'tag tag-btn', type: 'button', disabled: busy, title: t('br.hint', { url: BR_URL[a.family], ref: a.ref }), 'aria-label': label + ' (' + a.ref + ')', onclick: (e) => { e.stopPropagation(); if (info.found.length === 1) openBrowser(a, first); else openBrowserDialog(a) } },
-      busy ? spinner() : null, label)
+    if (!first) return null
+    const label = t(info.found.length > 1 ? 'br.signedInMore' : 'br.signedIn', { name: profileLabel(first), n: info.found.length })
+    return h('button', { class: 'email-btn br-btn', type: 'button', disabled: busy, title: t('br.hint', { url: BR_URL[a.family], ref: a.ref }), 'aria-label': 'Chrome ' + label + ' (' + a.ref + ')', onclick: (e) => { e.stopPropagation(); if (info.found.length === 1) openBrowser(a, first); else openBrowserDialog(a) } },
+      busy ? spinner() : icon('globe', 'br-ico'), label)
   }
   async function openBrowser(a, p) {
     if (ui.browserRef) return
@@ -1122,19 +1116,16 @@ const MAIN = String.raw`
     const out = []
     if (a.error) out.push(h('div', { class: 'note note-fail' }, h('b', null, t('acct.readError')), ' ', h('span', null, a.error)))
     if (a.hostInstalled === false) out.push(h('div', { class: 'note note-warn' }, hostNote(fam)))
-    // The other reasons already show in the row (read error, missing tool, sign-in, Health); a full window does not.
-    const why = attentionWhy(a, healthOf(a.ref), Date.now(), WARN)
-    if (why && why.key === 'why.quota-high') out.push(h('div', { class: 'note note-warn' }, t('acct.nearLimit', why.vars)))
     return out.length ? h('div', { class: 'row-notes' }, out) : null
   }
   // What a row or card shows depends on more than the account (health, view preferences, language); the
   // fingerprint covers what its click handlers use.
-  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref, ui.browserRef === a.ref, browserFor(a), prefs.hideEmail, folded(a)]) }
-  // Each account can be folded to one line (its name) and opened again, like a family group; the choice is kept in
-  // this browser's preferences.
-  function folded(a) { return prefs.rows[a.ref] === true }
+  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref, ui.browserRef === a.ref, browserFor(a), prefs.hideEmail, isOpen(a)]) }
+  // A row shows who the account is, its quota and its last use; a click opens the details under it (model, tokens,
+  // Health) and closes them again. The choice is kept in this browser's preferences.
+  function isOpen(a) { return prefs.open[a.ref] === true }
   function rowToggle(a) {
-    const open = !folded(a)
+    const open = isOpen(a)
     const label = t(open ? 'row.collapse' : 'row.expand', { name: a.name })
     return h('button', { class: 'icon-btn row-toggle', type: 'button', 'aria-expanded': String(open), 'aria-label': label, title: label, onclick: (e) => { e.stopPropagation(); toggleRow(a) } }, icon('chevron', 'chev'))
   }
@@ -1150,12 +1141,12 @@ const MAIN = String.raw`
   // Folding animates: the details fade out, then the row's height eases to one line; opening eases the height out
   // and fades the details in. The arrow turns with it. Reduced motion just switches.
   const EASE = 'cubic-bezier(.2, 0, 0, 1)'
-  function rowDetails(el) { return Array.from(el.querySelectorAll(':scope > :not(.ident):not(.more):not(.card-head), .ident-email, .ident-sub')) }
+  function rowDetails(el) { return Array.from(el.querySelectorAll(':scope > .row-detail')) }
   function toggleRow(a) {
-    const closing = !folded(a)
+    const closing = isOpen(a)
     const find = () => document.querySelector('[data-ref="' + CSS.escape(a.ref) + '"]')
     const apply = () => {
-      if (closing) prefs.rows[a.ref] = true; else delete prefs.rows[a.ref]
+      if (closing) delete prefs.open[a.ref]; else prefs.open[a.ref] = true
       savePrefs()
       renderAccounts()
     }
@@ -1180,28 +1171,35 @@ const MAIN = String.raw`
   // The Account 'sideby next <family>' would pick; the server ranks it with the CLI's rule (spec §3.13).
   function isNext(a) { return Boolean(S.state && S.state.handoff && S.state.handoff[a.family] === a.ref) }
   function row(a, now, cols) {
-    if (folded(a))
-      return h('div', { class: 'row row-folded fold-hit' + (a.error ? ' row-error' : ''), role: 'listitem', 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a), onclick: foldClick(a) },
-        h('div', { class: 'ident' }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a))),
-        moreButton(a))
-    return h('div', { class: 'row' + (a.error ? ' row-error' : ''), role: 'listitem', 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a) },
-      h('div', { class: 'ident fold-hit', onclick: foldClick(a) }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a), emailLine(a), subLine(a))),
+    const open = isOpen(a)
+    const email = emailLine(a)
+    return h('div', { class: 'row fold-hit' + (open ? ' row-open' : '') + (a.error ? ' row-error' : ''), role: 'listitem', 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a), onclick: foldClick(a) },
+      h('div', { class: 'ident' }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a), email || subLine(a))),
       quotaBlock(a, now, cols),
-      usageBlock(a),
       lastUsed(a),
-      h('div', { class: 'cell-health' }, healthChip(a)),
       moreButton(a),
+      open ? rowDetail(a, Boolean(email)) : null,
       notes(a))
   }
+  // What a click on a row opens: how it runs (ref, model and effort, a shared login), its tokens and its Health.
+  function sameLoginNote(a) {
+    if (!a.sameLogin || !a.sameLogin.length) return null
+    const names = a.sameLogin.map(refName).join(', ')
+    return h('div', { class: 'rd-note', title: t('acct.sameLoginHint', { names }) }, t('acct.sameLogin', { names }))
+  }
+  function rowDetail(a, withSub) {
+    const same = sameLoginNote(a)
+    return h('div', { class: 'row-detail' },
+      withSub || same ? h('div', { class: 'rd-item rd-run' }, h('span', { class: 'rd-label' }, t('row.runs')), withSub ? subLine(a) : null, same) : null,
+      h('div', { class: 'rd-item rd-usage' }, h('span', { class: 'rd-label' }, t('col.tokens', { n: BOOT.usageDays })), usageBlock(a)),
+      h('div', { class: 'rd-item rd-health' }, h('span', { class: 'rd-label' }, t('col.health')), healthChip(a)))
+  }
+  // A card shows everything at once; it has room for it.
   function card(a, now, cols) {
-    if (folded(a))
-      return h('article', { class: 'card card-folded fold-hit' + (a.error ? ' card-error' : ''), 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a), 'aria-label': a.ref, onclick: foldClick(a) },
-        h('header', { class: 'card-head' }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a)), moreButton(a)))
     return h('article', { class: 'card' + (a.error ? ' card-error' : ''), 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a), 'aria-label': a.ref },
-      h('header', { class: 'card-head fold-hit', onclick: foldClick(a) },
-        rowToggle(a),
+      h('header', { class: 'card-head' },
         badge(a.family, 'sm'),
-        h('div', { class: 'ident-text' }, nameLine(a), emailLine(a), subLine(a)),
+        h('div', { class: 'ident-text' }, nameLine(a), emailLine(a), subLine(a), sameLoginNote(a)),
         moreButton(a)),
       notes(a),
       quotaBlock(a, now, cols),
@@ -1215,9 +1213,7 @@ const MAIN = String.raw`
     return h('div', { class: 'col-head', 'aria-hidden': 'true', 'data-key': 'cols' },
       h('span', { class: 'ch-id' }, t('col.account')),
       h('span', { class: 'quota' }, titled ? cols.map((c) => h('span', null, t(left ? 'col.left' : 'col.used', { label: c }))) : null),
-      h('span', { class: 'ch-usage' }, t('col.tokens', { n: BOOT.usageDays })),
       h('span', { class: 'ch-last' }, t('col.last')),
-      h('span', { class: 'ch-health' }, t('col.health')),
       h('span', { class: 'ch-more' }))
   }
   // Quota is on but no account of the Family has numbers yet: say what brings the first ones.
@@ -2774,7 +2770,7 @@ const MAIN = String.raw`
   }
 
   // ---------- loading ----------
-  function renderAll() { renderTop(); renderBanners(); renderSummary(); renderFamilyFilter(); renderEmailToggle(); renderAccounts(); renderCheckup(); renderPageChrome() }
+  function renderAll() { renderTop(); renderBanners(); renderSummary(); renderFamilyFilter(); renderAccounts(); renderCheckup(); renderPageChrome() }
   // A load that starts while another runs is queued, never dropped, so a change made meanwhile (a new
   // account, a fix) always ends up on screen; and only the newest response is ever rendered. A silent load is a
   // background refresh: no spinner, and its render waits while the viewer is busy (see uiBusy).

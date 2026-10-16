@@ -128,7 +128,7 @@ On macOS, sideby can open Claude Desktop or the Codex app as one account, and ke
 sideby desktop claude:work     # or a short command: sideby desktop ccw
 ```
 
-In the panel, click **Open desktop app** in the account's row (it says **Desktop app open** while that account's window runs; a click brings it to the front). `sideby list` shows a DESKTOP column, and `--json` a `desktopApp` field per account.
+In the panel, choose **Open desktop app** in the account's ⋯ menu (it says **Desktop app open** while that account's window runs; it then brings the window to the front). `sideby list` shows a DESKTOP column, and `--json` a `desktopApp` field per account.
 
 - The main account opens the app as usual. Any other subscription account opens a new window that uses that account's directory (`CLAUDE_CONFIG_DIR`, so Claude Desktop's Code tab uses the account's Claude Code settings; `CODEX_HOME`, so the Codex app shares the account's terminal sign-in) and its own data folder, `~/Library/Application Support/sideby/<family>/<name>/`.
 - When that account's window is already open, sideby brings it to the front instead of opening a second one. It never closes a window and never copies or changes the app.
@@ -159,7 +159,7 @@ In the panel, the **Grok Bot** group lists the windows after your accounts: whet
 
 With many accounts it is easy to forget which Chrome browser user (the "Work" or "Personal" person in Chrome) you signed in to claude.ai or chatgpt.com with. sideby can find it and open the website right there. Everything is read on this computer and sent nowhere.
 
-In the panel, click **Open in browser** next to the account's email. The first time, it says what it reads and offers **Turn on**. After that the button names the browser user, such as **Chrome: Work**, and opens it in one click. From a terminal:
+In the panel, choose **Open in browser** in the account's ⋯ menu. The first time, it says what it reads and offers **Turn on**. After that, an account whose browser user was found shows it after its email with a globe icon, such as **🌐 Work**, and a click opens it. From a terminal:
 
 ```sh
 sideby browser --enable        # shows what it reads; add --yes to turn it on

@@ -128,7 +128,7 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 sideby desktop claude:work     # 也可以用短命令：sideby desktop ccw
 ```
 
-在面板里，点账号行里的 **打开桌面应用**（这个账号的窗口开着时显示 **桌面应用已打开**，点一下切到前台）。`sideby list` 多一列 DESKTOP，`--json` 里每个账号多一个 `desktopApp` 字段。
+在面板里，在账号的 ⋯ 菜单里选 **打开桌面应用**（这个账号的窗口开着时显示 **桌面应用已打开**，选它会把窗口切到前台）。`sideby list` 多一列 DESKTOP，`--json` 里每个账号多一个 `desktopApp` 字段。
 
 - 主账号照常打开应用。其他订阅账号打开一个新窗口，用这个账号的目录（`CLAUDE_CONFIG_DIR`，Claude Desktop 的 Code 标签页就用这个账号的 Claude Code 设置；`CODEX_HOME`，Codex 应用和终端里的这个账号共用登录）和它自己的数据目录 `~/Library/Application Support/sideby/<家族>/<账号名>/`。
 - 这个账号的窗口已经开着时，sideby 把它切到前台，不会再开第二个。它从不关窗口，也不复制或修改应用。
@@ -159,7 +159,7 @@ sideby desktop grok-bot        # Grok Bot 自己的默认窗口（grok-bot:main�
 
 账号一多，很容易忘记在哪个 Chrome 浏览器用户（Chrome 里的"工作""个人"这类用户）登录过 claude.ai 或 chatgpt.com。sideby 能把它找出来，并直接在那里打开网站。所有数据都只在本机读取，不会发到任何地方。
 
-在面板里，点账号邮箱旁边的 **在浏览器打开**。第一次点，它会说明要读取哪些数据，并提供 **开启** 按钮。开启后，按钮会显示浏览器用户的名字，比如 **Chrome：Work**，点一下就能打开。在终端里：
+在面板里，在账号的 ⋯ 菜单里选 **在浏览器打开**。第一次选，它会说明要读取哪些数据，并提供 **开启** 按钮。开启后，找到了浏览器用户的账号会在邮箱后面显示它的名字和地球图标，比如 **🌐 Work**，点一下就能打开。在终端里：
 
 ```sh
 sideby browser --enable        # 显示会读哪些数据；加 --yes 开启

@@ -168,26 +168,31 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .group-meta { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .group-quota { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
-/* List rows: identity, one column per quota window, usage, last used, health, menu. Every column but the first has a
-   fixed width, so the rows of all groups line up under the same column titles. --qn is the number of quota
-   columns; the page sets it on #accounts. */
-#accounts { --qn: 2; --q-w: 148px; --u-w: 168px; --l-w: 82px; --h-w: 112px; --m-w: 28px; --col-gap: 20px; }
-.row, .col-head { display: grid; grid-template-columns: minmax(0, 1fr) calc(var(--qn) * var(--q-w) + (var(--qn) - 1) * var(--col-gap)) var(--u-w) var(--l-w) var(--h-w) var(--m-w); column-gap: var(--col-gap); align-items: center; min-width: 0; }
-.row { grid-template-areas: "id quota usage last health more" "notes notes notes notes notes notes"; padding: 11px 10px 11px 16px; border-top: 1px solid var(--border); transition: background-color .12s; }
+/* List rows: identity, one column per quota window, last used, menu; a click opens the details (model, tokens,
+   Health) under them. Every column but the first has a fixed width, so the rows of all groups line up under the
+   same column titles. --qn is the number of quota columns; the page sets it on #accounts. */
+#accounts { --qn: 2; --q-w: 176px; --l-w: 92px; --m-w: 28px; --col-gap: 28px; }
+.row, .col-head { display: grid; grid-template-columns: minmax(0, 1fr) calc(var(--qn) * var(--q-w) + (var(--qn) - 1) * var(--col-gap)) var(--l-w) var(--m-w); column-gap: var(--col-gap); align-items: center; min-width: 0; }
+.row { grid-template-areas: "id quota last more" "detail detail detail detail" "notes notes notes notes"; padding: 11px 10px 11px 16px; border-top: 1px solid var(--border); transition: background-color .12s; }
 .rows .row:hover { background: color-mix(in srgb, var(--hover) 55%, transparent); }
 .row:first-child { border-top: 0; }
 .row:last-child { border-radius: 0 0 var(--radius) var(--radius); }
 .row-error .ident-name .name { color: var(--fail); }
-/* One account folded to its name line, opened again with the arrow at its start. */
+/* The arrow at a row's start opens and closes its details; so does a click anywhere else in the row. */
 .row-toggle { width: 28px; height: 28px; margin: -4px -6px -4px -8px; }
 .fold-hit { cursor: pointer; }
-.row > .ident.fold-hit { align-self: stretch; margin: -11px 0 -11px -16px; padding: 11px 0 11px 16px; }
 .fold-hit:hover .row-toggle { background: var(--hover); color: var(--text); }
 .row-toggle[aria-expanded=true] .chev { transform: rotate(90deg); }
 .row-toggle[aria-expanded=true]:not(:hover) { background: transparent; color: var(--muted); }
 .fold-hit:hover .row-toggle[aria-expanded=true] { background: var(--hover); color: var(--text); }
-.row-folded { grid-template-areas: "id id id id id more"; padding-top: 7px; padding-bottom: 7px; }
-.card-folded .card-head { align-items: center; }
+/* The details: ref and model, tokens, Health, side by side under the name. */
+.row-detail { grid-area: detail; display: flex; flex-wrap: wrap; gap: 10px 36px; margin: 10px 0 2px 64px; padding-top: 10px; border-top: 1px dashed var(--border); cursor: default; }
+.rd-item { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rd-label { color: var(--faint); font-size: 11.5px; font-weight: var(--strong-weight); }
+.rd-note { color: var(--muted); font-size: 12px; }
+.rows .row-detail .usage { justify-content: flex-start; gap: 16px; }
+.row-detail .ident-sub { margin-top: 0; }
+.att-dot { flex: none; }
 .col-head { position: sticky; top: 0; z-index: 2; padding: 7px 10px 7px 16px; border-top: 1px solid var(--border); background: var(--surface); color: var(--faint); font-size: 11.5px; font-weight: var(--strong-weight); line-height: 1.3; white-space: nowrap; }
 .col-head > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .col-head .quota > span { overflow: hidden; text-overflow: ellipsis; }
@@ -205,16 +210,23 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .br-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--ctl-radius); }
 .email-btn:hover { color: var(--text); text-decoration: underline dotted; }
 .email-btn:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
+.ident-email:has(.br-btn) { display: flex; align-items: center; }
+.ident-email:has(.br-btn) > * { flex: none; }
+.ident-email:has(.br-btn) > .email-btn:not(.br-btn) { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.br-btn { display: inline-flex; align-items: center; gap: 3px; vertical-align: bottom; }
+.br-ico { width: 12px; height: 12px; flex: none; }
 .ident-email + .ident-sub { color: var(--faint); margin-top: 0; }
 .tools .tb-icon { width: var(--ctl-h); height: var(--ctl-h); border-color: var(--border-strong); background: var(--surface); }
 .tools .tb-icon:hover { background: var(--hover); }
 .tools .tb-icon[aria-pressed=true] { background: var(--active); color: var(--text); }
+.display-panel { display: flex; flex-direction: column; gap: 10px; min-width: 240px; }
+.dp-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.dp-label { color: var(--muted); font-size: var(--small); }
+.dp-check { justify-content: flex-start; gap: 8px; cursor: pointer; font-size: var(--small); }
 .ident-sub { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
 .plan { text-transform: capitalize; }
 .row > .quota { grid-area: quota; }
-.row > .usage { grid-area: usage; }
 .row > .last { grid-area: last; }
-.cell-health { grid-area: health; min-width: 0; }
 .row > .more { grid-area: more; }
 .row-notes { grid-area: notes; display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 
@@ -570,8 +582,8 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .col-head { display: none; }
   .app-row { flex-wrap: wrap; }
   .app-actions { width: 100%; justify-content: flex-start; }
-  .row { grid-template-columns: minmax(0, 1fr) auto var(--m-w); grid-template-areas: "id health more" "quota quota quota" "usage usage last" "notes notes notes"; row-gap: 10px; }
-  .row-folded { grid-template-areas: "id id more"; }
+  .row { grid-template-columns: minmax(0, 1fr) auto var(--m-w); grid-template-areas: "id last more" "quota quota quota" "detail detail detail" "notes notes notes"; row-gap: 10px; }
+  .row-detail { margin-left: 0; }
   .row > .quota { grid-template-columns: repeat(var(--qn), minmax(0, 1fr)); max-width: 560px; }
   .rows .m-label, .rows .m-unit, .rows .u-unit { display: inline; }
   .rows .usage { justify-content: flex-start; }
