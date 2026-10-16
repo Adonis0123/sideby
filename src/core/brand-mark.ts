@@ -87,8 +87,6 @@ export const MARK: { line: number; placedLine: number; back: PlacedBuddy; front:
 
 /** The square the pair is drawn in, in mark units (the Panel's 40 px tile and the app icon tile). */
 export const MARK_VIEWBOX = { x: -2.5, y: 3, size: 69 } as const
-/** The square around one buddy at full size, for the small cut (favicon). */
-export const BUDDY_VIEWBOX = { x: 3, y: 10.5, size: 58 } as const
 
 function buddySvg(b: PlacedBuddy, line: number, bodyFill?: string | null): string {
   const color = (fill: BuddyPath['fill']) => {
@@ -134,7 +132,23 @@ export const ICON_SVG =
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox(MARK_VIEWBOX)}" role="img" aria-label="sideby">` +
   `${markSvgBody(MARK_COLORS.blue.body)}</svg>`
 
-/** `<basePath>/favicon.svg`: the small cut, the blue buddy alone, for sizes below about 24 px (ADR-0022). */
-export const FAVICON_SVG =
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox(BUDDY_VIEWBOX)}">` +
-  `<g ${OUTLINE}>${buddySvg({ ...MARK.front, x: 0, y: 0, scale: 1 }, MARK.line)}</g></svg>`
+/**
+ * `<basePath>/favicon.svg`: the small cut for sizes below about 24 px, redrawn for a 16 pt browser tab (ADR-0022):
+ * the blue buddy alone on a 32 grid, its body filling the width, short feet and no arms, `>` or mouth, bigger eyes,
+ * and a 2-unit outline (about 6% of the canvas). The same rules as the Local tools Portal's tab icons.
+ */
+export const FAVICON_SVG = (() => {
+  const blue = MARK_COLORS.blue
+  const ink = MARK_COLORS.ink
+  const light = MARK_COLORS.light
+  const body = BUDDY.paths[2]!.d
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="sideby">` +
+    `<g stroke-linecap="round" stroke-linejoin="round" transform="translate(0 -1.3)">` +
+    `<path d="M8.5 25 Q7.6 31 11.5 30.6 Q14 30.4 14 26.6 M18 26.6 Q18 30.4 20.5 30.6 Q24.4 31 23.5 25" fill="${blue.shade}" stroke="${ink}" stroke-width="2"/>` +
+    `<g transform="translate(-7.2 -12.675) scale(0.725)"><path d="${body}" fill="${blue.body}" stroke="${ink}" stroke-width="2.759"/>` +
+    `<ellipse cx="22.5" cy="38" rx="5.5" ry="7" fill="${ink}"/><ellipse cx="41.5" cy="38" rx="5.5" ry="7" fill="${ink}"/>` +
+    `<ellipse cx="20.6" cy="35.4" rx="2.1" ry="2.6" fill="${light}"/><ellipse cx="39.6" cy="35.4" rx="2.1" ry="2.6" fill="${light}"/>` +
+    `</g></g></svg>`
+  )
+})()

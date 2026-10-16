@@ -21,6 +21,7 @@ ADR-0020's conclusions still hold: one colour per character, no diagonal layout 
 - `src/core/brand-mark.ts` stays the single source: one buddy on a 64-unit grid, the two placements and the colours. The Panel header and empty state, `<basePath>/icon.svg`, `<basePath>/favicon.svg`, the app icon (`src/desktop/icon.ts`) and the Local tools Portal's icons are all built from it.
 - In the Panel the blue buddy's body takes `--logo-fg`, so a Portal's `logoColor` still recolours it. Everything else is fixed. No `PanelTheme` field or token changes.
 - `<basePath>/icon.svg` is the whole pair on a transparent square. Below about 24 px the blue buddy alone is the small cut: `<basePath>/favicon.svg`, the Panel's favicon.
+  - Amendment 2026-10-16: the small cut is redrawn for a 16 pt browser tab rather than scaled down. On a 32 grid the body fills the width; arms, `>` and mouth are dropped; eyes are larger; the outline is 2 units (about 6% of the canvas). The Local tools Portal shows it in the browser tab of the sideby page.
 
 ## Consequences
 
