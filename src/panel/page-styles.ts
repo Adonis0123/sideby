@@ -370,7 +370,6 @@ a.btn:hover { text-decoration: none; }
 .icon-btn:disabled { color: var(--faint); cursor: not-allowed; }
 .top-actions .icon-btn { width: var(--ctl-h); height: var(--ctl-h); border-color: var(--border-strong); background: var(--surface); }
 .top-actions .icon-btn:hover { background: var(--hover); }
-.lang-btn { font-size: 12.5px; font-weight: var(--button-weight); color: var(--btn-text); width: auto !important; padding: 0 10px; }
 .btn:focus-visible, .icon-btn:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible, .stat-btn:focus-visible { outline: var(--focus-outline); outline-offset: 2px; box-shadow: var(--focus-ring); }
 .btn:focus-visible { border-color: var(--focus); }
 .note a, .banner a { color: inherit; text-decoration: underline; text-underline-offset: 2px; font-weight: var(--strong-weight); }
@@ -532,6 +531,13 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .popover p { margin: 0; }
 .popover-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .popover-foot { padding-top: 8px; border-top: 1px solid var(--border); }
+/* The header's settings popover: two segmented choices, then links to Remote Control and Auto Handoff. */
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.set-label { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.set-row .seg { height: var(--ctl-h-sm); }
+.set-link { margin: 0 -8px; width: calc(100% + 16px); }
+.set-link .chip { margin-left: auto; }
+.set-dot { background: var(--warn-bar); }
 .tip { display: inline-flex; position: relative; vertical-align: middle; }
 .tip-btn { display: inline-grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--surface); color: var(--muted); font: 700 10px/1 var(--font); cursor: help; }
 .tip-btn:hover, .tip.is-open .tip-btn { color: var(--text); border-color: var(--muted); }

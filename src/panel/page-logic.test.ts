@@ -327,7 +327,7 @@ describe('page text', () => {
       .filter((k) => !(k in MESSAGES.en) && !(`${k}.one` in MESSAGES.en && `${k}.other` in MESSAGES.en))
     assert.deepEqual(missing, [])
     for (const v of ['pressure', 'name', 'recent']) assert.ok(`sort.${v}` in MESSAGES.en)
-    for (const v of ['system', 'light', 'dark']) assert.ok(`theme.${v}` in MESSAGES.en)
+    for (const v of ['system', 'light', 'dark']) assert.ok(`set.theme.${v}` in MESSAGES.en)
     for (const r of ['error', 'health-fail', 'signed-out', 'not-installed', 'quota-high', 'health-warn'])
       assert.ok(`need.${r}.one` in MESSAGES.en, r)
   })
@@ -401,15 +401,15 @@ describe('panel page lang', () => {
     JSON.parse(
       /<script type="application\/json" id="sideby-boot">([\s\S]*?)<\/script>/.exec(html)?.[1] ?? '{}',
     )
-  it('carries a host lang into the boot data, the html element and a hidden switch', () => {
+  it('carries a host lang into the boot data, the html element and a settings button hidden until the page decides', () => {
     const zh = renderPage({ basePath: '', token: 't', lang: 'zh' })
     assert.equal(boot(zh).lang, 'zh')
     assert.match(zh, /<html lang="zh-CN">/)
-    assert.match(zh, /<button id="lang" [^>]*hidden>EN<\/button>/)
+    assert.match(zh, /<button id="settings" [^>]*hidden>/)
     const en = renderPage({ basePath: '', token: 't', lang: 'en' })
     assert.equal(boot(en).lang, 'en')
     assert.match(en, /<html lang="en">/)
-    assert.match(en, /<button id="lang" [^>]*hidden>中文<\/button>/)
+    assert.match(en, /<button id="settings" [^>]*hidden>/)
   })
   it('leaves the page as before for auto or no lang', () => {
     for (const html of [
@@ -418,18 +418,18 @@ describe('panel page lang', () => {
     ]) {
       assert.equal(boot(html).lang, 'auto')
       assert.match(html, /<html lang="en">/)
-      assert.match(html, /<button id="lang" class="icon-btn lang-btn" type="button">中文<\/button>/)
+      assert.match(
+        html,
+        /<button id="settings" class="btn" type="button" aria-haspopup="dialog" aria-expanded="false">/,
+      )
     }
   })
   it('picks the language through panelLang and never saves it while the host fixes it', () => {
     assert.match(PAGE_SCRIPT, /let lang = panelLang\(BOOT\.lang, prefs\.lang, navigator\.language\)/)
-    assert.match(PAGE_SCRIPT, /lb\.hidden = LANG_FIXED/)
-    // The only write of prefs.lang is the switch's click handler, after its guard.
+    assert.match(PAGE_SCRIPT, /if \(!LANG_FIXED\) out\.push\('lang'\)/)
+    // The only write of prefs.lang is setLang, after its guard.
     assert.equal(PAGE_SCRIPT.match(/prefs\.lang =/g)?.length, 1)
-    assert.match(
-      PAGE_SCRIPT,
-      /if \(LANG_FIXED\) return\n\s+lang = lang === 'zh' \? 'en' : 'zh'\n\s+prefs\.lang = lang/,
-    )
+    assert.match(PAGE_SCRIPT, /if \(LANG_FIXED \|\| v === lang\) return\n\s+lang = v\n\s+prefs\.lang = lang/)
   })
 })
 

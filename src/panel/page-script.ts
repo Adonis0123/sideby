@@ -276,6 +276,8 @@ const MAIN = String.raw`
     sun: 'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
     moon: 'M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z',
     monitor: 'M3 5h18v11H3zM8 20h8M12 16v4',
+    // Lucide "settings" (ISC license)
+    gear: 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
     copy: 'M9 9h11v11H9zM5 15H4V4h11v1',
     terminal: 'M4 17l6-5-6-5M12 19h8',
     key: 'M15 9a3 3 0 1 0-.01 0M12.9 11.1L4 20M7 17l2 2M9.5 14.5l2 2',
@@ -698,8 +700,7 @@ const MAIN = String.raw`
   }
   function renderTop() {
     renderUpdated()
-    renderHandoffButton()
-    renderRcButton()
+    renderSettingsButton()
     renderUpdateButton()
     const u = updState()
     $('foot-text').textContent = t(u && !u.checksOff ? 'foot.textChecks' : 'foot.text')
@@ -714,16 +715,7 @@ const MAIN = String.raw`
     document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en'
     for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.getAttribute('data-i18n'))
     $('refresh').setAttribute('aria-label', t('top.refresh'))
-    const lb = $('lang')
-    lb.hidden = LANG_FIXED
-    lb.textContent = lang === 'zh' ? 'EN' : '中文'
-    lb.setAttribute('aria-label', t('top.language'))
-    lb.title = t('top.language')
-    const tb = $('theme')
-    tb.hidden = BOOT.colorScheme !== 'auto'
-    setKids(tb, icon(prefs.theme === 'light' ? 'sun' : prefs.theme === 'dark' ? 'moon' : 'monitor'))
-    tb.title = t('theme.' + prefs.theme)
-    tb.setAttribute('aria-label', t('theme.' + prefs.theme))
+    renderSettingsButton()
   }
   function applyTheme() {
     if (BOOT.colorScheme !== 'auto') return
@@ -2273,15 +2265,6 @@ const MAIN = String.raw`
   let ah = null
   const HINT_QUIET_MS = 24 * 3600000
   function ahState() { return S.state && S.state.autoHandoff }
-  function renderHandoffButton() {
-    const b = $('handoff')
-    const st = ahState()
-    b.hidden = !st
-    if (!st) return
-    const on = st.settings.auto
-    setKids(b, [h('span', { class: 'hide-sm' }, t('ah.button')), h('span', { class: 'chip chip-sm' + (on ? ' chip-ok' : '') }, on ? t('ah.on') : t('ah.off'))])
-    b.setAttribute('aria-label', t('ah.button') + ': ' + (on ? t('ah.on') : t('ah.off')))
-  }
   function handoffHint() {
     const st = ahState()
     if (!st || BOOT.readOnly) return null
@@ -2813,15 +2796,69 @@ const MAIN = String.raw`
     const api = S.state.accounts.filter((a) => a.kind === 'api').map((a) => a.ref)
     return remoteControlSummary(S.state.remoteControl || [], api)
   }
-  function renderRcButton() {
-    const b = $('rc')
-    const sum = S.state ? rcSummary() : null
-    b.hidden = !sum
-    if (!sum) return
-    const chip = sum === 'on' ? 'chip-warn' : sum === 'off' ? 'chip-ok' : ''
-    setKids(b, [h('span', { class: 'hide-sm' }, t('rc.button')), h('span', { class: 'chip chip-sm ' + chip }, t('rc.state.' + sum))])
-    b.setAttribute('aria-label', t('rc.button') + ': ' + t('rc.state.' + sum))
+  // ---------- settings ----------
+  // One header button holds what is set once and rarely changed: language, theme, Remote Control and Auto Handoff.
+  // A dot on it says Remote Control starts by itself, so that state stays visible after its banner is gone.
+  function settingsSections() {
+    const out = []
+    if (!LANG_FIXED) out.push('lang')
+    if (BOOT.colorScheme === 'auto') out.push('theme')
+    if (S.state && rcSummary()) out.push('rc')
+    if (S.state && ahState()) out.push('ah')
+    return out
+  }
+  function renderSettingsButton() {
+    const b = $('settings')
+    const secs = settingsSections()
+    b.hidden = !secs.length
+    const warn = secs.includes('rc') && rcSummary() === 'on'
+    setKids(b, [icon('gear'), h('span', { class: 'hide-sm' }, t('set.button')), warn ? h('span', { class: 'dot set-dot', 'aria-hidden': 'true' }) : null])
+    b.setAttribute('aria-label', t('set.button') + (warn ? ': ' + t('set.rcOn') : ''))
+    refreshPopover('settings')
     if (dlg.kind === 'rc') renderRc()
+  }
+  function settingsPop() {
+    const secs = settingsSections()
+    const out = []
+    const seg = (label, opts, cur, pick) => h('div', { class: 'set-row' }, h('span', { class: 'set-label' }, label),
+      h('div', { class: 'seg', role: 'group', 'aria-label': label }, opts.map(([v, text]) =>
+        h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === cur), onclick: () => pick(v) }, text))))
+    const link = (label, state, cls, run) => h('button', { class: 'menu-item set-link', type: 'button', onclick: () => { closeMenu(); run() } },
+      h('span', { class: 'menu-label' }, label), h('span', { class: 'chip chip-sm ' + cls }, state), icon('chevron'))
+    if (secs.includes('lang')) out.push(seg(t('set.lang'), [['en', 'English'], ['zh', '中文']], lang, setLang))
+    if (secs.includes('theme')) out.push(seg(t('set.theme'), CHOICES.theme.map((v) => [v, t('set.theme.' + v)]), prefs.theme, setTheme))
+    if (out.length && (secs.includes('rc') || secs.includes('ah'))) out.push(h('div', { class: 'menu-sep', role: 'separator' }))
+    if (secs.includes('rc')) {
+      const sum = rcSummary()
+      out.push(link(t('rc.button'), t('rc.state.' + sum), sum === 'on' ? 'chip-warn' : sum === 'off' ? 'chip-ok' : '', openRc))
+    }
+    if (secs.includes('ah')) {
+      const on = ahState().settings.auto
+      out.push(link(t('ah.button'), on ? t('ah.on') : t('ah.off'), on ? 'chip-ok' : '', () => setPage('handoff')))
+    }
+    return out
+  }
+  function setLang(v) {
+    if (LANG_FIXED || v === lang) return
+    lang = v
+    prefs.lang = lang
+    savePrefs()
+    renderStatic()
+    buildToolbar()
+    renderAll()
+    if (dlg.kind === 'create' && nf && !nf.creating) renderCreate()
+    else if (dlg.kind === 'setup' && qs) renderSetup()
+    else if (dlg.kind === 'tune' && tuneState) renderTune()
+    else if (dlg.kind === 'model' && md) { md.form = null; renderModel() }
+    else if (dlg.kind === 'browser') renderBrowser()
+    else if (dlg.kind === 'update' && up) renderUpdate()
+    else if (dlg.kind === 'rc') renderRc()
+  }
+  function setTheme(v) {
+    prefs.theme = v
+    savePrefs()
+    applyTheme()
+    refreshPopover('settings')
   }
   function openRc() {
     if (!S.state || !rcSummary()) return
@@ -3158,32 +3195,7 @@ const MAIN = String.raw`
   $('update').addEventListener('click', openUpdate)
   $('ver-top').addEventListener('click', () => openVerPop($('ver-top')))
   $('refresh').addEventListener('click', () => load({ check: true, announce: true }))
-  $('handoff').addEventListener('click', () => setPage('handoff'))
-  $('rc').addEventListener('click', openRc)
-  $('lang').addEventListener('click', () => {
-    if (LANG_FIXED) return
-    lang = lang === 'zh' ? 'en' : 'zh'
-    prefs.lang = lang
-    savePrefs()
-    renderStatic()
-    buildToolbar()
-    renderAll()
-    if (dlg.kind === 'create' && nf && !nf.creating) renderCreate()
-    else if (dlg.kind === 'setup' && qs) renderSetup()
-    else if (dlg.kind === 'tune' && tuneState) renderTune()
-    else if (dlg.kind === 'model' && md) { md.form = null; renderModel() }
-    else if (dlg.kind === 'browser') renderBrowser()
-    else if (dlg.kind === 'update' && up) renderUpdate()
-    else if (dlg.kind === 'rc') renderRc()
-  })
-  $('theme').addEventListener('click', () => {
-    const order = CHOICES.theme
-    prefs.theme = order[(order.indexOf(prefs.theme) + 1) % order.length]
-    savePrefs()
-    applyTheme()
-    renderStatic()
-    toast(t('theme.' + prefs.theme), { key: 'theme', kind: 'plain' })
-  })
+  $('settings').addEventListener('click', () => openPopover($('settings'), 'settings', t('set.button'), settingsPop, 'end'))
   applyTheme()
   renderStatic()
   buildToolbar()

@@ -200,7 +200,7 @@ Accounts that link `settings.json` to the Main Account share one file, so they s
 
 Claude Code's Remote Control connects a session to claude.ai/code and the Claude mobile app, where every device signed in to that claude.ai account can read and continue it. Turning on "Enable Remote Control for all sessions" in `/config` saves `remoteControlAtStartup: true` in `settings.json`, and since accounts usually link that file to the main one, every account connects.
 
-When that is on, the panel shows a banner with **Turn all off**. It first lists each settings file, the change (`remoteControlAtStartup true → false`) and the accounts that use it, and writes only after you confirm; the toast that follows has **Undo**. **Keep it on** hides the banner in that browser. The same from a terminal:
+When that is on, the panel shows a banner with **Turn all off**. It first lists each settings file, the change (`remoteControlAtStartup true → false`) and the accounts that use it, and writes only after you confirm; the toast that follows has **Undo**. **Keep it on** hides the banner in that browser. Either way, **Settings** at the top right keeps a **Remote Control** row with the current state (On, Default or Off) that opens the same list and **Turn off**, or **Undo** after sideby turned it off; the Settings button has an orange dot while it is on. The same from a terminal:
 
 ```sh
 sideby remote-control            # each settings file: on, default (Claude Code decides), off
