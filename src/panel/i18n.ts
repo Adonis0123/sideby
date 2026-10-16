@@ -152,6 +152,7 @@ const en = {
   'why.health-fail': 'Health check found issues',
   'why.signed-out': 'signed out',
   'why.not-installed': 'tool not installed',
+  'why.broken': 'tool install broken',
   'why.quota-high': '{label} at {pct}% (warns from {warn}%)',
   'why.health-warn': 'Health check has warnings',
 
@@ -209,6 +210,11 @@ const en = {
   'acct.installHost': '{host} is not installed on this machine. {link}',
   'acct.nearLimit': '{label} quota is {pct}% used; warnings start at {warn}%.',
   'acct.installIt': 'Install it',
+  'acct.installHostCmd': '{host} is not installed on this machine. To install it, run this in a terminal:',
+  'acct.brokenHost':
+    "{host}'s install is broken: {path} cannot run, often after an upgrade was cut off. Reinstalling fixes it:",
+  'acct.installDocs': 'Install guide',
+  'acct.broken': 'Tool broken',
 
   'quota.pctUsed': '{n}% used',
   'quota.pctLeft': '{n}% left',
@@ -495,6 +501,7 @@ const en = {
   'nf.accounts.other': '{n} accounts',
   'nf.runOnce': 'Run {bin} once first',
   'nf.notInstalled': 'Not installed',
+  'nf.broken': 'Install broken',
   'nf.name': 'Name',
   'nf.namePh': 'name',
   'nf.api': 'API key account',
@@ -753,6 +760,7 @@ const zh: Record<MessageKey, string> = {
   'why.health-fail': '体检发现问题',
   'why.signed-out': '未登录',
   'why.not-installed': '缺少工具',
+  'why.broken': '工具安装已损坏',
   'why.quota-high': '{label} 已用 {pct}%（{warn}% 起提醒）',
   'why.health-warn': '体检有警告',
 
@@ -809,6 +817,10 @@ const zh: Record<MessageKey, string> = {
   'acct.installHost': '本机没有安装 {host}。{link}',
   'acct.nearLimit': '{label} 额度已用 {pct}%，达到 {warn}% 就会提醒。',
   'acct.installIt': '去安装',
+  'acct.installHostCmd': '本机没有安装 {host}。在终端运行这条命令安装：',
+  'acct.brokenHost': '{host} 的安装已损坏：{path} 无法运行，多半是升级中途断了。重新安装即可：',
+  'acct.installDocs': '安装说明',
+  'acct.broken': '工具已损坏',
 
   'quota.pctUsed': '已用 {n}%',
   'quota.pctLeft': '剩余 {n}%',
@@ -1081,6 +1093,7 @@ const zh: Record<MessageKey, string> = {
   'nf.accounts.other': '{n} 个账号',
   'nf.runOnce': '先运行一次 {bin}',
   'nf.notInstalled': '未安装',
+  'nf.broken': '安装已损坏',
   'nf.name': '名称',
   'nf.namePh': '名称',
   'nf.api': 'API key 账号',

@@ -12,6 +12,7 @@ import {
   statOrNull,
   writeFileAtomic,
 } from './fs-safe.ts'
+import { installHint } from './launch.ts'
 import { secretFileTemplate } from './secret-file.ts'
 import { itemPaths } from './share-modes.ts'
 
@@ -69,7 +70,7 @@ export async function createAccount(opts: {
   const mainDir = mainDirOf(family, home)
   if (!(await statOrNull(mainDir))?.isDirectory())
     throw new CreateError(
-      `${family.title} has no main account at ${mainDir}; install ${family.bin} (${family.installUrl}) and run it once first`,
+      `${family.title} has no main account at ${mainDir}; install ${family.bin} (${installHint(family)}) and run it once first`,
     )
   const dir = accountDirOf(family, home, name)
   if (await lstatOrNull(dir))

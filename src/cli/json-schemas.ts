@@ -70,7 +70,9 @@ const FamilyInfo = Type.Object({
   title: Str,
   bin: Str,
   installUrl: Str,
+  installCommand: Type.Optional(Str),
   installed: Type.Boolean(),
+  brokenBin: Type.Optional(Str),
   plugin: Str,
   tuning: Type.Boolean(),
 })

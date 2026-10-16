@@ -29,7 +29,7 @@ import {
   readDoctorHistory,
   writeDoctorHistory,
 } from './core/last-doctor.ts'
-import { type HostLaunch, type PreparedLaunch, prepareLaunch, which } from './core/launch.ts'
+import { brokenOnPath, type HostLaunch, type PreparedLaunch, prepareLaunch, which } from './core/launch.ts'
 import { memoStore } from './core/memo-store.ts'
 import { type Paths, resolvePaths } from './core/paths.ts'
 import {
@@ -135,7 +135,10 @@ export interface FamilyInfo {
   title: string
   bin: string
   installUrl: string
+  installCommand?: string
   installed: boolean
+  /** A `bin` on PATH that exists but cannot run (an interrupted upgrade); set only when `installed` is false. */
+  brokenBin?: string
   /** Plugin that provides the Family. */
   plugin: string
   /** The Family can estimate a Compaction Threshold (spec §3.18). */
@@ -525,15 +528,23 @@ export async function createRuntime(
     pluginErrors: loaded.errors,
     async familyInfo() {
       return Promise.all(
-        [...families.values()].map(async (f) => ({
-          id: f.id,
-          title: f.title,
-          bin: f.bin,
-          installUrl: f.installUrl,
-          installed: (await which(f.bin, env)) !== null,
-          plugin: loaded.familyOwner.get(f.id) ?? 'unknown',
-          tuning: Boolean(f.readTuning),
-        })),
+        [...families.values()].map(async (f) => {
+          const installed = (await which(f.bin, env)) !== null
+          const broken = installed ? null : await brokenOnPath(f.bin, env)
+          return {
+            id: f.id,
+            title: f.title,
+            bin: f.bin,
+            installUrl: f.installUrl,
+            ...(typeof f.installCommand === 'string' && f.installCommand.trim()
+              ? { installCommand: f.installCommand.trim() }
+              : {}),
+            installed,
+            ...(broken ? { brokenBin: broken } : {}),
+            plugin: loaded.familyOwner.get(f.id) ?? 'unknown',
+            tuning: Boolean(f.readTuning),
+          }
+        }),
       )
     },
     async familyDetails() {

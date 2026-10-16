@@ -403,7 +403,8 @@ async function buildState(
     generatedAt: ctx.now.toISOString(),
     families: families.map((f) => {
       const logo = rt.families.get(f.id)?.logo
-      return logo ? { ...f, logo } : f
+      const g = f.brokenBin ? { ...f, brokenBin: tildify(f.brokenBin, ctx.home) } : f
+      return logo ? { ...g, logo } : g
     }),
     accounts: list,
     pluginErrors: rt.pluginErrors.map((e) => ({ where: e.where, message: e.message })),

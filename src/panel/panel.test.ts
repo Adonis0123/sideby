@@ -1,7 +1,7 @@
 // Panel: spec §5 items 9 and 10 (security rules, per-card errors) and both mounting modes.
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { chmod, readFile, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
@@ -165,6 +165,29 @@ describe('panel handler security', () => {
         assert.equal((await post(p3, '/api/doctor', {}, hdr)).status, 200)
       } finally {
         await close(s3)
+      }
+    })
+  })
+
+  it('names a broken Host install by its ~ path, so the page can say so instead of "not installed"', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const userBin = join(h.home, '.local', 'bin')
+      await mkdir(userBin, { recursive: true })
+      await symlink(join(userBin, 'gone.js'), join(userBin, 'demo'))
+      const env = { ...h.env, PATH: `${userBin}:${h.env.PATH}` }
+      const make = () => createRuntime({ env, builtins: [asBuiltin(demoPlugin(demoFamily({})))] })
+      const { server, port } = await serve((port) =>
+        createPanelHandler({ runtime: make, allowedHosts: [`127.0.0.1:${port}`] }),
+      )
+      try {
+        const state = (await (await fetch(`http://127.0.0.1:${port}/api/state`)).json()) as PanelState
+        const fam = state.families.find((f) => f.id === 'demo')!
+        assert.equal(fam.installed, false)
+        assert.equal(fam.brokenBin, '~/.local/bin/demo')
+        assert.equal(state.accounts.find((a) => a.ref === 'demo:main')!.hostInstalled, false)
+      } finally {
+        await close(server)
       }
     })
   })

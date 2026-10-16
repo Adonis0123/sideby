@@ -58,6 +58,8 @@ export interface FamilyDef {
   /** Host executable looked up on PATH. */
   bin: string
   installUrl: string
+  /** The Host's official one-line install command, shown before `installUrl`; sideby never runs it. */
+  installCommand?: string
   /** Environment variable that selects the Account directory. Not set for the Main Account. */
   selectVar: string
   layout: FamilyLayout

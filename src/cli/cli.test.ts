@@ -2,7 +2,7 @@
 // against a fake HOME and fake Host binaries.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -268,6 +268,36 @@ describe('run', () => {
       assert.equal((await sideby(h, ['run', 'codex:main'])).code, 3)
       await fakeHost(h, 'codex', { selfSignal: 'SIGTERM' })
       assert.equal((await sideby(h, ['run', 'codex:main'])).code, 143)
+    })
+  })
+
+  it('tells a broken install (a dangling link on PATH) from a missing one, with the install command', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.pi/agent/AGENTS.md', '# rules\n')
+      await codexMain(h)
+      // What an upgrade cut off half way leaves: the link stays, its target is gone.
+      await symlink(join(h.bin, 'gone', 'cli.js'), join(h.bin, 'pi'))
+      const listed = await sideby(h, ['list', '--json'])
+      assert.equal(listed.code, 0)
+      const data = JSON.parse(listed.out)
+      const pi = data.families.find((f: { id: string }) => f.id === 'pi')
+      assert.equal(pi.installed, false)
+      assert.equal(pi.brokenBin, join(h.bin, 'pi'))
+      assert.equal(pi.installCommand, 'curl -fsSL https://pi.dev/install.sh | sh')
+      const codex = data.families.find((f: { id: string }) => f.id === 'codex')
+      assert.equal(codex.installed, false)
+      assert.equal(codex.brokenBin, undefined)
+      assert.equal(data.accounts.find((a: { ref: string }) => a.ref === 'pi:main').hostInstalled, false)
+      const text = await sideby(h, ['list'])
+      assert.match(text.out, /\(host install broken\)/)
+      assert.match(
+        text.out,
+        /pi's install is broken .*reinstall it: `curl -fsSL https:\/\/pi\.dev\/install\.sh \| sh`/,
+      )
+      assert.match(text.out, /Codex is not installed; install it: https:\/\/github\.com\/openai\/codex/)
+      const run = await sideby(h, ['run', 'pi:main'])
+      assert.equal(run.code, 1)
+      assert.match(run.err, /pi is not installed.*`curl -fsSL https:\/\/pi\.dev\/install\.sh \| sh`/)
     })
   })
 

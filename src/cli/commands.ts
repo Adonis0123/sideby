@@ -8,7 +8,7 @@ import { UserError } from '../core/errors.ts'
 import { requestHandoff } from '../core/handoff-chain.ts'
 import { explain, type HandoffIo, readyDecision, runWithHandoff } from '../core/handoff-run.ts'
 import { configureHandoff, type HandoffChange, handoffHint, handoffStatus } from '../core/handoff-status.ts'
-import { runHost } from '../core/launch.ts'
+import { installHint, runHost } from '../core/launch.ts'
 import { accountModel, type ModelChange, setAccountModel } from '../core/model-choice.ts'
 import { resolvePaths, tildify } from '../core/paths.ts'
 import { USAGE_DAYS } from '../core/quota-levels.ts'
@@ -104,10 +104,11 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
     io.out('No accounts found yet.')
     const installed = families.filter((f) => f.installed)
     if (installed.length === 0)
-      io.out(`Install a host first: ${families.map((f) => `${f.title} (${f.installUrl})`).join(', ')}`)
+      io.out(`Install a host first: ${families.map((f) => `${f.title} (${installHint(f)})`).join(', ')}`)
     else io.out(`Run ${installed.map((f) => f.bin).join(' or ')} once, then \`sideby new <family> <name>\`.`)
   } else {
     // `= main`: the other Accounts of its Same Login, which share its Quota (spec §3.21).
+    const brokenOf = (id: string) => families.find((f) => f.id === id)?.brokenBin
     const sameMark = (refs: readonly string[] | undefined) =>
       refs?.length ? ` ${c.dim(`= ${refs.map((r) => r.slice(r.indexOf(':') + 1)).join(', ')}`)}` : ''
     const rows = statuses.map((s) => [
@@ -122,12 +123,23 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
             : c.dim('?'),
       s.identity?.email ?? c.dim('—'),
       s.model ?? c.dim('—'),
-      s.hostInstalled ? tildify(s.dir, home) : `${tildify(s.dir, home)} ${c.yellow('(host not installed)')}`,
+      s.hostInstalled
+        ? tildify(s.dir, home)
+        : `${tildify(s.dir, home)} ${c.yellow(brokenOf(s.family) ? '(host install broken)' : '(host not installed)')}`,
       ...(hasDesktop ? [s.desktopApp?.running ? c.green('open') : c.dim('—')] : []),
     ])
     io.out(
       table(rows, ['ACCOUNT', 'TYPE', 'LOGIN', 'EMAIL', 'MODEL', 'DIR', ...(hasDesktop ? ['DESKTOP'] : [])]),
     )
+    // One line per Host that cannot run, with what to do: the rows only say which accounts it affects.
+    for (const f of families.filter((x) => !x.installed && statuses.some((s) => s.family === x.id)))
+      io.out(
+        c.yellow(
+          f.brokenBin
+            ? `\n${f.title}'s install is broken (${tildify(f.brokenBin, home)} cannot run, often after an interrupted upgrade); reinstall it: ${installHint(f)}`
+            : `\n${f.title} is not installed; install it: ${installHint(f)}`,
+        ),
+      )
     if (statuses.some((s) => s.sameLogin?.length))
       io.out(c.dim('\n= <account>: signed in as the same login as that account, so they share one quota.'))
     io.out(c.dim('\nsideby run <account>  ·  sideby new <family> <name>  ·  sideby quota  ·  sideby ui'))
@@ -1338,7 +1350,7 @@ export async function cmdFamilies(a: ParsedArgs, io: Io): Promise<number> {
   families.forEach((f, i) => {
     if (i) io.out('')
     io.out(
-      `${c.bold(f.title)} (${f.id})  ${f.installed ? c.green('installed') : c.yellow(`not installed: ${f.installUrl}`)}`,
+      `${c.bold(f.title)} (${f.id})  ${f.installed ? c.green('installed') : c.yellow(f.brokenBin ? `install broken (${tildify(f.brokenBin, rt.paths.home)} cannot run); reinstall: ${installHint(f)}` : `not installed: ${installHint(f)}`)}`,
     )
     io.out(`  Accounts   ~/${f.layout.main} (main), ~/${f.layout.account}; selected with ${f.selectVar}`)
     io.out(

@@ -4,7 +4,7 @@ import { constants as osConstants } from 'node:os'
 import { delimiter, join } from 'node:path'
 import type { HookBus } from '../plugins/bus.ts'
 import type { Account, Env, FamilyDef } from '../types.ts'
-import { realpathOrNull } from './fs-safe.ts'
+import { lstatOrNull, realpathOrNull } from './fs-safe.ts'
 import { readSecretFile } from './secret-file.ts'
 
 export interface PreparedLaunch {
@@ -35,6 +35,26 @@ export async function which(bin: string, env: Env): Promise<string | null> {
     }
   }
   return null
+}
+
+/**
+ * The first PATH entry named `bin` that exists but cannot run, such as a link left dangling by an interrupted
+ * upgrade; null when there is none. Only meaningful when `which` found nothing.
+ */
+export async function brokenOnPath(bin: string, env: Env): Promise<string | null> {
+  for (const dir of (env.PATH ?? '').split(delimiter)) {
+    if (!dir) continue
+    const p = join(dir, bin)
+    if (await lstatOrNull(p)) return p
+  }
+  return null
+}
+
+/** What to tell a user whose Host cannot run: the install command when the Family has one, else the page. */
+export function installHint(family: Pick<FamilyDef, 'installUrl' | 'installCommand'>): string {
+  return family.installCommand
+    ? `\`${family.installCommand}\` (or see ${family.installUrl})`
+    : family.installUrl
 }
 
 /**
@@ -167,7 +187,7 @@ export function spawnHost(p: HostLaunch): { child: ChildProcess; exited: Promise
       cleanup()
       const msg =
         err.code === 'ENOENT'
-          ? `${p.family.title} is not installed (\`${p.bin}\` not found on PATH); install it: ${p.family.installUrl}`
+          ? `${p.family.title} is not installed (\`${p.bin}\` not found on PATH); install it: ${installHint(p.family)}`
           : `could not start ${p.bin}: ${err.message}`
       process.stderr.write(`sideby: ${msg}\n`)
       resolve(1)

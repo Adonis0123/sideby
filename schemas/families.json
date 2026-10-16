@@ -39,8 +39,14 @@
               "installUrl": {
                 "type": "string"
               },
+              "installCommand": {
+                "type": "string"
+              },
               "installed": {
                 "type": "boolean"
+              },
+              "brokenBin": {
+                "type": "string"
               },
               "plugin": {
                 "type": "string"

@@ -33,6 +33,8 @@ export const piFamily: FamilyDef = {
   logo: BUILTIN_LOGOS.pi,
   bin: 'pi',
   installUrl: 'https://github.com/earendil-works/pi',
+  // The managed install stages and smoke-tests each release before switching to it; npm upgrades in place.
+  installCommand: 'curl -fsSL https://pi.dev/install.sh | sh',
   selectVar: 'PI_CODING_AGENT_DIR',
   secretFileMeansApi: false,
   layout: { main: '.pi/agent', account: '.pi-<name>/agent' },

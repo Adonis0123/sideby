@@ -669,7 +669,11 @@ const MAIN = String.raw`
   }
   function reasonsOf(a, now) { return attentionReasons(a, healthOf(a.ref), now, WARN) }
   // One line on why an Account needs a look, such as "7d at 62% (warns from 60%)".
-  function whyOf(a, now) { const m = attentionWhy(a, healthOf(a.ref), now, WARN); return m ? t(m.key, m.vars) : '' }
+  function whyOf(a, now) {
+    const m = attentionWhy(a, healthOf(a.ref), now, WARN)
+    if (m && m.key === 'why.not-installed' && family(a.family).brokenBin) return t('why.broken')
+    return m ? t(m.key, m.vars) : ''
+  }
   function setupFor(fam) { return S.state && S.state.quotaSetups.find((s) => s.family === fam) }
 
   // ---------- header and summary ----------
@@ -957,7 +961,7 @@ const MAIN = String.raw`
       a.login === 'logged-out' && a.kind !== 'api'
         ? h('button', { class: 'tag tag-fail tag-btn', type: 'button', title: t('acct.signInHint'), 'aria-label': t('acct.signedOutLabel', { ref: a.ref }), onclick: () => copyText('sideby login ' + a.ref) }, h('span', { class: 'dot dot-fail', 'aria-hidden': 'true' }), t('acct.signedOut'))
         : null,
-      a.hostInstalled === false ? h('span', { class: 'tag tag-warn' }, t('acct.notInstalled')) : null)
+      a.hostInstalled === false ? h('span', { class: 'tag tag-warn' }, t(family(a.family).brokenBin ? 'acct.broken' : 'acct.notInstalled')) : null)
   }
   // The name part of a ref (claude:001 gives 001), as rows show other Accounts of the same Family.
   function refName(ref) { return String(ref).slice(String(ref).indexOf(':') + 1) }
@@ -1004,11 +1008,22 @@ const MAIN = String.raw`
     renderAccounts()
     load({ silent: true })
   }
+  // How to get a Host that cannot run: the sentence, then on its own line the install command to copy (with the
+  // install page next to it) when the Family has one; without a command the sentence ends with the page's link.
+  function hostNote(fam) {
+    const cmdLine = () => h('div', { class: 'note-line note-cmd' }, codeCopy(fam.installCommand), link(t('acct.installDocs'), fam.installUrl))
+    if (fam.brokenBin) {
+      const text = tx('acct.brokenHost', { host: fam.title, path: h('code', null, fam.brokenBin) })
+      return fam.installCommand ? [h('div', { class: 'note-line' }, text), cmdLine()] : [h('div', { class: 'note-line' }, text, ' ', link(t('acct.installIt'), fam.installUrl) || '')]
+    }
+    if (fam.installCommand) return [h('div', { class: 'note-line' }, tx('acct.installHostCmd', { host: fam.title })), cmdLine()]
+    return tx('acct.installHost', { host: fam.title, link: link(t('acct.installIt'), fam.installUrl) || '' })
+  }
   function notes(a) {
     const fam = family(a.family)
     const out = []
     if (a.error) out.push(h('div', { class: 'note note-fail' }, h('b', null, t('acct.readError')), ' ', h('span', null, a.error)))
-    if (a.hostInstalled === false) out.push(h('div', { class: 'note note-warn' }, tx('acct.installHost', { host: fam.title, link: link(t('acct.installIt'), fam.installUrl) || '' })))
+    if (a.hostInstalled === false) out.push(h('div', { class: 'note note-warn' }, hostNote(fam)))
     // The other reasons already show in the row (read error, missing tool, sign-in, Health); a full window does not.
     const why = attentionWhy(a, healthOf(a.ref), Date.now(), WARN)
     if (why && why.key === 'why.quota-high') out.push(h('div', { class: 'note note-warn' }, t('acct.nearLimit', why.vars)))
@@ -1309,7 +1324,7 @@ const MAIN = String.raw`
       h('h3', null, t('empty.title')),
       h('p', { class: 'muted' }, t('empty.body')),
       fams.length ? h('ul', { class: 'host-list' }, fams.map((f) => h('li', null, badge(f.id, 'sm'), h('span', null, f.title),
-        f.installed ? h('span', { class: 'muted small' }, tx('empty.runOnce', { bin: h('code', null, f.bin) })) : link(t('empty.install'), f.installUrl, 'btn btn-sm')))) : h('p', { class: 'muted small' }, t('empty.noFamilies')),
+        f.installed ? h('span', { class: 'muted small' }, tx('empty.runOnce', { bin: h('code', null, f.bin) })) : f.installCommand ? codeCopy(f.installCommand) : link(t('empty.install'), f.installUrl, 'btn btn-sm')))) : h('p', { class: 'muted small' }, t('empty.noFamilies')),
       BOOT.readOnly ? null : h('button', { class: 'btn', type: 'button', onclick: () => openCreate(null) }, icon('plus'), t('empty.create')))
   }
   function clearFilters() {
@@ -1894,7 +1909,7 @@ const MAIN = String.raw`
         renderPreview()
       })
       const n = S.state.accounts.filter((a) => a.family === f.id).length
-      const sub = st === 'ready' ? tn('nf.accounts', n) : st === 'no-main' ? tx('nf.runOnce', { bin: h('code', null, f.bin) }) : t('nf.notInstalled')
+      const sub = st === 'ready' ? tn('nf.accounts', n) : st === 'no-main' ? tx('nf.runOnce', { bin: h('code', null, f.bin) }) : t(f.brokenBin ? 'nf.broken' : 'nf.notInstalled')
       return h('label', { class: 'fam-card' + (st === 'ready' ? '' : ' is-off') }, input, badge(f.id, 'sm'),
         h('span', { class: 'fam-text' }, h('span', { class: 'fam-title' }, f.title), h('span', { class: 'fam-sub' }, sub)))
     })

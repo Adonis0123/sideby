@@ -366,6 +366,9 @@ a.btn:hover { text-decoration: none; }
 .note b { color: inherit; }
 .note-fail { background: var(--fail-soft); color: var(--fail); }
 .note-warn { background: var(--warn-soft); color: var(--warn); }
+/* A note in two lines: what is wrong, then the command to run (with its copy button and the install page). */
+.note-line { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; }
+.note-cmd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .error-note { justify-content: space-between; gap: 12px; }
 .error-note > span { min-width: 0; overflow-wrap: anywhere; }
 .error-note > .note-sub { flex-basis: 100%; color: var(--text); }
