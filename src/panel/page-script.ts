@@ -254,6 +254,8 @@ const MAIN = String.raw`
   // Whether the viewer is in the middle of something a background render would disturb: an open menu, dialog or
   // tooltip, a focused field, or a text selection in the account list.
   function uiBusy() {
+    // A row or group in the middle of folding; a render now would cut the motion short.
+    for (const el of folding) if (el.isConnected) return true
     if (menu.el || (dlg.el && dlg.el.open) || document.querySelector('.tip.is-open')) return true
     // A plan on the Auto Handoff page, and the change a person opened to read, stay as they are.
     if (!$('handoff-page').hidden && (hp.preview || hp.askSame || document.querySelector('#handoff-page details[open]'))) return true
@@ -1134,42 +1136,104 @@ const MAIN = String.raw`
   }
   // The whole account cell (and a folded row anywhere) folds and opens it, not only the arrow; the buttons and links
   // inside keep their own action, and a click that ends a text selection does nothing.
+  // A click folds the row unless it ended a drag that selects text; a selection left from before does not block it.
+  let downAt = null
+  document.addEventListener('pointerdown', (e) => { downAt = { x: e.clientX, y: e.clientY } }, true)
+  // A double click would select a word under the pointer as well as fold the row twice; keep the word unselected.
+  document.addEventListener('mousedown', (e) => {
+    if (e.detail > 1 && e.target.closest && e.target.closest('.fold-hit') && !e.target.closest('input, select, textarea')) e.preventDefault()
+  })
   function foldClick(a) {
     return (e) => {
       if (e.target.closest('button, a, input, select, textarea, .tip')) return
-      if (window.getSelection && String(window.getSelection())) return
+      const dragged = downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 4
+      if (dragged && window.getSelection && String(window.getSelection())) return
       toggleRow(a)
     }
   }
-  // Folding animates: the details fade out, then the row's height eases to one line; opening eases the height out
-  // and fades the details in. The arrow turns with it. Reduced motion just switches.
+  // Folding animates: the height eases while the details fade and the arrow turns. A click during the motion turns
+  // it around from where it is. Reduced motion just switches.
   const EASE = 'cubic-bezier(.2, 0, 0, 1)'
+  const FOLD_MS = 220
+  const folding = new Set()
   function rowDetails(el) { return Array.from(el.querySelectorAll(':scope > .row-detail')) }
+  function moving() { return !(REDUCED || document.hidden || !Element.prototype.animate) }
+  // Eases el's height from 'from' to its current height (measured with the 'hide' parts out of the layout),
+  // fading 'parts' toward 'opacity'; 'done' runs at the end unless a newer fold took over.
+  function ease(el, from, hide, parts, opacity, done) {
+    const run = el._fold
+    const fades = parts.map((p) => +getComputedStyle(p).opacity)
+    if (run) run.cancel()
+    for (const p of hide) p.style.display = 'none'
+    const to = el.getBoundingClientRect().height
+    for (const p of hide) p.style.display = ''
+    el.style.overflow = 'hidden'
+    const anims = [el.animate([{ height: from + 'px' }, { height: to + 'px' }], { duration: FOLD_MS, easing: EASE })]
+    parts.forEach((p, i) => anims.push(p.animate([{ opacity: fades[i] }, { opacity }], { duration: FOLD_MS, easing: 'ease-out', fill: 'forwards' })))
+    const me = { cancel: () => { for (const x of anims) x.cancel() } }
+    el._fold = me
+    folding.add(el)
+    anims[0].finished.then(() => {
+      if (el._fold !== me) return
+      el._fold = null
+      folding.delete(el)
+      el.style.overflow = ''
+      me.cancel()
+      done()
+    }, () => {})
+  }
+  // A row folds in place: only its arrow, class and details change, so the rest of the list is left alone.
   function toggleRow(a) {
-    const closing = isOpen(a)
-    const find = () => document.querySelector('[data-ref="' + CSS.escape(a.ref) + '"]')
-    const apply = () => {
-      if (closing) delete prefs.open[a.ref]; else prefs.open[a.ref] = true
-      savePrefs()
-      renderAccounts()
+    const open = !isOpen(a)
+    if (open) prefs.open[a.ref] = true; else delete prefs.open[a.ref]
+    savePrefs()
+    const el = document.querySelector('#accounts [data-ref="' + CSS.escape(a.ref) + '"]')
+    if (!el) { renderAccounts(); return }
+    const from = el.getBoundingClientRect().height
+    const btn = el.querySelector('.row-toggle')
+    if (btn) syncAttrs(btn, rowToggle(a))
+    el.classList.toggle('row-open', open)
+    el.dataset.sig = rowSig(a)
+    let detail = rowDetails(el)[0]
+    if (open && !detail) {
+      detail = rowDetail(a, Boolean(emailLine(a)))
+      const more = el.querySelector(':scope > .more')
+      el.insertBefore(detail, more ? more.nextSibling : null)
+      detail.style.opacity = '0'
     }
-    const old = find()
-    // A hidden page delays animation events; switch at once there too.
-    if (REDUCED || document.hidden || !old || !old.animate) { apply(); return }
-    const from = old.getBoundingClientRect().height
-    const fade = closing ? rowDetails(old).map((d) => d.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 110, easing: 'ease-out', fill: 'forwards' }).finished) : []
-    Promise.all(fade).catch(() => {}).then(() => {
-      apply()
-      const el = find()
-      if (!el) return
-      const to = el.getBoundingClientRect().height
-      el.style.overflow = 'hidden'
-      const done = () => { el.style.overflow = '' }
-      el.animate([{ height: from + 'px' }, { height: to + 'px' }], { duration: 220, easing: EASE }).finished.then(done, done)
-      const chev = el.querySelector('.row-toggle .chev')
-      if (chev) chev.animate([{ transform: closing ? 'rotate(90deg)' : 'rotate(0deg)' }, { transform: closing ? 'rotate(0deg)' : 'rotate(90deg)' }], { duration: 220, easing: EASE })
-      if (!closing) for (const d of rowDetails(el)) d.animate([{ opacity: 0, transform: 'translateY(-4px)' }, { opacity: 1, transform: 'none' }], { duration: 200, delay: 60, easing: 'ease-out', fill: 'backwards' })
-    })
+    if (!detail) return
+    if (!moving()) { if (!open) detail.remove(); return }
+    ease(el, from, open ? [] : [detail], [detail], open ? 1 : 0, () => { if (!open) detail.remove() })
+    detail.style.opacity = ''
+  }
+  function groupParts(el) { return Array.from(el.querySelectorAll(':scope > :not(.group-head)')) }
+  // A group closes on the page as it is and renders when the motion ends; it opens by rendering its body first.
+  function toggleGroup(key, domKey) {
+    const find = () => document.querySelector('#accounts > [data-key="' + CSS.escape(domKey) + '"]')
+    const el = find()
+    const btn = el && el.querySelector('.group-head .group-toggle')
+    const open = btn ? btn.getAttribute('aria-expanded') !== 'true' : prefs.collapsed[key] === true
+    if (open) delete prefs.collapsed[key]; else prefs.collapsed[key] = true
+    savePrefs()
+    if (!el || !moving()) { renderAccounts(); return }
+    const from = el.getBoundingClientRect().height
+    if (!open) {
+      btn.setAttribute('aria-expanded', 'false')
+      const parts = groupParts(el)
+      ease(el, from, parts, parts, 0, renderAccounts)
+      return
+    }
+    // Turned around while closing: the body is still there.
+    if (el._fold) { btn.setAttribute('aria-expanded', 'true'); ease(el, from, [], groupParts(el), 1, renderAccounts); return }
+    renderAccounts()
+    const now = find()
+    if (!now) return
+    const parts = groupParts(now)
+    for (const p of parts) p.style.opacity = '0'
+    const chev = now.querySelector('.group-head .chev')
+    if (chev) chev.animate([{ transform: 'rotate(0deg)' }, { transform: 'rotate(90deg)' }], { duration: FOLD_MS, easing: EASE })
+    ease(now, from, [], parts, 1, () => {})
+    for (const p of parts) p.style.opacity = ''
   }
   // The Account 'sideby next <family>' would pick; the server ranks it with the CLI's rule (spec §3.13).
   function isNext(a) { return Boolean(S.state && S.state.handoff && S.state.handoff[a.family] === a.ref) }
@@ -1319,11 +1383,7 @@ const MAIN = String.raw`
     const collapsed = prefs.collapsed['app:' + app] === true
     const bodyId = 'grp-app-' + app.replace(/[^a-zA-Z0-9_-]/g, '_')
     const head = h('div', { class: 'group-head', 'data-key': 'head' },
-      h('button', { class: 'group-toggle', type: 'button', 'aria-expanded': String(!collapsed), 'aria-controls': bodyId, title: t(collapsed ? 'group.expand' : 'group.collapse'), 'aria-label': t('group.toggle', { title: app, count: String(list.length), action: t(collapsed ? 'group.expand' : 'group.collapse') }), onclick: () => {
-        if (collapsed) delete prefs.collapsed['app:' + app]; else prefs.collapsed['app:' + app] = true
-        savePrefs()
-        renderAccounts()
-      } },
+      h('button', { class: 'group-toggle', type: 'button', 'aria-expanded': String(!collapsed), 'aria-controls': bodyId, title: t(collapsed ? 'group.expand' : 'group.collapse'), 'aria-label': t('group.toggle', { title: app, count: String(list.length), action: t(collapsed ? 'group.expand' : 'group.collapse') }), onclick: () => toggleGroup('app:' + app, 'app:' + app) },
         icon('chevron', 'chev'), appBadge(), h('span', { class: 'group-title' }, app),
         h('span', { class: 'group-count' }, String(list.length))),
       h('div', { class: 'group-meta' },
@@ -1391,11 +1451,7 @@ const MAIN = String.raw`
     const bodyId = 'grp-' + fam.replace(/[^a-zA-Z0-9_-]/g, '_')
     const cards = prefs.view === 'cards'
     const head = h('div', { class: 'group-head', 'data-key': 'head' },
-      h('button', { class: 'group-toggle', type: 'button', 'aria-expanded': String(!collapsed), 'aria-controls': bodyId, title: t(collapsed ? 'group.expand' : 'group.collapse'), 'aria-label': t('group.toggle', { title: info.title, count: list.length === total ? String(total) : list.length + ' / ' + total, action: t(collapsed ? 'group.expand' : 'group.collapse') }), onclick: () => {
-        if (collapsed) delete prefs.collapsed[fam]; else prefs.collapsed[fam] = true
-        savePrefs()
-        renderAccounts()
-      } },
+      h('button', { class: 'group-toggle', type: 'button', 'aria-expanded': String(!collapsed), 'aria-controls': bodyId, title: t(collapsed ? 'group.expand' : 'group.collapse'), 'aria-label': t('group.toggle', { title: info.title, count: list.length === total ? String(total) : list.length + ' / ' + total, action: t(collapsed ? 'group.expand' : 'group.collapse') }), onclick: () => toggleGroup(fam, 'g:' + fam) },
         icon('chevron', 'chev'), badge(fam, 'sm'), h('span', { class: 'group-title' }, info.title),
         h('span', { class: 'group-count' }, list.length === total ? String(total) : list.length + ' / ' + total)),
       h('div', { class: 'group-meta' },
