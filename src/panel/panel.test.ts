@@ -1600,7 +1600,7 @@ describe('panel updates (spec §3.23, ADR-0021)', () => {
         // The running version stays in sight in the header and opens the dialog with "Check for updates" (spec §3.23).
         assert.match(
           page.text,
-          /<div class="title-row"><h1>sideby<\/h1><button id="ver-top" class="ver-pill" type="button" hidden><\/button><\/div>/,
+          /<div class="title-row"><h1>sideby<\/h1><button id="ver-top" class="ver-pill" type="button" aria-haspopup="dialog" aria-expanded="false" hidden><\/button><\/div>/,
         )
         assert.match(page.text, /function updCheck\(\)[\s\S]*api\('\/api\/update', \{\}\)/)
         const state = async (port: number) =>

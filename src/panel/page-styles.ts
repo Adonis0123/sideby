@@ -89,7 +89,8 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 /* The running version, a quiet pill after the name; with a newer version it takes the accent and a dot (spec §3.23). */
 .title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .ver-pill { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); font: 500 11.5px/18px var(--mono); cursor: pointer; white-space: nowrap; }
-.ver-pill:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.ver-pill:hover:not(:disabled), .ver-pill[aria-expanded="true"] { color: var(--text); border-color: var(--border-strong); background: var(--hover); }
+.ver-pill.has-update:hover:not(:disabled), .ver-pill.has-update[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); background: var(--active); }
 .ver-pill:disabled { cursor: default; }
 .ver-pill:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
 .ver-pill.has-update { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
@@ -505,6 +506,11 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .tip { display: inline-flex; position: relative; vertical-align: middle; }
 .tip-btn { display: inline-grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--surface); color: var(--muted); font: 700 10px/1 var(--font); cursor: help; }
 .tip-btn:hover, .tip.is-open .tip-btn { color: var(--text); border-color: var(--muted); }
+/* Popover: the menu's floating box with free content (text, a few buttons), lighter than a dialog. */
+.popover { width: 280px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.popover p { margin: 0; }
+.popover-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.popover-foot { padding-top: 8px; border-top: 1px solid var(--border); }
 .tip-btn:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
 .tip-body { display: none; position: fixed; z-index: 60; width: max-content; max-width: min(280px, calc(100vw - 16px)); padding: 7px 10px; border-radius: 7px; background: var(--text); color: var(--bg); font-size: 12px; font-weight: 400; line-height: 1.45; letter-spacing: 0; box-shadow: var(--float-shadow); pointer-events: none; text-align: left; white-space: normal; }
 .tip.is-open .tip-body { display: block; }

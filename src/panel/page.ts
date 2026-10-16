@@ -83,7 +83,7 @@ export function renderPage(opts: PageOptions): string {
     <div class="brand">
       <span class="logo" aria-hidden="true">${MARK_SVG}</span>
       <div>
-        <div class="title-row"><h1>sideby</h1><button id="ver-top" class="ver-pill" type="button" hidden></button></div>
+        <div class="title-row"><h1>sideby</h1><button id="ver-top" class="ver-pill" type="button" aria-haspopup="dialog" aria-expanded="false" hidden></button></div>
         <p class="tagline" data-i18n="top.tagline">Every AI coding account, side by side.</p>
       </div>
     </div>
@@ -112,7 +112,7 @@ export function renderPage(opts: PageOptions): string {
     <div class="section-head"><h2 id="h-checkup" data-i18n="health.title">Health check</h2></div>
     <span class="sk sk-line w70"></span><span class="sk sk-line w50"></span>
   </section>
-  <footer class="foot muted small"><button id="ver" class="link-btn" type="button">sideby</button> · <span id="foot-text" data-i18n="foot.text">runs on this machine; nothing leaves it.</span></footer>
+  <footer class="foot muted small"><button id="ver" class="link-btn" type="button" aria-haspopup="dialog" aria-expanded="false">sideby</button> · <span id="foot-text" data-i18n="foot.text">runs on this machine; nothing leaves it.</span></footer>
 </main>
 <div id="conn" class="conn" role="status" hidden></div>
 <div id="toasts" class="toasts" aria-live="polite" popover="manual"></div>

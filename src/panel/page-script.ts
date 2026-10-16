@@ -551,28 +551,50 @@ const MAIN = String.raw`
   document.addEventListener('focusin', (e) => { if (e.target.classList && e.target.classList.contains('tip-btn')) showTip(e.target) })
   document.addEventListener('focusout', (e) => { if (e.target.classList && e.target.classList.contains('tip-btn')) hideTip(e.target) })
 
-  // ---------- row menu ----------
-  const menu = { el: null, anchor: null }
-  function openMenu(anchor, items, label) {
+  // ---------- floating panels: menus and popovers ----------
+  // One shared base for everything that floats next to a button: it is placed under (or above) its anchor, kept
+  // inside the window, closed by a click outside, Escape, a resize or a scroll, and only one is open at a time.
+  // openMenu() fills it with menu items; openPopover() with any content that render() returns (re-run by refreshPopover()).
+  const menu = { el: null, anchor: null, kind: null, render: null }
+  function openFloat(anchor, el, kind, align) {
     closeMenu()
-    const el = h('div', { class: 'menu', role: 'menu', 'aria-label': label },
-      items.filter(Boolean).map((it) => it === '-' ? h('div', { class: 'menu-sep', role: 'separator' })
-        : h('button', { class: 'menu-item', type: 'button', role: 'menuitem', tabindex: '-1', disabled: it.disabled, onclick: () => { closeMenu(true); it.run() } },
-          icon(it.icon), h('span', { class: 'menu-label' }, it.label), it.hint ? h('code', { class: 'menu-hint', title: it.hint }, it.hint.length > 24 ? '…' + it.hint.slice(-23) : it.hint) : null)))
-    el.addEventListener('keydown', menuKeys)
     document.body.append(el)
     const r = anchor.getBoundingClientRect()
     const w = el.offsetWidth
     const hgt = el.offsetHeight
-    const left = Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w))
+    const x = align === 'start' ? r.left : r.right - w
+    const left = Math.max(8, Math.min(window.innerWidth - w - 8, x))
     const top = r.bottom + 4 + hgt > window.innerHeight - 8 && r.top - hgt - 4 > 8 ? r.top - hgt - 4 : r.bottom + 4
     el.style.setProperty('left', left + 'px')
     el.style.setProperty('top', top + 'px')
     anchor.setAttribute('aria-expanded', 'true')
     menu.el = el
     menu.anchor = anchor
+    menu.kind = kind
+  }
+  function openMenu(anchor, items, label) {
+    const el = h('div', { class: 'menu', role: 'menu', 'aria-label': label },
+      items.filter(Boolean).map((it) => it === '-' ? h('div', { class: 'menu-sep', role: 'separator' })
+        : h('button', { class: 'menu-item', type: 'button', role: 'menuitem', tabindex: '-1', disabled: it.disabled, onclick: () => { closeMenu(true); it.run() } },
+          icon(it.icon), h('span', { class: 'menu-label' }, it.label), it.hint ? h('code', { class: 'menu-hint', title: it.hint }, it.hint.length > 24 ? '…' + it.hint.slice(-23) : it.hint) : null)))
+    el.addEventListener('keydown', menuKeys)
+    openFloat(anchor, el, 'menu', 'end')
     const first = el.querySelector('.menu-item:not(:disabled)')
     if (first) first.focus()
+  }
+  // A popover: a small panel of text and buttons, lighter than a dialog. A second click on its anchor closes it.
+  function openPopover(anchor, kind, label, render) {
+    if (menu.anchor === anchor) { closeMenu(true); return }
+    const el = h('div', { class: 'menu popover', role: 'dialog', 'aria-label': label })
+    el.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeMenu(true) } })
+    setKids(el, render())
+    openFloat(anchor, el, kind, 'start')
+    menu.render = render
+    const first = el.querySelector('button:not(:disabled), a[href]')
+    if (first) first.focus()
+  }
+  function refreshPopover(kind) {
+    if (menu.el && menu.kind === kind && menu.render) setKids(menu.el, menu.render())
   }
   function closeMenu(restore) {
     if (!menu.el) return
@@ -581,6 +603,8 @@ const MAIN = String.raw`
     if (restore && menu.anchor.isConnected) menu.anchor.focus()
     menu.el = null
     menu.anchor = null
+    menu.kind = null
+    menu.render = null
   }
   function menuKeys(e) {
     const items = Array.from(menu.el.querySelectorAll('.menu-item:not(:disabled)'))
@@ -2748,6 +2772,7 @@ const MAIN = String.raw`
     up.error = null
     renderUpdate()
     try {
+    if (!vp.checking) renderVerPop()
       const r = await api('/api/update', { confirm: true, version: u.latest })
       if (!r.updated) {
         // The registry names another version than the dialog showed: show the new plan and let the person look again.
@@ -2778,6 +2803,56 @@ const MAIN = String.raw`
   }
   // After an Update the server (or the Portal's worker) comes back with a new build; load() then reloads the page.
   function updWait() {
+  // The version pill opens a small popover, not the dialog: the version, whether it is the newest, "Check for
+  // updates" in place, and the way into the dialog when there is something to do (update, Auto Update).
+  const vp = { checking: false, checked: false, error: null }
+  function openVerPop(anchor) {
+    if (!BOOT.updates) return
+    vp.checked = false
+    vp.error = null
+    openPopover(anchor, 'version', t('upd.title'), verPopKids)
+  }
+  function renderVerPop() { refreshPopover('version') }
+  function verPopKids() {
+    const u = updState()
+    const toDialog = () => { closeMenu(); openUpdate() }
+    const kids = [h('b', null, 'sideby v' + BOOT.version)]
+    let status
+    if (!u) status = t('upd.loading')
+    else if (u.available) status = null
+    else if (vp.checked && u.latest) status = t('upd.latestNow')
+    else if (u.checksOff) status = t('upd.checksOff', { why: u.checksOff })
+    else if (u.latest) status = t('upd.latest') + (u.checkedAt ? ' · ' + t('upd.checked', { ago: ago(u.checkedAt) }) : '')
+    else status = t('upd.notYet')
+    if (status) kids.push(h('p', { class: 'muted small' }, status))
+    if (u && u.available) {
+      kids.push(h('p', { class: 'small' }, t('upd.available', { v: u.latest }), ' ',
+        h('a', { href: u.releaseNotes, target: '_blank', rel: 'noopener noreferrer' }, t('upd.notes'))))
+      kids.push(h('div', { class: 'popover-actions' }, h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: toDialog }, t('upd.open'))))
+    } else if (!BOOT.readOnly) {
+      kids.push(h('div', { class: 'popover-actions' }, h('button', { class: 'btn btn-sm', type: 'button', disabled: vp.checking, 'aria-busy': vp.checking ? 'true' : null, onclick: verPopCheck },
+        vp.checking ? spinner() : icon('refresh'), vp.checking ? t('upd.checking') : t('upd.check'))))
+    }
+    if (vp.error) kids.push(errorNote(vp.error, null))
+    if (u && !BOOT.readOnly)
+      kids.push(h('p', { class: 'muted small popover-foot' }, t(u.auto ? 'upd.autoIsOn' : 'upd.autoIsOff'), ' · ',
+        h('button', { class: 'link-btn', type: 'button', onclick: toDialog }, t('upd.settings'))))
+    return kids
+  }
+  async function verPopCheck() {
+    vp.checking = true
+    vp.error = null
+    renderVerPop()
+    try {
+      await api('/api/update', {})
+      await load({ silent: true })
+      vp.checked = true
+    } catch (e) { vp.error = e }
+    vp.checking = false
+    renderVerPop()
+    const b = menu.el && menu.el.querySelector('.popover-actions button')
+    if (b) b.focus()
+  }
     if (!up || !up.done || S.newBuild) { if (S.newBuild) location.reload(); return }
     if (Date.now() > up.waitUntil) { renderUpdate(); return }
     setTimeout(() => { void load({ silent: true }).then(updWait) }, 1500)
@@ -2863,9 +2938,9 @@ const MAIN = String.raw`
   // ---------- start ----------
   $('ver').textContent = BOOT.version ? 'sideby v' + BOOT.version : 'sideby'
   $('ver').disabled = !BOOT.updates
-  $('ver').addEventListener('click', openUpdate)
+  $('ver').addEventListener('click', () => openVerPop($('ver')))
   $('update').addEventListener('click', openUpdate)
-  $('ver-top').addEventListener('click', openUpdate)
+  $('ver-top').addEventListener('click', () => openVerPop($('ver-top')))
   $('refresh').addEventListener('click', () => load({ check: true, announce: true }))
   $('handoff').addEventListener('click', () => setPage('handoff'))
   $('lang').addEventListener('click', () => {
