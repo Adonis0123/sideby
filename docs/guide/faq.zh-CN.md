@@ -27,9 +27,9 @@ Node 从 22.18 起默认会剥掉 TypeScript 类型，sideby 才能直接 `impor
 
 | 内容 | 位置 |
 |---|---|
-| 配置（sideby 只写其中的 `aliases`、`handoff` 和 `accounts.<ref>.args`：`aliases` 来自 `new --alias`、`sideby alias` 或面板，`handoff` 来自 `sideby handoff enable`、`sideby handoff disable` 或面板，`accounts.<ref>.args` 里的模型和 effort 参数来自 `sideby model` 或面板） | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
+| 配置（sideby 只写其中的 `aliases`、`handoff`、`accounts.<ref>.args` 和 `update.auto`：`aliases` 来自 `new --alias`、`sideby alias` 或面板，`handoff` 来自 `sideby handoff enable`、`sideby handoff disable` 或面板，`accounts.<ref>.args` 里的模型和 effort 参数来自 `sideby model` 或面板，`update.auto` 来自面板的更新对话框） | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
 | 你的插件 | `${XDG_CONFIG_HOME:-~/.config}/sideby/plugins/` |
-| 状态：额度缓存、上次体检结果、`settings.json` 原始字节、后台面板的 pid 和日志 | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
+| 状态：额度缓存、上次体检结果、`settings.json` 原始字节、后台面板的 pid 和日志、上次检查更新的结果（`update.json`）和正在运行的会话（`running/`） | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
 | 每个账号的桌面应用数据（`sideby desktop`） | macOS `~/Library/Application Support/sideby/<家族>/<账号名>/` |
 | Grok Bot 窗口（`sideby desktop grok-bot:<名字>`） | macOS `~/Library/Application Support/sideby/grok-bot/<名字>/` |
 | 面板应用（`sideby app install`） | macOS `~/Applications/sideby.app`；Linux `~/.local/share/applications/sideby.desktop`、`~/.local/share/sideby/`、`~/.local/share/icons/hicolor/*/apps/sideby.*` |

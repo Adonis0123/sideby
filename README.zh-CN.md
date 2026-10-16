@@ -29,7 +29,7 @@ sideby quota setup claude --yes  # 在面板里显示 Claude 额度；撤回：s
 sideby ui                        # 在 http://127.0.0.1:17420 查看所有账号的额度
 ```
 
-`sideby run claude:main` 可以同时在另一个终端里继续用 `~/.claude`。`--` 之后的参数原样交给宿主：`sideby run work -- --resume`。不想安装，可以先跑 `npx sideby` 试试。
+有新版本时，命令结束后和面板里都会提示，`sideby update` 一条命令更新。`sideby run claude:main` 可以同时在另一个终端里继续用 `~/.claude`。`--` 之后的参数原样交给宿主：`sideby run work -- --resume`。不想安装，可以先跑 `npx sideby` 试试。
 
 ## 让 AI 帮你装
 
@@ -110,7 +110,7 @@ sideby 启动 `PATH` 上的官方程序，从不修改它。测试过的版本�
 ## 安全边界
 
 - 不改宿主的全局配置来切换账号。只有你打开自动交接（Auto Handoff）时，才会把任务交给另一个账号；从不代理请求，也不合并登录。
-- 不读取、不打印、不发送任何凭据的值。数据不出本机：sideby 不调用任何远程服务。
+- 不读取、不打印、不发送任何凭据的值。账号相关的数据不出本机：sideby 自己发出的唯一请求是每天向 npm registry 查一次自己的最新版本号（用 `NO_UPDATE_NOTIFIER=1` 关闭，见[更新](docs/guide/configuration.zh-CN.md#更新)）。
 - `doctor --fix` 不替换真实文件，也不改链接的指向。
 
 细节和服务条款的问题见[常见问题](docs/guide/faq.zh-CN.md)。

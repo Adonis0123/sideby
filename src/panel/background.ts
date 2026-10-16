@@ -104,6 +104,13 @@ async function checkPanel(rec: PanelPidFile): Promise<PanelCheck> {
   return { status: 'ours', ...(id.build ? { build: id.build } : {}) }
 }
 
+/** The port of this state directory's background Panel when it runs and answers as itself, else null. */
+export async function backgroundPanelPort(p: Paths): Promise<number | null> {
+  const rec = await readPidFile(p)
+  if (!rec) return null
+  return (await checkPanel(rec)).status === 'ours' ? rec.port : null
+}
+
 /** URL of a running background Panel, or of any sideby Panel on `port`; removes a stale pid file. */
 export async function findRunningPanel(p: Paths, port: number): Promise<string | undefined> {
   const rec = await readPidFile(p)

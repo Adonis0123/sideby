@@ -222,6 +222,8 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .link-btn { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: var(--strong-weight); cursor: pointer; }
 .link-btn:hover:not(:disabled) { text-decoration: underline; }
 .link-btn:disabled { color: var(--faint); cursor: not-allowed; }
+.foot .link-btn { color: inherit; font-weight: inherit; }
+.update-btn { border-color: var(--accent); color: var(--accent); }
 .link-btn:focus-visible { outline: var(--focus-outline); outline-offset: 2px; border-radius: 3px; }
 
 /* Usage: total over cache hits, with the 7 day bars beside both lines. In the wide list the bars sit at the column's

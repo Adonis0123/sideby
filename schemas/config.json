@@ -226,6 +226,21 @@
       },
       "additionalProperties": false
     },
+    "update": {
+      "type": "object",
+      "properties": {
+        "check": {
+          "type": "boolean",
+          "description": "Ask the npm registry once a day whether a newer sideby exists, and say so after a command and in the Panel. On by default; `NO_UPDATE_NOTIFIER` or `SIDEBY_NO_UPDATE_NOTIFIER` also turn it off."
+        },
+        "auto": {
+          "type": "boolean",
+          "description": "Install a newer version by itself after a check, when no `sideby run` is running and the version is not a major one. Off by default."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Update Check and Auto Update (ADR-0021)."
+    },
     "shellInitFile": {
       "type": "object",
       "properties": {

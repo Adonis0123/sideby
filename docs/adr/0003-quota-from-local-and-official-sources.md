@@ -16,7 +16,7 @@ Official or local sources exist for two Families:
 
 ## Decision
 
-- Built-in Quota sources make no network requests and never read credential values.
+- Built-in Quota sources make no network requests and never read credential values. (The once-a-day Update Check of ADR-0021 is the only request sideby makes on its own; it reads nothing of a Host.)
 - Claude: a status line wrapper caches `rate_limits` per Account, enabled only by an explicit `sideby quota setup claude`.
 - Codex: read the newest `token_count` event from local session files.
 - Grok, pi and API Accounts show no Quota.

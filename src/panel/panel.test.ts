@@ -1561,3 +1561,101 @@ describe('panel next tag and Same Login (spec §3.21)', () => {
     assert.equal(out.claude, 'claude:002')
   })
 })
+
+describe('panel updates (spec §3.23, ADR-0021)', () => {
+  it('serves the mark, shows a newer version and the Auto Update switch, and hides it all with updates: false', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const { bindUpdateDeps } = await import('../core/update.ts')
+      const asked: string[] = []
+      const execs: string[][] = []
+      const unbind = bindUpdateDeps({
+        fetch: (async (url: string | URL) => {
+          asked.push(String(url))
+          return new Response(JSON.stringify({ latest: '99.0.0' }))
+        }) as typeof fetch,
+        packageDir: async () => '/u/.nvm/versions/node/v22/lib/node_modules/sideby',
+        writable: async () => true,
+        exec: async (file, args) => {
+          execs.push([file, ...args])
+          return { code: 0, output: '' }
+        },
+      })
+      const { SIDEBY_NO_UPDATE_NOTIFIER: _off, ...env } = h.env
+      const make = (updates?: boolean) => (port: number) =>
+        createPanelHandler({
+          runtime: () => createRuntime({ env, builtins: [asBuiltin(demoPlugin(demoFamily({})))] }),
+          allowedHosts: [`127.0.0.1:${port}`],
+          ...(updates === undefined ? {} : { updates }),
+        })
+      const on = await serve(make())
+      const off = await serve(make(false))
+      try {
+        const icon = await request(on.port, 'GET', '/icon.svg', { host: `127.0.0.1:${on.port}` })
+        assert.equal(icon.status, 200)
+        assert.match(icon.text, /^<svg xmlns=.*#f2b35e.*#3f8fc4/s)
+        const page = await request(on.port, 'GET', '/', { host: `127.0.0.1:${on.port}` })
+        assert.match(page.text, /<link rel="icon" type="image\/svg\+xml" href="\/favicon\.svg">/)
+        const state = async (port: number) =>
+          JSON.parse(
+            (await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text,
+          ) as PanelState
+        // The first state read starts the check; poll until its answer shows (no fixed sleep: the machine may be slow).
+        let u = (await state(on.port)).update!
+        for (let i = 0; i < 250 && !u.latest; i++) {
+          await new Promise((r) => setTimeout(r, 20))
+          u = (await state(on.port)).update!
+        }
+        assert.equal(asked.length, 1)
+        assert.deepEqual(
+          [u.latest, u.available, u.canRun, u.auto, u.method.kind],
+          ['99.0.0', true, true, false, 'npm'],
+        )
+        assert.equal(u.command, 'npm install -g sideby@99.0.0')
+        assert.equal((await state(off.port)).update, undefined)
+
+        const good = { origin: `http://127.0.0.1:${on.port}`, 'x-sideby-token': on.handler.token }
+        const preview = await post(on.port, '/api/update/settings', { auto: true }, good)
+        assert.equal(preview.status, 200)
+        assert.equal(preview.body.applied, false)
+        await assert.rejects(readFile(h.path('.config/sideby/config.json'), 'utf8'))
+        const saved = await post(on.port, '/api/update/settings', { auto: true, confirm: true }, good)
+        assert.equal(saved.body.applied, true)
+        const config = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8')) as {
+          update?: { auto?: boolean }
+        }
+        assert.equal(config.update?.auto, true)
+
+        // The version the dialog showed is not the one the registry names now: nothing is installed.
+        const stale = await post(on.port, '/api/update', { confirm: true, version: '98.0.0' }, good)
+        assert.equal(stale.status, 200)
+        assert.deepEqual([stale.body.updated, stale.body.changed, stale.body.latest], [false, true, '99.0.0'])
+        assert.equal(execs.length, 0)
+        const ran = await post(on.port, '/api/update', { confirm: true, version: '99.0.0' }, good)
+        assert.equal(ran.body.updated, true)
+        assert.equal(execs.length, 1)
+
+        const offGood = { origin: `http://127.0.0.1:${off.port}`, 'x-sideby-token': off.handler.token }
+        assert.equal((await post(off.port, '/api/update', {}, offGood)).status, 403)
+        assert.equal((await post(off.port, '/api/update/settings', { auto: false }, offGood)).status, 403)
+        const ro = await serve((port) =>
+          createPanelHandler({
+            runtime: () => createRuntime({ env, builtins: [asBuiltin(demoPlugin(demoFamily({})))] }),
+            allowedHosts: [`127.0.0.1:${port}`],
+            readOnly: true,
+          }),
+        )
+        try {
+          const roGood = { origin: `http://127.0.0.1:${ro.port}`, 'x-sideby-token': ro.handler.token }
+          assert.equal((await post(ro.port, '/api/update', {}, roGood)).status, 403)
+        } finally {
+          await close(ro.server)
+        }
+      } finally {
+        unbind()
+        await close(on.server)
+        await close(off.server)
+      }
+    })
+  })
+})

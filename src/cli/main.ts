@@ -60,10 +60,11 @@ Usage:
   sideby shell-init [zsh|bash] --write
                                       rewrite the config's shellInitFile with them
   sideby plugins                      list loaded plugins and load errors
+  sideby update [--yes]               update sideby to the newest version (shows the command first)
 
 Options:
   --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, remote-control, handoff,
-                families, plugins, app, desktop)
+                families, plugins, app, desktop, update)
   -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, desktop
   -v, --version show the version
 
@@ -75,7 +76,10 @@ For AI agents:
   Setup steps and the full contract: https://github.com/Adonis0123/sideby/blob/main/llms.txt
   Run everything else yourself, but hand the user these as one line each: \`sideby login <account>\`
   (browser sign-in), filling in proxy.env, and \`sideby run\` or \`sideby next\` (interactive sessions).
-  Exit 10 means a change was shown: ask the user, then run it again with --yes.`
+  Exit 10 means a change was shown: ask the user, then run it again with --yes.
+
+Updates: once a day sideby asks the npm registry for its newest version and says so after a command.
+  Turn it off with NO_UPDATE_NOTIFIER=1 or config "update": { "check": false }; "auto": true installs by itself.`
 
 /** `sideby <command> --help` for the commands agents use to set up and repair accounts (spec §3.16). */
 const COMMAND_HELP: Record<string, string> = {
@@ -208,6 +212,48 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   'shell-init': { flags: ['write'] },
   plugins: { flags: ['json'] },
   families: { flags: ['json'] },
+  update: { flags: ['json', 'yes'] },
+  'update-check': { flags: [] },
+}
+
+/** Commands that never print an Update Notice: their output is read by a shell or an agent, or they are internal. */
+function noticeAllowed(cmd: string, parsed: import('./args.ts').ParsedArgs): boolean {
+  if (cmd === 'shell-init' || cmd === 'update' || cmd === 'update-check') return false
+  if (cmd === 'ui' && parsed.flags.has('serve-detached')) return false
+  if (cmd === 'handoff' && parsed.positionals[0] === 'ready') return false
+  return true
+}
+
+/**
+ * After a command (spec §3.23): print the Update Notice and the result of an Auto Update, each at most once, and
+ * start the next Update Check detached when the last one is a day old. Only on a terminal; never fails the command.
+ */
+async function afterCommand(): Promise<void> {
+  if (!process.stderr.isTTY) return
+  try {
+    const u = await import('../core/update.ts')
+    const { resolvePaths } = await import('../core/paths.ts')
+    const { loadConfig } = await import('../core/config.ts')
+    const { packageVersion } = await import('../core/version.ts')
+    const paths = resolvePaths(process.env)
+    const config = await loadConfig(paths.configFile).catch(() => ({}))
+    const cache = await u.readUpdateCache(paths)
+    const plan = u.afterCommandPlan(cache, packageVersion(), config, process.env, new Date())
+    const dim = process.env.NO_COLOR ? (t: string) => t : (t: string) => `\x1b[2m${t}\x1b[22m`
+    for (const l of plan.lines) console.error(dim(l))
+    if (plan.record) await u.updateUpdateCache(paths, plan.record)
+    if (plan.startCheck) {
+      const { spawn } = await import('node:child_process')
+      const child = spawn(process.execPath, [fileURLToPath(import.meta.url), 'update-check'], {
+        detached: true,
+        stdio: 'ignore',
+      })
+      child.on('error', () => {})
+      child.unref()
+    }
+  } catch {
+    // an Update Notice is never worth failing a command
+  }
 }
 
 export async function main(argv: string[]): Promise<number> {
@@ -282,47 +328,9 @@ export async function main(argv: string[]): Promise<number> {
       return 0
     }
     const cmds = await import('./commands.ts')
-    switch (cmd) {
-      case 'list':
-        return await cmds.cmdList(parsed, io)
-      case 'run':
-        return await cmds.cmdRun(parsed, io, 'run')
-      case 'login':
-        return await cmds.cmdRun(parsed, io, 'login')
-      case 'resume':
-        return await cmds.cmdResume(parsed, io)
-      case 'next':
-        return await cmds.cmdNext(parsed, io)
-      case 'new':
-        return await cmds.cmdNew(parsed, io)
-      case 'alias':
-        return await cmds.cmdAlias(parsed, io)
-      case 'doctor':
-        return await cmds.cmdDoctor(parsed, io)
-      case 'quota':
-        return await cmds.cmdQuota(parsed, io)
-      case 'tune':
-        return await cmds.cmdTune(parsed, io)
-      case 'model':
-        return await cmds.cmdModel(parsed, io)
-      case 'remote-control':
-        return await cmds.cmdRemoteControl(parsed, io)
-      case 'handoff':
-        return await cmds.cmdHandoff(parsed, io)
-      case 'ui':
-        return await cmds.cmdUi(parsed, io)
-      case 'app':
-        return await cmds.cmdApp(parsed, io)
-      case 'desktop':
-        return await cmds.cmdDesktop(parsed, io)
-      case 'shell-init':
-        return await cmds.cmdShellInit(parsed, io)
-      case 'plugins':
-        return await cmds.cmdPlugins(parsed, io)
-      case 'families':
-        return await cmds.cmdFamilies(parsed, io)
-    }
-    return 2
+    const code = await dispatch(cmd, parsed, io, cmds)
+    if (!wantsJson && noticeAllowed(cmd, parsed)) await afterCommand()
+    return code
   } catch (err) {
     const usage = err instanceof UsageError
     const message = err instanceof Error ? err.message : String(err)
@@ -334,6 +342,59 @@ export async function main(argv: string[]): Promise<number> {
     if (!usage && process.env.SIDEBY_DEBUG && err instanceof Error) console.error(err.stack)
     return usage ? 2 : 1
   }
+}
+
+async function dispatch(
+  cmd: string,
+  parsed: import('./args.ts').ParsedArgs,
+  io: import('./commands.ts').Io,
+  cmds: typeof import('./commands.ts'),
+): Promise<number> {
+  switch (cmd) {
+    case 'list':
+      return await cmds.cmdList(parsed, io)
+    case 'run':
+      return await cmds.cmdRun(parsed, io, 'run')
+    case 'login':
+      return await cmds.cmdRun(parsed, io, 'login')
+    case 'resume':
+      return await cmds.cmdResume(parsed, io)
+    case 'next':
+      return await cmds.cmdNext(parsed, io)
+    case 'new':
+      return await cmds.cmdNew(parsed, io)
+    case 'alias':
+      return await cmds.cmdAlias(parsed, io)
+    case 'doctor':
+      return await cmds.cmdDoctor(parsed, io)
+    case 'quota':
+      return await cmds.cmdQuota(parsed, io)
+    case 'tune':
+      return await cmds.cmdTune(parsed, io)
+    case 'model':
+      return await cmds.cmdModel(parsed, io)
+    case 'remote-control':
+      return await cmds.cmdRemoteControl(parsed, io)
+    case 'handoff':
+      return await cmds.cmdHandoff(parsed, io)
+    case 'ui':
+      return await cmds.cmdUi(parsed, io)
+    case 'app':
+      return await cmds.cmdApp(parsed, io)
+    case 'desktop':
+      return await cmds.cmdDesktop(parsed, io)
+    case 'shell-init':
+      return await cmds.cmdShellInit(parsed, io)
+    case 'plugins':
+      return await cmds.cmdPlugins(parsed, io)
+    case 'families':
+      return await cmds.cmdFamilies(parsed, io)
+    case 'update':
+      return await cmds.cmdUpdate(parsed, io)
+    case 'update-check':
+      return await cmds.cmdUpdateCheck(parsed, io)
+  }
+  return 2
 }
 
 // Run when executed directly, also through symlinks (npm's bin shim, a user alias like `sb`).

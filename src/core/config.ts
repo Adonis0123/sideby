@@ -180,6 +180,25 @@ export const ConfigSchema = Type.Object(
       }),
     ),
     handoff: Type.Optional(HandoffSchema),
+    update: Type.Optional(
+      Type.Object(
+        {
+          check: Type.Optional(
+            Type.Boolean({
+              description:
+                'Ask the npm registry once a day whether a newer sideby exists, and say so after a command and in the Panel. On by default; `NO_UPDATE_NOTIFIER` or `SIDEBY_NO_UPDATE_NOTIFIER` also turn it off.',
+            }),
+          ),
+          auto: Type.Optional(
+            Type.Boolean({
+              description:
+                'Install a newer version by itself after a check, when no `sideby run` is running and the version is not a major one. Off by default.',
+            }),
+          ),
+        },
+        { additionalProperties: false, description: 'Update Check and Auto Update (ADR-0021).' },
+      ),
+    ),
     shellInitFile: Type.Optional(
       Type.Object(
         {
@@ -260,14 +279,14 @@ async function configTarget(file: string): Promise<string> {
 }
 
 /**
- * Re-reads the config file, lets `edit` change one top-level `key` (the only two sideby writes are `aliases` and
- * `handoff`, spec §3.10), and writes the result: every other key and their order kept (with `$schema`), 2-space JSON
+ * Re-reads the config file, lets `edit` change one top-level `key` (sideby writes only `aliases`, `handoff`,
+ * `accounts` and `update`, spec §3.10), and writes the result: every other key and their order kept (with `$schema`), 2-space JSON
  * with a trailing newline, atomically, keeping the file's mode (0600 for a new file). Refuses, without writing, a
  * file that is not valid JSON or not a valid config, a result that is not a valid config, or a file that changed
  * while sideby wrote it. `edit` returns null to leave the file alone; `dryRun` returns the change without writing.
  * `retry` names what to do again after a fix.
  */
-async function editConfigKey<K extends 'aliases' | 'handoff' | 'accounts'>(
+async function editConfigKey<K extends 'aliases' | 'handoff' | 'accounts' | 'update'>(
   file: string,
   key: K,
   retry: string,
@@ -351,6 +370,20 @@ export function editConfigHandoff(
   opts: { dryRun?: boolean } = {},
 ): Promise<{ changed: boolean; before: HandoffConfig | undefined; after: HandoffConfig | undefined }> {
   return editConfigKey(file, 'handoff', 'run the command', (current) => edit(current ?? {}), opts)
+}
+
+export type UpdateConfig = NonNullable<Config['update']>
+
+/**
+ * The Panel's Auto Update switch (spec §3.23): changes the config `update` key with `edit` (see `editConfigKey` for
+ * how the file is written). With `dryRun`, shows the change without writing.
+ */
+export function editConfigUpdate(
+  file: string,
+  edit: (current: UpdateConfig) => UpdateConfig,
+  opts: { dryRun?: boolean } = {},
+): Promise<{ changed: boolean; before: UpdateConfig | undefined; after: UpdateConfig | undefined }> {
+  return editConfigKey(file, 'update', 'change the setting', (current) => edit(current ?? {}), opts)
 }
 
 export type AccountsConfig = NonNullable<Config['accounts']>

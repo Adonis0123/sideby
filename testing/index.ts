@@ -32,6 +32,8 @@ export async function withFakeHome<T>(fn: (h: FakeHome) => Promise<T>): Promise<
     XDG_STATE_HOME: join(home, '.local', 'state'),
     PATH: `${bin}:/usr/bin:/bin`,
     NO_COLOR: '1',
+    // No Update Check from tests (spec §3.23): it is sideby's only network request. Delete it to test checks.
+    SIDEBY_NO_UPDATE_NOTIFIER: '1',
   }
   const h: FakeHome = {
     home,

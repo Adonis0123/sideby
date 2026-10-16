@@ -45,6 +45,7 @@ src/
 │                 tuning.ts: the pure replay that estimates a Compaction Threshold (§3.18); the per-Family readers are families/<id>/tuning.ts
 │                 skill-check.ts compares an installed sideby skill with this version
 │                 share-meaning.ts: the one-line meaning of each Shared Item that `sideby families` prints
+│                 update.ts: Update Check, Update Notice, Install Method, `sideby update` and Auto Update (§3.23)
 │                 desktop-app.ts: `sideby desktop`, open a Family's Desktop App per Account (§3.20); definitions in families/desktop.ts (internal)
 ├── plugins/      loader (trust checks), hook bus, built-in account-script
 ├── families/     claude, codex, grok, pi: each a Family Plugin; index.ts lists built-ins in load order
@@ -101,7 +102,7 @@ Shared Item paths must be relative and stay inside the account directory: config
 
 - Never print, log, return, or put in an error message the value of anything from `proxy.env`, `auth.json` or `.claude.json`. Errors name the path or the variable, and for parse errors the line number only. The values shown are a Claude API Account's `ANTHROPIC_MODEL`, as its model, and the identity fields a Family's `identity` reader picks (email, organization; ADR-0003). Never a token: Codex's `id_token` is decoded only to take its `email` claim, and is never stored or returned.
 - Doctor checks credential files for type and mode 600 only. The only content it reads is the single key a `json-key` item names. `proxy.env` is parsed only at Launch and for that model name.
-- Never read a credential to call a model, pool logins, or rotate accounts on its own (ADR-0001; Auto Handoff is opt-in, ADR-0010). Never call private quota endpoints (ADR-0003). Built-in quota and usage readers make no network requests.
+- Never read a credential to call a model, pool logins, or rotate accounts on its own (ADR-0001; Auto Handoff is opt-in, ADR-0010). Never call private quota endpoints (ADR-0003). Built-in quota and usage readers make no network requests. The Update Check (ADR-0021, `core/update.ts`) is sideby's only request of its own: one GET of the `latest` dist-tag, at most daily, carrying no Account, path or identity; it stays off under `NO_UPDATE_NOTIFIER`, `SIDEBY_NO_UPDATE_NOTIFIER`, config `update.check: false` and CI, and `withFakeHome` sets `SIDEBY_NO_UPDATE_NOTIFIER` so tests never make it. Auto Update stays opt-in (config `update.auto`).
 
 **Host directories**
 
@@ -135,7 +136,7 @@ Shared Item paths must be relative and stay inside the account directory: config
 
 - Every `--json` output has `schemaVersion: 1`. A `--json` error is `{ schemaVersion, error, code }`; `error` stays a string. Adding a field keeps the version; removing, renaming or changing meaning bumps it and needs an ADR.
 - Every user-facing error says what to do next.
-- Exit code 10 means a change was shown and waits for `--yes` (`quota setup` and `handoff setup`). Doctor never uses it: it exits 1 only for `fail` Findings.
+- Exit code 10 means a change was shown and waits for `--yes` (`quota setup`, `handoff setup` and `update`). Doctor never uses it: it exits 1 only for `fail` Findings.
 
 ## Tests
 

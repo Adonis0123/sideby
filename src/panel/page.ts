@@ -24,6 +24,8 @@ export interface PageOptions {
   theme?: ResolvedTheme
   /** Host language from createPanelHandler's `lang`; `auto` (the default) lets the viewer choose. */
   lang?: 'auto' | 'en' | 'zh'
+  /** createPanelHandler's `updates`: false hides everything about sideby updates. */
+  updates?: boolean
 }
 
 /** JSON that is safe inside a `<script>` element: no `</script>`, `<!--` or line separators survive. */
@@ -54,6 +56,7 @@ export function renderPage(opts: PageOptions): string {
     version: opts.version ?? '',
     build: opts.build ?? '',
     readOnly: Boolean(opts.readOnly),
+    updates: opts.updates !== false,
     colorScheme: theme.colorScheme,
     lang,
     warn: QUOTA_WARN_PERCENT,
@@ -71,7 +74,7 @@ export function renderPage(opts: PageOptions): string {
 <meta name="color-scheme" content="${scheme}">
 <meta name="referrer" content="no-referrer">
 <title>sideby</title>
-<link rel="icon" href="data:,">
+<link rel="icon" type="image/svg+xml" href="${attr(opts.basePath)}/favicon.svg">
 <style${nonce}>${pageStyles(theme)}</style>
 </head>
 <body${theme.header === 'bar' ? ' class="header-bar"' : ''}>
@@ -88,6 +91,7 @@ export function renderPage(opts: PageOptions): string {
       <span id="updated" class="muted small">Loading…</span>
       <button id="lang" class="icon-btn lang-btn" type="button"${lang === 'auto' ? '' : ' hidden'}>${lang === 'zh' ? 'EN' : '中文'}</button>
       <button id="theme" class="icon-btn" type="button" hidden></button>
+      <button id="update" class="btn update-btn" type="button" hidden></button>
       <button id="handoff" class="btn" type="button" hidden></button>
       <button id="refresh" class="btn" type="button" aria-label="Refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg><span class="hide-sm" data-i18n="top.refresh">Refresh</span></button>
     </div>
@@ -108,7 +112,7 @@ export function renderPage(opts: PageOptions): string {
     <div class="section-head"><h2 id="h-checkup" data-i18n="health.title">Health check</h2></div>
     <span class="sk sk-line w70"></span><span class="sk sk-line w50"></span>
   </section>
-  <footer class="foot muted small">sideby <span id="ver"></span> · <span data-i18n="foot.text">runs on this machine; nothing leaves it.</span></footer>
+  <footer class="foot muted small"><button id="ver" class="link-btn" type="button">sideby</button> · <span id="foot-text" data-i18n="foot.text">runs on this machine; nothing leaves it.</span></footer>
 </main>
 <div id="conn" class="conn" role="status" hidden></div>
 <div id="toasts" class="toasts" aria-live="polite" popover="manual"></div>

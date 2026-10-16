@@ -39,6 +39,7 @@
 | `sideby shell-init zsh\|bash` | 输出每个账号和每个别名的 shell 函数 | 0 |
 | `sideby shell-init [zsh\|bash] --write` | 用这份输出重写 config 里配置的 `shellInitFile` | 0；写不了或没有配置为 1 |
 | `sideby plugins` | 已加载的插件和加载错误 | 0；有插件加载失败时为 1 |
+| `sideby update [--yes]` | 向 npm registry 查 sideby 最新版本，显示安装它的命令；带 `--yes` 就执行，并重启后台面板（见[更新](configuration.zh-CN.md#更新)） | 0 已是最新或已更新；只显示了命令为 10；这种安装方式不能自己更新（会打印要运行的命令）、连不上 registry 或安装失败为 1 |
 
 - 所有命令遇到用法错误（未知选项、缺参数）时退出码为 2；sideby 自身出错（账号不存在、名字不合法、配置读不了）时为 1。
 - `<acct>` 写成 `<family>:<name>`；名字在所有家族里唯一时，只写 `<name>` 也行。有歧义就报错，并列出候选。

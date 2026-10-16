@@ -52,3 +52,14 @@ export function markSvgBody(id: string, front?: string): string {
 const V = MARK_TILE_VIEWBOX
 /** The Panel's header logo: the mark sized for its 40 px tile. */
 export const MARK_SVG = `<svg viewBox="${V.x} ${V.y} ${V.size} ${V.size}">${markSvgBody('sideby-mark-gap')}</svg>`
+
+/** `<basePath>/icon.svg`: the whole mark on a transparent square, for a Portal's tab or menu (ADR-0006 amendment). */
+export const ICON_SVG =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${V.x} ${V.y} ${V.size} ${V.size}" role="img" aria-label="sideby">` +
+  `${markSvgBody('sideby-icon-gap', MARK_COLORS.front)}</svg>`
+
+/** `<basePath>/favicon.svg`: the small cut, the front face alone, for sizes below about 24 px (ADR-0020). */
+export const FAVICON_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="104 58 152 140">' +
+  `<path fill="${MARK_COLORS.front}" d="${roundedRectPath(MARK.front)}"/>` +
+  `<path fill="${MARK_COLORS.eye}" d="${MARK.frontEyes.map(roundedRectPath).join('')}"/></svg>`

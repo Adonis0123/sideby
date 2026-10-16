@@ -39,6 +39,7 @@ English | [中文](commands.zh-CN.md)
 | `sideby shell-init zsh\|bash` | Print shell functions for every account and your aliases | 0 |
 | `sideby shell-init [zsh\|bash] --write` | Rewrite the configured `shellInitFile` with that output | 0; 1 if a file could not be written or none is configured |
 | `sideby plugins` | Loaded plugins and load errors | 0; 1 if any plugin failed to load |
+| `sideby update [--yes]` | Ask the npm registry for the newest sideby and show the command that installs it; with `--yes`, run it and restart a background panel (see [Updates](configuration.md#updates)) | 0 up to date or updated; 10 when it only showed the command; 1 when this install cannot update itself (the command to run is printed), the registry is unreachable or the install failed |
 
 - Every command exits 2 on a usage error (unknown option, missing argument) and 1 when sideby itself fails (unknown account, invalid name, unreadable config). Exit code 10 means a change was shown and waits for your yes: run the same command again with `--yes`.
 - `<acct>` is `<family>:<name>`, or just `<name>` when it is unique across families. An ambiguous name is an error that lists the candidates.

@@ -33,8 +33,23 @@ export interface Io {
   stdin?: HandoffIo['stdin']
 }
 
+/** Runs `fn` while a record under the state directory says a Host runs (also for `login`), so an Auto Update waits (spec §3.23). */
+async function whileRunning<T>(rt: Runtime, fn: () => Promise<T>): Promise<T> {
+  const { markRunning } = await import('../core/update.ts')
+  const done = await markRunning(rt.paths)
+  try {
+    return await fn()
+  } finally {
+    await done().catch(() => {})
+  }
+}
+
 /** Runs the Account with Auto Handoff when it applies (spec §3.17), else the Host as usual. */
 async function runAccount(rt: Runtime, ref: string, args: readonly string[], io: Io): Promise<number> {
+  return whileRunning(rt, () => runAccountNow(rt, ref, args, io))
+}
+
+async function runAccountNow(rt: Runtime, ref: string, args: readonly string[], io: Io): Promise<number> {
   const handed = await runWithHandoff(rt, ref, args, {
     err: (l) => io.err(c.dim(l)),
     stdin: io.stdin ?? process.stdin,
@@ -233,7 +248,7 @@ export async function cmdRun(a: ParsedArgs, io: Io, command: 'run' | 'login'): P
   if (command === 'run') return runAccount(rt, ref, [...extra, ...a.rest], io)
   const prepared = await rt.prepareLaunch(ref, [...extra, ...a.rest], command)
   if (prepared.notice) io.err(c.cyan(prepared.notice))
-  return runHost(prepared)
+  return whileRunning(rt, () => runHost(prepared))
 }
 
 /**
@@ -253,7 +268,7 @@ export async function cmdResume(a: ParsedArgs, io: Io): Promise<number> {
     )
   else if (route.account)
     io.err(c.dim(`sideby: session ${route.sessionId} is in ${route.account.ref}; starting it there`))
-  return runHost(route.launch)
+  return whileRunning(rt, () => runHost(route.launch))
 }
 
 /** Quotes a Host argument for a command line the user may paste; plain words stay as they are. */
@@ -1118,6 +1133,88 @@ export async function cmdUi(a: ParsedArgs, io: Io): Promise<number> {
     process.once('SIGINT', stop)
     process.once('SIGTERM', stop)
   })
+  return 0
+}
+
+/**
+ * `sideby update [--yes] [--json]` (spec §3.23): asks the registry now, shows what an Update runs, and runs it with
+ * `--yes` (exit 10 before). An install sideby cannot update gets the command to run and exit 1.
+ */
+export async function cmdUpdate(a: ParsedArgs, io: Io): Promise<number> {
+  if (a.positionals.length) throw new UsageError('usage: sideby update [--yes] [--json]')
+  const u = await import('../core/update.ts')
+  const { SKILL_INSTALL } = await import('../core/skill-check.ts')
+  const { backgroundPanelPort } = await import('../panel/background.ts')
+  const paths = resolvePaths(process.env)
+  const asJson = a.flags.has('json')
+  const plan = await u.planUpdate(paths, process.env)
+  const shown = u.shownPlan(plan)
+  if (!plan.available) {
+    if (asJson) json(io, { ...shown, updated: false })
+    else io.out(`${c.green('✓')} sideby ${plan.current} is the latest version.`)
+    return 0
+  }
+  if (!plan.canRun) {
+    if (asJson) json(io, { ...shown, updated: false })
+    else {
+      io.out(
+        `sideby ${c.bold(plan.latest)} is available (you have ${plan.current}). What changed: ${plan.releaseNotes}`,
+      )
+      io.err(
+        c.yellow(`sideby cannot update itself: ${plan.method.reason}. Run it yourself:\n  ${plan.command}`),
+      )
+    }
+    return 1
+  }
+  if (!a.flags.has('yes')) {
+    if (asJson) json(io, { ...shown, updated: false })
+    else {
+      io.out(
+        `sideby ${c.bold(plan.latest)} is available (you have ${plan.current}). What changed: ${plan.releaseNotes}`,
+      )
+      io.out(`\nUpdating runs:\n  ${plan.command}`)
+      io.out(c.cyan('\nRun it with `sideby update --yes`.'))
+    }
+    return 10
+  }
+  if (!asJson) io.out(c.dim(`$ ${plan.command}`))
+  const r = await u.applyUpdate(paths, plan, process.env, {
+    ...(asJson ? {} : { onOutput: (text: string) => process.stderr.write(text) }),
+    panelPort: () => backgroundPanelPort(paths),
+  })
+  if (asJson) {
+    json(io, {
+      ...shown,
+      updated: r.ok,
+      message: r.message,
+      restartedPanel: r.restartedPanel,
+      skill: SKILL_INSTALL,
+      ...(r.ok ? {} : { output: r.output }),
+    })
+    return r.ok ? 0 : 1
+  }
+  if (!r.ok) {
+    io.err(c.red(`✗ ${r.message}`))
+    return 1
+  }
+  io.out(`${c.green('✓')} ${r.message}.`)
+  if (r.restartedPanel)
+    io.out('  The background panel is restarting with the new version; open pages reload by themselves.')
+  io.out(
+    '  A `sideby ui` running in a terminal and sessions already running keep the old version until you restart them.',
+  )
+  io.out(`  If you use the sideby skill, update it too: ${SKILL_INSTALL}`)
+  return 0
+}
+
+/** The internal `sideby update-check` the CLI starts detached: one Update Check, then Auto Update if it is on. */
+export async function cmdUpdateCheck(_a: ParsedArgs, _io: Io): Promise<number> {
+  const { backgroundCheck } = await import('../core/update.ts')
+  const { loadConfig } = await import('../core/config.ts')
+  const { backgroundPanelPort } = await import('../panel/background.ts')
+  const paths = resolvePaths(process.env)
+  const config = await loadConfig(paths.configFile).catch(() => ({}))
+  await backgroundCheck(paths, process.env, config, () => backgroundPanelPort(paths))
   return 0
 }
 

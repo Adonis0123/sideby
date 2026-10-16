@@ -84,3 +84,29 @@ function claude { local a; if [ -z "${CLAUDE_CONFIG_DIR-}" ]; then for a in "$@"
 ```
 
 `sideby resume` 找出账号目录里存有这个会话 id 的账号（Claude 是 `projects/*/<id>.jsonl`，Codex 是 `sessions/**/rollout-*-<id>.jsonl`，Grok 是 `sessions/*/<id>/`），像 `sideby run` 一样启动它。Claude 会话打开后没发过消息时没有这个文件：哪个账号都没有它时，`sideby resume` 再找起过它的账号（`session-env/<id>/`），去掉 `--resume <id>`，在那个账号开一个新会话，并在 stderr 说明。其他情况原样运行宿主，包括 `--continue`、按标题恢复、会话在主账号里。sideby 启动的宿主已经设了选择变量，不会被二次路由。`alias claude='claude --dangerously-skip-permissions'` 这样的 alias 照常生效。只有参数里有会话 id 形状的命令才经过 sideby（多约 140 ms），其他宿主命令直接运行。sideby 不复制、不移动会话。
+
+## 更新
+
+sideby 每天向 npm registry 查一次自己的最新版本（一次 `GET https://registry.npmjs.org/-/package/sideby/dist-tags`，不带任何关于你或你的账号的信息）。有新版本时：
+
+- 命令结束后，终端显示一行，比如 `sideby 0.12.0 is available (you have 0.11.0) · run \`sideby update\``，同一版本每天最多一次。带 `--json`、输出不是终端、`shell-init`，以及宿主运行期间都不显示：`sideby run`、`next`、`resume` 等宿主退出后才打印。
+- 面板「刷新」旁边出现「v0.12.0 可更新」。点它，或面板底部的版本号，可以看到更新内容、更新要执行的命令和「更新」按钮。
+
+`sideby update` 马上查一次 registry，显示命令，带 `--yes` 才执行。执行什么取决于 sideby 是怎么装的：
+
+| 安装方式 | 更新执行 |
+|---|---|
+| `npm i -g sideby` | `npm install -g sideby@<版本>`（同一个 Node prefix） |
+| `pnpm add -g sideby` | `pnpm add -g sideby@<版本>` |
+| `bun add -g sideby` | `bun add -g sideby@<版本>` |
+| Volta（`volta install sideby`） | 不执行：打印 `volta install sideby@<版本>` |
+| `npx sideby`、项目依赖、源码目录，或你没有写权限的全局目录 | 不执行：sideby 打印命令，由你自己运行 |
+
+更新后，后台面板（`sideby ui --background`）会自己重启，打开的页面自动刷新。终端里运行的 `sideby ui` 和已经在跑的会话要重启后才用新版本。装了 sideby skill 的话也更新一下：`npx skills add Adonis0123/sideby -g`。
+
+| 设置 | 含义 |
+|---|---|
+| `"update": { "check": false }` | 不再每天检查，也不提示。`NO_UPDATE_NOTIFIER=1` 或 `SIDEBY_NO_UPDATE_NOTIFIER=1` 效果相同；CI 里自动关闭。`sideby update` 照常可用。 |
+| `"update": { "auto": true }` | 默认关；面板的更新对话框里有同一个开关。每天检查后自动安装新版本，只对 npm、pnpm、bun 的全局安装生效，只在没有 `sideby run`、`next`、`resume` 运行时执行，不自动装大版本（0.x 到 1.0）。下一次命令会提示一次已更新。 |
+
+`SIDEBY_UPDATE_REGISTRY` 可以让检查走镜像，比如 `https://registry.npmmirror.com`。

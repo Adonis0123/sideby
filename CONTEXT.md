@@ -56,6 +56,16 @@ Avoid: *profile* (Codex already uses it for a config layer that does not change 
 
 Avoid: *rotation* (cycling through Accounts per request or on a timer; a Handoff moves on only when Quota runs low and never goes back to a full Account), *failover* (say Auto Handoff), *relay* (people use it for a third-party API endpoint).
 
+## Updates
+
+- **Update Check**: asking the npm registry, at most once a day, which sideby version is the newest. The only question sideby sends over the network on its own; it carries no Account, path or identity. On unless the user turns it off.
+- **Update Notice**: the one line, in the terminal or the Panel, that says a newer sideby exists and how to get it.
+- **Install Method**: how this copy of sideby was installed (a global npm, pnpm or bun package, the npx cache, a project dependency, a source checkout). It decides whether sideby can update itself or only names the command.
+- **Update**: replacing the installed sideby with a newer version through its Install Method, after the user confirms (`sideby update`, the Panel's button). Programs already running keep the old version until they start again.
+- **Auto Update**: an Update sideby carries out by itself after an Update Check. Off unless the user turns it on.
+
+Avoid: *upgrade* (say Update), *self-update* in user-facing text.
+
 ## Extending
 
 - **Plugin**: a local directory that sideby loads to add a Family or Hooks. Built-in Families are Plugins too.

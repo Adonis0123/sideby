@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/update.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "current",
+    "latest",
+    "available",
+    "method",
+    "command",
+    "canRun",
+    "releaseNotes",
+    "updated"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "current": {
+      "type": "string",
+      "description": "The running sideby version."
+    },
+    "latest": {
+      "type": "string",
+      "description": "The `latest` version on the npm registry."
+    },
+    "available": {
+      "type": "boolean",
+      "description": "`latest` is newer than `current`."
+    },
+    "method": {
+      "type": "object",
+      "required": [
+        "kind",
+        "canUpdate"
+      ],
+      "properties": {
+        "kind": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "npm"
+            },
+            {
+              "type": "string",
+              "const": "pnpm"
+            },
+            {
+              "type": "string",
+              "const": "bun"
+            },
+            {
+              "type": "string",
+              "const": "volta"
+            },
+            {
+              "type": "string",
+              "const": "npx"
+            },
+            {
+              "type": "string",
+              "const": "project"
+            },
+            {
+              "type": "string",
+              "const": "source"
+            }
+          ],
+          "description": "How this copy was installed."
+        },
+        "canUpdate": {
+          "type": "boolean",
+          "description": "sideby can run the Update itself."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why it cannot."
+        }
+      }
+    },
+    "command": {
+      "type": "string",
+      "description": "What an Update runs, or what to run by hand when `canRun` is false."
+    },
+    "canRun": {
+      "type": "boolean"
+    },
+    "releaseNotes": {
+      "type": "string",
+      "description": "The release notes of `latest`."
+    },
+    "updated": {
+      "type": "boolean",
+      "description": "False when only the plan was shown (exit 10 with --yes still to add) or nothing to do."
+    },
+    "message": {
+      "type": "string"
+    },
+    "restartedPanel": {
+      "type": "boolean",
+      "description": "A background Panel was running and starts again with the new version."
+    },
+    "skill": {
+      "type": "string",
+      "description": "The command that updates the sideby skill; sideby never runs it."
+    },
+    "output": {
+      "type": "string",
+      "description": "What the failed install command printed."
+    }
+  },
+  "title": "sideby update --json"
+}

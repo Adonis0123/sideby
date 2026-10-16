@@ -1652,3 +1652,61 @@ describe('sideby desktop (spec §3.20)', () => {
     })
   })
 })
+
+describe('sideby update (spec §3.23)', () => {
+  /** A registry on localhost answering `latest`, so the test never leaves the machine. */
+  async function fakeRegistry(latest: string) {
+    const { createServer } = await import('node:http')
+    const server = createServer((req, res) => {
+      res.writeHead(req.url === '/-/package/sideby/dist-tags' ? 200 : 404, {
+        'content-type': 'application/json',
+      })
+      res.end(JSON.stringify({ latest }))
+    })
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+    const { port } = server.address() as import('node:net').AddressInfo
+    return { url: `http://127.0.0.1:${port}`, close: () => new Promise<void>((r) => server.close(() => r())) }
+  }
+
+  it('says when this is the newest version, and names the command where it cannot update itself', async () => {
+    await withFakeHome(async (h) => {
+      const { packageVersion } = await import('../core/version.ts')
+      const same = await fakeRegistry(packageVersion())
+      try {
+        const r = await sideby(h, ['update', '--json'], { SIDEBY_UPDATE_REGISTRY: same.url })
+        assert.equal(r.code, 0, r.err)
+        const data = checkSchema('update', r.out)
+        assert.equal(data.available, false)
+      } finally {
+        await same.close()
+      }
+      const newer = await fakeRegistry('99.0.0')
+      try {
+        // These tests run from the source checkout, which sideby never updates itself.
+        const r = await sideby(h, ['update', '--json'], { SIDEBY_UPDATE_REGISTRY: newer.url })
+        assert.equal(r.code, 1)
+        const data = checkSchema('update', r.out)
+        assert.deepEqual(
+          [data.available, data.canRun, data.command],
+          [true, false, 'git pull && pnpm install'],
+        )
+        const text = await sideby(h, ['update'], { SIDEBY_UPDATE_REGISTRY: newer.url })
+        assert.match(text.err, /cannot update itself: it runs from a source checkout/)
+        // The cache now knows 99.0.0, but without a terminal no command prints a notice.
+        const list = await sideby(h, ['list'], { SIDEBY_NO_UPDATE_NOTIFIER: '' })
+        assert.doesNotMatch(list.err, /is available/)
+      } finally {
+        await newer.close()
+      }
+    })
+  })
+
+  it('reports a registry it cannot reach as an error with what to do', async () => {
+    await withFakeHome(async (h) => {
+      const r = await sideby(h, ['update', '--json'], { SIDEBY_UPDATE_REGISTRY: 'http://127.0.0.1:9' })
+      assert.equal(r.code, 1)
+      const data = checkSchema('error', r.out)
+      assert.match(String(data.error), /could not reach http:\/\/127\.0\.0\.1:9/)
+    })
+  })
+})

@@ -279,6 +279,7 @@ const MAIN = String.raw`
     check: 'M9 12l2 2 4-4M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z',
     userPlus: 'M15 19a6 6 0 0 0-12 0M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M16 11h6',
     x: 'M6 6l12 12M18 6L6 18',
+    arrowUp: 'M12 19V5M5 12l7-7 7 7',
     bot: 'M6 9h12a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2zM12 5v4M9.5 13.5v1M14.5 13.5v1',
     grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
     list: 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01',
@@ -658,6 +659,9 @@ const MAIN = String.raw`
   function renderTop() {
     renderUpdated()
     renderHandoffButton()
+    renderUpdateButton()
+    const u = updState()
+    $('foot-text').textContent = t(u && !u.checksOff ? 'foot.textChecks' : 'foot.text')
     // A background refresh keeps the button still; only one the viewer asked for spins it.
     const busy = S.loading && !S.silent
     const refresh = $('refresh')
@@ -2699,8 +2703,135 @@ const MAIN = String.raw`
     if (Date.now() - S.lastTry > 3000) load({ silent: true })
   }
 
+  // ---------- updates (spec §3.23, ADR-0021) ----------
+  // A label in the header only when a newer sideby exists; the footer version opens the same dialog any time, with
+  // the Auto Update switch. Updating is one plan shown first and one click; afterwards the page waits for the new
+  // build and reloads (a background Panel restarts itself, a Portal loads the new code by itself).
+  let up = null
+  function updState() { return BOOT.updates && S.state ? S.state.update || null : null }
+  function renderUpdateButton() {
+    const b = $('update')
+    const u = updState()
+    b.hidden = !(u && u.available)
+    if (!b.hidden) {
+      setKids(b, [icon('arrowUp'), h('span', null, t('upd.label', { v: u.latest }))])
+      b.setAttribute('aria-label', t('upd.labelLong', { v: u.latest, cur: u.current }))
+      b.title = t('upd.labelLong', { v: u.latest, cur: u.current })
+    }
+    if (dlg.kind === 'update' && up && !up.busy) renderUpdate()
+  }
+  function openUpdate() {
+    if (!BOOT.updates) return
+    up = { busy: false, error: null, done: null, changed: false, autoPlan: null, autoBusy: false, waitUntil: 0 }
+    showDialog('update')
+    renderUpdate()
+  }
+  async function updRun() {
+    const u = updState()
+    if (!u) return
+    up.busy = true
+    dlg.busy = true
+    up.error = null
+    renderUpdate()
+    try {
+      const r = await api('/api/update', { confirm: true, version: u.latest })
+      if (r.changed) {
+        // The registry names another version than the dialog showed: show the new plan and let the person look again.
+        Object.assign(S.state.update, { latest: r.latest, available: r.available, command: r.command, canRun: r.canRun, releaseNotes: r.releaseNotes, method: r.method })
+        up.changed = true
+      } else {
+        up.done = r
+        up.waitUntil = Date.now() + 20000
+        updWait()
+      }
+    } catch (e) { up.error = e }
+    up.busy = false
+    dlg.busy = false
+    renderUpdate()
+  }
+  // After an Update the server (or the Portal's worker) comes back with a new build; load() then reloads the page.
+  function updWait() {
+    if (!up || !up.done || S.newBuild) { if (S.newBuild) location.reload(); return }
+    if (Date.now() > up.waitUntil) { renderUpdate(); return }
+    setTimeout(() => { void load({ silent: true }).then(updWait) }, 1500)
+  }
+  async function updAuto(on) {
+    up.autoBusy = true
+    up.error = null
+    renderUpdate()
+    try {
+      const r = await api('/api/update/settings', { auto: on })
+      up.autoPlan = r.changed ? { auto: on, file: r.file } : null
+    } catch (e) { up.error = e }
+    up.autoBusy = false
+    renderUpdate()
+  }
+  async function updAutoSave() {
+    if (!up.autoPlan) return
+    up.autoBusy = true
+    renderUpdate()
+    try {
+      await api('/api/update/settings', { auto: up.autoPlan.auto, confirm: true })
+      toast(t(up.autoPlan.auto ? 'upd.autoOnSaved' : 'upd.autoOffSaved'))
+      up.autoPlan = null
+      await load({ silent: true })
+    } catch (e) { up.error = e }
+    up.autoBusy = false
+    renderUpdate()
+  }
+  function renderUpdate() {
+    if (!up || dlg.kind !== 'update') return
+    const u = updState()
+    const body = []
+    if (!u) {
+      body.push(h('p', { class: 'muted' }, spinner(), ' ', t('upd.loading')))
+      setKids(dlg.el, dialogFrame(t('upd.title'), null, body, null))
+      return
+    }
+    body.push(h('p', null, t('upd.current', { v: u.current })))
+    if (up.done) {
+      body.push(h('p', { class: 'note' }, t('upd.done', { v: up.done.latest })))
+      body.push(h('p', { class: 'muted small' }, Date.now() > up.waitUntil ? t('upd.restartHint') : [spinner(), ' ', t('upd.reloading')]))
+      body.push(h('p', { class: 'small' }, t('upd.skill')), codeCopy(u.skill))
+    } else if (u.available) {
+      if (up.changed) body.push(h('p', { class: 'note note-warn' }, t('upd.changed', { v: u.latest })))
+      body.push(h('p', null, h('b', null, t('upd.available', { v: u.latest })), ' ',
+        h('a', { href: u.releaseNotes, target: '_blank', rel: 'noopener noreferrer' }, t('upd.notes'))))
+      if (u.canRun) {
+        body.push(h('p', { class: 'small' }, t('upd.runs')), codeCopy(u.command))
+        body.push(h('p', { class: 'muted small' }, t('upd.after')))
+      } else {
+        body.push(h('p', { class: 'note note-warn' }, t('upd.cannot', { why: u.method.reason || u.method.kind })))
+        body.push(codeCopy(u.command))
+      }
+      body.push(h('p', { class: 'small' }, t('upd.skill')), codeCopy(u.skill))
+    } else if (u.checksOff) {
+      body.push(h('p', { class: 'muted small' }, t('upd.checksOff', { why: u.checksOff })))
+    } else if (u.latest) {
+      body.push(h('p', { class: 'muted small' }, t('upd.latest') + (u.checkedAt ? ' · ' + t('upd.checked', { ago: ago(u.checkedAt) }) : '')))
+    } else body.push(h('p', { class: 'muted small' }, t('upd.notYet')))
+    if (!BOOT.readOnly && !up.done) {
+      const box = h('input', { type: 'checkbox', disabled: up.autoBusy || !u.method.canUpdate })
+      box.checked = up.autoPlan ? up.autoPlan.auto : u.auto
+      box.addEventListener('change', () => updAuto(box.checked))
+      body.push(h('div', { class: 'check-row' }, h('label', { class: 'check' }, box,
+        h('span', null, h('b', null, t('upd.auto')), h('span', { class: 'muted small' }, u.method.canUpdate ? t('upd.autoHint') : t('upd.autoNo'))))))
+      if (up.autoPlan) body.push(h('p', { class: 'small' }, t('upd.autoChange', { file: up.autoPlan.file, value: String(up.autoPlan.auto) }), ' ',
+        h('button', { class: 'btn btn-sm btn-primary', type: 'button', disabled: up.autoBusy, onclick: updAutoSave }, t('upd.save'))))
+    }
+    if (BOOT.readOnly) body.push(h('p', { class: 'note' }, t('banner.readOnly')))
+    if (up.error) body.push(errorNote(up.error, null))
+    const foot = [h('button', { class: 'btn', type: 'button', disabled: up.busy, onclick: () => dlg.el.close() }, t('btn.close'))]
+    if (u.available && u.canRun && !BOOT.readOnly && !up.done)
+      foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: up.busy, 'aria-busy': up.busy ? 'true' : null, onclick: updRun }, up.busy ? spinner() : null, up.busy ? t('upd.updating') : t('upd.now', { v: u.latest })))
+    setKids(dlg.el, dialogFrame(t('upd.title'), null, body, foot))
+  }
+
   // ---------- start ----------
-  $('ver').textContent = BOOT.version ? 'v' + BOOT.version : ''
+  $('ver').textContent = BOOT.version ? 'sideby v' + BOOT.version : 'sideby'
+  $('ver').disabled = !BOOT.updates
+  $('ver').addEventListener('click', openUpdate)
+  $('update').addEventListener('click', openUpdate)
   $('refresh').addEventListener('click', () => load({ check: true, announce: true }))
   $('handoff').addEventListener('click', () => setPage('handoff'))
   $('lang').addEventListener('click', () => {
@@ -2715,6 +2846,7 @@ const MAIN = String.raw`
     else if (dlg.kind === 'setup' && qs) renderSetup()
     else if (dlg.kind === 'tune' && tuneState) renderTune()
     else if (dlg.kind === 'model' && md) { md.form = null; renderModel() }
+    else if (dlg.kind === 'update' && up) renderUpdate()
   })
   $('theme').addEventListener('click', () => {
     const order = CHOICES.theme

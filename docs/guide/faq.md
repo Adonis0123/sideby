@@ -27,9 +27,9 @@ sideby then checks the version itself. Below 22.18, `--help`, `--version` and ev
 
 | What | Where |
 |---|---|
-| Config (sideby only writes `aliases`, from `new --alias`, `sideby alias` or the panel, `handoff`, from `sideby handoff enable`, `sideby handoff disable` or the panel, and an account's model and effort arguments in `accounts.<ref>.args`, from `sideby model` or the panel) | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
+| Config (sideby only writes `aliases`, from `new --alias`, `sideby alias` or the panel, `handoff`, from `sideby handoff enable`, `sideby handoff disable` or the panel, an account's model and effort arguments in `accounts.<ref>.args`, from `sideby model` or the panel, and `update.auto`, from the panel's update dialog) | `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
 | Your plugins | `${XDG_CONFIG_HOME:-~/.config}/sideby/plugins/` |
-| State: quota cache, last Doctor result, original `settings.json` bytes, background panel pid and logs | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
+| State: quota cache, last Doctor result, original `settings.json` bytes, background panel pid and logs, the last update check (`update.json`) and the sessions running now (`running/`) | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
 | Desktop app data per account (`sideby desktop`) | macOS `~/Library/Application Support/sideby/<family>/<name>/` |
 | Grok Bot windows (`sideby desktop grok-bot:<name>`) | macOS `~/Library/Application Support/sideby/grok-bot/<name>/` |
 | Panel app (`sideby app install`) | macOS `~/Applications/sideby.app`; Linux `~/.local/share/applications/sideby.desktop`, `~/.local/share/sideby/`, `~/.local/share/icons/hicolor/*/apps/sideby.*` |

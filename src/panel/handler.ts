@@ -8,7 +8,8 @@ import {
   openAppProfile,
   removeAppProfile,
 } from '../core/app-profiles.ts'
-import { aliasArgs, aliasRefs, type HandoffSettings } from '../core/config.ts'
+import { FAVICON_SVG, ICON_SVG } from '../core/brand-mark.ts'
+import { aliasArgs, aliasRefs, editConfigUpdate, type HandoffSettings } from '../core/config.ts'
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import { UserError } from '../core/errors.ts'
 import { planHandoff } from '../core/handoff.ts'
@@ -18,8 +19,10 @@ import { configureHandoff, type HandoffChange, handoffStatus } from '../core/han
 import { type AccountModel, accountModel, setAccountModel } from '../core/model-choice.ts'
 import { tildify } from '../core/paths.ts'
 import type { RemoteControlGroup } from '../core/remote-control.ts'
+import { SKILL_INSTALL } from '../core/skill-check.ts'
 import { MIN_CALLS } from '../core/tuning.ts'
 import type { TuneApplyPlan } from '../core/tuning-apply.ts'
+import * as update from '../core/update.ts'
 import { buildId, packageVersion } from '../core/version.ts'
 import { HOOK_FAMILIES } from '../handoff/hook.ts'
 import type { AccountStatus, DoctorHistory, FamilyInfo, Runtime } from '../runtime.ts'
@@ -53,6 +56,12 @@ export interface PanelHandlerOptions {
    * any other value throws a TypeError. A Portal that changes language creates the handler again.
    */
   lang?: 'auto' | 'en' | 'zh'
+  /**
+   * Whether the Panel offers sideby updates (spec §3.23, ADR-0021): the "new version" label, the Update button and
+   * the Auto Update switch. Default true; a Portal that manages sideby's version itself passes false, and the
+   * Panel then refuses `/api/update*` with 403.
+   */
+  updates?: boolean
 }
 
 const PANEL_LANGS = ['auto', 'en', 'zh'] as const
@@ -102,6 +111,26 @@ export function healthByAccount(
 /** A Family as the page sees it: FamilyInfo plus the mark from its FamilyDef. */
 export type PanelFamily = FamilyInfo & { logo?: FamilyLogo }
 
+/** What the Panel shows about updates (spec §3.23); absent when the handler was created with `updates: false`. */
+export interface PanelUpdate {
+  current: string
+  /** The newest version the last Update Check saw; absent before the first one. */
+  latest?: string
+  available: boolean
+  checkedAt?: string
+  /** Why Update Checks are off; absent when they are on. */
+  checksOff?: string
+  /** Config `update.auto`. */
+  auto: boolean
+  method: { kind: update.InstallKind; canUpdate: boolean; reason?: string }
+  /** The command an Update runs, or the one to run by hand when `canRun` is false. */
+  command?: string
+  canRun: boolean
+  releaseNotes?: string
+  /** The command that updates the sideby skill, which sideby never runs itself. */
+  skill: string
+}
+
 export interface PanelState {
   schemaVersion: 1
   version: string
@@ -128,6 +157,40 @@ export interface PanelState {
   remoteControl?: RemoteControlView[]
   /** Grok Bot windows (ADR-0019), data folders shown as `~/…`; absent when there are none to show. */
   appProfiles?: AppProfileStatus[]
+  /** Update Check result and Auto Update setting (spec §3.23); absent with `updates: false`. */
+  update?: PanelUpdate
+}
+
+// One Update Check at a time per process, started by a state read when one is due (the cache also keeps a failed
+// one from being tried again within the hour, though the page asks every 20 s).
+let checking: Promise<unknown> | null = null
+
+/**
+ * The `update` part of the state. A Panel that may write starts an Update Check in the background when one is due;
+ * a read-only one only shows what the cache holds.
+ */
+async function updateState(rt: Runtime, readOnly: boolean): Promise<PanelUpdate> {
+  const current = packageVersion()
+  const off = update.checksOff(rt.env, rt.config)
+  const cache = await update.readUpdateCache(rt.paths)
+  if (!off && !readOnly && !checking && update.checkDue(cache, new Date()))
+    checking = update.refreshUpdateCheck(rt.paths, rt.env).finally(() => {
+      checking = null
+    })
+  const method = await update.installMethod(rt.env)
+  const plan = cache.latest ? update.shownPlan(update.planFrom(method, current, cache.latest, rt.env)) : null
+  return {
+    current,
+    ...(cache.latest ? { latest: cache.latest } : {}),
+    available: Boolean(plan?.available),
+    ...(cache.checkedAt ? { checkedAt: cache.checkedAt } : {}),
+    ...(off ? { checksOff: off } : {}),
+    auto: rt.config.update?.auto === true,
+    method: update.shownMethod(method),
+    ...(plan ? { command: plan.command, releaseNotes: plan.releaseNotes } : {}),
+    canRun: Boolean(plan?.canRun),
+    skill: SKILL_INSTALL,
+  }
 }
 
 /** The `handoff` map of the Panel state, from the statuses and Quota already read for the page. */
@@ -300,15 +363,16 @@ function rcView(groups: readonly RemoteControlGroup[], home: string): RemoteCont
 
 async function buildState(
   rt: Runtime,
-  opts: { version: string; build: string; readOnly: boolean },
+  opts: { version: string; build: string; readOnly: boolean; updates: boolean },
 ): Promise<PanelState> {
   const ctx = rt.readContext()
-  const [families, accounts, history, quotaSetups, remoteControl] = await Promise.all([
+  const [families, accounts, history, quotaSetups, remoteControl, upd] = await Promise.all([
     rt.familyInfo(),
     rt.accounts(),
     rt.doctorHistory(),
     rt.quotaSetups(),
     rt.remoteControl(),
+    opts.updates ? updateState(rt, opts.readOnly).catch(() => undefined) : Promise.resolve(undefined),
   ])
   const health = healthByAccount(history)
   const aliases = aliasesByAccount(aliasRefs(rt.config.aliases), accounts)
@@ -361,6 +425,7 @@ async function buildState(
         .filter((f) => f.handoff?.starts.length && HOOK_FAMILIES.includes(f.id))
         .map((f) => f.id),
     },
+    ...(upd ? { update: upd } : {}),
   }
 }
 
@@ -423,6 +488,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   const build = buildId()
   const theme = resolveTheme(opts.theme)
   const lang = resolveLang(opts.lang)
+  const updates = opts.updates !== false
   const token = randomBytes(32).toString('base64url')
   const serial = writeQueue()
   const getRuntime = typeof opts.runtime === 'function' ? opts.runtime : async () => opts.runtime as Runtime
@@ -645,7 +711,44 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return { ...r, plan: show(r.plan) }
       },
     },
-    // Undo for the setup above; the Runtime turns a teardown that throws into `{ ok: false, message }`.
+    // Update (spec §3.23, ADR-0021): asks the registry, and runs the plan only with `confirm` and the `version` the
+    // person saw. When the registry names another version now, nothing runs and the new plan comes back (`changed`).
+    // It writes the cache even without `confirm`, so a read-only Panel refuses it (writes defaults to true).
+    '/api/update': {
+      async run(body) {
+        if (!updates) throw new HttpError(403, 'updates are managed by the page that shows this panel')
+        const rt = await getRuntime()
+        const plan = await update.planUpdate(rt.paths, rt.env)
+        const shown = update.shownPlan(plan)
+        if (!optBool(body, 'confirm') || !plan.available) return { ...shown, updated: false }
+        if (body.version !== plan.latest) return { ...shown, updated: false, changed: true }
+        const { backgroundPanelPort } = await import('./background.ts')
+        const r = await update.applyUpdate(rt.paths, plan, rt.env, {
+          panelPort: () => backgroundPanelPort(rt.paths),
+        })
+        if (!r.ok) throw new UserError(r.message)
+        return { ...shown, updated: true, message: r.message, restartedPanel: r.restartedPanel }
+      },
+    },
+    // The Auto Update switch: config `update.auto`, shown as a diff first like every config change.
+    '/api/update/settings': {
+      writes: (body) => body.confirm === true,
+      async run(body) {
+        if (!updates) throw new HttpError(403, 'updates are managed by the page that shows this panel')
+        if (typeof body.auto !== 'boolean') throw new HttpError(400, '"auto" must be true or false')
+        const auto = body.auto
+        const rt = await getRuntime()
+        const r = await editConfigUpdate(rt.paths.configFile, (cur) => ({ ...cur, auto }), {
+          dryRun: !optBool(body, 'confirm'),
+        })
+        return {
+          ...r,
+          applied: optBool(body, 'confirm') && r.changed,
+          file: tildify(rt.paths.configFile, rt.paths.home),
+        }
+      },
+    },
+    // Undo for the quota setup above; the Runtime turns a teardown that throws into `{ ok: false, message }`.
     '/api/quota/teardown': {
       async run(body) {
         const family = optString(body, 'family')
@@ -693,8 +796,18 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           res.end(
             method === 'HEAD'
               ? undefined
-              : renderPage({ basePath, token, nonce, version, build, readOnly, theme, lang }),
+              : renderPage({ basePath, token, nonce, version, build, readOnly, theme, lang, updates }),
           )
+          return true
+        }
+        // The mark, for a Portal's tab and for this page's favicon (ADR-0006 amendment).
+        if (sub === '/icon.svg' || sub === '/favicon.svg') {
+          res.writeHead(200, {
+            'content-type': 'image/svg+xml; charset=utf-8',
+            'cache-control': 'no-cache',
+            'x-content-type-options': 'nosniff',
+          })
+          res.end(method === 'HEAD' ? undefined : sub === '/icon.svg' ? ICON_SVG : FAVICON_SVG)
           return true
         }
         if (sub === '/api/health') {
@@ -709,7 +822,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           return true
         }
         if (sub === '/api/state') {
-          send(res, 200, await buildState(await getRuntime(), { version, build, readOnly }))
+          send(res, 200, await buildState(await getRuntime(), { version, build, readOnly, updates }))
           return true
         }
         if (Object.hasOwn(routes, sub)) throw new HttpError(405, 'use POST')

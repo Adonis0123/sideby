@@ -84,3 +84,29 @@ function claude { local a; if [ -z "${CLAUDE_CONFIG_DIR-}" ]; then for a in "$@"
 ```
 
 `sideby resume` finds the account whose directory holds that session id (Claude `projects/*/<id>.jsonl`, Codex `sessions/**/rollout-*-<id>.jsonl`, Grok `sessions/*/<id>/`) and starts it as `sideby run` would. A Claude session that was opened but never got a message has no such file: when no account holds it, `sideby resume` looks for the account that started it (`session-env/<id>/`), drops `--resume <id>` and starts a new session there, saying so on stderr. Anything else, including `--continue`, a session title, or a session in the Main Account, runs the Host unchanged. A Host started by sideby already has its selection variable set, so it is never routed twice. An alias such as `alias claude='claude --dangerously-skip-permissions'` keeps working. Only a command with an argument shaped like a session id goes through sideby (about 140 ms more); every other Host command runs directly. sideby never copies or moves sessions.
+
+## Updates
+
+Once a day sideby asks the npm registry which sideby version is the newest (one `GET` of `https://registry.npmjs.org/-/package/sideby/dist-tags`, carrying nothing about you or your accounts). When there is a newer one:
+
+- after a command, the terminal shows one line such as `sideby 0.12.0 is available (you have 0.11.0) · run \`sideby update\``, at most once a day per version. It never shows with `--json`, when the output is not a terminal, from `shell-init`, or inside a Host: `sideby run`, `next` and `resume` print it after the Host exits.
+- the panel shows "v0.12.0 available" next to Refresh. Click it, or the version at the bottom of the panel, to see what changed, the command an update runs, and an **Update** button.
+
+`sideby update` asks the registry right away, shows the command and runs it with `--yes`. What it runs depends on how sideby was installed:
+
+| Installed with | Update runs |
+|---|---|
+| `npm i -g sideby` | `npm install -g sideby@<version>` (in the same Node prefix) |
+| `pnpm add -g sideby` | `pnpm add -g sideby@<version>` |
+| `bun add -g sideby` | `bun add -g sideby@<version>` |
+| Volta (`volta install sideby`) | nothing: sideby prints `volta install sideby@<version>` |
+| `npx sideby`, a project dependency, a source checkout, or a global folder you cannot write | nothing: sideby prints the command for you to run |
+
+After an update, a background panel (`sideby ui --background`) restarts itself and open pages reload. A `sideby ui` running in a terminal and sessions already running keep the old version until you restart them. If you use the sideby skill, update it too: `npx skills add Adonis0123/sideby -g`.
+
+| Setting | Meaning |
+|---|---|
+| `"update": { "check": false }` | No daily check and no notice. `NO_UPDATE_NOTIFIER=1` or `SIDEBY_NO_UPDATE_NOTIFIER=1` do the same; CI turns it off by itself. `sideby update` still works. |
+| `"update": { "auto": true }` | Off by default; the panel's update dialog has the same switch. After the daily check sideby installs a newer version by itself, only for an npm, pnpm or bun global install, only when no `sideby run`, `next` or `resume` is running, and never a new major version (0.x to 1.0). The next command says it updated, once. |
+
+`SIDEBY_UPDATE_REGISTRY` points the check at a mirror, for example `https://registry.npmmirror.com`.

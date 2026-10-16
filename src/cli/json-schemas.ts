@@ -701,6 +701,41 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     },
     { title: 'sideby desktop grok-bot:<name> --remove --json' },
   ),
+  update: Type.Object(
+    {
+      schemaVersion: Version,
+      current: Type.String({ description: 'The running sideby version.' }),
+      latest: Type.String({ description: 'The `latest` version on the npm registry.' }),
+      available: Type.Boolean({ description: '`latest` is newer than `current`.' }),
+      method: Type.Object({
+        kind: Type.Union(
+          ['npm', 'pnpm', 'bun', 'volta', 'npx', 'project', 'source'].map((k) => Type.Literal(k)),
+          { description: 'How this copy was installed.' },
+        ),
+        canUpdate: Type.Boolean({ description: 'sideby can run the Update itself.' }),
+        reason: Type.Optional(Type.String({ description: 'Why it cannot.' })),
+      }),
+      command: Type.String({
+        description: 'What an Update runs, or what to run by hand when `canRun` is false.',
+      }),
+      canRun: Type.Boolean(),
+      releaseNotes: Type.String({ description: 'The release notes of `latest`.' }),
+      updated: Type.Boolean({
+        description: 'False when only the plan was shown (exit 10 with --yes still to add) or nothing to do.',
+      }),
+      message: Type.Optional(Type.String()),
+      restartedPanel: Type.Optional(
+        Type.Boolean({
+          description: 'A background Panel was running and starts again with the new version.',
+        }),
+      ),
+      skill: Type.Optional(
+        Type.String({ description: 'The command that updates the sideby skill; sideby never runs it.' }),
+      ),
+      output: Type.Optional(Type.String({ description: 'What the failed install command printed.' })),
+    },
+    { title: 'sideby update --json' },
+  ),
   error: Type.Object(
     {
       schemaVersion: Version,
