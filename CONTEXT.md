@@ -63,7 +63,8 @@ Avoid: *rotation* (cycling through Accounts per request or on a timer; a Handoff
 
 - **Update Check**: asking the npm registry, at most once a day, which sideby version is the newest. The only question sideby sends over the network on its own; it carries no Account, path or identity. On unless the user turns it off.
 - **Update Notice**: the one line, in the terminal or the Panel, that says a newer sideby exists and how to get it.
-- **Install Method**: how this copy of sideby was installed (a global npm, pnpm or bun package, the npx cache, a project dependency, a source checkout). It decides whether sideby can update itself or only names the command.
+- **Install Method**: how this copy of sideby was installed (a global npm, pnpm or bun package, the npx cache, a project dependency, a source checkout, a Local Build). It decides whether sideby can update itself or only names the command.
+- **Local Build**: the checkout's working tree compiled by `pnpm local` and put behind the global `sideby` command (ADR-0024). It never checks for updates; `pnpm local --off` goes back to the npm package.
 - **Update**: replacing the installed sideby with a newer version through its Install Method, after the user confirms (`sideby update`, the Panel's button). Programs already running keep the old version until they start again.
 - **Auto Update**: an Update sideby carries out by itself after an Update Check. Off unless the user turns it on.
 

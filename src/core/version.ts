@@ -47,3 +47,38 @@ export function buildId(env: NodeJS.ProcessEnv = process.env): string {
   cachedBuild = `${packageVersion()}+${id}`
   return cachedBuild
 }
+
+/** What `pnpm local` records about a Local Build (ADR-0024). */
+export interface LocalBuild {
+  commit: string
+  /** The working tree had changes that were not committed. */
+  dirty: boolean
+  builtAt: string
+}
+
+/** The Local Build fields of a `dist/build.json`, or null for a published build or anything unexpected. */
+export function parseLocalBuild(data: unknown): LocalBuild | null {
+  if (!data || typeof data !== 'object') return null
+  const d = data as Record<string, unknown>
+  if (d.local !== true) return null
+  return {
+    commit: typeof d.commit === 'string' ? d.commit : '',
+    dirty: d.dirty === true,
+    builtAt: typeof d.builtAt === 'string' ? d.builtAt : '',
+  }
+}
+
+let cachedLocal: LocalBuild | null | undefined
+
+/** The running code's Local Build, or null when it was published or runs from source. */
+export function localBuild(): LocalBuild | null {
+  if (cachedLocal !== undefined) return cachedLocal
+  try {
+    cachedLocal = parseLocalBuild(
+      JSON.parse(readFileSync(new URL('../../build.json', import.meta.url), 'utf8')),
+    )
+  } catch {
+    cachedLocal = null
+  }
+  return cachedLocal
+}

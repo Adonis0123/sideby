@@ -2995,7 +2995,7 @@ const MAIN = String.raw`
     v.hidden = !BOOT.version
     if (!v.hidden) {
       const newer = !!(u && u.available)
-      v.textContent = 'v' + BOOT.version
+      v.textContent = verLabel()
       v.classList.toggle('has-update', newer)
       v.disabled = !BOOT.updates
       const tip = !BOOT.updates ? '' : newer ? t('upd.labelLong', { v: u.latest, cur: u.current }) : t('upd.verTitle', { v: BOOT.version })
@@ -3051,10 +3051,17 @@ const MAIN = String.raw`
     openPopover(anchor, 'version', t('upd.title'), verPopKids)
   }
   function renderVerPop() { refreshPopover('version') }
+  // A Local Build (ADR-0024) names its commit, with + when the working tree had changes, so the viewer can tell
+  // which code they are looking at.
+  function verLabel() {
+    const l = BOOT.local
+    return 'v' + BOOT.version + (l ? '-dev' + (l.commit ? ' · ' + l.commit + (l.dirty ? '+' : '') : '') : '')
+  }
   function verPopKids() {
     const u = updState()
     const toDialog = () => { closeMenu(); openUpdate() }
-    const kids = [h('b', null, 'sideby v' + BOOT.version)]
+    const kids = [h('b', null, 'sideby ' + verLabel())]
+    if (BOOT.local) kids.push(h('p', { class: 'muted small' }, t(BOOT.local.dirty ? 'upd.localDirty' : 'upd.local', { at: BOOT.local.builtAt ? clock(BOOT.local.builtAt) : '' })))
     let status
     if (!u) status = t('upd.loading')
     else if (u.available) status = null

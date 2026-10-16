@@ -55,10 +55,11 @@
   ],
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/src/cli/main.js && node scripts/write-build-id.ts",
+    "local": "node scripts/local.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome check --write .",
-    "test": "node --test --test-concurrency=4 \"src/**/*.test.ts\" \"testing/**/*.test.ts\"",
+    "test": "node --test --test-concurrency=4 \"src/**/*.test.ts\" \"testing/**/*.test.ts\" \"scripts/**/*.test.ts\"",
     "schemas": "node src/cli/schemas.ts",
     "leak-check": "sh scripts/leak-check.sh",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm leak-check",

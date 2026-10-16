@@ -29,7 +29,7 @@ import { SKILL_INSTALL } from '../core/skill-check.ts'
 import { MIN_CALLS } from '../core/tuning.ts'
 import type { TuneApplyPlan } from '../core/tuning-apply.ts'
 import * as update from '../core/update.ts'
-import { buildId, packageVersion } from '../core/version.ts'
+import { buildId, localBuild, packageVersion } from '../core/version.ts'
 import { HOOK_FAMILIES } from '../handoff/hook.ts'
 import type { AccountStatus, DoctorHistory, FamilyInfo, Runtime } from '../runtime.ts'
 import type { Account, FamilyLogo, QuotaResult, QuotaSetupPlan, UsageResult } from '../types.ts'
@@ -501,6 +501,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   const readOnly = Boolean(opts.readOnly)
   const version = opts.version ?? PANEL_VERSION
   const build = buildId()
+  const local = localBuild()
   const theme = resolveTheme(opts.theme)
   const lang = resolveLang(opts.lang)
   const updates = opts.updates !== false
@@ -840,7 +841,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           res.end(
             method === 'HEAD'
               ? undefined
-              : renderPage({ basePath, token, nonce, version, build, readOnly, theme, lang, updates }),
+              : renderPage({ basePath, token, nonce, version, build, local, readOnly, theme, lang, updates }),
           )
           return true
         }

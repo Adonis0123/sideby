@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import type { Env } from '../types.ts'
 import { writeFileAtomic } from './fs-safe.ts'
 import type { Paths } from './paths.ts'
-import { packageVersion } from './version.ts'
+import { localBuild, packageVersion, parseLocalBuild } from './version.ts'
 
 export const DEFAULT_REGISTRY = 'https://registry.npmjs.org'
 export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
@@ -36,7 +36,7 @@ export interface UpdateCache {
   auto?: { from: string; to: string; at: string; ok: boolean; message: string; shown?: boolean }
 }
 
-export type InstallKind = 'npm' | 'pnpm' | 'bun' | 'volta' | 'npx' | 'project' | 'source'
+export type InstallKind = 'npm' | 'pnpm' | 'bun' | 'volta' | 'npx' | 'project' | 'source' | 'local'
 
 export interface InstallMethod {
   kind: InstallKind
@@ -222,7 +222,9 @@ export const inCi = (env: Env): boolean =>
 type UpdateSettings = { update?: { check?: boolean; auto?: boolean } }
 
 /** Why Update Checks are off, or null when they are on (spec §3.23). */
-export function checksOff(env: Env, config: UpdateSettings): string | null {
+export function checksOff(env: Env, config: UpdateSettings, local = localBuild() !== null): string | null {
+  // A Local Build (ADR-0024) follows the checkout: a notice or an Auto Update would only replace it with npm's.
+  if (local) return 'this is a local build (pnpm local)'
   if (set(env.SIDEBY_NO_UPDATE_NOTIFIER)) return 'SIDEBY_NO_UPDATE_NOTIFIER is set'
   if (set(env.NO_UPDATE_NOTIFIER)) return 'NO_UPDATE_NOTIFIER is set'
   if (config.update?.check === false) return 'config update.check is false'
@@ -469,6 +471,14 @@ export async function installMethod(env: Env): Promise<InstallMethod> {
     canUpdate: false,
     ...extra,
   })
+  try {
+    if (parseLocalBuild(JSON.parse(await readFile(join(packageDir, 'dist', 'build.json'), 'utf8'))))
+      return at('local', {
+        reason: 'it is a local build; run `pnpm local --off` in the sideby checkout to go back to npm',
+      })
+  } catch {
+    // no build file: not a Local Build
+  }
   if (p.includes('/_npx/'))
     return at('npx', { reason: 'it runs from the npx cache, which fetches a version per call' })
   // Volta keeps a global package under its own npm prefix; installing there behind its back breaks its records.
@@ -533,6 +543,8 @@ export function updateCommand(
       return { text: `npm install ${spec}` }
     case 'source':
       return { text: 'git pull && pnpm install' }
+    case 'local':
+      return { text: 'pnpm local --off' }
   }
 }
 

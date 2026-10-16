@@ -424,6 +424,15 @@ describe('panel page lang', () => {
       )
     }
   })
+  it('carries a Local Build into the boot data, so the version pill can name its commit', () => {
+    const local = { commit: 'abc1234', dirty: true, builtAt: '2026-10-16T12:00:00.000Z' }
+    assert.deepEqual(boot(renderPage({ basePath: '', token: 't', local })).local, local)
+    assert.equal(boot(renderPage({ basePath: '', token: 't' })).local, null)
+    assert.match(
+      PAGE_SCRIPT,
+      /'-dev' \+ \(l\.commit \? ' · ' \+ l\.commit \+ \(l\.dirty \? '\+' : ''\) : ''\)/,
+    )
+  })
   it('picks the language through panelLang and never saves it while the host fixes it', () => {
     assert.match(PAGE_SCRIPT, /let lang = panelLang\(BOOT\.lang, prefs\.lang, navigator\.language\)/)
     assert.match(PAGE_SCRIPT, /if \(!LANG_FIXED\) out\.push\('lang'\)/)

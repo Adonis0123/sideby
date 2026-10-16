@@ -1,0 +1,39 @@
+# 0024. `pnpm local` puts the checkout's code behind the global `sideby`
+
+Date: 2026-10-16 · Status: accepted
+
+## Context
+
+The maintainer changes sideby through coding agents and wants to see each change at once in the tools used every day: the Panel mounted in a Portal (it finds sideby through the `sideby` command on PATH) and the `sideby` command itself. Until now a change reached them only through a release and an Update, so the maintainer looked at the published version while the agent had already changed the code.
+
+Facts that shape the answer:
+
+- A Portal reads `dist/build.json` of the package it loaded on every request and starts a fresh worker when it changes (ADR-0006, Portal side). It keeps the folder it resolved at start, so new code must land in the same folder.
+- An open Panel page reloads itself when `/api/state` reports another build (`buildId()`), and waits while the viewer is busy. A background Panel (`ui --background`) is replaced the next time it starts from another build.
+- `statusline-tap` and `handoff-hook` run the global `sideby` on every status line refresh and tool call. A broken build there breaks every Claude session's status line.
+- Several agent sessions often edit the checkout at the same time, so the working tree may hold another session's unfinished change.
+- `pnpm build` starts with `rm -rf dist`, so the package has no code for the length of a build.
+
+Options considered:
+
+- `npm link` the checkout. Rejected: the global command then runs whatever `dist` holds, including a half-written build, and `pnpm build` empties it while it runs.
+- Build on every save (watch mode). Rejected: it ships an agent's half-done edit.
+- Build only committed code (a post-commit hook). Rejected by the maintainer: they want to see an agent's result before deciding to commit.
+- A Stop hook of one Host. Rejected: Codex and Grok sessions would not trigger it.
+- A script the agent runs before handing work back, which builds aside and switches only a build that compiles and starts. Chosen.
+
+## Decision
+
+- **Local Build** (`CONTEXT.md`): `pnpm local` in a checkout compiles the working tree into a new folder next to `$XDG_DATA_HOME/sideby-dev/pkg` (default `~/.local/share/sideby-dev`), with `package.json`, `schemas`, `skills`, the READMEs, `LICENSE` and a link to the checkout's `node_modules`. It writes `dist/build.json` with `local: true`, the commit, whether the working tree had changes (`dirty`) and the build time.
+- It switches only when `tsc` succeeds and `node dist/src/cli/main.js --version` prints the package version. The switch is two renames: the running `pkg` moves to `old/<id>`, the new folder becomes `pkg`. The folder the global `sideby` resolves to never changes, so a Portal sees the new `build.json` and a running command never reads a half-written tree. The three newest old builds are kept; `pnpm local --back` swaps the newest one back.
+- The first run replaces the global npm package `<prefix>/lib/node_modules/sideby` with a link to `pkg` (the npm package moves to `$XDG_DATA_HOME/sideby-dev/npm`) and makes sure `<prefix>/bin/sideby` points into it. `pnpm local --off` removes the link and puts the npm package back (or runs `npm install -g sideby` when there is none). Only an npm global install is handled; with pnpm, bun or Volta the script stops and says so.
+- After a switch, a background Panel that runs is started again from the new code. Open pages and Portals reload by themselves, as after an Update (ADR-0021).
+- **Install Method `local`**: a package whose `dist/build.json` says `local: true`. Update Checks are off for it (`checksOff` says "this is a local build"), so it never shows an Update Notice and Auto Update never replaces it. `sideby update` names `pnpm local --off`.
+- The Panel's version pill reads `v<version>-dev · <commit>` with `+` when the working tree had changes; its popover adds the build time.
+- `AGENTS.md`: after `pnpm check`, an agent runs `pnpm local` before handing work back, so the maintainer sees the result in the Panel they already have open.
+
+## Consequences
+
+- What the maintainer sees is the working tree, including another session's uncommitted edits when there are some. Compile errors never reach the global command; runtime bugs can, and `pnpm local --back` undoes the switch.
+- The global `sideby` follows the checkout until `pnpm local --off`; releases installed with `npm i -g sideby` in the meantime replace the link, which is the same as `--off`.
+- Published packages are unchanged: `build.json` from `pnpm build` has no `local`, so every other install behaves as before.

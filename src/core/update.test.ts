@@ -1,7 +1,7 @@
 // Update Check, Update Notice, Install Method and Auto Update (spec §3.23, ADR-0021). The registry, the install
 // command and the machine are replaced through bindUpdateDeps; nothing here reaches the network.
 import assert from 'node:assert/strict'
-import { readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
@@ -120,6 +120,10 @@ describe('switches', () => {
     assert.match(checksOff({ CI: 'true' }, {}) ?? '', /CI/)
     assert.equal(checksOff({ CI: 'false', NO_UPDATE_NOTIFIER: '0' }, {}), null)
   })
+  it('keeps checks off for a Local Build, whatever else is set', () => {
+    assert.match(checksOff({}, { update: { check: true, auto: true } }, true) ?? '', /local build/)
+    assert.equal(checksOff({}, {}, false), null)
+  })
 })
 
 describe('the notice', () => {
@@ -185,6 +189,24 @@ describe('Install Method', () => {
     assert.equal((await installMethod({})).kind, 'project')
     at('/u/coding/sideby')
     assert.equal((await installMethod({})).kind, 'source')
+  })
+  it('tells a Local Build by its build file and only names pnpm local --off', async () => {
+    await withFakeHome(async (h) => {
+      const pkg = h.path('.local/share/sideby-dev/pkg')
+      await mkdir(join(pkg, 'dist'), { recursive: true })
+      await writeFile(
+        join(pkg, 'dist', 'build.json'),
+        JSON.stringify({ id: 'x', local: true, commit: 'abc1234', dirty: true }),
+      )
+      at(pkg)
+      const local = await installMethod({})
+      assert.deepEqual([local.kind, local.canUpdate], ['local', false])
+      assert.match(local.reason ?? '', /pnpm local --off/)
+      assert.deepEqual(updateCommand(local, '0.13.0'), { text: 'pnpm local --off' })
+      // A published build file has no `local`: the path decides as before.
+      await writeFile(join(pkg, 'dist', 'build.json'), JSON.stringify({ id: 'x' }))
+      assert.equal((await installMethod({})).kind, 'source')
+    })
   })
 })
 
