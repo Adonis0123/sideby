@@ -92,7 +92,6 @@ export function renderPage(opts: PageOptions): string {
       </div>
     </div>
     <div class="top-actions">
-      <span id="updated" class="muted small">Loading…</span>
       <button id="lang" class="icon-btn lang-btn" type="button"${lang === 'auto' ? '' : ' hidden'}>${lang === 'zh' ? 'EN' : '中文'}</button>
       <button id="theme" class="icon-btn" type="button" hidden></button>
       <button id="update" class="btn update-btn" type="button" hidden></button>
@@ -108,7 +107,7 @@ export function renderPage(opts: PageOptions): string {
   <section id="handoff-page" class="block" aria-labelledby="h-handoff" hidden></section>
   <section id="tuning-page" class="block" aria-labelledby="h-tuning" hidden></section>
   <section id="accounts-page" class="block" aria-labelledby="h-accounts">
-    <div class="section-head acct-head"><h2 id="h-accounts"><span data-i18n="acct.title">Accounts</span><span id="acct-count" class="muted small"></span></h2></div>
+    <div class="section-head acct-head"><h2 id="h-accounts"><span data-i18n="acct.title">Accounts</span><span id="acct-count" class="muted small"></span></h2><span id="updated" class="muted small" role="status">Loading…</span></div>
     <div id="toolbar" class="toolbar" hidden></div>
     <div id="accounts" aria-busy="true"><div class="group group-list">${SKELETON_ROW.repeat(4)}</div></div>
   </section>

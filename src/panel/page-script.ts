@@ -675,10 +675,15 @@ const MAIN = String.raw`
   // ---------- header and summary ----------
   function renderUpdated() {
     const busy = S.loading && !S.silent
-    const text = S.loading && !S.state ? t('top.loading') : busy ? t('top.refreshing') : S.loadedAt ? t('top.updated', { ago: agoShort(Date.now() - S.loadedAt) }) : ''
+    const every = Math.round((S.fastUntil > Date.now() ? FAST_MS : AUTO_MS) / 1000)
+    const text = S.loading && !S.state ? t('top.loading') : busy ? t('top.refreshing') : S.loadedAt ? t('top.updated', { ago: agoShort(Date.now() - S.loadedAt), s: every }) : ''
     const el = $('updated')
     if (el.textContent !== text) el.textContent = text
-    el.title = S.loadedAt ? t('top.updatedTitle', { at: clock(new Date(S.loadedAt).toISOString()), s: Math.round((S.fastUntil > Date.now() ? FAST_MS : AUTO_MS) / 1000) }) : ''
+    // A dot says whether the numbers are live: green while they refresh on their own, amber when they stopped.
+    const stale = conn.lost || Boolean(S.loadError)
+    el.classList.toggle('is-live', Boolean(S.loadedAt) && !stale)
+    el.classList.toggle('is-stale', Boolean(S.loadedAt) && stale)
+    el.title = !S.loadedAt ? '' : (stale ? t('top.stale') + ' ' : '') + t('top.updatedTitle', { at: clock(new Date(S.loadedAt).toISOString()), s: Math.round((S.fastUntil > Date.now() ? FAST_MS : AUTO_MS) / 1000) })
   }
   function renderTop() {
     renderUpdated()
@@ -2788,21 +2793,6 @@ const MAIN = String.raw`
     dlg.busy = false
     renderUpdate()
   }
-  // "Check for updates": asks the registry now (the daily check only runs once a day), then shows the answer.
-  async function updCheck() {
-    up.checking = true
-    up.error = null
-    renderUpdate()
-    try {
-      await api('/api/update', {})
-      await load({ silent: true })
-      up.checked = true
-    } catch (e) { up.error = e }
-    up.checking = false
-    renderUpdate()
-  }
-  // After an Update the server (or the Portal's worker) comes back with a new build; load() then reloads the page.
-  function updWait() {
   // The version pill opens a small popover, not the dialog: the version, whether it is the newest, "Check for
   // updates" in place, and the way into the dialog when there is something to do (update, Auto Update).
   const vp = { checking: false, checked: false, error: null }
@@ -2853,6 +2843,21 @@ const MAIN = String.raw`
     const b = menu.el && menu.el.querySelector('.popover-actions button')
     if (b) b.focus()
   }
+  // "Check for updates": asks the registry now (the daily check only runs once a day), then shows the answer.
+  async function updCheck() {
+    up.checking = true
+    up.error = null
+    renderUpdate()
+    try {
+      await api('/api/update', {})
+      await load({ silent: true })
+      up.checked = true
+    } catch (e) { up.error = e }
+    up.checking = false
+    renderUpdate()
+  }
+  // After an Update the server (or the Portal's worker) comes back with a new build; load() then reloads the page.
+  function updWait() {
     if (!up || !up.done || S.newBuild) { if (S.newBuild) location.reload(); return }
     if (Date.now() > up.waitUntil) { renderUpdate(); return }
     setTimeout(() => { void load({ silent: true }).then(updWait) }, 1500)

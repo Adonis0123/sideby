@@ -86,10 +86,14 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .brand h1 { font-size: var(--title-size); font-weight: var(--title-weight); line-height: 1.3; letter-spacing: -0.02em; }
 .tagline { color: var(--muted); font-size: 13px; }
+/* When the account data was read; the dot says whether it still refreshes on its own (green) or stopped (amber). */
+#updated { display: inline-flex; align-items: center; gap: 6px; }
+#updated.is-live::before, #updated.is-stale::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ok-bar); }
+#updated.is-stale::before { background: var(--warn-bar); }
 /* The running version, a quiet pill after the name; with a newer version it takes the accent and a dot (spec §3.23). */
 .title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .ver-pill { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); font: 500 11.5px/18px var(--mono); cursor: pointer; white-space: nowrap; }
-.ver-pill:hover:not(:disabled), .ver-pill[aria-expanded="true"] { color: var(--text); border-color: var(--border-strong); background: var(--hover); }
+.ver-pill:hover:not(:disabled), .ver-pill[aria-expanded="true"] { color: var(--on-primary); border-color: var(--primary-hover-border); background: var(--primary-hover); }
 .ver-pill.has-update:hover:not(:disabled), .ver-pill.has-update[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); background: var(--active); }
 .ver-pill:disabled { cursor: default; }
 .ver-pill:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
@@ -145,7 +149,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .tune-acct-head { display: flex; align-items: center; gap: 8px; }
 .seg-btn[aria-pressed=true] { background: var(--active); color: var(--text); font-weight: var(--strong-weight); }
 .seg-btn:focus-visible { outline: var(--focus-outline); outline-offset: 1px; box-shadow: var(--focus-ring); }
-.acct-head { margin-bottom: 10px; }
+.acct-head { margin-bottom: 10px; justify-content: flex-start; column-gap: 14px; }
 .acct-head h2 { display: flex; align-items: baseline; gap: 10px; }
 #acct-count { font-weight: 400; }
 
@@ -583,7 +587,6 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .tagline { display: none; }
   .brand .logo { width: 34px; height: 34px; }
   .brand h1 { font-size: 19px; }
-  #updated { display: none; }
   .banner { flex-direction: column; }
   .stat { padding: 11px 13px; align-items: flex-start; flex-direction: column; gap: 6px; }
   .stat-value { font-size: 19px; }
