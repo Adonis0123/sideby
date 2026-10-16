@@ -834,7 +834,33 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
         }),
       ),
       skill: Type.Optional(
-        Type.String({ description: 'The command that updates the sideby skill; sideby never runs it.' }),
+        Type.String({ description: 'The command that installs the sideby skill by hand.' }),
+      ),
+      skillUpdate: Type.Optional(
+        Type.Object(
+          {
+            installed: Type.Array(Type.Union([Str, Type.Null()]), {
+              description: 'Versions of the installed sideby skills; null for one without a version.',
+            }),
+            outdated: Type.Boolean({
+              description: 'Some installed skill is for another version than sideby will run.',
+            }),
+            command: Str,
+            canRun: Type.Boolean({
+              description: 'False when sideby leaves the skill alone (see reason): give the user command.',
+            }),
+            reason: Type.Optional(Str),
+          },
+          {
+            description:
+              'The installed sideby skill, which the Update brings along; absent when none is installed.',
+          },
+        ),
+      ),
+      skillUpdated: Type.Optional(
+        Type.Boolean({
+          description: 'The skill was updated too (true) or that failed (false); absent when not tried.',
+        }),
       ),
       output: Type.Optional(Type.String({ description: 'What the failed install command printed.' })),
     },

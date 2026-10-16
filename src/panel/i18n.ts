@@ -27,7 +27,10 @@ const en = {
   'upd.after':
     'A background panel restarts by itself and this page reloads. A sideby ui running in a terminal and sessions already running keep the old version until you restart them.',
   'upd.cannot': 'sideby cannot update itself here: {why}. Run this yourself:',
-  'upd.skill': 'If you use the sideby skill, update it too:',
+  'upd.skill': 'If you use the sideby skill, install it with:',
+  'upd.skillToo': 'The sideby skill agents read is updated with it.',
+  'upd.skillDone': 'The sideby skill was updated too; agents load it in their next session.',
+  'upd.skillManaged': 'sideby leaves the skill alone ({why}). Update it with:',
   'upd.checksOff': 'Update checks are off ({why}).',
   'upd.latest': 'This is the newest version',
   'upd.latestNow': 'You have the newest version (checked just now).',
@@ -706,7 +709,10 @@ const zh: Record<MessageKey, string> = {
   'upd.after':
     '后台面板会自己重启，本页随后自动刷新。终端里运行的 sideby ui 和已经在跑的会话要重启后才用新版本。',
   'upd.cannot': '这种安装方式下 sideby 不能自己更新：{why}。请自己运行：',
-  'upd.skill': '如果你装了 sideby skill，也更新一下：',
+  'upd.skill': '如果要用 sideby skill，用这条命令安装：',
+  'upd.skillToo': 'agent 读的 sideby skill 会一起更新。',
+  'upd.skillDone': 'sideby skill 也已更新，agent 下次开会话时生效。',
+  'upd.skillManaged': 'sideby 不会自动更新这个 skill（{why}）。请用这条命令更新：',
   'upd.checksOff': '检查更新已关闭（{why}）。',
   'upd.latest': '已是最新版本',
   'upd.latestNow': '已是最新版本（刚刚检查）。',

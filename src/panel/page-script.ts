@@ -3227,6 +3227,14 @@ const MAIN = String.raw`
     up.autoBusy = false
     renderUpdate()
   }
+  // The installed sideby skill follows the CLI (spec §3.23): said before the Update, or what to run when sideby may not.
+  function updSkill(u) {
+    const s = u.skillUpdate
+    if (!s) return [h('p', { class: 'small' }, t('upd.skill')), codeCopy(u.skill)]
+    if (!s.outdated) return []
+    if (s.canRun) return [h('p', { class: 'muted small' }, t('upd.skillToo'))]
+    return [h('p', { class: 'small' }, t('upd.skillManaged', { why: s.reason || '' })), codeCopy(s.command)]
+  }
   function renderUpdate() {
     if (!up || dlg.kind !== 'update') return
     const u = updState()
@@ -3240,7 +3248,8 @@ const MAIN = String.raw`
     if (up.done) {
       body.push(h('p', { class: 'note' }, t('upd.done', { v: up.done.latest })))
       body.push(h('p', { class: 'muted small' }, Date.now() > up.waitUntil ? t('upd.restartHint') : [spinner(), ' ', t('upd.reloading')]))
-      body.push(h('p', { class: 'small' }, t('upd.skill')), codeCopy(u.skill))
+      if (up.done.skillUpdated) body.push(h('p', { class: 'small' }, t('upd.skillDone')))
+      else body.push(...updSkill(u))
     } else if (u.available) {
       if (up.changed) body.push(h('p', { class: 'note note-warn' }, t('upd.changed', { v: u.latest })))
       body.push(h('p', null, h('b', null, t('upd.available', { v: u.latest })), ' ',
@@ -3252,7 +3261,7 @@ const MAIN = String.raw`
         body.push(h('p', { class: 'note note-warn' }, t('upd.cannot', { why: u.method.reason || u.method.kind })))
         body.push(codeCopy(u.command))
       }
-      body.push(h('p', { class: 'small' }, t('upd.skill')), codeCopy(u.skill))
+      body.push(...updSkill(u))
     } else if (up.checked && u.latest) {
       body.push(h('p', { class: 'note' }, t('upd.latestNow')))
     } else if (u.checksOff) {

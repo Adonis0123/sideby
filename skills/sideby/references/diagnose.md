@@ -23,7 +23,7 @@ Shared Items the Main Account does not have are skipped: no Finding, not counted
 | `fail` `link.dangling` | The link points at nothing | Show the hint (`ls -l <path>`); the user decides how to repair it |
 | `fail` `symlink-forbidden` without `fixable` | The Host needs a real file here, but the link points somewhere other than the Main Account | Show the hint; sideby will not replace a link it did not create |
 | credential item, mode not 600 | `proxy.env`, `auth.json`, `.claude.json` readable by others | `--fix` resets the mode to 600 |
-| `warn` `skill.outdated` (in `general`) | The installed sideby skill is for another sideby version | Tell the user to run `npx skills add Adonis0123/sideby -g` |
+| `warn` `skill.outdated` (in `general`) | The installed sideby skill is for another sideby version | Offer `sideby update` (it updates the skill; see `update.md`) |
 | name looks like a backup (`bak`, `backup`, `old`, `tmp`) | A stray directory was picked up as an account | Suggest adding its ref to `ignore` in `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
 | `login: "not-needed"` (`key` in `sideby list`) | API account; it authenticates with `proxy.env` | Nothing to do |
 | `problems` on an account in `list --json` | A plugin failed while reading it (for example a settings file that is not valid JSON) | Show the message; the account itself still works |

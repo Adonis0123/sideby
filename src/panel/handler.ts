@@ -133,8 +133,10 @@ export interface PanelUpdate {
   command?: string
   canRun: boolean
   releaseNotes?: string
-  /** The command that updates the sideby skill, which sideby never runs itself. */
+  /** The command that installs the sideby skill by hand. */
   skill: string
+  /** The installed sideby skill, which an Update brings along (spec §3.23); absent when none is installed. */
+  skillUpdate?: import('../core/update.ts').SkillUpdatePlan
 }
 
 export interface PanelState {
@@ -190,6 +192,9 @@ async function updateState(rt: Runtime, readOnly: boolean): Promise<PanelUpdate>
     })
   const method = await update.installMethod(rt.env)
   const plan = cache.latest ? update.shownPlan(update.planFrom(method, current, cache.latest, rt.env)) : null
+  const skillUpdate = await update
+    .skillUpdatePlan(rt.paths.home, plan?.available ? plan.latest : current)
+    .catch(() => null)
   return {
     current,
     ...(cache.latest ? { latest: cache.latest } : {}),
@@ -201,6 +206,7 @@ async function updateState(rt: Runtime, readOnly: boolean): Promise<PanelUpdate>
     ...(plan ? { command: plan.command, releaseNotes: plan.releaseNotes } : {}),
     canRun: Boolean(plan?.canRun),
     skill: SKILL_INSTALL,
+    ...(skillUpdate ? { skillUpdate } : {}),
   }
 }
 
@@ -780,6 +786,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           message: r.message,
           restartedPanel: r.restartedPanel,
           refreshedApp: r.refreshedApp,
+          ...(r.skillUpdated === undefined ? {} : { skillUpdated: r.skillUpdated }),
         }
       },
     },

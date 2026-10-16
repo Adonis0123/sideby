@@ -8,6 +8,7 @@ import { type FakeHome, withFakeHome } from '../../testing/index.ts'
 import { resolvePaths } from './paths.ts'
 import {
   afterCommandPlan,
+  applySkillUpdate,
   applyUpdate,
   autoPending,
   autoUpdateBlocker,
@@ -22,6 +23,7 @@ import {
   markRunning,
   noticeLine,
   planFrom,
+  planUpdate,
   readUpdateCache,
   refreshUpdateCheck,
   runningSessions,
@@ -282,6 +284,65 @@ describe('running sessions', () => {
 })
 
 describe('Update and Auto Update', () => {
+  const skill = (v: string) => `---\nname: sideby\nmetadata:\n  version: ${v}\n---\n`
+  it('brings an installed sideby skill along: the CLI first, then skills update, keeping its agents', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.agents/skills/sideby/SKILL.md', skill(CURRENT))
+      const m = machine(h)
+      const plan = await planUpdate(resolvePaths(h.env), envWithChecks(h))
+      assert.deepEqual(plan.skill && [plan.skill.installed, plan.skill.outdated, plan.skill.canRun], [
+        [CURRENT],
+        true,
+        true,
+      ])
+      const r = await applyUpdate(resolvePaths(h.env), plan, h.env)
+      assert.deepEqual(
+        m.execs.map((e) => e.file),
+        ['npm', 'npx'],
+      )
+      assert.equal(
+        m.execs[1] && [m.execs[1].file, ...m.execs[1].args].join(' '),
+        'npx -y skills update sideby -g -y',
+      )
+      assert.equal(r.skillUpdated, true)
+    })
+  })
+  it('leaves a skill alone when it lives in a git repository, and says where to update it', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.agents/skills/sideby/SKILL.md', skill('0.1.0'))
+      await mkdir(h.path('.agents/.git'), { recursive: true })
+      const m = machine(h)
+      const plan = await planUpdate(resolvePaths(h.env), envWithChecks(h))
+      assert.deepEqual(plan.skill && [plan.skill.outdated, plan.skill.canRun], [true, false])
+      assert.match(plan.skill?.reason ?? '', /git repository ~\/\.agents/)
+      const r = await applyUpdate(resolvePaths(h.env), plan, h.env)
+      assert.equal(m.execs.length, 1, 'only the CLI install ran')
+      assert.equal(r.skillUpdated, undefined)
+    })
+  })
+  it('has no skill part without an installed skill, and runs nothing for a current one', async () => {
+    await withFakeHome(async (h) => {
+      machine(h)
+      assert.equal((await planUpdate(resolvePaths(h.env), envWithChecks(h))).skill, undefined)
+      await h.write('.agents/skills/sideby/SKILL.md', skill(CURRENT))
+      const m = machine(h, { latest: CURRENT })
+      const plan = await planUpdate(resolvePaths(h.env), envWithChecks(h))
+      assert.equal(plan.skill?.outdated, false)
+      assert.equal(await applySkillUpdate(plan.skill, h.env), null)
+      assert.equal(m.execs.length, 0)
+    })
+  })
+  it('reports a failed skill update without failing the Update', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.agents/skills/sideby/SKILL.md', skill(CURRENT))
+      machine(h, { exec: async (file) => ({ code: file === 'npx' ? 1 : 0, output: '' }) })
+      const plan = await planUpdate(resolvePaths(h.env), envWithChecks(h))
+      const r = await applyUpdate(resolvePaths(h.env), plan, h.env)
+      assert.deepEqual([r.ok, r.skillUpdated], [true, false])
+      assert.match(r.skillMessage ?? '', /run it yourself/)
+    })
+  })
+
   it('runs the command and restarts a running background Panel', async () => {
     await withFakeHome(async (h) => {
       const m = machine(h)

@@ -75,4 +75,4 @@ To update sideby, run `sideby update --json` yourself: it shows `current`, `late
 
 ## Keeping this skill current
 
-If `sideby doctor --json` reports `skill.outdated`, this skill was written for another sideby version. Tell the user to update it with `npx skills add Adonis0123/sideby -g`.
+If `sideby doctor --json` reports `skill.outdated`, this skill was written for another sideby version. Offer `sideby update --json` (exit 10, then `--yes` after they agree): it updates the skill, together with sideby when a newer one is out (`references/update.md`).

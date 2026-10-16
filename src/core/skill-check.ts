@@ -2,7 +2,7 @@
 // sideby version teaches commands this CLI may not have, so a version mismatch is a warning with the
 // reinstall command. Not installed is not a problem.
 import { readFile, realpath } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { FamilyDef, Finding } from '../types.ts'
 import { mainDirOf } from './accounts.ts'
 import { tildify } from './paths.ts'
@@ -22,20 +22,28 @@ export function skillVersionOf(text: string): string | null {
  * `_notice`, so it looks at two fixed files only; Doctor checks every Family's main directory.
  */
 export async function installedSkillVersions(home: string): Promise<(string | null)[]> {
+  return (await installedSkills(home)).map((s) => s.version)
+}
+
+/** The same skills with the real folder each lives in (for `sideby update`, which may update them). */
+export async function installedSkills(home: string): Promise<{ dir: string; version: string | null }[]> {
   const seen = new Set<string>()
-  const out: (string | null)[] = []
+  const out: { dir: string; version: string | null }[] = []
   for (const dir of [join(home, '.agents', 'skills'), join(home, '.claude', 'skills')]) {
     try {
       const real = await realpath(join(dir, 'sideby', 'SKILL.md'))
       if (seen.has(real)) continue
       seen.add(real)
-      out.push(skillVersionOf(await readFile(real, 'utf8')))
+      out.push({ dir: dirname(real), version: skillVersionOf(await readFile(real, 'utf8')) })
     } catch {
       // not installed there
     }
   }
   return out
 }
+
+/** The command `sideby update` runs to update an installed sideby skill: it keeps the agents it was installed for. */
+export const SKILL_UPDATE = ['npx', '-y', 'skills', 'update', 'sideby', '-g', '-y'] as const
 
 /**
  * Checks, for each given Family, the sideby skill its Host reads: `<main>/skills/sideby`, and for Codex also

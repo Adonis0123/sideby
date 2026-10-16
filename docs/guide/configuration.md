@@ -102,7 +102,7 @@ Once a day sideby asks the npm registry which sideby version is the newest (one 
 | Volta (`volta install sideby`) | nothing: sideby prints `volta install sideby@<version>` |
 | `npx sideby`, a project dependency, a source checkout, or a global folder you cannot write | nothing: sideby prints the command for you to run |
 
-After an update, a background panel (`sideby ui --background`) restarts itself and open pages reload. The panel app (`sideby app install`), if you installed it, is installed again from the new version, with its new icon. A `sideby ui` running in a terminal and sessions already running keep the old version until you restart them. If you use the sideby skill, update it too: `npx skills add Adonis0123/sideby -g`.
+After an update, a background panel (`sideby ui --background`) restarts itself and open pages reload. The panel app (`sideby app install`), if you installed it, is installed again from the new version, with its new icon. A `sideby ui` running in a terminal and sessions already running keep the old version until you restart them. The sideby skill agents read (`~/.agents/skills/sideby`) is updated with it, keeping the agents you installed it for; when sideby is already current and only the skill is old, `sideby update` updates the skill alone. A skill inside a git repository, such as a dotfiles clone, is left to that repository.
 
 | Setting | Meaning |
 |---|---|

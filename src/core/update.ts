@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import type { Env } from '../types.ts'
 import { writeFileAtomic } from './fs-safe.ts'
 import type { Paths } from './paths.ts'
+import { installedSkills, SKILL_INSTALL, SKILL_UPDATE } from './skill-check.ts'
 import { localBuild, packageVersion, parseLocalBuild } from './version.ts'
 
 export const DEFAULT_REGISTRY = 'https://registry.npmjs.org'
@@ -635,6 +636,8 @@ export interface UpdatePlan {
   command: string
   canRun: boolean
   releaseNotes: string
+  /** The installed sideby skill, which an Update brings along (absent when none is installed). */
+  skill?: SkillUpdatePlan
 }
 
 export function planFrom(method: InstallMethod, current: string, latest: string, env: Env = {}): UpdatePlan {
@@ -667,7 +670,59 @@ export function shownPlan(plan: UpdatePlan) {
     command: plan.command,
     canRun: plan.canRun,
     releaseNotes: plan.releaseNotes,
+    ...(plan.skill ? { skillUpdate: plan.skill } : {}),
   }
+}
+
+/** What an Update does to the installed sideby skill (spec §3.23, ADR-0021 amendment 2026-10-17). */
+export interface SkillUpdatePlan {
+  /** Versions of the installed skills (`null`: one without a version). */
+  installed: (string | null)[]
+  /** Some installed skill is for another version than the one sideby will run. */
+  outdated: boolean
+  command: string
+  /** False when sideby must not run it; `reason` says why and the user runs `command` where it belongs. */
+  canRun: boolean
+  reason?: string
+}
+
+/** The folder holding `dir` that is a git work tree, if any: a skill there is managed by that repository. */
+async function gitRootOf(dir: string): Promise<string | null> {
+  for (let d = dir; ; d = dirname(d)) {
+    try {
+      await stat(join(d, '.git'))
+      return d
+    } catch {
+      // keep looking up
+    }
+    if (dirname(d) === d) return null
+  }
+}
+
+/** The skill part of an Update toward `target`; null when no sideby skill is installed. Reads two files. */
+export async function skillUpdatePlan(home: string, target: string): Promise<SkillUpdatePlan | null> {
+  const skills = await installedSkills(home)
+  if (!skills.length) return null
+  const installed = skills.map((s) => s.version)
+  const plan: SkillUpdatePlan = {
+    installed,
+    outdated: installed.some((v) => v !== target),
+    command: SKILL_UPDATE.join(' '),
+    canRun: true,
+  }
+  for (const s of skills) {
+    const root = await gitRootOf(s.dir)
+    if (root) {
+      const at = root.startsWith(home) ? `~${root.slice(home.length)}` : root
+      return {
+        ...plan,
+        command: SKILL_INSTALL,
+        canRun: false,
+        reason: `the skill is in the git repository ${at}, so sideby leaves it alone; update it where that repository comes from`,
+      }
+    }
+  }
+  return plan
 }
 
 /** Asks the registry now (whatever the switches say: the user asked) and returns what an Update would do. */
@@ -675,7 +730,25 @@ export async function planUpdate(paths: Paths, env: Env): Promise<UpdatePlan> {
   const latest = await fetchLatest(env)
   const at = deps().now().toISOString()
   await updateUpdateCache(paths, { checkedAt: at, triedAt: at, latest }).catch(() => {})
-  return planFrom(await installMethod(env), packageVersion(), latest, env)
+  const plan = planFrom(await installMethod(env), packageVersion(), latest, env)
+  const skill = await skillUpdatePlan(paths.home, plan.available ? latest : plan.current).catch(() => null)
+  return skill ? { ...plan, skill } : plan
+}
+
+/** Updates the installed sideby skill when the plan says it is outdated and sideby may; null when it did nothing. */
+export async function applySkillUpdate(
+  plan: SkillUpdatePlan | undefined,
+  env: Env,
+  onOutput?: (text: string) => void,
+): Promise<{ ok: boolean; message: string } | null> {
+  if (!plan?.outdated || !plan.canRun) return null
+  const [file, ...args] = SKILL_UPDATE
+  const r = await deps()
+    .exec(file, args, { env, ...(onOutput ? { onOutput } : {}) })
+    .catch((e: unknown) => ({ code: 1, output: e instanceof Error ? e.message : String(e) }))
+  return r.code === 0
+    ? { ok: true, message: 'updated the sideby skill' }
+    : { ok: false, message: `\`${plan.command}\` failed (exit ${r.code}); run it yourself to see why` }
 }
 
 export interface UpdateResult {
@@ -690,6 +763,9 @@ export interface UpdateResult {
   refreshedApp: boolean
   /** Another Update held the lock; nothing ran. */
   busy?: boolean
+  /** The installed sideby skill was updated too (true), or that failed (false); absent when it was not tried. */
+  skillUpdated?: boolean
+  skillMessage?: string
 }
 
 /**
@@ -745,6 +821,8 @@ export async function applyUpdate(
     // the new code writes it again. Only where one is installed; a failure here never fails the Update.
     const installed = await d.appInstalled(paths.home, env).catch(() => false)
     const refreshed = installed && (await d.refreshApp(env).catch(() => false))
+    // The skill teaches agents this version's commands, so it follows the CLI; a failure there keeps the Update.
+    const skill = await applySkillUpdate(plan.skill, env, opts.onOutput)
     return {
       ok: true,
       code: 0,
@@ -752,6 +830,7 @@ export async function applyUpdate(
       message: `updated sideby from ${plan.current} to ${plan.latest}`,
       restartedPanel: restarted,
       refreshedApp: refreshed,
+      ...(skill ? { skillUpdated: skill.ok, skillMessage: skill.message } : {}),
     }
   } finally {
     await release().catch(() => {})

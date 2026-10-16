@@ -1184,9 +1184,36 @@ export async function cmdUpdate(a: ParsedArgs, io: Io): Promise<number> {
   const asJson = a.flags.has('json')
   const plan = await u.planUpdate(paths, process.env)
   const shown = u.shownPlan(plan)
+  const sk = plan.skill
+  const skillLine = (s: NonNullable<typeof sk>) =>
+    s.canRun
+      ? `the sideby skill (for ${s.installed.map((v) => v ?? 'no version').join(', ')}) is updated too:\n  ${s.command}`
+      : `the sideby skill is not updated by sideby: ${s.reason}.\n  ${s.command}`
   if (!plan.available) {
+    // The CLI is current; an outdated skill is the one thing left to update.
+    if (sk?.outdated && sk.canRun) {
+      if (!a.flags.has('yes')) {
+        if (asJson) json(io, { ...shown, updated: false })
+        else {
+          io.out(`${c.green('✓')} sideby ${plan.current} is the latest version.`)
+          io.out(`\nUpdating ${skillLine(sk)}`)
+          io.out(c.cyan('\nRun it with `sideby update --yes`.'))
+        }
+        return 10
+      }
+      if (!asJson) io.out(c.dim(`$ ${sk.command}`))
+      const r = await u.applySkillUpdate(sk, process.env, asJson ? undefined : (t) => process.stderr.write(t))
+      if (asJson)
+        json(io, { ...shown, updated: false, skillUpdated: r?.ok ?? false, message: r?.message ?? '' })
+      else if (r?.ok) io.out(`${c.green('✓')} ${r.message}; agents load it in their next session.`)
+      else io.err(c.red(`✗ ${r?.message}`))
+      return r?.ok ? 0 : 1
+    }
     if (asJson) json(io, { ...shown, updated: false })
-    else io.out(`${c.green('✓')} sideby ${plan.current} is the latest version.`)
+    else {
+      io.out(`${c.green('✓')} sideby ${plan.current} is the latest version.`)
+      if (sk?.outdated) io.out(c.yellow(skillLine(sk)))
+    }
     return 0
   }
   if (!plan.canRun) {
@@ -1208,6 +1235,7 @@ export async function cmdUpdate(a: ParsedArgs, io: Io): Promise<number> {
         `sideby ${c.bold(plan.latest)} is available (you have ${plan.current}). What changed: ${plan.releaseNotes}`,
       )
       io.out(`\nUpdating runs:\n  ${plan.command}`)
+      if (sk?.outdated) io.out(`Then ${skillLine(sk)}`)
       io.out(c.cyan('\nRun it with `sideby update --yes`.'))
     }
     return 10
@@ -1225,6 +1253,7 @@ export async function cmdUpdate(a: ParsedArgs, io: Io): Promise<number> {
       restartedPanel: r.restartedPanel,
       refreshedApp: r.refreshedApp,
       skill: SKILL_INSTALL,
+      ...(r.skillUpdated === undefined ? {} : { skillUpdated: r.skillUpdated }),
       ...(r.ok ? {} : { output: r.output }),
     })
     return r.ok ? 0 : 1
@@ -1240,7 +1269,10 @@ export async function cmdUpdate(a: ParsedArgs, io: Io): Promise<number> {
   io.out(
     '  A `sideby ui` running in a terminal and sessions already running keep the old version until you restart them.',
   )
-  io.out(`  If you use the sideby skill, update it too: ${SKILL_INSTALL}`)
+  if (r.skillUpdated) io.out('  The sideby skill was updated too; agents load it in their next session.')
+  else if (r.skillUpdated === false) io.err(c.yellow(`  ${r.skillMessage}`))
+  else if (sk?.outdated) io.out(c.yellow(`  ${skillLine(sk)}`))
+  else if (!sk) io.out(`  If you use the sideby skill, install it with: ${SKILL_INSTALL}`)
   return 0
 }
 
