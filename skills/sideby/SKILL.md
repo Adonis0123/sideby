@@ -61,6 +61,8 @@ When a terminal manager such as Orca reopens a pane with a bare `claude --resume
 
 To open Claude Desktop or the Codex app as one account (macOS, subscription accounts), run `sideby desktop <ref> --json` yourself: it opens a new window for that account, or brings its open window to the front, and never closes anything. Relay its `notices`: the first Claude Desktop sign-in should happen while other Claude Desktop windows are closed, and a sign-in screen that suggests the main account ("Welcome back" in the Codex app) must not be used for another account.
 
+Grok Bot is not a grok account's app: it signs in with a Cursor account, apart from Grok Build. For several Grok Bot windows at once, run `sideby desktop grok-bot:<name> --json` (a new name makes a new, signed-out window; `grok-bot` is its default one) and relay the notice: sign in inside the new window with the account meant for it, with the other Grok Bot windows closed. `sideby list --json` lists them under `appProfiles`. Removing one (`--remove --yes`) signs it out and deletes its data: do it only when the user asks, after they quit that window.
+
 For someone who would rather double-click than use a terminal, `sideby app install` adds a panel app (macOS `~/Applications/sideby.app`, Linux app menu) that runs `sideby ui --background`; `sideby ui --stop` stops it and `sideby app uninstall` removes the app. Ask before `app install`: it writes outside sideby's own directories.
 
 ## Keeping this skill current

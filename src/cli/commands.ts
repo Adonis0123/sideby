@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url'
 import { aliasesByAccount } from '../core/accounts.ts'
+import { listAppProfiles, openAppProfile, parseProfileRef, removeAppProfile } from '../core/app-profiles.ts'
 import { aliasRefs } from '../core/config.ts'
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import type { DoctorReport } from '../core/doctor.ts'
@@ -73,11 +74,14 @@ function tilde(text: string, home: string): string {
 export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
   const rt = await createRuntime()
   const accounts = await rt.accounts()
-  const statuses = await withDesktopApps(rt, accounts, Promise.all(accounts.map((x) => rt.status(x))))
+  const [statuses, appProfiles] = await Promise.all([
+    withDesktopApps(rt, accounts, Promise.all(accounts.map((x) => rt.status(x)))),
+    listAppProfiles(rt),
+  ])
   const hasDesktop = statuses.some((s) => s.desktopApp)
   const families = await rt.familyInfo()
   if (a.flags.has('json')) {
-    json(io, { families, accounts: statuses, pluginErrors: [...rt.pluginErrors] })
+    json(io, { families, accounts: statuses, appProfiles, pluginErrors: [...rt.pluginErrors] })
     return 0
   }
   const home = rt.paths.home
@@ -112,6 +116,29 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
     if (statuses.some((s) => s.sameLogin?.length))
       io.out(c.dim('\n= <account>: signed in as the same login as that account, so they share one quota.'))
     io.out(c.dim('\nsideby run <account>  ·  sideby new <family> <name>  ·  sideby quota  ·  sideby ui'))
+  }
+  // App Profiles (ADR-0019): windows of an app that signs in apart from the Accounts above.
+  for (const app of new Set(appProfiles.map((p) => p.app))) {
+    const list = appProfiles.filter((p) => p.app === app)
+    io.out(`\n${c.bold(app)} ${c.dim('(signs in on its own, not with the accounts above)')}`)
+    io.out(
+      table(
+        list.map((p) => [
+          c.bold(p.ref),
+          p.running ? c.green('open') : c.dim('—'),
+          p.signedIn === true
+            ? c.green('signed in')
+            : p.signedIn === false
+              ? c.yellow('not signed in')
+              : c.dim('?'),
+          p.appData ? tildify(p.appData, home) : c.dim('default'),
+        ]),
+        ['WINDOW', 'STATE', 'SIGN-IN', 'DATA'],
+      ),
+    )
+    if (!list[0]?.installed) io.out(c.yellow(`${app} is not installed; these windows open again once it is`))
+    const id = list[0]?.ref.slice(0, list[0].ref.indexOf(':'))
+    io.out(c.dim(`sideby desktop ${id}:<name> opens one (a new name makes a new window)`))
   }
   for (const s of statuses) for (const p of s.problems ?? []) io.err(c.yellow(`${s.ref}: ${p}`))
   for (const e of rt.pluginErrors) io.err(c.yellow(`plugin ${e.where}: ${e.message}`))
@@ -1126,12 +1153,32 @@ export async function cmdApp(a: ParsedArgs, io: Io): Promise<number> {
   return r.skipped.length ? 1 : 0
 }
 
-/** `sideby desktop <account>`: the Family's Desktop App as that Account (spec §3.20). */
+/**
+ * `sideby desktop <account>`: the Family's Desktop App as that Account (spec §3.20); `sideby desktop grok-bot:<name>`:
+ * a Grok Bot window, new or open, and with `--remove` its removal (ADR-0019).
+ */
 export async function cmdDesktop(a: ParsedArgs, io: Io): Promise<number> {
   const [ref, ...extra] = a.positionals
-  if (!ref || extra.length || a.rest.length) throw new UsageError('usage: sideby desktop <account>')
+  if (!ref || extra.length || a.rest.length)
+    throw new UsageError(
+      'usage: sideby desktop <account> | sideby desktop grok-bot:<name> [--remove [--yes]]',
+    )
   const rt = await createRuntime()
-  const r = await openDesktopApp(rt, ref)
+  const profile = parseProfileRef(ref) !== undefined
+  if (a.flags.has('remove')) {
+    if (!profile)
+      throw new UsageError('--remove works on Grok Bot windows only: sideby desktop grok-bot:<name> --remove')
+    const r = await removeAppProfile(rt, ref, { yes: a.flags.has('yes') })
+    if (a.flags.has('json')) json(io, r)
+    else if (r.removed) io.out(`${c.green('✓')} removed the ${r.app} window ${c.bold(r.ref)} and its data`)
+    else {
+      io.out(`Remove the ${r.app} window ${c.bold(r.ref)}?`)
+      io.out(`  deletes ${tildify(r.appData, rt.paths.home)}: its sign-in, bots and local data on this Mac`)
+      io.out('Run again with --yes to remove it.')
+    }
+    return r.removed ? 0 : 10
+  }
+  const r = profile ? await openAppProfile(rt, ref) : await openDesktopApp(rt, ref)
   if (a.flags.has('json')) {
     json(io, r)
     return 0

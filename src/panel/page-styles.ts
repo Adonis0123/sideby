@@ -264,6 +264,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .badge svg { display: block; width: 20px; height: 20px; fill: currentColor; }
 .badge-sm { width: 26px; height: 26px; border-radius: 7px; font-size: 10.5px; }
 .badge-sm svg { width: 16px; height: 16px; }
+.badge svg.ic { fill: none; stroke: currentColor; }
 .badge-xs { width: 16px; height: 16px; border-radius: 4px; border: 0; background: none; }
 .badge-xs svg { width: 13px; height: 13px; }
 .chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: var(--chip-radius); background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); font: inherit; font-size: 12px; line-height: 20px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
@@ -323,6 +324,8 @@ a.btn:hover { text-decoration: none; }
 .btn svg { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .btn:disabled { background: var(--surface-2); border-color: var(--border); color: var(--faint); cursor: not-allowed; }
 .btn-ghost:disabled { background: transparent; border-color: transparent; }
+.btn-danger { border-color: var(--fail); color: var(--fail); }
+.btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--fail) 10%, transparent); border-color: var(--fail); color: var(--fail); }
 /* A busy button is disabled but keeps its variant, so a running action does not look unavailable. */
 .btn[aria-busy=true]:disabled { cursor: progress; color: var(--muted); }
 .btn-primary[aria-busy=true]:disabled { background: var(--primary); border-color: var(--primary-border); color: var(--on-primary); opacity: .85; }
@@ -434,6 +437,16 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .field-hint { color: var(--muted); font-size: var(--small); }
 .field-hint:empty { display: none; }
 .field-error:empty { display: none; }
+.field-error.field-note { color: var(--muted); }
+/* Grok Bot windows (ADR-0019): a simple row of their own, since they have no quota, usage or health columns. */
+.app-row { display: flex; align-items: center; gap: 12px; padding: 11px 10px 11px 16px; border-top: 1px solid var(--border); min-width: 0; }
+.app-row:first-child { border-top: 0; }
+.app-row > .ident { flex: 1; }
+.app-actions { flex: none; justify-content: flex-end; }
+.app-foot { display: flex; flex-direction: column; gap: 6px; padding: 10px 16px 12px; border-top: 1px solid var(--border); }
+.app-foot > .btn { align-self: flex-start; }
+.app-new { display: flex; gap: 8px; align-items: center; max-width: 420px; }
+.app-new input { height: var(--ctl-h-sm); flex: 1; min-width: 0; }
 .fam-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .fam-card { position: relative; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--ctl-radius); cursor: pointer; min-width: 0; transition: border-color .12s, background-color .12s; }
 .fam-card:hover { border-color: var(--btn-hover-border); }
@@ -525,6 +538,8 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 
 @media (max-width: 1100px) {
   .col-head { display: none; }
+  .app-row { flex-wrap: wrap; }
+  .app-actions { width: 100%; justify-content: flex-start; }
   .row { grid-template-columns: minmax(0, 1fr) auto var(--m-w); grid-template-areas: "id health more" "quota quota quota" "usage usage last" "notes notes notes"; row-gap: 10px; }
   .row-folded { grid-template-areas: "id id more"; }
   .row > .quota { grid-template-columns: repeat(var(--qn), minmax(0, 1fr)); max-width: 560px; }

@@ -31,6 +31,7 @@ sideby then checks the version itself. Below 22.18, `--help`, `--version` and ev
 | Your plugins | `${XDG_CONFIG_HOME:-~/.config}/sideby/plugins/` |
 | State: quota cache, last Doctor result, original `settings.json` bytes, background panel pid and logs | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
 | Desktop app data per account (`sideby desktop`) | macOS `~/Library/Application Support/sideby/<family>/<name>/` |
+| Grok Bot windows (`sideby desktop grok-bot:<name>`) | macOS `~/Library/Application Support/sideby/grok-bot/<name>/` |
 | Panel app (`sideby app install`) | macOS `~/Applications/sideby.app`; Linux `~/.local/share/applications/sideby.desktop`, `~/.local/share/sideby/`, `~/.local/share/icons/hicolor/*/apps/sideby.*` |
 
 sideby writes nothing of its own into Host account directories. The one exception is `quota setup claude --yes`, which changes `~/.claude/settings.json`. Account directories you create with `sideby new` belong to the Host.

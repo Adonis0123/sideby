@@ -185,6 +185,53 @@
         ]
       }
     },
+    "appProfiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "ref",
+          "app",
+          "name",
+          "isMain",
+          "installed",
+          "running"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string",
+            "description": "`grok-bot:<name>`; `grok-bot:main` is the app's own default data."
+          },
+          "app": {
+            "type": "string",
+            "description": "The app, for example `Grok Bot`."
+          },
+          "name": {
+            "type": "string"
+          },
+          "isMain": {
+            "type": "boolean"
+          },
+          "appData": {
+            "type": "string",
+            "description": "This window's data folder; absent for the main one, which uses the app's default."
+          },
+          "installed": {
+            "type": "boolean"
+          },
+          "running": {
+            "type": "boolean",
+            "description": "This window's own instance runs now."
+          },
+          "signedIn": {
+            "type": "boolean",
+            "description": "What the app last wrote about its sign-in (it keeps the last value after the app quits); absent when unknown. Which account is signed in is not known."
+          }
+        },
+        "description": "A window of a desktop app that signs in apart from every account (Grok Bot, ADR-0019). Open or create one with `sideby desktop grok-bot:<name>`."
+      },
+      "description": "Grok Bot windows (macOS, when Grok Bot is installed or has windows), the main one first. Not accounts."
+    },
     "pluginErrors": {
       "type": "array",
       "items": {

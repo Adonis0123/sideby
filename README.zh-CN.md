@@ -78,6 +78,7 @@ agent 会检查 Node 和宿主 CLI，装好 sideby 和 skill，建账号，告�
 | 用 `ccw` 这样的短命令 | `sideby alias add ccw claude:work` | [Shell 函数](docs/guide/configuration.zh-CN.md#shell-函数) |
 | 在 Orca 这类工具里重开会话时，自动进到存有它的账号 | config 里写 `"resumeRouting": true` | [从其他工具恢复会话](docs/guide/configuration.zh-CN.md#从其他工具恢复会话) |
 | 用某个账号打开 Claude Desktop 或 Codex 应用，几个账号同时开着（macOS） | `sideby desktop claude:work`（或在面板里） | [桌面应用](docs/guide/usage.zh-CN.md#桌面应用) |
+| 同时开几个 Grok Bot 窗口，各登录一个账号（macOS） | `sideby desktop grok-bot:002`（或在面板里） | [Grok Bot 窗口](docs/guide/usage.zh-CN.md#grok-bot-窗口) |
 | 从 Dock 或应用菜单打开面板 | `sideby app install` | [面板应用](docs/guide/panel.zh-CN.md#面板应用) |
 | 把面板嵌进自己的本地页面 | `createPanelHandler()` | [嵌入面板](docs/guide/panel.zh-CN.md#嵌入面板) |
 | 新增一个宿主，或加启动前检查 | 本地插件 | [插件](docs/guide/plugins.zh-CN.md) |

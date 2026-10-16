@@ -1446,6 +1446,85 @@ describe('panel: desktop apps (spec §3.20)', () => {
   })
 })
 
+describe('panel: Grok Bot windows (ADR-0019)', () => {
+  it('lists them in the state, creates and opens one, removes it, and a read-only panel refuses both', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}\n')
+      await h.write(
+        'Apps/Grok Bot.app/Contents/Info.plist',
+        '<plist><dict><key>CFBundleExecutable</key><string>Grok Bot</string><key>CFBundleIdentifier</key><string>com.anysphere.sand</string></dict></plist>\n',
+      )
+      await h.write('Library/Application Support/Grok Bot/desktop-status.json', '{"signedIn":true}')
+      const calls: { cmd: string; args: readonly string[] }[] = []
+      const rt = await createRuntime({
+        env: h.env,
+        desktop: {
+          platform: 'darwin',
+          appDirs: [h.path('Apps')],
+          exec: async (cmd, args) => {
+            calls.push({ cmd, args })
+            return { code: 0, stdout: '', stderr: '' }
+          },
+        },
+      })
+      const { server, port, handler } = await serve((port) =>
+        createPanelHandler({ runtime: rt, allowedHosts: [`127.0.0.1:${port}`] }),
+      )
+      const ro = await serve((port) =>
+        createPanelHandler({ runtime: rt, allowedHosts: [`127.0.0.1:${port}`], readOnly: true }),
+      )
+      try {
+        const state = async (p: number) =>
+          (await (await fetch(`http://127.0.0.1:${p}/api/state`)).json()) as PanelState
+        assert.deepEqual(
+          (await state(port)).appProfiles?.map((p) => [p.ref, p.signedIn]),
+          [['grok-bot:main', true]],
+        )
+        const hdr = { origin: `http://127.0.0.1:${port}`, 'x-sideby-token': handler.token }
+        const roHdr = { origin: `http://127.0.0.1:${ro.port}`, 'x-sideby-token': ro.handler.token }
+        assert.equal(
+          (await post(ro.port, '/api/app-profile/open', { ref: 'grok-bot:002' }, roHdr)).status,
+          403,
+        )
+
+        const r = await post(port, '/api/app-profile/open', { ref: 'grok-bot:002' }, hdr)
+        assert.equal(r.status, 200)
+        assert.equal(r.body.action, 'started')
+        assert.equal(r.body.createdAppData, true)
+        assert.equal(r.body.appData, '~/Library/Application Support/sideby/grok-bot/002')
+        assert.equal(calls.filter((c) => c.cmd === '/usr/bin/open').length, 1)
+        const after = (await state(port)).appProfiles!
+        assert.deepEqual(
+          after.map((p) => p.ref),
+          ['grok-bot:main', 'grok-bot:002'],
+        )
+        assert.equal(after[1]!.appData, '~/Library/Application Support/sideby/grok-bot/002')
+
+        const bad = await post(port, '/api/app-profile/open', { ref: 'grok-bot:No' }, hdr)
+        assert.equal(bad.status, 400)
+        assert.equal(bad.body.code, 'invalid-name')
+
+        assert.equal(
+          (await post(ro.port, '/api/app-profile/remove', { ref: 'grok-bot:002' }, roHdr)).status,
+          403,
+        )
+        const main = await post(port, '/api/app-profile/remove', { ref: 'grok-bot:main' }, hdr)
+        assert.equal(main.body.code, 'main-profile')
+        const rm = await post(port, '/api/app-profile/remove', { ref: 'grok-bot:002' }, hdr)
+        assert.equal(rm.status, 200)
+        assert.equal(rm.body.removed, true)
+        assert.deepEqual(
+          (await state(port)).appProfiles?.map((p) => p.ref),
+          ['grok-bot:main'],
+        )
+      } finally {
+        await close(server)
+        await close(ro.server)
+      }
+    })
+  })
+})
+
 describe('panel next tag and Same Login (spec §3.21)', () => {
   const rt = {
     families: new Map([['claude', { readQuota: async () => ({ status: 'ok', windows: [] }) }]]),

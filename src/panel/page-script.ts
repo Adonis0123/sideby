@@ -78,7 +78,7 @@ const MAIN = String.raw`
     silent: false, lastTry: 0, pending: false, fastUntil: 0, fastFamily: null,
   }
   // View state that is not saved: the search text, the attention filter, the Health check filter.
-  const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, desktopRef: null, highlight: null, fade: true }
+  const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, desktopRef: null, appBusy: null, appRemove: null, appNew: null, highlight: null, fade: true }
   const $ = (id) => document.getElementById(id)
 
   // ---------- preferences ----------
@@ -279,6 +279,7 @@ const MAIN = String.raw`
     check: 'M9 12l2 2 4-4M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z',
     userPlus: 'M15 19a6 6 0 0 0-12 0M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M16 11h6',
     x: 'M6 6l12 12M18 6L6 18',
+    bot: 'M6 9h12a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2zM12 5v4M9.5 13.5v1M14.5 13.5v1',
     grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
     list: 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01',
     clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2',
@@ -1093,6 +1094,147 @@ const MAIN = String.raw`
     const list = needing.map((a) => a.name + ': ' + whyOf(a, now)).join('\n')
     return h('button', { class: 'tag tag-warn tag-btn', type: 'button', title: list, 'aria-pressed': String(ui.attention), onclick: () => { ui.attention = !ui.attention; renderSummary(); renderAccounts() } }, tn('group.attention', needing.length))
   }
+  // ---------- Grok Bot windows (ADR-0019) ----------
+  // Windows of an app that signs in apart from every account, so they get a group of their own after the accounts.
+  // A new window gets the next free three-digit name; removing one asks inside its row first.
+  const APP_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/
+  // A plain bot glyph, not the grok mark: these windows are not grok (Grok Build) accounts.
+  function appBadge() { return h('span', { class: 'badge badge-sm badge-logo', 'aria-hidden': 'true' }, icon('bot')) }
+  function appProfiles() { return (S.state && S.state.appProfiles) || [] }
+  function appId(ref) { return String(ref).slice(0, String(ref).indexOf(':')) }
+  function nextAppName(list) {
+    const taken = new Set(list.map((p) => p.name))
+    for (let i = 1; i < 1000; i++) { const n = String(i).padStart(3, '0'); if (!taken.has(n)) return n }
+    return ''
+  }
+  function appNameProblem(name) {
+    if (!name) return t('app.nameEmpty')
+    return APP_NAME.test(name) ? '' : t('app.nameBad')
+  }
+  function appRow(p) {
+    const busy = ui.appBusy === p.ref
+    const asking = ui.appRemove === p.ref
+    const can = !BOOT.readOnly && p.installed
+    const actions = !can ? null : asking
+      ? h('div', { class: 'row-actions app-actions', role: 'group', 'aria-label': t('app.removeAsk', { ref: p.ref }) },
+        h('span', { class: 'small' }, t('app.removeAsk', { ref: p.ref })),
+        h('button', { class: 'btn btn-sm btn-danger', type: 'button', disabled: busy, onclick: () => removeApp(p) }, t(busy ? 'app.removing' : 'app.removeYes')),
+        h('button', { class: 'btn btn-sm btn-ghost', type: 'button', disabled: busy, onclick: () => { ui.appRemove = null; renderAccounts() } }, t('btn.cancel')))
+      : h('div', { class: 'row-actions app-actions' },
+        h('button', { class: 'btn btn-sm' + (p.running ? '' : ' btn-primary'), type: 'button', disabled: Boolean(ui.appBusy), title: t(p.running ? 'app.showHint' : 'app.openHint', { app: p.app, ref: p.ref }), 'aria-label': t(p.running ? 'app.show' : 'app.openBtn') + ' (' + p.ref + ')', onclick: () => openApp(p.ref) },
+          busy ? t('desk.opening', { app: p.app }) : t(p.running ? 'app.show' : 'app.openBtn')),
+        p.isMain ? null : h('button', { class: 'btn btn-sm btn-ghost', type: 'button', disabled: p.running || Boolean(ui.appBusy), title: t(p.running ? 'app.removeRunning' : 'app.removeHint', { app: p.app }), 'aria-label': t('app.remove') + ' (' + p.ref + ')', onclick: () => { ui.appRemove = p.ref; renderAccounts() } }, t('app.remove')))
+    return h('div', { class: 'app-row', role: 'listitem', 'data-ref': p.ref, 'data-key': p.ref, 'data-sig': sig([p, busy, asking, Boolean(ui.appBusy)]) },
+      h('div', { class: 'ident' }, appBadge(), h('div', { class: 'ident-text' },
+        h('div', { class: 'ident-name' },
+          h('span', { class: 'name' }, p.isMain ? t('app.mainName') : p.name),
+          p.running ? h('span', { class: 'tag tag-ok' }, h('span', { class: 'dot dot-ok', 'aria-hidden': 'true' }), t('app.isOpen')) : null,
+          p.signedIn === true ? h('span', { class: 'tag', title: t('app.signedInHint') }, t('app.signedIn'))
+            : p.signedIn === false ? h('span', { class: 'tag tag-warn', title: t('app.signedInHint') }, t('app.signedOut')) : null),
+        h('div', { class: 'ident-sub' }, dots([h('span', { class: 'mono' }, p.ref), h('span', { class: 'muted' }, p.isMain ? t('app.mainData') : p.appData)])))),
+      actions)
+  }
+  function appFoot(list) {
+    if (BOOT.readOnly || !list[0].installed) return null
+    const n = ui.appNew
+    if (!n)
+      return h('div', { class: 'app-foot', 'data-key': 'foot' },
+        h('button', { class: 'btn btn-sm', type: 'button', disabled: Boolean(ui.appBusy), onclick: () => {
+          ui.appNew = { name: nextAppName(list) }
+          renderAccounts()
+          const el = $('app-new-name')
+          if (el) { el.focus(); el.select() }
+        } }, icon('plus'), t('app.another', { app: list[0].app })),
+        h('span', { class: 'muted small' }, t('app.anotherHint')))
+    const input = h('input', { id: 'app-new-name', type: 'text', class: 'mono', value: n.name, maxlength: '32', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', 'aria-label': t('app.nameLabel'), 'aria-describedby': 'app-new-err' })
+    const err = h('span', { id: 'app-new-err', class: 'field-error', role: 'status' })
+    const go = h('button', { class: 'btn btn-sm btn-primary', type: 'button', disabled: Boolean(appNameProblem(n.name)) || Boolean(ui.appBusy), onclick: () => createApp(list) }, t('app.create'))
+    const sync = () => {
+      n.name = input.value.trim()
+      const problem = appNameProblem(n.name)
+      const exists = list.some((p) => p.name === n.name)
+      err.textContent = problem && input.value ? problem : exists ? t('app.exists', { ref: appId(list[0].ref) + ':' + n.name }) : ''
+      err.classList.toggle('field-note', !problem && exists)
+      input.classList.toggle('invalid', Boolean(problem && input.value))
+      go.disabled = Boolean(problem) || Boolean(ui.appBusy)
+    }
+    input.addEventListener('input', sync)
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !appNameProblem(n.name)) { e.preventDefault(); createApp(list) }
+      if (e.key === 'Escape') { ui.appNew = null; renderAccounts() }
+    })
+    return h('div', { class: 'app-foot', 'data-key': 'foot-new' },
+      h('label', { for: 'app-new-name', class: 'small' }, t('app.nameLabel')),
+      h('div', { class: 'app-new' }, input, go, h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: () => { ui.appNew = null; renderAccounts() } }, t('btn.cancel'))),
+      err,
+      h('span', { class: 'muted small' }, t('app.newHint', { app: list[0].app })))
+  }
+  function appGroup(list) {
+    const app = list[0].app
+    const collapsed = prefs.collapsed['app:' + app] === true
+    const bodyId = 'grp-app-' + app.replace(/[^a-zA-Z0-9_-]/g, '_')
+    const head = h('div', { class: 'group-head', 'data-key': 'head' },
+      h('button', { class: 'group-toggle', type: 'button', 'aria-expanded': String(!collapsed), 'aria-controls': bodyId, title: t(collapsed ? 'group.expand' : 'group.collapse'), 'aria-label': t('group.toggle', { title: app, count: String(list.length), action: t(collapsed ? 'group.expand' : 'group.collapse') }), onclick: () => {
+        if (collapsed) delete prefs.collapsed['app:' + app]; else prefs.collapsed['app:' + app] = true
+        savePrefs()
+        renderAccounts()
+      } },
+        icon('chevron', 'chev'), appBadge(), h('span', { class: 'group-title' }, app),
+        h('span', { class: 'group-count' }, String(list.length))),
+      h('div', { class: 'group-meta' },
+        h('span', { class: 'muted small label-tip' }, t('app.apart'), tipRaw(app, t('app.apartTip', { app })))),
+      list[0].installed ? null : h('div', { class: 'group-meta' }, h('span', { class: 'tag tag-warn' }, t('acct.notInstalled'))))
+    const body = collapsed ? null : h('div', { class: 'rows', id: bodyId, role: 'list', 'data-key': 'rows', 'data-patch': '' }, list.map(appRow))
+    return h('section', { class: 'group group-list' + (collapsed ? ' is-collapsed' : ''), 'aria-label': app, 'data-key': 'app:' + app, 'data-patch': '' },
+      head, body, collapsed ? null : appFoot(list))
+  }
+  // Shown with the account groups unless a family filter or the attention filter is on; the search matches names.
+  function appGroups() {
+    if (prefs.family || ui.attention) return []
+    const q = ui.query.trim().toLowerCase()
+    const out = []
+    for (const app of new Set(appProfiles().map((p) => p.app))) {
+      const all = appProfiles().filter((p) => p.app === app)
+      const list = q && !app.toLowerCase().includes(q) ? all.filter((p) => p.ref.toLowerCase().includes(q)) : all
+      if (list.length) out.push(appGroup(list))
+    }
+    return out
+  }
+  async function openApp(ref) {
+    if (ui.appBusy) return
+    ui.appBusy = ref
+    renderAccounts()
+    let ok = false
+    try {
+      const r = await api('/api/app-profile/open', { ref })
+      const text = r.action === 'started' ? t('app.started', { app: r.app, ref: r.ref }) : r.action === 'focused' ? t('desk.focused', { app: r.app, ref: r.ref }) : ''
+      if (text) toast(text)
+      for (const m of r.notices || []) toast(m, { kind: 'info', duration: 12000 })
+      ok = true
+    } catch (e) { toast(t('app.failed', { ref, msg: e.message }), { kind: 'fail' }) }
+    ui.appBusy = null
+    if (ok) ui.appNew = null
+    renderAccounts()
+    load({ silent: true })
+  }
+  function createApp(list) {
+    const n = ui.appNew
+    if (!n || appNameProblem(n.name)) return
+    openApp(appId(list[0].ref) + ':' + n.name)
+  }
+  async function removeApp(p) {
+    if (ui.appBusy) return
+    ui.appBusy = p.ref
+    renderAccounts()
+    try {
+      await api('/api/app-profile/remove', { ref: p.ref })
+      toast(t('app.removed', { ref: p.ref }))
+    } catch (e) { toast(t('app.removeFailed', { ref: p.ref, msg: e.message }), { kind: 'fail' }) }
+    ui.appBusy = null
+    ui.appRemove = null
+    renderAccounts()
+    load({ silent: true })
+  }
   function group(fam, list, total, now, cols) {
     const info = family(fam)
     const filtering = Boolean(ui.query.trim()) || ui.attention
@@ -1170,13 +1312,14 @@ const MAIN = String.raw`
     const all = S.state.accounts
     const now = Date.now()
     $('toolbar').hidden = !all.length
-    if (!all.length) { setKids(count, null); patch(box, emptyState()); return }
+    if (!all.length) { setKids(count, null); patch(box, [emptyState()].concat(appGroups())); return }
     const shown = all.filter((a) => (!prefs.family || a.family === prefs.family) && matchesQuery(a, ui.query, famTitle(a)) && (!ui.attention || reasonsOf(a, now).length))
     const filtered = shown.length !== all.length
     patch(count, filtered
       ? [t('count.filtered', { n: shown.length, total: all.length }), ' ', h('button', { class: 'link-btn', type: 'button', onclick: clearFilters }, t('filter.clear'))]
       : tn('count.accounts', all.length))
-    if (!shown.length) { patch(box, noMatch()); return }
+    const apps = appGroups()
+    if (!shown.length && !apps.length) { patch(box, noMatch()); return }
     const cols = quotaColumns(shown)
     box.style.setProperty('--qn', String(cols.length))
     const ids = S.state.families.map((f) => f.id)
@@ -1186,7 +1329,7 @@ const MAIN = String.raw`
       const list = shown.filter((a) => a.family === fam)
       if (list.length) groups.push(group(fam, sortAccounts(list, prefs.sort, now), all.filter((a) => a.family === fam).length, now, cols))
     }
-    patch(box, groups)
+    patch(box, groups.concat(apps))
     if (ui.fade && !REDUCED) {
       box.classList.add('view-in')
       setTimeout(() => box.classList.remove('view-in'), 400)

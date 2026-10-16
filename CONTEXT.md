@@ -16,6 +16,7 @@ Glossary for sideby. Defines words only. Decisions live in `docs/adr/`, designs 
 
 - **Desktop App**: a Family's desktop application (Claude Desktop, the Codex app), which sideby starts for one Account but never modifies. Optional per Family. Not a Host.
 - **App Data**: the data directory a Desktop App keeps for one Account.
+- **App Profile**: one named window of a desktop app that signs in apart from every Account (Grok Bot), with its own App Data; ref `grok-bot:<name>`, `grok-bot:main` being the app's default data. Not an Account.
 
 Avoid: *profile* (Codex already uses it for a config layer that does not change the login), *provider* (an endpoint plus key, which does not cover subscriptions), *switch* (sideby never changes which Account is globally active).
 

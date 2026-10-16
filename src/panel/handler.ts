@@ -2,6 +2,12 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { aliasesByAccount } from '../core/accounts.ts'
+import {
+  type AppProfileStatus,
+  listAppProfiles,
+  openAppProfile,
+  removeAppProfile,
+} from '../core/app-profiles.ts'
 import { aliasArgs, aliasRefs, type HandoffSettings } from '../core/config.ts'
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import { UserError } from '../core/errors.ts'
@@ -120,6 +126,8 @@ export interface PanelState {
   autoHandoff: { settings: HandoffSettings; starters: string[] }
   /** Claude settings files grouped as `sideby remote-control` shows them (spec §3.22); absent without Claude Accounts. */
   remoteControl?: RemoteControlView[]
+  /** Grok Bot windows (ADR-0019), data folders shown as `~/…`; absent when there are none to show. */
+  appProfiles?: AppProfileStatus[]
 }
 
 /** The `handoff` map of the Panel state, from the statuses and Quota already read for the page. */
@@ -305,11 +313,10 @@ async function buildState(
   const health = healthByAccount(history)
   const aliases = aliasesByAccount(aliasRefs(rt.config.aliases), accounts)
   // Desktop Apps (spec §3.20): one process listing for every Account, run alongside the per-Account reads.
-  const states = await withDesktopApps(
-    rt,
-    accounts,
-    Promise.all(accounts.map((a) => accountState(rt, a, families))),
-  )
+  const [states, appProfiles] = await Promise.all([
+    withDesktopApps(rt, accounts, Promise.all(accounts.map((a) => accountState(rt, a, families)))),
+    listAppProfiles(rt),
+  ])
   const list = states.map((st): PanelAccount => {
     const h = health.get(st.ref)
     const names = aliases.get(st.ref)
@@ -341,6 +348,13 @@ async function buildState(
     ...(rt.config.aliases ? { configAliases: aliasRefs(rt.config.aliases) } : {}),
     ...(Object.keys(handoff).length ? { handoff } : {}),
     ...(remoteControl.length ? { remoteControl: rcView(remoteControl, ctx.home) } : {}),
+    ...(appProfiles.length
+      ? {
+          appProfiles: appProfiles.map((p) =>
+            p.appData ? { ...p, appData: tildify(p.appData, rt.paths.home) } : p,
+          ),
+        }
+      : {}),
     autoHandoff: {
       settings: rt.handoffSettings(),
       starters: [...rt.families.values()]
@@ -577,6 +591,31 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           appPath: tildify(r.appPath, home),
           ...(r.appData ? { appData: tildify(r.appData, home) } : {}),
         }
+      },
+    },
+    // Opens a Grok Bot window, creating it when the name is new, or brings it to the front (ADR-0019).
+    '/api/app-profile/open': {
+      async run(body) {
+        const ref = optString(body, 'ref')
+        if (!ref) throw new HttpError(400, '"ref" is required')
+        const rt = await getRuntime()
+        const r = await openAppProfile(rt, ref)
+        const home = rt.paths.home
+        return {
+          ...r,
+          appPath: tildify(r.appPath, home),
+          ...(r.appData ? { appData: tildify(r.appData, home) } : {}),
+        }
+      },
+    },
+    // Removes a Grok Bot window's data folder (ADR-0019). The page asks first, so this call is the confirmation.
+    '/api/app-profile/remove': {
+      async run(body) {
+        const ref = optString(body, 'ref')
+        if (!ref) throw new HttpError(400, '"ref" is required')
+        const rt = await getRuntime()
+        const r = await removeAppProfile(rt, ref, { yes: true })
+        return { ...r, appData: tildify(r.appData, rt.paths.home) }
       },
     },
     // The Auto Handoff page (spec §3.17): where work would go next and the last hand-overs. Reads only.

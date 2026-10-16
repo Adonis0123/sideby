@@ -139,6 +139,22 @@ In the panel, click **Open desktop app** in the account's row (it says **Desktop
 
 Known limits: every window has the same Dock icon. While another account's window runs and the main one does not, clicking the Dock icon brings that other window forward; open the main account from sideby then. After the app updates itself it restarts on the main account; open the others again from sideby. Claude in Chrome cannot pair with a window that uses another data folder. sideby opens the apps with settings they read today (`--user-data-dir`, and for Codex `CODEX_ELECTRON_USER_DATA_PATH`); a future app version may change them. An app opened from inside a Claude Code or Codex session does not inherit that session's variables. Other platforms and hosts are not supported yet.
 
+### Grok Bot windows
+
+Grok Bot signs in with a Cursor account. That sign-in has nothing to do with Grok Build (the `grok` command) or any account above. Grok Bot's own account menu can keep several accounts, but only one is signed in at a time. sideby gives each Grok Bot window a name, so several can be open at once, each signed in to a different account:
+
+```sh
+sideby desktop grok-bot:002    # a new name makes a new window; the same name opens it again
+sideby desktop grok-bot        # Grok Bot's own default window (grok-bot:main)
+```
+
+In the panel, the **Grok Bot** group lists the windows after your accounts: whether each is open and signed in, a button to open it or bring it to the front, and **Open another Grok Bot** at the bottom (it suggests the next free name, such as `002`). `sideby list` shows the same list.
+
+- A new window starts signed out. Sign in inside it with the account you want for that window, and close the other Grok Bot windows while you do: the browser may send the sign-in back to one of them.
+- sideby shows whether a window is signed in, from what Grok Bot last wrote, but not which account: finding that out would mean reading sign-in files. Pick names that tell the windows apart.
+- Each new window keeps its data in `~/Library/Application Support/sideby/grok-bot/<name>/`. `sideby desktop grok-bot:<name> --remove --yes` (or **Remove** in the panel) deletes that folder, which signs the window out and deletes its data on this Mac. Quit the window first. The main window is Grok Bot's own and cannot be removed.
+- sideby opens Grok Bot with `--user-data-dir`, which Grok Bot reads today, and clears `SAND_DATA_ROOT` and `SAND_USER_DATA_DIR`, which would override it. A future Grok Bot version may change this.
+
 ## Context tuning
 
 Every Host compacts a session by itself once its context grows past a threshold. `sideby tune` replays your last 7 days of local sessions against other thresholds and estimates which one spends the fewest tokens:

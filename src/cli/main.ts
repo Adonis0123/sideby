@@ -53,6 +53,7 @@ Usage:
   sideby ui --stop                    stop the background panel
   sideby desktop <account>            open the desktop app (Claude Desktop, the Codex app) as this
                                       account, next to the others (macOS)
+  sideby desktop grok-bot:<name>      open a Grok Bot window, a new one for a new name (macOS)
   sideby app install [--url <url>]    add a sideby app that opens the panel (macOS, Linux)
   sideby app uninstall                remove that app
   sideby shell-init zsh|bash          print shell functions, e.g. eval "$(sideby shell-init zsh)"
@@ -136,6 +137,7 @@ Examples:
   sideby doctor claude:008 --fix
 Exit: 0 when nothing fails (warnings allowed); 1 when a check fails.`,
   desktop: `sideby desktop <account> [--json]
+       sideby desktop grok-bot:<name> [--remove [--yes]] [--json]
 
 Open the host's desktop app as one account: Claude Desktop for claude accounts, the Codex app (ChatGPT.app) for codex
 accounts. Each account gets its own window, side by side with the others; macOS only for now.
@@ -145,14 +147,22 @@ directory (CLAUDE_CONFIG_DIR, CODEX_HOME) and its own app data folder,
 ~/Library/Application Support/sideby/<family>/<name>/. When that account's window is already open, sideby brings it
 to the front instead of starting another one. API accounts are refused: the apps sign in with a subscription only.
 
-sideby never copies or changes the app, and never closes a window. The first time, sign in inside Claude Desktop;
-close other Claude Desktop windows while you do, because the sign-in may come back to one of them.
+Grok Bot signs in with a Cursor account, apart from every account above, so its windows have names of their own:
+grok-bot:<name> opens that window, and makes it first when the name is new (a new window, signed out). grok-bot or
+grok-bot:main is Grok Bot's own default window. --remove deletes a window you made, which signs it out and deletes
+its data on this Mac; it asks for --yes first (exit 10) and refuses while that window is open. \`sideby list\` shows
+the Grok Bot windows.
+
+sideby never copies or changes the app, and never closes a window. The first time, sign in inside the new window;
+close the app's other windows while you do, because the sign-in may come back to one of them.
 
 Examples:
   sideby desktop claude:work
   sideby desktop cc008 --json
-Exit: 0 opened or brought to the front; 1 not macOS, no desktop app for that host, API account, app not installed,
-or the app did not open; 2 malformed command line.`,
+  sideby desktop grok-bot:002
+  sideby desktop grok-bot:002 --remove --yes
+Exit: 0 opened, brought to the front or removed; 1 not macOS, no desktop app for that host, API account, app not
+installed, a bad window name, or the app did not open; 10 --remove without --yes; 2 malformed command line.`,
   families: `sideby families [family] [--json]
 
 For each host (built in or from a plugin): where its accounts live, the variable that selects one, how to sign
@@ -194,7 +204,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   },
   ui: { flags: ['no-open', 'background', 'stop', 'serve-detached'], valued: ['port'] },
   app: { flags: ['json'], valued: ['url'] },
-  desktop: { flags: ['json'] },
+  desktop: { flags: ['json', 'remove', 'yes'] },
   'shell-init': { flags: ['write'] },
   plugins: { flags: ['json'] },
   families: { flags: ['json'] },

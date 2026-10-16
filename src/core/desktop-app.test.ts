@@ -78,7 +78,7 @@ function fakeDeps(appDirs: string[], platform: NodeJS.Platform = 'darwin'): Fake
 
 const SUPPORT = 'Library/Application Support'
 
-/** Main and `work` / `work2` accounts of claude and codex, a claude API account and a grok account. */
+/** Main and `work` / `work2` accounts of claude and codex, a claude API account, grok main and `lab`, and pi. */
 async function seed(h: FakeHome) {
   await h.write('.claude/settings.json', '{}\n')
   await h.write('.claude/.claude.json', '{"oauthAccount":{}}\n', 0o600)
@@ -91,8 +91,11 @@ async function seed(h: FakeHome) {
   await h.write('.codex/auth.json', '{}\n', 0o600)
   await h.write('.claude-deepseek/proxy.env', 'ANTHROPIC_BASE_URL=https://example.invalid\n', 0o600)
   await h.write('.grok/skills/x.md', 'x\n')
+  await h.write('.grok-lab/skills/x.md', 'x\n')
+  await h.write('.pi/agent/AGENTS.md', '# rules\n')
   await h.write('Apps/Claude.app/Contents/Info.plist', plist('com.anthropic.claudefordesktop', 'Claude'))
   await h.write('Apps/ChatGPT.app/Contents/Info.plist', plist('com.openai.codex', 'ChatGPT'))
+  await h.write('Apps/Grok Bot.app/Contents/Info.plist', plist('com.anysphere.sand', 'Grok Bot'))
   await h.write(`${SUPPORT}/Claude/claude_desktop_config.json`, '{"mcpServers":{}}\n')
 }
 
@@ -318,7 +321,8 @@ describe('sideby desktop: one instance per account', () => {
       assert.deepEqual(map.get('claude:main'), { app: 'Claude Desktop', installed: true, running: false })
       assert.deepEqual(map.get('codex:work'), { app: 'Codex app', installed: true, running: false })
       assert.equal(map.has('claude:deepseek'), false, 'API accounts get no desktop app')
-      assert.equal(map.has('grok:main'), false)
+      assert.equal(map.has('grok:lab'), false, 'Grok Bot windows are App Profiles, not a grok desktop app')
+      assert.equal(map.has('pi:main'), false, 'a family without a desktop app gets none')
       // Listing never asks Spotlight.
       assert.equal(fake.calls.filter((c) => c.cmd === '/usr/bin/mdfind').length, 0)
     })
@@ -330,7 +334,15 @@ describe('sideby desktop: refusals', () => {
     await withFakeHome(async (h) => {
       const { rt, fake } = await setup(h)
       await refused(openDesktopApp(rt, 'claude:deepseek'), 'api-account')
-      await refused(openDesktopApp(rt, 'grok:main'), 'no-desktop-app')
+      await refused(openDesktopApp(rt, 'pi:main'), 'no-desktop-app')
+      await assert.rejects(openDesktopApp(rt, 'grok:lab'), (err: UserError) => {
+        assert.equal(err.code, 'no-desktop-app')
+        assert.match(
+          err.message,
+          /for Grok Bot, which signs in on its own, use `sideby desktop grok-bot:<name>`/,
+        )
+        return true
+      })
       assert.equal(fake.calls.length, 0)
 
       const linux = fakeDeps([h.path('Apps')], 'linux')

@@ -5,7 +5,7 @@
 import { execFile } from 'node:child_process'
 import { chmod, mkdir, readdir, readFile, symlink } from 'node:fs/promises'
 import { basename, join } from 'node:path'
-import { type DesktopAppDef, desktopDef } from '../families/desktop.ts'
+import { type DesktopAppDef, desktopDef, profileAppFor } from '../families/desktop.ts'
 import type { LoadedPlugin } from '../plugins/loader.ts'
 import type { Runtime } from '../runtime.ts'
 import type { Account, CheckResult, Env, FamilyDef, SharedItemDef } from '../types.ts'
@@ -58,7 +58,7 @@ export function bindDesktopDeps(rt: Runtime, deps: Partial<DesktopDeps>): void {
   overrides.set(rt, deps)
 }
 
-function depsFor(rt: Runtime): DesktopDeps {
+export function depsFor(rt: Runtime): DesktopDeps {
   const o = overrides.get(rt) ?? {}
   return {
     platform: o.platform ?? process.platform,
@@ -115,7 +115,7 @@ export interface FoundApp {
  * Accounts leaves Spotlight out to stay fast; opening one asks it too.
  */
 export async function findApp(
-  def: DesktopAppDef,
+  def: Pick<DesktopAppDef, 'bundleId' | 'bundleNames'>,
   deps: DesktopDeps,
   opts: { spotlight?: boolean } = {},
 ): Promise<FoundApp | null> {
@@ -148,7 +148,7 @@ export interface Proc {
 }
 
 /** Every process with its command line, or null when `ps` failed (then nothing is known to run). */
-async function processes(deps: DesktopDeps): Promise<Proc[] | null> {
+export async function processes(deps: DesktopDeps): Promise<Proc[] | null> {
   const r = await deps.exec(PS, ['-axo', 'pid=,command='])
   if (r.code !== 0) return null
   const out: Proc[] = []
@@ -160,7 +160,7 @@ async function processes(deps: DesktopDeps): Promise<Proc[] | null> {
 }
 
 /** The arguments after the app's own executable, when `p` is the app's main process (not a helper). */
-function mainArgs(app: FoundApp, p: Proc): string | null {
+export function mainArgs(app: FoundApp, p: Proc): string | null {
   const exe = `/${basename(app.path)}/Contents/MacOS/${app.executable}`
   const at = p.command.indexOf(exe)
   if (at === -1) return null
@@ -188,7 +188,7 @@ export function instanceOf(app: FoundApp, appData: string | null, procs: readonl
  * such an app frontmost with nothing on screen (seen 2026-10-14 with the Codex app). Neither needs the Automation
  * permission.
  */
-async function activate(deps: DesktopDeps, pid: number): Promise<boolean> {
+export async function activate(deps: DesktopDeps, pid: number): Promise<boolean> {
   const p = Math.trunc(pid)
   const script = [
     "ObjC.import('AppKit');",
@@ -206,10 +206,13 @@ async function activate(deps: DesktopDeps, pid: number): Promise<boolean> {
 
 /** The environment `open` runs with: the caller's, without anything that would pick another Account (spec §3.5). */
 function openEnv(base: Env, family: FamilyDef, def: DesktopAppDef): Env {
+  return cleanEnv(base, [...family.hijackVars, family.selectVar, ...def.clearVars])
+}
+
+/** The caller's environment without `clear`, `SIDEBY_*` and the variables of the agent session it may run in. */
+export function cleanEnv(base: Env, clear: readonly string[]): Env {
   const env: Env = { ...base }
-  for (const v of family.hijackVars) delete env[v]
-  delete env[family.selectVar]
-  for (const v of def.clearVars) delete env[v]
+  for (const v of clear) delete env[v]
   for (const k of Object.keys(env)) if (k.startsWith('SIDEBY_') || isSessionVar(k)) delete env[k]
   return env
 }
@@ -253,14 +256,25 @@ export interface DesktopOpenResult {
   notices: string[]
 }
 
-function notMac(platform: string): UserError {
+/** `a`, `a and b`, `a, b and c`. */
+function joinNames(ids: readonly string[]): string {
+  return ids.length < 2 ? ids.join('') : `${ids.slice(0, -1).join(', ')} and ${ids.at(-1)}`
+}
+
+/** For a Family whose people use a separate app with App Profiles (grok: Grok Bot), how to open that instead. */
+function profileHint(familyId: string): string {
+  const p = profileAppFor(familyId)
+  return p ? `; for ${p.title}, which signs in on its own, use \`sideby desktop ${p.id}:<name>\`` : ''
+}
+
+export function notMac(platform: string): UserError {
   return new UserError(
     `opening a desktop app per account works on macOS only for now (this is ${platform}); use \`sideby run <account>\` for the terminal`,
     { code: 'not-macos' },
   )
 }
 
-function notInstalled(def: DesktopAppDef, deps: DesktopDeps): UserError {
+export function notInstalled(def: Pick<DesktopAppDef, 'title' | 'installUrl'>, deps: DesktopDeps): UserError {
   return new UserError(
     `${def.title} is not installed (looked in ${deps.appDirs.join(' and ')}); install it from ${def.installUrl}, then try again`,
     { code: 'app-not-installed' },
@@ -279,7 +293,7 @@ export async function openDesktopApp(rt: Runtime, ref: string): Promise<DesktopO
   if (!family || !def) {
     const have = [...rt.families.keys()].filter((id) => desktopAppOf(rt.plugins, id))
     throw new UserError(
-      `${account.ref}: ${family?.title ?? account.family} has no desktop app sideby can open${have.length ? ` (only ${have.join(' and ')} accounts do)` : ''}; use \`sideby run ${account.ref}\``,
+      `${account.ref}: ${family?.title ?? account.family} has no desktop app sideby can open${have.length ? ` (only ${joinNames(have)} accounts do)` : ''}; use \`sideby run ${account.ref}\`${profileHint(account.family)}`,
       { code: 'no-desktop-app' },
     )
   }

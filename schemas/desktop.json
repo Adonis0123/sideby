@@ -22,7 +22,8 @@
       "type": "string"
     },
     "family": {
-      "type": "string"
+      "type": "string",
+      "description": "The family, or `grok-bot` for a Grok Bot window."
     },
     "app": {
       "type": "string",

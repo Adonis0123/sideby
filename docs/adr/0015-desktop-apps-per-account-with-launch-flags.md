@@ -36,3 +36,5 @@ Options:
 ## Real-app check (2026-10-14)
 
 On the maintainer's machine: Claude Desktop honours `--user-data-dir` and its Code tab `CLAUDE_CONFIG_DIR`; the Codex app honours `CODEX_HOME` and `CODEX_ELECTRON_USER_DATA_PATH` and keeps its sqlite in `CODEX_HOME` (no `CODEX_SQLITE_HOME` needed); bringing a window to the front through JXA asked for no permission.
+
+Grok Bot is not a Family's Desktop App: it signs in apart from every Account, so it gets its own App Profiles (ADR-0019).

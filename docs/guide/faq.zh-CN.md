@@ -31,6 +31,7 @@ Node 从 22.18 起默认会剥掉 TypeScript 类型，sideby 才能直接 `impor
 | 你的插件 | `${XDG_CONFIG_HOME:-~/.config}/sideby/plugins/` |
 | 状态：额度缓存、上次体检结果、`settings.json` 原始字节、后台面板的 pid 和日志 | `${XDG_STATE_HOME:-~/.local/state}/sideby/` |
 | 每个账号的桌面应用数据（`sideby desktop`） | macOS `~/Library/Application Support/sideby/<家族>/<账号名>/` |
+| Grok Bot 窗口（`sideby desktop grok-bot:<名字>`） | macOS `~/Library/Application Support/sideby/grok-bot/<名字>/` |
 | 面板应用（`sideby app install`） | macOS `~/Applications/sideby.app`；Linux `~/.local/share/applications/sideby.desktop`、`~/.local/share/sideby/`、`~/.local/share/icons/hicolor/*/apps/sideby.*` |
 
 sideby 不往宿主的账号目录里写自己的文件。唯一的例外是 `quota setup claude --yes`，它会修改 `~/.claude/settings.json`。用 `sideby new` 建出来的账号目录归宿主所有。

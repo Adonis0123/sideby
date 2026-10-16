@@ -78,6 +78,7 @@ The agent checks Node and your Host CLIs, installs sideby and the skill, creates
 | Short commands such as `ccw` | `sideby alias add ccw claude:work` | [Shell functions](docs/guide/configuration.md#shell-functions) |
 | Reopen a session from Orca and the like in the account that holds it | `"resumeRouting": true` in config | [Resuming from other tools](docs/guide/configuration.md#resuming-from-other-tools) |
 | Open Claude Desktop or the Codex app as one account, several side by side (macOS) | `sideby desktop claude:work` (or the panel) | [Desktop apps](docs/guide/usage.md#desktop-apps) |
+| Keep several Grok Bot windows open, each signed in to its own account (macOS) | `sideby desktop grok-bot:002` (or the panel) | [Grok Bot windows](docs/guide/usage.md#grok-bot-windows) |
 | Open the panel from the Dock or app menu | `sideby app install` | [Panel app](docs/guide/panel.md#panel-app) |
 | Show the panel inside your own local page | `createPanelHandler()` | [Embed the panel](docs/guide/panel.md#embed-the-panel) |
 | Add a Host or a pre-launch check | a local plugin | [Plugins](docs/guide/plugins.md) |

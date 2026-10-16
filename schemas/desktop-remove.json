@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/desktop-remove.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "ref",
+    "app",
+    "appData",
+    "removed"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "ref": {
+      "type": "string"
+    },
+    "app": {
+      "type": "string"
+    },
+    "appData": {
+      "type": "string",
+      "description": "The folder that is (or would be) deleted."
+    },
+    "removed": {
+      "type": "boolean",
+      "description": "False when only the plan was shown; run again with --yes (exit 10)."
+    }
+  },
+  "title": "sideby desktop grok-bot:<name> --remove --json"
+}

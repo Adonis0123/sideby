@@ -247,12 +247,44 @@ const ShellInitFiles = Type.Array(
   { description: 'One entry per config `shellInitFile`, rewritten after the change.' },
 )
 
+const AppProfile = Type.Object(
+  {
+    ref: Type.String({ description: "`grok-bot:<name>`; `grok-bot:main` is the app's own default data." }),
+    app: Type.String({ description: 'The app, for example `Grok Bot`.' }),
+    name: Str,
+    isMain: Type.Boolean(),
+    appData: Type.Optional(
+      Type.String({
+        description: "This window's data folder; absent for the main one, which uses the app's default.",
+      }),
+    ),
+    installed: Type.Boolean(),
+    running: Type.Boolean({ description: "This window's own instance runs now." }),
+    signedIn: Type.Optional(
+      Type.Boolean({
+        description:
+          'What the app last wrote about its sign-in (it keeps the last value after the app quits); absent when unknown. Which account is signed in is not known.',
+      }),
+    ),
+  },
+  {
+    description:
+      'A window of a desktop app that signs in apart from every account (Grok Bot, ADR-0019). Open or create one with `sideby desktop grok-bot:<name>`.',
+  },
+)
+
 export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
   list: Type.Object(
     {
       schemaVersion: Version,
       families: Type.Array(FamilyInfo),
       accounts: Type.Array(AccountStatus),
+      appProfiles: Type.Optional(
+        Type.Array(AppProfile, {
+          description:
+            'Grok Bot windows (macOS, when Grok Bot is installed or has windows), the main one first. Not accounts.',
+        }),
+      ),
       pluginErrors: Type.Array(PluginError),
     },
     { title: 'sideby list --json' },
@@ -629,7 +661,7 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     {
       schemaVersion: Version,
       ref: Str,
-      family: Str,
+      family: Type.String({ description: 'The family, or `grok-bot` for a Grok Bot window.' }),
       app: Type.String({ description: 'The desktop app, for example `Claude Desktop`.' }),
       appPath: Str,
       action: Type.Union(
@@ -654,6 +686,18 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       notices: Type.Array(Str),
     },
     { title: 'sideby desktop --json' },
+  ),
+  'desktop-remove': Type.Object(
+    {
+      schemaVersion: Version,
+      ref: Str,
+      app: Str,
+      appData: Type.String({ description: 'The folder that is (or would be) deleted.' }),
+      removed: Type.Boolean({
+        description: 'False when only the plan was shown; run again with --yes (exit 10).',
+      }),
+    },
+    { title: 'sideby desktop grok-bot:<name> --remove --json' },
   ),
   error: Type.Object(
     {

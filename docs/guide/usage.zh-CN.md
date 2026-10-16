@@ -139,6 +139,22 @@ sideby desktop claude:work     # 也可以用短命令：sideby desktop ccw
 
 已知限制：所有窗口在 Dock 里的图标一样。主账号没开、别的账号的窗口开着时，点 Dock 图标切到的是那个账号的窗口，这时主账号要从 sideby 打开。应用自动更新后会以主账号重启，其他账号要从 sideby 再开一次。用别的数据目录的窗口不能和 Claude in Chrome 配对。sideby 用应用现在认的设置打开它们（`--user-data-dir`，Codex 还有 `CODEX_ELECTRON_USER_DATA_PATH`），以后的版本可能会改。从 Claude Code 或 Codex 会话里打开的应用不会继承那个会话的环境变量。其他平台和宿主暂不支持。
 
+### Grok Bot 窗口
+
+Grok Bot 用 Cursor 账号登录，和 Grok Build（`grok` 命令）以及上面的任何账号都无关。Grok Bot 自己的账号菜单能保存几个账号，但同一时间只登录一个。sideby 给每个 Grok Bot 窗口起一个名字，几个窗口可以同时开着，各登录一个账号：
+
+```sh
+sideby desktop grok-bot:002    # 新名字就开一个新窗口；同一个名字再运行就是打开它
+sideby desktop grok-bot        # Grok Bot 自己的默认窗口（grok-bot:main）
+```
+
+在面板里，账号下面的 **Grok Bot** 组列出这些窗口：每个是否开着、是否已登录，一个打开或切到前台的按钮，组底部有 **再开一个 Grok Bot**（名字预填下一个空闲的，比如 `002`）。`sideby list` 显示同样的列表。
+
+- 新窗口一开始没有登录。在里面用你想给这个窗口的账号登录，登录时先关掉其他 Grok Bot 窗口：浏览器可能把登录结果送回别的窗口。
+- sideby 按 Grok Bot 最后写下的状态显示窗口是否已登录，但不显示登录的是哪个账号：要知道这个就得读登录文件。起一个能分清的名字。
+- 每个新窗口的数据放在 `~/Library/Application Support/sideby/grok-bot/<名字>/`。`sideby desktop grok-bot:<名字> --remove --yes`（或面板里的 **删除**）删掉这个目录，也就是退出这个窗口的登录、删掉它在这台 Mac 上的数据。先退出那个窗口。主窗口是 Grok Bot 自己的，不能删。
+- sideby 用 Grok Bot 现在认的 `--user-data-dir` 打开它，并清掉会盖过它的 `SAND_DATA_ROOT`、`SAND_USER_DATA_DIR`。以后的 Grok Bot 版本可能会改。
+
 ## 上下文调优
 
 每个宿主在上下文涨过某个阈值后会自动压缩会话。`sideby tune` 用你最近 7 天的本地会话，重放其他阈值，估算哪个最省 token：
