@@ -88,6 +88,7 @@ export function renderPage(opts: PageOptions): string {
       </div>
     </div>
     <div class="top-actions">
+      <button id="ver-top" class="link-btn muted small hide-sm" type="button" hidden></button>
       <span id="updated" class="muted small">Loading…</span>
       <button id="lang" class="icon-btn lang-btn" type="button"${lang === 'auto' ? '' : ' hidden'}>${lang === 'zh' ? 'EN' : '中文'}</button>
       <button id="theme" class="icon-btn" type="button" hidden></button>

@@ -56,7 +56,7 @@ createServer(async (req, res) => {
 - **创建 handler 时校验**：未知 token，或值里出现字母、数字、空格和 `# % ( ) , . + - / ' " _` 以外的字符（也就是不允许 `;`、`{`、`}`、`<`、`\`、`*`、`:`），或含 `url(`、括号或引号不成对、超过 200 个字符，都会抛出写明 token 名的 `TypeError`。
 - 不传 `theme` 时，外观和 `sideby ui` 一样。
 
-`updates`（默认 `true`）会在面板页头显示「新版本」标签，以及带「更新」按钮和自动更新开关的更新对话框（见[更新](configuration.zh-CN.md#更新)）。从这里发起的更新会安装新包；像作者的 Portal 那样从已安装的包加载 sideby 的页面会自己换上新版本，面板提示刷新页面。你的页面自己管理 sideby 版本时传 `updates: false`：面板不再显示任何更新相关内容，并拒绝 `/api/update*`。
+`updates`（默认 `true`）会在面板页头显示当前版本，有新版本时显示「新版本」标签，以及带「检查更新」、「更新」按钮和自动更新开关的更新对话框（见[更新](configuration.zh-CN.md#更新)）。从这里发起的更新会安装新包；像作者的 Portal 那样从已安装的包加载 sideby 的页面会自己换上新版本，面板提示刷新页面。你的页面自己管理 sideby 版本时传 `updates: false`：面板不再显示任何更新相关内容，并拒绝 `/api/update*`。
 
 `<basePath>/icon.svg` 提供 sideby 标志（面板自己的 favicon 用 `<basePath>/favicon.svg`，小尺寸版，只有蓝色那个小伙伴）。在你自己的标签页或菜单里直接引用它，不要另存一份，这样换了新标志，你的页面跟着下一个 sideby 版本更新。
 

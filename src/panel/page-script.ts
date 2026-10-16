@@ -2712,6 +2712,14 @@ const MAIN = String.raw`
   function renderUpdateButton() {
     const b = $('update')
     const u = updState()
+    // The version the page runs, always in sight; it opens the same dialog (with "Check for updates").
+    const v = $('ver-top')
+    v.hidden = !BOOT.version || !!(u && u.available)
+    if (!v.hidden) {
+      v.textContent = 'v' + BOOT.version
+      v.disabled = !BOOT.updates
+      v.title = BOOT.updates ? t('upd.verTitle', { v: BOOT.version }) : ''
+    }
     b.hidden = !(u && u.available)
     if (!b.hidden) {
       setKids(b, [icon('arrowUp'), h('span', null, t('upd.label', { v: u.latest }))])
@@ -2722,7 +2730,7 @@ const MAIN = String.raw`
   }
   function openUpdate() {
     if (!BOOT.updates) return
-    up = { busy: false, error: null, done: null, changed: false, autoPlan: null, autoBusy: false, waitUntil: 0 }
+    up = { busy: false, error: null, done: null, changed: false, autoPlan: null, autoBusy: false, waitUntil: 0, checking: false, checked: false }
     showDialog('update')
     renderUpdate()
   }
@@ -2747,6 +2755,19 @@ const MAIN = String.raw`
     } catch (e) { up.error = e }
     up.busy = false
     dlg.busy = false
+    renderUpdate()
+  }
+  // "Check for updates": asks the registry now (the daily check only runs once a day), then shows the answer.
+  async function updCheck() {
+    up.checking = true
+    up.error = null
+    renderUpdate()
+    try {
+      await api('/api/update', {})
+      await load({ silent: true })
+      up.checked = true
+    } catch (e) { up.error = e }
+    up.checking = false
     renderUpdate()
   }
   // After an Update the server (or the Portal's worker) comes back with a new build; load() then reloads the page.
@@ -2805,11 +2826,17 @@ const MAIN = String.raw`
         body.push(codeCopy(u.command))
       }
       body.push(h('p', { class: 'small' }, t('upd.skill')), codeCopy(u.skill))
+    } else if (up.checked && u.latest) {
+      body.push(h('p', { class: 'note' }, t('upd.latestNow')))
     } else if (u.checksOff) {
       body.push(h('p', { class: 'muted small' }, t('upd.checksOff', { why: u.checksOff })))
     } else if (u.latest) {
       body.push(h('p', { class: 'muted small' }, t('upd.latest') + (u.checkedAt ? ' · ' + t('upd.checked', { ago: ago(u.checkedAt) }) : '')))
     } else body.push(h('p', { class: 'muted small' }, t('upd.notYet')))
+    // A read-only Panel sends no request and writes nothing, so it cannot check (spec §3.23).
+    if (!BOOT.readOnly && !up.done && !u.available)
+      body.push(h('p', null, h('button', { class: 'btn btn-sm', type: 'button', disabled: up.checking || up.busy, 'aria-busy': up.checking ? 'true' : null, onclick: updCheck },
+        up.checking ? spinner() : icon('refresh'), up.checking ? t('upd.checking') : t('upd.check'))))
     if (!BOOT.readOnly && !up.done) {
       const box = h('input', { type: 'checkbox', disabled: up.autoBusy || !u.method.canUpdate })
       box.checked = up.autoPlan ? up.autoPlan.auto : u.auto
@@ -2832,6 +2859,7 @@ const MAIN = String.raw`
   $('ver').disabled = !BOOT.updates
   $('ver').addEventListener('click', openUpdate)
   $('update').addEventListener('click', openUpdate)
+  $('ver-top').addEventListener('click', openUpdate)
   $('refresh').addEventListener('click', () => load({ check: true, announce: true }))
   $('handoff').addEventListener('click', () => setPage('handoff'))
   $('lang').addEventListener('click', () => {

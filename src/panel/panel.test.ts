@@ -1597,6 +1597,12 @@ describe('panel updates (spec §3.23, ADR-0021)', () => {
         assert.match(icon.text, /^<svg xmlns=.*#f2b35e.*#3f8fc4/s)
         const page = await request(on.port, 'GET', '/', { host: `127.0.0.1:${on.port}` })
         assert.match(page.text, /<link rel="icon" type="image\/svg\+xml" href="\/favicon\.svg">/)
+        // The running version stays in sight in the header and opens the dialog with "Check for updates" (spec §3.23).
+        assert.match(
+          page.text,
+          /<button id="ver-top" class="link-btn muted small hide-sm" type="button" hidden><\/button>/,
+        )
+        assert.match(page.text, /function updCheck\(\)[\s\S]*api\('\/api\/update', \{\}\)/)
         const state = async (port: number) =>
           JSON.parse(
             (await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text,

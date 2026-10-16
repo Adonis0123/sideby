@@ -56,7 +56,7 @@ createServer(async (req, res) => {
 - **Checked when the handler is created**: an unknown token, or a value with anything but letters, digits, spaces and `# % ( ) , . + - / ' " _` (so no `;`, `{`, `}`, `<`, `\`, `*` or `:`), with `url(`, unbalanced parentheses or quotes, or over 200 characters, throws a `TypeError` that names the token.
 - Without `theme`, the page looks the same as `sideby ui`.
 
-`updates` (default `true`) shows a "new version" label in the panel's header and the update dialog with its **Update** button and Auto Update switch (see [Updates](configuration.md#updates)). An update started there installs the new package; a page that loads sideby from the installed package, as the author's portal does, picks it up by itself, and the panel says to reload. Pass `updates: false` when your page manages sideby's version: the panel then shows nothing about updates and refuses `/api/update*`.
+`updates` (default `true`) shows the running version and, when there is one, a "new version" label in the panel's header, and the update dialog with **Check for updates**, the **Update** button and the Auto Update switch (see [Updates](configuration.md#updates)). An update started there installs the new package; a page that loads sideby from the installed package, as the author's portal does, picks it up by itself, and the panel says to reload. Pass `updates: false` when your page manages sideby's version: the panel then shows nothing about updates and refuses `/api/update*`.
 
 `<basePath>/icon.svg` serves the sideby mark (the panel uses `<basePath>/favicon.svg`, the small cut with the blue buddy alone, as its favicon). Show it in your own tab or menu instead of keeping a copy, so a new mark reaches your page with the next sideby.
 
