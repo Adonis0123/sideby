@@ -2712,13 +2712,19 @@ const MAIN = String.raw`
   function renderUpdateButton() {
     const b = $('update')
     const u = updState()
-    // The version the page runs, always in sight; it opens the same dialog (with "Check for updates").
+    // The version the page runs, a pill after the name; it opens the same dialog (with "Check for updates"), and
+    // takes a dot while a newer version waits.
     const v = $('ver-top')
-    v.hidden = !BOOT.version || !!(u && u.available)
+    v.hidden = !BOOT.version
     if (!v.hidden) {
+      const newer = !!(u && u.available)
       v.textContent = 'v' + BOOT.version
+      v.classList.toggle('has-update', newer)
       v.disabled = !BOOT.updates
-      v.title = BOOT.updates ? t('upd.verTitle', { v: BOOT.version }) : ''
+      const tip = !BOOT.updates ? '' : newer ? t('upd.labelLong', { v: u.latest, cur: u.current }) : t('upd.verTitle', { v: BOOT.version })
+      v.title = tip
+      if (tip) v.setAttribute('aria-label', tip)
+      else v.removeAttribute('aria-label')
     }
     b.hidden = !(u && u.available)
     if (!b.hidden) {

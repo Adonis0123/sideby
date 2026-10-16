@@ -83,12 +83,11 @@ export function renderPage(opts: PageOptions): string {
     <div class="brand">
       <span class="logo" aria-hidden="true">${MARK_SVG}</span>
       <div>
-        <h1>sideby</h1>
+        <div class="title-row"><h1>sideby</h1><button id="ver-top" class="ver-pill" type="button" hidden></button></div>
         <p class="tagline" data-i18n="top.tagline">Every AI coding account, side by side.</p>
       </div>
     </div>
     <div class="top-actions">
-      <button id="ver-top" class="link-btn muted small hide-sm" type="button" hidden></button>
       <span id="updated" class="muted small">Loading…</span>
       <button id="lang" class="icon-btn lang-btn" type="button"${lang === 'auto' ? '' : ' hidden'}>${lang === 'zh' ? 'EN' : '中文'}</button>
       <button id="theme" class="icon-btn" type="button" hidden></button>

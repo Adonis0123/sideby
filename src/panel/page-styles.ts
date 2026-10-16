@@ -64,6 +64,9 @@ body { margin: 0; background: var(--bg); color: var(--text); font: var(--font-si
 [hidden] { display: none !important; }
 .top-in, .wrap { max-width: var(--content-width); margin: 0 auto; }
 .top-in { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 28px var(--gutter) 0; }
+/* When the name, its version pill and the buttons do not fit one row, the buttons wrap below, on the right. */
+.top-in { flex-wrap: wrap; row-gap: 10px; }
+.top-in > .top-actions { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
 .wrap { padding: 20px var(--gutter) 40px; }
 .header-bar .top { background: var(--surface); border-bottom: 1px solid var(--border); }
 .header-bar .top-in { min-height: 84px; padding: 14px var(--gutter); }
@@ -83,6 +86,14 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .brand h1 { font-size: var(--title-size); font-weight: var(--title-weight); line-height: 1.3; letter-spacing: -0.02em; }
 .tagline { color: var(--muted); font-size: 13px; }
+/* The running version, a quiet pill after the name; with a newer version it takes the accent and a dot (spec §3.23). */
+.title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ver-pill { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); font: 500 11.5px/18px var(--mono); cursor: pointer; white-space: nowrap; }
+.ver-pill:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.ver-pill:disabled { cursor: default; }
+.ver-pill:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
+.ver-pill.has-update { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.ver-pill.has-update::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .logo { display: inline-flex; flex: none; width: 40px; height: 40px; border-radius: 10px; background: var(--logo-bg); box-shadow: inset 0 0 0 1px var(--logo-line); }
 /* desktop/icon.ts draws the same two half discs for the app icon. */
 .logo svg { display: block; width: 100%; height: 100%; fill: var(--logo-fg); }
@@ -560,6 +571,7 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   :root { --gutter: 14px; }
   .top-in { padding: 16px var(--gutter) 0; }
   .header-bar .top-in { min-height: 0; padding: 12px var(--gutter); }
+  .update-btn span { display: none; }
   .wrap { padding: 14px var(--gutter) 32px; }
   .hide-sm { display: none; }
   .tagline { display: none; }
