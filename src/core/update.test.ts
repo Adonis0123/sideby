@@ -18,6 +18,7 @@ import {
   checksOff,
   compareVersions,
   installMethod,
+  jsonNotice,
   markRunning,
   noticeLine,
   planFrom,
@@ -123,6 +124,33 @@ describe('switches', () => {
   it('keeps checks off for a Local Build, whatever else is set', () => {
     assert.match(checksOff({}, { update: { check: true, auto: true } }, true) ?? '', /local build/)
     assert.equal(checksOff({}, {}, false), null)
+  })
+})
+
+describe('the _notice of --json outputs', () => {
+  const SKILL = 'npx skills add Adonis0123/sideby -g'
+  it('names a newer version from the cache and an installed skill for another version', () => {
+    const n = jsonNotice({ latest: '0.14.0' }, '0.13.0', {}, {}, ['0.12.1', '0.13.0'], SKILL)
+    assert.deepEqual(n?.update && [n.update.current, n.update.latest, n.update.command], [
+      '0.13.0',
+      '0.14.0',
+      'sideby update',
+    ])
+    assert.deepEqual(n?.skill && [n.skill.installed, n.skill.command], ['0.12.1', SKILL])
+    assert.equal(jsonNotice({ latest: '0.14.0' }, '0.13.0', {}, {}, [null], SKILL)?.skill?.installed, null)
+  })
+  it('says nothing when all is current, when checks are off, or for a Local Build', () => {
+    assert.equal(jsonNotice({ latest: '0.13.0' }, '0.13.0', {}, {}, ['0.13.0'], SKILL), null)
+    assert.equal(jsonNotice({}, '0.13.0', {}, {}, [], SKILL), null)
+    assert.equal(
+      jsonNotice({ latest: '0.14.0' }, '0.13.0', {}, { SIDEBY_NO_UPDATE_NOTIFIER: '1' }, ['0.1.0'], SKILL),
+      null,
+    )
+    assert.equal(
+      jsonNotice({ latest: '0.14.0' }, '0.13.0', { update: { check: false } }, {}, [], SKILL),
+      null,
+    )
+    assert.equal(jsonNotice({ latest: '0.14.0' }, '0.13.0', {}, { CI: 'true' }, [], SKILL), null)
   })
 })
 

@@ -29,6 +29,7 @@ Do every step you can yourself. Only browser sign-in, secrets and interactive se
 - Every `--json` output has `schemaVersion: 1`. On an error it is `{ "schemaVersion": 1, "error": "<what to do next>", "code": "<reason>" }`; `code` is `usage` for a malformed command line.
 - Exit codes: `0` done, `1` failed or found a `fail` problem, `2` malformed command line, `10` **needs the user's confirmation**. `run`, `next` and `login` return the Host's own exit code once it starts.
 - On `10`: show the user the change the command printed, ask, and only after a clear yes run the same command again with `--yes` added. Never add `--yes` on your own.
+- `_notice` on any `--json` output: a newer sideby (`_notice.update`) or an installed sideby skill for another version (`_notice.skill`). It is not the answer to the task: finish the task first, then mention it in one line and offer to update, following `references/update.md`.
 
 ## What do you want to do
 
@@ -48,6 +49,7 @@ Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique
 | See or set the model and effort an account starts with ("用哪个模型", "set effort to high for cc002") | `sideby model <acct> --json`; `sideby model <acct> <model\|default> --effort <level\|default>` (exit 10 first, then `--yes` after the user agrees) | — |
 | Stop Claude sessions from connecting to claude.ai / the Claude app by themselves ("关闭 remote control", "别让别人远程看到对话") for every account | `sideby remote-control --json`, then `sideby remote-control off` (exits 10 with the change; rerun with `--yes` after they agree); `sideby remote-control undo` puts it back; `sideby remote-control on` turns it back on the same way (only when they ask for it) | — |
 | See Claude quota (it shows `not-enabled`) | `sideby quota setup claude` (exits 10) | `references/quota.md` |
+| Update sideby or its skill ("is there a new version", "更新 sideby"), or an output has `_notice` | `sideby update --json` (exits 10 first) | `references/update.md` |
 | See everything at once | `sideby ui` (local panel on `127.0.0.1:17420`; `--no-open` prints the address) | — |
 | Start an account | give them `sideby run <ref> [-- host args]` | — |
 

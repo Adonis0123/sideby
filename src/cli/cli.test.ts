@@ -1458,6 +1458,35 @@ describe('model (spec §3.19)', () => {
   })
 })
 
+describe('_notice on --json outputs (spec §3.23)', () => {
+  it('carries a newer version from the cache and an outdated skill, on results and errors, and not when turned off', async () => {
+    await withFakeHome(async (h) => {
+      // Checked just now, so no Update Check starts: tests never make the request.
+      const now = new Date().toISOString()
+      await h.write(
+        '.local/state/sideby/update.json',
+        JSON.stringify({ checkedAt: now, triedAt: now, latest: '99.0.0' }),
+      )
+      await h.write('.agents/skills/sideby/SKILL.md', '---\nname: sideby\nmetadata:\n  version: 0.0.1\n---\n')
+      const on = { SIDEBY_NO_UPDATE_NOTIFIER: '' }
+      const list = checkSchema('list', (await sideby(h, ['list', '--json'], on)).out)
+      const n = list._notice as { update: { latest: string; command: string }; skill: { installed: string } }
+      assert.deepEqual(
+        [n.update.latest, n.update.command, n.skill.installed],
+        ['99.0.0', 'sideby update', '0.0.1'],
+      )
+      const err = await sideby(h, ['quota', 'nope:x', '--json'], on)
+      assert.equal(err.code, 1)
+      assert.ok((checkSchema('error', err.out)._notice as object | undefined) !== undefined)
+      assert.equal(checkSchema('list', (await sideby(h, ['list', '--json'])).out)._notice, undefined)
+      const update = JSON.parse(
+        (await sideby(h, ['update', '--json'], { ...on, SIDEBY_UPDATE_REGISTRY: 'http://127.0.0.1:9' })).out,
+      )
+      assert.equal(update._notice, undefined)
+    })
+  })
+})
+
 describe('remote-control (spec §3.22)', () => {
   it('shows the state, previews turning it off with exit 10, writes only with --yes, and undoes it', async () => {
     await withFakeHome(async (h) => {

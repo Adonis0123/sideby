@@ -254,6 +254,38 @@ function noticeAllowed(cmd: string, parsed: import('./args.ts').ParsedArgs): boo
 }
 
 /**
+ * Before a `--json` command (spec §3.23): the `_notice` its output carries, from the cached Update Check and the
+ * installed sideby skills, so an agent that reads JSON learns of a newer version too. Starts the next check detached
+ * when the last one is a day old, as afterCommand does on a terminal. Never fails the command.
+ */
+async function jsonNoticeFor(): Promise<object | null> {
+  try {
+    const u = await import('../core/update.ts')
+    const { resolvePaths } = await import('../core/paths.ts')
+    const { loadConfig } = await import('../core/config.ts')
+    const { packageVersion } = await import('../core/version.ts')
+    const { installedSkillVersions, SKILL_INSTALL } = await import('../core/skill-check.ts')
+    const paths = resolvePaths(process.env)
+    const config = await loadConfig(paths.configFile).catch(() => ({}))
+    const cache = await u.readUpdateCache(paths)
+    const skills = await installedSkillVersions(paths.home)
+    const n = u.jsonNotice(cache, packageVersion(), config, process.env, skills, SKILL_INSTALL)
+    if (!u.checksOff(process.env, config) && u.checkDue(cache, new Date())) {
+      const { spawn } = await import('node:child_process')
+      const child = spawn(process.execPath, [fileURLToPath(import.meta.url), 'update-check'], {
+        detached: true,
+        stdio: 'ignore',
+      })
+      child.on('error', () => {})
+      child.unref()
+    }
+    return n
+  } catch {
+    return null
+  }
+}
+
+/**
  * After a command (spec §3.23): print the Update Notice and the result of an Auto Update, each at most once, and
  * start the next Update Check detached when the last one is a day old. Only on a terminal; never fails the command.
  */
@@ -322,6 +354,7 @@ export async function main(argv: string[]): Promise<number> {
   // Only sideby's own options count: arguments after `--` belong to the host.
   const own = args.includes('--') ? args.slice(0, args.indexOf('--')) : args
   const wantsJson = Boolean(spec?.flags.includes('json')) && own.includes('--json')
+  let notice: object | null = null
   try {
     if (!spec) throw new UsageError(`unknown command "${cmd}"; run \`sideby --help\``)
     // `run` and `resume` pass everything after the account or family through to the host, with or without `--`.
@@ -357,6 +390,10 @@ export async function main(argv: string[]): Promise<number> {
       return 0
     }
     const cmds = await import('./commands.ts')
+    if (wantsJson && noticeAllowed(cmd, parsed)) {
+      notice = await jsonNoticeFor()
+      cmds.setJsonNotice(notice)
+    }
     const code = await dispatch(cmd, parsed, io, cmds)
     if (!wantsJson && noticeAllowed(cmd, parsed)) await afterCommand()
     return code
@@ -366,7 +403,13 @@ export async function main(argv: string[]): Promise<number> {
     if (wantsJson) {
       const { UserError } = await import('../core/errors.ts')
       const code = usage ? 'usage' : err instanceof UserError && err.code ? err.code : 'error'
-      console.log(JSON.stringify({ schemaVersion: 1, error: message, code }, null, 2))
+      console.log(
+        JSON.stringify(
+          { schemaVersion: 1, error: message, code, ...(notice ? { _notice: notice } : {}) },
+          null,
+          2,
+        ),
+      )
     } else console.error(`sideby: ${message}`)
     if (!usage && process.env.SIDEBY_DEBUG && err instanceof Error) console.error(err.stack)
     return usage ? 2 : 1

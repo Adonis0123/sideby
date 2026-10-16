@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { mkdir, symlink } from 'node:fs/promises'
+import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
 import { createRuntime } from '../runtime.ts'
-import { skillVersionOf } from './skill-check.ts'
+import { installedSkillVersions, skillVersionOf } from './skill-check.ts'
 import { packageVersion } from './version.ts'
 
 const skill = (version?: string) =>
@@ -24,6 +25,24 @@ describe('skillVersionOf', () => {
       'body text does not count',
     )
     assert.equal(skillVersionOf('no frontmatter'), null)
+  })
+})
+
+describe('installedSkillVersions', () => {
+  it('reads the skill agents use from ~/.agents and ~/.claude, once per real file', async () => {
+    await withFakeHome(async (h) => {
+      assert.deepEqual(await installedSkillVersions(h.home), [])
+      await h.write(
+        '.agents/skills/sideby/SKILL.md',
+        '---\nname: sideby\nmetadata:\n  version: 0.12.1\n---\n',
+      )
+      await mkdir(h.path('.claude/skills'), { recursive: true })
+      await symlink(h.path('.agents/skills/sideby'), join(h.path('.claude/skills'), 'sideby'))
+      assert.deepEqual(await installedSkillVersions(h.home), ['0.12.1'])
+      await h.write('.claude/skills/other/SKILL.md', 'x')
+      await h.write('.agents/skills/sideby/SKILL.md', '---\nname: sideby\n---\n')
+      assert.deepEqual(await installedSkillVersions(h.home), [null])
+    })
   })
 })
 

@@ -275,6 +275,38 @@ const AppProfile = Type.Object(
   },
 )
 
+/**
+ * On any `--json` output when there is something to mention once the task is done (spec §3.23): a newer sideby in the
+ * cached Update Check, or an installed sideby skill for another version. Off with SIDEBY_NO_UPDATE_NOTIFIER.
+ */
+const Notice = Type.Object(
+  {
+    update: Type.Optional(
+      Type.Object({
+        current: Str,
+        latest: Str,
+        command: Type.String({
+          description: 'Run it after the user agrees: it shows the plan and exits 10; then --yes.',
+        }),
+        message: Str,
+      }),
+    ),
+    skill: Type.Optional(
+      Type.Object({
+        installed: Type.Union([Str, Type.Null()], {
+          description: "The skill's version; null when it has none.",
+        }),
+        current: Str,
+        command: Type.String({
+          description: 'Updates the installed sideby skill (run it after the user agrees).',
+        }),
+        message: Str,
+      }),
+    ),
+  },
+  { description: 'Not the answer to the task: mention it briefly afterwards and offer to update.' },
+)
+
 export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
   list: Type.Object(
     {
@@ -820,4 +852,8 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     { title: 'sideby error --json' },
   ),
   config: ConfigSchema,
+}
+for (const [name, schema] of Object.entries(OUTPUT_SCHEMAS)) {
+  const props = (schema as { properties?: Record<string, TSchema> }).properties
+  if (name !== 'config' && props) props._notice = Type.Optional(Notice)
 }

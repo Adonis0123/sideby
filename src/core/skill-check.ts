@@ -17,6 +17,27 @@ export function skillVersionOf(text: string): string | null {
 }
 
 /**
+ * The versions of the sideby skills an agent reads on this machine (`null`: a skill without one): where
+ * `npx skills add -g` puts it (`~/.agents/skills`) and Claude Code's user skills. Read for a `--json` output's
+ * `_notice`, so it looks at two fixed files only; Doctor checks every Family's main directory.
+ */
+export async function installedSkillVersions(home: string): Promise<(string | null)[]> {
+  const seen = new Set<string>()
+  const out: (string | null)[] = []
+  for (const dir of [join(home, '.agents', 'skills'), join(home, '.claude', 'skills')]) {
+    try {
+      const real = await realpath(join(dir, 'sideby', 'SKILL.md'))
+      if (seen.has(real)) continue
+      seen.add(real)
+      out.push(skillVersionOf(await readFile(real, 'utf8')))
+    } catch {
+      // not installed there
+    }
+  }
+  return out
+}
+
+/**
  * Checks, for each given Family, the sideby skill its Host reads: `<main>/skills/sideby`, and for Codex also
  * `~/.agents/skills/sideby` (where `npx skills add -g` installs and Codex reads user skills). A file is read
  * once per Family, so the result for one Family never depends on which others are checked with it. Findings

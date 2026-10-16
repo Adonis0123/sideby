@@ -67,7 +67,13 @@ async function runAccountNow(rt: Runtime, ref: string, args: readonly string[], 
   return code
 }
 
-const json = (io: Io, data: object) => io.out(JSON.stringify({ schemaVersion: 1, ...data }, null, 2))
+// The `_notice` main.ts works out before a `--json` command (spec §3.23); every JSON output of this run carries it.
+let notice: object | null = null
+export function setJsonNotice(n: object | null): void {
+  notice = n
+}
+const json = (io: Io, data: object) =>
+  io.out(JSON.stringify({ schemaVersion: 1, ...data, ...(notice ? { _notice: notice } : {}) }, null, 2))
 
 function stripFix(f: Finding): Omit<Finding, 'fix'> {
   const { fix: _fix, ...rest } = f

@@ -427,6 +427,45 @@ export function autoUpdateLine(cache: UpdateCache): string | null {
     : `sideby could not update itself to ${a.to}: ${a.message}`
 }
 
+/** The `_notice` of a `--json` output (spec §3.23): what an agent should mention once its task is done. */
+export interface JsonNotice {
+  update?: { current: string; latest: string; command: string; message: string }
+  skill?: { installed: string | null; current: string; command: string; message: string }
+}
+
+/**
+ * The `_notice` for a `--json` output, from the cached Update Check and the versions of the installed sideby skills
+ * (`null` for one written before skills had a version); null when there is nothing to say or checks are off. It
+ * reads no network: an agent sees what the last check found, as a person sees the Update Notice.
+ */
+export function jsonNotice(
+  cache: UpdateCache,
+  current: string,
+  config: UpdateSettings,
+  env: Env,
+  skills: readonly (string | null)[],
+  skillCommand: string,
+): JsonNotice | null {
+  if (checksOff(env, config)) return null
+  const out: JsonNotice = {}
+  if (isNewer(cache.latest, current))
+    out.update = {
+      current,
+      latest: cache.latest,
+      command: 'sideby update',
+      message: `sideby ${cache.latest} is available (this is ${current}); \`sideby update\` shows what it runs and updates after --yes`,
+    }
+  const stale = skills.find((v) => v !== current)
+  if (stale !== undefined)
+    out.skill = {
+      installed: stale,
+      current,
+      command: skillCommand,
+      message: `the installed sideby skill is ${stale ? `for sideby ${stale}` : 'from before skills had a version'}; this sideby is ${current}. \`${skillCommand}\` updates it`,
+    }
+  return out.update || out.skill ? out : null
+}
+
 /**
  * What the CLI does after a command (spec §3.23), decided from the cache: the lines to print (the Auto Update result,
  * then the Update Notice), the change that records them, and whether to start a background check. The caller prints,
