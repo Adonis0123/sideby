@@ -469,3 +469,11 @@ export function remoteControlSummary(
   if (reach.some((g) => g.state === 'default')) return 'default'
   return 'off'
 }
+
+/**
+ * The groups that turning Remote Control `to` on or off changes (spec §3.22): those that do not hold it yet, a
+ * default counting as either. A file that is missing or cannot be read is never changed.
+ */
+export function remoteControlTodo<G extends { state: string }>(groups: readonly G[], to: 'on' | 'off'): G[] {
+  return groups.filter((g) => g.state === 'default' || g.state === (to === 'on' ? 'off' : 'on'))
+}

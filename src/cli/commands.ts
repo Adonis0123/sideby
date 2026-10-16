@@ -15,6 +15,7 @@ import { resolvePaths, tildify } from '../core/paths.ts'
 import { USAGE_DAYS } from '../core/quota-levels.ts'
 import {
   groupsToTurnOff,
+  groupsToTurnOn,
   groupsToUndo,
   type RemoteControlGroup,
   type RemoteControlState,
@@ -537,13 +538,16 @@ function rcGroupLine(g: RemoteControlGroup, home: string): string {
 }
 
 /**
- * `sideby remote-control [off|undo] [--yes] [--json]` (spec §3.22, ADR-0017): whether Claude sessions connect to
- * claude.ai by themselves, and turning that off for every Account (a preview with exit 10 until --yes).
+ * `sideby remote-control [on|off|undo] [--yes] [--json]` (spec §3.22, ADR-0017): whether Claude sessions connect to
+ * claude.ai by themselves, and turning that on or off for every Account (a preview with exit 10 until --yes).
  */
 export async function cmdRemoteControl(a: ParsedArgs, io: Io): Promise<number> {
   const [action, extra] = a.positionals
-  if (extra !== undefined || (action !== undefined && action !== 'off' && action !== 'undo'))
-    throw new UsageError('usage: sideby remote-control [off|undo] [--yes] [--json]')
+  if (
+    extra !== undefined ||
+    (action !== undefined && action !== 'on' && action !== 'off' && action !== 'undo')
+  )
+    throw new UsageError('usage: sideby remote-control [on|off|undo] [--yes] [--json]')
   const wantJson = a.flags.has('json')
   const rt = await createRuntime()
   const home = rt.paths.home
@@ -576,9 +580,17 @@ export async function cmdRemoteControl(a: ParsedArgs, io: Io): Promise<number> {
       )
     return 0
   }
-  const todo = action === 'off' ? groupsToTurnOff(groups) : groupsToUndo(groups)
+  const apply = () =>
+    action === 'off' ? rt.remoteControlOff() : action === 'on' ? rt.remoteControlOn() : rt.remoteControlUndo()
+  const todo =
+    action === 'off'
+      ? groupsToTurnOff(groups)
+      : action === 'on'
+        ? groupsToTurnOn(groups)
+        : groupsToUndo(groups)
+  const verb = action === 'off' ? 'turn it off' : action === 'on' ? 'turn it on' : 'undo'
   if (todo.length === 0) {
-    const r = action === 'off' ? await rt.remoteControlOff() : await rt.remoteControlUndo()
+    const r = await apply()
     if (wantJson) out({ applied: false, groups: show(groups), message: r.message })
     else io.out(tilde(r.message, home))
     return r.ok ? 0 : 1
@@ -588,16 +600,18 @@ export async function cmdRemoteControl(a: ParsedArgs, io: Io): Promise<number> {
       out({
         applied: false,
         groups: show(todo),
-        message: `Run again with --yes to ${action === 'off' ? 'turn it off' : 'undo'}.`,
+        message: `Run again with --yes to ${verb}.`,
       })
     else {
       io.out(
         action === 'off'
           ? 'Turn off Remote Control at startup?'
-          : 'Put back the Remote Control setting sideby replaced?',
+          : action === 'on'
+            ? 'Turn on Remote Control at startup?'
+            : 'Put back the Remote Control setting sideby replaced?',
       )
       for (const g of todo) {
-        const to = action === 'off' ? 'false' : 'what it was before'
+        const to = action === 'off' ? 'false' : action === 'on' ? 'true' : 'what it was before'
         const from = g.state === 'default' ? 'not set' : g.state === 'on' ? 'true' : 'false'
         io.out(`  ${tildify(g.file, home)}: remoteControlAtStartup ${from} -> ${to}`)
         io.out(c.dim(`    used by ${g.accounts.join(', ')}`))
@@ -605,13 +619,15 @@ export async function cmdRemoteControl(a: ParsedArgs, io: Io): Promise<number> {
       io.out(
         action === 'off'
           ? 'Sessions already running stay connected until you restart them. You can still start it in a session with /remote-control, and undo this with `sideby remote-control undo`.'
-          : 'New sessions go back to the previous setting.',
+          : action === 'on'
+            ? 'Every new session then connects to claude.ai and the Claude app, where every device signed in to that account can read it. Undo this with `sideby remote-control undo`.'
+            : 'New sessions go back to the previous setting.',
       )
-      io.out(`Run again with --yes to ${action === 'off' ? 'turn it off' : 'undo'}.`)
+      io.out(`Run again with --yes to ${verb}.`)
     }
     return 10
   }
-  const r = action === 'off' ? await rt.remoteControlOff() : await rt.remoteControlUndo()
+  const r = await apply()
   const results = r.results.map((x) => ({ ...x, file: tildify(x.file, home) }))
   if (wantJson) out({ applied: r.ok, results, message: r.message })
   else {

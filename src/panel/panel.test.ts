@@ -1275,6 +1275,7 @@ describe('turning Remote Control off in the Panel (spec §3.22)', () => {
           'x-sideby-token': ro.handler.token,
         }
         assert.equal((await post(ro.port, '/api/remote-control/off', {}, hdr)).status, 403)
+        assert.equal((await post(ro.port, '/api/remote-control/on', {}, hdr)).status, 403)
         assert.equal((await post(ro.port, '/api/remote-control/undo', {}, hdr)).status, 403)
         assert.equal((await settings()).remoteControlAtStartup, true)
       } finally {
@@ -1303,6 +1304,9 @@ describe('turning Remote Control off in the Panel (spec §3.22)', () => {
         )
         assert.equal(after.remoteControl[0].undo, true)
         assert.equal((await post(port, '/api/remote-control/undo', {}, hdr)).body.ok, true)
+        assert.deepEqual(await settings(), { theme: 'dark', remoteControlAtStartup: true })
+        await post(port, '/api/remote-control/off', {}, hdr)
+        assert.equal((await post(port, '/api/remote-control/on', {}, hdr)).body.ok, true)
         assert.deepEqual(await settings(), { theme: 'dark', remoteControlAtStartup: true })
       } finally {
         await close(server)

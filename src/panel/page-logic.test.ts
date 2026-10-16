@@ -23,6 +23,7 @@ import {
   passedWindow,
   quotaPressure,
   remoteControlSummary,
+  remoteControlTodo,
   sortAccounts,
   suggestAlias,
   suggestName,
@@ -537,6 +538,17 @@ describe('Remote Control button state', () => {
     assert.equal(
       remoteControlSummary([g('off', 'claude:main', 'claude:001'), g('missing', 'claude:002')], []),
       'off',
+    )
+  })
+  it('changes the groups that do not hold the chosen side yet, a default counting as either', () => {
+    const gs = [g('on', 'a'), g('off', 'b'), g('default', 'c'), g('missing', 'd'), g('blocked', 'e')]
+    assert.deepEqual(
+      remoteControlTodo(gs, 'on').map((x) => x.accounts[0]),
+      ['b', 'c'],
+    )
+    assert.deepEqual(
+      remoteControlTodo(gs, 'off').map((x) => x.accounts[0]),
+      ['a', 'c'],
     )
   })
   it('ignores groups used only by API Accounts', () => {

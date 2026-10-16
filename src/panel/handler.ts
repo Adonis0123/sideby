@@ -604,12 +604,20 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return { ref: found.ref, undone: r.ok, message: r.message }
       },
     },
-    // Remote Control off by default (spec §3.22, ADR-0017): writes `remoteControlAtStartup: false` into each Claude
-    // settings file that turns it on or leaves it to the default; the page shows the files first, from the state.
+    // Remote Control at startup (spec §3.22, ADR-0017): writes `remoteControlAtStartup` (false for off, true for on)
+    // into each Claude settings file that does not hold it yet; the page shows the files first, from the state.
     '/api/remote-control/off': {
       async run() {
         const rt = await getRuntime()
         const r = await rt.remoteControlOff()
+        const home = rt.paths.home
+        return { ...r, results: r.results.map((x) => ({ ...x, file: tildify(x.file, home) })) }
+      },
+    },
+    '/api/remote-control/on': {
+      async run() {
+        const rt = await getRuntime()
+        const r = await rt.remoteControlOn()
         const home = rt.paths.home
         return { ...r, results: r.results.map((x) => ({ ...x, file: tildify(x.file, home) })) }
       },

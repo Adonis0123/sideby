@@ -19,6 +19,7 @@ Ways to turn it off:
 - It records the previous value per file under the state directory; `undo` restores it only while the key is still `false`.
 - This is the fourth exception to "sideby writes nothing into a Host directory", after `quota setup claude --yes`, `handoff setup grok --yes` and `tune apply` (ADR-0012), and follows the same rules as `tune apply`.
 - Still never: read or print any other value of the file, write `disableRemoteControl`, touch `~/.claude.json`, or end a running session.
+- **Amended 2026-10-16: turning it on too.** Once the banner was gone, the Panel's dialog showed "Off" with no way back but `/config` in a session, which a beginner does not know. `sideby remote-control on` and the dialog's switch (Settings → Remote Control) write `true` the same way: only files that are `false` or not set, one key, a preview first, a note that every device signed in to the account can read new sessions, and an undo. The undo record now keeps the value sideby wrote (`wrote`; records without it mean `false`), and `undo` restores only while the key still holds it. sideby still never turns it on by itself.
 
 ## Consequences
 

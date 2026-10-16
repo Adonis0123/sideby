@@ -4,7 +4,12 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
 import type { Account, ReadContext } from '../types.ts'
-import { remoteControlGroups, turnRemoteControlOff, undoRemoteControlOff } from './remote-control.ts'
+import {
+  remoteControlGroups,
+  turnRemoteControlOff,
+  turnRemoteControlOn,
+  undoRemoteControlOff,
+} from './remote-control.ts'
 
 const MARKER = 'not-a-secret-marker-only-for-this-test'
 
@@ -121,6 +126,69 @@ describe('Remote Control off by default', () => {
       assert.equal(
         await readFile(join(main.dir, 'settings.json'), 'utf8'),
         '{"remoteControlAtStartup":true}\n',
+      )
+    })
+  })
+
+  it('on writes true where it was off or missing the key, and undo puts each file back', async () => {
+    await withFakeHome(async (h) => {
+      const { main, own, none, all } = await setUp(h)
+      await writeFile(
+        join(main.dir, 'settings.json'),
+        `{"env":{"X":"${MARKER}"},"remoteControlAtStartup":false}\n`,
+      )
+      const r = await turnRemoteControlOn(all, ctx(h))
+      assert.deepEqual([r.ok, r.results.length], [true, 2])
+      assert.deepEqual(await json(join(main.dir, 'settings.json')), {
+        env: { X: MARKER },
+        remoteControlAtStartup: true,
+      })
+      assert.deepEqual(await json(join(own.dir, 'settings.json')), {
+        model: 'x',
+        remoteControlAtStartup: true,
+      })
+      await assert.rejects(stat(join(none.dir, 'settings.json')))
+      assert.ok(!JSON.stringify(r).includes(MARKER))
+      const after = await remoteControlGroups(all, ctx(h))
+      assert.deepEqual(
+        after.map((g) => [g.state, g.undo]),
+        [
+          ['on', true],
+          ['on', true],
+          ['missing', false],
+        ],
+      )
+      assert.deepEqual((await turnRemoteControlOn(all, ctx(h))).results.length, 0)
+      assert.equal((await undoRemoteControlOff(all, ctx(h))).ok, true)
+      assert.equal((await json(join(main.dir, 'settings.json'))).remoteControlAtStartup, false)
+      assert.deepEqual(await json(join(own.dir, 'settings.json')), { model: 'x' })
+    })
+  })
+
+  it('undo after on leaves a setting the user turned off since', async () => {
+    await withFakeHome(async (h) => {
+      const { main, all } = await setUp(h)
+      await writeFile(join(main.dir, 'settings.json'), '{"remoteControlAtStartup":false}\n')
+      await turnRemoteControlOn(all, ctx(h))
+      await writeFile(join(main.dir, 'settings.json'), '{"remoteControlAtStartup":false}\n')
+      const groups = await remoteControlGroups(all, ctx(h))
+      assert.deepEqual([groups[0]?.state, groups[0]?.undo], ['off', false])
+    })
+  })
+
+  it('reads a record written before on existed as one that wrote false', async () => {
+    await withFakeHome(async (h) => {
+      const { all } = await setUp(h)
+      await turnRemoteControlOff(all, ctx(h))
+      const dir = h.path('.local/state/sideby/remote-control')
+      for (const f of await readdir(dir)) {
+        const r = await json(join(dir, f))
+        delete r.wrote
+        await writeFile(join(dir, f), JSON.stringify(r))
+      }
+      assert.deepEqual(
+        (await remoteControlGroups(all, ctx(h))).map((g) => g.undo),
+        [true, true, false],
       )
     })
   })

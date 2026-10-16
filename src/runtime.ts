@@ -37,6 +37,7 @@ import {
   type RemoteControlGroup,
   remoteControlGroups,
   turnRemoteControlOff,
+  turnRemoteControlOn,
   undoRemoteControlOff,
 } from './core/remote-control.ts'
 import { findResumeRoute } from './core/resume.ts'
@@ -291,7 +292,9 @@ export interface Runtime {
   remoteControl(): Promise<RemoteControlGroup[]>
   /** Sets `remoteControlAtStartup` to false wherever it is on or left to the default, remembering how to undo it. */
   remoteControlOff(): Promise<RemoteControlChange>
-  /** Puts back what `remoteControlOff` replaced, only where the key still holds false. */
+  /** Sets `remoteControlAtStartup` to true wherever it is off or left to the default, remembering how to undo it. */
+  remoteControlOn(): Promise<RemoteControlChange>
+  /** Puts back what `remoteControlOff` or `remoteControlOn` replaced, only where the key still holds what it wrote. */
   remoteControlUndo(): Promise<RemoteControlChange>
   /**
    * Which Account of a Family to move on to (spec §3.13). Throws a UserError with code `no-quota-source`
@@ -901,6 +904,9 @@ export async function createRuntime(
     },
     async remoteControlOff() {
       return turnRemoteControlOff(await accounts(), readContext())
+    },
+    async remoteControlOn() {
+      return turnRemoteControlOn(await accounts(), readContext())
     },
     async remoteControlUndo() {
       return undoRemoteControlOff(await accounts(), readContext())

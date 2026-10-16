@@ -200,12 +200,13 @@ sideby tune undo claude:work --yes       # 恢复原来的值
 
 Claude Code 的 Remote Control 把会话连到 claude.ai/code 和 Claude 手机 App，登录同一个 claude.ai 账号的设备都能看到并继续这些对话。在 `/config` 里打开「Enable Remote Control for all sessions」会在 `settings.json` 里存下 `remoteControlAtStartup: true`；账号一般都把这个文件链接到主账号，所以每个账号都会自动连接。
 
-它开着时，面板顶部会出提示条和 **全部关闭** 按钮。点了先列出每个设置文件、改动（`remoteControlAtStartup true → false`）和用到它的账号，确认后才写入；之后的提示里有 **撤销**。**保持开启** 只在这个浏览器里不再提示。无论哪种，右上角 **设置** 里一直有一行 **Remote Control**，写着当前状态（开、默认、关），点开是同样的列表和 **确认关闭**；sideby 关过之后是 **撤销上次关闭**。状态为开时，设置按钮带一个橙色圆点。命令行同样可以：
+它开着时，面板顶部会出提示条和 **全部关闭** 按钮。点了先列出每个设置文件、改动（`remoteControlAtStartup true → false`）和用到它的账号，确认后才写入；之后的提示里有 **撤销**。**保持开启** 只在这个浏览器里不再提示。无论哪种，右上角 **设置** 里一直有一行 **Remote Control**，写着当前状态（开、默认、关）。点开是同样的列表和一个开关 **新会话自动打开：开 / 关**：切换后先列出每个文件的改动，点 **确认打开** 或 **确认关闭** 才写入（打开前会提醒：登录这个账号的设备都能看到新会话）；**撤销上次更改** 恢复 sideby 改掉的值。状态为开时，设置按钮带一个橙色圆点。命令行同样可以：
 
 ```sh
 sideby remote-control            # 每个设置文件的状态：on、default（由 Claude Code 决定）、off
 sideby remote-control off        # 只展示改动，退出码 10
 sideby remote-control off --yes  # 写入
+sideby remote-control on --yes   # 给所有账号重新打开
 sideby remote-control undo --yes # 恢复原来的值
 ```
 

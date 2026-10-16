@@ -19,6 +19,7 @@ import {
   passedWindow,
   quotaPressure,
   remoteControlSummary,
+  remoteControlTodo,
   sortAccounts,
   suggestAlias,
   suggestName,
@@ -45,6 +46,7 @@ const LOGIC = [
   passedWindow,
   quotaPressure,
   remoteControlSummary,
+  remoteControlTodo,
   sortAccounts,
   suggestAlias,
   suggestName,
@@ -2740,7 +2742,8 @@ const MAIN = String.raw`
   // ---------- Remote Control (spec §3.22) ----------
   // Shown while some Claude settings file turns Remote Control on. "Turn all off" first lists each file, the change
   // and the accounts it reaches, in the banner itself; the toast after it carries the undo.
-  const rc = { confirm: false, busy: false }
+  // target: the side the dialog's switch was moved to, waiting for its confirmation; null while nothing is chosen.
+  const rc = { confirm: false, busy: false, target: null }
   const shortRef = (ref) => ref.replace(/^claude:/, '')
   function remoteControlBanner() {
     const groups = S.state.remoteControl || []
@@ -2757,29 +2760,32 @@ const MAIN = String.raw`
           h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => { rc.confirm = true; renderBanners() } }, t('rc.turnOff')),
           h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { prefs.rcHide = true; savePrefs(); renderBanners(); toast(t('rc.hidden')) } }, t('rc.keep'))))
     const lines = todo.map((g) => h('li', null, h('code', null, g.file), ' ',
-      t('rc.change', { from: g.state === 'on' ? 'true' : t('rc.notSet') }), ' ',
+      t('rc.change', { from: g.state === 'on' ? 'true' : t('rc.notSet'), to: 'false' }), ' ',
       h('span', { class: 'muted' }, t('rc.usedBy', { refs: g.accounts.map(shortRef).join(', ') }))))
     return h('div', { class: 'banner banner-warn', role: 'status' },
       h('div', null, h('b', null, t('rc.confirmTitle')), h('ul', null, lines), h('div', { class: 'small' }, t('rc.confirmNote'))),
       h('div', { class: 'banner-actions' },
-        h('button', { class: 'btn btn-sm btn-primary', type: 'button', disabled: rc.busy, onclick: remoteControlOff }, rc.busy ? spinner() : null, t('rc.confirm')),
+        h('button', { class: 'btn btn-sm btn-primary', type: 'button', disabled: rc.busy, onclick: () => setRemoteControl('off') }, rc.busy ? spinner() : null, t('rc.confirm')),
         h('button', { class: 'btn btn-sm', type: 'button', disabled: rc.busy, onclick: () => { rc.confirm = false; renderBanners() } }, t('btn.cancel'))))
   }
-  async function remoteControlOff() {
+  async function setRemoteControl(to) {
     rc.busy = true
     renderBanners()
     if (dlg.kind === 'rc') renderRc()
+    const fail = to === 'on' ? 'rc.failedOn' : 'rc.failed'
     try {
-      const r = await api('/api/remote-control/off', {})
+      const r = await api('/api/remote-control/' + to, {})
       if (r.ok) {
-        // Hide the banner now; the reload that follows confirms it.
-        S.state.remoteControl = (S.state.remoteControl || []).map((g) => g.state === 'on' || g.state === 'default' ? { ...g, state: 'off', undo: true } : g)
-        toast(t('rc.done'), { action: { label: t('toast.undo'), run: remoteControlUndo }, duration: 12000 })
+        // Show the new state now; the reload that follows confirms it.
+        const changed = new Set(remoteControlTodo(S.state.remoteControl || [], to).map((g) => g.file))
+        S.state.remoteControl = (S.state.remoteControl || []).map((g) => changed.has(g.file) ? { ...g, state: to, undo: true } : g)
+        toast(t(to === 'on' ? 'rc.doneOn' : 'rc.done'), { action: { label: t('toast.undo'), run: remoteControlUndo }, duration: 12000 })
       }
-      else toast(t('rc.failed', { msg: r.message }), { kind: 'fail' })
-    } catch (e) { toast(t('rc.failed', { msg: e.message }), { kind: 'fail' }) }
+      else toast(t(fail, { msg: r.message }), { kind: 'fail' })
+    } catch (e) { toast(t(fail, { msg: e.message }), { kind: 'fail' }) }
     rc.busy = false
     rc.confirm = false
+    rc.target = null
     renderBanners()
     if (dlg.kind === 'rc') renderRc()
     await load({ silent: true })
@@ -2862,25 +2868,36 @@ const MAIN = String.raw`
   }
   function openRc() {
     if (!S.state || !rcSummary()) return
+    rc.target = null
     showDialog('rc')
     renderRc()
   }
+  // One switch for every Claude settings file: moving it lists what changes, and only the confirmation writes.
   function renderRc() {
     const groups = S.state.remoteControl || []
-    const todo = groups.filter((g) => g.state === 'on' || g.state === 'default')
-    const undo = groups.some((g) => g.undo && g.state === 'off')
+    const sum = rcSummary()
+    const to = rc.target
+    const todo = to ? remoteControlTodo(groups, to) : []
+    const changing = new Set(todo.map((g) => g.file))
+    const undo = groups.some((g) => g.undo)
+    const pick = (v) => { rc.target = v === sum ? null : v; renderRc() }
+    const sw = h('div', { class: 'set-row rc-switch' }, h('span', null, t('rc.switch')),
+      h('div', { class: 'seg', role: 'group', 'aria-label': t('rc.switch') }, ['on', 'off'].map((v) =>
+        h('button', { class: 'seg-btn', type: 'button', disabled: BOOT.readOnly || rc.busy, 'aria-pressed': String((to || sum) === v), onclick: () => pick(v) }, t('rc.state.' + v)))))
+    const fromOf = (g) => g.state === 'on' ? 'true' : g.state === 'off' ? 'false' : t('rc.notSet')
     const rows = groups.map((g) => h('li', { class: 'rc-row' },
       h('div', null, h('code', null, g.file), ' ', h('span', { class: 'chip chip-sm ' + (g.state === 'on' ? 'chip-warn' : g.state === 'off' ? 'chip-ok' : g.state === 'blocked' ? 'chip-fail' : '') }, t('rc.state.' + g.state))),
       h('div', { class: 'muted small' }, t('rc.usedBy', { refs: g.accounts.map(shortRef).join(', ') })),
       g.reason ? h('div', { class: 'muted small' }, g.reason) : null,
-      g.state === 'on' || g.state === 'default' ? h('div', { class: 'small' }, t('rc.change', { from: g.state === 'on' ? 'true' : t('rc.notSet') })) : null))
-    const body = [h('p', { class: 'small' }, t('rc.explain')), h('ul', { class: 'rc-list' }, rows)]
-    if (todo.length) body.push(h('p', { class: 'small muted' }, t('rc.confirmNote')))
-    else body.push(h('p', { class: 'small muted' }, t('rc.allOff')))
-    if (BOOT.readOnly && todo.length) body.push(h('p', { class: 'small' }, t('rc.readOnly')))
-    const foot = [h('button', { class: 'btn', type: 'button', disabled: rc.busy, onclick: () => dlg.el.close() }, t(todo.length && !BOOT.readOnly ? 'btn.cancel' : 'btn.close'))]
-    if (!BOOT.readOnly && undo && !todo.length) foot.push(h('button', { class: 'btn', type: 'button', disabled: rc.busy, onclick: async () => { rc.busy = true; renderRc(); await remoteControlUndo(); rc.busy = false; if (dlg.kind === 'rc') renderRc() } }, t('rc.undo')))
-    if (!BOOT.readOnly && todo.length) foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: rc.busy, 'aria-busy': rc.busy ? 'true' : null, onclick: remoteControlOff }, rc.busy ? spinner() : null, t('rc.confirm')))
+      changing.has(g.file) ? h('div', { class: 'small rc-change' }, t('rc.change', { from: fromOf(g), to: to === 'on' ? 'true' : 'false' })) : null))
+    const body = [h('p', { class: 'small' }, t('rc.explain')), sw, h('ul', { class: 'rc-list' }, rows)]
+    if (to === 'on') body.push(h('div', { class: 'note note-warn small' }, t('rc.onWarn')))
+    else if (to === 'off') body.push(h('p', { class: 'small muted' }, t('rc.confirmNote')))
+    else if (sum === 'off') body.push(h('p', { class: 'small muted' }, t('rc.allOff')))
+    if (BOOT.readOnly) body.push(h('p', { class: 'small' }, t('rc.readOnlyBoth')))
+    const foot = [h('button', { class: 'btn', type: 'button', disabled: rc.busy, onclick: () => to ? pick(sum) : dlg.el.close() }, t(to ? 'btn.cancel' : 'btn.close'))]
+    if (!BOOT.readOnly && !to && undo) foot.push(h('button', { class: 'btn', type: 'button', disabled: rc.busy, onclick: async () => { rc.busy = true; renderRc(); await remoteControlUndo(); rc.busy = false; if (dlg.kind === 'rc') renderRc() } }, t('rc.undo')))
+    if (!BOOT.readOnly && to) foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: rc.busy || !todo.length, 'aria-busy': rc.busy ? 'true' : null, onclick: () => setRemoteControl(to) }, rc.busy ? spinner() : null, t(to === 'on' ? 'rc.confirmOn' : 'rc.confirm')))
     setKids(dlg.el, dialogFrame(t('rc.dialogTitle'), null, body, foot))
   }
 

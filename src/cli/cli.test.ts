@@ -1490,6 +1490,26 @@ describe('remote-control (spec §3.22)', () => {
       assert.equal((await sideby(h, ['remote-control', 'nope'])).code, 2)
     })
   })
+  it('turns it on the same way: a preview with exit 10, then --yes', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{"model":"sonnet","remoteControlAtStartup":false}\n')
+      await fakeHost(h, 'claude')
+      const before = await snapshot(h.home)
+      const preview = await sideby(h, ['remote-control', 'on'])
+      assert.equal(preview.code, 10)
+      assert.match(preview.out, /remoteControlAtStartup false -> true/)
+      assert.match(preview.out, /every device signed in/)
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+      const done = await sideby(h, ['remote-control', 'on', '--yes', '--json'])
+      assert.equal(done.code, 0)
+      assert.equal(checkSchema('remote-control', done.out).action, 'on')
+      assert.deepEqual(JSON.parse(await readFile(h.path('.claude/settings.json'), 'utf8')), {
+        model: 'sonnet',
+        remoteControlAtStartup: true,
+      })
+      assert.equal((await sideby(h, ['remote-control', 'on', '--yes'])).code, 0)
+    })
+  })
 })
 
 describe('tune (spec §3.18)', () => {

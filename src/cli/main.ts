@@ -36,7 +36,7 @@ Usage:
                                       from your last 7 days of sessions (read-only)
   sideby model <account> [<model>|default] [--effort <level>|default] [--yes]
                                       show or set the model and effort sideby starts this account with
-  sideby remote-control [off|undo] [--yes]
+  sideby remote-control [on|off|undo] [--yes]
                                       whether Claude sessions connect to claude.ai by themselves;
                                       off stops that for every account (shows the change first)
   sideby handoff status               what Auto Handoff still needs on this machine

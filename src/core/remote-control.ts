@@ -1,4 +1,4 @@
-// Remote Control off by default (spec §3.22, ADR-0017): reads and writes one key, `remoteControlAtStartup`, of each
+// Remote Control at startup (spec §3.22, ADR-0017): reads and writes one key, `remoteControlAtStartup`, of each
 // Claude Account's `settings.json`. Accounts that share a file (a link to the Main Account's) form one group and one
 // write. Nothing but that key is ever read out of the file into an output, an error or the undo record; writes go
 // through `writeIfUnchanged`, keep every other key, and never create, replace or retarget a link.
@@ -24,14 +24,16 @@ export interface RemoteControlGroup {
   state: RemoteControlState
   /** For `blocked` and `missing`: why, and what to do. */
   reason?: string
-  /** sideby turned it off here and can put the earlier value back. */
+  /** sideby set it here and can put the earlier value back. */
   undo: boolean
 }
 
 export interface RemoteControlUndoRecord {
   file: string
-  /** The value before sideby wrote `false`, or null when the key was not there. */
+  /** The value before sideby wrote, or null when the key was not there. */
   previous: boolean | null
+  /** The value sideby wrote; records from before `on` existed lack it and mean `false`. */
+  wrote?: boolean
   at: string
 }
 
@@ -98,7 +100,8 @@ export async function remoteControlGroups(
         group.reason = `settings.json cannot be changed safely: ${read.error}. Fix or move the file, then try again`
       } else {
         group.state = stateOf(read.obj[RC_KEY])
-        group.undo = group.state === 'off' && (await readRecord(ctx, where.file)) !== null
+        const record = await readRecord(ctx, where.file)
+        group.undo = record !== null && read.obj[RC_KEY] === (record.wrote ?? false)
       }
     }
   }
@@ -108,6 +111,11 @@ export async function remoteControlGroups(
 /** The groups `off` would change: those that are on, or follow a default that may be on. */
 export function groupsToTurnOff(groups: readonly RemoteControlGroup[]): RemoteControlGroup[] {
   return groups.filter((g) => g.state === 'on' || g.state === 'default')
+}
+
+/** The groups `on` would change: those that are off, or follow a default that may be off. */
+export function groupsToTurnOn(groups: readonly RemoteControlGroup[]): RemoteControlGroup[] {
+  return groups.filter((g) => g.state === 'off' || g.state === 'default')
 }
 
 async function writeKey(file: string, change: (obj: Json) => Json, expect: (obj: Json) => string | null) {
@@ -125,21 +133,27 @@ async function writeKey(file: string, change: (obj: Json) => Json, expect: (obj:
   return wrote ? null : 'settings.json changed while sideby was writing, so nothing was changed. Try again.'
 }
 
-/** Sets `remoteControlAtStartup` to false in every group that is on or follows the default, remembering each old value. */
-export async function turnRemoteControlOff(
+/**
+ * Sets `remoteControlAtStartup` to `to` in every group that does not hold it yet (a default counts as either),
+ * remembering each old value for undo.
+ */
+export async function setRemoteControl(
   accounts: readonly Account[],
   ctx: ReadContext,
+  to: boolean,
 ): Promise<RemoteControlChange> {
   const groups = await remoteControlGroups(accounts, ctx)
-  const todo = groupsToTurnOff(groups)
+  const todo = to ? groupsToTurnOn(groups) : groupsToTurnOff(groups)
   if (todo.length === 0) {
-    const stuck = groups.find((g) => g.state === 'blocked')
+    const stuck = groups.find((g) => g.state === 'blocked' || (to && g.state === 'missing'))
     return stuck
       ? { ok: false, results: [], message: `Nothing was changed: ${stuck.reason}` }
       : {
           ok: true,
           results: [],
-          message: 'Remote Control already does not start by itself; nothing changed.',
+          message: to
+            ? 'Remote Control already starts by itself; nothing changed.'
+            : 'Remote Control already does not start by itself; nothing changed.',
         }
   }
   const results: RemoteControlChange['results'] = []
@@ -149,36 +163,51 @@ export async function turnRemoteControlOff(
       g.file,
       (obj) => {
         previous = typeof obj[RC_KEY] === 'boolean' ? (obj[RC_KEY] as boolean) : null
-        obj[RC_KEY] = false
+        obj[RC_KEY] = to
         return obj
       },
-      (obj) => (obj[RC_KEY] === false ? 'It was turned off meanwhile; nothing changed.' : null),
+      (obj) => (obj[RC_KEY] === to ? `It was turned ${to ? 'on' : 'off'} meanwhile; nothing changed.` : null),
     )
     if (failed) {
       results.push({ file: g.file, accounts: g.accounts, ok: false, message: failed })
       continue
     }
-    const record: RemoteControlUndoRecord = { file: g.file, previous, at: new Date().toISOString() }
+    const record: RemoteControlUndoRecord = {
+      file: g.file,
+      previous,
+      wrote: to,
+      at: new Date().toISOString(),
+    }
     await mkdir(join(ctx.stateDir, 'remote-control'), { recursive: true })
     await writeFileAtomic(recordPath(ctx, g.file), `${JSON.stringify(record, null, 2)}\n`, 0o600)
-    results.push({ file: g.file, accounts: g.accounts, ok: true, message: 'Turned off.' })
+    results.push({ file: g.file, accounts: g.accounts, ok: true, message: to ? 'Turned on.' : 'Turned off.' })
   }
   const ok = results.every((r) => r.ok)
   return {
     ok,
     results,
-    message: ok
-      ? 'Done. New sessions no longer connect to claude.ai by themselves; restart sessions that are already running. You can still start it in a session with /remote-control.'
-      : 'Some files could not be changed; see each line.',
+    message: !ok
+      ? 'Some files could not be changed; see each line.'
+      : to
+        ? 'Done. New sessions connect to claude.ai and the Claude app by themselves, where every device signed in to that account can read them; restart sessions that are already running.'
+        : 'Done. New sessions no longer connect to claude.ai by themselves; restart sessions that are already running. You can still start it in a session with /remote-control.',
   }
 }
 
-/** Groups sideby can put back: it wrote `false` there and the key still holds it. */
+/** Sets `remoteControlAtStartup` to false in every group that is on or follows the default. */
+export const turnRemoteControlOff = (accounts: readonly Account[], ctx: ReadContext) =>
+  setRemoteControl(accounts, ctx, false)
+
+/** Sets `remoteControlAtStartup` to true in every group that is off or follows the default. */
+export const turnRemoteControlOn = (accounts: readonly Account[], ctx: ReadContext) =>
+  setRemoteControl(accounts, ctx, true)
+
+/** Groups sideby can put back: it wrote there and the key still holds what it wrote. */
 export function groupsToUndo(groups: readonly RemoteControlGroup[]): RemoteControlGroup[] {
   return groups.filter((g) => g.undo)
 }
 
-/** Puts back what each file had before `off`, only while the key is still `false`. */
+/** Puts back what each file had before `on` or `off`, only while the key still holds what sideby wrote. */
 export async function undoRemoteControlOff(
   accounts: readonly Account[],
   ctx: ReadContext,
@@ -197,7 +226,9 @@ export async function undoRemoteControlOff(
         return obj
       },
       (obj) =>
-        obj[RC_KEY] === false ? null : 'The setting was changed after sideby set it, so it was left alone.',
+        obj[RC_KEY] === (record.wrote ?? false)
+          ? null
+          : 'The setting was changed after sideby set it, so it was left alone.',
     )
     if (!failed) await rm(recordPath(ctx, g.file), { force: true })
     results.push({ file: g.file, accounts: g.accounts, ok: !failed, message: failed ?? 'Put back.' })

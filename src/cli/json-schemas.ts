@@ -340,7 +340,12 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
   'remote-control': Type.Object(
     {
       schemaVersion: Version,
-      action: Type.Union([Type.Literal('status'), Type.Literal('off'), Type.Literal('undo')]),
+      action: Type.Union([
+        Type.Literal('status'),
+        Type.Literal('on'),
+        Type.Literal('off'),
+        Type.Literal('undo'),
+      ]),
       applied: Type.Optional(Type.Boolean({ description: 'True once the change was written (or undone).' })),
       groups: Type.Optional(
         Type.Array(

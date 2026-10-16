@@ -634,7 +634,7 @@ const en = {
   'rc.hidden': 'Hidden in this browser. sideby remote-control off turns it off later.',
   'rc.readOnly': 'Run sideby remote-control off to turn it off.',
   'rc.confirmTitle': 'Turn off Remote Control at startup?',
-  'rc.change': 'remoteControlAtStartup {from} → false',
+  'rc.change': 'remoteControlAtStartup {from} → {to}',
   'rc.notSet': 'not set',
   'rc.usedBy': 'used by {refs}',
   'rc.confirmNote':
@@ -659,8 +659,15 @@ const en = {
   'rc.explain':
     'When it is on, each new Claude session connects to claude.ai and the Claude app, where every device signed in to that account can read it. Default leaves it to Claude Code or your organization.',
   'rc.allOff':
-    'Off everywhere. You can still start it in a session with /remote-control, or turn it back on in /config.',
+    'Off everywhere. You can still start it in a session with /remote-control, or switch it on above.',
   'rc.undo': 'Undo last change',
+  'rc.switch': 'New sessions start it by themselves',
+  'rc.confirmOn': 'Turn on',
+  'rc.onWarn':
+    'Every new Claude session of these accounts will connect to claude.ai and the Claude app. Anyone signed in to the account on another device can read and continue it.',
+  'rc.doneOn': 'Remote Control starts by itself in new sessions. Restart sessions that are running.',
+  'rc.failedOn': 'Could not turn it on: {msg}',
+  'rc.readOnlyBoth': 'Run sideby remote-control on or off to change it.',
   'rc.undone': 'Undone. New sessions go back to the previous setting.',
   'banner.readOnly': 'Read-only view. Use the sideby CLI to fix or create accounts.',
   'banner.plugins.one': '{n} plugin problem.',
@@ -1266,7 +1273,7 @@ const zh: Record<MessageKey, string> = {
   'rc.hidden': '本浏览器不再提示。以后可以运行 sideby remote-control off 关闭。',
   'rc.readOnly': '运行 sideby remote-control off 关闭。',
   'rc.confirmTitle': '关闭 Remote Control 自动打开？',
-  'rc.change': 'remoteControlAtStartup {from} → false',
+  'rc.change': 'remoteControlAtStartup {from} → {to}',
   'rc.notSet': '未设置',
   'rc.usedBy': '用于 {refs}',
   'rc.confirmNote': '已经开着的会话要重开才断开。需要时仍可在会话里运行 /remote-control 手动打开。',
@@ -1289,8 +1296,15 @@ const zh: Record<MessageKey, string> = {
   'rc.dialogTitle': 'Remote Control 自动打开',
   'rc.explain':
     '打开时，每个新的 Claude 会话都会连到 claude.ai 和 Claude 手机 App，登录这个账号的设备都能看到对话。「默认」表示交给 Claude Code 或你的组织决定。',
-  'rc.allOff': '已全部关闭。需要时仍可在会话里运行 /remote-control 手动打开，或在 /config 里重新打开。',
-  'rc.undo': '撤销上次关闭',
+  'rc.allOff': '已全部关闭。需要时仍可在会话里运行 /remote-control 手动打开，或在上面切到「开」。',
+  'rc.undo': '撤销上次更改',
+  'rc.switch': '新会话自动打开',
+  'rc.confirmOn': '确认打开',
+  'rc.onWarn':
+    '这些账号的每个新 Claude 会话都会连到 claude.ai 和 Claude 手机 App，其他设备上登录这个账号的人都能看到并继续对话。',
+  'rc.doneOn': '新会话会自动打开 Remote Control。开着的会话要重开。',
+  'rc.failedOn': '没能打开：{msg}',
+  'rc.readOnlyBoth': '运行 sideby remote-control on 或 off 来修改。',
   'rc.undone': '已撤销，新会话恢复原来的设置。',
   'banner.readOnly': '只读视图。修复或创建账号请用 sideby 命令行。',
   'banner.plugins.one': '{n} 个插件问题。',
