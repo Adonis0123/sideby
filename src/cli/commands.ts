@@ -991,7 +991,10 @@ export async function cmdHandoff(a: ParsedArgs, io: Io): Promise<number> {
       requested: true,
       ...(next ? { next } : {}),
       ...(request.brief ? { brief: request.brief } : {}),
+      ...(request.now ? { now: true } : {}),
     })
+  else if (request.now)
+    io.out(`This session was waiting for its quota; ${next ?? 'the next account'} takes over now.`)
   else
     io.out(
       `${next ? `${next} takes over` : 'The next account starts'} when this turn ends; finish the turn now.`,

@@ -1,7 +1,8 @@
 // The files one Handoff chain keeps under `<state>/handoffs/<chain>/` (spec §3.17). The handoff hook runs on every
 // tool call, so this module imports only Node built-ins and leaf modules (never the Runtime or a Family index).
-// The parent `sideby run` writes `plan.json` and `chain.json`; the hook writes `run-<id>.json` and `ready.json`;
-// `sideby handoff ready` writes `request.json`. Every file is mode 600 in a mode 700 directory.
+// The parent `sideby run` writes `plan.json`, `chain.json` and, while a session waits for a reset, `waiting.json`; the
+// hook writes `run-<id>.json` and `ready.json`; `sideby handoff ready` writes `request.json` (`ready.json` while the
+// session waits). Every file is mode 600 in a mode 700 directory.
 import { randomBytes } from 'node:crypto'
 import { chmod, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -25,6 +26,8 @@ export interface PlanFile {
   at: string
   decision: 'pick' | 'wait' | 'none'
   pick?: string
+  /** For `wait`: when the full window resets and the session goes on by itself. */
+  until?: string
   prepareAt: number
   threshold: number
   /** False when the session cannot write its Brief: no preparing step, and the threshold only ends the turn. */
@@ -38,6 +41,8 @@ export interface RunState {
   prepareSentAt?: string
   thresholdSentAt?: string
   stopBlocked?: boolean
+  /** The user was told this run waits for a reset instead of moving on (ADR-0018). */
+  waitNoticeSentAt?: string
   sessionId?: string
   transcriptPath?: string
 }
@@ -54,6 +59,13 @@ export interface ReadyFile {
   to?: string
   sessionId?: string
   transcriptPath?: string
+}
+
+/** The parent kept a session that hit its limit, to wait for the reset at `until` (ADR-0018). */
+export interface WaitingFile {
+  runId: string
+  until: string
+  at: string
 }
 
 export interface ChainHop {
@@ -73,6 +85,7 @@ export const FILES = {
   plan: 'plan.json',
   ready: 'ready.json',
   request: 'request.json',
+  waiting: 'waiting.json',
   chain: 'chain.json',
   run: (runId: string) => `run-${runId}.json`,
 } as const
@@ -114,14 +127,16 @@ export async function writeJsonFile(path: string, value: unknown): Promise<void>
 /**
  * `sideby handoff ready` (spec §3.17): asks the parent to hand over after this turn. Works only inside a run sideby
  * started with Auto Handoff; `briefFile`, when given, is copied into the chain directory (mode 600); `to` is the
- * Account ref to hand over to.
+ * Account ref to hand over to. While the session waits for a reset (`waiting.json`, typed as `! sideby handoff ready`),
+ * no turn will end to pick up a request, so it writes `ready.json` at once (`now`).
  * Returns the request, or null outside such a run.
  */
 export async function requestHandoff(
   env: Readonly<Record<string, string | undefined>>,
   briefFile?: string,
   to?: string,
-): Promise<ReadyFile | null> {
+  now: Date = new Date(),
+): Promise<(ReadyFile & { now: boolean }) | null> {
   const runId = env[HANDOFF_ENV.run]
   const dir = env[HANDOFF_ENV.dir]
   if (!runId || !dir) return null
@@ -132,11 +147,21 @@ export async function requestHandoff(
   }
   const request: ReadyFile = {
     runId,
-    at: new Date().toISOString(),
+    at: now.toISOString(),
     trigger: 'manual',
     ...(brief ? { brief, briefSource: 'user' as const } : {}),
     ...(to ? { to } : {}),
   }
+  const waiting = await readJsonFile<WaitingFile>(join(dir, FILES.waiting))
+  if (waiting && waiting.runId === runId && Date.parse(waiting.until) > now.getTime()) {
+    const state = (await readJsonFile<RunState>(join(dir, FILES.run(runId)))) ?? {}
+    await writeJsonFile(join(dir, FILES.ready), {
+      ...request,
+      ...(state.sessionId ? { sessionId: state.sessionId } : {}),
+      ...(state.transcriptPath ? { transcriptPath: state.transcriptPath } : {}),
+    })
+    return { ...request, now: true }
+  }
   await writeJsonFile(join(dir, FILES.request), request)
-  return request
+  return { ...request, now: false }
 }

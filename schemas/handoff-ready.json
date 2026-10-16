@@ -20,6 +20,10 @@
     },
     "brief": {
       "type": "string"
+    },
+    "now": {
+      "type": "boolean",
+      "const": true
     }
   },
   "title": "sideby handoff ready --json"

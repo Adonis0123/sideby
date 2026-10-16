@@ -551,6 +551,8 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       requested: Type.Literal(true),
       next: Type.Optional(Str),
       brief: Type.Optional(Str),
+      /** The session was waiting for its quota, so the handoff starts now instead of after a turn (ADR-0018). */
+      now: Type.Optional(Type.Literal(true)),
     },
     { title: 'sideby handoff ready --json' },
   ),

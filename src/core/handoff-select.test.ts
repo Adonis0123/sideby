@@ -39,22 +39,47 @@ describe('selectNext', () => {
     const base = { candidates: [acct('claude:002')], aliases: {}, used: [], now: NOW }
     const s = settings({ auto: true, sameFamily: true })
     assert.deepEqual(
-      selectNext({ ...base, origin: acct('claude:001', { quota: quota(96, 30) }), settings: s }),
+      selectNext({
+        ...base,
+        origin: acct('claude:001', { quota: quota(96, 30), resumesAtReset: true }),
+        settings: s,
+      }),
       {
         kind: 'wait',
         until: inMinutes(30),
       },
     )
     assert.deepEqual(
-      selectNext({ ...base, origin: acct('claude:001', { quota: quota(96, 31) }), settings: s }),
+      selectNext({
+        ...base,
+        origin: acct('claude:001', { quota: quota(96, 31), resumesAtReset: true }),
+        settings: s,
+      }),
       pick('claude:002'),
     )
+  })
+
+  it('never waits when the session cannot go on by itself, nor when the user asked to move on', () => {
+    const base = { candidates: [acct('claude:002')], aliases: {}, used: [], now: NOW }
+    const s = settings({ auto: true, sameFamily: true })
+    const full = (resumesAtReset?: boolean) =>
+      acct('claude:001', {
+        quota: quota(96, 10),
+        ...(resumesAtReset === undefined ? {} : { resumesAtReset }),
+      })
+    assert.deepEqual(selectNext({ ...base, origin: full(false), settings: s }), pick('claude:002'))
+    assert.deepEqual(selectNext({ ...base, origin: full(), settings: s }), pick('claude:002'))
+    assert.deepEqual(
+      selectNext({ ...base, origin: full(true), settings: s, manual: true }),
+      pick('claude:002'),
+    )
+    assert.equal(selectNext({ ...base, origin: full(true), settings: s }).kind, 'wait')
   })
 
   it('ahead, counts the fullest window past prepareAt as full: the plan read at the threshold already says wait', () => {
     const base = { candidates: [acct('claude:002')], aliases: {}, used: [], now: NOW }
     const s = settings({ auto: true, sameFamily: true })
-    const at = (used: number) => acct('claude:001', { quota: quota(used, 20) })
+    const at = (used: number) => acct('claude:001', { quota: quota(used, 20), resumesAtReset: true })
     assert.deepEqual(selectNext({ ...base, origin: at(90), settings: s }), pick('claude:002'))
     assert.deepEqual(selectNext({ ...base, origin: at(90), settings: s, ahead: true }), {
       kind: 'wait',
@@ -76,7 +101,7 @@ describe('selectNext', () => {
       observedAt: NOW.toISOString(),
       source: 'test',
     })
-    const origin = (weekly: number) => acct('claude:001', { quota: two(weekly) })
+    const origin = (weekly: number) => acct('claude:001', { quota: two(weekly), resumesAtReset: true })
     assert.deepEqual(
       selectNext({ ...base, origin: origin(94), settings: s, ahead: true }),
       pick('claude:002'),

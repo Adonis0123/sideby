@@ -10,6 +10,7 @@ import { claudePlugin } from '../families/claude/index.ts'
 import { cacheStateDir, writeQuotaCache } from '../families/claude/quota-cache.ts'
 import { codexPlugin } from '../families/codex/index.ts'
 import { createRuntime } from '../runtime.ts'
+import { FILES, readJsonFile, requestHandoff, type WaitingFile } from './handoff-chain.ts'
 import { runWithHandoff } from './handoff-run.ts'
 
 const builtins = [claudePlugin, codexPlugin].map((plugin) => ({
@@ -39,7 +40,82 @@ function terminal(): PassThrough & { isTTY: boolean; setRawMode: () => void } {
   return Object.assign(new PassThrough(), { isTTY: true, setRawMode: () => {} })
 }
 
+/** The first run hits its usage limit (what the StopFailure hook writes), then idles until it is ended. */
+const LIMIT_ON_FIRST_RUN = READY_ON_FIRST_RUN.replace("trigger: 'manual'", "trigger: 'limit'")
+
+async function fullSoon(h: FakeHome) {
+  await writeQuotaCache(cacheStateDir(h.env), '001', {
+    version: 1,
+    observedAt: new Date().toISOString(),
+    windows: [
+      {
+        label: '5h',
+        windowMinutes: 300,
+        usedPercent: 100,
+        resetsAt: new Date(Date.now() + 20 * 60_000).toISOString(),
+      },
+    ],
+  })
+}
+
+async function waitFor<T>(get: () => Promise<T | null>): Promise<T> {
+  for (let i = 0; i < 200; i++) {
+    const v = await get()
+    if (v) return v
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  throw new Error('timed out')
+}
+
 describe('runWithHandoff', () => {
+  it('at the limit with a reset soon, keeps the session; `handoff ready` typed meanwhile moves on at once', async () => {
+    await withFakeHome(async (h) => {
+      await fakeHost(h, 'claude', { sleep: 20, onStart: LIMIT_ON_FIRST_RUN })
+      await fullSoon(h)
+      const rt = await setup(h, { auto: true, sameFamily: true, countdownSeconds: 0 })
+      const lines: string[] = []
+      const run = runWithHandoff(rt, 'cc001', [], { err: (l) => lines.push(l), stdin: terminal() })
+      const root = join(rt.paths.stateDir, 'handoffs')
+      const dir = join(root, (await waitFor(async () => (await readdir(root).catch(() => []))[0] ?? null))!)
+      const waiting = await waitFor(() => readJsonFile<WaitingFile>(join(dir, FILES.waiting)))
+      assert.ok(Date.parse(waiting.until) > Date.now())
+      const asked = await requestHandoff({ SIDEBY_HANDOFF_RUN: waiting.runId, SIDEBY_HANDOFF_DIR: dir })
+      assert.equal(asked?.now, true)
+      assert.equal(await run, 0)
+      const starts = (await readHostLog(h, 'claude')).filter((r) => r.argv)
+      assert.equal(starts.length, 2)
+      assert.equal(starts[1]!.env.CLAUDE_CONFIG_DIR, h.path('.claude-002'))
+      assert.match(starts[1]!.argv.at(-1)!, /because the user asked to hand over/)
+      assert.ok(lines.some((l) => /handing over from claude:001 to claude:002/.test(l)))
+      assert.equal(await readJsonFile(join(dir, FILES.waiting)), null)
+    })
+  })
+
+  it('at the limit with a reset soon, says why once the session ends on its own', async () => {
+    await withFakeHome(async (h) => {
+      await fakeHost(h, 'claude', { sleep: 1, onStart: LIMIT_ON_FIRST_RUN })
+      await fullSoon(h)
+      const rt = await setup(h, { auto: true, sameFamily: true, countdownSeconds: 0 })
+      const lines: string[] = []
+      assert.equal(await runWithHandoff(rt, 'cc001', [], { err: (l) => lines.push(l), stdin: terminal() }), 0)
+      assert.equal((await readHostLog(h, 'claude')).filter((r) => r.argv).length, 1)
+      assert.ok(lines.some((l) => /claude:001 did not hand over: .*waiting beats moving on/.test(l)))
+    })
+  })
+
+  it('does not wait when Claude will not continue by itself at the reset', async () => {
+    await withFakeHome(async (h) => {
+      await fakeHost(h, 'claude', { sleep: 20, onStart: LIMIT_ON_FIRST_RUN })
+      await fullSoon(h)
+      await h.write('.claude-001/settings.json', '{"autoContinueAtUsageLimit": false}')
+      const rt = await setup(h, { auto: true, sameFamily: true, countdownSeconds: 0 })
+      assert.equal(await runWithHandoff(rt, 'cc001', [], { err: () => {}, stdin: terminal() }), 0)
+      const starts = (await readHostLog(h, 'claude')).filter((r) => r.argv)
+      assert.equal(starts[1]?.env.CLAUDE_CONFIG_DIR, h.path('.claude-002'))
+      assert.match(starts[1]!.argv.at(-1)!, /because its quota ran out/)
+    })
+  })
+
   it('ends the ready Host and starts the next Account with the Brief path after --', async () => {
     await withFakeHome(async (h) => {
       await fakeHost(h, 'claude', { sleep: 20, onStart: READY_ON_FIRST_RUN })

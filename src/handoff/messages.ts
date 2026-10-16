@@ -44,3 +44,19 @@ const WHY = {
 export function firstPrompt(fromRef: string, brief: string, trigger: keyof typeof WHY): string {
   return `This task was handed over from ${fromRef} by sideby because ${WHY[trigger]}. Read ${brief} first, then continue the task it describes. If the user asks to move the task to another account (back to ${fromRef}, say), run \`sideby handoff ready --to <account>\` and end your turn.`
 }
+
+const clock = (iso: string) =>
+  new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+
+/** For the user, not the model (ADR-0018): this session will wait for the reset, and how to move on now instead. */
+export function waitNotice(ref: string, until: string, pressure?: number): string {
+  const now = pressure === undefined ? 'hit its limit' : `is at ${Math.round(pressure)}%`
+  const then = pressure === undefined ? 'this session waits' : 'when it runs out this session waits'
+  return `sideby: ${ref} ${now}; its quota is back at ${clock(until)}, so ${then} and goes on by itself instead of moving to another account. To move on now, type: ! sideby handoff ready`
+}
+
+/** A desktop notification through the Host (OSC 9 and OSC 777), the only output `StopFailure` keeps. */
+export function notifySequence(text: string): string {
+  const safe = [...text].map((ch) => (ch < ' ' || ch === '\u007f' ? ' ' : ch)).join('')
+  return `\u001b]9;${safe}\u0007\u001b]777;notify;sideby;${safe}\u0007`
+}

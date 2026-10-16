@@ -163,6 +163,11 @@ export interface FamilyHandoff {
   ): Promise<string | undefined>
   /** One-time hook installation for a Host without a launch option (Grok); the same contract as `quotaSetup`. */
   hookSetup?: QuotaSetup
+  /**
+   * Whether a session of this Account stopped at the usage limit continues by itself once the limit resets (Claude's
+   * `autoContinueAtUsageLimit`). Auto Handoff waits for a reset only when this says true; left out, it never waits.
+   */
+  resumesAtReset?(account: Account): Promise<boolean>
 }
 
 /** Identity fields of a signed-in Account. */

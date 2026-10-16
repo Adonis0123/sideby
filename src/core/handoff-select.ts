@@ -20,6 +20,8 @@ export interface SelectCandidate {
   installed: boolean
   /** Whether its Family can start as the next Account (has `handoff`, and the run would be eligible). */
   receive: boolean
+  /** A session stopped at the limit continues by itself at the reset (`FamilyHandoff.resumesAtReset`); set for the origin. */
+  resumesAtReset?: boolean
 }
 
 /** An Account the Handoff Order lists that was left out, and why (spec §3.21). */
@@ -58,7 +60,9 @@ function waitUntil(
   now: Date,
   ahead: boolean,
 ): string | undefined {
-  if (origin.quota.status !== 'ok' || s.waitIfResetWithinMinutes <= 0) return undefined
+  // Waiting only makes sense when the session goes on by itself at the reset (ADR-0018).
+  if (origin.quota.status !== 'ok' || s.waitIfResetWithinMinutes <= 0 || origin.resumesAtReset !== true)
+    return undefined
   const open = origin.quota.windows.filter((w) => !windowReset(w.resetsAt, now))
   const top = Math.max(0, ...open.map((w) => w.usedPercent))
   let last: number | undefined
@@ -107,6 +111,8 @@ export function selectNext(input: {
    * an Account whose Quota came back); every other rule still applies.
    */
   to?: string
+  /** The user asked to hand over (`sideby handoff ready`): never wait for a reset (ADR-0018). */
+  manual?: boolean
 }): HandoffDecision {
   const { origin, settings: s, now } = input
   const refOf = (name: string) => input.aliases[name] ?? name
@@ -116,7 +122,7 @@ export function selectNext(input: {
     if (!target) return { kind: 'none', reason: `${input.to} is not an account sideby can find` }
     return toTarget(origin, target, s, new Set(s.crossOrganization.map(refOf)), now)
   }
-  const until = waitUntil(origin, s, now, input.ahead === true)
+  const until = input.manual ? undefined : waitUntil(origin, s, now, input.ahead === true)
   if (until) return { kind: 'wait', until }
 
   const allowed = new Set(s.crossOrganization.map(refOf))

@@ -109,6 +109,55 @@ describe('handoff hook', () => {
     })
   })
 
+  it('tells the user once, not the model, that the session will wait for the reset and how to move on now', async () => {
+    await withFakeHome(async (h) => {
+      const until = '2026-10-09T12:26:00Z'
+      const { env } = await setup(h, { decision: 'wait', until })
+      const e = { ...env, SIDEBY_ACCOUNT: 'claude:008' }
+      await pressure(env, 90)
+      assert.equal(
+        ((await call(e, 'PostToolUse')).output as { systemMessage?: string }).systemMessage,
+        undefined,
+      )
+      await pressure(env, 96)
+      const out = (await call(e, 'PostToolUse')).output as {
+        systemMessage: string
+        hookSpecificOutput?: unknown
+      }
+      assert.match(
+        out.systemMessage,
+        /claude:008 is at 96%.*waits and goes on by itself.*! sideby handoff ready/,
+      )
+      assert.ok(
+        out.systemMessage.includes(
+          new Date(until).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),
+        ),
+      )
+      assert.equal(out.hookSpecificOutput, undefined)
+      for (const event of ['PostToolUse', 'Stop'] as const) {
+        const again = (await call(e, event)).output as { systemMessage?: string } | undefined
+        assert.equal(again?.systemMessage, undefined)
+      }
+    })
+  })
+
+  it('at the limit while the plan is to wait, marks the run and sends a desktop notification', async () => {
+    await withFakeHome(async (h) => {
+      const { env, dir } = await setup(h, { decision: 'wait', until: '2026-10-09T12:26:00Z' })
+      await pressure(env, 100)
+      const r = await call({ ...env, SIDEBY_ACCOUNT: 'claude:008' }, 'StopFailure', { error: 'rate_limit' })
+      const seq = (r.output as { terminalSequence: string }).terminalSequence
+      assert.ok(seq.startsWith('\u001b]9;sideby: claude:008 hit its limit'))
+      assert.ok(seq.includes('\u001b]777;notify;sideby;'))
+      assert.ok(seq.endsWith('! sideby handoff ready\u0007'))
+      assert.equal((await readJsonFile<{ trigger: string }>(join(dir, FILES.ready)))?.trigger, 'limit')
+      // A plan that moves on needs no notice: sideby hands over itself.
+      const other = await setup(h, { decision: 'pick', runId: 'r1' })
+      await writeFile(join(other.dir, FILES.ready), '')
+      assert.deepEqual(await call(other.env, 'StopFailure', { error: 'rate_limit' }), {})
+    })
+  })
+
   it('ignores a plan left by another run', async () => {
     await withFakeHome(async (h) => {
       const { env } = await setup(h, { runId: 'old' })

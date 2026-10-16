@@ -2,6 +2,7 @@
 // Account's own settings hooks (verified 2026-10-09), and the Brief's directory through `--add-dir`.
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import { locate, readObject } from '../../core/claude-settings-file.ts'
 import { writeFileAtomic } from '../../core/fs-safe.ts'
 import type { FamilyHandoff } from '../../types.ts'
 import { type ArgRules, carryArgs, hasOption, promptAfterDashes } from '../shared/handoff-args.ts'
@@ -116,4 +117,12 @@ export const claudeHandoff: FamilyHandoff = {
     return { start: true, receive: true }
   },
   briefFromSession: claudeBrief,
+  // Only `autoContinueAtUsageLimit` is read (ADR-0018); Claude Code's default is true. Managed and project settings
+  // and `--settings` can set it too; sideby does not read them.
+  async resumesAtReset(account) {
+    const where = await locate(account)
+    if (!where.exists) return true
+    const read = await readObject(where.file)
+    return 'error' in read || read.obj.autoContinueAtUsageLimit !== false
+  },
 }

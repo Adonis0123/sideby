@@ -300,12 +300,13 @@ export interface Runtime {
   /**
    * Where an Auto Handoff from `origin` would go now (spec §3.17 "选号"): every Account of every Family is a
    * candidate; `used` lists the chain's Accounts so far. `ahead` decides early what happens once the origin's fullest
-   * window reaches the threshold, as plan.json and the Panel need. `to` names the only candidate (`handoff ready --to`).
+   * window reaches the threshold, as plan.json and the Panel need. `to` names the only candidate (`handoff ready --to`);
+   * `manual` (`handoff ready`) never waits for a reset.
    */
   handoffDecision(
     origin: Account,
     used: readonly string[],
-    opts?: { ahead?: boolean; to?: string },
+    opts?: { ahead?: boolean; to?: string; manual?: boolean },
   ): Promise<HandoffDecision>
   readContext(): ReadContext
 }
@@ -983,6 +984,11 @@ export async function createRuntime(
       )
       const self = candidates.find((c) => c.ref === origin.ref)
       if (!self) throw new UserError(`${origin.ref} is not an account sideby can find; run \`sideby list\``)
+      try {
+        self.resumesAtReset = (await familyOf(origin.family).handoff?.resumesAtReset?.(origin)) === true
+      } catch {
+        // cannot tell: do not wait
+      }
       return selectNext({
         origin: self,
         candidates,
@@ -992,6 +998,7 @@ export async function createRuntime(
         now: now(),
         ...(opts.ahead ? { ahead: true } : {}),
         ...(opts.to !== undefined ? { to: opts.to } : {}),
+        ...(opts.manual ? { manual: true } : {}),
       })
     },
     readContext,

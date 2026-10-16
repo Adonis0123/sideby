@@ -18,10 +18,12 @@ import { grokHookReader } from '../families/grok/handoff-hook.ts'
 import type { Env, HandoffHookEvent } from '../types.ts'
 import {
   endTurnMessage,
+  notifySequence,
   prepareMessage,
   sessionStartMessage,
   stopMessage,
   thresholdMessage,
+  waitNotice,
 } from './messages.ts'
 import { field, type HookInput, type HookReader } from './reader.ts'
 
@@ -104,10 +106,20 @@ export async function decide(opts: {
 
   const threshold = usable?.threshold ?? 95
   const pressure = reader.pressure ? await reader.pressure(input, env, now) : null
+  const ref = env.SIDEBY_ACCOUNT ?? family
+  const waiting = usable?.decision === 'wait' && usable.until ? usable.until : undefined
+  // Once per run, shown to the user (not the model): sideby will wait for the reset, and how to move on now.
+  const waitOutput = async () => {
+    if (!waiting || pressure === null || pressure < threshold || state.waitNoticeSentAt) return undefined
+    await save({ ...state, waitNoticeSentAt: now.toISOString() })
+    return { systemMessage: waitNotice(ref, waiting, pressure) }
+  }
 
   if (event === 'StopFailure') {
-    if (reader.limitHit?.(input, pressure, threshold)) await ready({ trigger: 'limit' })
-    return {}
+    if (!reader.limitHit?.(input, pressure, threshold)) return {}
+    await ready({ trigger: 'limit' })
+    // The Host keeps only `terminalSequence` of a StopFailure hook's output.
+    return waiting ? { output: { terminalSequence: notifySequence(waitNotice(ref, waiting)) } } : {}
   }
 
   if (event === 'Stop') {
@@ -121,6 +133,8 @@ export async function decide(opts: {
       return {}
     }
     if (!usable) return {}
+    const notice = await waitOutput()
+    if (notice) return { output: notice }
     if (state.thresholdSentAt && usable.agentBrief === false) {
       await ready({ trigger: 'threshold' })
       return {}
@@ -149,6 +163,8 @@ export async function decide(opts: {
 
   // PostToolUse
   if (!usable || pressure === null) return {}
+  const notice = await waitOutput()
+  if (notice) return { output: notice }
   if (pressure >= usable.threshold && usable.decision === 'pick' && !state.thresholdSentAt) {
     await save({ ...state, thresholdSentAt: now.toISOString() })
     const text =

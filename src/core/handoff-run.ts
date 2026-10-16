@@ -23,6 +23,7 @@ import {
   type PlanFile,
   type ReadyFile,
   readJsonFile,
+  type WaitingFile,
   writeJsonFile,
 } from './handoff-chain.ts'
 import type { HandoffDecision } from './handoff-select.ts'
@@ -174,9 +175,13 @@ async function decide(
   account: Account,
   used: readonly string[],
   to?: string,
+  manual = false,
 ): Promise<HandoffDecision> {
   try {
-    return await rt.handoffDecision(account, used, to !== undefined ? { to } : {})
+    return await rt.handoffDecision(account, used, {
+      ...(to !== undefined ? { to } : {}),
+      ...(manual ? { manual: true } : {}),
+    })
   } catch (err) {
     return { kind: 'none', reason: (err as Error).message }
   }
@@ -273,6 +278,7 @@ export async function runWithHandoff(
             at: new Date().toISOString(),
             decision: d.kind,
             ...(d.kind === 'pick' ? { pick: d.ref } : {}),
+            ...(d.kind === 'wait' ? { until: d.until } : {}),
             prepareAt: settings.prepareAt,
             threshold: settings.threshold,
             ...(elig.agentBrief === false ? { agentBrief: false } : {}),
@@ -288,29 +294,49 @@ export async function runWithHandoff(
     await writePlan()
     const refresh = setInterval(() => void writePlan(), PLAN_REFRESH_MS)
     const host = spawnHost({ ...launch, args, env })
-    const watcher = watchReady(dir, runId)
-    const outcome = await Promise.race([
-      host.exited.then((code) => ({ kind: 'exit' as const, code })),
-      watcher.ready.then((ready) => ({ kind: 'ready' as const, ready })),
-    ])
+    const exited = host.exited.then((code) => ({ kind: 'exit' as const, code }))
+    // Nothing to move on to (or better to wait): leave the session alone, keep listening (the user may still ask to
+    // move on while it waits, ADR-0018), and say why once it ends.
+    let kept: HandoffDecision | undefined
+    let outcome:
+      | Awaited<typeof exited>
+      | { kind: 'ready'; ready: ReadyFile; decision: Extract<HandoffDecision, { kind: 'pick' }> }
+    for (;;) {
+      const watcher = watchReady(dir, runId)
+      const got = await Promise.race([
+        exited,
+        watcher.ready.then((ready) => ({ kind: 'ready' as const, ready })),
+      ])
+      watcher.stop()
+      if (got.kind === 'exit') {
+        outcome = got
+        break
+      }
+      const d = await decide(rt, account, used, got.ready.to, got.ready.trigger === 'manual')
+      if (d.kind === 'pick') {
+        outcome = { ...got, decision: d }
+        break
+      }
+      await rm(join(dir, FILES.ready), { force: true })
+      if (d.kind === 'wait')
+        await writeJsonFile(join(dir, FILES.waiting), {
+          runId,
+          until: d.until,
+          at: new Date().toISOString(),
+        } satisfies WaitingFile)
+      kept = d
+    }
     clearInterval(refresh)
-    watcher.stop()
     stopped = true
     await pending
+    await rm(join(dir, FILES.waiting), { force: true })
 
     if (outcome.kind === 'exit') {
-      await noteUnhandedHighQuota(rt, account, used, settings.threshold, io)
+      if (kept) io.err(`sideby: ${account.ref} did not hand over: ${explain(kept)}`)
+      else await noteUnhandedHighQuota(rt, account, used, settings.threshold, io)
       return outcome.code
     }
-
-    // Nothing to move on to (or better to wait): leave the session alone and say why once it ends.
-    const decision = await decide(rt, account, used, outcome.ready.to)
-    if (decision.kind !== 'pick') {
-      await rm(join(dir, FILES.ready), { force: true })
-      const code = await host.exited
-      io.err(`sideby: ${account.ref} did not hand over: ${explain(decision)}`)
-      return code
-    }
+    const decision = outcome.decision
 
     // The session is ready: end the Host, give it time to save, never kill it.
     host.child.kill('SIGTERM')
@@ -419,5 +445,5 @@ export async function readyDecision(rt: Runtime, env: Env, to?: string): Promise
   }
   const account = await rt.resolve(ref)
   const chain = await readJsonFile<ChainFile>(join(dir, FILES.chain))
-  return decide(rt, account, chain?.hops.map((h) => h.ref) ?? [account.ref], to)
+  return decide(rt, account, chain?.hops.map((h) => h.ref) ?? [account.ref], to, true)
 }
