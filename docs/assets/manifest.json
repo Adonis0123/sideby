@@ -23,7 +23,7 @@
         "scripts/shoot-panel.ts"
       ],
       "retake": "node scripts/shoot-panel.ts",
-      "checked": "934df31"
+      "checked": "a518200"
     },
     {
       "id": "demo-gif",
@@ -42,7 +42,7 @@
         "src/panel/page-styles.ts"
       ],
       "retake": "node scripts/record-demo.ts",
-      "checked": "934df31"
+      "checked": "a518200"
     },
     {
       "id": "banner",
@@ -64,6 +64,6 @@
   "copy": {
     "files": ["README.md", "README.zh-CN.md"],
     "commits": "^(\\S+ )?feat(\\(|:|!)",
-    "checked": "f8c5882"
+    "checked": "a518200"
   }
 }
