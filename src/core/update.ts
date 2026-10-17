@@ -2,6 +2,7 @@
 // only network request sideby makes on its own: one GET for the `latest` dist-tag, carrying nothing about the user.
 // Everything it learns goes to one state file shared by the CLI and every Panel.
 import { spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { access, constants, mkdir, open, readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -71,6 +72,11 @@ export interface InstallMethod {
   prefix?: string
 }
 
+/** Whether a Linux `/proc/<pid>/stat` line is of a zombie: the state after the parenthesised command name is `Z`. */
+export function isZombieStat(stat: string): boolean {
+  return /\)\s+Z\s/.test(stat.slice(stat.lastIndexOf(')')))
+}
+
 /** Swapped in tests through `bindUpdateDeps`; the real machine otherwise. */
 export interface UpdateDeps {
   fetch: typeof fetch
@@ -87,6 +93,8 @@ export interface UpdateDeps {
   ) => Promise<{ code: number; output: string }>
   /** Starts `sideby ui --background --no-open --port <port>` from the newly installed code, detached; false when it could not start. */
   restartPanel: (env: Env, port: number) => Promise<boolean>
+  /** Starts a program detached, nothing kept of its output; false when it could not start. */
+  startDetached: (file: string, args: readonly string[], env: Env) => Promise<boolean>
   /** Whether `sideby app install` put a desktop app in this home (its files carry the app marker). */
   appInstalled: (home: string, env: Env) => Promise<boolean>
   /** Runs `sideby app install --json` from the newly installed code and waits; false when it failed. */
@@ -120,9 +128,15 @@ const realDeps: UpdateDeps = {
   alive(pid) {
     try {
       process.kill(pid, 0)
-      return true
     } catch (err) {
       return (err as NodeJS.ErrnoException).code === 'EPERM'
+    }
+    // An exited process nobody waited for (its parent went first) still answers signal 0 on Linux: a zombie holds
+    // no lock and runs no session.
+    try {
+      return !isZombieStat(readFileSync(`/proc/${pid}/stat`, 'utf8'))
+    } catch {
+      return true // no /proc (macOS): signal 0 is the answer
     }
   },
   exec: (file, args, opts) =>
@@ -151,6 +165,15 @@ const realDeps: UpdateDeps = {
         detached: true,
         stdio: 'ignore',
       })
+      child.once('spawn', () => {
+        child.unref()
+        resolve(true)
+      })
+      child.once('error', () => resolve(false))
+    }),
+  startDetached: (file, args, env) =>
+    new Promise((resolve) => {
+      const child = spawn(file, args, { env: env as NodeJS.ProcessEnv, detached: true, stdio: 'ignore' })
       child.once('spawn', () => {
         child.unref()
         resolve(true)
@@ -191,6 +214,11 @@ export const runProgram: UpdateDeps['exec'] = (file, args, opts) => deps().exec(
 export const restartPanelByName = (env: Env, port: number): Promise<boolean> =>
   deps()
     .restartPanel(env, port)
+    .catch(() => false)
+/** Starts a program detached through the swappable machine; see `UpdateDeps.startDetached`. */
+export const startDetached = (file: string, args: readonly string[], env: Env): Promise<boolean> =>
+  deps()
+    .startDetached(file, args, env)
     .catch(() => false)
 /** The lock every install shares (`update-install.lock`), so a Local Build switch never races an Update. */
 export const takeInstallLock = (paths: Paths) => takeLock(paths, 'update-install.lock').catch(() => null)

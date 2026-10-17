@@ -903,8 +903,10 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           throw new UserError('`npm prefix -g` failed; switching needs npm on PATH and an npm global install')
         if (!optBool(body, 'confirm')) return { ...(await lb.localStatus(d)), to, switched: false }
         const { backgroundPanelPort } = await import('./background.ts')
+        // The skill fetch can outlast what a Portal waits for: it runs on its own, and the answer comes at once.
         const r = await lb.switchLocal(rt.paths, d, to, rt.env, {
           panelPort: () => backgroundPanelPort(rt.paths),
+          skillSync: 'background',
         })
         if (!r.ok) throw new UserError(r.message)
         return {
@@ -913,7 +915,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           switched: !r.unchanged,
           message: r.message,
           restartedPanel: r.restartedPanel,
-          ...(r.skillSynced === undefined ? {} : { skillSynced: r.skillSynced }),
+          ...(r.skillSyncStarted === undefined ? {} : { skillSyncStarted: r.skillSyncStarted }),
         }
       },
     },

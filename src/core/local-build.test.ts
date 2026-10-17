@@ -43,6 +43,10 @@ function machine(latest: string, installCode = 0) {
       return { code: installCode, output: '' }
     },
     restartPanel: async () => true,
+    startDetached: async (file, args) => {
+      ran.push(`detached: ${[file, ...args].join(' ')}`)
+      return true
+    },
   })
   return ran
 }
@@ -89,6 +93,19 @@ describe('Local Build switch', () => {
         ['sideby update --yes'],
         'restoring installs nothing; the npm code brings the skill along',
       )
+    })
+  })
+
+  it('starts the skill on its own for the Panel, so the answer does not wait for the network', async () => {
+    await withFakeHome(async (h) => {
+      const d = dirsOf(h)
+      const ran = machine('0.15.0')
+      await pkgAt(globalPkg(d), '0.15.0')
+      await pkgAt(pkgDir(d), '0.15.0', localBuild)
+      await linkGlobal(d)
+      const r = await switchLocal(resolvePaths(h.env), d, 'npm', h.env, { skillSync: 'background' })
+      assert.deepEqual([r.ok, r.skillSyncStarted, r.skillSynced], [true, true, undefined])
+      assert.deepEqual(ran, ['detached: sideby update --yes'])
     })
   })
 

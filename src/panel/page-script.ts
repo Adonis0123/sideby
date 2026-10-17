@@ -31,6 +31,7 @@ import {
   sortAccounts,
   suggestAlias,
   suggestName,
+  switchFailure,
   updatedAge,
   windowState,
   withPinned,
@@ -55,6 +56,7 @@ const LOGIC = [
   newAccountDir,
   nextReset,
   canLeaveLocal,
+  switchFailure,
   panelFixes,
   panelHint,
   panelLang,
@@ -3782,8 +3784,15 @@ const MAIN = String.raw`
     try {
       await api('/api/local', { to, confirm: true })
     } catch (e) {
-      // A background Panel restarting from the new code may drop this answer: wait for the build all the same.
-      if (!e.network) { vs.busy = false; vs.error = e; renderSwitch(); return }
+      // A background Panel restarting from the new code may drop this answer, and a Portal moving to it may answer
+      // 5xx (spec §3.23): the state then says whether the switch happened. Only a switch that did not is an error.
+      const kind = switchFailure(e)
+      if (kind === 'fail') { vs.busy = false; vs.error = e; renderSwitch(); return }
+      if (kind === 'check') {
+        await load({ silent: true })
+        const ls = updState() && updState().localSwitch
+        if (!ls || ls.running !== to) { vs.busy = false; vs.error = e; renderSwitch(); return }
+      }
     }
     vs.waitUntil = Date.now() + 20000
     localWait()

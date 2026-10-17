@@ -427,6 +427,15 @@ export function canLeaveLocal(
 ): boolean {
   return !readOnly && !!u?.localSwitch && u.localSwitch.running === 'local'
 }
+/**
+ * What a failed Local Build switch request means (ADR-0024): a lost connection (a background Panel restarting) or a
+ * Portal's 5xx (it moved to the new code mid-request) may follow a switch that happened, so the state decides;
+ * anything else is the server saying it did not switch.
+ */
+export function switchFailure(e: { network?: boolean; status?: number }): 'wait' | 'check' | 'fail' {
+  if (e.network) return 'wait'
+  return (e.status ?? 0) >= 500 ? 'check' : 'fail'
+}
 export function panelFixes(f: { code?: string }, skillUpdatable: boolean): boolean {
   return skillUpdatable && f.code === 'skill.outdated'
 }

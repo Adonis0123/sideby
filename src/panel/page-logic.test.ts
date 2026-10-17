@@ -35,6 +35,7 @@ import {
   sortAccounts,
   suggestAlias,
   suggestName,
+  switchFailure,
   updatedAge,
   windowState,
   withPinned,
@@ -444,6 +445,15 @@ describe('fixPrompt', () => {
   it('is empty when every Finding has an automatic fix, or there are none', () => {
     assert.equal(fixPrompt([auto], words), '')
     assert.equal(fixPrompt([], words), '')
+  })
+})
+
+describe('switchFailure', () => {
+  it('waits on a lost connection, checks the state on a 5xx, and fails on what the server refused', () => {
+    assert.equal(switchFailure({ network: true, status: 0 }), 'wait')
+    assert.equal(switchFailure({ status: 502 }), 'check')
+    assert.equal(switchFailure({ status: 400 }), 'fail')
+    assert.equal(switchFailure({}), 'fail')
   })
 })
 

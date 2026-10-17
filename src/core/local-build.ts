@@ -7,7 +7,14 @@ import { homedir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import type { Env } from '../types.ts'
 import type { Paths } from './paths.ts'
-import { compareVersions, fetchLatest, restartPanelByName, runProgram, takeInstallLock } from './update.ts'
+import {
+  compareVersions,
+  fetchLatest,
+  restartPanelByName,
+  runProgram,
+  startDetached,
+  takeInstallLock,
+} from './update.ts'
 import { type LocalBuild, parseLocalBuild } from './version.ts'
 
 const BIN = 'dist/src/cli/main.js'
@@ -159,6 +166,8 @@ export interface SwitchResult {
    * failed (false); absent for a switch to the Local Build, which has no skill of its own to bring.
    */
   skillSynced?: boolean
+  /** With `skillSync: 'background'`: that `sideby update --yes` started on its own and is not waited for. */
+  skillSyncStarted?: boolean
   /** Another install held the lock; nothing ran. */
   busy?: boolean
 }
@@ -173,7 +182,15 @@ export async function switchLocal(
   d: LocalDirs,
   to: LocalTarget,
   env: Env,
-  opts: { panelPort?: () => Promise<number | null>; onOutput?: (text: string) => void } = {},
+  opts: {
+    panelPort?: () => Promise<number | null>
+    onOutput?: (text: string) => void
+    /**
+     * Back on npm, wait for the skill (a terminal shows its progress) or start it on its own: it fetches from the
+     * network and can take minutes, longer than a Portal waits for an answer (`background`, the Panel).
+     */
+    skillSync?: 'wait' | 'background'
+  } = {},
 ): Promise<SwitchResult> {
   const before = await localStatus(d)
   const fail = (message: string, extra: Partial<SwitchResult> = {}): SwitchResult => ({
@@ -234,6 +251,14 @@ export async function switchLocal(
   if (to === 'local') return { ok: true, message, running: to, restartedPanel }
   // The skill is part of the version (spec §3.23): the npm code updates it as `sideby update --yes` does for anyone,
   // by name so the new code runs, after the lock above is free. A failure keeps the switch.
+  if (opts.skillSync === 'background')
+    return {
+      ok: true,
+      message,
+      running: to,
+      restartedPanel,
+      skillSyncStarted: await startDetached('sideby', ['update', '--yes'], env),
+    }
   const u = await runProgram('sideby', ['update', '--yes'], {
     env,
     ...(opts.onOutput ? { onOutput: opts.onOutput } : {}),
