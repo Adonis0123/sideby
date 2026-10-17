@@ -2,9 +2,13 @@
 
 Rules for AI agents maintaining sideby. Terms are defined in `CONTEXT.md`; decisions in `docs/adr/`; the current design in `docs/specs/`. Specs and plans are in Chinese, everything public is in English.
 
-## Design principle
+## User experience first
 
-Design every feature for a beginner. The first screen is simple, the default path is one clear action, and the words are plain: say what happens and what the user gets, not "weighted tokens" or "Host". Do the work for the user: when sideby recommends a setting, it offers to apply it, shows exactly what will change, and keeps an undo; it never asks the user to copy a snippet into a config file by hand. Do not make a feature something the user must already know about: give it a place of its own (a page, a tab) or show it where the problem appears. Details go behind a click. Before handing work back, walk the path as that beginner would (empty, normal, error, slow) and fix whatever is confusing.
+The user's experience comes first. When a rule, a habit of this codebase or an easier implementation pulls another way, choose what saves the user effort; only the Invariants below (credentials, Host directories, the Panel's security checks) win over it. Every feature should be simple and useful enough that the user never has to stop and think: the default is already right, and the screen says what to do next.
+
+Design every feature for a beginner. The first screen is simple, the default path is one clear action, and the words are plain: say what happens and what the user gets, not "weighted tokens" or "Host". Do the work for the user: when sideby recommends a setting, it offers to apply it, shows exactly what will change, and keeps an undo; it never asks the user to copy a snippet into a config file by hand. Do not make a feature something the user must already know about: give it a place of its own (a page, a tab) or show it where the problem appears. Details go behind a click. Before designing something new, look at how well-made software solves the same problem, and prefer what several of them agree on. Before handing work back, walk the path as that beginner would (empty, normal, error, slow) and fix whatever is confusing.
+
+Every feature the Panel offers is also something an AI assistant can do for the user: it has a `sideby` command (with `--json`) and a place in the shipped skill (`skills/sideby/`), added in the same change. The Panel tells users they can ask their AI instead (Settings, "Ask your AI to do it", and hints where a task starts). A feature that exists only as a button is unfinished.
 
 ## Write for every user
 
@@ -169,7 +173,8 @@ Shared Item paths must be relative and stay inside the account directory: config
 1. Behaviour or contract change: update the spec in `docs/specs/` first. A new decision, or reversing one, gets an ADR in `docs/adr/`. Then change code and tests.
 2. Keep `README.md` and `README.zh-CN.md` in sync, and each `docs/guide/<page>.md` with its `<page>.zh-CN.md`, with the same terms (`CONTEXT.md`). The README stays a short landing page (pitch, quick start, hosts, links); details go in `docs/guide/`.
 3. If `--json` output or config changed, run `pnpm schemas` and update `llms.txt`.
-4. Run `pnpm check` and `pnpm build`.
+4. A new or changed Panel feature: add or update its CLI command and the matching part of `skills/sideby/` (SKILL.md routing and the reference file), and an example phrase in the Panel's "Ask your AI" list when it is a common task.
+5. Run `pnpm check` and `pnpm build`.
 
 ### Adding a family
 

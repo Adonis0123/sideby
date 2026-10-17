@@ -109,6 +109,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .ic { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
 /* Summary: four quiet numbers in one surface. */
+.summary[hidden], #checkup[hidden] { display: none; }
 .summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 18px; overflow: hidden; }
 .stat { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; min-width: 0; padding: 14px 18px; border-left: 1px solid var(--border); text-align: left; }
 .stat:first-child { border-left: 0; }
@@ -171,36 +172,65 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 /* List rows: identity, one column per quota window, last used, menu; a click opens the details (model, tokens,
    Health) under them. Every column but the first has a fixed width, so the rows of all groups line up under the
    same column titles. --qn is the number of quota columns; the page sets it on #accounts. */
-#accounts { --qn: 2; --q-w: 176px; --l-w: 92px; --m-w: 28px; --col-gap: 28px; }
+#accounts { --qn: 2; --q-w: 176px; --l-w: 92px; --m-w: 92px; --col-gap: 28px; }
 .row, .col-head { display: grid; grid-template-columns: minmax(0, 1fr) calc(var(--qn) * var(--q-w) + (var(--qn) - 1) * var(--col-gap)) var(--l-w) var(--m-w); column-gap: var(--col-gap); align-items: center; min-width: 0; }
 .row { grid-template-areas: "id quota last more" "detail detail detail detail" "notes notes notes notes"; padding: 11px 10px 11px 16px; border-top: 1px solid var(--border); transition: background-color .12s; }
 .rows .row:hover { background: color-mix(in srgb, var(--hover) 55%, transparent); }
 .row:first-child { border-top: 0; }
 .row:last-child { border-radius: 0 0 var(--radius) var(--radius); }
 .row-error .ident-name .name { color: var(--fail); }
-/* A login group (spec §3.21): ordinary rows that share one quota, tied together by a rail on the left. */
-.login { position: relative; border-top: 1px solid var(--border); }
-.login:first-child { border-top: 0; }
-.login::before { content: ""; position: absolute; left: 5px; top: 12px; bottom: 12px; width: 3px; border-radius: 3px; background: var(--border-strong); }
-.login-rows > .row:first-child { border-top: 0; }
-.login-rows > .row + .row { border-top: 1px dashed var(--border); }
-.login-rows > .row:last-child { border-radius: 0 0 var(--radius) var(--radius); }
-.q-shared { gap: 6px; color: var(--faint); }
-.q-shared .ic { width: 13px; height: 13px; }
-/* Display Order (spec §3.25): a grip at the start of a group head or row, shown on hover or focus, always on touch
-   screens. A row's grip sits in its left padding, so the row's layout is the same with or without it. */
 .row { position: relative; }
-.drag-handle { width: 16px; height: 28px; color: var(--faint); cursor: grab; opacity: 0; transition: opacity .12s; }
+/* Old quota keeps its colour (the colour is how full it is) and says its age in words. */
+.att-tag { font-weight: 500; }
+.att-tag .dot { width: 6px; height: 6px; }
+.more-opts { display: flex; flex-direction: column; gap: 12px; }
+.more-opts > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.more-opts[open] > summary { margin-bottom: 4px; }
+.tune-custom > summary { cursor: pointer; color: var(--muted); font-size: 13px; margin: 4px 0; }
+.ai-asks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ai-ask { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--ctl-radius); background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.ai-ask:hover { border-color: var(--btn-hover-border); color: var(--accent); }
+.ai-ask .ic { width: 14px; height: 14px; color: var(--muted); flex: none; }
+.arrange-text .link-btn { margin-left: 6px; }
+.q-asof { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; }
+.q-asof .ic { width: 11px; height: 11px; }
+.stat-act { align-self: flex-end; color: var(--accent); font-size: 12px; white-space: nowrap; }
+.next-why { margin: 0 0 10px; max-width: 280px; line-height: 1.5; }
+.next-cmd { display: block; margin-top: 8px; color: var(--muted); font-size: 11px; }
+/* A Same Login (spec §3.21, ADR-0026): one row; opened, a short line per directory. */
+.tag-login { font-weight: 400; }
+.login-detail { flex-direction: column; gap: 8px; }
+.login-detail .rd-note { margin: 0; }
+.login-dirs { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--ctl-radius); background: var(--surface); }
+.login-dir { display: grid; grid-template-columns: minmax(120px, 1fr) auto var(--l-w) minmax(0, 1.4fr) auto auto auto; column-gap: 14px; align-items: center; padding: 6px 6px 6px 12px; }
+.login-dir + .login-dir { border-top: 1px solid var(--border); }
+.login-dir .ld-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.login-dir .ld-name .name { font-weight: var(--strong-weight); }
+.login-dir .usage { justify-content: flex-start; }
+.login-dir .btn .ic { width: 13px; height: 13px; }
+/* The arrange mode (spec §3.25): a bar over the list, short rows, grips, up and down, pin. Drag only here. */
+.arrange-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; padding: 8px 10px 8px 14px; border: 1px solid var(--primary-border); border-radius: var(--radius); background: var(--accent-soft); color: var(--text); }
+.arrange-text { display: inline-flex; align-items: center; gap: 8px; }
+.arrange-text .ic { width: 14px; height: 14px; color: var(--accent); }
+.arrange-actions { display: inline-flex; align-items: center; gap: 12px; }
+.row.row-arrange { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 10px 6px 8px; }
+.row-arrange .ident { flex: 1; }
+.row-arrange.is-pinned { background: color-mix(in srgb, var(--accent-soft) 60%, transparent); }
+.arrange-tools { display: inline-flex; align-items: center; gap: 2px; }
+.arrange-tools .icon-btn { width: 28px; height: 28px; }
+.arrange-tools .icon-btn .ic { width: 14px; height: 14px; }
+.pin-btn { color: var(--faint); }
+.pin-btn[aria-pressed="true"] { color: var(--accent); }
+.pin-btn[aria-pressed="true"] .ic { fill: currentColor; }
+.drag-handle { width: 20px; height: 28px; color: var(--muted); cursor: grab; }
+.drag-handle:hover { color: var(--accent); }
 .drag-handle .ic { width: 14px; height: 14px; }
 .drag-handle:active { cursor: grabbing; }
-.row > .ident > .drag-handle { position: absolute; left: 0; top: 13px; }
 .group-head > .drag-handle { margin-right: -8px; }
-.group-head:hover > .drag-handle, .row:hover > .ident > .drag-handle, .drag-handle:focus-visible { opacity: 1; }
-@media (hover: none) { .drag-handle { opacity: 1; } }
 .is-dragging { opacity: .45; }
 .drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
-.tb-reset[hidden] { display: none; }
+.menu-head { padding: 6px 10px 2px; color: var(--faint); font-size: 11px; font-weight: var(--strong-weight); }
 /* The arrow at a row's start opens and closes its details; so does a click anywhere else in the row. */
 .row-toggle { width: 28px; height: 28px; margin: -4px -6px -4px -8px; }
 .fold-hit { cursor: pointer; }
@@ -250,7 +280,20 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .plan { text-transform: capitalize; }
 .row > .quota { grid-area: quota; }
 .row > .last { grid-area: last; }
-.row > .more { grid-area: more; }
+.row > .row-end { grid-area: more; display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+/* The row's pin (spec §3.25): filled and always there on a pinned row; on the others it shows on hover or focus. */
+.row-run { width: 28px; height: 28px; color: var(--muted); }
+.row-run .ic { width: 15px; height: 15px; }
+.row-run:hover { color: var(--accent); }
+.row-pin { width: 28px; height: 28px; color: var(--faint); opacity: 0; transition: opacity .12s, color .12s; }
+.row-pin .ic { width: 15px; height: 15px; }
+.row:hover .row-pin, .card:hover .row-pin, .row-pin:focus-visible, .row-pin.is-on { opacity: 1; }
+.card-head > .row-end { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.row-pin:hover { color: var(--accent); }
+.row-pin.is-on { color: var(--accent); }
+.row-pin.is-on .ic { fill: currentColor; }
+.row-pin[aria-disabled="true"] { cursor: not-allowed; }
+@media (hover: none) { .row-pin { opacity: .6; } }
 .row-notes { grid-area: notes; display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 
 /* Quota meters: percent and countdown over a bar colored by level (ok, warn at 60%, fail at 85% used). */
@@ -263,18 +306,13 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .m-unit { color: var(--faint); font-weight: 400; font-size: 11.5px; }
 .m-reset { margin-left: auto; color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
 .m-passed { color: var(--muted); }
-.m-asof { display: inline-flex; margin-left: 4px; color: var(--faint); vertical-align: -1px; }
-.m-asof .ic { width: 12px; height: 12px; }
 .m-none { color: var(--faint); }
 .bar { height: 6px; border-radius: 999px; background: var(--track); overflow: hidden; margin-top: 5px; }
 .bar > span { display: block; height: 100%; min-width: 0; border-radius: inherit; background: var(--ok-bar); transition: width .4s ease; }
 .lvl-warn .bar > span { background: var(--warn-bar); } .lvl-warn .m-pct { color: var(--warn); }
 .lvl-fail .bar > span { background: var(--fail-bar); } .lvl-fail .m-pct { color: var(--fail); }
 .lvl-reset .m-pct { color: var(--muted); }
-.lvl-stale.lvl-ok .m-pct { color: var(--muted); }
 /* Old numbers keep their level's color, paler, so the bar and the number agree. */
-.lvl-stale .bar > span { opacity: .45; }
-.lvl-stale.lvl-ok .bar > span { background: var(--faint); }
 .q-note { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: var(--small); }
 .link-btn { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: var(--strong-weight); cursor: pointer; }
 .link-btn:hover:not(:disabled) { text-decoration: underline; }
@@ -621,6 +659,7 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .app-actions { width: 100%; justify-content: flex-start; }
   .row { grid-template-columns: minmax(0, 1fr) auto var(--m-w); grid-template-areas: "id last more" "quota quota quota" "detail detail detail" "notes notes notes"; row-gap: 10px; }
   .row-detail { margin-left: 0; }
+
   .row > .quota { grid-template-columns: repeat(var(--qn), minmax(0, 1fr)); max-width: 560px; }
   .rows .m-label, .rows .m-unit, .rows .u-unit { display: inline; }
   .rows .usage { justify-content: flex-start; }
@@ -652,6 +691,15 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .toolbar > .btn-primary { flex: 1; }
   .row { padding: 10px 12px; }
   #accounts { --col-gap: 14px; }
+  /* One window per line, so the reset time is never cut off. */
+  .row > .quota { grid-template-columns: 1fr; row-gap: 10px; max-width: none; }
+  /* On a phone the summary keeps what needs a look and the next reset. */
+  .stat:nth-child(1), .stat:nth-child(3) { display: none; }
+  .stat:nth-child(n) { border-top: 0; }
+  .stat:nth-child(4) { border-left: 1px solid var(--border); }
+  .row-end .icon-btn { width: 36px; height: 36px; }
+  .login-dir { grid-template-columns: minmax(0, 1fr) auto auto; row-gap: 6px; }
+  .login-dir .usage, .login-dir .health { display: none; }
   .grid { grid-template-columns: 1fr; }
   .panel { padding: 14px; }
   .dlg-head { padding: 14px 14px 2px; } .dlg-body { padding: 10px 14px 14px; } .dlg-foot { padding: 10px 14px; }

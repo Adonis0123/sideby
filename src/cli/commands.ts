@@ -2,11 +2,12 @@ import { fileURLToPath } from 'node:url'
 import { aliasesByAccount } from '../core/accounts.ts'
 import { listAppProfiles, openAppProfile, parseProfileRef, removeAppProfile } from '../core/app-profiles.ts'
 import { browserReport, openInBrowser, setBrowserSignIns } from '../core/browser-profiles.ts'
-import { aliasRefs } from '../core/config.ts'
+import { aliasRefs, type DisplayConfig, editConfigUpdate } from '../core/config.ts'
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import type { DoctorReport } from '../core/doctor.ts'
 import { UserError } from '../core/errors.ts'
 import { requestHandoff } from '../core/handoff-chain.ts'
+import { handoffOverview } from '../core/handoff-overview.ts'
 import { explain, type HandoffIo, readyDecision, runWithHandoff } from '../core/handoff-run.ts'
 import { configureHandoff, type HandoffChange, handoffHint, handoffStatus } from '../core/handoff-status.ts'
 import { installHint, runHost } from '../core/launch.ts'
@@ -22,7 +23,7 @@ import {
 } from '../core/remote-control.ts'
 import { SHELLS, type Shell, type ShellInitWrite } from '../core/shell-init.ts'
 import type { TuneApplyPlan } from '../core/tuning-apply.ts'
-import { inDisplayOrder, suggestAlias, suggestName } from '../panel/page-logic.ts'
+import { inDisplayOrder, pinnedIn, suggestAlias, suggestName, withPinned } from '../panel/page-logic.ts'
 import { createRuntime, type Runtime, UnknownFamilyError } from '../runtime.ts'
 import type { Account, Finding } from '../types.ts'
 import { type ParsedArgs, UsageError } from './args.ts'
@@ -94,25 +95,185 @@ function tilde(text: string, home: string): string {
   return text.split(`${home}/`).join('~/')
 }
 
-/** Accounts in the Display Order the user gave them in the Panel (spec §3.25): Families first, then each one's. */
+/** Accounts in the Display Order the user gave them in the Panel (spec §3.25): Families first, then each one's, Pinned Accounts leading. */
 function displayOrdered(accounts: Account[], rt: Runtime): Account[] {
   const d = rt.displayOrder()
   const ids = inDisplayOrder([...new Set(accounts.map((x) => x.family))], (id) => id, d.families)
   return ids.flatMap((id) =>
-    inDisplayOrder(
-      accounts.filter((x) => x.family === id),
-      (x) => x.name,
-      d.accounts?.[id],
+    withPinned(
+      inDisplayOrder(
+        accounts.filter((x) => x.family === id),
+        (x) => x.name,
+        d.accounts?.[id],
+      ),
+      d.pinned?.[id],
     ),
   )
+}
+
+/** Drop deleted accounts and unloaded Families only when saving a display change. */
+/**
+ * Groups the Display Order may name (spec §3.25): every Family, and every desktop app with windows of its own (Grok
+ * Bot, `grok-bot`), each with the names it holds.
+ */
+async function orderGroups(rt: Runtime, accounts: Account[]): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>()
+  for (const id of rt.families.keys())
+    out.set(
+      id,
+      accounts.filter((a) => a.family === id).map((a) => a.name),
+    )
+  for (const p of await listAppProfiles(rt)) {
+    const [id, name] = [p.ref.slice(0, p.ref.indexOf(':')), p.ref.slice(p.ref.indexOf(':') + 1)]
+    out.set(id, [...(out.get(id) ?? []), name])
+  }
+  return out
+}
+
+function cleanDisplay(rt: Runtime, groups: Map<string, string[]>): DisplayConfig {
+  const d = rt.displayOrder()
+  const clean = (lists: Record<string, string[]> | undefined) =>
+    Object.fromEntries(
+      Object.entries(lists ?? {})
+        .filter(([id]) => groups.has(id))
+        .map(([id, names]) => [id, names.filter((name) => groups.get(id)?.includes(name))]),
+    )
+  return {
+    families: d.families?.filter((id) => groups.has(id)),
+    accounts: clean(d.accounts),
+    pinned: clean(d.pinned),
+  }
+}
+
+export async function cmdPin(a: ParsedArgs, io: Io, pin: boolean): Promise<number> {
+  if (a.positionals.length !== 1 || a.rest.length)
+    throw new UsageError('usage: sideby pin|unpin <account|short command> [--json]')
+  const rt = await createRuntime()
+  const account = await rt.resolve(a.positionals[0]!)
+  const accounts = await rt.accounts()
+  const d = cleanDisplay(rt, await orderGroups(rt, accounts))
+  const peers = new Set([account.ref, ...(await rt.sameLogin(account))])
+  const names = accounts.filter((x) => peers.has(x.ref)).map((x) => x.name)
+  const pins = d.pinned?.[account.family] ?? []
+  const already = names.some((name) => pins.includes(name))
+  if (pin && !already) {
+    const units = new Set<string>()
+    for (const x of accounts.filter((x) => x.family === account.family && pins.includes(x.name))) {
+      units.add([x.ref, ...(await rt.sameLogin(x))].sort().join('|'))
+    }
+    if (units.size >= 3)
+      throw new UserError('At most 3 pinned logins per family; unpin one first with sideby unpin <account>.')
+  }
+  const next = pin
+    ? [...pins, ...names.filter((name) => !pins.includes(name))]
+    : pins.filter((name) => !names.includes(name))
+  d.pinned = { ...d.pinned, [account.family]: next }
+  const before = JSON.stringify(rt.displayOrder())
+  const display = await rt.setDisplayOrder(d)
+  const changed = before !== JSON.stringify(display)
+  const message = pin
+    ? already
+      ? 'Already pinned.'
+      : 'Pinned.'
+    : already
+      ? 'Unpinned.'
+      : 'Account is not pinned; nothing to change.'
+  if (a.flags.has('json')) json(io, { ref: account.ref, pinned: pin, changed, message, display })
+  else io.out(`${account.ref}: ${message}`)
+  return 0
+}
+
+export async function cmdOrder(a: ParsedArgs, io: Io): Promise<number> {
+  const reset = a.flags.has('reset')
+  const families = a.flags.has('families')
+  if (
+    a.rest.length ||
+    (reset && (families || a.positionals.length)) ||
+    (families && !a.positionals.length) ||
+    (!reset && !families && a.positionals.length === 1)
+  )
+    throw new UsageError('usage: sideby order [--json] | <family> <name>... | --families <id>... | --reset')
+  const rt = await createRuntime()
+  const accounts = await rt.accounts()
+  if (reset || families || a.positionals.length) {
+    const groups = await orderGroups(rt, accounts)
+    let d = cleanDisplay(rt, groups)
+    if (reset) d = { pinned: d.pinned }
+    else {
+      const [id, ...names] = a.positionals
+      const requested = families ? a.positionals : names
+      const unknown = families
+        ? requested.filter((x) => !groups.has(x))
+        : !groups.has(id!)
+          ? [id!]
+          : names.filter((name) => !groups.get(id!)?.includes(name))
+      if (unknown.length)
+        throw new UserError(
+          `Unknown ${families || !groups.has(id!) ? 'families' : 'account names'}: ${unknown.join(', ')}; run sideby families or sideby list to choose existing names.`,
+        )
+      if (new Set(requested).size !== requested.length)
+        throw new UsageError('Names must not repeat; list each name once.')
+      if (families) d.families = requested
+      else d.accounts = { ...d.accounts, [id!]: names }
+    }
+    await rt.setDisplayOrder(d)
+  }
+  const display = rt.displayOrder()
+  const ordered = displayOrdered(accounts, rt)
+  const groups = await orderGroups(rt, accounts)
+  const rows = inDisplayOrder([...groups.keys()], (id) => id, display.families).map((family) => ({
+    family,
+    accounts: rt.families.has(family)
+      ? ordered
+          .filter((x) => x.family === family)
+          .map((x) => ({
+            name: x.name,
+            ref: x.ref,
+            pinned: display.pinned?.[family]?.includes(x.name) ?? false,
+          }))
+      : inDisplayOrder(groups.get(family) ?? [], (n) => n, display.accounts?.[family]).map((name) => ({
+          name,
+          ref: `${family}:${name}`,
+          pinned: false,
+        })),
+  }))
+  if (a.flags.has('json')) json(io, { display, families: rows })
+  else
+    for (const row of rows)
+      io.out(
+        `${row.family}: ${row.accounts.map((x) => `${x.name}${x.pinned ? ' (pinned)' : ''}`).join(', ') || '(no accounts)'}`,
+      )
+  return 0
+}
+
+function onOff(value: string | boolean | undefined, usage: string): boolean {
+  if (value !== 'on' && value !== 'off') throw new UsageError(usage)
+  return value === 'on'
 }
 
 export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
   const rt = await createRuntime()
   const accounts = displayOrdered(await rt.accounts(), rt)
   const [statuses, appProfiles] = await Promise.all([
-    withDesktopApps(rt, accounts, Promise.all(accounts.map((x) => rt.status(x)))),
-    listAppProfiles(rt),
+    withDesktopApps(rt, accounts, Promise.all(accounts.map((x) => rt.status(x)))).then((list) =>
+      list.map((s) =>
+        pinnedIn(s, rt.displayOrder().pinned?.[s.family] ?? []) ? { ...s, pinned: true as const } : s,
+      ),
+    ),
+    // Desktop app windows in the Display Order too (spec §3.25), the main window first by default.
+    listAppProfiles(rt).then((list) => {
+      const d = rt.displayOrder()
+      const appOf = (ref: string) => ref.slice(0, ref.indexOf(':'))
+      const nameOf = (ref: string) => ref.slice(ref.indexOf(':') + 1)
+      const apps = inDisplayOrder([...new Set(list.map((p) => appOf(p.ref)))], (id) => id, d.families)
+      return apps.flatMap((app) =>
+        inDisplayOrder(
+          list.filter((p) => appOf(p.ref) === app),
+          (p) => nameOf(p.ref),
+          d.accounts?.[app],
+        ),
+      )
+    }),
   ])
   const hasDesktop = statuses.some((s) => s.desktopApp)
   const families = inDisplayOrder(await rt.familyInfo(), (f) => f.id, rt.displayOrder().families)
@@ -779,6 +940,22 @@ export async function cmdTune(a: ParsedArgs, io: Io): Promise<number> {
 
 export async function cmdQuota(a: ParsedArgs, io: Io): Promise<number> {
   const sub = a.positionals[0]
+  if (sub === 'check') {
+    const usage = 'usage: sideby quota check <family> on|off [--json]'
+    if (a.positionals.length !== 3 || a.rest.length || a.flags.has('refresh') || a.flags.has('yes'))
+      throw new UsageError(usage)
+    const on = onOff(a.positionals[2], usage)
+    const family = a.positionals[1]!
+    const rt = await createRuntime()
+    if (!rt.quotaChecks().some((x) => x.family === family))
+      throw new UserError(
+        `${family} has no quota fetcher; run sideby families to choose a family that fetches quota.`,
+      )
+    const r = await rt.setQuotaCheck(family, on)
+    if (a.flags.has('json')) json(io, { family, on, ...r })
+    else io.out(`${family}: quota checks ${on ? 'on' : 'off'}.`)
+    return 0
+  }
   if (sub === 'setup' || sub === 'teardown') return cmdQuotaSetup(a, io, sub)
   const rt = await createRuntime()
   const accounts = !sub
@@ -891,9 +1068,10 @@ async function runSetup(
 
 /** `sideby handoff status` (spec §3.17): what Auto Handoff still needs, with the commands to run. */
 async function cmdHandoffStatus(a: ParsedArgs, io: Io): Promise<number> {
-  const st = await handoffStatus(await createRuntime())
+  const rt = await createRuntime()
+  const st = await handoffStatus(rt)
   if (a.flags.has('json')) {
-    json(io, st)
+    json(io, { ...st, overview: await handoffOverview(rt) })
     return 0
   }
   io.out(
@@ -1199,6 +1377,15 @@ export async function cmdUi(a: ParsedArgs, io: Io): Promise<number> {
  */
 export async function cmdUpdate(a: ParsedArgs, io: Io): Promise<number> {
   if (a.positionals.length) throw new UsageError('usage: sideby update [--yes] [--json]')
+  if (a.flags.has('auto')) {
+    if (a.rest.length) throw new UsageError('usage: sideby update --auto on|off [--json]')
+    const auto = onOff(a.flags.get('auto'), 'usage: sideby update --auto on|off [--json]')
+    const paths = resolvePaths(process.env)
+    const r = await editConfigUpdate(paths.configFile, (cur) => ({ ...cur, auto }))
+    if (a.flags.has('json')) json(io, { auto, changed: r.changed })
+    else io.out(`Auto Update ${auto ? 'on' : 'off'}${r.changed ? '.' : ' (unchanged).'}`)
+    return 0
+  }
   const u = await import('../core/update.ts')
   const { SKILL_INSTALL } = await import('../core/skill-check.ts')
   const { backgroundPanelPort } = await import('../panel/background.ts')

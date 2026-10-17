@@ -59,6 +59,12 @@ const AccountStatus = Type.Intersect([
           'The other accounts signed in as the same login (same family, email and organization), which share one quota (spec §3.21). Absent when there are none.',
       }),
     ),
+    pinned: Type.Optional(
+      Type.Literal(true, {
+        description:
+          'Pinned to the top of its family in the Panel and `sideby list` (spec §3.25). Display only; absent when not pinned.',
+      }),
+    ),
     problems: Type.Optional(Type.Array(Str)),
     desktopApp: Type.Optional(
       Type.Object(
@@ -335,7 +341,95 @@ const Notice = Type.Object(
   { description: 'Not the answer to the task: mention it briefly afterwards and offer to update.' },
 )
 
+const Display = Type.Object({
+  families: Type.Optional(Type.Array(Str)),
+  accounts: Type.Optional(Type.Record(Str, Type.Array(Str))),
+  pinned: Type.Optional(Type.Record(Str, Type.Array(Str))),
+})
+const PinResult = Type.Object({
+  schemaVersion: Version,
+  ref: Str,
+  pinned: Type.Boolean(),
+  changed: Type.Boolean(),
+  message: Str,
+  display: Display,
+})
+const Skipped = Type.Optional(Type.Array(Type.Object({ ref: Str, reason: Str })))
+const Overview = Type.Object({
+  settings: Type.Object({
+    auto: Type.Boolean(),
+    sameFamily: Type.Boolean(),
+    prepareAt: Type.Number(),
+    threshold: Type.Number(),
+    waitIfResetWithinMinutes: Type.Number(),
+    countdownSeconds: Type.Number(),
+    crossOrganization: Type.Array(Str),
+    families: Type.Record(
+      Str,
+      Type.Object({
+        policy: Type.Union([Type.Literal('pressure'), Type.Literal('order')]),
+        order: Type.Array(Str),
+      }),
+    ),
+  }),
+  takeover: Type.Array(
+    Type.Object({
+      ref: Str,
+      family: Str,
+      starts: Type.Array(Type.Union([Type.Literal('quota'), Type.Literal('limit')])),
+      decision: Type.Union([
+        Type.Object({ kind: Type.Literal('pick'), ref: Str, skipped: Skipped }),
+        Type.Object({ kind: Type.Literal('wait'), until: Str }),
+        Type.Object({
+          kind: Type.Literal('none'),
+          reason: Str,
+          earliestReset: Type.Optional(Type.Object({ ref: Str, at: Str })),
+          skipped: Skipped,
+        }),
+      ]),
+    }),
+  ),
+  recent: Type.Array(
+    Type.Object({
+      from: Str,
+      to: Str,
+      at: Str,
+      trigger: Type.Union([
+        Type.Literal('threshold'),
+        Type.Literal('limit'),
+        Type.Literal('manual'),
+        Type.Null(),
+      ]),
+      briefSource: Type.Union([
+        Type.Literal('agent'),
+        Type.Literal('sideby'),
+        Type.Literal('user'),
+        Type.Null(),
+      ]),
+    }),
+  ),
+})
+
 export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
+  pin: PinResult,
+  unpin: PinResult,
+  order: Type.Object({
+    schemaVersion: Version,
+    display: Display,
+    families: Type.Array(
+      Type.Object({
+        family: Str,
+        accounts: Type.Array(Type.Object({ name: Str, ref: Str, pinned: Type.Boolean() })),
+      }),
+    ),
+  }),
+  'quota-check': Type.Object({
+    schemaVersion: Version,
+    family: Str,
+    on: Type.Boolean(),
+    changed: Type.Boolean(),
+  }),
+  'update-auto': Type.Object({ schemaVersion: Version, auto: Type.Boolean(), changed: Type.Boolean() }),
   list: Type.Object(
     {
       schemaVersion: Version,
@@ -558,6 +652,7 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
   'handoff-status': Type.Object(
     {
       schemaVersion: Version,
+      overview: Type.Optional(Overview),
       auto: Type.Boolean(),
       sameFamily: Type.Boolean(),
       prepareAt: Type.Number(),

@@ -22,6 +22,7 @@ import {
   panelHint,
   panelLang,
   passedWindow,
+  pinnedIn,
   quotaPressure,
   remoteControlSummary,
   remoteControlTodo,
@@ -31,6 +32,7 @@ import {
   suggestName,
   updatedAge,
   windowState,
+  withPinned,
 } from './page-logic.ts'
 
 const LOGIC = [
@@ -63,7 +65,9 @@ const LOGIC = [
   suggestAlias,
   suggestName,
   updatedAge,
+  pinnedIn,
   windowState,
+  withPinned,
 ]
   .map((fn) => fn.toString())
   .join('\n')
@@ -94,7 +98,7 @@ const MAIN = String.raw`
     silent: false, lastTry: 0, pending: false, fastUntil: 0, fastFamily: null,
   }
   // View state that is not saved: the search text, the attention filter, the Health check filter.
-  const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, desktopRef: null, browserRef: null, appBusy: null, appRemove: null, appNew: null, highlight: null, fade: true, loginRefs: new Map(), order: { families: [], units: {} }, drag: null }
+  const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, desktopRef: null, browserRef: null, appBusy: null, appRemove: null, appNew: null, highlight: null, fade: true, loginRefs: new Map(), order: { families: [], units: {} }, drag: null, arrange: null }
   const $ = (id) => document.getElementById(id)
 
   // ---------- preferences ----------
@@ -303,6 +307,9 @@ const MAIN = String.raw`
     userPlus: 'M15 19a6 6 0 0 0-12 0M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M16 11h6',
     x: 'M6 6l12 12M18 6L6 18',
     arrowUp: 'M12 19V5M5 12l7-7 7 7',
+    arrowDown: 'M12 5v14M5 12l7 7 7-7',
+    // Lucide "pin" (ISC license)
+    pin: 'M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z',
     bot: 'M6 9h12a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2zM12 5v4M9.5 13.5v1M14.5 13.5v1',
     grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
     list: 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01',
@@ -600,6 +607,7 @@ const MAIN = String.raw`
   function openMenu(anchor, items, label) {
     const el = h('div', { class: 'menu', role: 'menu', 'aria-label': label },
       items.filter(Boolean).map((it) => it === '-' ? h('div', { class: 'menu-sep', role: 'separator' })
+        : it.header ? h('div', { class: 'menu-head', role: 'presentation' }, it.header)
         : h('button', { class: 'menu-item', type: 'button', role: 'menuitem', tabindex: '-1', disabled: it.disabled, onclick: () => { closeMenu(true); it.run() } },
           icon(it.icon), h('span', { class: 'menu-label' }, it.label), it.hint ? h('code', { class: 'menu-hint', title: it.hint }, it.hint.length > 24 ? '…' + it.hint.slice(-23) : it.hint) : null)))
     el.addEventListener('keydown', menuKeys)
@@ -647,23 +655,80 @@ const MAIN = String.raw`
   window.addEventListener('resize', () => closeMenu())
   window.addEventListener('scroll', () => closeMenu(), { passive: true })
 
-  function accountMenu(a, anchor) {
+  // What one directory does: start it, its short commands, its desktop app, its folder, model, tuning, Health.
+  function dirCopies(a) {
     const run = 'sideby run ' + a.ref
-    const items = [
+    return [
       { icon: 'terminal', label: t('menu.copyRun'), hint: run, run: () => copyText(run) },
       ...(a.aliases || []).slice(0, 2).map((x) => ({ icon: 'terminal', label: t('menu.copyAlias'), hint: x, run: () => copyText(x) })),
-      a.desktopApp && a.desktopApp.installed && a.kind !== 'api' && !BOOT.readOnly ? { icon: 'terminal', label: t(a.desktopApp.running ? 'desk.show' : 'desk.open', { app: a.desktopApp.app }), disabled: Boolean(ui.desktopRef), run: () => openDesktop(a) } : null,
-      browserFor(a) ? { icon: 'terminal', label: t('br.open'), disabled: Boolean(ui.browserRef), run: () => openBrowserDialog(a) } : null,
-      a.kind !== 'api' ? { icon: 'key', label: t('menu.copyLogin'), hint: 'sideby login ' + a.ref, run: () => copyText('sideby login ' + a.ref) } : null,
       a.dir ? { icon: 'folder', label: t('menu.copyDir'), hint: a.dir, run: () => copyText(a.dir) } : null,
-      a.identity && a.identity.email ? { icon: 'mail', label: t('menu.copyEmail'), hint: emailText(a.identity.email), run: () => copyText(a.identity.email) } : null,
-      '-',
+    ]
+  }
+  function deskItem(a) {
+    return a.desktopApp && a.desktopApp.installed && a.kind !== 'api' && !BOOT.readOnly ? { icon: 'monitor', label: t(a.desktopApp.running ? 'desk.show' : 'desk.open', { app: a.desktopApp.app }), disabled: Boolean(ui.desktopRef), run: () => openDesktop(a) } : null
+  }
+  function dirItems(a) { return [...dirCopies(a), deskItem(a)] }
+  function dirTools(a) {
+    return [
       a.modelInfo && a.modelInfo.settable ? { icon: 'terminal', label: t('menu.model'), run: () => openModel(a) } : null,
       family(a.family).tuning ? { icon: 'check', label: t('menu.tune'), run: () => openTune(a) } : null,
       { icon: 'check', label: t('menu.check'), disabled: S.checking || S.fixing || Boolean(ui.checkingRef), run: () => checkAccount(a.ref) },
-      BOOT.readOnly ? null : { icon: 'userPlus', label: t('menu.like'), run: () => openCreate({ family: a.family, api: a.kind === 'api' }) },
     ]
+  }
+  // What the login does, whichever directory: the browser, signing in, the email, a new account like it.
+  function loginItems(a) {
+    return [
+      browserFor(a) ? { icon: 'globe', label: t('br.open'), disabled: Boolean(ui.browserRef), run: () => openBrowserDialog(a) } : null,
+      a.kind !== 'api' ? { icon: 'key', label: t('menu.copyLogin'), hint: 'sideby login ' + a.ref, run: () => copyText('sideby login ' + a.ref) } : null,
+      a.identity && a.identity.email ? { icon: 'mail', label: t('menu.copyEmail'), hint: emailText(a.identity.email), run: () => copyText(a.identity.email) } : null,
+    ]
+  }
+  function likeItem(a) { return BOOT.readOnly ? null : { icon: 'userPlus', label: t('menu.like'), run: () => openCreate({ family: a.family, api: a.kind === 'api' }) } }
+  // Grouped by what the user wants to do: open, copy, manage.
+  function accountMenu(a, anchor) {
+    const [browser, login, email] = loginItems(a)
+    const opens = [deskItem(a), browser].filter(Boolean)
+    const copies = dirCopies(a)
+    const items = [pinItem(a),
+      opens.length ? '-' : null, opens.length ? { header: t('menu.groupOpen') } : null, ...opens,
+      '-', { header: t('menu.groupCopy') }, ...copies, login, email,
+      '-', { header: t('menu.groupManage') }, ...dirTools(a), likeItem(a)]
     openMenu(anchor, items, t('menu.label', { ref: a.ref }))
+  }
+  // A Same Login row (ADR-0026): pin first, then a section per directory, then what the login shares.
+  function loginMenu(ms, anchor) {
+    const items = [pinItem(ms[0])]
+    for (const m of ms) items.push('-', { header: m.name + ((m.aliases || []).length ? ' · ' + m.aliases[0] : '') }, ...dirItems(m), ...dirTools(m))
+    items.push('-', ...loginItems(ms[0]), likeItem(ms[0]))
+    openMenu(anchor, items, t('login.label', { names: ms.map((m) => m.name).join(', ') }))
+  }
+  function loginMoreButton(ms) {
+    const b = h('button', { class: 'icon-btn more', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': t('login.label', { names: ms.map((m) => m.name).join(', ') }), title: t('menu.title') }, icon('more'))
+    b.addEventListener('click', () => { if (menu.anchor === b) closeMenu(); else loginMenu(ms, b) })
+    return b
+  }
+  // The most used action, on the row itself: copy the command that starts this account (its short command when it
+  // has one, which is shorter to type).
+  function runButton(a) {
+    const cmd = (a.aliases || [])[0] || 'sideby run ' + a.ref
+    const text = t('row.copyRun', { cmd })
+    return h('button', { class: 'icon-btn row-run', type: 'button', 'aria-label': text, title: text, onclick: (e) => { e.stopPropagation(); copyText(cmd) } }, icon('terminal'))
+  }
+  // The pin at the end of a row (spec §3.25): one click pins or unpins. A pinned row always shows it, filled; the
+  // others show it on hover or focus. A read-only Panel shows the mark of a pinned row and no button.
+  function pinButton(a, label) {
+    const on = isPinned(a)
+    if (BOOT.readOnly) return on ? h('span', { class: 'icon-btn pin-btn row-pin is-on', role: 'img', title: t('pin.mark'), 'aria-label': t('pin.mark') }, icon('pin')) : null
+    const full = !on && pinnedUnits(a.family) >= PIN_MAX
+    const text = full ? t('pin.full', { n: PIN_MAX }) : t(on ? 'pin.unpinName' : 'pin.pinName', { name: label, title: family(a.family).title })
+    return h('button', { class: 'icon-btn pin-btn row-pin' + (on ? ' is-on' : ''), type: 'button', 'aria-pressed': String(on), 'aria-label': text, title: text, 'aria-disabled': full ? 'true' : null,
+      onclick: (e) => { e.stopPropagation(); if (full) toast(t('pin.full', { n: PIN_MAX })); else togglePin(a) } }, icon('pin'))
+  }
+  function pinItem(a) {
+    if (BOOT.readOnly) return null
+    const on = isPinned(a)
+    const full = !on && pinnedUnits(a.family) >= PIN_MAX
+    return { icon: 'pin', label: full ? t('pin.full', { n: PIN_MAX }) : t(on ? 'pin.unpin' : 'pin.pin'), disabled: full, run: () => togglePin(a) }
   }
   function moreButton(a) {
     const b = h('button', { class: 'icon-btn more', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': t('menu.label', { ref: a.ref }), title: t('menu.title') }, icon('more'))
@@ -698,7 +763,7 @@ const MAIN = String.raw`
   function whyOf(a, now) {
     const m = attentionWhy(a, healthOf(a.ref), now, WARN)
     if (m && m.key === 'why.not-installed' && family(a.family).brokenBin) return t('why.broken')
-    return m ? t(m.key, m.vars) : ''
+    return m ? t(m.key, m.vars && m.vars.label ? Object.assign({}, m.vars, { label: winTitle(m.vars.label) }) : m.vars) : ''
   }
   function setupFor(fam) { return S.state && S.state.quotaSetups.find((s) => s.family === fam) }
 
@@ -775,7 +840,10 @@ const MAIN = String.raw`
       for (const r of rs) counts[r] = (counts[r] || 0) + 1
     }
     const order = ['error', 'health-fail', 'signed-out', 'not-installed', 'quota-high', 'health-warn']
-    const needSub = need ? order.filter((r) => counts[r]).slice(0, 2).map((r) => tn('need.' + r, counts[r])).join(' · ') : t('stat.allClear')
+    // Who needs a look, by name: counting reasons beside a count of accounts made numbers that did not add up.
+    const needing = list.filter((a) => reasonsOf(a, now).length)
+    const needSub = need ? t(needing.length > 2 ? 'stat.needWhoMore' : 'stat.needWho', { names: needing.slice(0, 2).map((a) => a.ref).join(' · '), n: needing.length - 2 }) : t('stat.allClear')
+    const needTitle = need ? order.filter((r) => counts[r]).map((r) => tn('need.' + r, counts[r])).join(' · ') : null
     const usages = list.filter((a) => a.usage && a.usage.status === 'ok')
     const total = usages.reduce((s, a) => s + (Number(a.usage.totalTokens) || 0), 0)
     const sessions = usages.reduce((s, a) => s + (Number(a.usage.sessions) || 0), 0)
@@ -784,12 +852,12 @@ const MAIN = String.raw`
     patch(box, [
       stat(t('stat.accounts'), String(list.length), dots([tn('stat.families', famCount), apiCount ? tn('stat.api', apiCount) : null])),
       need
-        ? stat(t('stat.attention'), String(need), needSub, null, { cls: 'stat-warn', pressed: ui.attention, title: t(ui.attention ? 'stat.attentionOff' : 'stat.attentionOn'), onclick: () => { ui.attention = !ui.attention; renderSummary(); renderAccounts() } })
+        ? stat(t('stat.attention'), String(need), needSub, h('span', { class: 'stat-act' }, t(ui.attention ? 'stat.attentionOff' : 'stat.attentionOn')), { cls: 'stat-warn', pressed: ui.attention, title: [needTitle, t(ui.attention ? 'stat.attentionOff' : 'stat.attentionOn')].join('\n'), onclick: () => { ui.attention = !ui.attention; renderSummary(); renderAccounts() } })
         : stat(t('stat.attention'), '0', needSub, null, { cls: 'stat-ok' }),
       stat(t('stat.tokens', { n: BOOT.usageDays }), tokens(total), tn('stat.sessions', sessions), spark(daily, 'spark-lg')),
       stat(h('span', { class: 'label-tip' }, t('stat.nextReset'), tip('age')),
         nr ? t('time.in', { d: formatDuration(nr.at - now, lang) }) : '—',
-        nr ? dots([h('span', { class: 'mono' }, nr.ref), nr.label, clock(new Date(nr.at).toISOString())]) : t('stat.noQuota')),
+        nr ? dots([h('span', { class: 'mono' }, nr.ref), winTitle(nr.label), clock(new Date(nr.at).toISOString())]) : t('stat.noQuota')),
     ])
   }
 
@@ -815,21 +883,29 @@ const MAIN = String.raw`
     })
     tb.family = h('select', { class: 'tb-select', 'aria-label': t('tb.family') })
     tb.family.addEventListener('change', () => { prefs.family = tb.family.value; savePrefs(); renderAccounts() })
+    // "Arrange order…" is not a sort: it opens the arrange mode (spec §3.25), and the sort shows "my order".
     tb.sort = h('select', { class: 'tb-select', 'aria-label': t('tb.sort') },
-      CHOICES.sort.map((v) => h('option', { value: v }, t('sort.' + v))))
+      CHOICES.sort.map((v) => h('option', { value: v }, t('sort.' + v))),
+      BOOT.readOnly ? null : h('option', { value: 'arrange' }, t('sort.arrange')))
     tb.sort.value = prefs.sort
-    tb.sort.addEventListener('change', () => { prefs.sort = tb.sort.value; savePrefs(); renderAccounts() })
-    tb.reset = h('button', { class: 'btn btn-sm tb-reset', type: 'button', title: t('order.resetHint'), onclick: resetOrder }, t('order.resetButton'))
+    tb.sort.addEventListener('change', () => {
+      const v = tb.sort.value
+      // "My order" before any order of one's own would show nothing new: it opens the arrange mode instead.
+      if (v === 'arrange' || (v === 'manual' && !ordered() && !BOOT.readOnly)) { startArrange(); return }
+      if (ui.arrange) endArrange()
+      prefs.sort = v
+      savePrefs()
+      renderAccounts()
+    })
     const display = h('button', { class: 'btn tb-display', type: 'button', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', title: t('tb.display') }, icon('sliders'), h('span', null, t('tb.display')))
     display.addEventListener('click', () => openPopover(display, 'display', t('tb.display'), displayPanel, 'end'))
     const create = BOOT.readOnly ? null : h('button', { class: 'btn btn-primary', type: 'button', 'aria-label': t('tb.new'), onclick: () => openCreate(null) }, icon('plus'), h('span', null, t('tb.new')))
     setKids($('toolbar'), [
       h('label', { class: 'search' }, icon('search', 'search-ic'), tb.search, h('kbd', { class: 'kbd', 'aria-hidden': 'true' }, '/')),
-      h('div', { class: 'tools' }, tb.family, tb.sort, tb.reset, display),
+      h('div', { class: 'tools' }, tb.family, tb.sort, display),
       create,
     ])
     renderFamilyFilter()
-    renderOrderReset()
     if (hadFocus) tb.search.focus()
   }
   // "Display": the view settings people change rarely, one popover instead of three buttons in the toolbar.
@@ -841,7 +917,7 @@ const MAIN = String.raw`
       h('div', { class: 'dp-row' }, h('span', { class: 'dp-label' }, t('tb.quota')),
         seg(t('tb.quota'), [['used', t('tb.used')], ['left', t('tb.left')]], prefs.quota, (v) => { prefs.quota = v; redo() })),
       h('div', { class: 'dp-row' }, h('span', { class: 'dp-label' }, t('tb.view')),
-        seg(t('tb.view'), [['list', icon('list'), t('tb.list')], ['cards', icon('grid'), t('tb.cards')]], prefs.view, (v) => { prefs.view = v; ui.fade = true; redo() })),
+        seg(t('tb.view'), [['list', [icon('list'), h('span', null, t('tb.list'))], t('tb.list')], ['cards', [icon('grid'), h('span', null, t('tb.cards'))], t('tb.cards')]], prefs.view, (v) => { prefs.view = v; ui.fade = true; redo() })),
       emails ? h('label', { class: 'dp-row dp-check' },
         h('input', { type: 'checkbox', checked: prefs.hideEmail, onchange: (e) => { prefs.hideEmail = e.target.checked; redo() } }),
         h('span', null, t('tb.hideEmails'))) : null)
@@ -873,6 +949,8 @@ const MAIN = String.raw`
   const KNOWN_WINDOWS = { '5h': 300, '7d': 10080 }
   // A window's column: the models it covers when it covers only some (Cursor's "Other models"), else its length.
   function winKey(w) { return w.name || w.label }
+  // The words for a window in labels (5-hour, weekly) instead of 5h and 7d; other labels as they are.
+  function winTitle(k) { return k === '5h' || k === '7d' ? t('win.' + k) : k }
   // One group's columns: the windows its accounts report, shortest first; 5h and 7d when none reports any yet.
   function quotaColumns(list) {
     const mins = {}
@@ -890,14 +968,15 @@ const MAIN = String.raw`
     const left = prefs.quota === 'left'
     const shown = left ? 100 - st.pct : st.pct
     const asOf = stale ? t('quota.asOf', { ago: ago(observedAt) }) : ''
+    const reset = passed ? t('quota.resetShort') : t('quota.resetsIn', { d: formatDuration(Date.parse(w.resetsAt) - now, lang) })
     const title = [passed ? t('quota.resetNoData', { date: day(passed.since) }) : t('quota.resetsAt', { at: clock(w.resetsAt) }), asOf].filter(Boolean).join(' · ')
     return h('div', { class: 'meter lvl-' + st.level + (stale || passed ? ' lvl-stale' : ''), title },
       h('div', { class: 'm-top' },
-        h('span', { class: 'm-label' }, winKey(w)),
+        h('span', { class: 'm-label' }, winTitle(winKey(w))),
         h('span', { class: 'm-pct' }, shown + '%', h('span', { class: 'm-unit' }, ' ' + t(left ? 'quota.unitLeft' : 'quota.unitUsed')),
-          stale ? h('span', { class: 'm-asof', role: 'img', 'aria-label': asOf }, icon('clock')) : null),
-        h('span', { class: 'm-reset' + (passed ? ' m-passed' : '') }, passed ? t('quota.resetShort') : countdown(w.resetsAt, now))),
-      h('div', { class: 'bar', role: 'meter', 'aria-label': t(left ? 'quota.meterLeft' : 'quota.meterUsed', { label: winKey(w) }), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(shown), 'aria-valuetext': t(left ? 'quota.pctLeft' : 'quota.pctUsed', { n: shown }) }, h('span', { css: { width: shown + '%' } })))
+          null),
+        h('span', { class: 'm-reset' + (passed ? ' m-passed' : '') }, Number.isFinite(Date.parse(w.resetsAt)) || passed ? reset : '?')),
+      h('div', { class: 'bar', role: 'meter', 'aria-label': t(left ? 'quota.meterLeft' : 'quota.meterUsed', { label: winTitle(winKey(w)) }), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(shown), 'aria-valuetext': t(left ? 'quota.pctLeft' : 'quota.pctUsed', { n: shown }) }, h('span', { css: { width: shown + '%' } })))
   }
   // A column whose window this account does not report right now, such as a 5h window that has not started.
   function noMeter(label) {
@@ -936,8 +1015,10 @@ const MAIN = String.raw`
     return h('div', { class: 'quota' + (stale ? ' is-stale' : ''), title },
       wins.length ? cols.map((c) => {
         const w = wins.find((x) => winKey(x) === c)
-        return w ? meter(w, now, stale, q.observedAt) : noMeter(c)
-      }) : h('div', { class: 'q-note' }, t('quota.noWindows')))
+        return w ? meter(w, now, stale, q.observedAt) : noMeter(winTitle(c))
+      }) : h('div', { class: 'q-note' }, t('quota.noWindows')),
+      // Old numbers keep their colours and say their age once, under the bars.
+      stale && wins.length ? h('div', { class: 'q-asof', title: t('quota.asOf', { ago: ago(q.observedAt) }) }, icon('clock'), t('quota.staleShort', { ago: agoShort(now - Date.parse(q.observedAt)) })) : null)
   }
   function usageBlock(a) {
     const u = a.usage
@@ -983,9 +1064,13 @@ const MAIN = String.raw`
     const lvl = r.includes('health-fail') ? 'fail' : r.includes('quota-high') || r.includes('health-warn') ? 'warn' : ''
     if (!lvl) return null
     const why = whyOf(subject, Date.now())
-    return h('span', { class: 'dot dot-' + lvl + ' att-dot', title: why, role: 'img', 'aria-label': why })
+    // A word, not only a colour (spec §3.8): what kind of look the account needs; the reason is on hover.
+    const word = r.includes('health-fail') ? t('att.fix') : r.includes('quota-high') ? t('att.quota') : t('att.check')
+    return h('span', { class: 'tag tag-' + lvl + ' att-tag', title: why, 'aria-label': why }, h('span', { class: 'dot dot-' + lvl, 'aria-hidden': 'true' }), word)
   }
-  function nameLine(a) {
+  // members: the directories of a Same Login shown as this one row (spec §3.21).
+  function nameLine(a, members) {
+    const next = members ? members.some(isNext) : isNext(a)
     return h('div', { class: 'ident-name' },
       h('span', { class: 'name', title: a.name }, a.name),
       attentionDot(a),
@@ -993,9 +1078,10 @@ const MAIN = String.raw`
         const args = aliasArgsOf(a, x)
         return h('span', { class: 'tag tag-alias', title: args ? t('acct.aliasArgs', { args: args.join(' ') }) : t('acct.alias') }, x)
       }),
+      members ? h('span', { class: 'tag tag-login', title: t('login.explain') }, t('login.dirs', { n: members.length })) : null,
       a.kind === 'api' ? h('span', { class: 'tag tag-warn', title: t('tip.api.body') }, t('acct.api')) : null,
-      isNext(a)
-        ? h('button', { class: 'tag tag-ok tag-btn', type: 'button', title: t('acct.nextHint', { family: a.family }), 'aria-label': t('acct.nextLabel', { ref: a.ref, family: a.family }), onclick: () => copyText('sideby next ' + a.family) }, t('acct.next'))
+      next
+        ? nextTag(a)
         : null,
       a.login === 'logged-out' && a.kind !== 'api'
         ? h('button', { class: 'tag tag-fail tag-btn', type: 'button', title: t('acct.signInHint'), 'aria-label': t('acct.signedOutLabel', { ref: a.ref }), onclick: () => copyText('sideby login ' + a.ref) }, h('span', { class: 'dot dot-fail', 'aria-hidden': 'true' }), t('acct.signedOut'))
@@ -1158,7 +1244,7 @@ const MAIN = String.raw`
   }
   // What a row or card shows depends on more than the account (health, view preferences, language); the
   // fingerprint covers what its click handlers use.
-  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref, ui.browserRef === a.ref, browserFor(a), prefs.hideEmail, isOpen(a), loginLead(a)]) }
+  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref, ui.browserRef === a.ref, browserFor(a), prefs.hideEmail, isOpen(a), loginLead(a), isPinned(a)]) }
   // Whether the row sits in a login group (spec §3.21): its first row then shows the quota for all of them.
   function inLogin(a) { return ui.loginRefs.has(a.ref) }
   // The group's first row, which shows the quota for all of them.
@@ -1231,11 +1317,13 @@ const MAIN = String.raw`
     const btn = el.querySelector('.row-toggle')
     if (btn) syncAttrs(btn, rowToggle(a))
     el.classList.toggle('row-open', open)
-    el.dataset.sig = rowSig(a)
+    // A Same Login row (ADR-0026) opens onto its directories.
+    const ms = el.classList.contains('row-login') ? loginMembers(S.state.accounts.filter((x) => ui.loginRefs.get(x.ref) === a.ref)) : null
+    el.dataset.sig = ms ? sig(ms.map(rowSig)) : rowSig(a)
     let detail = rowDetails(el)[0]
     if (open && !detail) {
-      detail = rowDetail(a, Boolean(emailLine(a)))
-      const more = el.querySelector(':scope > .more')
+      detail = ms ? loginDetail(ms) : rowDetail(a, Boolean(emailLine(a)))
+      const more = el.querySelector(':scope > .row-end')
       el.insertBefore(detail, more ? more.nextSibling : null)
       detail.style.opacity = '0'
     }
@@ -1274,33 +1362,87 @@ const MAIN = String.raw`
     for (const p of parts) p.style.opacity = ''
   }
   // The Account 'sideby next <family>' would pick; the server ranks it with the CLI's rule (spec §3.13).
+  // "Suggested": a click says what it means and offers the command, instead of copying without a word.
+  function nextTag(a) {
+    const b = h('button', { class: 'tag tag-ok tag-btn', type: 'button', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', title: t('acct.nextWhy', { title: famTitle(a) }) }, t('acct.next'))
+    b.addEventListener('click', (e) => {
+      e.stopPropagation()
+      openPopover(b, 'next', t('acct.next'), () => [
+        h('p', { class: 'next-why' }, t('acct.nextWhy', { title: famTitle(a) })),
+        h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { closeMenu(true); copyText('sideby next ' + a.family) } }, icon('copy'), t('acct.nextCopy')),
+        h('code', { class: 'next-cmd' }, 'sideby next ' + a.family),
+      ])
+    })
+    return b
+  }
   function isNext(a) { return Boolean(S.state && S.state.handoff && S.state.handoff[a.family] === a.ref) }
   function row(a, now, cols) {
+    if (ui.arrange) return arrangeRow(a, [a])
     const open = isOpen(a)
     const email = emailLine(a)
-    const lead = loginLead(a)
     return h('div', { class: 'row fold-hit' + (open ? ' row-open' : '') + (a.error ? ' row-error' : ''), role: 'listitem', 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a), onclick: foldClick(a) },
-      h('div', { class: 'ident' }, dragHandle('account', a.family, a.name, a.name), rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a), email || subLine(a))),
-      lead && lead !== a.ref ? sharedQuota(lead) : quotaBlock(a, now, cols),
+      h('div', { class: 'ident' }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a), email || subLine(a))),
+      quotaBlock(a, now, cols),
       lastUsed(a),
-      moreButton(a),
+      h('div', { class: 'row-end' }, runButton(a), pinButton(a, a.name), moreButton(a)),
       open ? rowDetail(a, Boolean(email)) : null,
       notes(a))
   }
-  // Directories signed in as one login (spec §3.21): the vendor counts one quota, so it shows once, on the group's
-  // first row; every directory stays an ordinary row (name, email, browser, model, tokens, Health), and a rail on
-  // the left ties the rows together.
-  function loginGroup(members, now, cols) {
-    const names = members.map((a) => a.name).join(', ')
-    // The first row as sorted carries the quota.
-    for (const a of members) ui.loginRefs.set(a.ref, members[0].ref)
-    return h('div', { class: 'login', role: 'listitem', 'aria-label': t('login.label', { names }), title: t('login.hint', { names }), 'data-key': loginKey(members.map((a) => a.ref)) },
-      h('div', { class: 'login-rows', role: 'list', 'data-key': 'rows', 'data-patch': '' }, members.map((a) => row(a, now, cols))))
+  // Directories signed in as one login (spec §3.21, ADR-0026) are one row: the vendor counts one quota, so the row
+  // shows it once, with the email and the newest use; opening it lists each directory with its own short command,
+  // last use, tokens, Health, a button that copies its start command and its own menu.
+  // The directory that names a Same Login row: the one the user put first (Display Order), else the main one, else
+  // the first by name.
+  function loginMembers(members) {
+    const order = accountOrder(members[0].family) || []
+    const at = (m) => { const i = order.indexOf(m.name); return i < 0 ? Infinity : i }
+    return members.slice().sort((x, y) => at(x) - at(y) || Number(Boolean(y.isMain)) - Number(Boolean(x.isMain)) || x.name.localeCompare(y.name, undefined, { numeric: true }))
   }
-  // The quota cell of a group's other rows: the numbers are the first row's.
-  function sharedQuota(lead) {
-    const name = refName(lead)
-    return h('div', { class: 'quota' }, h('div', { class: 'q-note q-shared', title: t('login.sharedHint', { name }) }, icon('arrowUp'), t('login.shared', { name })))
+  // Names the row after another directory: puts it just before the current one in the Display Order.
+  function showLoginAs(ms, m) {
+    const before = displayOf()
+    const next = copyDisplay(before)
+    const names = allNames(m.family).filter((n) => n !== m.name)
+    names.splice(Math.max(0, names.indexOf(ms[0].name)), 0, m.name)
+    next.accounts[m.family] = names
+    saveDisplay(before, next)
+  }
+  function newestOf(members) {
+    const at = (m) => { const v = Date.parse((m.usage && m.usage.status === 'ok' && m.usage.lastActivityAt) || ''); return Number.isFinite(v) ? v : -1 }
+    return members.reduce((x, y) => at(y) > at(x) ? y : x)
+  }
+  function loginRow(members, now, cols) {
+    const ms = loginMembers(members)
+    const a = ms[0]
+    if (ui.arrange) return arrangeRow(a, ms)
+    const open = isOpen(a)
+    const email = emailLine(a)
+    return h('div', { class: 'row row-login fold-hit' + (open ? ' row-open' : '') + (a.error ? ' row-error' : ''), role: 'listitem', 'aria-label': t('login.label', { names: ms.map((m) => m.name).join(', ') }), 'data-ref': a.ref, 'data-key': loginKey(ms.map((m) => m.ref)), 'data-sig': sig(ms.map(rowSig)), onclick: foldClick(a) },
+      h('div', { class: 'ident' }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a, ms), email || subLine(a))),
+      quotaBlock(a, now, cols),
+      lastUsed(newestOf(ms)),
+      h('div', { class: 'row-end' }, runButton(a), pinButton(a, ms.map((m) => m.name).join(', ')), loginMoreButton(ms)),
+      open ? loginDetail(ms) : null,
+      notes(a))
+  }
+  function loginDetail(ms) {
+    return h('div', { class: 'row-detail login-detail' },
+      h('p', { class: 'rd-note' }, t('login.explain')),
+      h('div', { class: 'login-dirs', role: 'list' }, ms.map((m) => {
+        const run = 'sideby run ' + m.ref
+        return h('div', { class: 'login-dir', role: 'listitem', 'data-ref': m.ref },
+          h('div', { class: 'ld-name' },
+            h('span', { class: 'name' }, m.name),
+            m.ref !== ms[0].ref ? attentionDot(m) : null,
+            (m.aliases || []).slice(0, 3).map((x) => h('span', { class: 'tag tag-alias' }, x))),
+          m.ref === ms[0].ref ? h('span', { class: 'tag ld-shown', title: t('login.shownHint') }, t('login.shown'))
+            : BOOT.readOnly ? h('span') : h('button', { class: 'link-btn small', type: 'button', title: t('login.showAsHint', { name: m.name }), onclick: () => showLoginAs(ms, m) }, t('login.showAs')),
+          lastUsed(m),
+          usageBlock(m),
+          healthChip(m),
+          h('button', { class: 'btn btn-sm', type: 'button', title: run, onclick: () => copyText(run) }, icon('terminal'), t('login.copyRun')),
+          moreButton(m))
+      })))
   }
   // What a click on a row opens: how it runs (ref, model and effort, a shared login), its tokens and its Health.
   function sameLoginNote(a) {
@@ -1321,7 +1463,7 @@ const MAIN = String.raw`
       h('header', { class: 'card-head' },
         badge(a.family, 'sm'),
         h('div', { class: 'ident-text' }, nameLine(a), emailLine(a), subLine(a), sameLoginNote(a)),
-        moreButton(a)),
+        h('div', { class: 'row-end' }, pinButton(a, a.name), moreButton(a))),
       notes(a),
       quotaBlock(a, now, cols),
       h('footer', { class: 'card-foot' }, usageBlock(a), h('div', { class: 'card-side' }, lastUsed(a), healthChip(a))))
@@ -1333,7 +1475,7 @@ const MAIN = String.raw`
     const titled = list.some((a) => a.quota && a.quota.status === 'ok')
     return h('div', { class: 'col-head', 'aria-hidden': 'true', 'data-key': 'cols' },
       h('span', { class: 'ch-id' }, t('col.account')),
-      h('span', { class: 'quota' }, titled ? cols.map((c) => h('span', null, t(left ? 'col.left' : 'col.used', { label: c }))) : null),
+      h('span', { class: 'quota' }, titled ? cols.map((c) => h('span', null, t(left ? 'col.left' : 'col.used', { label: winTitle(c) }))) : null),
       h('span', { class: 'ch-last' }, t('col.last')),
       h('span', { class: 'ch-more' }))
   }
@@ -1434,30 +1576,43 @@ const MAIN = String.raw`
   }
   function appGroup(list) {
     const app = list[0].app
-    const collapsed = prefs.collapsed['app:' + app] === true
+    const id = appId(list[0].ref)
+    ui.order.units[id] = list.map((p) => [p.name])
+    const collapsed = prefs.collapsed['app:' + app] === true && !ui.arrange
     const bodyId = 'grp-app-' + app.replace(/[^a-zA-Z0-9_-]/g, '_')
-    const head = h('div', { class: 'group-head', 'data-key': 'head' },
-      h('button', { class: 'group-toggle', type: 'button', 'aria-expanded': String(!collapsed), 'aria-controls': bodyId, title: t(collapsed ? 'group.expand' : 'group.collapse'), 'aria-label': t('group.toggle', { title: app, count: String(list.length), action: t(collapsed ? 'group.expand' : 'group.collapse') }), onclick: () => toggleGroup('app:' + app, 'app:' + app) },
+    const head = h('div', { class: 'group-head', 'data-key': ui.arrange ? 'head-arrange' : 'head' },
+      dragHandle('family', id, id, app),
+      h('button', { class: 'group-toggle', type: 'button', disabled: ui.arrange ? true : undefined, 'aria-expanded': String(!collapsed), 'aria-controls': bodyId, title: t(collapsed ? 'group.expand' : 'group.collapse'), 'aria-label': t('group.toggle', { title: app, count: String(list.length), action: t(collapsed ? 'group.expand' : 'group.collapse') }), onclick: () => toggleGroup('app:' + app, 'app:' + app) },
         icon('chevron', 'chev'), appBadge(), h('span', { class: 'group-title' }, app),
         h('span', { class: 'group-count' }, String(list.length))),
       h('div', { class: 'group-meta' },
         h('span', { class: 'muted small label-tip' }, t('app.apart'), tipRaw(app, t('app.apartTip', { app })))),
       list[0].installed ? null : h('div', { class: 'group-meta' }, h('span', { class: 'tag tag-warn' }, t('acct.notInstalled'))))
-    const body = collapsed ? null : h('div', { class: 'rows', id: bodyId, role: 'list', 'data-key': 'rows', 'data-patch': '' }, list.map(appRow))
-    return h('section', { class: 'group group-list' + (collapsed ? ' is-collapsed' : ''), 'aria-label': app, 'data-key': 'app:' + app, 'data-patch': '' },
-      head, body, collapsed ? null : appFoot(list))
+    const body = collapsed ? null : h('div', { class: 'rows', id: bodyId, role: 'list', 'data-key': ui.arrange ? 'rows-arrange' : 'rows', 'data-patch': '' }, list.map((p) => ui.arrange ? appArrangeRow(p, id) : appRow(p)))
+    return h('section', { class: 'group group-list' + (collapsed ? ' is-collapsed' : '') + (ui.arrange ? ' is-arranging' : ''), 'aria-label': app, 'data-key': 'app:' + app, 'data-fam': id, 'data-patch': '' },
+      head, body, collapsed || ui.arrange ? null : appFoot(list))
+  }
+  // A desktop app window in the arrange mode: grip, mark, name, up and down.
+  function appArrangeRow(p, id) {
+    const units = ui.order.units[id] || []
+    const at = units.findIndex((u) => u[0] === p.name)
+    const name = p.isMain ? t('app.mainName') : p.name
+    return h('div', { class: 'row row-arrange', role: 'listitem', 'data-ref': p.ref, 'data-key': 'arr:' + p.ref, 'data-sig': sig([p.ref, at, units.length]) },
+      h('div', { class: 'ident' }, dragHandle('account', id, p.name, name), appBadge(), h('div', { class: 'ident-text' }, h('div', { class: 'ident-name' }, h('span', { class: 'name' }, name), h('span', { class: 'muted small mono' }, p.ref)))),
+      h('div', { class: 'arrange-tools' },
+        h('button', { class: 'icon-btn', type: 'button', 'aria-label': t('order.up', { name }), title: t('order.up', { name }), disabled: at <= 0 ? true : undefined, onclick: () => moveUnit('account', id, at, at - 1, { focus: p.name, label: name, button: 'up' }) }, icon('arrowUp')),
+        h('button', { class: 'icon-btn', type: 'button', 'aria-label': t('order.down', { name }), title: t('order.down', { name }), disabled: at >= units.length - 1 ? true : undefined, onclick: () => moveUnit('account', id, at, at + 1, { focus: p.name, label: name, button: 'down' }) }, icon('arrowDown'))))
   }
   // Shown with the account groups unless a family filter or the attention filter is on; the search matches names.
-  function appGroups() {
-    if (prefs.family || ui.attention) return []
+  function appGroups() { return appIds().map(appGroupFor).filter(Boolean) }
+  // A desktop app's group, its windows in the Display Order (spec §3.25); none under a family or attention filter.
+  function appGroupFor(id) {
+    if (prefs.family || ui.attention) return null
     const q = ui.query.trim().toLowerCase()
-    const out = []
-    for (const app of new Set(appProfiles().map((p) => p.app))) {
-      const all = appProfiles().filter((p) => p.app === app)
-      const list = q && !app.toLowerCase().includes(q) ? all.filter((p) => p.ref.toLowerCase().includes(q)) : all
-      if (list.length) out.push(appGroup(list))
-    }
-    return out
+    const all = inDisplayOrder(appProfiles().filter((p) => appId(p.ref) === id), (p) => p.name, accountOrder(id))
+    const app = all.length ? all[0].app : ''
+    const list = q && !app.toLowerCase().includes(q) ? all.filter((p) => p.ref.toLowerCase().includes(q)) : all
+    return list.length ? appGroup(list) : null
   }
   async function openApp(ref) {
     if (ui.appBusy) return
@@ -1503,11 +1658,13 @@ const MAIN = String.raw`
     const setup = setupFor(fam)
     const off = list.some((a) => a.quota && a.quota.status === 'unavailable' && a.quota.reason === 'not-enabled')
     const bodyId = 'grp-' + fam.replace(/[^a-zA-Z0-9_-]/g, '_')
-    const cards = prefs.view === 'cards'
+    // The arrange mode shows every group open, as a short list, in either view (spec §3.25).
+    const cards = prefs.view === 'cards' && !ui.arrange
+    const collapsedNow = collapsed && !ui.arrange
     if (!cards) ui.order.units[fam] = loginClusters(list).map((x) => Array.isArray(x) ? x.map((a) => a.name) : [x.name])
-    const head = h('div', { class: 'group-head', 'data-key': 'head' },
+    const head = h('div', { class: 'group-head', 'data-key': ui.arrange ? 'head-arrange' : 'head' },
       dragHandle('family', fam, fam, info.title),
-      h('button', { class: 'group-toggle', type: 'button', 'aria-expanded': String(!collapsed), 'aria-controls': bodyId, title: t(collapsed ? 'group.expand' : 'group.collapse'), 'aria-label': t('group.toggle', { title: info.title, count: list.length === total ? String(total) : list.length + ' / ' + total, action: t(collapsed ? 'group.expand' : 'group.collapse') }), onclick: () => toggleGroup(fam, 'g:' + fam) },
+      h('button', { class: 'group-toggle', type: 'button', disabled: ui.arrange ? true : undefined, 'aria-expanded': String(!collapsedNow), 'aria-controls': bodyId, title: t(collapsed ? 'group.expand' : 'group.collapse'), 'aria-label': t('group.toggle', { title: info.title, count: list.length === total ? String(total) : list.length + ' / ' + total, action: t(collapsed ? 'group.expand' : 'group.collapse') }), onclick: () => toggleGroup(fam, 'g:' + fam) },
         icon('chevron', 'chev'), badge(fam, 'sm'), h('span', { class: 'group-title' }, info.title),
         h('span', { class: 'group-count' }, list.length === total ? String(total) : list.length + ' / ' + total)),
       h('div', { class: 'group-meta' },
@@ -1519,11 +1676,11 @@ const MAIN = String.raw`
             h('button', { class: 'btn btn-sm', type: 'button', title: setup.summary, 'aria-label': t('quota.turnOnFamilyLabel', { host: info.title }), onclick: () => openSetup(fam) }, t('quota.turnOnFamily')))
           : null,
         off && setup && setup.plan.status === 'blocked' ? h('span', { class: 'muted small label-tip' }, t('quota.blocked'), tipRaw(t('quota.blocked'), setup.plan.message)) : null))
-    const body = collapsed ? null : cards
+    const body = collapsedNow ? null : cards
       ? h('div', { class: 'grid', id: bodyId, 'data-key': 'cards', 'data-patch': '' }, list.map((a) => card(a, now, cols)))
-      : h('div', { class: 'rows', id: bodyId, role: 'list', 'data-key': 'rows', 'data-patch': '' }, loginClusters(list).map((x) => Array.isArray(x) ? loginGroup(x, now, cols) : row(x, now, cols)))
-    return h('section', { class: 'group' + (cards ? ' group-cards' : ' group-list') + (collapsed ? ' is-collapsed' : ''), 'aria-label': info.title, 'data-key': 'g:' + fam, 'data-fam': fam, 'data-patch': '' },
-      head, collapsed || cards ? null : colHead(cols, list), body)
+      : h('div', { class: 'rows', id: bodyId, role: 'list', 'data-key': ui.arrange ? 'rows-arrange' : 'rows', 'data-patch': '' }, loginClusters(list).map((x) => Array.isArray(x) ? loginRow(x, now, cols) : row(x, now, cols)))
+    return h('section', { class: 'group' + (cards ? ' group-cards' : ' group-list') + (collapsedNow ? ' is-collapsed' : '') + (ui.arrange ? ' is-arranging' : ''), 'aria-label': info.title, 'data-key': 'g:' + fam, 'data-fam': fam, 'data-patch': '' },
+      head, collapsedNow || cards || ui.arrange ? null : colHead(cols, list), body)
   }
   function emptyState() {
     const fams = S.state.families.slice().sort((x, y) => Number(y.installed) - Number(x.installed))
@@ -1534,7 +1691,8 @@ const MAIN = String.raw`
       h('p', { class: 'muted' }, t('empty.body')),
       fams.length ? h('ul', { class: 'host-list' }, fams.map((f) => h('li', null, badge(f.id, 'sm'), h('span', null, f.title),
         f.installed ? h('span', { class: 'muted small' }, tx('empty.runOnce', { bin: h('code', null, f.bin) })) : f.installCommand ? codeCopy(f.installCommand) : link(t('empty.install'), f.installUrl, 'btn btn-sm')))) : h('p', { class: 'muted small' }, t('empty.noFamilies')),
-      BOOT.readOnly ? null : h('button', { class: 'btn', type: 'button', onclick: () => openCreate(null) }, icon('plus'), t('empty.create')))
+      BOOT.readOnly ? null : h('button', { class: 'btn btn-primary', type: 'button', onclick: () => openCreate(null) }, icon('plus'), t('empty.create')),
+      BOOT.readOnly ? null : h('p', { class: 'muted small' }, t('ai.emptyHint'), ' ', h('button', { class: 'link-btn', type: 'button', onclick: openAi }, t('ai.how'))))
   }
   function clearFilters() {
     ui.query = ''
@@ -1558,24 +1716,142 @@ const MAIN = String.raw`
       h('p', null, S.loadError.message),
       h('button', { class: 'btn', type: 'button', onclick: () => load({ check: !S.report }) }, icon('refresh'), t('btn.retry')))
   }
-  // ---------- Display Order (spec §3.25) ----------
+  // ---------- Display Order and Pinned Accounts (spec §3.25) ----------
+  const PIN_MAX = 3
   function displayOf() { return (S.state && S.state.display) || {} }
   // Every Family id in the Display Order, the ones only accounts name (a plugin that failed) last.
   function familyOrder() {
     const ids = S.state.families.map((f) => f.id)
     for (const a of S.state.accounts) if (!ids.includes(a.family)) ids.push(a.family)
+    // Desktop apps with windows of their own (Grok Bot) take a place in the same order, after the tools by default.
+    for (const id of appIds()) if (!ids.includes(id)) ids.push(id)
     return inDisplayOrder(ids, (x) => x, displayOf().families)
   }
+  function appIds() { return [...new Set(appProfiles().map((p) => appId(p.ref)))] }
+  function isAppGroup(id) { return appIds().includes(id) && !S.state.families.some((f) => f.id === id) }
   function accountOrder(fam) { return (displayOf().accounts || {})[fam] }
+  function pinnedOf(fam) { return (displayOf().pinned || {})[fam] || [] }
+  function isPinned(a) { return pinnedIn(a, pinnedOf(a.family)) }
+  // Whether a shown unit (an account, or the directories of one login) is pinned.
+  function unitPinned(fam, unit) {
+    const pins = pinnedOf(fam)
+    return unit.some((n) => { const a = S.state.accounts.find((x) => x.family === fam && x.name === n); return a ? pinnedIn(a, pins) : pins.includes(n) })
+  }
+  // Pinned places taken in a Family: a Same Login pinned together counts once.
+  function pinnedUnits(fam) {
+    const names = pinnedOf(fam)
+    return loginClusters(S.state.accounts.filter((a) => a.family === fam && names.includes(a.name))).length
+  }
   // Every account name of a Family, hidden ones too, in the Display Order.
   function allNames(fam) {
+    if (isAppGroup(fam)) return inDisplayOrder(appProfiles().filter((p) => appId(p.ref) === fam).map((p) => p.name), (x) => x, accountOrder(fam))
     return sortAccounts(S.state.accounts.filter((a) => a.family === fam), 'manual', Date.now(), accountOrder(fam)).map((a) => a.name)
   }
   function ordered() { const d = displayOf(); return Boolean((d.families && d.families.length) || (d.accounts && Object.keys(d.accounts).length)) }
-  // A grip to drag a Family group or an account (a Same Login group moves as one) into a new place, or to move it
-  // with the arrow keys. Not in the card view, nor on a read-only Panel.
+  function copyDisplay(d) {
+    return { families: d.families ? d.families.slice() : [], accounts: Object.assign({}, d.accounts || {}), pinned: Object.assign({}, d.pinned || {}) }
+  }
+  // Shows next at once and writes it to the config. Writes go one at a time; a failed one puts back what the config
+  // last confirmed, never another write's unsaved state.
+  const displaySaves = { chain: Promise.resolve(), pending: 0, confirmed: null }
+  function saveDisplay(before, next, failKey) {
+    if (!displaySaves.pending) displaySaves.confirmed = before
+    displaySaves.pending++
+    S.state.display = next
+    renderAccounts()
+    const run = displaySaves.chain.then(async () => {
+      try {
+        const r = await api('/api/display-order', { display: next })
+        displaySaves.confirmed = r.display
+        if (S.state.display === next) S.state.display = r.display
+        return true
+      } catch (e) {
+        // A newer write already on its way settles the screen; only the latest one puts things back.
+        if (S.state.display === next) { S.state.display = displaySaves.confirmed; renderAccounts() }
+        toast(t(failKey || 'order.failed', { msg: e.message }), { kind: 'fail' })
+        return false
+      } finally { displaySaves.pending-- }
+    })
+    displaySaves.chain = run.catch(() => {})
+    return run
+  }
+  // Pins or unpins an Account, with the other directories of its Same Login. A new pin goes last among the pinned.
+  function togglePin(a) {
+    const before = displayOf()
+    const next = copyDisplay(before)
+    const names = [a.name].concat((a.sameLogin || []).map(refName))
+    // Names of accounts that are gone are dropped on the way (spec §3.25).
+    const list = pinnedOf(a.family).filter((n) => !names.includes(n) && S.state.accounts.some((x) => x.family === a.family && x.name === n))
+    if (!isPinned(a)) {
+      if (pinnedUnits(a.family) >= PIN_MAX) { toast(t('pin.full', { n: PIN_MAX }), { kind: 'fail' }); return }
+      list.push(...names.filter((n) => S.state.accounts.some((x) => x.family === a.family && x.name === n)))
+    }
+    next.pinned[a.family] = list
+    saveDisplay(before, next, 'pin.failed')
+  }
+
+  // The arrange mode: the only place to drag (spec §3.25). It starts from the order on screen, saves each move at
+  // once, and "Done" offers to put back the order it started from.
+  function sortAfter(start) { return start.sortBefore === 'manual' ? 'pressure' : start.sortBefore }
+  function startArrange() {
+    if (BOOT.readOnly) return
+    closeMenu()
+    if (!ui.arrange) ui.arrange = { before: copyDisplay(displayOf()), sortBefore: prefs.sort }
+    prefs.sort = 'manual'
+    savePrefs()
+    if (tb.sort) tb.sort.value = 'manual'
+    renderAccounts()
+    const first = document.querySelector('#accounts .drag-handle')
+    if (first) first.focus({ preventScroll: true })
+  }
+  function endArrange() {
+    const start = ui.arrange
+    if (!start) return
+    ui.arrange = null
+    // With no order of one's own left, "my order" is the default order: go back to the usual sort.
+    if (!ordered()) { prefs.sort = sortAfter(start); savePrefs() }
+    if (tb.sort) tb.sort.value = prefs.sort
+    renderAccounts()
+    if (JSON.stringify(copyDisplay(displayOf())) === JSON.stringify(start.before)) return
+    toast(t('order.saved'), { action: { label: t('order.undo'), run: async () => {
+      if (!(await saveDisplay(displayOf(), start.before))) return
+      if (!ordered() && prefs.sort === 'manual') { prefs.sort = sortAfter(start); savePrefs(); if (tb.sort) tb.sort.value = prefs.sort; renderAccounts() }
+      toast(t('order.undone'))
+    } } })
+  }
+  function arrangeBar() {
+    return h('div', { class: 'arrange-bar', role: 'region', 'aria-label': t('sort.arrange'), 'data-key': 'arrange-bar', 'data-sig': sig([ordered(), lang]) },
+      h('span', { class: 'arrange-text' }, icon('grip'), h('span', null, t('order.bar')), h('button', { class: 'link-btn small', type: 'button', onclick: openAi }, t('ai.orderHint'))),
+      h('div', { class: 'arrange-actions' },
+        h('button', { class: 'link-btn', type: 'button', title: t('order.resetHint'), disabled: ordered() ? undefined : true, onclick: resetOrder }, t('order.resetButton')),
+        h('button', { class: 'btn btn-primary btn-sm', type: 'button', onclick: endArrange }, t('order.done'))))
+  }
+  // An account row in the arrange mode: grip, mark, name and short commands, then up, down and pin. Nothing else.
+  function arrangeRow(a, ms) {
+    const fam = a.family
+    const units = ui.order.units[fam] || []
+    const at = units.findIndex((u) => u.includes(a.name))
+    const nPinned = units.filter((u) => unitPinned(fam, u)).length
+    const pinned = isPinned(a)
+    const lo = pinned ? 0 : nPinned
+    const hi = pinned ? nPinned - 1 : units.length - 1
+    const label = ms.map((m) => m.name).join(', ')
+    const full = !pinned && pinnedUnits(fam) >= PIN_MAX
+    const pinLabel = full ? t('pin.full', { n: PIN_MAX }) : t(pinned ? 'pin.unpinName' : 'pin.pinName', { name: label, title: family(fam).title })
+    return h('div', { class: 'row row-arrange' + (pinned ? ' is-pinned' : ''), role: 'listitem', 'data-ref': a.ref, 'data-key': 'arr:' + loginKey(ms.map((m) => m.ref)), 'data-sig': sig([ms.map(rowSig), at, lo, hi, full]) },
+      h('div', { class: 'ident' }, dragHandle('account', fam, a.name, label), badge(fam, 'sm'), h('div', { class: 'ident-text' }, h('div', { class: 'ident-name' },
+        h('span', { class: 'name', title: a.name }, a.name),
+        (a.aliases || []).slice(0, 3).map((x) => h('span', { class: 'tag tag-alias' }, x)),
+        ms.length > 1 ? h('span', { class: 'tag tag-login', title: t('login.explain') }, t('login.dirs', { n: ms.length })) : null))),
+      h('div', { class: 'arrange-tools' },
+        h('button', { class: 'icon-btn', type: 'button', 'aria-label': t('order.up', { name: label }), title: t('order.up', { name: label }), disabled: at <= lo ? true : undefined, onclick: () => moveUnit('account', fam, at, at - 1, { focus: a.name, label, button: 'up' }) }, icon('arrowUp')),
+        h('button', { class: 'icon-btn', type: 'button', 'aria-label': t('order.down', { name: label }), title: t('order.down', { name: label }), disabled: at >= hi ? true : undefined, onclick: () => moveUnit('account', fam, at, at + 1, { focus: a.name, label, button: 'down' }) }, icon('arrowDown')),
+        h('button', { class: 'icon-btn pin-btn', type: 'button', 'aria-pressed': String(pinned), 'aria-label': pinLabel, title: pinLabel, 'aria-disabled': full ? 'true' : null, onclick: () => { if (full) toast(t('pin.full', { n: PIN_MAX })); else togglePin(a) } }, icon('pin'))))
+  }
+  // A grip to drag a Family group or an account (a Same Login moves as one) into a new place, or to move it with
+  // the arrow keys. Only in the arrange mode.
   function dragHandle(kind, fam, key, name) {
-    if (BOOT.readOnly || prefs.view === 'cards') return null
+    if (BOOT.readOnly || !ui.arrange) return null
     const label = t(kind === 'family' ? 'order.moveFamily' : 'order.moveAccount', { name })
     return h('button', { class: 'icon-btn drag-handle', type: 'button', draggable: 'true', 'data-move': kind, 'data-fam': fam, 'data-name': key, 'aria-label': label, title: t('order.handle'),
       onclick: (e) => e.stopPropagation(),
@@ -1592,7 +1868,7 @@ const MAIN = String.raw`
       },
       ondragstart: (e) => {
         const units = unitsOf(kind, fam)
-        ui.drag = { kind, fam, from: units.findIndex((u) => u.includes(key)), to: null }
+        ui.drag = { kind, fam, from: units.findIndex((u) => u.includes(key)), to: null, other: null, dropped: false }
         e.dataTransfer.effectAllowed = 'move'
         try { e.dataTransfer.setData('text/plain', name) } catch {}
         const el = unitElement(kind, fam, key)
@@ -1602,11 +1878,10 @@ const MAIN = String.raw`
     }, icon('grip'))
   }
   function unitsOf(kind, fam) { return kind === 'family' ? ui.order.families.map((f) => [f]) : (ui.order.units[fam] || []) }
-  // The element that moves: a Family's group, an account's row, or the Same Login group the row is in.
+  // The element that moves: a Family's group, or an account's row (a Same Login is one row).
   function unitElement(kind, fam, key) {
     if (kind === 'family') return document.querySelector('#accounts > section[data-fam="' + CSS.escape(fam) + '"]')
-    const rowEl = document.querySelector('#accounts .row[data-ref="' + CSS.escape(fam + ':' + key) + '"]')
-    return rowEl && (rowEl.closest('.login') || rowEl)
+    return document.querySelector('#accounts .row[data-ref="' + CSS.escape(fam + ':' + key) + '"]')
   }
   // Where a drop at the pointer lands: the list of places it can go and the index among them, or null outside.
   function dropTarget(e) {
@@ -1617,7 +1892,9 @@ const MAIN = String.raw`
       return els.length ? { els, at: slotAt(els, e.clientY) } : null
     }
     const sec = e.target.closest && e.target.closest('#accounts > section[data-fam]')
-    if (!sec || sec.getAttribute('data-fam') !== d.fam) return null
+    // Over another Family: remembered, so letting go there can say why nothing moved.
+    d.other = sec && sec.getAttribute('data-fam') !== d.fam ? sec.getAttribute('data-fam') : null
+    if (!sec || d.other) return null
     const box = sec.querySelector('.rows')
     if (!box) return null
     const els = Array.from(box.children)
@@ -1632,9 +1909,11 @@ const MAIN = String.raw`
   }
   function clearDropMarks() { for (const el of document.querySelectorAll('.drop-before, .drop-after')) el.classList.remove('drop-before', 'drop-after') }
   function endDrag() {
+    const d = ui.drag
     clearDropMarks()
     for (const el of document.querySelectorAll('.is-dragging')) el.classList.remove('is-dragging')
     ui.drag = null
+    if (d && d.other && !d.dropped) toast(t('order.sameFamily', { title: family(d.fam).title }))
     if (S.pending) { S.pending = false; renderAll() }
   }
   function onDragOver(e) {
@@ -1652,57 +1931,53 @@ const MAIN = String.raw`
     const d = ui.drag
     if (!d || !dropTarget(e)) return
     e.preventDefault()
+    d.dropped = true
     const to = d.to
     endDrag()
     if (to !== null && to !== d.from) moveUnit(d.kind, d.fam, d.from, to)
   }
-  // Records the new Display Order: shown at once, written to the config, and put back if the write fails.
-  async function moveUnit(kind, fam, from, to, opts) {
+  // Records a move: Families anywhere; pinned accounts only among the pinned (their pin order), the others only
+  // below them (the Display Order). A move past the edge of its part stops at the edge.
+  function moveUnit(kind, fam, from, to, opts) {
     opts = opts || {}
     const units = unitsOf(kind, fam)
     if (from < 0 || to < 0 || from >= units.length || to >= units.length) return
-    if (from === to) { if (opts.label) say(t('order.position', { name: opts.label, n: from + 1, total: units.length })); return }
     const before = displayOf()
-    const next = { families: before.families ? before.families.slice() : [], accounts: Object.assign({}, before.accounts || {}) }
+    const next = copyDisplay(before)
+    let place = to
+    let first = 0
+    let total = units.length
     if (kind === 'family') next.families = reorder(familyOrder(), units, from, to)
-    else next.accounts[fam] = reorder(allNames(fam), units, from, to)
-    S.state.display = next
-    // Moving an account says "my order" from now on; Families follow it in every sort.
-    if (kind === 'account' && prefs.sort !== 'manual') { prefs.sort = 'manual'; savePrefs(); if (tb.sort) tb.sort.value = 'manual' }
-    renderAccounts()
-    if (opts.focus) {
-      const btn = document.querySelector('#accounts .drag-handle[data-move="' + kind + '"][data-fam="' + CSS.escape(fam) + '"][data-name="' + CSS.escape(opts.focus) + '"]')
-      if (btn) btn.focus({ preventScroll: false })
-      say(t('order.position', { name: opts.label, n: to + 1, total: units.length }))
+    else {
+      // Names of accounts that are gone are dropped on the way (spec §3.25).
+      const pins = pinnedOf(fam).filter((n) => S.state.accounts.some((x) => x.family === fam && x.name === n))
+      const nPinned = units.filter((u) => unitPinned(fam, u)).length
+      const pinned = from < nPinned
+      place = pinned ? Math.min(to, nPinned - 1) : Math.max(to, nPinned)
+      first = pinned ? 0 : nPinned
+      total = pinned ? nPinned : units.length - nPinned
+      if (place !== from) {
+        if (pinned) next.pinned[fam] = reorder(pins, units.slice(0, nPinned), from, place)
+        else next.accounts[fam] = reorder(allNames(fam), units, from, place)
+      }
     }
-    try {
-      const r = await api('/api/display-order', { display: next })
-      S.state.display = r.display
-    } catch (e) {
-      S.state.display = before
-      renderAccounts()
-      toast(t('order.failed', { msg: e.message }), { kind: 'fail' })
+    const where = () => { if (opts.label) say(t('order.position', { name: opts.label, n: place - first + 1, total })) }
+    if (place === from) { where(); return }
+    saveDisplay(before, next)
+    if (opts.focus) {
+      const grip = '#accounts .drag-handle[data-move="' + kind + '"][data-fam="' + CSS.escape(fam) + '"][data-name="' + CSS.escape(opts.focus) + '"]'
+      let btn = opts.button ? document.querySelector('#accounts .row[data-ref="' + CSS.escape(fam + ':' + opts.focus) + '"] .arrange-tools button:nth-child(' + (opts.button === 'up' ? 1 : 2) + ')') : null
+      // At the edge the arrow it used is off now: the grip keeps the focus.
+      if (!btn || btn.disabled) btn = document.querySelector(grip)
+      if (btn) btn.focus({ preventScroll: false })
+      where()
     }
   }
+  // Forgets the order of Families and accounts; pins stay.
   async function resetOrder() {
     const before = displayOf()
-    S.state.display = {}
-    if (prefs.sort === 'manual') { prefs.sort = 'pressure'; savePrefs(); if (tb.sort) tb.sort.value = 'pressure' }
-    renderAccounts()
-    try {
-      const r = await api('/api/display-order', { display: null })
-      S.state.display = r.display
-      toast(t('order.reset'))
-    } catch (e) {
-      S.state.display = before
-      renderAccounts()
-      toast(t('order.failed', { msg: e.message }), { kind: 'fail' })
-    }
-  }
-  // The toolbar's "Default order" button, shown once the user has put things in an order of their own.
-  function renderOrderReset() {
-    if (!tb.reset) return
-    tb.reset.hidden = BOOT.readOnly || !ordered()
+    const pinned = before.pinned && Object.keys(before.pinned).length ? before.pinned : null
+    if (await saveDisplay(before, pinned ? { pinned } : {})) toast(t('order.reset'))
   }
   // Words for screen readers only, such as the new place of something moved with the keyboard.
   let live = null
@@ -1732,25 +2007,29 @@ const MAIN = String.raw`
     const apps = appGroups()
     if (!shown.length && !apps.length) { patch(box, noMatch()); return }
     ui.loginRefs = new Map()
-    if (prefs.view !== 'cards')
-      for (const x of loginClusters(shown)) if (Array.isArray(x)) for (const a of x) ui.loginRefs.set(a.ref, x[0].ref)
+    if (prefs.view !== 'cards' || ui.arrange)
+      for (const x of loginClusters(shown)) if (Array.isArray(x)) for (const a of x) ui.loginRefs.set(a.ref, loginMembers(x)[0].ref)
     // Families in the Display Order (spec §3.25) whatever the sort; each group gets the quota columns it uses.
     // Every group is as wide as the one with the most windows, so the columns after them line up.
     ui.order = { families: [], units: {} }
     const groups = []
     let width = 1
     for (const fam of familyOrder()) {
+      if (isAppGroup(fam)) {
+        const g = appGroupFor(fam)
+        if (g) { ui.order.families.push(fam); groups.push(g) }
+        continue
+      }
       const list = shown.filter((a) => a.family === fam)
       if (!list.length) continue
       ui.order.families.push(fam)
-      const sorted = sortAccounts(list, prefs.sort, now, accountOrder(fam))
+      const sorted = withPinned(sortAccounts(list, prefs.sort, now, accountOrder(fam)), pinnedOf(fam))
       const cols = quotaColumns(sorted)
       width = Math.max(width, cols.length)
       groups.push(group(fam, sorted, all.filter((a) => a.family === fam).length, now, cols))
     }
     box.style.setProperty('--qn', String(width))
-    renderOrderReset()
-    patch(box, groups.concat(apps))
+    patch(box, (ui.arrange ? [arrangeBar()] : []).concat(groups))
     if (ui.fade && !REDUCED) {
       box.classList.add('view-in')
       setTimeout(() => box.classList.remove('view-in'), 400)
@@ -1827,8 +2106,12 @@ const MAIN = String.raw`
     const u = updState()
     return !BOOT.readOnly && !!(u && u.method.kind !== 'local' && u.skillUpdate && u.skillUpdate.outdated && u.skillUpdate.canRun)
   }
+  // A Finding in plain words (its code's sentence); the check's own text goes under "Details".
   function findingRow(f) {
     const own = panelFixes(f, skillFixable())
+    const key = 'finding.' + f.code
+    const plain = Object.hasOwn(MESSAGES.en, key) ? t(key, { item: f.item }) : ''
+    const fixHere = plain && f.fixable && !BOOT.readOnly && !own
     return h('li', { class: 'finding lvl-' + f.level },
       h('span', { class: 'dot', title: f.level }),
       h('div', { class: 'finding-body' },
@@ -1838,11 +2121,18 @@ const MAIN = String.raw`
           f.fixable ? h('span', { class: 'chip chip-sm chip-accent' }, t('health.autoFix')) : null,
           f.source && f.source !== 'core' ? h('span', { class: 'muted small' }, t('health.from', { source: f.source })) : null,
           own ? h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: openUpdate }, icon('arrowUp'), t('upd.skillLabel')) : null),
-        h('p', null, f.message),
-        f.hint && !own ? h('p', { class: 'hint' }, panelHint(f.hint, f.fixable && !BOOT.readOnly, t('fix.hintAction'))) : null))
+        h('p', null, plain || f.message),
+        own ? null
+          : fixHere ? h('p', { class: 'hint' }, t('finding.fixHint'))
+            : f.hint && !plain ? h('p', { class: 'hint' }, panelHint(f.hint, f.fixable && !BOOT.readOnly, t('fix.hintAction'))) : null,
+        // The check's own words (and any command to run) stay one click away.
+        plain ? h('details', { class: 'finding-raw' }, h('summary', null, t('finding.raw')), h('p', { class: 'mono small' }, f.message), f.hint ? h('p', { class: 'mono small' }, f.hint) : null) : null))
   }
   function renderCheckup() {
     const box = $('checkup')
+    // With no account there is nothing to check: the empty state is the only thing to do.
+    box.hidden = Boolean(S.state && !S.state.accounts.length)
+    if (box.hidden) return
     const all = findingsNow()
     const ref = ui.healthRef
     const findings = all && ref ? all.filter((f) => f.account === ref) : all
@@ -2058,10 +2348,12 @@ const MAIN = String.raw`
     if (g.outOfRange) rows.push(h('p', { class: 'note note-warn' }, t('tune.outOfRange', { size: tokens(g.current) })))
     if (!BOOT.readOnly) {
       if (pick && !asking) rows.push(h('div', { class: 'row-actions' }, h('button', { class: 'btn btn-primary', type: 'button', onclick: () => useAsk(g, pick.threshold) }, t('tune.use', { size: tokens(pick.threshold) }))))
-      rows.push(h('div', { class: 'tune-setting' },
+      // With a suggestion there is one main button; choosing a size by hand waits behind a click.
+      const custom = h('div', { class: 'tune-setting' },
         h('b', { class: 'small' }, t('tune.setting')),
         h('div', { class: 'row-actions' }, sel,
-          h('button', { class: 'btn btn-sm', type: 'button', disabled: Boolean(busy) || value === g.current, onclick: () => useAsk(g, value) }, t('tune.useThis')))))
+          h('button', { class: 'btn btn-sm', type: 'button', disabled: Boolean(busy) || value === g.current, onclick: () => useAsk(g, value) }, t('tune.useThis'))))
+      rows.push(pick ? h('details', { class: 'tune-custom', open: value !== (pick ? pick.threshold : null) && value !== g.current ? true : undefined }, h('summary', null, t('tune.custom')), custom) : custom)
       rows.push(useBox(g, false))
       if (g.undo && !(mine && (useUi.step === 'done' || useUi.step === 'undone')))
         rows.push(h('p', { class: 'small tune-undo' }, t('tune.applied', { prev: tuneSize(g.undo.previous) }), ' ',
@@ -2156,7 +2448,9 @@ const MAIN = String.raw`
     setKids(nav, h('div', { class: 'seg', role: 'presentation' }, tabs.map(([id, label]) =>
       h('button', { class: 'seg-btn', type: 'button', role: 'tab', 'aria-selected': curPage === id ? 'true' : 'false', onclick: () => setPage(id) }, label))))
     const away = curPage !== 'accounts' && tabs.some(([id]) => id === curPage)
-    for (const id of ['summary', 'accounts-page', 'checkup']) $(id).hidden = away
+    // With no account yet the empty state is the whole page: no summary, no health check.
+    const none = Boolean(S.state && !S.state.accounts.length)
+    for (const id of ['summary', 'accounts-page', 'checkup']) $(id).hidden = away || (none && id !== 'accounts-page')
     const onTune = away && curPage === 'tuning'
     const onHandoff = away && curPage === 'handoff'
     $('tuning-page').hidden = !onTune
@@ -2301,9 +2595,12 @@ const MAIN = String.raw`
       h('p', { class: 'muted small' }, t('nf.intro')),
       h('fieldset', { class: 'field fam-field' }, h('legend', null, t('nf.tool')), nf.fams.length ? h('div', { class: 'fam-grid' }, cards) : h('p', { class: 'muted small' }, t('empty.noFamilies'))),
       h('div', { class: 'field' }, h('label', { class: 'field', for: 'nf-name' }, h('span', null, t('nf.name')), e.name), e.suggest),
-      h('div', { class: 'field' }, h('label', { class: 'field', for: 'nf-alias' }, h('span', null, t('nf.alias'), ' ', h('span', { class: 'muted small' }, t('nf.optional'))), e.alias), e.aliasHint, e.aliasErr),
-      h('div', { class: 'check-row' }, h('label', { class: 'check' }, e.api, h('span', null, h('b', null, t('nf.api')), h('span', { class: 'muted small' }, t('nf.apiHint')))), tip('api')),
-      e.preview,
+      // The first screen asks only for the tool and a name; the rest waits behind "More options".
+      h('details', { class: 'more-opts', open: nf.api || Boolean(nf.alias) || Boolean(nf.error) || undefined },
+        h('summary', null, t('nf.more')),
+        h('div', { class: 'field' }, h('label', { class: 'field', for: 'nf-alias' }, h('span', null, t('nf.alias'), ' ', h('span', { class: 'muted small' }, t('nf.optional'))), e.alias), e.aliasHint, e.aliasErr),
+        h('div', { class: 'check-row' }, h('label', { class: 'check' }, e.api, h('span', null, h('b', null, t('nf.api')), h('span', { class: 'muted small' }, t('nf.apiHint')))), tip('api')),
+        e.preview),
       e.error,
       e.errNote = nf.error ? errorNote(nf.error, create, nf.error.code === 'create-refused' && !nf.api ? t('nf.refusedApi') : null) : null)
     setKids(el, dialogFrame(t('nf.title'), null, body, [
@@ -3066,6 +3363,8 @@ const MAIN = String.raw`
     const out = []
     if (!LANG_FIXED) out.push('lang')
     if (BOOT.colorScheme === 'auto') out.push('theme')
+    if (S.state && S.state.accounts.length && !BOOT.readOnly) out.push('order')
+    out.push('ai')
     if (S.state && rcSummary()) out.push('rc')
     if (S.state && ahState()) out.push('ah')
     if (S.state && (S.state.quotaChecks || []).length) out.push('checks')
@@ -3091,7 +3390,19 @@ const MAIN = String.raw`
       h('span', { class: 'menu-label' }, label), h('span', { class: 'chip chip-sm ' + cls }, state), icon('chevron'))
     if (secs.includes('lang')) out.push(seg(t('set.lang'), [['en', 'English'], ['zh', '中文']], lang, setLang))
     if (secs.includes('theme')) out.push(seg(t('set.theme'), CHOICES.theme.map((v) => [v, t('set.theme.' + v)]), prefs.theme, setTheme))
-    if (out.length && (secs.includes('rc') || secs.includes('ah'))) out.push(h('div', { class: 'menu-sep', role: 'separator' }))
+    if (out.length && (secs.includes('order') || secs.includes('rc') || secs.includes('ah'))) out.push(h('div', { class: 'menu-sep', role: 'separator' }))
+    // Everything here can also be asked of an AI assistant through the sideby skill (spec §3.8).
+    if (secs.includes('ai')) out.push(link(t('ai.title'), t(skillInstalled() ? 'ai.installed' : 'ai.notInstalled'), skillInstalled() ? 'chip-ok' : '', openAi))
+    // The arrange mode (spec §3.25) has a place here too, where people look for "how do I change this".
+    if (secs.includes('order')) {
+      const pins = Object.values(displayOf().pinned || {}).some((x) => x.length)
+      out.push(link(t('set.order'), t(ordered() || pins ? 'set.orderMine' : 'set.orderDefault'), '', () => {
+        setPage('accounts')
+        startArrange()
+        const bar = document.querySelector('#accounts .arrange-bar')
+        if (bar) bar.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'center' })
+      }))
+    }
     if (secs.includes('rc')) {
       const sum = rcSummary()
       out.push(link(t('rc.button'), t('rc.state.' + sum), sum === 'on' ? 'chip-warn' : sum === 'off' ? 'chip-ok' : '', openRc))
@@ -3135,6 +3446,25 @@ const MAIN = String.raw`
     savePrefs()
     applyTheme()
     refreshPopover('settings')
+  }
+  // The sideby Agent Skill: what to say to an AI assistant instead of clicking, and how to install it when needed.
+  function skillInstalled() {
+    const u = S.state && S.state.update
+    return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
+  }
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.new', 'ai.ask.pin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.rc']
+  function openAi() {
+    showDialog('ai')
+    const asks = AI_ASKS.map((k) => {
+      const text = t(k)
+      return h('li', null, h('button', { class: 'ai-ask', type: 'button', title: t('ai.copy'), onclick: () => copyText(text) }, icon('copy'), h('span', null, text)))
+    })
+    setKids(dlg.el, dialogFrame(t('ai.title'), null, h('div', { class: 'form' },
+      h('p', null, t('ai.intro')),
+      skillInstalled() ? h('p', { class: 'note' }, t('ai.ready')) : h('div', { class: 'field' }, h('p', { class: 'small' }, t('ai.install')), codeCopy(BOOT.skillInstall)),
+      h('p', { class: 'small muted' }, t('ai.examples')),
+      h('ul', { class: 'ai-asks' }, asks)),
+      [h('button', { class: 'btn', type: 'button', onclick: () => dlg.el.close() }, t('btn.close'))]))
   }
   function openRc() {
     if (!S.state || !rcSummary()) return
@@ -3562,6 +3892,11 @@ const MAIN = String.raw`
   $('refresh').addEventListener('click', refreshAll)
   $('accounts').addEventListener('dragover', onDragOver)
   $('accounts').addEventListener('drop', onDrop)
+  // Escape leaves the arrange mode, as "Done" does, unless a menu or dialog takes it first.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.defaultPrevented || !ui.arrange || menu.el || (dlg.el && dlg.el.open) || e.target.closest('input, select, textarea')) return
+    endArrange()
+  })
   $('settings').addEventListener('click', () => openPopover($('settings'), 'settings', t('set.button'), settingsPop, 'end'))
   applyTheme()
   renderStatic()

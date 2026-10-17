@@ -77,12 +77,18 @@ describe('display and quota checks (spec §3.25, §3.26)', () => {
       const r = await editConfigDisplay(file, {
         families: ['codex'],
         accounts: { claude: ['003', 'main'], grok: [] },
+        pinned: { claude: ['work'], codex: [] },
       })
-      assert.deepEqual(r.after, { families: ['codex'], accounts: { claude: ['003', 'main'] } })
+      assert.deepEqual(r.after, {
+        families: ['codex'],
+        accounts: { claude: ['003', 'main'] },
+        pinned: { claude: ['work'] },
+      })
       const data = JSON.parse(await readFile(file, 'utf8'))
       assert.deepEqual(Object.keys(data), ['aliases', 'resumeRouting', 'display'])
       assert.deepEqual((await loadConfig(file)).display, r.after)
       await assert.rejects(editConfigDisplay(file, { families: ['codex', 'codex'] }), ConfigError)
+      await assert.rejects(editConfigDisplay(file, { pinned: { claude: ['work', 'work'] } }), ConfigError)
       await editConfigDisplay(file, undefined)
       assert.deepEqual(Object.keys(JSON.parse(await readFile(file, 'utf8'))), ['aliases', 'resumeRouting'])
       await h.write(CONFIG, JSON.stringify({ display: { accounts: { claude: 'main' } } }))

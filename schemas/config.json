@@ -277,10 +277,24 @@
             }
           },
           "description": "Per family, account names (not refs or short commands) in the order they are shown; accounts not listed follow, main first, then by name."
+        },
+        "pinned": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            }
+          },
+          "description": "Per family, the names of the accounts pinned to the top of their group, in the order they are shown; they lead the group in every sort. Resetting the order keeps them."
         }
       },
       "additionalProperties": false,
-      "description": "Display Order (spec §3.25): the order you dragged families and accounts into in the Panel. Display only: it never changes which account a Handoff picks."
+      "description": "Display Order (spec §3.25): the order you gave families and accounts in the Panel, and the accounts you pinned. Display only: it never changes which account a Handoff picks."
     },
     "quota": {
       "type": "object",

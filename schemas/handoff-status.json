@@ -17,6 +17,287 @@
       "type": "number",
       "const": 1
     },
+    "overview": {
+      "type": "object",
+      "required": [
+        "settings",
+        "takeover",
+        "recent"
+      ],
+      "properties": {
+        "settings": {
+          "type": "object",
+          "required": [
+            "auto",
+            "sameFamily",
+            "prepareAt",
+            "threshold",
+            "waitIfResetWithinMinutes",
+            "countdownSeconds",
+            "crossOrganization",
+            "families"
+          ],
+          "properties": {
+            "auto": {
+              "type": "boolean"
+            },
+            "sameFamily": {
+              "type": "boolean"
+            },
+            "prepareAt": {
+              "type": "number"
+            },
+            "threshold": {
+              "type": "number"
+            },
+            "waitIfResetWithinMinutes": {
+              "type": "number"
+            },
+            "countdownSeconds": {
+              "type": "number"
+            },
+            "crossOrganization": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "families": {
+              "type": "object",
+              "patternProperties": {
+                "^.*$": {
+                  "type": "object",
+                  "required": [
+                    "policy",
+                    "order"
+                  ],
+                  "properties": {
+                    "policy": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "pressure"
+                        },
+                        {
+                          "type": "string",
+                          "const": "order"
+                        }
+                      ]
+                    },
+                    "order": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "takeover": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "ref",
+              "family",
+              "starts",
+              "decision"
+            ],
+            "properties": {
+              "ref": {
+                "type": "string"
+              },
+              "family": {
+                "type": "string"
+              },
+              "starts": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "quota"
+                    },
+                    {
+                      "type": "string",
+                      "const": "limit"
+                    }
+                  ]
+                }
+              },
+              "decision": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind",
+                      "ref"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "pick"
+                      },
+                      "ref": {
+                        "type": "string"
+                      },
+                      "skipped": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "ref",
+                            "reason"
+                          ],
+                          "properties": {
+                            "ref": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind",
+                      "until"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "wait"
+                      },
+                      "until": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind",
+                      "reason"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "none"
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "earliestReset": {
+                        "type": "object",
+                        "required": [
+                          "ref",
+                          "at"
+                        ],
+                        "properties": {
+                          "ref": {
+                            "type": "string"
+                          },
+                          "at": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "skipped": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "ref",
+                            "reason"
+                          ],
+                          "properties": {
+                            "ref": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "recent": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "from",
+              "to",
+              "at",
+              "trigger",
+              "briefSource"
+            ],
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "at": {
+                "type": "string"
+              },
+              "trigger": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "threshold"
+                  },
+                  {
+                    "type": "string",
+                    "const": "limit"
+                  },
+                  {
+                    "type": "string",
+                    "const": "manual"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "briefSource": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "agent"
+                  },
+                  {
+                    "type": "string",
+                    "const": "sideby"
+                  },
+                  {
+                    "type": "string",
+                    "const": "user"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "auto": {
       "type": "boolean"
     },

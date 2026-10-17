@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import { FAVICON_SVG, MARK_SVG } from '../core/brand-mark.ts'
 import { ALIAS_NAME, RESERVED_ALIASES } from '../core/config.ts'
 import { QUOTA_FAIL_PERCENT, QUOTA_WARN_PERCENT, USAGE_DAYS } from '../core/quota-levels.ts'
+import { SKILL_INSTALL } from '../core/skill-check.ts'
 import type { LocalBuild } from '../core/version.ts'
 import { MESSAGES } from './i18n.ts'
 import { PAGE_SCRIPT } from './page-script.ts'
@@ -73,6 +74,8 @@ export function renderPage(opts: PageOptions): string {
     // The alias rules of the config, so the new-account dialog checks a short command as sideby will.
     aliasPattern: ALIAS_NAME.source,
     reservedAliases: [...RESERVED_ALIASES],
+    // The command that installs the sideby Agent Skill, which the Panel offers so an AI assistant can do the same.
+    skillInstall: SKILL_INSTALL,
   })
   return `<!doctype html>
 <html lang="${lang === 'zh' ? 'zh-CN' : 'en'}">

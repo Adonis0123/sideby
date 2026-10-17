@@ -196,6 +196,8 @@ export interface AccountStatus extends Account {
    * The other Accounts signed in as the same login, which share its Quota (spec §3.21); absent when there are none.
    */
   sameLogin?: string[]
+  /** Pinned to the top of its Family (spec §3.25); set by `sideby list` only, absent when not pinned. */
+  pinned?: true
   /** Plugin errors met while reading this Account (for example an unreadable settings file). */
   problems?: string[]
   /**

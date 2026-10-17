@@ -44,7 +44,7 @@
 | `shellInitFile` | 可选，`{ "zsh": …, "bash": … }`，绝对路径或以 `~/` 开头。sideby 每次新增账号、新增或删除别名（`sideby new`、`sideby alias`、面板）后，都用 `sideby shell-init <shell>` 的输出重写这些文件，source 它的 shell 就能用上新命令。不是 `shell-init` 写的文件，它不会覆盖。 |
 | `accountTitle` | 可选，默认关。设为 `true` 时，启动账号会把终端标签页标题设成 `[<短命令或 ref>]`，并用 `-c tui.terminal_title=[]` 启动 Codex，让它保留这个标题（你的参数里自己设了 `tui.terminal_title` 时不加）。其他宿主可能换成自己的标题；见[在会话里显示是哪个账号](usage.zh-CN.md#在会话里显示是哪个账号)。 |
 | `resumeRouting` | 可选，默认关。设为 `true` 时，`shell-init` 还会生成与宿主同名的函数（`claude`、`codex`、`grok`），按 id 恢复会话时转到存有该会话的账号；见[从其他工具恢复会话](#从其他工具恢复会话)。 |
-| `display` | 你在面板里拖出来的工具和账号顺序：`{ "families": ["codex", "claude"], "accounts": { "claude": ["003", "main"] } }`，写账号名，不是 ref。没写进去的按原来的顺序排在后面。由面板写入，**默认顺序** 会删掉它。只影响显示，见 [自己排顺序](usage.zh-CN.md#自己排顺序)。 |
+| `display` | 你在面板里排的工具和账号顺序，以及置顶的账号：`{ "families": ["codex", "claude"], "accounts": { "claude": ["003", "main"] }, "pinned": { "claude": ["work"] } }`，写账号名，不是 ref。没写进去的按原来的顺序排在后面。由面板写入，**恢复默认顺序** 删掉顺序、保留 `pinned`。只影响显示，见 [自己排顺序](usage.zh-CN.md#自己排顺序)。 |
 | `quota.check.<family>` | 设为 `false` 就不再为这个工具做需要联网的额度查询。目前只有 Grok：每个账号最多每 15 分钟问一次它的命令行，见 [Grok 额度](usage.zh-CN.md#grok-额度)。默认开启，CI 里关闭。 |
 | `extraSharedItems.<family>` | 在内置清单之外加你自己的共享项，每项要写 Share Mode（`link`、`copy`、`link-or-copy`、`link-or-local`、`local`、`local-if-api`、`info`、`json-key`）。`path` 相对于账号目录，绝对路径和 `..` 会被拒绝。 |
 

@@ -111,7 +111,7 @@ Accounts that link `settings.json` to the Main Account (the default) get quota f
 Sometimes two accounts of Claude Code are signed in as the same claude.ai login, for example `~/.claude` and `~/.claude-001` with the same email and organization. Claude counts one quota for that login, but each directory only records the numbers its own sessions saw, so one could look half full and the other almost empty. sideby notices this by itself (it compares the email and organization it already shows) and:
 
 - shows the same, freshest quota on both, with where it was read: `sideby quota` says `read from claude:001 (same login)`, the panel says so when you hover the quota;
-- marks them: `claude:001 = main` in `sideby list`; in the panel their rows sit together, tied by a line on the left, and the quota shows once, on the first row; the quota warning shows once too;
+- marks them: `claude:001 = main` in `sideby list`; in the panel they are one row, marked **2 directories · shared quota**, with the quota and its warning shown once. Open the row to see each directory with its own short command, last use and tokens, and a **Copy start command** button; the row's **⋯** menu has a part for each directory;
 - never hands over between them: `sideby next` run inside a session sideby started skips the other directory of that login, and Auto Handoff skips it too, also when your `order` lists it, and says why.
 
 Usage (tokens) still counts per directory. Nothing is moved or deleted; keep both or remove one yourself. Codex is not grouped yet: one email can belong to several ChatGPT workspaces, each with its own quota.
@@ -135,12 +135,25 @@ With quota, `sideby next grok` ranks Grok accounts too, and Auto Handoff starts 
 
 ## Your own order
 
-In the panel, drag a tool's group by the grip (⋮⋮) left of its name, or an account by the grip at the start of its row, to put them in the order you like. The grip shows when you point at a row; on a touch screen it is always there. With the keyboard, tab to a grip and press `↑` / `↓` (`Home` / `End` for first and last).
+In the panel, open **Settings** and choose **Account order and pins** (or pick **Arrange order…** at the end of the sort menu). A bar appears over the list and the rows get short: drag a tool's group or an account by its grip (⋮⋮), or use the ↑ and ↓ buttons. Each move is saved at once; click **Done** (or press Escape) when you are finished, and **Undo** in the message puts back the order you started from. With the keyboard, tab to a grip and press `↑` / `↓` (`Home` / `End` for first and last).
 
-- Moving an account switches the sort to **My order**; the other sorts (by quota, name, last use) still work and keep your order for later. Tool groups stay in your order whatever the sort.
-- Two directories of one login move together.
-- A new account goes last in its group, a new tool last of all. **Default order** next to the sort menu forgets your order.
+- After arranging, the sort shows **My order**; the other sorts (by quota, name, last use) still work and keep your order for later. Tool groups stay in your order whatever the sort.
+- Accounts move only within their tool. Two directories of one login are one row and move together.
+- A new account goes last in its group, a new tool last of all. **Default order** in the arrange bar forgets your order.
 - `sideby list` and `sideby quota` use the same order. It is stored in the config as `display`, and only changes what you see: `sideby next` and Auto Handoff still pick by quota.
+
+### Pin an account
+
+Click the pin at the end of an account's row, left of **⋯** (it shows when you point at the row). A pinned account keeps a filled pin and stays at the top of its tool in every sort; `sideby list` puts it first too. Up to three per tool; while arranging, pinned accounts move among themselves. **Default order** keeps your pins; Click the pin again to take it off. Pins never change which account `sideby next` or Auto Handoff picks.
+
+
+CLI settings (also accept `--json`):
+
+- `sideby pin claude:work` / `sideby unpin claude:work`: pin or unpin a Same Login together, at most three per Family. Repeated operations do nothing; unpin one first when full.
+- `sideby order`: show Display Order with pins marked. `sideby order claude work main` sets account names; `sideby order --families codex claude` sets Families. Unknown names fail. `sideby order --reset` restores default order and keeps pins.
+- `sideby quota check grok on` / `sideby quota check grok off`: save the quota fetching switch. `sideby quota --refresh` refreshes every Family that fetches, respecting disabled checks and CI.
+- `sideby update --auto on` / `sideby update --auto off`: save Auto Update immediately, without checking or installing an update.
+- `sideby handoff status --json`: includes `overview.settings`, `overview.takeover` and `overview.recent` alongside readiness.
 
 ## Model and effort
 
@@ -263,7 +276,7 @@ sideby next claude -- --model opus  # Host arguments go after --
 - Claude, Codex and Grok; pi publishes no quota, so `next pi` lists the accounts for you to choose.
 - Two directories signed in as the same login share one quota (see [Two directories, one login](#two-directories-one-login)); run inside a session sideby started, `next` never picks the other one.
 
-sideby recommends; you start the account. It never switches or rotates by itself unless you turn on Auto Handoff below (see the FAQ). The panel marks the same pick as **Next** in each family.
+sideby recommends; you start the account. It never switches or rotates by itself unless you turn on Auto Handoff below (see the FAQ). The panel marks the same pick as **Suggested** in each family; click it to see why and to copy the command.
 
 ## Auto Handoff
 

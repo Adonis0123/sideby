@@ -160,6 +160,11 @@
                 },
                 "description": "The other accounts signed in as the same login (same family, email and organization), which share one quota (spec §3.21). Absent when there are none."
               },
+              "pinned": {
+                "type": "boolean",
+                "const": true,
+                "description": "Pinned to the top of its family in the Panel and `sideby list` (spec §3.25). Display only; absent when not pinned."
+              },
               "problems": {
                 "type": "array",
                 "items": {

@@ -1841,7 +1841,17 @@ describe('display order and quota checks (spec §3.25, §3.26)', () => {
           families: ['grok'],
           accounts: { grok: ['main'] },
         })
-        for (const bad of [{ display: { families: 'grok' } }, { display: { rows: [] } }, { display: [] }, {}])
+        const pin = await post(port, '/api/display-order', { display: { pinned: { grok: ['main'] } } }, hdr)
+        assert.equal(pin.status, 200)
+        assert.deepEqual(JSON.parse(await readFile(config, 'utf8')).display, { pinned: { grok: ['main'] } })
+        for (const bad of [
+          { display: { families: 'grok' } },
+          { display: { rows: [] } },
+          { display: [] },
+          { display: { pinned: ['main'] } },
+          { display: { pinned: { grok: [1] } } },
+          {},
+        ])
           assert.equal((await post(port, '/api/display-order', bad, hdr)).status, 400, JSON.stringify(bad))
         assert.equal((await post(port, '/api/display-order', { display: null }, hdr)).status, 200)
         assert.equal(JSON.parse(await readFile(config, 'utf8')).display, undefined)

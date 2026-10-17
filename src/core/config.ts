@@ -228,11 +228,17 @@ export const ConfigSchema = Type.Object(
                 'Per family, account names (not refs or short commands) in the order they are shown; accounts not listed follow, main first, then by name.',
             }),
           ),
+          pinned: Type.Optional(
+            Type.Record(Type.String(), Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true }), {
+              description:
+                'Per family, the names of the accounts pinned to the top of their group, in the order they are shown; they lead the group in every sort. Resetting the order keeps them.',
+            }),
+          ),
         },
         {
           additionalProperties: false,
           description:
-            'Display Order (spec §3.25): the order you dragged families and accounts into in the Panel. Display only: it never changes which account a Handoff picks.',
+            'Display Order (spec §3.25): the order you gave families and accounts in the Panel, and the accounts you pinned. Display only: it never changes which account a Handoff picks.',
         },
       ),
     ),
@@ -463,12 +469,14 @@ export function editConfigDisplay(
   file: string,
   display: DisplayConfig | undefined,
 ): Promise<{ changed: boolean; before: DisplayConfig | undefined; after: DisplayConfig | undefined }> {
-  const accounts = Object.fromEntries(
-    Object.entries(display?.accounts ?? {}).filter(([, names]) => names.length),
-  )
+  const lists = (r: Record<string, string[]> | undefined) =>
+    Object.fromEntries(Object.entries(r ?? {}).filter(([, names]) => names.length))
+  const accounts = lists(display?.accounts)
+  const pinned = lists(display?.pinned)
   const next: DisplayConfig = {
     ...(display?.families?.length ? { families: [...display.families] } : {}),
     ...(Object.keys(accounts).length ? { accounts } : {}),
+    ...(Object.keys(pinned).length ? { pinned } : {}),
   }
   return editConfigKey(file, 'display', 'move it again', () => (Object.keys(next).length ? next : undefined))
 }

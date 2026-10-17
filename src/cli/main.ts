@@ -15,6 +15,14 @@ Usage:
                                       create an account (families: claude, codex, grok, pi);
                                       --next picks the next name and short command (cc008);
                                       --alias also adds a short command such as cc008
+  sideby pin|unpin <account|short command> [--json]
+                                      pin or unpin a Same Login (at most 3 per family)
+  sideby order [--json]               show display order, with pinned accounts marked
+  sideby order <family> <name>...     set account order within a family
+  sideby order --families <id>...     set family order
+  sideby order --reset               restore default order, keeping pins
+  sideby quota check <family> on|off  turn quota fetching on or off
+  sideby update --auto on|off         set Auto Update without running an update
   sideby families [family]            what each host's accounts share with the main account,
                                       where they live and how they sign in
   sideby alias add <short> <account> [-- args]
@@ -30,7 +38,7 @@ Usage:
   sideby doctor [target] [--fix] [--force]
                                       check shared items and permissions; --fix repairs safe issues
   sideby quota [account|family] [--refresh]
-                                      quota and 7-day token usage; --refresh asks Grok again now
+                                      quota and 7-day token usage; --refresh asks every fetching family again now
   sideby quota setup claude [--yes]   turn on Claude quota (shows the change first)
   sideby quota teardown claude        undo it, restoring the original file
   sideby tune [account|family]        estimate the cheapest auto-compact threshold per model
@@ -220,6 +228,9 @@ export function nodeTooOld(version = process.versions.node): boolean {
 
 const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   list: { flags: ['json'] },
+  pin: { flags: ['json'] },
+  unpin: { flags: ['json'] },
+  order: { flags: ['json', 'families', 'reset'] },
   run: { flags: [] },
   resume: { flags: [] },
   login: { flags: [] },
@@ -242,7 +253,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   'shell-init': { flags: ['write'] },
   plugins: { flags: ['json'] },
   families: { flags: ['json'] },
-  update: { flags: ['json', 'yes'] },
+  update: { flags: ['json', 'yes'], valued: ['auto'] },
   'update-check': { flags: [] },
 }
 
@@ -427,6 +438,11 @@ async function dispatch(
   cmds: typeof import('./commands.ts'),
 ): Promise<number> {
   switch (cmd) {
+    case 'pin':
+    case 'unpin':
+      return await cmds.cmdPin(parsed, io, cmd === 'pin')
+    case 'order':
+      return await cmds.cmdOrder(parsed, io)
     case 'list':
       return await cmds.cmdList(parsed, io)
     case 'run':

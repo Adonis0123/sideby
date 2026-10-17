@@ -26,6 +26,7 @@ import {
   panelHint,
   panelLang,
   passedWindow,
+  pinnedIn,
   quotaPressure,
   remoteControlSummary,
   remoteControlTodo,
@@ -35,6 +36,7 @@ import {
   suggestName,
   updatedAge,
   windowState,
+  withPinned,
 } from './page-logic.ts'
 import { PAGE_SCRIPT } from './page-script.ts'
 
@@ -625,22 +627,139 @@ describe('Auto Handoff helpers', () => {
 })
 
 describe('Display Order in the page (spec §3.25)', () => {
-  it('puts the grip on Family groups and account rows, not on the Grok Bot group', () => {
-    const body = (name: string) => {
-      const at = PAGE_SCRIPT.indexOf(`  function ${name}(`)
-      return PAGE_SCRIPT.slice(at, PAGE_SCRIPT.indexOf('\n  function ', at + 10))
-    }
+  const body = (name: string) => {
+    const at = PAGE_SCRIPT.indexOf(`  function ${name}(`)
+    return PAGE_SCRIPT.slice(at, PAGE_SCRIPT.indexOf('\n  function ', at + 10))
+  }
+  it('puts the grip on group heads and on arrange-mode rows only, not on ordinary rows', () => {
     assert.match(body('group'), /dragHandle\('family'/)
     assert.match(body('group'), /ui\.order\.units\[fam\]/)
-    assert.match(body('row'), /dragHandle\('account'/)
-    assert.doesNotMatch(body('appGroup'), /dragHandle|ui\.order/)
+    assert.match(body('arrangeRow'), /dragHandle\('account'/)
+    assert.doesNotMatch(body('row'), /dragHandle/)
+    assert.doesNotMatch(body('loginRow'), /dragHandle/)
+    assert.match(body('dragHandle'), /!ui\.arrange\) return null/)
+    assert.doesNotMatch(body('appRow'), /dragHandle/)
+  })
+  it('puts a one-click pin on every row, Same Login row and card, next to the menu', () => {
+    assert.match(body('row'), /pinButton\(a, a\.name\), moreButton\(a\)/)
+    assert.match(body('loginRow'), /pinButton\(a, /)
+    assert.match(body('card'), /pinButton\(a, a\.name\)/)
+    assert.match(body('pinButton'), /togglePin\(a\)/)
+  })
+  it('opens the arrange mode from Settings too, not only from the sort menu', () => {
+    assert.match(body('settingsSections'), /out\.push\('order'\)/)
+    assert.match(body('settingsPop'), /t\('set\.order'\)[\s\S]*startArrange\(\)/)
+  })
+  it('never switches the sort to my order behind the user, only the arrange mode does', () => {
+    assert.doesNotMatch(body('moveUnit'), /prefs\.sort/)
+    assert.match(body('startArrange'), /prefs\.sort = 'manual'/)
+  })
+  it('puts pinned accounts first in every sort', () => {
+    assert.match(
+      PAGE_SCRIPT,
+      /withPinned\(sortAccounts\(list, prefs\.sort, now, accountOrder\(fam\)\), pinnedOf\(fam\)\)/,
+    )
+  })
+})
+
+describe('whole-Panel UX pass (three-way audit, 2026-10-17)', () => {
+  const body = (name: string) => {
+    const at = PAGE_SCRIPT.indexOf(`  function ${name}(`)
+    return PAGE_SCRIPT.slice(at, PAGE_SCRIPT.indexOf('\n  function ', at + 10))
+  }
+  it('explains Suggested on click instead of copying a command without a word', () => {
+    assert.match(body('nextTag'), /openPopover\(/)
+    assert.doesNotMatch(body('nextTag'), /addEventListener\('click', \(\) => copyText/)
+  })
+  it("shows a Health finding in plain words, with the check's own text under Details", () => {
+    assert.match(body('findingRow'), /'finding\.' \+ f\.code/)
+    assert.match(body('findingRow'), /h\('details', \{ class: 'finding-raw' \}/)
+    for (const code of [
+      'link.real-file',
+      'symlink-forbidden',
+      'missing',
+      'copy.stale',
+      'credential.mode',
+      'json-key.drift',
+    ])
+      assert.ok(MESSAGES.zh[`finding.${code}` as keyof typeof MESSAGES.zh], code)
+  })
+  it('keeps the colour of old quota and says its age in words', () => {
+    assert.match(body('quotaBlock'), /q-asof/)
+    assert.doesNotMatch(body('meter'), /m-asof/)
+  })
+  it('puts the start command on the row, and groups the menu by open, copy and manage', () => {
+    assert.match(body('row'), /runButton\(a\)/)
+    assert.match(body('accountMenu'), /menu\.groupOpen[\s\S]*menu\.groupCopy[\s\S]*menu\.groupManage/)
+  })
+  it('shows only the empty state when there is no account: no summary, no health check', () => {
+    assert.match(body('renderPageChrome'), /none && id !== 'accounts-page'/)
+  })
+  it('lets the user choose which directory names a Same Login row, through the Display Order', () => {
+    assert.match(body('loginMembers'), /accountOrder\(members\[0\]\.family\)/)
+    assert.match(body('loginDetail'), /showLoginAs\(ms, m\)/)
+    assert.match(body('showLoginAs'), /next\.accounts\[m\.family\] = names/)
+  })
+  it('puts desktop app groups (Grok Bot) in the Display Order, draggable like the tools', () => {
+    assert.match(body('familyOrder'), /appIds\(\)/)
+    assert.match(body('appGroup'), /dragHandle\('family', id, id, app\)/)
+    assert.match(body('appGroup'), /appArrangeRow\(p, id\)/)
+    assert.match(body('appArrangeRow'), /dragHandle\('account', id, p\.name, name\)/)
+  })
+  it('points to the sideby skill from Settings, the arrange bar and the empty state', () => {
+    assert.match(body('settingsSections'), /out\.push\('ai'\)/)
+    assert.match(body('arrangeBar'), /openAi/)
+    assert.match(body('emptyState'), /openAi/)
+    assert.match(body('openAi'), /BOOT\.skillInstall/)
+  })
+})
+
+describe('withPinned', () => {
+  const list = [{ name: 'main' }, { name: 'work' }, { name: '001' }, { name: '002' }]
+  const names = (x: { name: string }[]) => x.map((a) => a.name)
+  it('leaves the list as it is with nothing pinned', () => {
+    assert.deepEqual(names(withPinned(list)), ['main', 'work', '001', '002'])
+    assert.deepEqual(names(withPinned(list, [])), ['main', 'work', '001', '002'])
+  })
+  it('puts pinned names first, in pin order, and keeps the order of the rest', () => {
+    assert.deepEqual(names(withPinned(list, ['002', 'work'])), ['002', 'work', 'main', '001'])
+  })
+  it('keeps a Same Login together when only one of its directories is pinned', () => {
+    const login = [
+      { name: 'main', sameLogin: ['claude:001'] },
+      { name: 'work' },
+      { name: '001', sameLogin: ['claude:main'] },
+    ]
+    assert.deepEqual(names(withPinned(login, ['001'])), ['main', '001', 'work'])
+  })
+  it('skips pinned names that are gone or filtered out', () => {
+    assert.deepEqual(names(withPinned(list, ['gone', '001'])), ['001', 'main', 'work', '002'])
+  })
+})
+
+describe('pinnedIn', () => {
+  it('pins a Same Login as a whole, whichever directory the pin names', () => {
+    assert.equal(pinnedIn({ name: 'main', sameLogin: ['claude:001'] }, ['001']), true)
+    assert.equal(pinnedIn({ name: '001', sameLogin: ['claude:main'] }, ['001']), true)
+    assert.equal(pinnedIn({ name: 'work' }, ['001']), false)
+    assert.equal(pinnedIn({ name: 'work' }, []), false)
+  })
+})
+
+describe('arrange mode keys', () => {
+  it('leaves Escape to a menu or popover that already took it', () => {
+    assert.match(PAGE_SCRIPT, /e\.key !== 'Escape' \|\| e\.defaultPrevented \|\| !ui\.arrange/)
   })
 })
 
 describe('Same Login rows', () => {
-  it('keep their own email line and Chrome user button, since every member is an ordinary row', () => {
-    assert.match(PAGE_SCRIPT, /const email = emailLine\(a\)\n/)
-    assert.doesNotMatch(PAGE_SCRIPT, /function rowEmail\(/)
+  it('are one row with the quota once, and list each directory when opened (ADR-0026)', () => {
+    const at = PAGE_SCRIPT.indexOf('  function loginRow(')
+    const loginRow = PAGE_SCRIPT.slice(at, PAGE_SCRIPT.indexOf('\n  function ', at + 10))
+    assert.equal((loginRow.match(/quotaBlock\(/g) || []).length, 1)
+    assert.match(loginRow, /lastUsed\(newestOf\(ms\)\)/)
+    assert.match(loginRow, /loginDetail\(ms\)/)
+    assert.doesNotMatch(PAGE_SCRIPT, /function sharedQuota\(/)
   })
 })
 

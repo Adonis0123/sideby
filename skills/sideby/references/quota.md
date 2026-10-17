@@ -18,3 +18,9 @@ Grok quota needs no setup: sideby asks the `grok` CLI of each signed-in account 
 A window with a `name` (a plugin's Cursor "Other models") covers only some models: show it, but it does not make the account full.
 
 Usage (7-day tokens) is read by sideby itself from Claude Code and Codex local records; no ccusage is needed. Grok and pi have no usage source; pi has no quota either.
+
+## Quota checks and refresh
+
+`sideby quota check <family> on|off --json` saves the fetching switch immediately, returning `family`, `on`, `changed`. For example, `sideby quota check grok off --json`. Only Families with a quota fetcher support it; the error tells you to choose one through `sideby families`. Turning it off keeps local readings available. CI still blocks fetching when the switch is on.
+
+`sideby quota [account|family] --refresh --json` refreshes every selected Family that fetches quota, including plugin Families; without a target it refreshes all. It does not override a disabled check or CI. Read the returned accounts' `quota` and `usage`, including `fetchError` and observation time; do not call stale data a successful refresh.

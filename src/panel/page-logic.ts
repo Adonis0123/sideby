@@ -233,6 +233,33 @@ export function sortAccounts<T extends LogicAccount>(
 }
 
 /**
+ * Whether an Account is pinned (spec §3.25): its name is in `pinned`, or, for a Same Login, the name of any of its
+ * directories, so the login is pinned as a whole.
+ */
+export function pinnedIn(
+  a: { name: string; sameLogin?: readonly string[] },
+  pinned: readonly string[],
+): boolean {
+  return (
+    pinned.includes(a.name) || (a.sameLogin ?? []).some((r) => pinned.includes(r.slice(r.indexOf(':') + 1)))
+  )
+}
+
+/**
+ * Pinned Accounts first (spec §3.25): the names in `pinned`, in that order, then the rest in the order they came.
+ * A Same Login follows any of its pinned directories, so it stays together. Names no longer there are simply not met.
+ */
+export function withPinned<T extends { name: string; sameLogin?: readonly string[] }>(
+  list: readonly T[],
+  pinned?: readonly string[],
+): T[] {
+  if (!pinned?.length) return list.slice()
+  const top: T[] = []
+  for (const n of pinned) for (const a of list) if (!top.includes(a) && pinnedIn(a, [n])) top.push(a)
+  return top.concat(list.filter((a) => !top.includes(a)))
+}
+
+/**
  * The sorted list with each Same Login together (spec §3.21): an Account, or the shown members of one login, in
  * order, at the place of its first member. A login with one shown member stays a plain Account.
  */

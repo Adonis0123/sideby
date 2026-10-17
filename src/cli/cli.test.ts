@@ -127,6 +127,28 @@ describe('list in Display Order (spec §3.25)', () => {
       )
     })
   })
+
+  it('puts Pinned Accounts first in their family and marks them in --json', async () => {
+    await withFakeHome(async (h) => {
+      for (const d of ['.claude', '.claude-001', '.claude-002', '.claude-003'])
+        await h.write(`${d}/settings.json`, '{}\n')
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ display: { accounts: { claude: ['003'] }, pinned: { claude: ['002', 'gone'] } } }),
+      )
+      const r = await sideby(h, ['list', '--json'])
+      const data = checkSchema('list', r.out) as { accounts: { ref: string; pinned?: boolean }[] }
+      assert.deepEqual(
+        data.accounts.map((a) => [a.ref, a.pinned ?? false]),
+        [
+          ['claude:002', true],
+          ['claude:003', false],
+          ['claude:main', false],
+          ['claude:001', false],
+        ],
+      )
+    })
+  })
 })
 
 describe('first run with Claude Code', () => {
@@ -1812,6 +1834,177 @@ describe('sideby update (spec §3.23)', () => {
       assert.equal(r.code, 1)
       const data = checkSchema('error', r.out)
       assert.match(String(data.error), /could not reach http:\/\/127\.0\.0\.1:9/)
+    })
+  })
+})
+
+describe('Panel CLI parity', () => {
+  it('pins a Same Login once, preserves order, prunes stale names and enforces the limit', async () => {
+    await withFakeHome(async (h) => {
+      for (const name of ['main', 'work', 'team', 'lab', 'extra']) {
+        const dir = name === 'main' ? '.claude' : `.claude-${name}`
+        await h.write(`${dir}/settings.json`, '{}')
+        const email = ['main', 'work'].includes(name) ? 'me@example.com' : `${name}@example.com`
+        await h.write(
+          name === 'main' ? '.claude.json' : `${dir}/.claude.json`,
+          JSON.stringify({ oauthAccount: { emailAddress: email } }),
+          0o600,
+        )
+      }
+      await fakeHost(h, 'claude')
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({
+          aliases: { cx: 'claude:work' },
+          display: {
+            families: ['claude'],
+            accounts: { claude: ['lab', 'main'] },
+            pinned: { claude: ['gone'] },
+          },
+        }),
+      )
+      const hostDirs = ['.claude', '.claude-work', '.claude-team', '.claude-lab', '.claude-extra']
+      const before = await Promise.all(hostDirs.map((dir) => snapshot(h.path(dir))))
+      const loginBefore = await readFile(h.path('.claude.json'), 'utf8')
+      const pin = await sideby(h, ['pin', 'cx', '--json'])
+      assert.equal(pin.code, 0, pin.out)
+      const data = checkSchema('pin', pin.out)
+      assert.equal(data.changed, true)
+      let config = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8'))
+      assert.deepEqual(new Set(config.display.pinned.claude), new Set(['main', 'work']))
+      assert.deepEqual(config.display.accounts.claude, ['lab', 'main'])
+      assert.deepEqual(config.display.families, ['claude'])
+      assert.equal(checkSchema('pin', (await sideby(h, ['pin', 'claude:main', '--json'])).out).changed, false)
+      for (const name of ['team', 'lab']) assert.equal((await sideby(h, ['pin', `claude:${name}`])).code, 0)
+      const full = await sideby(h, ['pin', 'claude:extra', '--json'])
+      assert.equal(full.code, 1)
+      assert.match(String(checkSchema('error', full.out).error), /unpin/i)
+      const unpin = await sideby(h, ['unpin', 'cx', '--json'])
+      assert.equal(unpin.code, 0)
+      assert.equal(checkSchema('unpin', unpin.out).pinned, false)
+      config = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8'))
+      assert.deepEqual(config.display.pinned.claude, ['team', 'lab'])
+      const noop = await sideby(h, ['unpin', 'cx'])
+      assert.equal(noop.code, 0)
+      assert.match(noop.out, /not pinned/i)
+      const missing = await sideby(h, ['pin', 'claude:missing', '--json'])
+      assert.equal(missing.code, 1)
+      checkSchema('error', missing.out)
+      for (const [i, dir] of hostDirs.entries())
+        assert.deepEqual(diffSnapshots(before[i]!, await snapshot(h.path(dir))), [])
+      assert.equal(await readFile(h.path('.claude.json'), 'utf8'), loginBefore)
+    })
+  })
+
+  it('shows empty families, sets orders, and resets while keeping pins', async () => {
+    await withFakeHome(async (h) => {
+      const empty = await sideby(h, ['order', '--json'])
+      assert.equal(empty.code, 0)
+      const initial = checkSchema('order', empty.out)
+      assert.deepEqual(initial.display, {})
+      // Desktop app groups (Grok Bot) depend on the apps this machine has installed; check the tools only.
+      const tools = (initial.families as { family: string; accounts: unknown[] }[]).filter((f) =>
+        ['claude', 'codex', 'grok', 'pi'].includes(f.family),
+      )
+      assert.equal(tools.length, 4)
+      assert.ok(tools.every((f) => f.accounts.length === 0))
+      assert.equal((await sideby(h, ['order', 'codex', 'work'])).code, 1)
+      await codexMain(h)
+      await h.write('.codex-work/config.toml', '')
+      await fakeHost(h, 'codex')
+      assert.equal((await sideby(h, ['pin', 'codex:main'])).code, 0)
+      assert.equal((await sideby(h, ['order', 'codex', 'work', 'main'])).code, 0)
+      assert.equal((await sideby(h, ['order', '--families', 'codex', 'claude'])).code, 0)
+      const shown = checkSchema('order', (await sideby(h, ['order', '--json'])).out)
+      assert.deepEqual(shown.display, {
+        families: ['codex', 'claude'],
+        accounts: { codex: ['work', 'main'] },
+        pinned: { codex: ['main'] },
+      })
+      assert.match((await sideby(h, ['order'])).out, /main.*pinned/)
+      const before = await readFile(h.path('.config/sideby/config.json'), 'utf8')
+      const bad = await sideby(h, ['order', 'codex', 'missing', 'other', '--json'])
+      assert.equal(bad.code, 1)
+      assert.match(String(checkSchema('error', bad.out).error), /missing.*other/)
+      assert.equal((await sideby(h, ['order', '--families', 'missing'])).code, 1)
+      assert.equal((await sideby(h, ['order', 'codex', 'main', 'main'])).code, 2)
+      assert.equal((await sideby(h, ['order', '--families', 'codex', 'codex'])).code, 2)
+      assert.equal(await readFile(h.path('.config/sideby/config.json'), 'utf8'), before)
+      const reset = await sideby(h, ['order', '--reset', '--json'])
+      assert.equal(reset.code, 0)
+      assert.deepEqual(checkSchema('order', reset.out).display, { pinned: { codex: ['main'] } })
+    })
+  })
+
+  it('sets quota checks and Auto Update without touching Host files', async () => {
+    await withFakeHome(async (h) => {
+      for (const on of ['off', 'on']) {
+        const r = await sideby(h, ['quota', 'check', 'grok', on, '--json'])
+        assert.equal(r.code, 0, r.out)
+        assert.equal(checkSchema('quota-check', r.out).on, on === 'on')
+        const cfg = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8'))
+        assert.equal(cfg.quota?.check?.grok !== false, on === 'on')
+      }
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ update: { check: false }, aliases: { cx: 'codex:main' } }),
+      )
+      for (const on of ['on', 'off']) {
+        const r = await sideby(h, ['update', '--auto', on, '--json'])
+        assert.equal(r.code, 0, r.out)
+        assert.equal(checkSchema('update-auto', r.out).auto, on === 'on')
+        const cfg = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8'))
+        assert.deepEqual(cfg.update, { check: false, auto: on === 'on' })
+        assert.deepEqual(cfg.aliases, { cx: 'codex:main' })
+      }
+      for (const args of [
+        ['quota', 'check', 'missing', 'on'],
+        ['quota', 'check', 'claude', 'off'],
+        ['update', '--auto', 'maybe'],
+        ['order', '--reset', 'codex'],
+      ]) {
+        const r = await sideby(h, [...args, '--json'])
+        assert.notEqual(r.code, 0)
+        checkSchema('error', r.out)
+      }
+      const status = await sideby(h, ['handoff', 'status', '--json'])
+      assert.equal(status.code, 0)
+      const overview = checkSchema('handoff-status', status.out).overview as {
+        takeover: unknown[]
+        recent: unknown[]
+      }
+      assert.deepEqual(overview.takeover, [])
+      assert.deepEqual(overview.recent, [])
+      await codexMain(h)
+      await fakeHost(h, 'codex')
+      await h.write('.config/sideby/config.json', JSON.stringify({ handoff: { auto: true } }))
+      await h.write(
+        '.local/state/sideby/handoffs/example/chain.json',
+        JSON.stringify({
+          hops: [
+            { ref: 'codex:main', trigger: 'threshold', briefSource: 'agent' },
+            { ref: 'claude:work', startedAt: '2026-10-17T00:00:00Z', brief: 'must not be returned' },
+          ],
+        }),
+      )
+      const enabled = await sideby(h, ['handoff', 'status', '--json'])
+      assert.equal(enabled.code, 0)
+      const active = checkSchema('handoff-status', enabled.out).overview as {
+        takeover: { ref: string; decision: { kind: string } }[]
+        recent: unknown[]
+      }
+      assert.equal(active.takeover[0]?.ref, 'codex:main')
+      assert.equal(active.takeover[0]?.decision.kind, 'none')
+      assert.deepEqual(active.recent, [
+        {
+          from: 'codex:main',
+          to: 'claude:work',
+          at: '2026-10-17T00:00:00Z',
+          trigger: 'threshold',
+          briefSource: 'agent',
+        },
+      ])
+      assert.doesNotMatch(enabled.out, /must not be returned/)
     })
   })
 })

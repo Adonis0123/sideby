@@ -61,3 +61,11 @@ Before you delegate work to another account (for example a review in a headless 
 
 - Switch accounts by editing config or environment, copy session files between account directories, or read any credential.
 - Start an interactive session for the user.
+
+## Settings and overview
+
+`sideby handoff enable --threshold 95 --prepare-at 80 --wait-minutes 30 --countdown 10 --json` previews the settings. `--threshold` is the quota percentage to hand over, `--prepare-at` the percentage to prepare the Brief, `--wait-minutes` the longest reset wait, and `--countdown` the seconds before handing over. Read the validated `settings` and `diff`; on exit 10, show the change and confirm before repeating with `--yes`. Keep the user's chosen `--same-family` and `--order` options in the confirmed command.
+
+`sideby handoff status --json` also includes `overview`: `settings`, `takeover` (each account's `ref`, `family`, `starts`, `decision`) and `recent` (the last hand-overs' `from`, `to`, `at`, `trigger`, `briefSource`). A decision is `pick` with `ref`, `wait` with `until`, or `none` with `reason`; optional `skipped` and `earliestReset` explain exclusions and resets. An empty takeover list while Auto Handoff is off is expected. No Brief text is returned.
+
+`sideby handoff teardown grok --json` removes the hook installed by setup only while it still matches. It does not turn Auto Handoff off; use `handoff disable` for that. Relay any refusal instead of removing modified files manually.

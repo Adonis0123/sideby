@@ -14,3 +14,7 @@ What to do:
    - If it exits `1` with `canRun: false` (npx, Volta, a project dependency, a source checkout, a Local Build), sideby cannot update itself: give the user the `command` it printed as one line to run.
    - The same command updates the installed sideby skill (`skillUpdate` in the plan, `skillUpdated` in the result), so do not run a skill command yourself. With sideby already current and only the skill old (`_notice.skill`), `sideby update` updates the skill alone, after the same preview. When `skillUpdate.canRun` is false (the skill lives in a git repository the skills tool did not install it into), tell the user `reason` and give them `command`. Tell them that sessions already running keep the old version until they start again.
 4. The user can turn notices off with `SIDEBY_NO_UPDATE_NOTIFIER=1` (or config `update.check: false`); set it for one command when a script needs JSON without `_notice`. A Local Build (`pnpm local`) never has one.
+
+## Auto Update
+
+When the user asks to change Auto Update, run `sideby update --auto on|off --json`. It saves immediately and returns `auto` and `changed` (exit 0, including no-op). It keeps the Update Check setting and does not check or install in this invocation. It needs no `--yes`; ordinary `sideby update --json` still previews an installation with exit 10. Never enable Auto Update unless the user asks.

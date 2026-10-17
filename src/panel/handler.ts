@@ -494,6 +494,10 @@ function displayBody(body: Record<string, unknown>): DisplayConfig | undefined {
       out.accounts = Object.fromEntries(
         Object.entries(v).map(([f, list]) => [f, names(list, `"accounts.${f}"`)]),
       )
+    } else if (k === 'pinned') {
+      if (!v || typeof v !== 'object' || Array.isArray(v))
+        throw new HttpError(400, '"pinned" must be an object')
+      out.pinned = Object.fromEntries(Object.entries(v).map(([f, list]) => [f, names(list, `"pinned.${f}"`)]))
     } else throw new HttpError(400, `unknown key "${k}"`)
   }
   return out

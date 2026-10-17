@@ -19,7 +19,7 @@ Options:
 - v1 groups only the claude Family. Codex Identity has an email only, and one email can belong to several ChatGPT workspaces with separate Quota, so Codex is left out until its Identity can tell workspaces apart (ADR-0003 would need a revision). The switch is internal, not part of `FamilyDef`.
 - Quota: every member shows the group's freshest reading (latest `observedAt`), marked with the Account it was read from (`from`). Usage stays per Account: it counts each directory's own records.
 - Handoff: ranking uses the shared Quota. `sideby next`, run from an Account sideby started (`SIDEBY_ACCOUNT`), and Auto Handoff never pick an Account of the current Account's Same Login; a Handoff Order entry that names one is skipped with the reason in the output.
-- Panel: one row per Account as before, with a "Same login as …" tag; the Quota warning appears once per group, on the member the reading comes from.
+- Panel: one row per Account as before, with a "Same login as …" tag; the Quota warning appears once per group, on the member the reading comes from. (Replaced by ADR-0026, 2026-10-17: a Same Login is one row in the Panel.)
 - Doctor reports nothing about it. No directory is moved, merged or written.
 
 ## Consequences
