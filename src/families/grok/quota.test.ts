@@ -82,7 +82,8 @@ process.stdin.on('data', (d) => {
     process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: req.id, ...answer }) + '\\n')
   }
 })
-process.stdin.on('end', () => process.exit(0))
+// A Grok that hangs ignores its closed stdin too, so only sideby's SIGTERM ends it.
+process.stdin.on('end', () => { if (mode !== 'hang') process.exit(0) })
 if (mode === 'hang') setInterval(() => {}, 1000)
 `
   await writeFile(join(h.bin, 'grok'), script, { mode: 0o755 })
