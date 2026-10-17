@@ -156,19 +156,20 @@ await until(
   'the Panel to load quota',
 )
 await new Promise((r) => setTimeout(r, 800))
-// Where the scene zooms and rings: the Claude Code group, work's 7-day window and the account marked Next.
+// Where the scene zooms and rings: the Claude Code group, work's 7-day window and the account marked Suggested
+// (found by its tag's button, not its words, which change with the language and the copy).
 const layout = await evaluate(`(() => {
   const box = (el) => { const r = el.getBoundingClientRect(); return [r.left, r.top, r.width, r.height] }
   const group = document.querySelector('section[data-key="g:claude"]')
   const work = document.querySelector('.row[data-ref="claude:work"]')
-  const next = [...(group?.querySelectorAll('.row') ?? [])].find((r) => [...r.querySelectorAll('.ident-name .tag')].some((t) => t.textContent.trim() === 'Next'))
+  const next = [...(group?.querySelectorAll('.row') ?? [])].find((r) => r.querySelector('.ident-name .tag-ok.tag-btn'))
   const week = work?.querySelector('.quota')?.children[1]
   if (!group || !week || !next) return null
   return { group: box(group), week: box(week), next: box(next), weekUsed: /\\d+%/.exec(week.innerText)?.[0], nextName: next.dataset.ref }
 })()`)
 if (!layout)
   fail(
-    'The Panel has no Claude Code group with claude:work and a Next account. Check scripts/demo-home.ts normal.',
+    'The Panel has no Claude Code group with claude:work and a Suggested account. Check scripts/demo-home.ts normal.',
   )
 const panelPng = join(work, 'panel.png')
 writeFileSync(panelPng, await screenshot())

@@ -78,6 +78,7 @@ cc-switch 自己的说明是：切换时把配置写进宿主正在用的文件�
 | 用你自己的会话找出最省的自动压缩大小，一键使用 | `sideby tune`（或面板的「上下文调优」页签） | [上下文调优](docs/guide/usage.zh-CN.md#上下文调优) |
 | 查看每个账号的模型和 effort，并按账号设置 | `sideby model <账号>`（或在面板里点模型） | [模型与 effort](docs/guide/usage.zh-CN.md#模型与-effort) |
 | 一次设置所有账号的 Claude 会话要不要自动连到 claude.ai（Remote Control） | `sideby remote-control off` 或 `on`（或面板的「设置」） | [Remote Control](docs/guide/usage.zh-CN.md#remote-control) |
+| 把常用账号置顶，按自己的习惯排工具和账号 | `sideby pin claude:work`、`sideby order`（或面板的设置） | [自己排顺序](docs/guide/usage.zh-CN.md#自己排顺序) |
 | 账号撞上限额时换一个接着用 | `sideby next claude` | [接力](docs/guide/usage.zh-CN.md#账号撞上限额时) |
 | 额度快用完时，让正在跑的任务自己交给下一个账号（默认关闭，注意风险） | `sideby handoff enable`（或在面板里开启） | [自动交接](docs/guide/usage.zh-CN.md#自动交接auto-handoff) |
 | 用 `ccw` 这样的短命令 | `sideby alias add ccw claude:work` | [Shell 函数](docs/guide/configuration.zh-CN.md#shell-函数) |
