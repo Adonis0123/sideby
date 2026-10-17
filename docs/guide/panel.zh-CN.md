@@ -23,7 +23,7 @@ sideby ui --stop         # 停掉后台面板
 
 双击应用就能打开面板。没有面板在运行时，它在后台启动一个（`sideby ui --background`）；已经有了就直接复用，然后打开浏览器。关掉标签页后，后台面板继续运行，日志写到 `${XDG_STATE_HOME:-~/.local/state}/sideby/panel.log`。从 Finder 或桌面菜单启动的程序只拿到很短的 PATH，所以后台面板会向你的登录 shell（`$SHELL -ilc`）要 PATH，好找到 `~/.local/bin` 这类目录里的宿主。
 
-应用运行的是安装时那份 Node 和 sideby。`sideby update`（以及面板的「更新」按钮和自动更新）会用新版本重新安装应用，图标也一起换新。升级了 Node，或用别的方式装了 sideby，就自己再跑一次 `sideby app install`。如果你自己的页面嵌入了面板（见下文），`sideby app install --url http://accounts.localhost:17333/` 让应用改为打开这个地址；再次安装会沿用这个地址。要让应用改回启动面板，先跑 `sideby app uninstall`，再跑 `sideby app install`。安装和卸载只动 `sideby app install` 自己创建的文件。这个应用是本机未签名的启动脚本，不适合拷到别的机器上用。
+应用运行的是安装时那份 Node 和 sideby。`sideby update`（以及面板的「更新」按钮和自动更新）会用新版本重新安装应用，图标也一起换新。升级了 Node，或用别的方式装了 sideby，就自己再跑一次 `sideby app install`。如果你自己的页面嵌入了面板（见下文），`sideby app install --url http://localhost:3000/` 让应用改为打开这个地址；再次安装会沿用这个地址。要让应用改回启动面板，先跑 `sideby app uninstall`，再跑 `sideby app install`。安装和卸载只动 `sideby app install` 自己创建的文件。这个应用是本机未签名的启动脚本，不适合拷到别的机器上用。
 
 ## 嵌入面板
 
@@ -56,7 +56,7 @@ createServer(async (req, res) => {
 - **创建 handler 时校验**：未知 token，或值里出现字母、数字、空格和 `# % ( ) , . + - / ' " _` 以外的字符（也就是不允许 `;`、`{`、`}`、`<`、`\`、`*`、`:`），或含 `url(`、括号或引号不成对、超过 200 个字符，都会抛出写明 token 名的 `TypeError`。
 - 不传 `theme` 时，外观和 `sideby ui` 一样。
 
-`updates`（默认 `true`）会在面板页头显示当前版本，有新版本时显示「新版本」标签，以及带「检查更新」、「更新」按钮和自动更新开关的更新对话框（见[更新](configuration.zh-CN.md#更新)）。从这里发起的更新会安装新包；像作者的 Portal 那样从已安装的包加载 sideby 的页面会自己换上新版本，面板提示刷新页面。你的页面自己管理 sideby 版本时传 `updates: false`：面板不再显示任何更新相关内容，并拒绝 `/api/update*`。
+`updates`（默认 `true`）会在面板页头显示当前版本，有新版本时显示「新版本」标签，以及带「检查更新」、「更新」按钮和自动更新开关的更新对话框（见[更新](configuration.zh-CN.md#更新)）。从这里发起的更新会安装新包；从已安装的包加载 sideby 的页面会自己换上新版本（前提是它每次检查新代码时，都重新找一次 `sideby` 命令所在的包），面板提示刷新页面。你的页面自己管理 sideby 版本时传 `updates: false`：面板不再显示任何更新相关内容，并拒绝 `/api/update*`。
 
 `<basePath>/icon.svg` 提供 sideby 标志（面板自己的 favicon 用 `<basePath>/favicon.svg`，小尺寸版，只有蓝色那个小伙伴）。在你自己的标签页或菜单里直接引用它，不要另存一份，这样换了新标志，你的页面跟着下一个 sideby 版本更新。
 

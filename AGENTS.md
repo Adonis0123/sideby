@@ -6,6 +6,17 @@ Rules for AI agents maintaining sideby. Terms are defined in `CONTEXT.md`; decis
 
 Design every feature for a beginner. The first screen is simple, the default path is one clear action, and the words are plain: say what happens and what the user gets, not "weighted tokens" or "Host". Do the work for the user: when sideby recommends a setting, it offers to apply it, shows exactly what will change, and keeps an undo; it never asks the user to copy a snippet into a config file by hand. Do not make a feature something the user must already know about: give it a place of its own (a page, a tab) or show it where the problem appears. Details go behind a click. Before handing work back, walk the path as that beginner would (empty, normal, error, slow) and fix whatever is confusing.
 
+## Write for every user
+
+sideby is public, and everything in this repository (code, comments, tests, specs, ADRs, guides, commit messages) is read by people whose machines look nothing like the one the work was done on. A task often starts from one person's setup: their accounts, a page of their own that embeds the Panel, a local plugin. Solve it for everyone and write it that way:
+
+- State behaviour and rules, with roles as subjects: a user, an Account, a Portal, a plugin author. Not who reported it or how their machine is set up.
+- Give evidence by what makes it repeatable: the Host and its version, the date, the conditions ("tried with Grok Build 1.0.60 on 2026-10-17"). Never "on my machine" or "the maintainer has three accounts".
+- Use the demo HOME's fake names in examples (`claude:work`, `me@example.com`, port 17420). Never real account names, emails, home paths, hostnames or ports from someone's setup, and never the names of their own tools or plugins.
+- A fix that belongs to someone's own tool (their Portal, a local plugin) goes in that tool. Here, write only the general rule it needs from sideby, such as what any Portal must do.
+
+Before you commit, read your diff once for these.
+
 ## Commands
 
 | Task | Command |
