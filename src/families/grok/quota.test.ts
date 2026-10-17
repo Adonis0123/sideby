@@ -294,7 +294,11 @@ describe('Grok quota (spec §3.26)', () => {
       assert.equal(q.status === 'unavailable' && q.reason, 'fetch-failed')
       for (let i = 0; i < 200 && !(await grokLog(h)).some((r) => r.signal); i++)
         await new Promise((r) => setTimeout(r, 50))
-      assert.ok((await grokLog(h)).some((r) => r.signal === 'SIGTERM'))
+      const log = await grokLog(h)
+      assert.ok(
+        log.some((r) => r.signal === 'SIGTERM'),
+        `no SIGTERM in the fake Grok's log: ${JSON.stringify(log.map((r) => ({ ...r, env: undefined })))}; answer: ${JSON.stringify(q)}`,
+      )
     })
   })
 })
