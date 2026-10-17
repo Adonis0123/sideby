@@ -201,8 +201,10 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .tag-login { font-weight: 400; }
 .login-detail { flex-direction: column; gap: 8px; }
 .login-detail .rd-note { margin: 0; }
-.login-dirs { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--ctl-radius); background: var(--surface); }
-.login-dir { display: grid; grid-template-columns: minmax(120px, 1fr) auto var(--l-w) minmax(0, 1.4fr) auto auto auto; column-gap: 14px; align-items: center; padding: 6px 6px 6px 12px; }
+/* The directories share one set of columns (subgrid), so a wider cell in one line moves every line alike. */
+.login-dirs { display: grid; grid-template-columns: minmax(120px, 1fr) auto var(--l-w) minmax(0, 1.4fr) auto auto auto; column-gap: 14px; border: 1px solid var(--border); border-radius: var(--ctl-radius); background: var(--surface); }
+.login-dir { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; padding: 6px 6px 6px 12px; }
+.login-dir > * { justify-self: start; min-width: 0; }
 .login-dir + .login-dir { border-top: 1px solid var(--border); }
 .login-dir .ld-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .login-dir .ld-name .name { font-weight: var(--strong-weight); }
@@ -698,7 +700,8 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .stat:nth-child(n) { border-top: 0; }
   .stat:nth-child(4) { border-left: 1px solid var(--border); }
   .row-end .icon-btn { width: 36px; height: 36px; }
-  .login-dir { grid-template-columns: minmax(0, 1fr) auto auto; row-gap: 6px; }
+  .login-dirs { grid-template-columns: minmax(0, 1fr); }
+  .login-dir { grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 14px; row-gap: 6px; }
   .login-dir .usage, .login-dir .health { display: none; }
   .grid { grid-template-columns: 1fr; }
   .panel { padding: 14px; }
