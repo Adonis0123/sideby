@@ -279,7 +279,12 @@ describe('Grok quota (spec §3.26)', () => {
       await seed(h)
       await fakeGrok(h, 'hang')
       const ac = new AbortController()
-      setTimeout(() => ac.abort(), 300)
+      // Stop only once Grok has the request (and its signal handler): a fixed delay loses that race on a slow machine.
+      void (async () => {
+        for (let i = 0; i < 200 && !(await grokLog(h)).some((r) => r.req); i++)
+          await new Promise((r) => setTimeout(r, 25))
+        ac.abort()
+      })()
       const rt = await createRuntime({ env: h.env, builtins })
       const q = await fetchGrokQuota(await rt.resolve('grok:main'), {
         ...rt.readContext(),
@@ -287,7 +292,7 @@ describe('Grok quota (spec §3.26)', () => {
         hostEnv: h.env,
       })
       assert.equal(q.status === 'unavailable' && q.reason, 'fetch-failed')
-      for (let i = 0; i < 50 && !(await grokLog(h)).some((r) => r.signal); i++)
+      for (let i = 0; i < 200 && !(await grokLog(h)).some((r) => r.signal); i++)
         await new Promise((r) => setTimeout(r, 50))
       assert.ok((await grokLog(h)).some((r) => r.signal === 'SIGTERM'))
     })
