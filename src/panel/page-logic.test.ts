@@ -545,9 +545,9 @@ describe('Auto Handoff helpers', () => {
 })
 
 describe('Same Login rows', () => {
-  it('keep their Chrome user button on the second line, as the email line moves to the group head', () => {
-    assert.match(PAGE_SCRIPT, /function rowEmail\(a\) \{ return inLogin\(a\) \? null : emailLine\(a\) \}/)
-    assert.match(PAGE_SCRIPT, /inLogin\(a\) \? browserButton\(a\) : null,\n {4}\]\)\)/)
+  it('keep their own email line and Chrome user button, since every member is an ordinary row', () => {
+    assert.match(PAGE_SCRIPT, /const email = emailLine\(a\)\n/)
+    assert.doesNotMatch(PAGE_SCRIPT, /function rowEmail\(/)
   })
 })
 

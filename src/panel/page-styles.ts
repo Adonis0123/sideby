@@ -178,13 +178,15 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .row:first-child { border-top: 0; }
 .row:last-child { border-radius: 0 0 var(--radius) var(--radius); }
 .row-error .ident-name .name { color: var(--fail); }
-/* A login group (spec §3.21): the head carries the email and the one quota; the directories sit indented under it. */
-.login { border-top: 1px solid var(--border); }
+/* A login group (spec §3.21): ordinary rows that share one quota, tied together by a rail on the left. */
+.login { position: relative; border-top: 1px solid var(--border); }
 .login:first-child { border-top: 0; }
-.rows .login > .login-head { border-top: 0; padding-bottom: 4px; }
-.rows .login > .login-head:hover { background: transparent; }
-.login-rows > .row, .login-rows > .row:first-child { border-top: 1px dashed var(--border); padding-left: 40px; }
+.login::before { content: ""; position: absolute; left: 5px; top: 12px; bottom: 12px; width: 3px; border-radius: 3px; background: var(--border-strong); }
+.login-rows > .row:first-child { border-top: 0; }
+.login-rows > .row + .row { border-top: 1px dashed var(--border); }
 .login-rows > .row:last-child { border-radius: 0 0 var(--radius) var(--radius); }
+.q-shared { gap: 6px; color: var(--faint); }
+.q-shared .ic { width: 13px; height: 13px; }
 /* The arrow at a row's start opens and closes its details; so does a click anywhere else in the row. */
 .row-toggle { width: 28px; height: 28px; margin: -4px -6px -4px -8px; }
 .fold-hit { cursor: pointer; }
@@ -246,7 +248,9 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .m-pct { font-weight: var(--strong-weight); font-size: 13px; font-variant-numeric: tabular-nums; }
 .m-unit { color: var(--faint); font-weight: 400; font-size: 11.5px; }
 .m-reset { margin-left: auto; color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
-.m-passed { font-style: italic; }
+.m-passed { color: var(--muted); }
+.m-asof { display: inline-flex; margin-left: 4px; color: var(--faint); vertical-align: -1px; }
+.m-asof .ic { width: 12px; height: 12px; }
 .m-none { color: var(--faint); }
 .bar { height: 6px; border-radius: 999px; background: var(--track); overflow: hidden; margin-top: 5px; }
 .bar > span { display: block; height: 100%; min-width: 0; border-radius: inherit; background: var(--ok-bar); transition: width .4s ease; }
@@ -254,9 +258,9 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .lvl-fail .bar > span { background: var(--fail-bar); } .lvl-fail .m-pct { color: var(--fail); }
 .lvl-reset .m-pct { color: var(--muted); }
 .lvl-stale.lvl-ok .m-pct { color: var(--muted); }
-.is-stale .bar > span, .lvl-stale .bar > span { background: var(--faint); opacity: .5; }
-.q-asof { grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; color: var(--faint); font-size: 11.5px; line-height: 1.3; }
-.q-asof .ic { width: 12px; height: 12px; }
+/* Old numbers keep their level's color, paler, so the bar and the number agree. */
+.lvl-stale .bar > span { opacity: .45; }
+.lvl-stale.lvl-ok .bar > span { background: var(--faint); }
 .q-note { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: var(--small); }
 .link-btn { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: var(--strong-weight); cursor: pointer; }
 .link-btn:hover:not(:disabled) { text-decoration: underline; }
@@ -600,7 +604,6 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .app-actions { width: 100%; justify-content: flex-start; }
   .row { grid-template-columns: minmax(0, 1fr) auto var(--m-w); grid-template-areas: "id last more" "quota quota quota" "detail detail detail" "notes notes notes"; row-gap: 10px; }
   .row-detail { margin-left: 0; }
-  .login-rows > .row, .login-rows > .row:first-child { padding-left: 28px; }
   .row > .quota { grid-template-columns: repeat(var(--qn), minmax(0, 1fr)); max-width: 560px; }
   .rows .m-label, .rows .m-unit, .rows .u-unit { display: inline; }
   .rows .usage { justify-content: flex-start; }
