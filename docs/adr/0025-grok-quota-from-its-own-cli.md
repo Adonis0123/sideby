@@ -8,7 +8,7 @@ Grok Build shows each subscription's weekly credit use in its TUI (`/usage`) and
 
 Other tools show it. Orca (stablyai/orca, read 2026-10-16) reads the bearer token from `~/.grok/auth.json` and calls `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` itself every 15 minutes, for one account only. That is a private endpoint called with a credential sideby would have to read, which ADR-0003 rules out.
 
-What Grok Build 1.0.60 offers by itself (source: the public `xai-org/grok-build`; tried on this machine 2026-10-17):
+What Grok Build 1.0.60 offers by itself (source: the public `xai-org/grok-build`; tried 2026-10-17):
 
 - `grok agent stdio` speaks ACP (Agent Client Protocol) and answers the extension method `_x.ai/billing` with `{ config: { creditUsagePercent, currentPeriod: { type, start, end }, billingPeriodStart, billingPeriodEnd, … }, subscription_tier }`. It needs no `initialize` and no session; with `--no-leader` it uses no shared background process. The Grok CLI makes the request with its own login, read from the `GROK_HOME` it runs under. It answered in 0.7 to 2 seconds and wrote one line to `$GROK_HOME/logs/unified.jsonl`. The method name without the leading underscore answers -32601 (method not found), which is why another tool reported it missing.
 - Every session start and every finished turn of the TUI writes the same numbers to `$GROK_HOME/logs/unified.jsonl`, as a line whose `msg` is `billing: fetched credits config`. Other lines of that file carry the user id and the end of the bearer token.
@@ -19,7 +19,7 @@ ADR-0003 says to revisit it when a vendor ships "a CLI command that reports Quot
 Options considered:
 
 - Do what Orca does: read the token, call the endpoint. Rejected: it breaks two promises every sideby user relies on (never read a credential value, never call a private Quota endpoint), and a third-party tool sending a spoofed client identity is what ADR-0003 rejected for Claude and Codex.
-- Read only the log lines. Local and allowed today, but an Account not used this week shows nothing: on the maintainer's machine three of four Grok Accounts had no line from the current week.
+- Read only the log lines. Local and allowed today, but an Account not used this week shows nothing, and someone with several accounts often leaves most of them unused for a week.
 - Ask the Grok CLI, at most every 15 minutes per Account, and also read the log lines between asks. Chosen.
 
 ## Decision

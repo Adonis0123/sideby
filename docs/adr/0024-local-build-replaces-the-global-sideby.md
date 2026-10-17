@@ -39,8 +39,9 @@ Options considered:
 
 ## Amendment (2026-10-17): back on npm after a release
 
-After 0.14.0 the maintainer was still on the Local Build, and `pnpm local --off` would have put back the npm package kept aside at the first switch, 0.13.1, older than the code just published.
+`pnpm local --off` put back the npm package kept aside at the first switch. After a release that copy is the version before it, so going back to npm meant going back to older code, and nothing switched back after a release unless someone remembered to.
 
 - `--off` now compares the kept copy with the registry's `latest` (the same request as the Update Check, ADR-0021): it restores the copy only when it is not older, or when the registry cannot be asked; otherwise it installs `sideby@<latest>`.
-- `pnpm release <patch|minor>` does the daily release (`npm version`, `git push --follow-tags`), waits until the registry serves the new version, and then runs `--off` when a Local Build is live. A release now ends with the maintainer on the published package, without a step to remember. It never publishes by itself; `release.yml` still does.
+- `pnpm release <patch|minor>` does the daily release (`npm version`, `git push --follow-tags`), waits until the registry serves the new version, and then runs `--off` when a Local Build is live. A release now ends on the published package, without a step to remember. It never publishes by itself; `release.yml` still does.
+- A Portal that looks up the package of the `sideby` command only at start keeps serving the old folder after `--off` (or after `pnpm local`), because that folder's `dist/build.json` never changes again. A Portal should look the package up again whenever it checks for new code, and load it anew when the folder changes.
 - Published packages are unchanged: `build.json` from `pnpm build` has no `local`, so every other install behaves as before.
