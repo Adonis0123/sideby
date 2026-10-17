@@ -25,5 +25,5 @@ For people who work on sideby itself. A Local Build (`pnpm local` in a sideby ch
 
 1. Run `sideby local --json`. `running` is what runs now (`local` or `npm`), `local` the kept Local Build (`version`, `commit`, `dirty`, `builtAt`), `kept` the npm version set aside.
 2. Run `sideby local off --json` (back to npm) or `sideby local on --json` (the kept Local Build). It exits `10` with the change; after their yes, add `--yes`. `on` does not rebuild: `pnpm local` in the checkout makes a new build. `blocked` (exit 1) says why it cannot and what to do.
-3. A background panel restarts by itself and open panels reload; a `sideby ui` in a terminal needs a restart.
+3. `off` brings the sideby skill to the npm version too (`skillSynced`; false means run `sideby update`). A background panel restarts by itself and open panels reload; a `sideby ui` in a terminal needs a restart.
 

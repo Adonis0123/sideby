@@ -98,6 +98,10 @@
     "restartedPanel": {
       "type": "boolean"
     },
+    "skillSynced": {
+      "type": "boolean",
+      "description": "Back on npm, `sideby update --yes` brought the sideby skill to that version (true) or failed (false)."
+    },
     "_notice": {
       "type": "object",
       "properties": {

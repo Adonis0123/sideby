@@ -39,6 +39,10 @@ const en = {
   'upd.local': 'Local build from this checkout, built {at}.',
   'upd.localDirty': 'Local build from this checkout, with changes not committed yet, built {at}.',
   'loc.toNpm': 'Switch to the release',
+  'loc.toNpmV': 'Switch to the release {v}',
+  'upd.localSwitch':
+    'You are running a local build, and sideby {v} is out. Switching to the release puts it in place, and the skill comes along.',
+  'upd.localManual': 'Or run this in the sideby checkout:',
   'loc.toNpmHint': 'Go back to the version published on npm; switch here again to come back.',
   'loc.toLocal': 'Switch to the local build',
   'loc.toLocalHint':
@@ -872,6 +876,9 @@ const zh: Record<MessageKey, string> = {
   'upd.local': '本地构建，来自仓库代码，构建于 {at}。',
   'upd.localDirty': '本地构建，含还没提交的改动，构建于 {at}。',
   'loc.toNpm': '切换到正式版',
+  'loc.toNpmV': '切换到正式版 {v}',
+  'upd.localSwitch': '你在用本地构建，sideby {v} 已发布。切换到正式版就会用上它，skill 也会一起同步。',
+  'upd.localManual': '也可以在 sideby 仓库里运行：',
   'loc.toNpmHint': '回到 npm 上发布的版本，之后可以在这里再切回来。',
   'loc.toLocal': '切换到本地构建',
   'loc.toLocalHint':

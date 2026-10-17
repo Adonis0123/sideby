@@ -1577,9 +1577,12 @@ export async function cmdLocal(a: ParsedArgs, io: Io): Promise<number> {
       switched: r.ok,
       message: r.message,
       restartedPanel: r.restartedPanel,
+      ...(r.skillSynced === undefined ? {} : { skillSynced: r.skillSynced }),
     })
   else if (r.ok) {
     io.out(`${c.green('✓')} ${r.message}.`)
+    if (r.skillSynced === false)
+      io.err(c.yellow('The sideby skill was not brought along; run `sideby update` to see why.'))
     if (r.restartedPanel)
       io.out(c.dim('The background panel restarted with it; open panels reload by themselves.'))
   } else io.err(c.red(`✗ ${r.message}`))

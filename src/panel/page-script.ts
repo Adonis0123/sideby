@@ -6,6 +6,7 @@ import {
   attentionReasons,
   attentionWhy,
   cacheHitRate,
+  canLeaveLocal,
   fixPrompt,
   formatDuration,
   handoffChangeOf,
@@ -53,6 +54,7 @@ const LOGIC = [
   mergeDaily,
   newAccountDir,
   nextReset,
+  canLeaveLocal,
   panelFixes,
   panelHint,
   panelLang,
@@ -3606,6 +3608,8 @@ const MAIN = String.raw`
   function updState() { return BOOT.updates && S.state ? S.state.update || null : null }
   // The skill agents read is part of the version (spec §3.23): behind a current CLI it is the one thing to update.
   const isLocal = (u) => u.method.kind === 'local'
+  // A Local Build the Panel can leave for npm itself (ADR-0024): then that switch is the update, not a command.
+  const leavesLocal = (u) => canLeaveLocal(u, BOOT.readOnly)
   const skillOld = (u) => !!(u && !u.available && !isLocal(u) && u.skillUpdate && u.skillUpdate.outdated)
   const skillDue = (u) => skillOld(u) && u.skillUpdate.canRun
   function skillFor(u) {
@@ -3725,7 +3729,8 @@ const MAIN = String.raw`
     if (u && u.available) {
       kids.push(h('p', { class: 'small' }, t('upd.available', { v: u.latest }), ' ',
         h('a', { href: u.releaseNotes, target: '_blank', rel: 'noopener noreferrer' }, t('upd.notes'))))
-      kids.push(h('div', { class: 'popover-actions' }, h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: toDialog }, t('upd.open'))))
+      if (!(isLocal(u) && leavesLocal(u)))
+        kids.push(h('div', { class: 'popover-actions' }, h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: toDialog }, t('upd.open'))))
     } else if (skillOld(u)) {
       kids.push(h('p', { class: 'small' }, t('upd.skillBehind', { s: skillFor(u) })))
       kids.push(h('div', { class: 'popover-actions' }, h('button', { class: 'btn btn-sm' + (skillDue(u) ? ' btn-primary' : ''), type: 'button', onclick: toDialog }, t('upd.open'))))
@@ -3757,30 +3762,35 @@ const MAIN = String.raw`
       kids.push(h('p', { class: 'small' }, t('loc.stuck')))
       kids.push(h('div', { class: 'popover-actions' }, h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => location.reload() }, icon('refresh'), t('loc.reload'))))
     } else {
-      kids.push(h('div', { class: 'popover-actions' }, h('button', { class: 'btn btn-sm', type: 'button', disabled: vs.busy, 'aria-busy': vs.busy ? 'true' : null, onclick: () => localSwitchTo(toNpm ? 'npm' : 'local') },
-        vs.busy ? spinner() : icon('swap'), vs.busy ? t('loc.switching') : t(toNpm ? 'loc.toNpm' : 'loc.toLocal'))))
+      const newer = toNpm && u.available && u.latest
+      kids.push(h('div', { class: 'popover-actions' }, h('button', { class: 'btn btn-sm' + (newer ? ' btn-primary' : ''), type: 'button', disabled: vs.busy, 'aria-busy': vs.busy ? 'true' : null, onclick: () => localSwitchTo(toNpm ? 'npm' : 'local') },
+        vs.busy ? spinner() : icon('swap'), vs.busy ? t('loc.switching') : newer ? t('loc.toNpmV', { v: u.latest }) : t(toNpm ? 'loc.toNpm' : 'loc.toLocal'))))
     }
     if (vs.error) kids.push(errorNote(vs.error, null))
     return h('div', { class: 'popover-foot' }, kids)
+  }
+  function renderSwitch() {
+    renderVerPop()
+    if (dlg.kind === 'update' && up) renderUpdate()
   }
   async function localSwitchTo(to) {
     vs.busy = true
     vs.to = to
     vs.error = null
     vs.stuck = false
-    renderVerPop()
+    renderSwitch()
     try {
       await api('/api/local', { to, confirm: true })
     } catch (e) {
       // A background Panel restarting from the new code may drop this answer: wait for the build all the same.
-      if (!e.network) { vs.busy = false; vs.error = e; renderVerPop(); return }
+      if (!e.network) { vs.busy = false; vs.error = e; renderSwitch(); return }
     }
     vs.waitUntil = Date.now() + 20000
     localWait()
   }
   function localWait() {
     if (S.newBuild) { location.reload(); return }
-    if (Date.now() > vs.waitUntil) { vs.busy = false; vs.stuck = true; renderVerPop(); return }
+    if (Date.now() > vs.waitUntil) { vs.busy = false; vs.stuck = true; renderSwitch(); return }
     setTimeout(() => { void load({ silent: true }).then(localWait, localWait) }, 1500)
   }
   async function verPopCheck() {
@@ -3869,6 +3879,14 @@ const MAIN = String.raw`
       else body.push(...updSkill(u))
     } else if (up.skillDone && !skillOld(u)) {
       body.push(h('p', { class: 'note' }, t('upd.skillDoneOnly')))
+    } else if (u.available && isLocal(u) && (leavesLocal(u) || vs.busy || vs.stuck)) {
+      // A Local Build the Panel can leave (ADR-0024): switching to the release is the update, and brings the skill.
+      body.push(h('p', null, t('upd.localSwitch', { v: u.latest }), ' ',
+        h('a', { href: u.releaseNotes, target: '_blank', rel: 'noopener noreferrer' }, t('upd.notes'))))
+      if (vs.busy) body.push(h('p', { class: 'muted small' }, spinner(), ' ', t('upd.reloading')))
+      if (vs.stuck) body.push(h('p', { class: 'note' }, t('loc.stuck')))
+      if (vs.error) body.push(errorNote(vs.error, null))
+      body.push(updManual([h('p', { class: 'small' }, t('upd.localManual')), codeCopy(u.command)]))
     } else if (u.available && isLocal(u)) {
       // A Local Build (ADR-0024): one way back to npm, which brings the skill along.
       body.push(h('p', null, t('upd.localAvail', { v: u.latest }), ' ',
@@ -3923,7 +3941,11 @@ const MAIN = String.raw`
     if (up.error) body.push(errorNote(up.error, null))
     const foot = [h('button', { class: 'btn', type: 'button', disabled: up.busy, onclick: () => dlg.el.close() }, t('btn.close'))]
     const primary = (label, run) => h('button', { class: 'btn btn-primary', type: 'button', disabled: up.busy, 'aria-busy': up.busy ? 'true' : null, onclick: run }, up.busy ? spinner() : null, up.busy ? t('upd.updating') : label)
-    if (u.available && u.canRun && !BOOT.readOnly && !up.done) foot.push(primary(t('upd.now', { v: u.latest }), updRun))
+    if (u.available && isLocal(u) && vs.stuck) foot.push(h('button', { class: 'btn btn-primary', type: 'button', onclick: () => location.reload() }, icon('refresh'), t('loc.reload')))
+    else if (u.available && isLocal(u) && (leavesLocal(u) || vs.busy))
+      foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: vs.busy, 'aria-busy': vs.busy ? 'true' : null, onclick: () => localSwitchTo('npm') },
+        vs.busy ? spinner() : icon('swap'), vs.busy ? t('loc.switching') : t('loc.toNpmV', { v: u.latest })))
+    else if (u.available && u.canRun && !BOOT.readOnly && !up.done) foot.push(primary(t('upd.now', { v: u.latest }), updRun))
     else if (skillDue(u) && !BOOT.readOnly && !up.done) foot.push(primary(t('upd.skillNow'), updSkillRun))
     setKids(dlg.el, dialogFrame(t('upd.title'), null, body, foot))
   }

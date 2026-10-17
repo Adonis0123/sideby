@@ -913,6 +913,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           switched: !r.unchanged,
           message: r.message,
           restartedPanel: r.restartedPanel,
+          ...(r.skillSynced === undefined ? {} : { skillSynced: r.skillSynced }),
         }
       },
     },

@@ -84,7 +84,11 @@ describe('Local Build switch', () => {
       assert.equal(off.running, 'npm')
       assert.ok((await lstat(globalPkg(d))).isDirectory())
       assert.equal(await versionAt(globalPkg(d)), '0.15.0')
-      assert.deepEqual(ran, [], 'restoring needs no install')
+      assert.deepEqual(
+        ran,
+        ['sideby update --yes'],
+        'restoring installs nothing; the npm code brings the skill along',
+      )
     })
   })
 
@@ -97,7 +101,7 @@ describe('Local Build switch', () => {
       await linkGlobal(d)
       const r = await switchLocal(resolvePaths(h.env), d, 'npm', h.env)
       assert.equal(r.ok, true)
-      assert.deepEqual(ran, ['npm install -g sideby@0.16.0'])
+      assert.deepEqual(ran, ['npm install -g sideby@0.16.0', 'sideby update --yes'])
     })
   })
 

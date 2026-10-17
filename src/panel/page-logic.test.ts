@@ -9,6 +9,7 @@ import {
   attentionReasons,
   attentionWhy,
   cacheHitRate,
+  canLeaveLocal,
   fixPrompt,
   formatDuration,
   handoffChangeOf,
@@ -443,6 +444,16 @@ describe('fixPrompt', () => {
   it('is empty when every Finding has an automatic fix, or there are none', () => {
     assert.equal(fixPrompt([auto], words), '')
     assert.equal(fixPrompt([], words), '')
+  })
+})
+
+describe('canLeaveLocal', () => {
+  it('offers the switch as the update only while the global sideby runs the Local Build and the Panel may write', () => {
+    assert.equal(canLeaveLocal({ localSwitch: { running: 'local' } }, false), true)
+    assert.equal(canLeaveLocal({ localSwitch: { running: 'local' } }, true), false)
+    assert.equal(canLeaveLocal({ localSwitch: { running: 'npm' } }, false), false)
+    assert.equal(canLeaveLocal({}, false), false)
+    assert.equal(canLeaveLocal(null, false), false)
   })
 })
 

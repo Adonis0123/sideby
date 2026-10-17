@@ -453,6 +453,12 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       blocked: Type.Optional(Type.String({ description: 'Why the switch cannot run, with what to do.' })),
       message: Type.Optional(Str),
       restartedPanel: Type.Optional(Type.Boolean()),
+      skillSynced: Type.Optional(
+        Type.Boolean({
+          description:
+            'Back on npm, `sideby update --yes` brought the sideby skill to that version (true) or failed (false).',
+        }),
+      ),
     },
     { title: 'sideby local --json' },
   ),

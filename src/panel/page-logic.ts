@@ -417,6 +417,16 @@ export function panelHint(hint: string, fixable: boolean, action: string): strin
  * Whether the Panel fixes Finding `f` with a button of its own: a sideby skill behind this version while the
  * Update plan says sideby may update it (`skillUpdatable`). Such Findings stay out of the prompt for an AI agent.
  */
+/**
+ * A Local Build the Panel can leave for npm itself (ADR-0024): the global `sideby` still runs it and the Panel may
+ * write. Then switching to the release is the update, offered as a button instead of the `pnpm local --off` command.
+ */
+export function canLeaveLocal(
+  u: { localSwitch?: { running: string | null } } | null,
+  readOnly: boolean,
+): boolean {
+  return !readOnly && !!u?.localSwitch && u.localSwitch.running === 'local'
+}
 export function panelFixes(f: { code?: string }, skillUpdatable: boolean): boolean {
   return skillUpdatable && f.code === 'skill.outdated'
 }

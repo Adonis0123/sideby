@@ -82,10 +82,9 @@ export async function localOff(d: LocalDirs): Promise<void> {
   if (!r.ok) throw new Error(r.message)
   console.log(`${r.message[0]?.toUpperCase()}${r.message.slice(1)}.`)
   await restartPanel(['sideby'])
-  // The skill agents read is part of the version (spec §3.23): the npm sideby brings it to its own version, as
-  // `sideby update --yes` does for anyone. A failure here leaves the switch done and says what to run.
-  const u = spawnSync('sideby', ['update', '--yes'], { stdio: 'inherit' })
-  if (u.status !== 0) console.log('The sideby skill was not brought along; run `sideby update` to see why.')
+  // switchLocal ran `sideby update --yes` of the npm code, which brings the skill to its version (spec §3.23).
+  if (r.skillSynced === false)
+    console.log('The sideby skill was not brought along; run `sideby update` to see why.')
 }
 
 export function dirs(): LocalDirs {
