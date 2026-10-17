@@ -387,6 +387,14 @@ export function panelHint(hint: string, fixable: boolean, action: string): strin
 }
 
 /**
+ * Whether the Panel fixes Finding `f` with a button of its own: a sideby skill behind this version while the
+ * Update plan says sideby may update it (`skillUpdatable`). Such Findings stay out of the prompt for an AI agent.
+ */
+export function panelFixes(f: { code?: string }, skillUpdatable: boolean): boolean {
+  return skillUpdatable && f.code === 'skill.outdated'
+}
+
+/**
  * The prompt "Copy for AI" puts on the clipboard: `words.lead`, then each Finding that has no automatic fix
  * (numbered, with its account, item, level, message and hint), then `words.fixFirst` when some Findings do have
  * one, then `words.check`. Empty when every Finding has an automatic fix. `words.hint` labels a hint line.

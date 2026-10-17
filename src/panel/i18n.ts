@@ -355,6 +355,7 @@ const en = {
   'fix.whyNoCheck': 'Run a check first.',
   'fix.whyManual':
     'None of these findings has an automatic fix; follow the hint under each one, or use Copy for AI to hand them to your AI agent.',
+  'fix.whyButton': 'Use the button beside each finding.',
   'fix.copyAi': 'Copy for AI',
   'fix.copyAiTitle':
     'Copy a prompt for your AI agent that asks it to fix the findings without an automatic fix',
@@ -1076,6 +1077,7 @@ const zh: Record<MessageKey, string> = {
   'fix.off': '“全部修复”不可用：{why}',
   'fix.whyNoCheck': '请先运行检查。',
   'fix.whyManual': '这些发现都不能自动修复：按每条下面的提示处理，或点「复制给 AI 修复」交给你的 AI agent。',
+  'fix.whyButton': '点每条旁边的按钮修复。',
   'fix.copyAi': '复制给 AI 修复',
   'fix.copyAiTitle': '复制一段提示词，粘贴给你的 AI agent，让它修好不能自动修复的问题',
   'fix.promptShown': '给 AI 的提示词',

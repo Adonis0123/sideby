@@ -18,6 +18,7 @@ import {
   mergeDaily,
   newAccountDir,
   nextReset,
+  panelFixes,
   panelHint,
   panelLang,
   passedWindow,
@@ -50,6 +51,7 @@ const LOGIC = [
   mergeDaily,
   newAccountDir,
   nextReset,
+  panelFixes,
   panelHint,
   panelLang,
   passedWindow,
@@ -1820,7 +1822,13 @@ const MAIN = String.raw`
     renderCheckup()
     $('checkup').scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'start' })
   }
+  // The Panel updates an outdated sideby skill itself when the Update plan allows it (spec §3.16, §3.23).
+  function skillFixable() {
+    const u = updState()
+    return !BOOT.readOnly && !!(u && u.method.kind !== 'local' && u.skillUpdate && u.skillUpdate.outdated && u.skillUpdate.canRun)
+  }
   function findingRow(f) {
+    const own = panelFixes(f, skillFixable())
     return h('li', { class: 'finding lvl-' + f.level },
       h('span', { class: 'dot', title: f.level }),
       h('div', { class: 'finding-body' },
@@ -1828,9 +1836,10 @@ const MAIN = String.raw`
           ui.healthRef ? null : h('button', { class: 'chip chip-btn mono', type: 'button', title: t('health.only', { ref: f.account }), 'aria-label': t('health.only', { ref: f.account }), onclick: () => filterHealth(f.account) }, badge(f.account.split(':')[0], 'xs'), f.account),
           h('span', { class: 'muted small mono' }, f.item),
           f.fixable ? h('span', { class: 'chip chip-sm chip-accent' }, t('health.autoFix')) : null,
-          f.source && f.source !== 'core' ? h('span', { class: 'muted small' }, t('health.from', { source: f.source })) : null),
+          f.source && f.source !== 'core' ? h('span', { class: 'muted small' }, t('health.from', { source: f.source })) : null,
+          own ? h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: openUpdate }, icon('arrowUp'), t('upd.skillLabel')) : null),
         h('p', null, f.message),
-        f.hint ? h('p', { class: 'hint' }, panelHint(f.hint, f.fixable && !BOOT.readOnly, t('fix.hintAction'))) : null))
+        f.hint && !own ? h('p', { class: 'hint' }, panelHint(f.hint, f.fixable && !BOOT.readOnly, t('fix.hintAction'))) : null))
   }
   function renderCheckup() {
     const box = $('checkup')
@@ -1841,8 +1850,11 @@ const MAIN = String.raw`
     const busy = S.checking || S.fixing
     const fixable = all ? all.filter((f) => f.fixable).length : 0
     // Say why Fix all is off, unless a running check or fix already explains it.
-    const fixWhy = busy || fixable ? null : !all ? t('fix.whyNoCheck') : all.length ? t('fix.whyManual') : t('fix.whyNothing')
-    const prompt = findings && !busy ? fixPrompt(findings, { lead: t('fix.promptLead'), hint: t('fix.promptHint'), fixFirst: t('fix.promptFixFirst'), check: t('fix.promptCheck') }) : ''
+    const skillFix = skillFixable()
+    const forAi = (list) => list.filter((f) => !panelFixes(f, skillFix))
+    const fixWhy = busy || fixable ? null : !all ? t('fix.whyNoCheck') : !all.length ? t('fix.whyNothing')
+      : forAi(all).length ? t('fix.whyManual') : t('fix.whyButton')
+    const prompt = findings && !busy ? fixPrompt(forAi(findings), { lead: t('fix.promptLead'), hint: t('fix.promptHint'), fixFirst: t('fix.promptFixFirst'), check: t('fix.promptCheck') }) : ''
     const status = S.checking ? t('health.running') : S.fixing ? t('health.fixing') : at ? t('health.last', { ago: ago(at) }) : t('health.never')
     const out = [h('div', { class: 'section-head' },
       h('div', null,
@@ -3341,6 +3353,8 @@ const MAIN = String.raw`
       if (r.skillUpdated) {
         up.skillDone = true
         toast(t('upd.skillDoneOnly'))
+        // The health check still lists the old skill: check again so its Findings go.
+        if ((findingsNow() || []).some((f) => f.code === 'skill.outdated')) runCheck()
       } else up.skillChanged = true
       await load({ silent: true })
     } catch (e) { up.error = e }

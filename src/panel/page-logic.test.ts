@@ -22,6 +22,7 @@ import {
   mergeDaily,
   newAccountDir,
   nextReset,
+  panelFixes,
   panelHint,
   panelLang,
   passedWindow,
@@ -440,6 +441,15 @@ describe('fixPrompt', () => {
   it('is empty when every Finding has an automatic fix, or there are none', () => {
     assert.equal(fixPrompt([auto], words), '')
     assert.equal(fixPrompt([], words), '')
+  })
+})
+
+describe('panelFixes', () => {
+  it('takes an outdated skill only while sideby may update it', () => {
+    assert.equal(panelFixes({ code: 'skill.outdated' }, true), true)
+    assert.equal(panelFixes({ code: 'skill.outdated' }, false), false)
+    assert.equal(panelFixes({ code: 'link.dangling' }, true), false)
+    assert.equal(panelFixes({}, true), false)
   })
 })
 
