@@ -170,6 +170,10 @@ export async function localOff(d: LocalDirs): Promise<void> {
     if (r.status !== 0) throw new Error(`\`npm install -g sideby@${want}\` failed; run it yourself`)
   }
   await restartPanel(['sideby'])
+  // The skill agents read is part of the version (spec §3.23): the npm sideby brings it to its own version, as
+  // `sideby update --yes` does for anyone. A failure here leaves the switch done and says what to run.
+  const u = spawnSync('sideby', ['update', '--yes'], { stdio: 'inherit' })
+  if (u.status !== 0) console.log('The sideby skill was not brought along; run `sideby update` to see why.')
 }
 
 export function dirs(): LocalDirs {

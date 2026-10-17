@@ -4,6 +4,13 @@ import { type TSchema, Type } from 'typebox'
 import { ConfigSchema } from '../core/config.ts'
 
 const Str = Type.String()
+/** Why sideby cannot do something itself (spec §3.23); `reason` keeps the English text. */
+const ReasonCode = Type.Union(
+  ['local-build', 'npx', 'volta', 'not-writable', 'project', 'source', 'skill-in-git'].map((k) =>
+    Type.Literal(k),
+  ),
+  { description: 'Why, as a code a page can say in its own language.' },
+)
 const Level = Type.Union([Type.Literal('ok'), Type.Literal('warn'), Type.Literal('fail')])
 const Kind = Type.Union([Type.Literal('subscription'), Type.Literal('api')])
 const Version = Type.Literal(1)
@@ -318,7 +325,8 @@ const Notice = Type.Object(
         }),
         current: Str,
         command: Type.String({
-          description: 'Updates the installed sideby skill (run it after the user agrees).',
+          description:
+            '`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes.',
         }),
         message: Str,
       }),
@@ -827,11 +835,15 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       available: Type.Boolean({ description: '`latest` is newer than `current`.' }),
       method: Type.Object({
         kind: Type.Union(
-          ['npm', 'pnpm', 'bun', 'volta', 'npx', 'project', 'source'].map((k) => Type.Literal(k)),
+          ['npm', 'pnpm', 'bun', 'volta', 'npx', 'project', 'source', 'local'].map((k) => Type.Literal(k)),
           { description: 'How this copy was installed.' },
         ),
         canUpdate: Type.Boolean({ description: 'sideby can run the Update itself.' }),
         reason: Type.Optional(Type.String({ description: 'Why it cannot.' })),
+        reasonCode: Type.Optional(ReasonCode),
+        reasonAt: Type.Optional(
+          Type.String({ description: 'The folders that are not writable (`not-writable`).' }),
+        ),
       }),
       command: Type.String({
         description: 'What an Update runs, or what to run by hand when `canRun` is false.',
@@ -870,6 +882,10 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
               description: 'False when sideby leaves the skill alone (see reason): give the user command.',
             }),
             reason: Type.Optional(Str),
+            reasonCode: Type.Optional(ReasonCode),
+            reasonAt: Type.Optional(
+              Type.String({ description: 'The git repository that owns the skill (`skill-in-git`).' }),
+            ),
           },
           {
             description:

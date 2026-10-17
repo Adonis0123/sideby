@@ -265,12 +265,13 @@ async function jsonNoticeFor(): Promise<object | null> {
     const { resolvePaths } = await import('../core/paths.ts')
     const { loadConfig } = await import('../core/config.ts')
     const { packageVersion } = await import('../core/version.ts')
-    const { installedSkillVersions, SKILL_INSTALL } = await import('../core/skill-check.ts')
+    const { installedSkillVersions } = await import('../core/skill-check.ts')
     const paths = resolvePaths(process.env)
     const config = await loadConfig(paths.configFile).catch(() => ({}))
     const cache = await u.readUpdateCache(paths)
     const skills = await installedSkillVersions(paths.home)
-    const n = u.jsonNotice(cache, packageVersion(), config, process.env, skills, SKILL_INSTALL)
+    // `sideby update` brings the skill along, so it is the one command for both (spec §3.23).
+    const n = u.jsonNotice(cache, packageVersion(), config, process.env, skills, 'sideby update')
     if (!u.checksOff(process.env, config) && u.checkDue(cache, new Date())) {
       const { spawn } = await import('node:child_process')
       const child = spawn(process.execPath, [fileURLToPath(import.meta.url), 'update-check'], {
@@ -300,7 +301,9 @@ async function afterCommand(): Promise<void> {
     const paths = resolvePaths(process.env)
     const config = await loadConfig(paths.configFile).catch(() => ({}))
     const cache = await u.readUpdateCache(paths)
-    const plan = u.afterCommandPlan(cache, packageVersion(), config, process.env, new Date())
+    const current = packageVersion()
+    const skill = u.skillBehind(await u.skillUpdatePlan(paths.home, current).catch(() => null), current)
+    const plan = u.afterCommandPlan(cache, current, config, process.env, new Date(), skill)
     const dim = process.env.NO_COLOR ? (t: string) => t : (t: string) => `\x1b[2m${t}\x1b[22m`
     for (const l of plan.lines) console.error(dim(l))
     if (plan.record) await u.updateUpdateCache(paths, plan.record)

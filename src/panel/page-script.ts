@@ -3257,6 +3257,17 @@ const MAIN = String.raw`
   // build and reloads (a background Panel restarts itself, a Portal loads the new code by itself).
   let up = null
   function updState() { return BOOT.updates && S.state ? S.state.update || null : null }
+  // The skill agents read is part of the version (spec §3.23): behind a current CLI it is the one thing to update.
+  const isLocal = (u) => u.method.kind === 'local'
+  const skillOld = (u) => !!(u && !u.available && !isLocal(u) && u.skillUpdate && u.skillUpdate.outdated)
+  const skillDue = (u) => skillOld(u) && u.skillUpdate.canRun
+  function skillFor(u) {
+    const v = u.skillUpdate.installed.find((x) => x !== u.current)
+    return v ? v : t('upd.skillNoVer')
+  }
+  // Why sideby cannot do something itself, in the viewer's language; the English reason when the code is unknown.
+  const why = (o) => (o && o.reasonCode ? t('why.' + o.reasonCode, { at: o.reasonAt || '' }) : (o && o.reason) || '')
+  const offText = (u) => (u.checksOffCode ? t('off.' + u.checksOffCode, { why: u.checksOff }) : t('upd.checksOff', { why: u.checksOff }))
   function renderUpdateButton() {
     const b = $('update')
     const u = updState()
@@ -3265,27 +3276,29 @@ const MAIN = String.raw`
     const v = $('ver-top')
     v.hidden = !BOOT.version
     if (!v.hidden) {
-      const newer = !!(u && u.available)
+      const newer = !!(u && (u.available || skillDue(u)))
       v.textContent = verLabel()
       v.classList.toggle('has-update', newer)
       v.disabled = !BOOT.updates
-      const tip = !BOOT.updates ? '' : newer ? t('upd.labelLong', { v: u.latest, cur: u.current }) : t('upd.verTitle', { v: BOOT.version })
+      const tip = !BOOT.updates ? '' : u && u.available ? t('upd.labelLong', { v: u.latest, cur: u.current })
+        : skillDue(u) ? t('upd.skillLabelLong', { s: skillFor(u), cur: u.current }) : t('upd.verTitle', { v: BOOT.version })
       v.title = tip
       if (tip) v.setAttribute('aria-label', tip)
       else v.removeAttribute('aria-label')
     }
-    b.hidden = !(u && u.available)
+    b.hidden = !(u && (u.available || skillDue(u)))
     if (!b.hidden) {
-      setKids(b, [icon('arrowUp'), h('span', null, t('upd.label', { v: u.latest }))])
-      b.setAttribute('aria-label', t('upd.labelLong', { v: u.latest, cur: u.current }))
-      b.title = t('upd.labelLong', { v: u.latest, cur: u.current })
+      const long = u.available ? t('upd.labelLong', { v: u.latest, cur: u.current }) : t('upd.skillLabelLong', { s: skillFor(u), cur: u.current })
+      setKids(b, [icon('arrowUp'), h('span', null, u.available ? t('upd.label', { v: u.latest }) : t('upd.skillLabel'))])
+      b.setAttribute('aria-label', long)
+      b.title = long
     }
     if (dlg.kind === 'update' && up && !up.busy) renderUpdate()
     if (!vp.checking) renderVerPop()
   }
   function openUpdate() {
     if (!BOOT.updates) return
-    up = { busy: false, error: null, done: null, changed: false, autoPlan: null, autoBusy: false, waitUntil: 0, checking: false, checked: false }
+    up = { busy: false, error: null, done: null, changed: false, skillDone: false, skillChanged: false, autoPlan: null, autoBusy: false, waitUntil: 0, checking: false, checked: false }
     showDialog('update')
     renderUpdate()
   }
@@ -3307,6 +3320,25 @@ const MAIN = String.raw`
         up.waitUntil = Date.now() + 20000
         updWait()
       }
+    } catch (e) { up.error = e }
+    up.busy = false
+    dlg.busy = false
+    renderUpdate()
+  }
+  // The CLI is current and the skill is behind: update the skill alone, as sideby update --yes does.
+  async function updSkillRun() {
+    up.busy = true
+    dlg.busy = true
+    up.error = null
+    up.skillChanged = false
+    renderUpdate()
+    try {
+      const r = await api('/api/update', { confirm: true, skill: true })
+      if (r.skillUpdated) {
+        up.skillDone = true
+        toast(t('upd.skillDoneOnly'))
+      } else up.skillChanged = true
+      await load({ silent: true })
     } catch (e) { up.error = e }
     up.busy = false
     dlg.busy = false
@@ -3335,9 +3367,9 @@ const MAIN = String.raw`
     if (BOOT.local) kids.push(h('p', { class: 'muted small' }, t(BOOT.local.dirty ? 'upd.localDirty' : 'upd.local', { at: BOOT.local.builtAt ? clock(BOOT.local.builtAt) : '' })))
     let status
     if (!u) status = t('upd.loading')
-    else if (u.available) status = null
+    else if (u.available || skillOld(u)) status = null
     else if (vp.checked && u.latest) status = t('upd.latestNow')
-    else if (u.checksOff) status = t('upd.checksOff', { why: u.checksOff })
+    else if (u.checksOff) status = offText(u)
     else if (u.latest) status = t('upd.latest') + (u.checkedAt ? ' · ' + t('upd.checked', { ago: ago(u.checkedAt) }) : '')
     else status = t('upd.notYet')
     if (status) kids.push(h('p', { class: 'muted small' }, status))
@@ -3345,12 +3377,15 @@ const MAIN = String.raw`
       kids.push(h('p', { class: 'small' }, t('upd.available', { v: u.latest }), ' ',
         h('a', { href: u.releaseNotes, target: '_blank', rel: 'noopener noreferrer' }, t('upd.notes'))))
       kids.push(h('div', { class: 'popover-actions' }, h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: toDialog }, t('upd.open'))))
+    } else if (skillOld(u)) {
+      kids.push(h('p', { class: 'small' }, t('upd.skillBehind', { s: skillFor(u) })))
+      kids.push(h('div', { class: 'popover-actions' }, h('button', { class: 'btn btn-sm' + (skillDue(u) ? ' btn-primary' : ''), type: 'button', onclick: toDialog }, t('upd.open'))))
     } else if (!BOOT.readOnly) {
       kids.push(h('div', { class: 'popover-actions' }, h('button', { class: 'btn btn-sm', type: 'button', disabled: vp.checking, 'aria-busy': vp.checking ? 'true' : null, onclick: verPopCheck },
         vp.checking ? spinner() : icon('refresh'), vp.checking ? t('upd.checking') : t('upd.check'))))
     }
     if (vp.error) kids.push(errorNote(vp.error, null))
-    if (u && !BOOT.readOnly)
+    if (u && !BOOT.readOnly && !isLocal(u))
       kids.push(h('p', { class: 'muted small popover-foot' }, t(u.auto ? 'upd.autoIsOn' : 'upd.autoIsOff'), ' · ',
         h('button', { class: 'link-btn', type: 'button', onclick: toDialog }, t('upd.settings'))))
     return kids
@@ -3412,13 +3447,17 @@ const MAIN = String.raw`
     up.autoBusy = false
     renderUpdate()
   }
-  // The installed sideby skill follows the CLI (spec §3.23): said before the Update, or what to run when sideby may not.
+  // The installed sideby skill follows the CLI (spec §3.23): one quiet line when the Update brings it along, the
+  // reason and the command only when sideby may not.
   function updSkill(u) {
     const s = u.skillUpdate
-    if (!s) return [h('p', { class: 'small' }, t('upd.skill')), codeCopy(u.skill)]
-    if (!s.outdated) return []
+    if (!s || !s.outdated) return []
     if (s.canRun) return [h('p', { class: 'muted small' }, t('upd.skillToo'))]
-    return [h('p', { class: 'small' }, t('upd.skillManaged', { why: s.reason || '' })), codeCopy(s.command)]
+    return [h('p', { class: 'small' }, t('upd.skillManaged', { why: why(s) })), codeCopy(s.command)]
+  }
+  // What a person runs by hand, behind a click: the default path is the button.
+  function updManual(cmds) {
+    return h('details', { class: 'tune-details' }, h('summary', null, t('upd.manual')), cmds)
   }
   function renderUpdate() {
     if (!up || dlg.kind !== 'update') return
@@ -3435,30 +3474,50 @@ const MAIN = String.raw`
       body.push(h('p', { class: 'muted small' }, Date.now() > up.waitUntil ? t('upd.restartHint') : [spinner(), ' ', t('upd.reloading')]))
       if (up.done.skillUpdated) body.push(h('p', { class: 'small' }, t('upd.skillDone')))
       else body.push(...updSkill(u))
+    } else if (up.skillDone && !skillOld(u)) {
+      body.push(h('p', { class: 'note' }, t('upd.skillDoneOnly')))
+    } else if (u.available && isLocal(u)) {
+      // A Local Build (ADR-0024): one way back to npm, which brings the skill along.
+      body.push(h('p', null, t('upd.localAvail', { v: u.latest }), ' ',
+        h('a', { href: u.releaseNotes, target: '_blank', rel: 'noopener noreferrer' }, t('upd.notes'))))
+      body.push(codeCopy(u.command))
     } else if (u.available) {
       if (up.changed) body.push(h('p', { class: 'note note-warn' }, t('upd.changed', { v: u.latest })))
       body.push(h('p', null, h('b', null, t('upd.available', { v: u.latest })), ' ',
         h('a', { href: u.releaseNotes, target: '_blank', rel: 'noopener noreferrer' }, t('upd.notes'))))
       if (u.canRun) {
-        body.push(h('p', { class: 'small' }, t('upd.runs')), codeCopy(u.command))
+        body.push(...updSkill(u))
         body.push(h('p', { class: 'muted small' }, t('upd.after')))
+        body.push(updManual([h('p', { class: 'small' }, t('upd.runs')), codeCopy(u.command)]))
       } else {
-        body.push(h('p', { class: 'note note-warn' }, t('upd.cannot', { why: u.method.reason || u.method.kind })))
+        body.push(h('p', { class: 'note note-warn' }, t('upd.cannot', { why: why(u.method) || u.method.kind })))
         body.push(codeCopy(u.command))
+        // An install by hand leaves the skill behind; sideby update (or Auto Update) brings it along afterwards.
+        const s = u.skillUpdate
+        if (s && s.outdated && s.canRun) body.push(h('p', { class: 'muted small' }, t('upd.skillLater')))
+        else body.push(...updSkill(u))
       }
-      body.push(...updSkill(u))
+    } else if (skillOld(u)) {
+      if (up.skillChanged) body.push(h('p', { class: 'note note-warn' }, t('upd.skillChanged')))
+      const s = u.skillUpdate
+      body.push(h('p', null, h('b', null, t('upd.skillBehind', { s: skillFor(u) }))))
+      if (s.canRun) {
+        body.push(h('p', { class: 'muted small' }, t('upd.skillWhat', { cur: u.current })))
+        body.push(updManual([codeCopy(s.command)]))
+      } else body.push(h('p', { class: 'small' }, t('upd.skillManaged', { why: why(s) })), codeCopy(s.command))
     } else if (up.checked && u.latest) {
       body.push(h('p', { class: 'note' }, t('upd.latestNow')))
     } else if (u.checksOff) {
-      body.push(h('p', { class: 'muted small' }, t('upd.checksOff', { why: u.checksOff })))
+      body.push(h('p', { class: 'muted small' }, offText(u)))
     } else if (u.latest) {
       body.push(h('p', { class: 'muted small' }, t('upd.latest') + (u.checkedAt ? ' · ' + t('upd.checked', { ago: ago(u.checkedAt) }) : '')))
     } else body.push(h('p', { class: 'muted small' }, t('upd.notYet')))
     // A read-only Panel sends no request and writes nothing, so it cannot check (spec §3.23).
-    if (!BOOT.readOnly && !up.done && !u.available)
+    if (!BOOT.readOnly && !up.done && !u.available && !skillDue(u))
       body.push(h('p', null, h('button', { class: 'btn btn-sm', type: 'button', disabled: up.checking || up.busy, 'aria-busy': up.checking ? 'true' : null, onclick: updCheck },
         up.checking ? spinner() : icon('refresh'), up.checking ? t('upd.checking') : t('upd.check'))))
-    if (!BOOT.readOnly && !up.done) {
+    if (!BOOT.readOnly && !up.done && isLocal(u)) body.push(h('p', { class: 'muted small' }, t('upd.autoLocal')))
+    else if (!BOOT.readOnly && !up.done) {
       const box = h('input', { type: 'checkbox', disabled: up.autoBusy || !u.method.canUpdate })
       box.checked = up.autoPlan ? up.autoPlan.auto : u.auto
       box.addEventListener('change', () => updAuto(box.checked))
@@ -3470,8 +3529,9 @@ const MAIN = String.raw`
     if (BOOT.readOnly) body.push(h('p', { class: 'note' }, t('banner.readOnly')))
     if (up.error) body.push(errorNote(up.error, null))
     const foot = [h('button', { class: 'btn', type: 'button', disabled: up.busy, onclick: () => dlg.el.close() }, t('btn.close'))]
-    if (u.available && u.canRun && !BOOT.readOnly && !up.done)
-      foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: up.busy, 'aria-busy': up.busy ? 'true' : null, onclick: updRun }, up.busy ? spinner() : null, up.busy ? t('upd.updating') : t('upd.now', { v: u.latest })))
+    const primary = (label, run) => h('button', { class: 'btn btn-primary', type: 'button', disabled: up.busy, 'aria-busy': up.busy ? 'true' : null, onclick: run }, up.busy ? spinner() : null, up.busy ? t('upd.updating') : label)
+    if (u.available && u.canRun && !BOOT.readOnly && !up.done) foot.push(primary(t('upd.now', { v: u.latest }), updRun))
+    else if (skillDue(u) && !BOOT.readOnly && !up.done) foot.push(primary(t('upd.skillNow'), updSkillRun))
     setKids(dlg.el, dialogFrame(t('upd.title'), null, body, foot))
   }
 

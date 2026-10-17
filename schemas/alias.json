@@ -149,7 +149,7 @@
             },
             "command": {
               "type": "string",
-              "description": "Updates the installed sideby skill (run it after the user agrees)."
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
             },
             "message": {
               "type": "string"

@@ -77,6 +77,14 @@ describe('doctor and the installed skill', () => {
         found?.hint ?? '',
         /git repository ~\/\.agents: update it where that repository comes from/,
       )
+      // The skills tool records installing it there: then `sideby update` may update it (spec §3.23).
+      await h.write(
+        '.agents/.skill-lock.json',
+        JSON.stringify({ skills: { sideby: { source: 'Adonis0123/sideby' } } }),
+      )
+      const again = await (await createRuntime({ env: h.env })).doctor({ persist: false })
+      const [owned] = again.general.filter((f) => f.code === 'skill.outdated')
+      assert.match(owned?.hint ?? '', /^run `sideby update`/)
     })
   })
 

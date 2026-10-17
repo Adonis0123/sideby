@@ -132,16 +132,26 @@ export interface PanelUpdate {
   checkedAt?: string
   /** Why Update Checks are off; absent when they are on. */
   checksOff?: string
+  checksOffCode?: update.ChecksOffCode
   /** Config `update.auto`. */
   auto: boolean
-  method: { kind: update.InstallKind; canUpdate: boolean; reason?: string }
+  method: {
+    kind: update.InstallKind
+    canUpdate: boolean
+    reason?: string
+    reasonCode?: update.ReasonCode
+    reasonAt?: string
+  }
   /** The command an Update runs, or the one to run by hand when `canRun` is false. */
   command?: string
   canRun: boolean
   releaseNotes?: string
   /** The command that installs the sideby skill by hand. */
   skill: string
-  /** The installed sideby skill, which an Update brings along (spec §3.23); absent when none is installed. */
+  /**
+   * The installed sideby skill, which an Update brings along (spec §3.23); absent when none is installed, and for a
+   * Local Build, which `pnpm local --off` brings back to npm together with the skill.
+   */
   skillUpdate?: import('../core/update.ts').SkillUpdatePlan
 }
 
@@ -194,7 +204,7 @@ let checking: Promise<unknown> | null = null
  */
 async function updateState(rt: Runtime, readOnly: boolean): Promise<PanelUpdate> {
   const current = packageVersion()
-  const off = update.checksOff(rt.env, rt.config)
+  const off = update.checksOffWhy(rt.env, rt.config)
   const cache = await update.readUpdateCache(rt.paths)
   if (!off && !readOnly && !checking && update.checkDue(cache, new Date()))
     checking = update.refreshUpdateCheck(rt.paths, rt.env).finally(() => {
@@ -202,15 +212,16 @@ async function updateState(rt: Runtime, readOnly: boolean): Promise<PanelUpdate>
     })
   const method = await update.installMethod(rt.env)
   const plan = cache.latest ? update.shownPlan(update.planFrom(method, current, cache.latest, rt.env)) : null
-  const skillUpdate = await update
-    .skillUpdatePlan(rt.paths.home, plan?.available ? plan.latest : current)
-    .catch(() => null)
+  const skillUpdate =
+    method.kind === 'local'
+      ? null
+      : await update.skillUpdatePlan(rt.paths.home, plan?.available ? plan.latest : current).catch(() => null)
   return {
     current,
     ...(cache.latest ? { latest: cache.latest } : {}),
     available: Boolean(plan?.available),
     ...(cache.checkedAt ? { checkedAt: cache.checkedAt } : {}),
-    ...(off ? { checksOff: off } : {}),
+    ...(off ? { checksOff: off.text, checksOffCode: off.code } : {}),
     auto: rt.config.update?.auto === true,
     method: update.shownMethod(method),
     ...(plan ? { command: plan.command, releaseNotes: plan.releaseNotes } : {}),
@@ -810,6 +821,15 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const plan = await update.planUpdate(rt.paths, rt.env)
         const shown = update.shownPlan(plan)
         if (!optBool(body, 'confirm')) return { ...shown, updated: false }
+        // The CLI is current and the skill is behind: `skill: true` updates it alone, as `sideby update --yes` does.
+        if (optBool(body, 'skill')) {
+          if (plan.available || plan.method.kind === 'local')
+            return { ...shown, updated: false, changed: true }
+          const r = await update.applySkillOnly(rt.paths, plan.skill, rt.env)
+          if (!r) return { ...shown, updated: false, changed: true }
+          if (!r.ok) throw new UserError(r.message)
+          return { ...shown, updated: false, skillUpdated: true, message: r.message }
+        }
         // A confirmation that runs nothing always says why: the registry names another version (or none newer) now.
         if (body.version !== plan.latest || !plan.available)
           return { ...shown, updated: false, changed: true }

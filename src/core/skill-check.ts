@@ -7,7 +7,10 @@ import type { FamilyDef, Finding } from '../types.ts'
 import { mainDirOf } from './accounts.ts'
 import { tildify } from './paths.ts'
 
-export const SKILL_INSTALL = 'npx skills add Adonis0123/sideby -g'
+export const SKILL_SOURCE = 'Adonis0123/sideby'
+export const SKILL_INSTALL = `npx skills add ${SKILL_SOURCE} -g`
+/** The command a person runs to update the skill where sideby leaves it alone. */
+export const SKILL_UPDATE_SHOWN = 'npx skills update sideby -g'
 
 /** The folder holding `dir` that is a git work tree, if any: a skill there is managed by that repository. */
 export async function gitRootOf(dir: string): Promise<string | null> {
@@ -20,6 +23,32 @@ export async function gitRootOf(dir: string): Promise<string | null> {
     }
     if (dirname(d) === d) return null
   }
+}
+
+/**
+ * Whether the skills tool's install record (`.skill-lock.json` beside the `skills` folder holding `dir`) names this
+ * repository as the source of `sideby`: then `npx skills update` owns the skill, even inside a git repository (a
+ * dotfiles clone of `~/.agents`, say). Reads only that one entry's `source`.
+ */
+export async function installedBySkillsTool(dir: string): Promise<boolean> {
+  try {
+    const lock = JSON.parse(await readFile(join(dirname(dirname(dir)), '.skill-lock.json'), 'utf8')) as {
+      skills?: Record<string, { source?: unknown } | undefined>
+    }
+    const source = lock.skills?.sideby?.source
+    return typeof source === 'string' && source.toLowerCase() === SKILL_SOURCE.toLowerCase()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The git repository that owns the sideby skill in `dir`, or null when sideby may update it: not in a repository, or
+ * the skills tool installed it there.
+ */
+export async function skillOwnerRepo(dir: string): Promise<string | null> {
+  const repo = await gitRootOf(dir)
+  return repo && !(await installedBySkillsTool(dir)) ? repo : null
 }
 
 /** `metadata.version` from a SKILL.md frontmatter, or null when there is none. */
@@ -90,7 +119,7 @@ export async function checkInstalledSkills(
     if (found === version) continue
     const where = tildify(path, home)
     // `sideby update` brings the skill along, except one a git repository owns (a dotfiles clone, say).
-    const repo = await gitRootOf(dirname(real))
+    const repo = await skillOwnerRepo(dirname(real))
     out.push({
       level: 'warn',
       account: `${family.id}:main`,
@@ -98,7 +127,7 @@ export async function checkInstalledSkills(
       code: 'skill.outdated',
       message: `the sideby skill at ${where} is ${found ? `for sideby ${found}` : 'from before skills had a version'}; this sideby is ${version}`,
       hint: repo
-        ? `it lives in the git repository ${tildify(repo, home)}: update it where that repository comes from (\`npx skills update sideby -g\` there), so agents learn this version's commands`
+        ? `it lives in the git repository ${tildify(repo, home)}: update it where that repository comes from (\`${SKILL_UPDATE_SHOWN}\` there), so agents learn this version's commands`
         : `run \`sideby update\`, which updates the skill too (or \`${SKILL_INSTALL}\` by hand), so agents learn this version's commands`,
       source: 'core',
       fixable: false,

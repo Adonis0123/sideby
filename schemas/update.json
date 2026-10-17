@@ -66,6 +66,10 @@
             {
               "type": "string",
               "const": "source"
+            },
+            {
+              "type": "string",
+              "const": "local"
             }
           ],
           "description": "How this copy was installed."
@@ -77,6 +81,43 @@
         "reason": {
           "type": "string",
           "description": "Why it cannot."
+        },
+        "reasonCode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "local-build"
+            },
+            {
+              "type": "string",
+              "const": "npx"
+            },
+            {
+              "type": "string",
+              "const": "volta"
+            },
+            {
+              "type": "string",
+              "const": "not-writable"
+            },
+            {
+              "type": "string",
+              "const": "project"
+            },
+            {
+              "type": "string",
+              "const": "source"
+            },
+            {
+              "type": "string",
+              "const": "skill-in-git"
+            }
+          ],
+          "description": "Why, as a code a page can say in its own language."
+        },
+        "reasonAt": {
+          "type": "string",
+          "description": "The folders that are not writable (`not-writable`)."
         }
       }
     },
@@ -146,6 +187,43 @@
         },
         "reason": {
           "type": "string"
+        },
+        "reasonCode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "local-build"
+            },
+            {
+              "type": "string",
+              "const": "npx"
+            },
+            {
+              "type": "string",
+              "const": "volta"
+            },
+            {
+              "type": "string",
+              "const": "not-writable"
+            },
+            {
+              "type": "string",
+              "const": "project"
+            },
+            {
+              "type": "string",
+              "const": "source"
+            },
+            {
+              "type": "string",
+              "const": "skill-in-git"
+            }
+          ],
+          "description": "Why, as a code a page can say in its own language."
+        },
+        "reasonAt": {
+          "type": "string",
+          "description": "The git repository that owns the skill (`skill-in-git`)."
         }
       },
       "description": "The installed sideby skill, which the Update brings along; absent when none is installed."
@@ -210,7 +288,7 @@
             },
             "command": {
               "type": "string",
-              "description": "Updates the installed sideby skill (run it after the user agrees)."
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
             },
             "message": {
               "type": "string"

@@ -104,11 +104,11 @@ sideby 每天向 npm registry 查一次自己的最新版本（一次 `GET https
 | Volta（`volta install sideby`） | 不执行：打印 `volta install sideby@<版本>` |
 | `npx sideby`、项目依赖、源码目录，或你没有写权限的全局目录 | 不执行：sideby 打印命令，由你自己运行 |
 
-更新后，后台面板（`sideby ui --background`）会自己重启，打开的页面自动刷新。装了面板应用（`sideby app install`）的话，会用新版本重新安装，图标也一起换新。终端里运行的 `sideby ui` 和已经在跑的会话要重启后才用新版本。agent 读的 sideby skill（`~/.agents/skills/sideby`）会一起更新，沿用你当初装给哪些 agent 的选择；sideby 已是最新、只有 skill 旧时，`sideby update` 只更新 skill。skill 在 git 仓库里（比如 dotfiles 克隆）时，sideby 不动它，交给那个仓库更新。
+更新后，后台面板（`sideby ui --background`）会自己重启，打开的页面自动刷新。装了面板应用（`sideby app install`）的话，会用新版本重新安装，图标也一起换新。终端里运行的 `sideby ui` 和已经在跑的会话要重启后才用新版本。agent 读的 sideby skill（`~/.agents/skills/sideby`）会一起更新，沿用你当初装给哪些 agent 的选择；sideby 已是最新、只有 skill 旧时，`sideby update` 和面板的「更新 skill」按钮只更新 skill。skill 也对上版本才算最新：在那之前面板的版本号带圆点，关闭自动更新时终端每天提示一次。skill 在 git 仓库里（比如 dotfiles 克隆）时，sideby 不动它，交给那个仓库更新；但如果 skills 工具记录了它装在那里（`skills` 文件夹旁的 `.skill-lock.json`），sideby 照常更新，改动会出现在那个仓库的 `git status` 里。
 
 | 设置 | 含义 |
 |---|---|
 | `"update": { "check": false }` | 不再每天检查，也不提示。`NO_UPDATE_NOTIFIER=1` 或 `SIDEBY_NO_UPDATE_NOTIFIER=1` 效果相同；CI 里自动关闭。`sideby update` 照常可用。 |
-| `"update": { "auto": true }` | 默认关；面板的更新对话框里有同一个开关。每天检查后自动安装新版本，只对 npm、pnpm、bun 的全局安装生效，只在没有 `sideby run`、`next`、`resume` 运行时执行，不自动装大版本（0.x 到 1.0）。下一次命令会提示一次已更新。 |
+| `"update": { "auto": true }` | 默认关；面板的更新对话框里有同一个开关。每天检查后自动安装新版本，只对 npm、pnpm、bun 的全局安装生效，只在没有 `sideby run`、`next`、`resume` 运行时执行，不自动装大版本（0.x 到 1.0）。会一起更新 sideby skill；sideby 已是最新而 skill 落后时，也会自己把 skill 补上。下一次命令会提示一次已更新。 |
 
 `SIDEBY_UPDATE_REGISTRY` 可以让检查走镜像，比如 `https://registry.npmmirror.com`。

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import type { Env } from '../types.ts'
 import { writeFileAtomic } from './fs-safe.ts'
 import type { Paths } from './paths.ts'
-import { gitRootOf, installedSkills, SKILL_INSTALL, SKILL_UPDATE } from './skill-check.ts'
+import { installedSkills, SKILL_UPDATE, SKILL_UPDATE_SHOWN, skillOwnerRepo } from './skill-check.ts'
 import { localBuild, packageVersion, parseLocalBuild } from './version.ts'
 
 export const DEFAULT_REGISTRY = 'https://registry.npmjs.org'
@@ -35,7 +35,24 @@ export interface UpdateCache {
   notified?: { version: string; at: string }
   /** The last Auto Update; `shown` once the CLI has said so. */
   auto?: { from: string; to: string; at: string; ok: boolean; message: string; shown?: boolean }
+  /** The last line the CLI printed about a sideby skill behind this version (`version` is the CLI's). */
+  skillNotified?: { version: string; at: string }
+  /** The last time Auto Update brought the skill to `to` alone; `shown` once the CLI has said so. */
+  skillAuto?: { to: string; at: string; ok: boolean; message: string; shown?: boolean }
 }
+
+/**
+ * Why sideby cannot do something itself, for a Panel to say in the viewer's language; `reason` keeps the English
+ * text the CLI prints. `reasonAt` carries the path a code needs.
+ */
+export type ReasonCode =
+  | 'local-build'
+  | 'npx'
+  | 'volta'
+  | 'not-writable'
+  | 'project'
+  | 'source'
+  | 'skill-in-git'
 
 export type InstallKind = 'npm' | 'pnpm' | 'bun' | 'volta' | 'npx' | 'project' | 'source' | 'local'
 
@@ -47,6 +64,9 @@ export interface InstallMethod {
   canUpdate: boolean
   /** Why it cannot, in a phrase that follows "sideby cannot update itself: ". */
   reason?: string
+  reasonCode?: ReasonCode
+  /** The folders that are not writable (`not-writable`). */
+  reasonAt?: string
   /** npm only: the prefix whose `lib/node_modules` holds sideby. */
   prefix?: string
 }
@@ -222,15 +242,26 @@ export const inCi = (env: Env): boolean =>
 
 type UpdateSettings = { update?: { check?: boolean; auto?: boolean } }
 
+export type ChecksOffCode = 'local-build' | 'env' | 'config' | 'ci'
+
+/** Why Update Checks are off, with a code for the Panel, or null when they are on (spec §3.23). */
+export function checksOffWhy(
+  env: Env,
+  config: UpdateSettings,
+  local = localBuild() !== null,
+): { code: ChecksOffCode; text: string } | null {
+  // A Local Build (ADR-0024) follows the checkout: a notice or an Auto Update would only replace it with npm's.
+  if (local) return { code: 'local-build', text: 'this is a local build (pnpm local)' }
+  if (set(env.SIDEBY_NO_UPDATE_NOTIFIER)) return { code: 'env', text: 'SIDEBY_NO_UPDATE_NOTIFIER is set' }
+  if (set(env.NO_UPDATE_NOTIFIER)) return { code: 'env', text: 'NO_UPDATE_NOTIFIER is set' }
+  if (config.update?.check === false) return { code: 'config', text: 'config update.check is false' }
+  if (inCi(env)) return { code: 'ci', text: 'running in CI' }
+  return null
+}
+
 /** Why Update Checks are off, or null when they are on (spec §3.23). */
 export function checksOff(env: Env, config: UpdateSettings, local = localBuild() !== null): string | null {
-  // A Local Build (ADR-0024) follows the checkout: a notice or an Auto Update would only replace it with npm's.
-  if (local) return 'this is a local build (pnpm local)'
-  if (set(env.SIDEBY_NO_UPDATE_NOTIFIER)) return 'SIDEBY_NO_UPDATE_NOTIFIER is set'
-  if (set(env.NO_UPDATE_NOTIFIER)) return 'NO_UPDATE_NOTIFIER is set'
-  if (config.update?.check === false) return 'config update.check is false'
-  if (inCi(env)) return 'running in CI'
-  return null
+  return checksOffWhy(env, config, local)?.text ?? null
 }
 
 // ---- registry
@@ -283,6 +314,17 @@ export async function readUpdateCache(paths: Paths): Promise<UpdateCache> {
         ok: a.ok,
         message: a.message,
         ...(a.shown ? { shown: true } : {}),
+      }
+    const sn = d.skillNotified as Record<string, unknown> | undefined
+    if (sn && str(sn.version) && str(sn.at)) out.skillNotified = { version: sn.version, at: sn.at }
+    const sa = d.skillAuto as Record<string, unknown> | undefined
+    if (sa && str(sa.to) && str(sa.at) && typeof sa.ok === 'boolean' && str(sa.message))
+      out.skillAuto = {
+        to: sa.to,
+        at: sa.at,
+        ok: sa.ok,
+        message: sa.message,
+        ...(sa.shown ? { shown: true } : {}),
       }
     return out
   } catch {
@@ -428,6 +470,65 @@ export function autoUpdateLine(cache: UpdateCache): string | null {
     : `sideby could not update itself to ${a.to}: ${a.message}`
 }
 
+/** What the CLI says once about the skill Auto Update brought up to date alone, or null. */
+export function skillAutoLine(cache: UpdateCache): string | null {
+  const a = cache.skillAuto
+  if (!a || a.shown) return null
+  return a.ok
+    ? `sideby updated the sideby skill agents read to ${a.to}`
+    : `sideby could not update the sideby skill to ${a.to}: ${a.message}`
+}
+
+/**
+ * The sideby skill an agent reads, as the CLI sees it after a command: the version of the first one behind
+ * `current` (null: one without a version), and whether sideby may update it. Absent when none is behind.
+ */
+export interface SkillBehind {
+  installed: string | null
+  canRun: boolean
+}
+
+/** The skill part of a `SkillUpdatePlan` toward the running version, as `afterCommandPlan` takes it. */
+export const skillBehind = (plan: SkillUpdatePlan | null, current: string): SkillBehind | null =>
+  plan?.outdated
+    ? { installed: plan.installed.find((v) => v !== current) ?? null, canRun: plan.canRun }
+    : null
+
+/**
+ * The line about a skill behind this version the CLI may print now (spec §3.23), or null: once a day per CLI version,
+ * and never while Auto Update is on (the background check brings the skill along) and sideby may update it.
+ */
+export function skillNoticeLine(
+  cache: UpdateCache,
+  current: string,
+  config: UpdateSettings,
+  skill: SkillBehind | null,
+  now: Date,
+): string | null {
+  if (!skill || (config.update?.auto === true && skill.canRun)) return null
+  const n = cache.skillNotified
+  if (n && n.version === current && age(n.at, now) < NOTICE_INTERVAL_MS) return null
+  return `the sideby skill agents read is for ${skill.installed ?? 'an older sideby'} (this sideby is ${current}) · run \`sideby update\``
+}
+
+/**
+ * Auto Update is on, the CLI is the newest version the cache knows, and the skill is behind it where sideby may
+ * update it, not tried for this version yet (or a failed try a day ago). A newer CLI waiting is left to the Update
+ * of the CLI: the skills tool fetches the default branch, which would put the skill ahead of this CLI.
+ */
+export function skillAutoPending(
+  cache: UpdateCache,
+  current: string,
+  config: UpdateSettings,
+  skill: SkillBehind | null,
+  now: Date,
+): boolean {
+  if (config.update?.auto !== true || !skill?.canRun || isNewer(cache.latest, current)) return false
+  const a = cache.skillAuto
+  if (!a || a.to !== current) return true
+  return !a.ok && !(age(a.at, now) < AUTO_RETRY_MS)
+}
+
 /** The `_notice` of a `--json` output (spec §3.23): what an agent should mention once its task is done. */
 export interface JsonNotice {
   update?: { current: string; latest: string; command: string; message: string }
@@ -478,24 +579,39 @@ export function afterCommandPlan(
   config: UpdateSettings,
   env: Env,
   now: Date,
+  skill: SkillBehind | null = null,
 ): { lines: string[]; record: ((cur: UpdateCache) => Partial<UpdateCache>) | null; startCheck: boolean } {
   if (checksOff(env, config)) return { lines: [], record: null, startCheck: false }
   const lines: string[] = []
   const auto = autoUpdateLine(cache)
+  const skillAuto = skillAutoLine(cache)
   const notice = noticeLine(cache, current, now)
-  if (auto) lines.push(auto)
-  if (notice) lines.push(notice)
+  // A newer CLI's notice already leads to `sideby update`, which brings the skill along.
+  const skillNotice = notice ? null : skillNoticeLine(cache, current, config, skill, now)
+  for (const l of [auto, skillAuto, notice, skillNotice]) if (l) lines.push(l)
   const shownAuto = cache.auto
+  const shownSkillAuto = cache.skillAuto
   const record = lines.length
     ? (cur: UpdateCache): Partial<UpdateCache> => ({
         // Mark only the Auto Update that was printed; a newer one written meanwhile stays to be said.
         ...(auto && cur.auto && cur.auto.at === shownAuto?.at && cur.auto.to === shownAuto.to
           ? { auto: { ...cur.auto, shown: true } }
           : {}),
+        ...(skillAuto && cur.skillAuto && cur.skillAuto.at === shownSkillAuto?.at
+          ? { skillAuto: { ...cur.skillAuto, shown: true } }
+          : {}),
         ...(notice ? { notified: { version: cache.latest!, at: now.toISOString() } } : {}),
+        ...(skillNotice ? { skillNotified: { version: current, at: now.toISOString() } } : {}),
       })
     : null
-  return { lines, record, startCheck: checkDue(cache, now) || autoPending(cache, current, config, now) }
+  return {
+    lines,
+    record,
+    startCheck:
+      checkDue(cache, now) ||
+      autoPending(cache, current, config, now) ||
+      skillAutoPending(cache, current, config, skill, now),
+  }
 }
 
 // ---- Install Method
@@ -515,14 +631,19 @@ export async function installMethod(env: Env): Promise<InstallMethod> {
     if (parseLocalBuild(JSON.parse(await readFile(join(packageDir, 'dist', 'build.json'), 'utf8'))))
       return at('local', {
         reason: 'it is a local build; run `pnpm local --off` in the sideby checkout to go back to npm',
+        reasonCode: 'local-build',
       })
   } catch {
     // no build file: not a Local Build
   }
   if (p.includes('/_npx/'))
-    return at('npx', { reason: 'it runs from the npx cache, which fetches a version per call' })
+    return at('npx', {
+      reason: 'it runs from the npx cache, which fetches a version per call',
+      reasonCode: 'npx',
+    })
   // Volta keeps a global package under its own npm prefix; installing there behind its back breaks its records.
-  if (p.includes('/.volta/')) return at('volta', { reason: 'Volta manages this install' })
+  if (p.includes('/.volta/'))
+    return at('volta', { reason: 'Volta manages this install', reasonCode: 'volta' })
   const npm = /^(.*)\/lib\/node_modules\/sideby$/.exec(p)
   if (npm) {
     const prefix = npm[1]!
@@ -533,7 +654,11 @@ export async function installMethod(env: Env): Promise<InstallMethod> {
       prefix,
       canUpdate: !blocked.length,
       ...(blocked.length
-        ? { reason: `${blocked.join(' and ')} ${blocked.length > 1 ? 'are' : 'is'} not writable by you` }
+        ? {
+            reason: `${blocked.join(' and ')} ${blocked.length > 1 ? 'are' : 'is'} not writable by you`,
+            reasonCode: 'not-writable' as const,
+            reasonAt: blocked.join(', '),
+          }
         : {}),
     })
   }
@@ -541,8 +666,9 @@ export async function installMethod(env: Env): Promise<InstallMethod> {
   if (p.includes('/pnpm/global/') || (pnpmHome && p.startsWith(`${pnpmHome.replace(/\/+$/, '')}/`)))
     return at('pnpm', { canUpdate: true })
   if (p.includes('/.bun/install/global/')) return at('bun', { canUpdate: true })
-  if (p.includes('/node_modules/')) return at('project', { reason: 'it is a dependency of a project' })
-  return at('source', { reason: 'it runs from a source checkout' })
+  if (p.includes('/node_modules/'))
+    return at('project', { reason: 'it is a dependency of a project', reasonCode: 'project' })
+  return at('source', { reason: 'it runs from a source checkout', reasonCode: 'source' })
 }
 
 /**
@@ -658,6 +784,8 @@ export const shownMethod = (m: InstallMethod) => ({
   kind: m.kind,
   canUpdate: m.canUpdate,
   ...(m.reason ? { reason: m.reason } : {}),
+  ...(m.reasonCode ? { reasonCode: m.reasonCode } : {}),
+  ...(m.reasonAt ? { reasonAt: m.reasonAt } : {}),
 })
 
 /** The plan as `sideby update --json` and the Panel show it (schemas/update.json). */
@@ -684,6 +812,9 @@ export interface SkillUpdatePlan {
   /** False when sideby must not run it; `reason` says why and the user runs `command` where it belongs. */
   canRun: boolean
   reason?: string
+  reasonCode?: ReasonCode
+  /** The git repository that owns the skill (`skill-in-git`). */
+  reasonAt?: string
 }
 
 /** The skill part of an Update toward `target`; null when no sideby skill is installed. Reads two files. */
@@ -698,14 +829,17 @@ export async function skillUpdatePlan(home: string, target: string): Promise<Ski
     canRun: true,
   }
   for (const s of skills) {
-    const root = await gitRootOf(s.dir)
+    // A git repository owns the skill unless the skills tool records installing it there (spec §3.23).
+    const root = await skillOwnerRepo(s.dir)
     if (root) {
       const at = root.startsWith(home) ? `~${root.slice(home.length)}` : root
       return {
         ...plan,
-        command: SKILL_INSTALL,
+        command: SKILL_UPDATE_SHOWN,
         canRun: false,
         reason: `the skill is in the git repository ${at}, so sideby leaves it alone; update it where that repository comes from`,
+        reasonCode: 'skill-in-git',
+        reasonAt: at,
       }
     }
   }
@@ -736,6 +870,31 @@ export async function applySkillUpdate(
   return r.code === 0
     ? { ok: true, message: 'updated the sideby skill' }
     : { ok: false, message: `\`${plan.command}\` failed (exit ${r.code}); run it yourself to see why` }
+}
+
+/**
+ * Updates only the sideby skill, for a CLI that is already current (`sideby update`, the Panel, Auto Update). Holds
+ * the same lock as an Update, so a skill update never runs beside one; null when there was nothing to do.
+ */
+export async function applySkillOnly(
+  paths: Paths,
+  plan: SkillUpdatePlan | undefined,
+  env: Env,
+  onOutput?: (text: string) => void,
+): Promise<{ ok: boolean; message: string; busy?: boolean } | null> {
+  if (!plan?.outdated || !plan.canRun) return null
+  const release = await takeLock(paths, 'update-install.lock').catch(() => null)
+  if (!release)
+    return {
+      ok: false,
+      busy: true,
+      message: 'another sideby update is running; wait for it to finish, then run `sideby update` again',
+    }
+  try {
+    return await applySkillUpdate(plan, env, onOutput)
+  } finally {
+    await release().catch(() => {})
+  }
 }
 
 export interface UpdateResult {
@@ -847,6 +1006,28 @@ export async function autoUpdateBlocker(paths: Paths, plan: UpdatePlan): Promise
 }
 
 /**
+ * The skill half of Auto Update (spec §3.23): with the CLI current, a skill behind it is updated alone and the result
+ * recorded once per version, so a failure waits a day.
+ */
+async function skillAutoSync(
+  paths: Paths,
+  env: Env,
+  config: UpdateSettings,
+  cache: UpdateCache,
+  current: string,
+  now: Date,
+): Promise<void> {
+  const plan = await skillUpdatePlan(paths.home, current).catch(() => null)
+  if (!skillAutoPending(cache, current, config, skillBehind(plan, current), now)) return
+  const r = await applySkillOnly(paths, plan ?? undefined, env)
+  // A manual Update holding the lock is not a failure; the next command looks again.
+  if (!r || r.busy) return
+  await updateUpdateCache(paths, {
+    skillAuto: { to: current, at: deps().now().toISOString(), ok: r.ok, message: r.message },
+  })
+}
+
+/**
  * Body of the detached `sideby update-check`: an Update Check when one is due, then an Auto Update when config
  * `update.auto` is on and nothing blocks it. Only one runs at a time; it never throws.
  */
@@ -864,8 +1045,16 @@ export async function backgroundCheck(
     let cache = await readUpdateCache(paths)
     if (checkDue(cache, now)) cache = await refreshUpdateCheck(paths, env)
     const current = packageVersion()
-    if (!autoPending(cache, current, config, now)) return
-    const plan = planFrom(await installMethod(env), current, cache.latest!, env)
+    if (!autoPending(cache, current, config, now)) {
+      await skillAutoSync(paths, env, config, cache, current, now)
+      return
+    }
+    // The skill teaches agents the new version's commands, so an Auto Update carries it as `sideby update` does.
+    const skill = await skillUpdatePlan(paths.home, cache.latest!).catch(() => null)
+    const plan = {
+      ...planFrom(await installMethod(env), current, cache.latest!, env),
+      ...(skill ? { skill } : {}),
+    }
     await updateUpdateCache(paths, { autoTriedAt: now.toISOString() })
     // A blocker only the user can lift is said once and looked at again a day later, like a failed install; a
     // running session only delays it (the next look is within the hour).

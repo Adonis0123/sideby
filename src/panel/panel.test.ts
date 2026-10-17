@@ -1688,6 +1688,19 @@ describe('panel updates (spec §3.23, ADR-0021)', () => {
         const none = await post(on.port, '/api/update', { confirm: true, version: '99.0.0' }, good)
         assert.deepEqual([none.body.updated, none.body.changed, none.body.available], [false, true, false])
         assert.equal(execs.length, 1)
+        // The CLI is current and the skill agents read is behind: `skill: true` updates the skill alone.
+        await h.write(
+          '.agents/skills/sideby/SKILL.md',
+          '---\nname: sideby\nmetadata:\n  version: 0.0.1\n---\n',
+        )
+        const sk = (await state(on.port)).update!
+        assert.deepEqual(
+          [sk.available, sk.skillUpdate?.outdated, sk.skillUpdate?.canRun],
+          [false, true, true],
+        )
+        const skillRan = await post(on.port, '/api/update', { confirm: true, skill: true }, good)
+        assert.deepEqual([skillRan.body.updated, skillRan.body.skillUpdated], [false, true])
+        assert.equal(execs.length, 2)
         unbindNone()
 
         const offGood = { origin: `http://127.0.0.1:${off.port}`, 'x-sideby-token': off.handler.token }

@@ -17,6 +17,7 @@ import {
   bindUpdateDeps,
   checkDue,
   checksOff,
+  checksOffWhy,
   compareVersions,
   installMethod,
   jsonNotice,
@@ -28,6 +29,10 @@ import {
   refreshUpdateCheck,
   runningSessions,
   sameLine,
+  skillAutoPending,
+  skillBehind,
+  skillNoticeLine,
+  skillUpdatePlan,
   type UpdateDeps,
   updateCommand,
   updateUpdateCache,
@@ -594,5 +599,157 @@ describe('hardening round 1', () => {
     const npm = await installMethod({})
     assert.equal(npm.canUpdate, false)
     assert.match(npm.reason ?? '', /\/u\/bin is not writable/)
+  })
+})
+
+describe('the skill is part of the version (spec §3.23)', () => {
+  const skill = (v: string) => `---\nname: sideby\nmetadata:\n  version: ${v}\n---\n`
+  const lock = (source: string) =>
+    JSON.stringify({ version: 3, skills: { sideby: { source, sourceType: 'github' } } })
+  const now = new Date('2026-10-17T12:00:00Z')
+  const auto = { update: { auto: true } }
+
+  it('updates a skill the skills tool installed, even inside a git repository; leaves any other one there alone', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.agents/skills/sideby/SKILL.md', skill('0.1.0'))
+      await mkdir(h.path('.agents/.git'), { recursive: true })
+      await h.write('.agents/.skill-lock.json', lock('Adonis0123/sideby'))
+      const ours = await skillUpdatePlan(h.home, CURRENT)
+      assert.deepEqual(ours && [ours.canRun, ours.reasonCode], [true, undefined])
+      await h.write('.agents/.skill-lock.json', lock('someone/else'))
+      const theirs = await skillUpdatePlan(h.home, CURRENT)
+      assert.deepEqual(theirs && [theirs.canRun, theirs.reasonCode, theirs.reasonAt, theirs.command], [
+        false,
+        'skill-in-git',
+        '~/.agents',
+        'npx skills update sideby -g',
+      ])
+    })
+  })
+
+  it('an Auto Update of the CLI brings the skill along', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.agents/skills/sideby/SKILL.md', skill(CURRENT))
+      const m = machine(h)
+      await backgroundCheck(resolvePaths(h.env), envWithChecks(h), auto, async () => null)
+      assert.deepEqual(
+        m.execs.map((e) => e.file),
+        ['npm', 'npx'],
+      )
+    })
+  })
+
+  it('with Auto Update on and the CLI current, brings a skill behind it up to date alone, once', async () => {
+    await withFakeHome(async (h) => {
+      const paths = resolvePaths(h.env)
+      await h.write('.agents/skills/sideby/SKILL.md', skill('0.1.0'))
+      const m = machine(h, { latest: CURRENT })
+      await backgroundCheck(paths, envWithChecks(h), {}, async () => null)
+      assert.equal(m.execs.length, 0, 'not without update.auto')
+      await backgroundCheck(paths, envWithChecks(h), auto, async () => null)
+      assert.deepEqual(
+        m.execs.map((e) => [e.file, ...e.args].join(' ')),
+        ['npx -y skills update sideby -g -y'],
+      )
+      const cache = await readUpdateCache(paths)
+      assert.deepEqual(cache.skillAuto && [cache.skillAuto.to, cache.skillAuto.ok], [CURRENT, true])
+      // The fake skills tool changed nothing, but this version was tried: it is not tried again.
+      await backgroundCheck(paths, envWithChecks(h), auto, async () => null)
+      assert.equal(m.execs.length, 1)
+      const p = afterCommandPlan(cache, CURRENT, auto, envWithChecks(h), now)
+      assert.match(p.lines.join('\n'), /updated the sideby skill agents read/)
+      assert.equal(p.record!(cache).skillAuto?.shown, true)
+    })
+  })
+
+  it('never updates the skill alone while a newer CLI waits, since the skills tool fetches the newest skill', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.agents/skills/sideby/SKILL.md', skill('0.1.0'))
+      const m = machine(h, { latest: NEXT_MAJOR })
+      await backgroundCheck(resolvePaths(h.env), envWithChecks(h), auto, async () => null)
+      assert.equal(m.execs.length, 0)
+      const behind = { installed: '0.1.0', canRun: true }
+      assert.equal(skillAutoPending({ latest: NEXT_MAJOR }, CURRENT, auto, behind, now), false)
+      assert.equal(skillAutoPending({ latest: CURRENT }, CURRENT, auto, behind, now), true)
+      // A failed try waits a day.
+      const failed = { to: CURRENT, at: now.toISOString(), ok: false, message: 'x' }
+      assert.equal(skillAutoPending({ skillAuto: failed }, CURRENT, auto, behind, now), false)
+      assert.equal(
+        skillAutoPending(
+          { skillAuto: failed },
+          CURRENT,
+          auto,
+          behind,
+          new Date(now.getTime() + 25 * 3600_000),
+        ),
+        true,
+      )
+    })
+  })
+
+  it('tells a terminal about a skill behind this version once a day, unless Auto Update will bring it along', () => {
+    const behind = skillBehind({ installed: ['0.1.0'], outdated: true, command: '', canRun: true }, CURRENT)
+    assert.deepEqual(behind, { installed: '0.1.0', canRun: true })
+    assert.equal(
+      skillBehind({ installed: [CURRENT], outdated: false, command: '', canRun: true }, CURRENT),
+      null,
+    )
+    const p = afterCommandPlan(
+      { latest: CURRENT, checkedAt: now.toISOString() },
+      CURRENT,
+      {},
+      {},
+      now,
+      behind,
+    )
+    assert.deepEqual(p.lines, [
+      `the sideby skill agents read is for 0.1.0 (this sideby is ${CURRENT}) · run \`sideby update\``,
+    ])
+    const seen = { latest: CURRENT, checkedAt: now.toISOString(), ...p.record!({}) }
+    assert.equal(skillNoticeLine(seen, CURRENT, {}, behind, now), null)
+    // Auto Update on: no line, and the background check is started to bring it along.
+    const a = afterCommandPlan(
+      { latest: CURRENT, checkedAt: now.toISOString() },
+      CURRENT,
+      auto,
+      {},
+      now,
+      behind,
+    )
+    assert.deepEqual([a.lines, a.startCheck], [[], true])
+    // A skill sideby may not update is still said with Auto Update on.
+    assert.notEqual(skillNoticeLine({}, CURRENT, auto, { installed: '0.1.0', canRun: false }, now), null)
+    // A newer CLI's notice leads to `sideby update`, which brings the skill along: one line, not two.
+    const n = afterCommandPlan(
+      { latest: NEXT_MINOR, checkedAt: now.toISOString() },
+      CURRENT,
+      {},
+      {},
+      now,
+      behind,
+    )
+    assert.equal(n.lines.length, 1)
+    assert.match(n.lines[0]!, /is available/)
+  })
+
+  it('gives every reason a code a page can say in its own language', async () => {
+    assert.deepEqual(checksOffWhy({}, {}, true), {
+      code: 'local-build',
+      text: 'this is a local build (pnpm local)',
+    })
+    assert.equal(checksOffWhy({ NO_UPDATE_NOTIFIER: '1' }, {}, false)?.code, 'env')
+    assert.equal(checksOffWhy({}, { update: { check: false } }, false)?.code, 'config')
+    assert.equal(checksOffWhy({ CI: 'true' }, {}, false)?.code, 'ci')
+    await withFakeHome(async (h) => {
+      machine(h, {
+        packageDir: async () => join(h.home, '.volta/tools/image/packages/sideby/lib/node_modules/sideby'),
+      })
+      assert.equal((await installMethod(h.env)).reasonCode, 'volta')
+      unbind?.()
+      machine(h, { writable: async () => false })
+      const m = await installMethod(h.env)
+      assert.equal(m.reasonCode, 'not-writable')
+      assert.match(m.reasonAt ?? '', /lib\/node_modules/)
+    })
   })
 })

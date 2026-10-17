@@ -1224,7 +1224,12 @@ export async function cmdUpdate(a: ParsedArgs, io: Io): Promise<number> {
         return 10
       }
       if (!asJson) io.out(c.dim(`$ ${sk.command}`))
-      const r = await u.applySkillUpdate(sk, process.env, asJson ? undefined : (t) => process.stderr.write(t))
+      const r = await u.applySkillOnly(
+        paths,
+        sk,
+        process.env,
+        asJson ? undefined : (t) => process.stderr.write(t),
+      )
       if (asJson)
         json(io, { ...shown, updated: false, skillUpdated: r?.ok ?? false, message: r?.message ?? '' })
       else if (r?.ok) io.out(`${c.green('✓')} ${r.message}; agents load it in their next session.`)
