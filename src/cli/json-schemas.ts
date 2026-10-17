@@ -134,6 +134,12 @@ const Finding = Type.Object({
 
 const QuotaWindow = Type.Object({
   label: Str,
+  name: Type.Optional(
+    Type.String({
+      description:
+        'The group of models this limit covers, when it covers only some (spec §3.26); it does not count toward Quota Pressure.',
+    }),
+  ),
   windowMinutes: Type.Number(),
   usedPercent: Type.Number(),
   resetsAt: Str,
@@ -152,8 +158,22 @@ const Quota = Type.Union([
           'The account this reading was taken from, when it is another account of the same login (spec §3.21); observedAt is its time.',
       }),
     ),
+    fetched: Type.Optional(
+      Type.Boolean({
+        description: 'This reading is the kept answer of a quota check that costs a request (spec §3.26).',
+      }),
+    ),
+    fetchError: Type.Optional(
+      Type.String({ description: 'Why the latest quota check failed, while this older reading is shown.' }),
+    ),
   }),
-  Type.Object({ status: Type.Literal('unavailable'), reason: Str, detail: Type.Optional(Str) }),
+  Type.Object({
+    status: Type.Literal('unavailable'),
+    reason: Type.String({
+      description: 'not-enabled, no-session, unrecognized, no-source, api-account or fetch-failed.',
+    }),
+    detail: Type.Optional(Str),
+  }),
 ])
 
 const TuningModel = Type.Object({

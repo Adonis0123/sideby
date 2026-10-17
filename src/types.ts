@@ -97,7 +97,13 @@ export interface FamilyDef {
    * error is treated the same way and never shown as a problem.
    */
   identity?(account: Account): Promise<AccountIdentity | undefined>
+  /** Quota from local files only; read every time sideby shows Quota. */
   readQuota?(account: Account, ctx: ReadContext): Promise<QuotaResult>
+  /**
+   * Quota that costs a request, such as asking the Host's own CLI (spec §3.26, ADR-0025). sideby decides when to call
+   * it and keeps its last answer; the newer of that answer and `readQuota`'s is shown.
+   */
+  fetchQuota?: QuotaFetch
   readUsage?(account: Account, ctx: ReadContext): Promise<UsageResult>
   /**
    * Estimates the best Compaction Threshold per model from the Account's recent local session records
@@ -197,6 +203,12 @@ export interface QuotaSetup {
   apply(ctx: ReadContext): Promise<QuotaSetupPlan>
   /** Restores the original bytes only if the file is still exactly what `apply` wrote. */
   teardown(ctx: ReadContext): Promise<{ ok: boolean; message: string; diff?: string }>
+  /**
+   * For a setup that adds a whole file: earlier versions of that file, byte for byte, which an older sideby wrote.
+   * Setup replaces such a file after a preview, teardown removes it, and the Panel's copies into other Accounts
+   * replace it; a file with any other content is never touched.
+   */
+  earlierTexts?: readonly string[]
 }
 
 export interface Account {
@@ -221,9 +233,41 @@ export interface ReadContext {
   env: Env
 }
 
+/**
+ * How sideby asks for a Family's Quota when that costs a request (spec §3.26). sideby keeps each Account's last
+ * answer in its state directory and calls `fetch` at most every `everyMinutes`, or when the user refreshes; never
+ * from the status line or the handoff hook, for an API Account or a signed-out one, in CI, or when the user turned it
+ * off (config `quota.check.<family>: false`).
+ */
+export interface QuotaFetch {
+  /** At most one `fetch` per Account in this many minutes, unless the user refreshes. */
+  everyMinutes: number
+  /** What a fetch does, in one plain sentence, shown next to the setting that turns it off. */
+  summary: string
+  /**
+   * The Account's Quota now. An error, or an `unavailable` result, keeps the last good answer on show. Stop when
+   * `ctx.signal` aborts (after 20 seconds).
+   */
+  fetch(account: Account, ctx: QuotaFetchContext): Promise<QuotaResult>
+}
+
+export interface QuotaFetchContext extends ReadContext {
+  signal: AbortSignal
+  /**
+   * The environment the Host gets at Launch, before the Secret File and Plugin hooks: sideby's own, Hijack Variables
+   * cleared, the Family's `selectVar` set for every Account but the Main Account. Run the Host with this one.
+   */
+  hostEnv: Env
+}
+
 export interface QuotaWindow {
   /** `5h`, `7d`, or `<n>m` for unknown window lengths. */
   label: string
+  /**
+   * The group of models this limit covers, such as Cursor's "Other models", when it covers only some of them. Such a
+   * window is shown under this name but never counts toward Quota Pressure: the Account can still use other models.
+   */
+  name?: string
   windowMinutes: number
   usedPercent: number
   /** ISO timestamp. */
@@ -236,6 +280,8 @@ export type QuotaUnavailableReason =
   | 'unrecognized'
   | 'no-source'
   | 'api-account'
+  /** A `fetchQuota` answer failed; `detail` says why and what to do. */
+  | 'fetch-failed'
 
 export type QuotaResult =
   | {
@@ -249,6 +295,10 @@ export type QuotaResult =
        * Account signed in as the same login (spec §3.21). `observedAt` is that Account's time.
        */
       from?: string
+      /** Set by sideby: this reading is the kept answer of the Family's `fetchQuota`, not of its local reader. */
+      fetched?: boolean
+      /** Set by sideby: why the latest `fetchQuota` attempt failed, while this older reading stays on show. */
+      fetchError?: string
     }
   | { status: 'unavailable'; reason: QuotaUnavailableReason; detail?: string }
 

@@ -6,7 +6,14 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { diffSnapshots, snapshot, withFakeHome } from '../../../testing/index.ts'
 import type { Account, ReadContext } from '../../types.ts'
-import { type GrokLayers, grokEligibility, grokHandoff, grokHookFileText, grokPolicy } from './handoff.ts'
+import {
+  GROK_HOOK_FILE_V1,
+  type GrokLayers,
+  grokEligibility,
+  grokHandoff,
+  grokHookFileText,
+  grokPolicy,
+} from './handoff.ts'
 
 const none: GrokLayers = {
   etcRequirements: null,
@@ -131,6 +138,29 @@ describe('grok hook setup', () => {
       assert.equal((await setup.plan(ctx(h.home, bin))).status, 'enabled')
       assert.equal((await setup.teardown(ctx(h.home, bin))).ok, true)
       assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+    })
+  })
+
+  it('updates the file an older sideby wrote after a preview, and teardown removes either version', async () => {
+    await withFakeHome(async (h) => {
+      const bin = h.path('bin')
+      await mkdir(bin, { recursive: true })
+      await writeFile(join(bin, 'sideby'), '#!/bin/sh\n')
+      await chmod(join(bin, 'sideby'), 0o755)
+      const setup = grokHandoff.hookSetup!
+      assert.match(grokHookFileText(), /PostToolUse/)
+      assert.doesNotMatch(GROK_HOOK_FILE_V1, /PostToolUse/)
+      await h.write('.grok/hooks/sideby-handoff.json', GROK_HOOK_FILE_V1)
+      const p = await setup.plan(ctx(h.home, bin))
+      assert.equal(p.status, 'ready')
+      assert.match(p.message, /^updates /)
+      assert.match(p.diff, /^\+.*PostToolUse/m)
+      assert.equal(await readFile(h.path('.grok/hooks/sideby-handoff.json'), 'utf8'), GROK_HOOK_FILE_V1)
+      assert.equal((await setup.apply(ctx(h.home, bin))).status, 'enabled')
+      assert.equal(await readFile(h.path('.grok/hooks/sideby-handoff.json'), 'utf8'), grokHookFileText())
+      await writeFile(h.path('.grok/hooks/sideby-handoff.json'), GROK_HOOK_FILE_V1)
+      assert.equal((await setup.teardown(ctx(h.home, bin))).ok, true)
+      await assert.rejects(readFile(h.path('.grok/hooks/sideby-handoff.json'), 'utf8'))
     })
   })
 

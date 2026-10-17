@@ -66,6 +66,10 @@
                         "label": {
                           "type": "string"
                         },
+                        "name": {
+                          "type": "string",
+                          "description": "The group of models this limit covers, when it covers only some (spec §3.26); it does not count toward Quota Pressure."
+                        },
                         "windowMinutes": {
                           "type": "number"
                         },
@@ -90,6 +94,14 @@
                   "from": {
                     "type": "string",
                     "description": "The account this reading was taken from, when it is another account of the same login (spec §3.21); observedAt is its time."
+                  },
+                  "fetched": {
+                    "type": "boolean",
+                    "description": "This reading is the kept answer of a quota check that costs a request (spec §3.26)."
+                  },
+                  "fetchError": {
+                    "type": "string",
+                    "description": "Why the latest quota check failed, while this older reading is shown."
                   }
                 }
               },
@@ -105,7 +117,8 @@
                     "const": "unavailable"
                   },
                   "reason": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "not-enabled, no-session, unrecognized, no-source, api-account or fetch-failed."
                   },
                   "detail": {
                     "type": "string"

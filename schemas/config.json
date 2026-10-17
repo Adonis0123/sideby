@@ -252,6 +252,52 @@
       "additionalProperties": false,
       "description": "Browser Sign-ins (spec §3.24, ADR-0023)."
     },
+    "display": {
+      "type": "object",
+      "properties": {
+        "families": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "Family ids in the order the Panel and `sideby list` show them; families not listed follow in their usual order."
+        },
+        "accounts": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            }
+          },
+          "description": "Per family, account names (not refs or short commands) in the order they are shown; accounts not listed follow, main first, then by name."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Display Order (spec §3.25): the order you dragged families and accounts into in the Panel. Display only: it never changes which account a Handoff picks."
+    },
+    "quota": {
+      "type": "object",
+      "properties": {
+        "check": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "boolean"
+            }
+          },
+          "description": "Per family, whether sideby may ask for Quota in a way that costs a request (Grok: its own CLI asks xAI, at most every 15 minutes per account). On by default; `false` turns it off. Off in CI."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Quota that sideby asks for (spec §3.26, ADR-0025)."
+    },
     "shellInitFile": {
       "type": "object",
       "properties": {

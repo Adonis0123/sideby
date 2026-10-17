@@ -9,6 +9,9 @@ import {
   aliasProblem,
   aliasRefs,
   type Config,
+  type DisplayConfig,
+  editConfigDisplay,
+  editConfigQuotaCheck,
   type HandoffSettings,
   handoffSettings,
   loadConfig,
@@ -29,9 +32,17 @@ import {
   readDoctorHistory,
   writeDoctorHistory,
 } from './core/last-doctor.ts'
-import { brokenOnPath, type HostLaunch, type PreparedLaunch, prepareLaunch, which } from './core/launch.ts'
+import {
+  accountEnv,
+  brokenOnPath,
+  type HostLaunch,
+  type PreparedLaunch,
+  prepareLaunch,
+  which,
+} from './core/launch.ts'
 import { memoStore } from './core/memo-store.ts'
 import { type Paths, resolvePaths } from './core/paths.ts'
+import { fetchedQuota, type QuotaFetchMode, quotaCheckOff, shownQuota } from './core/quota-fetch.ts'
 import {
   type RemoteControlChange,
   type RemoteControlGroup,
@@ -272,7 +283,20 @@ export interface Runtime {
    * The Account's Quota. For an Account of a Same Login (spec §3.21) it is the group's freshest reading, with `from`
    * naming the Account it was read from when that is another one.
    */
-  quota(account: Account): Promise<QuotaResult>
+  quota(account: Account, opts?: { fetch?: QuotaFetchMode }): Promise<QuotaResult>
+  /**
+   * Asks every Family that fetches Quota (spec §3.26) again now, for `only` or every signed-in subscription Account,
+   * and waits for the answers. Fetching that is turned off stays off.
+   */
+  refreshQuota(only?: readonly Account[]): Promise<void>
+  /** Families that fetch Quota, with their switch (config `quota.check.<family>`) and why it is off, if it is. */
+  quotaChecks(): QuotaCheckInfo[]
+  /** Turns a Family's Quota fetching on (removes the key) or off (`quota.check.<family>: false`). */
+  setQuotaCheck(family: string, on: boolean): Promise<{ changed: boolean }>
+  /** The config `display` (spec §3.25), or an empty object. */
+  displayOrder(): DisplayConfig
+  /** Replaces the config `display`; undefined or empty removes it. Returns what the file now holds. */
+  setDisplayOrder(display: DisplayConfig | undefined): Promise<DisplayConfig>
   /** The other Accounts signed in as the same login as this one (spec §3.21), in discovery order; empty when none. */
   sameLogin(account: Account): Promise<string[]>
   usage(account: Account): Promise<UsageResult>
@@ -318,6 +342,17 @@ export interface Runtime {
 }
 
 export class UnknownFamilyError extends UserError {}
+
+export interface QuotaCheckInfo {
+  family: string
+  title: string
+  summary: string
+  everyMinutes: number
+  /** False when config `quota.check.<family>` is false. */
+  on: boolean
+  /** Why no fetch happens even though it is on (CI), or undefined. */
+  blocked?: string
+}
 
 /**
  * A Family's identity reader, kept to the identity fields with the expected types. A reader that throws, or returns
@@ -419,29 +454,43 @@ export async function createRuntime(
   }
 
   /** Every Account's Quota as shown (shared within a Same Login), reading each Account's own cache once. */
-  const quotasOf = async (list: readonly Account[]): Promise<Map<string, QuotaResult>> => {
+  const quotasOf = async (
+    list: readonly Account[],
+    mode: QuotaFetchMode = 'wait',
+  ): Promise<Map<string, QuotaResult>> => {
     const [own, groups] = await Promise.all([
-      Promise.all(list.map(async (a) => [a.ref, await ownQuota(a)] as const)).then((e) => new Map(e)),
+      Promise.all(list.map(async (a) => [a.ref, await ownQuota(a, mode)] as const)).then((e) => new Map(e)),
       groupsOf(list),
     ])
     return new Map(list.map((a) => [a.ref, sharedQuota(a.ref, own, groups.get(a.ref) ?? [])]))
   }
 
-  const ownQuota = async (account: Account): Promise<QuotaResult> => {
+  /** A reader's own `from`, `fetched` and `fetchError` are dropped: only sideby sets them (spec §3.21, §3.26). */
+  const readerOnly = (q: QuotaResult): QuotaResult => {
+    if (q.status !== 'ok') return q
+    const { from: _from, fetched: _fetched, fetchError: _error, ...own } = q
+    return own
+  }
+
+  const ownQuota = async (account: Account, mode: QuotaFetchMode = 'wait'): Promise<QuotaResult> => {
     if (account.kind === 'api') return { status: 'unavailable', reason: 'api-account' }
     const f = familyOf(account.family)
-    if (!f.readQuota) return { status: 'unavailable', reason: 'no-source' }
+    if (!f.readQuota && !f.fetchQuota) return { status: 'unavailable', reason: 'no-source' }
     await memos.ready()
     try {
-      const q = await f.readQuota(account, readContext())
-      // Only sideby marks a reading as borrowed from another Account (spec §3.21); a reader's own `from` is dropped.
-      if (q.status === 'ok' && q.from !== undefined) {
-        const { from: _from, ...own } = q
-        return own
-      }
-      return q
-    } catch (err) {
-      return { status: 'unavailable', reason: 'unrecognized', detail: (err as Error).message }
+      let local: QuotaResult | null = null
+      if (f.readQuota)
+        try {
+          local = readerOnly(await f.readQuota(account, readContext()))
+        } catch (err) {
+          local = { status: 'unavailable', reason: 'unrecognized', detail: (err as Error).message }
+        }
+      if (!f.fetchQuota) return local!
+      const off = quotaCheckOff(f.id, config, env)
+      // A signed-out Account has nothing to ask about; its kept answer still shows.
+      const ask = off || mode === 'never' || (await loginOf(account)) === 'logged-out' ? 'never' : mode
+      const kept = await fetchedQuota(f.fetchQuota, account, readContext(), accountEnv(f, account, env), ask)
+      return shownQuota(local, kept, off)
     } finally {
       memos.saveSoon()
     }
@@ -560,7 +609,7 @@ export async function createRuntime(
           layout: { main: f.layout.main, account: f.layout.account },
           selectVar: f.selectVar,
           login: { args: f.login.args ? [...f.login.args] : null, hint: f.login.hint },
-          quota: Boolean(f.readQuota),
+          quota: Boolean(f.readQuota || f.fetchQuota),
           usage: Boolean(f.readUsage),
           quotaSetup: Boolean(f.quotaSetup),
           shared: f.sharedItems.map((item) => ({
@@ -822,10 +871,42 @@ export async function createRuntime(
         account: route.account,
       }
     },
-    async quota(account) {
+    async quota(account, o = {}) {
       const peers = await peersOf(account)
-      if (!peers.length) return ownQuota(account)
-      return (await quotasOf([account, ...peers])).get(account.ref)!
+      if (!peers.length) return ownQuota(account, o.fetch)
+      return (await quotasOf([account, ...peers], o.fetch)).get(account.ref)!
+    },
+    async refreshQuota(only) {
+      const list = (only ?? (await accounts())).filter(
+        (a) => a.kind === 'subscription' && families.get(a.family)?.fetchQuota,
+      )
+      await Promise.all(list.map((a) => ownQuota(a, 'force')))
+    },
+    quotaChecks() {
+      const ci = quotaCheckOff('', {}, env)
+      return [...families.values()]
+        .filter((f) => f.fetchQuota)
+        .map((f) => ({
+          family: f.id,
+          title: f.title,
+          summary: f.fetchQuota!.summary,
+          everyMinutes: f.fetchQuota!.everyMinutes,
+          on: config.quota?.check?.[f.id] !== false,
+          ...(ci ? { blocked: ci } : {}),
+        }))
+    },
+    async setQuotaCheck(family, on) {
+      if (!families.get(family)?.fetchQuota)
+        throw new UserError(`${family} does not ask for quota, so there is nothing to turn on or off`)
+      const r = await editConfigQuotaCheck(paths.configFile, family, on)
+      config.quota = r.after
+      return { changed: r.changed }
+    },
+    displayOrder: () => config.display ?? {},
+    async setDisplayOrder(display) {
+      const r = await editConfigDisplay(paths.configFile, display)
+      config.display = r.after
+      return r.after ?? {}
     },
     async sameLogin(account) {
       return (await peersOf(account)).map((a) => a.ref)
@@ -929,7 +1010,7 @@ export async function createRuntime(
     async handoff(familyId, o = {}) {
       const f = familyOf(familyId)
       const list = (await accounts()).filter((a) => a.family === f.id)
-      if (!f.readQuota)
+      if (!f.readQuota && !f.fetchQuota)
         throw new UserError(
           `${f.title} has no public quota source, so sideby cannot tell which account has room; pick one yourself: ${
             list.map((a) => `sideby run ${a.ref}`).join(', ') || `sideby new ${f.id} <name>`

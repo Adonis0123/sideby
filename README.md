@@ -94,7 +94,7 @@ cc-switch's docs describe that switch: it writes the live settings file ([README
 |---|---|---|---|---|
 | Claude Code | `~/.claude`, `~/.claude-<name>` | `claude auth login` | ✓ after `quota setup claude` | ✓ |
 | Codex CLI | `~/.codex`, `~/.codex-<name>` | `codex login` | ✓ | ✓ |
-| Grok Build | `~/.grok`, `~/.grok-<name>` | `grok login` | no public source | no public source |
+| Grok Build | `~/.grok`, `~/.grok-<name>` | `grok login` | weekly, asked from the `grok` CLI | no public source |
 | pi | `~/.pi/agent`, `~/.pi-<name>/agent` | `/login` inside pi | no public source | no public source |
 
 sideby starts the official binary on your `PATH` and never patches it. Tested versions and per-Host notes are in the [guide](docs/guide/usage.md#host-notes).

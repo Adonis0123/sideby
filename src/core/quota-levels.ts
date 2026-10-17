@@ -25,13 +25,16 @@ export function windowReset(resetsAt: string, now: Date): boolean {
 
 /**
  * Quota Pressure: the used percent of the fullest window that has not reset yet (0 when all have reset),
- * or null when the Account has no Quota. The Panel keeps its own copy (`quotaPressure` in page-logic.ts,
- * -1 for null) because page-logic helpers must be self-contained; a test keeps the two equal.
+ * or null when the Account has no Quota. A window with a `name` covers only some models and never counts (spec
+ * §3.26). The Panel keeps its own copy (`quotaPressure` in page-logic.ts, -1 for null) because page-logic helpers
+ * must be self-contained; a test keeps the two equal.
  */
 export function quotaPressure(quota: QuotaResult | undefined, now: Date): number | null {
-  if (quota?.status !== 'ok' || quota.windows.length === 0) return null
+  if (quota?.status !== 'ok') return null
+  const windows = quota.windows.filter((w) => !w.name)
+  if (windows.length === 0) return null
   let max = 0
-  for (const w of quota.windows)
+  for (const w of windows)
     if (!windowReset(w.resetsAt, now)) max = Math.max(max, Math.min(100, Number(w.usedPercent) || 0))
   return max
 }

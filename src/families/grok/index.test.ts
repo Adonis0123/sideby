@@ -129,8 +129,9 @@ describe('grok family', () => {
       assert.equal(launch.env.GROK_HOME, h.path('.grok-work'))
       assert.equal(launch.env.XAI_API_KEY, undefined)
       assert.equal(launch.env.GROK_MODELS_BASE_URL, undefined)
+      // A signed-out Account is not asked about (spec §3.26) and has no billing line in its log yet.
       const q = await rt.quota(await rt.resolve('grok:work'))
-      assert.equal(q.status === 'unavailable' && q.reason, 'no-source')
+      assert.equal(q.status === 'unavailable' && q.reason, 'no-session')
     })
   })
 })

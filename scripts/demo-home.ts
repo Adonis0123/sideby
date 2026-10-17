@@ -37,8 +37,31 @@ const now = Date.now()
 const iso = (msFromNow: number) => new Date(now + msFromNow).toISOString()
 const H = 3_600_000
 
-for (const host of ['claude', 'codex', 'grok', 'pi'])
+for (const host of ['claude', 'codex', 'pi'])
   await writeFile(join(bin, host), '#!/bin/sh\necho "demo host"\n', { mode: 0o755 })
+// Grok answers sideby's quota check (`grok agent --no-leader stdio`, `_x.ai/billing`, spec §3.26) with fake numbers per
+// account, so the Panel shows Grok quota as it does with the real CLI. Nothing here talks to xAI.
+await writeFile(
+  join(bin, 'grok'),
+  `#!${process.execPath}
+const args = process.argv.slice(2)
+if (args[0] !== 'agent') { console.log('demo host'); process.exit(0) }
+const pct = /grok-lab$/.test(process.env.GROK_HOME || '') ? 64 : 31
+const day = 86400000
+const start = new Date(Math.floor(Date.now() / day) * day - 2 * day)
+const config = { creditUsagePercent: pct, currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY', start: start.toISOString(), end: new Date(start.getTime() + 7 * day).toISOString() } }
+let buf = ''
+process.stdin.on('data', (d) => {
+  buf += d
+  for (let i; (i = buf.indexOf('\\n')) >= 0; buf = buf.slice(i + 1)) {
+    const req = JSON.parse(buf.slice(0, i))
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: req.id, result: { config, subscription_tier: 'SuperGrok' } }) + '\\n')
+  }
+})
+process.stdin.on('end', () => process.exit(0))
+`,
+  { mode: 0o755 },
+)
 
 /** A Codex auth.json whose id_token carries fake email and ChatGPT user id claims (no real token, no signature). */
 function codexAuth(email: string, userId: string): string {
@@ -113,6 +136,11 @@ if (variant !== 'empty') {
   await rt.createAccount('claude', 'deepseek', { api: true })
   await rt.createAccount('codex', 'team')
   await rt.createAccount('grok', 'lab')
+  await write(
+    '.grok-lab/auth.json',
+    JSON.stringify({ 'https://auth.x.ai::00000000-lab': { email: 'lab@example.com', access_token: 'demo' } }),
+    0o600,
+  )
   // Short commands, so the Panel shows them next to the account names as people really use it.
   await rt.addAlias('ccw', 'claude:work')
   await rt.addAlias('ccd', 'claude:deepseek')

@@ -29,7 +29,8 @@ Shared Items the Main Account does not have are skipped: no Finding, not counted
 | `problems` on an account in `list --json` | A plugin failed while reading it (for example a settings file that is not valid JSON) | Show the message; the account itself still works |
 | quota `unavailable` / `not-enabled` | Claude quota source is off | Offer `sideby quota setup claude` |
 | quota `unavailable` / `no-session` | No session since the source was enabled | Ask the user to start one session with that account |
-| quota `unavailable` / `no-source` | Grok, pi: the Host has no public source | Nothing to fix |
+| quota `unavailable` / `no-source` | pi: the Host has no public source | Nothing to fix |
+| quota `unavailable` / `fetch-failed` | Grok: its CLI could not get the quota | Follow `detail` (update Grok, `sideby login grok:<name>`), then `sideby quota grok --refresh` |
 | quota `unavailable` / `api-account` | API accounts have no quota | Nothing to fix |
 | quota `unavailable` / `unrecognized` | Host changed its file format | Report it; suggest filing an issue with the Host version |
 | host not installed | Accounts exist but the CLI is missing | Point to the Host's install docs; do not install it unasked |

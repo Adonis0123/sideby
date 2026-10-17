@@ -47,6 +47,7 @@ src/
 │                 tuning.ts: the pure replay that estimates a Compaction Threshold (§3.18); the per-Family readers are families/<id>/tuning.ts
 │                 skill-check.ts compares an installed sideby skill with this version
 │                 share-meaning.ts: the one-line meaning of each Shared Item that `sideby families` prints
+│                 quota-fetch.ts and quota-store.ts: when a Family's `fetchQuota` is asked, and its kept answers (§3.26)
 │                 update.ts: Update Check, Update Notice, Install Method, `sideby update` and Auto Update (§3.23)
 │                 desktop-app.ts: `sideby desktop`, open a Family's Desktop App per Account (§3.20); definitions in families/desktop.ts (internal)
 ├── plugins/      loader (trust checks), hook bus, built-in account-script
@@ -55,6 +56,7 @@ src/
 │                 logos.ts holds the built-in marks each FamilyDef sets as `logo`
 │                 claude/ reads quota from the tap cache and usage from projects/**/*.jsonl;
 │                 codex/rollout.ts reads quota and usage from sessions/**/rollout-*.jsonl;
+│                 grok/quota.ts asks the grok CLI for its Quota, grok/quota-log.ts reads the Quota Grok logs (ADR-0025);
 │                 identity readers pick only email/organization from login files (core/identity.ts);
 │                 readers remember each file's parse until it changes (core/file-memo.ts)
 ├── quota/        `quota setup|teardown claude` and the `statusline-tap` entry (thin; cache logic in families/claude/quota-cache.ts)
@@ -105,7 +107,7 @@ Shared Item paths must be relative and stay inside the account directory: config
 
 - Never print, log, return, or put in an error message the value of anything from `proxy.env`, `auth.json` or `.claude.json`. Errors name the path or the variable, and for parse errors the line number only. The values shown are a Claude API Account's `ANTHROPIC_MODEL`, as its model, and the identity fields a Family's `identity` reader picks (email, organization; ADR-0003). Never a token: Codex's `id_token` is decoded only to take its `email` claim, and is never stored or returned.
 - Doctor checks credential files for type and mode 600 only. The only content it reads is the single key a `json-key` item names. `proxy.env` is parsed only at Launch and for that model name.
-- Never read a credential to call a model, pool logins, or rotate accounts on its own (ADR-0001; Auto Handoff is opt-in, ADR-0010). Never call private quota endpoints (ADR-0003). Built-in quota and usage readers make no network requests. The Update Check (ADR-0021, `core/update.ts`) is sideby's only request of its own: one GET of the `latest` dist-tag, at most daily, carrying no Account, path or identity; it stays off under `NO_UPDATE_NOTIFIER`, `SIDEBY_NO_UPDATE_NOTIFIER`, config `update.check: false` and CI, and `withFakeHome` sets `SIDEBY_NO_UPDATE_NOTIFIER` so tests never make it. Auto Update stays opt-in (config `update.auto`).
+- Never read a credential to call a model, pool logins, or rotate accounts on its own (ADR-0001; Auto Handoff is opt-in, ADR-0010). Never call private quota endpoints (ADR-0003). Built-in quota and usage readers make no network requests. The one exception is a Host's own CLI asked for its Quota without a session (Grok, `grok agent --no-leader stdio` and `_x.ai/billing`, ADR-0025, `core/quota-fetch.ts`): the Host sends the request with its own login, sideby reads no credential for it, asks at most every `everyMinutes` per Account (never from `statusline-tap` or `handoff-hook`), keeps only numbers, reset times and the plan name, and stays off under config `quota.check.<family>: false` and in CI. Only the `billing: fetched credits config` lines of Grok's `logs/unified.jsonl` are parsed, and only their Quota fields kept; the file's other lines hold the user id and a token's end. The Update Check (ADR-0021, `core/update.ts`) is sideby's only request of its own: one GET of the `latest` dist-tag, at most daily, carrying no Account, path or identity; it stays off under `NO_UPDATE_NOTIFIER`, `SIDEBY_NO_UPDATE_NOTIFIER`, config `update.check: false` and CI, and `withFakeHome` sets `SIDEBY_NO_UPDATE_NOTIFIER` so tests never make it. Auto Update stays opt-in (config `update.auto`).
 
 **Host directories**
 

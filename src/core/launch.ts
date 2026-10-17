@@ -76,6 +76,18 @@ export async function sidebyBinProblem(env: Env, why: string): Promise<string | 
  * copy the current env, clear Hijack Variables, merge the Secret File, set the select variable,
  * then let `launch.before` hooks adjust or abort. Never touches the caller's environment.
  */
+/**
+ * The Account's environment before its Secret File and Plugin hooks: `baseEnv` with the Hijack Variables cleared and
+ * the Family's `selectVar` set for every Account but the Main Account.
+ */
+export function accountEnv(family: FamilyDef, account: Account, baseEnv: Env): Env {
+  const env: Env = { ...baseEnv }
+  for (const v of family.hijackVars) delete env[v]
+  delete env[family.selectVar]
+  if (!account.isMain) env[family.selectVar] = account.dir
+  return env
+}
+
 export async function prepareLaunch(opts: {
   account: Account
   family: FamilyDef
@@ -90,10 +102,9 @@ export async function prepareLaunch(opts: {
   title?: boolean
 }): Promise<PreparedLaunch> {
   const { account, family } = opts
-  const env: Env = { ...opts.baseEnv }
-  for (const v of family.hijackVars) delete env[v]
-  delete env[family.selectVar]
+  const env = accountEnv(family, account, opts.baseEnv)
   if (account.secretFile) Object.assign(env, await readSecretFile(account.secretFile, opts.baseEnv))
+  // The Secret File may not move the Account: its directory always wins.
   if (!account.isMain) env[family.selectVar] = account.dir
   // Which Account this is, for a status line, prompt or hook to show (spec §3.5); set for every Launch, so a value
   // inherited from another sideby Launch never leaks through.

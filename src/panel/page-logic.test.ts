@@ -12,6 +12,7 @@ import {
   formatDuration,
   handoffChangeOf,
   handoffHintAccount,
+  inDisplayOrder,
   type LogicAccount,
   loginClusters,
   loginKey,
@@ -26,6 +27,7 @@ import {
   quotaPressure,
   remoteControlSummary,
   remoteControlTodo,
+  reorder,
   sortAccounts,
   suggestAlias,
   suggestName,
@@ -183,6 +185,40 @@ describe('page logic', () => {
       ['main', 'a', 'b', 'c9', 'c10'],
     )
     assert.equal(list[0]!.name, 'b', 'the input is not reordered')
+  })
+
+  it('sorts by my order: listed names first, the others after in name order (spec §3.25)', () => {
+    const list = [acct('b'), acct('a'), acct('main'), acct('c10'), acct('c9')]
+    assert.deepEqual(
+      sortAccounts(list, 'manual', NOW, ['c10', 'gone', 'a']).map((a) => a.name),
+      ['c10', 'a', 'main', 'b', 'c9'],
+    )
+    assert.deepEqual(
+      sortAccounts(list, 'manual', NOW).map((a) => a.name),
+      ['main', 'a', 'b', 'c9', 'c10'],
+      'without an order it is the name order',
+    )
+    assert.deepEqual(
+      inDisplayOrder(['claude', 'codex', 'grok', 'pi'], (x) => x, ['grok', 'claude']),
+      ['grok', 'claude', 'codex', 'pi'],
+    )
+  })
+
+  it('moves one unit after a drag, from the order on screen, keeping hidden keys in place', () => {
+    const all = ['main', '001', '002', '003']
+    // The screen showed them by pressure: 003, main, 002 (001 is filtered out).
+    assert.deepEqual(reorder(all, [['003'], ['main'], ['002']], 2, 0), ['002', '001', '003', 'main'])
+    // A Same Login group moves as one unit and keeps its inside order.
+    assert.deepEqual(reorder(all, [['main', '002'], ['001'], ['003']], 0, 2), ['001', '003', 'main', '002'])
+    // A key the order did not have yet (a new account) goes where it was dropped.
+    assert.deepEqual(reorder(['a'], [['a'], ['b']], 1, 0), ['b', 'a'])
+    assert.deepEqual(reorder(all, [['main']], 0, 5), all, 'an index outside the list changes nothing')
+  })
+
+  it('does not ask for attention for a window that covers only some models', () => {
+    const q = quota(10, 95)!
+    q.windows![1]!.name = 'Other models'
+    assert.equal(attentionWhy(acct('a', { quota: q }), null, NOW, 60), null)
   })
 
   it('matches every search word against name, ref, alias, tool, model and plan', () => {
@@ -541,6 +577,19 @@ describe('Auto Handoff helpers', () => {
         orders: [{ family: 'claude', order: [] }],
       },
     )
+  })
+})
+
+describe('Display Order in the page (spec §3.25)', () => {
+  it('puts the grip on Family groups and account rows, not on the Grok Bot group', () => {
+    const body = (name: string) => {
+      const at = PAGE_SCRIPT.indexOf(`  function ${name}(`)
+      return PAGE_SCRIPT.slice(at, PAGE_SCRIPT.indexOf('\n  function ', at + 10))
+    }
+    assert.match(body('group'), /dragHandle\('family'/)
+    assert.match(body('group'), /ui\.order\.units\[fam\]/)
+    assert.match(body('row'), /dragHandle\('account'/)
+    assert.doesNotMatch(body('appGroup'), /dragHandle|ui\.order/)
   })
 })
 

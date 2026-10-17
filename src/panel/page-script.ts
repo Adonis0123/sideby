@@ -9,6 +9,7 @@ import {
   formatDuration,
   handoffChangeOf,
   handoffHintAccount,
+  inDisplayOrder,
   loginClusters,
   loginKey,
   maskEmail,
@@ -22,6 +23,7 @@ import {
   quotaPressure,
   remoteControlSummary,
   remoteControlTodo,
+  reorder,
   sortAccounts,
   suggestAlias,
   suggestName,
@@ -38,6 +40,7 @@ const LOGIC = [
   formatDuration,
   handoffChangeOf,
   handoffHintAccount,
+  inDisplayOrder,
   loginClusters,
   loginKey,
   maskEmail,
@@ -51,6 +54,7 @@ const LOGIC = [
   quotaPressure,
   remoteControlSummary,
   remoteControlTodo,
+  reorder,
   sortAccounts,
   suggestAlias,
   suggestName,
@@ -86,14 +90,14 @@ const MAIN = String.raw`
     silent: false, lastTry: 0, pending: false, fastUntil: 0, fastFamily: null,
   }
   // View state that is not saved: the search text, the attention filter, the Health check filter.
-  const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, desktopRef: null, browserRef: null, appBusy: null, appRemove: null, appNew: null, highlight: null, fade: true, loginRefs: new Map() }
+  const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, desktopRef: null, browserRef: null, appBusy: null, appRemove: null, appNew: null, highlight: null, fade: true, loginRefs: new Map(), order: { families: [], units: {} }, drag: null }
   const $ = (id) => document.getElementById(id)
 
   // ---------- preferences ----------
   // Kept in localStorage, which can be missing or throw (private windows, blocked storage): every access is guarded
   // and the defaults apply.
   const PREFS_KEY = 'sideby.panel.v2'
-  const CHOICES = { view: ['list', 'cards'], sort: ['pressure', 'name', 'recent'], quota: ['used', 'left'], theme: ['system', 'light', 'dark'], lang: ['en', 'zh'] }
+  const CHOICES = { view: ['list', 'cards'], sort: ['pressure', 'name', 'recent', 'manual'], quota: ['used', 'left'], theme: ['system', 'light', 'dark'], lang: ['en', 'zh'] }
   const prefs = loadPrefs()
   function loadPrefs() {
     let raw = {}
@@ -264,6 +268,8 @@ const MAIN = String.raw`
   function uiBusy() {
     // A row or group in the middle of folding; a render now would cut the motion short.
     for (const el of folding) if (el.isConnected) return true
+    // A row or group being dragged into a new place (spec §3.25).
+    if (ui.drag) return true
     if (menu.el || (dlg.el && dlg.el.open) || document.querySelector('.tip.is-open')) return true
     // A plan on the Auto Handoff page, and the change a person opened to read, stay as they are.
     if (!$('handoff-page').hidden && (hp.preview || hp.askSame || document.querySelector('#handoff-page details[open]'))) return true
@@ -278,6 +284,7 @@ const MAIN = String.raw`
     search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4.2-4.2',
     chevron: 'M9 6l6 6-6 6',
     more: 'M5 12h.01M12 12h.01M19 12h.01',
+    grip: 'M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01',
     plus: 'M12 5v14M5 12h14',
     sun: 'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
     moon: 'M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z',
@@ -808,15 +815,17 @@ const MAIN = String.raw`
       CHOICES.sort.map((v) => h('option', { value: v }, t('sort.' + v))))
     tb.sort.value = prefs.sort
     tb.sort.addEventListener('change', () => { prefs.sort = tb.sort.value; savePrefs(); renderAccounts() })
+    tb.reset = h('button', { class: 'btn btn-sm tb-reset', type: 'button', title: t('order.resetHint'), onclick: resetOrder }, t('order.resetButton'))
     const display = h('button', { class: 'btn tb-display', type: 'button', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', title: t('tb.display') }, icon('sliders'), h('span', null, t('tb.display')))
     display.addEventListener('click', () => openPopover(display, 'display', t('tb.display'), displayPanel, 'end'))
     const create = BOOT.readOnly ? null : h('button', { class: 'btn btn-primary', type: 'button', 'aria-label': t('tb.new'), onclick: () => openCreate(null) }, icon('plus'), h('span', null, t('tb.new')))
     setKids($('toolbar'), [
       h('label', { class: 'search' }, icon('search', 'search-ic'), tb.search, h('kbd', { class: 'kbd', 'aria-hidden': 'true' }, '/')),
-      h('div', { class: 'tools' }, tb.family, tb.sort, display),
+      h('div', { class: 'tools' }, tb.family, tb.sort, tb.reset, display),
       create,
     ])
     renderFamilyFilter()
+    renderOrderReset()
     if (hadFocus) tb.search.focus()
   }
   // "Display": the view settings people change rarely, one popover instead of three buttons in the toolbar.
@@ -858,12 +867,16 @@ const MAIN = String.raw`
   // One column per Quota window label. 5h and 7d always have one, so rows of every group line up under the same
   // header; a label only some account reports (such as 60m) adds a column, at most three in all.
   const KNOWN_WINDOWS = { '5h': 300, '7d': 10080 }
+  // A window's column: the models it covers when it covers only some (Cursor's "Other models"), else its length.
+  function winKey(w) { return w.name || w.label }
+  // One group's columns: the windows its accounts report, shortest first; 5h and 7d when none reports any yet.
   function quotaColumns(list) {
-    const mins = Object.assign({}, KNOWN_WINDOWS)
+    const mins = {}
     for (const a of list)
       if (a.quota && a.quota.status === 'ok')
-        for (const w of a.quota.windows || []) if (!Object.hasOwn(mins, w.label)) mins[w.label] = Number(w.windowMinutes) || 0
-    return Object.keys(mins).sort((x, y) => mins[x] - mins[y]).slice(0, 3)
+        for (const w of a.quota.windows || []) if (!Object.hasOwn(mins, winKey(w))) mins[winKey(w)] = (Number(w.windowMinutes) || 0) + (w.name ? -0.5 : 0)
+    if (!Object.keys(mins).length) Object.assign(mins, KNOWN_WINDOWS)
+    return Object.keys(mins).sort((x, y) => mins[x] - mins[y]).slice(0, 4)
   }
   // A window's cell: percent and countdown on one line, the bar under them. The label shows where no column
   // header does (cards, narrow screens).
@@ -876,11 +889,11 @@ const MAIN = String.raw`
     const title = [passed ? t('quota.resetNoData', { date: day(passed.since) }) : t('quota.resetsAt', { at: clock(w.resetsAt) }), asOf].filter(Boolean).join(' · ')
     return h('div', { class: 'meter lvl-' + st.level + (stale || passed ? ' lvl-stale' : ''), title },
       h('div', { class: 'm-top' },
-        h('span', { class: 'm-label' }, w.label),
+        h('span', { class: 'm-label' }, winKey(w)),
         h('span', { class: 'm-pct' }, shown + '%', h('span', { class: 'm-unit' }, ' ' + t(left ? 'quota.unitLeft' : 'quota.unitUsed')),
           stale ? h('span', { class: 'm-asof', role: 'img', 'aria-label': asOf }, icon('clock')) : null),
         h('span', { class: 'm-reset' + (passed ? ' m-passed' : '') }, passed ? t('quota.resetShort') : countdown(w.resetsAt, now))),
-      h('div', { class: 'bar', role: 'meter', 'aria-label': t(left ? 'quota.meterLeft' : 'quota.meterUsed', { label: w.label }), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(shown), 'aria-valuetext': t(left ? 'quota.pctLeft' : 'quota.pctUsed', { n: shown }) }, h('span', { css: { width: shown + '%' } })))
+      h('div', { class: 'bar', role: 'meter', 'aria-label': t(left ? 'quota.meterLeft' : 'quota.meterUsed', { label: winKey(w) }), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(shown), 'aria-valuetext': t(left ? 'quota.pctLeft' : 'quota.pctUsed', { n: shown }) }, h('span', { css: { width: shown + '%' } })))
   }
   // A column whose window this account does not report right now, such as a 5h window that has not started.
   function noMeter(label) {
@@ -890,6 +903,9 @@ const MAIN = String.raw`
   function quotaNote(a, q) {
     const setup = setupFor(a.family)
     // One setup turns quota on for every account of the Family, so the switch lives in the group header only.
+    // A check that asks the Host (Grok) and is turned off, or failed (spec §3.26): say why and what to do.
+    if (q.reason === 'fetch-failed') return h('div', { class: 'q-note q-off' }, h('span', { class: 'muted' }, t('quota.fetchFailed')), tipRaw(t('quota.fetchFailed'), q.detail || ''))
+    if (q.reason === 'not-enabled' && checkOf(a.family)) return h('div', { class: 'q-note q-off' }, h('span', { class: 'muted' }, t('quota.checkOff')), tipRaw(t('quota.checkOff'), q.detail || t('quota.checkOffHint')))
     if (q.reason === 'not-enabled') {
       const host = famTitle(a)
       const body = setup && setup.plan.status === 'ready' && !BOOT.readOnly ? t('tip.quotaOff.body', { host })
@@ -909,9 +925,13 @@ const MAIN = String.raw`
     const wins = q.windows || []
     // A reading borrowed from another Account of the same login says where it came from (spec §3.21).
     const from = q.from ? t('quota.sharedFrom', { name: refName(q.from), ago: ago(q.observedAt) }) : null
-    return h('div', { class: 'quota' + (stale ? ' is-stale' : ''), title: from || (stale ? null : t('quota.dataFrom', { ago: ago(q.observedAt) })) },
+    // Where the numbers came from when the Host was asked (spec §3.26), and why the latest ask failed.
+    const via = q.fetched ? t('quota.fetchedFrom', { host: famTitle(a), ago: ago(q.observedAt) }) : null
+    const failed = q.fetchError ? t('quota.lastCheckFailed', { why: q.fetchError }) : null
+    const title = [from || via || (stale ? null : t('quota.dataFrom', { ago: ago(q.observedAt) })), failed].filter(Boolean).join('\n') || null
+    return h('div', { class: 'quota' + (stale ? ' is-stale' : ''), title },
       wins.length ? cols.map((c) => {
-        const w = wins.find((x) => x.label === c)
+        const w = wins.find((x) => winKey(x) === c)
         return w ? meter(w, now, stale, q.observedAt) : noMeter(c)
       }) : h('div', { class: 'q-note' }, t('quota.noWindows')))
   }
@@ -1256,7 +1276,7 @@ const MAIN = String.raw`
     const email = emailLine(a)
     const lead = loginLead(a)
     return h('div', { class: 'row fold-hit' + (open ? ' row-open' : '') + (a.error ? ' row-error' : ''), role: 'listitem', 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a), onclick: foldClick(a) },
-      h('div', { class: 'ident' }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a), email || subLine(a))),
+      h('div', { class: 'ident' }, dragHandle('account', a.family, a.name, a.name), rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a), email || subLine(a))),
       lead && lead !== a.ref ? sharedQuota(lead) : quotaBlock(a, now, cols),
       lastUsed(a),
       moreButton(a),
@@ -1480,7 +1500,9 @@ const MAIN = String.raw`
     const off = list.some((a) => a.quota && a.quota.status === 'unavailable' && a.quota.reason === 'not-enabled')
     const bodyId = 'grp-' + fam.replace(/[^a-zA-Z0-9_-]/g, '_')
     const cards = prefs.view === 'cards'
+    if (!cards) ui.order.units[fam] = loginClusters(list).map((x) => Array.isArray(x) ? x.map((a) => a.name) : [x.name])
     const head = h('div', { class: 'group-head', 'data-key': 'head' },
+      dragHandle('family', fam, fam, info.title),
       h('button', { class: 'group-toggle', type: 'button', 'aria-expanded': String(!collapsed), 'aria-controls': bodyId, title: t(collapsed ? 'group.expand' : 'group.collapse'), 'aria-label': t('group.toggle', { title: info.title, count: list.length === total ? String(total) : list.length + ' / ' + total, action: t(collapsed ? 'group.expand' : 'group.collapse') }), onclick: () => toggleGroup(fam, 'g:' + fam) },
         icon('chevron', 'chev'), badge(fam, 'sm'), h('span', { class: 'group-title' }, info.title),
         h('span', { class: 'group-count' }, list.length === total ? String(total) : list.length + ' / ' + total)),
@@ -1496,7 +1518,7 @@ const MAIN = String.raw`
     const body = collapsed ? null : cards
       ? h('div', { class: 'grid', id: bodyId, 'data-key': 'cards', 'data-patch': '' }, list.map((a) => card(a, now, cols)))
       : h('div', { class: 'rows', id: bodyId, role: 'list', 'data-key': 'rows', 'data-patch': '' }, loginClusters(list).map((x) => Array.isArray(x) ? loginGroup(x, now, cols) : row(x, now, cols)))
-    return h('section', { class: 'group' + (cards ? ' group-cards' : ' group-list') + (collapsed ? ' is-collapsed' : ''), 'aria-label': info.title, 'data-key': 'g:' + fam, 'data-patch': '' },
+    return h('section', { class: 'group' + (cards ? ' group-cards' : ' group-list') + (collapsed ? ' is-collapsed' : ''), 'aria-label': info.title, 'data-key': 'g:' + fam, 'data-fam': fam, 'data-patch': '' },
       head, collapsed || cards ? null : colHead(cols, list), body)
   }
   function emptyState() {
@@ -1532,6 +1554,159 @@ const MAIN = String.raw`
       h('p', null, S.loadError.message),
       h('button', { class: 'btn', type: 'button', onclick: () => load({ check: !S.report }) }, icon('refresh'), t('btn.retry')))
   }
+  // ---------- Display Order (spec §3.25) ----------
+  function displayOf() { return (S.state && S.state.display) || {} }
+  // Every Family id in the Display Order, the ones only accounts name (a plugin that failed) last.
+  function familyOrder() {
+    const ids = S.state.families.map((f) => f.id)
+    for (const a of S.state.accounts) if (!ids.includes(a.family)) ids.push(a.family)
+    return inDisplayOrder(ids, (x) => x, displayOf().families)
+  }
+  function accountOrder(fam) { return (displayOf().accounts || {})[fam] }
+  // Every account name of a Family, hidden ones too, in the Display Order.
+  function allNames(fam) {
+    return sortAccounts(S.state.accounts.filter((a) => a.family === fam), 'manual', Date.now(), accountOrder(fam)).map((a) => a.name)
+  }
+  function ordered() { const d = displayOf(); return Boolean((d.families && d.families.length) || (d.accounts && Object.keys(d.accounts).length)) }
+  // A grip to drag a Family group or an account (a Same Login group moves as one) into a new place, or to move it
+  // with the arrow keys. Not in the card view, nor on a read-only Panel.
+  function dragHandle(kind, fam, key, name) {
+    if (BOOT.readOnly || prefs.view === 'cards') return null
+    const label = t(kind === 'family' ? 'order.moveFamily' : 'order.moveAccount', { name })
+    return h('button', { class: 'icon-btn drag-handle', type: 'button', draggable: 'true', 'data-move': kind, 'data-fam': fam, 'data-name': key, 'aria-label': label, title: t('order.handle'),
+      onclick: (e) => e.stopPropagation(),
+      onkeydown: (e) => {
+        const keys = { ArrowUp: -1, ArrowDown: 1, Home: -Infinity, End: Infinity }
+        if (!Object.hasOwn(keys, e.key)) return
+        e.preventDefault()
+        e.stopPropagation()
+        const units = unitsOf(kind, fam)
+        const from = units.findIndex((u) => u.includes(key))
+        const step = keys[e.key]
+        const to = Math.max(0, Math.min(units.length - 1, Number.isFinite(step) ? from + step : step < 0 ? 0 : units.length - 1))
+        moveUnit(kind, fam, from, to, { focus: key, label: name })
+      },
+      ondragstart: (e) => {
+        const units = unitsOf(kind, fam)
+        ui.drag = { kind, fam, from: units.findIndex((u) => u.includes(key)), to: null }
+        e.dataTransfer.effectAllowed = 'move'
+        try { e.dataTransfer.setData('text/plain', name) } catch {}
+        const el = unitElement(kind, fam, key)
+        if (el) { e.dataTransfer.setDragImage(el, 16, 16); requestAnimationFrame(() => el.classList.add('is-dragging')) }
+      },
+      ondragend: () => endDrag(),
+    }, icon('grip'))
+  }
+  function unitsOf(kind, fam) { return kind === 'family' ? ui.order.families.map((f) => [f]) : (ui.order.units[fam] || []) }
+  // The element that moves: a Family's group, an account's row, or the Same Login group the row is in.
+  function unitElement(kind, fam, key) {
+    if (kind === 'family') return document.querySelector('#accounts > section[data-fam="' + CSS.escape(fam) + '"]')
+    const rowEl = document.querySelector('#accounts .row[data-ref="' + CSS.escape(fam + ':' + key) + '"]')
+    return rowEl && (rowEl.closest('.login') || rowEl)
+  }
+  // Where a drop at the pointer lands: the list of places it can go and the index among them, or null outside.
+  function dropTarget(e) {
+    const d = ui.drag
+    if (!d) return null
+    if (d.kind === 'family') {
+      const els = Array.from(document.querySelectorAll('#accounts > section[data-fam]'))
+      return els.length ? { els, at: slotAt(els, e.clientY) } : null
+    }
+    const sec = e.target.closest && e.target.closest('#accounts > section[data-fam]')
+    if (!sec || sec.getAttribute('data-fam') !== d.fam) return null
+    const box = sec.querySelector('.rows')
+    if (!box) return null
+    const els = Array.from(box.children)
+    return { els, at: slotAt(els, e.clientY) }
+  }
+  function slotAt(els, y) {
+    for (let i = 0; i < els.length; i++) {
+      const r = els[i].getBoundingClientRect()
+      if (y < r.top + r.height / 2) return i
+    }
+    return els.length
+  }
+  function clearDropMarks() { for (const el of document.querySelectorAll('.drop-before, .drop-after')) el.classList.remove('drop-before', 'drop-after') }
+  function endDrag() {
+    clearDropMarks()
+    for (const el of document.querySelectorAll('.is-dragging')) el.classList.remove('is-dragging')
+    ui.drag = null
+    if (S.pending) { S.pending = false; renderAll() }
+  }
+  function onDragOver(e) {
+    const tgt = dropTarget(e)
+    if (!tgt) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    clearDropMarks()
+    if (tgt.at < tgt.els.length) tgt.els[tgt.at].classList.add('drop-before')
+    else tgt.els[tgt.els.length - 1].classList.add('drop-after')
+    // Dropped after itself means one place earlier once it is taken out.
+    ui.drag.to = tgt.at > ui.drag.from ? tgt.at - 1 : tgt.at
+  }
+  function onDrop(e) {
+    const d = ui.drag
+    if (!d || !dropTarget(e)) return
+    e.preventDefault()
+    const to = d.to
+    endDrag()
+    if (to !== null && to !== d.from) moveUnit(d.kind, d.fam, d.from, to)
+  }
+  // Records the new Display Order: shown at once, written to the config, and put back if the write fails.
+  async function moveUnit(kind, fam, from, to, opts) {
+    opts = opts || {}
+    const units = unitsOf(kind, fam)
+    if (from < 0 || to < 0 || from >= units.length || to >= units.length) return
+    if (from === to) { if (opts.label) say(t('order.position', { name: opts.label, n: from + 1, total: units.length })); return }
+    const before = displayOf()
+    const next = { families: before.families ? before.families.slice() : [], accounts: Object.assign({}, before.accounts || {}) }
+    if (kind === 'family') next.families = reorder(familyOrder(), units, from, to)
+    else next.accounts[fam] = reorder(allNames(fam), units, from, to)
+    S.state.display = next
+    // Moving an account says "my order" from now on; Families follow it in every sort.
+    if (kind === 'account' && prefs.sort !== 'manual') { prefs.sort = 'manual'; savePrefs(); if (tb.sort) tb.sort.value = 'manual' }
+    renderAccounts()
+    if (opts.focus) {
+      const btn = document.querySelector('#accounts .drag-handle[data-move="' + kind + '"][data-fam="' + CSS.escape(fam) + '"][data-name="' + CSS.escape(opts.focus) + '"]')
+      if (btn) btn.focus({ preventScroll: false })
+      say(t('order.position', { name: opts.label, n: to + 1, total: units.length }))
+    }
+    try {
+      const r = await api('/api/display-order', { display: next })
+      S.state.display = r.display
+    } catch (e) {
+      S.state.display = before
+      renderAccounts()
+      toast(t('order.failed', { msg: e.message }), { kind: 'fail' })
+    }
+  }
+  async function resetOrder() {
+    const before = displayOf()
+    S.state.display = {}
+    if (prefs.sort === 'manual') { prefs.sort = 'pressure'; savePrefs(); if (tb.sort) tb.sort.value = 'pressure' }
+    renderAccounts()
+    try {
+      const r = await api('/api/display-order', { display: null })
+      S.state.display = r.display
+      toast(t('order.reset'))
+    } catch (e) {
+      S.state.display = before
+      renderAccounts()
+      toast(t('order.failed', { msg: e.message }), { kind: 'fail' })
+    }
+  }
+  // The toolbar's "Default order" button, shown once the user has put things in an order of their own.
+  function renderOrderReset() {
+    if (!tb.reset) return
+    tb.reset.hidden = BOOT.readOnly || !ordered()
+  }
+  // Words for screen readers only, such as the new place of something moved with the keyboard.
+  let live = null
+  function say(text) {
+    if (!live) { live = h('div', { class: 'sr-only', 'aria-live': 'polite' }); document.body.append(live) }
+    live.textContent = ''
+    setTimeout(() => { live.textContent = text }, 30)
+  }
   function renderAccounts() {
     closeMenu()
     const box = $('accounts')
@@ -1552,18 +1727,25 @@ const MAIN = String.raw`
       : tn('count.accounts', all.length))
     const apps = appGroups()
     if (!shown.length && !apps.length) { patch(box, noMatch()); return }
-    const cols = quotaColumns(shown)
-    box.style.setProperty('--qn', String(cols.length))
     ui.loginRefs = new Map()
     if (prefs.view !== 'cards')
       for (const x of loginClusters(shown)) if (Array.isArray(x)) for (const a of x) ui.loginRefs.set(a.ref, x[0].ref)
-    const ids = S.state.families.map((f) => f.id)
-    for (const a of all) if (!ids.includes(a.family)) ids.push(a.family)
+    // Families in the Display Order (spec §3.25) whatever the sort; each group gets the quota columns it uses.
+    // Every group is as wide as the one with the most windows, so the columns after them line up.
+    ui.order = { families: [], units: {} }
     const groups = []
-    for (const fam of ids) {
+    let width = 1
+    for (const fam of familyOrder()) {
       const list = shown.filter((a) => a.family === fam)
-      if (list.length) groups.push(group(fam, sortAccounts(list, prefs.sort, now), all.filter((a) => a.family === fam).length, now, cols))
+      if (!list.length) continue
+      ui.order.families.push(fam)
+      const sorted = sortAccounts(list, prefs.sort, now, accountOrder(fam))
+      const cols = quotaColumns(sorted)
+      width = Math.max(width, cols.length)
+      groups.push(group(fam, sorted, all.filter((a) => a.family === fam).length, now, cols))
     }
+    box.style.setProperty('--qn', String(width))
+    renderOrderReset()
     patch(box, groups.concat(apps))
     if (ui.fade && !REDUCED) {
       box.classList.add('view-in')
@@ -2838,6 +3020,29 @@ const MAIN = String.raw`
     const api = S.state.accounts.filter((a) => a.kind === 'api').map((a) => a.ref)
     return remoteControlSummary(S.state.remoteControl || [], api)
   }
+  // The refresh button reads everything again; Families that ask their Host for Quota (Grok, spec §3.26) are asked
+  // again first, so the numbers are new and not the kept ones.
+  function asking() { return !BOOT.readOnly && S.state && (S.state.quotaChecks || []).some((c) => c.on && !c.blocked) }
+  async function refreshAll() {
+    if (asking()) {
+      const btn = $('refresh')
+      btn.disabled = true
+      btn.classList.add('is-spinning')
+      try { await api('/api/quota/refresh', {}) } catch (e) { toast(t('quota.refreshFailed', { msg: e.message }), { kind: 'fail' }) }
+      btn.classList.remove('is-spinning')
+      btn.disabled = false
+    }
+    load({ check: true, announce: true })
+  }
+  function checkOf(fam) { return S.state && (S.state.quotaChecks || []).find((c) => c.family === fam) }
+  async function setCheck(fam, on) {
+    try {
+      await api('/api/quota/check', { family: fam, on })
+      toast(t(on ? 'quota.checkOnToast' : 'quota.checkOffToast', { host: famTitleOf(fam) }))
+    } catch (e) { toast(t('quota.checkFailed', { msg: e.message }), { kind: 'fail' }) }
+    load({ silent: true })
+  }
+  function famTitleOf(fam) { const f = S.state && S.state.families.find((x) => x.id === fam); return f ? f.title : fam }
   // ---------- settings ----------
   // One header button holds what is set once and rarely changed: language, theme, Remote Control and Auto Handoff.
   // A dot on it says Remote Control starts by itself, so that state stays visible after its banner is gone.
@@ -2847,6 +3052,7 @@ const MAIN = String.raw`
     if (BOOT.colorScheme === 'auto') out.push('theme')
     if (S.state && rcSummary()) out.push('rc')
     if (S.state && ahState()) out.push('ah')
+    if (S.state && (S.state.quotaChecks || []).length) out.push('checks')
     return out
   }
   function renderSettingsButton() {
@@ -2877,6 +3083,18 @@ const MAIN = String.raw`
     if (secs.includes('ah')) {
       const on = ahState().settings.auto
       out.push(link(t('ah.button'), on ? t('ah.on') : t('ah.off'), on ? 'chip-ok' : '', () => setPage('handoff')))
+    }
+    // Quota checks that ask the Host (spec §3.26): one switch per Family, with what it does in plain words.
+    if (secs.includes('checks')) {
+      if (out.length) out.push(h('div', { class: 'menu-sep', role: 'separator' }))
+      for (const c of S.state.quotaChecks) {
+        const label = t('set.quotaCheck', { host: c.title })
+        out.push(h('div', { class: 'set-row set-check' },
+          h('div', { class: 'set-text' }, h('span', { class: 'set-label' }, label), h('span', { class: 'set-hint' }, c.blocked ? c.blocked : t('set.quotaCheckHint', { host: c.title, n: c.everyMinutes }))),
+          BOOT.readOnly ? h('span', { class: 'chip chip-sm' + (c.on ? ' chip-ok' : '') }, c.on ? t('ah.on') : t('ah.off'))
+            : h('div', { class: 'seg', role: 'group', 'aria-label': label }, [[true, t('ah.on')], [false, t('ah.off')]].map(([v, text]) =>
+              h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === c.on), onclick: () => { if (v !== c.on) { closeMenu(); setCheck(c.family, v) } } }, text)))))
+      }
     }
     return out
   }
@@ -3263,7 +3481,9 @@ const MAIN = String.raw`
   $('ver').addEventListener('click', () => openVerPop($('ver')))
   $('update').addEventListener('click', openUpdate)
   $('ver-top').addEventListener('click', () => openVerPop($('ver-top')))
-  $('refresh').addEventListener('click', () => load({ check: true, announce: true }))
+  $('refresh').addEventListener('click', refreshAll)
+  $('accounts').addEventListener('dragover', onDragOver)
+  $('accounts').addEventListener('drop', onDrop)
   $('settings').addEventListener('click', () => openPopover($('settings'), 'settings', t('set.button'), settingsPop, 'end'))
   applyTheme()
   renderStatic()

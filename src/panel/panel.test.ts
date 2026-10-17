@@ -1773,3 +1773,72 @@ describe('Browser Sign-ins in the Panel (spec §3.24)', () => {
     })
   })
 })
+
+describe('display order and quota checks (spec §3.25, §3.26)', () => {
+  it('writes and removes `display`, refuses a bad body and a read-only Panel, and switches Grok checks', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.grok/auth.json', '{}', 0o600)
+      await h.write('.grok/config.toml', '')
+      const { grokPlugin } = await import('../families/grok/index.ts')
+      const runtime = () => createRuntime({ env: h.env, builtins: [asBuiltin(grokPlugin)] })
+      const config = h.path('.config/sideby/config.json')
+      const ro = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`], readOnly: true }),
+      )
+      try {
+        const hdr = {
+          host: `127.0.0.1:${ro.port}`,
+          origin: `http://127.0.0.1:${ro.port}`,
+          'x-sideby-token': ro.handler.token,
+        }
+        assert.equal((await post(ro.port, '/api/display-order', { display: null }, hdr)).status, 403)
+        assert.equal((await post(ro.port, '/api/quota/refresh', {}, hdr)).status, 403)
+        assert.equal(
+          (await post(ro.port, '/api/quota/check', { family: 'grok', on: false }, hdr)).status,
+          403,
+        )
+      } finally {
+        await close(ro.server)
+      }
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      try {
+        const hdr = {
+          host: `127.0.0.1:${port}`,
+          origin: `http://127.0.0.1:${port}`,
+          'x-sideby-token': handler.token,
+        }
+        const state = JSON.parse(
+          (await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text,
+        )
+        assert.deepEqual(state.display, {})
+        assert.deepEqual(
+          state.quotaChecks.map((c: { family: string; on: boolean }) => [c.family, c.on]),
+          [['grok', true]],
+        )
+        const set = await post(
+          port,
+          '/api/display-order',
+          { display: { families: ['grok'], accounts: { grok: ['main'] } } },
+          hdr,
+        )
+        assert.equal(set.status, 200)
+        assert.deepEqual(JSON.parse(await readFile(config, 'utf8')).display, {
+          families: ['grok'],
+          accounts: { grok: ['main'] },
+        })
+        for (const bad of [{ display: { families: 'grok' } }, { display: { rows: [] } }, { display: [] }, {}])
+          assert.equal((await post(port, '/api/display-order', bad, hdr)).status, 400, JSON.stringify(bad))
+        assert.equal((await post(port, '/api/display-order', { display: null }, hdr)).status, 200)
+        assert.equal(JSON.parse(await readFile(config, 'utf8')).display, undefined)
+        const off = await post(port, '/api/quota/check', { family: 'grok', on: false }, hdr)
+        assert.deepEqual([off.status, off.body.changed], [200, true])
+        assert.deepEqual(JSON.parse(await readFile(config, 'utf8')).quota, { check: { grok: false } })
+        assert.equal((await post(port, '/api/quota/check', { family: 'nope', on: false }, hdr)).status, 400)
+      } finally {
+        await close(server)
+      }
+    })
+  })
+})

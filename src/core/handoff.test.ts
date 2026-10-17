@@ -40,8 +40,19 @@ describe('quotaPressure', () => {
     assert.equal(quotaPressure({ status: 'ok', observedAt: at(-1), source: 'test', windows: [] }, NOW), null)
   })
 
+  it('leaves out a window that covers only some models (spec §3.26)', () => {
+    const named = quota([20, 2], [90, 50])
+    if (named.status === 'ok') named.windows[1]!.name = 'Other models'
+    assert.equal(quotaPressure(named, NOW), 20)
+    if (named.status === 'ok') named.windows[0]!.name = 'Cursor models'
+    assert.equal(quotaPressure(named, NOW), null, 'only named windows: no pressure to tell')
+  })
+
   it('matches the Panel copy for every case', () => {
+    const named = quota([20, 2], [90, 50])
+    if (named.status === 'ok') named.windows[1]!.name = 'Other models'
     const cases = [
+      named,
       quota([20, 2], [70, 50]),
       quota([95, -1], [30, 50]),
       quota([95, -1]),

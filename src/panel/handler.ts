@@ -15,7 +15,13 @@ import {
   openInBrowser,
   setBrowserSignIns,
 } from '../core/browser-profiles.ts'
-import { aliasArgs, aliasRefs, editConfigUpdate, type HandoffSettings } from '../core/config.ts'
+import {
+  aliasArgs,
+  aliasRefs,
+  type DisplayConfig,
+  editConfigUpdate,
+  type HandoffSettings,
+} from '../core/config.ts'
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import { UserError } from '../core/errors.ts'
 import { planHandoff } from '../core/handoff.ts'
@@ -31,7 +37,7 @@ import type { TuneApplyPlan } from '../core/tuning-apply.ts'
 import * as update from '../core/update.ts'
 import { buildId, localBuild, packageVersion } from '../core/version.ts'
 import { HOOK_FAMILIES } from '../handoff/hook.ts'
-import type { AccountStatus, DoctorHistory, FamilyInfo, Runtime } from '../runtime.ts'
+import type { AccountStatus, DoctorHistory, FamilyInfo, QuotaCheckInfo, Runtime } from '../runtime.ts'
 import type { Account, FamilyLogo, QuotaResult, QuotaSetupPlan, UsageResult } from '../types.ts'
 import { renderPage } from './page.ts'
 import { type PanelTheme, resolveTheme } from './theme.ts'
@@ -172,6 +178,10 @@ export interface PanelState {
    * Absent without Claude, Codex or Grok subscription Accounts. Nothing of the browser is read while `enabled` is false.
    */
   browser?: BrowserReport
+  /** Display Order (spec §3.25): config `display` as it is, an empty object when the user never dragged. */
+  display: DisplayConfig
+  /** Families that ask for Quota in a way that costs a request (spec §3.26), with their switch; absent when none. */
+  quotaChecks?: QuotaCheckInfo[]
 }
 
 // One Update Check at a time per process, started by a state read when one is due (the cache also keeps a failed
@@ -222,7 +232,7 @@ export function handoffByFamily(
     // Count logins, not directories: a Same Login group (spec §3.21) is one Quota, so it alone is no alternative.
     const subs = list.filter((a) => a.kind === 'subscription')
     const logins = subs.filter((a, i) => !subs.slice(0, i).some((b) => a.sameLogin?.includes(b.ref))).length
-    if (!f.readQuota || logins < 2) continue
+    if ((!f.readQuota && !f.fetchQuota) || logins < 2) continue
     const plan = planHandoff(
       id,
       list.map((a) => ({
@@ -337,7 +347,8 @@ async function accountState(rt: Runtime, account: Account, families: FamilyInfo[
   }
   const [status, quota, usage] = await Promise.all([
     guard(rt.status(account)),
-    guard(rt.quota(account)),
+    // The kept answer of a Quota check shows now; a stale one is asked again behind it (spec §3.26).
+    guard(rt.quota(account, { fetch: 'background' })),
     guard(rt.usage(account)),
   ])
   const fam = families.find((f) => f.id === account.family)
@@ -447,7 +458,34 @@ async function buildState(
     },
     ...(upd ? { update: upd } : {}),
     ...(showBrowser ? { browser } : {}),
+    display: rt.displayOrder(),
+    ...(rt.quotaChecks().length ? { quotaChecks: rt.quotaChecks() } : {}),
   }
+}
+
+/** The `display` of a /api/display-order body: null, or string lists only; anything else is refused. */
+function displayBody(body: Record<string, unknown>): DisplayConfig | undefined {
+  const d = body.display
+  if (d === null) return undefined
+  const names = (v: unknown, what: string): string[] => {
+    if (!Array.isArray(v) || !v.every((x) => typeof x === 'string' && x))
+      throw new HttpError(400, `${what} must be a list of names`)
+    return [...v]
+  }
+  if (!d || typeof d !== 'object' || Array.isArray(d))
+    throw new HttpError(400, '"display" must be an object or null')
+  const out: DisplayConfig = {}
+  for (const [k, v] of Object.entries(d)) {
+    if (k === 'families') out.families = names(v, '"families"')
+    else if (k === 'accounts') {
+      if (!v || typeof v !== 'object' || Array.isArray(v))
+        throw new HttpError(400, '"accounts" must be an object')
+      out.accounts = Object.fromEntries(
+        Object.entries(v).map(([f, list]) => [f, names(list, `"accounts.${f}"`)]),
+      )
+    } else throw new HttpError(400, `unknown key "${k}"`)
+  }
+  return out
 }
 
 /** The `change` of a /api/handoff/configure body, with every field checked; unknown fields are refused. */
@@ -806,6 +844,32 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           applied: optBool(body, 'confirm') && r.changed,
           file: tildify(rt.paths.configFile, rt.paths.home),
         }
+      },
+    },
+    // Display Order (spec §3.25): replaces config `display`, or removes it for null. The drag itself is the preview.
+    '/api/display-order': {
+      async run(body) {
+        const display = displayBody(body)
+        const rt = await getRuntime()
+        return { display: await rt.setDisplayOrder(display) }
+      },
+    },
+    // Asks every Family that fetches Quota again now, and waits (spec §3.26); the page reloads its state after.
+    '/api/quota/refresh': {
+      async run() {
+        const rt = await getRuntime()
+        await rt.refreshQuota()
+        return { ok: true }
+      },
+    },
+    // A Family's Quota check on or off: config `quota.check.<family>` (spec §3.26).
+    '/api/quota/check': {
+      async run(body) {
+        const family = optString(body, 'family')
+        if (!family) throw new HttpError(400, '"family" is required')
+        if (typeof body.on !== 'boolean') throw new HttpError(400, '"on" must be true or false')
+        const rt = await getRuntime()
+        return { family, ...(await rt.setQuotaCheck(family, body.on)) }
       },
     },
     // Undo for the quota setup above; the Runtime turns a teardown that throws into `{ ok: false, message }`.

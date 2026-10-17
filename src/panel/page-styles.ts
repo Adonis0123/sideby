@@ -187,6 +187,20 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .login-rows > .row:last-child { border-radius: 0 0 var(--radius) var(--radius); }
 .q-shared { gap: 6px; color: var(--faint); }
 .q-shared .ic { width: 13px; height: 13px; }
+/* Display Order (spec §3.25): a grip at the start of a group head or row, shown on hover or focus, always on touch
+   screens. A row's grip sits in its left padding, so the row's layout is the same with or without it. */
+.row { position: relative; }
+.drag-handle { width: 16px; height: 28px; color: var(--faint); cursor: grab; opacity: 0; transition: opacity .12s; }
+.drag-handle .ic { width: 14px; height: 14px; }
+.drag-handle:active { cursor: grabbing; }
+.row > .ident > .drag-handle { position: absolute; left: 0; top: 13px; }
+.group-head > .drag-handle { margin-right: -8px; }
+.group-head:hover > .drag-handle, .row:hover > .ident > .drag-handle, .drag-handle:focus-visible { opacity: 1; }
+@media (hover: none) { .drag-handle { opacity: 1; } }
+.is-dragging { opacity: .45; }
+.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.tb-reset[hidden] { display: none; }
 /* The arrow at a row's start opens and closes its details; so does a click anywhere else in the row. */
 .row-toggle { width: 28px; height: 28px; margin: -4px -6px -4px -8px; }
 .fold-hit { cursor: pointer; }
@@ -546,6 +560,9 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .set-label { color: var(--muted); font-size: 13px; white-space: nowrap; }
 .set-row .seg { height: var(--ctl-h-sm); }
+.set-check { align-items: flex-start; }
+.set-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.set-hint { color: var(--faint); font-size: 12px; max-width: 260px; }
 .set-link { margin: 0 -8px; width: calc(100% + 16px); }
 .set-link .chip { margin-left: auto; }
 .set-dot { background: var(--warn-bar); }

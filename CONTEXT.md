@@ -46,9 +46,9 @@ Avoid: *profile* on its own (Codex already uses it for a config layer that does 
 
 ## Limits
 
-- **Quota**: a limit the Host's vendor sets on a Subscription Account for a time window (for example 5 hours or 7 days), with the time it resets.
+- **Quota**: a limit the Host's vendor sets on a Subscription Account for a time window (for example 5 hours or 7 days), with the time it resets. Some limits cover only one group of models (Cursor's *other models*) and are named after it; the Account can still work with the other models when one is used up.
 - **Usage**: what an Account has consumed (tokens, estimated cost), counted from the Host's own local records.
-- **Quota Pressure**: how full an Account's fullest Quota window is, ignoring windows whose reset time has passed. Unknown when the Account has no Quota yet.
+- **Quota Pressure**: how full an Account's fullest Quota window is, ignoring windows whose reset time has passed and limits that cover only one group of models. Unknown when the Account has no Quota yet.
 - **Handoff**: moving on to another Account when one Account's Quota runs low. The next Account starts a new session; the old session stays in the old Account. Started by a person (`sideby next`) or by sideby itself (Auto Handoff).
 - **Handoff Order**: which Accounts a Handoff may move on to, and in what order: either the Family's Accounts by lowest Quota Pressure, or a list the user writes, which may name Accounts of other Families.
 - **Handoff Brief**: the note the next Account starts from: what the task is, what is done, what is left. Written by the old session while it still has Quota, or put together by sideby from the old session's local records when it could not.
@@ -76,4 +76,5 @@ Avoid: *upgrade* (say Update), *self-update* in user-facing text.
 - **Family Plugin**: a Plugin that describes one Family.
 - **Hook**: a function a Plugin runs at a lifecycle event: before a Launch, after an Account is created, or during Doctor.
 - **Panel**: the local web page that shows every Account, its health, Quota and Usage.
+- **Display Order** (the Panel says *my order*): the order the user gives the Families, and the Accounts within each Family, for showing them in the Panel and `sideby list`. Families always appear in it; the Panel's other sorts (by Quota, name, recent use) reorder only the Accounts and leave it as it is. A new Family or Account goes last. It never changes which Account a Handoff picks; that is the Handoff Order.
 - **Portal**: another local server that shows the Panel next to other tools' pages, for example under its own `*.localhost` host with a shared top bar. It mounts `createPanelHandler` under a path of its own origin and shows that path in an iframe on a page of the same host and port. It configures the Panel only through the handler's options and never injects markup into it (ADR-0006).

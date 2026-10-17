@@ -1,5 +1,5 @@
-// How Grok Build takes part in a Handoff (spec §3.17). It has no public Quota, so it starts one only after a turn
-// failed at the limit. Interactive `grok` has no launch option for hooks: `sideby handoff setup grok` adds
+// How Grok Build takes part in a Handoff (spec §3.17). Since its Quota comes from its own CLI (spec §3.26), it starts
+// one at the Handoff Threshold, and still after a turn failed at the limit. Interactive `grok` has no launch option for hooks: `sideby handoff setup grok` adds
 // `hooks/sideby-handoff.json` to the Main Account and Doctor copies it to the others (verified 2026-10-09).
 // The hook inherits Grok's sandbox, so the profile decides whether a run may start or receive.
 import { mkdir, readFile, rm, rmdir } from 'node:fs/promises'
@@ -171,10 +171,27 @@ export function grokEligibility(
 
 const hookCommand = (event: string) => `sideby handoff-hook grok ${event}`
 
-/** The whole file setup writes; teardown removes it only while it is still exactly this. */
+/**
+ * The file sideby 0.13 and earlier wrote: no `PostToolUse`, since Grok had no Quota to prepare a Handoff from then.
+ * Setup replaces it, teardown removes it (spec §3.26).
+ */
+export const GROK_HOOK_FILE_V1 = `${JSON.stringify(
+  {
+    hooks: {
+      Stop: [{ hooks: [{ type: 'command', command: hookCommand('Stop') }] }],
+      StopFailure: [{ hooks: [{ type: 'command', command: hookCommand('StopFailure'), timeout: 60 }] }],
+    },
+  },
+  null,
+  2,
+)}\n`
+
+/** The whole file setup writes; teardown removes it only while it is still exactly this (or `GROK_HOOK_FILE_V1`). */
 export function grokHookFileText(): string {
   const hooks = {
     hooks: {
+      // Quota Pressure after each tool call, to prepare and start a Handoff before the limit (spec §3.26).
+      PostToolUse: [{ hooks: [{ type: 'command', command: hookCommand('PostToolUse') }] }],
       Stop: [{ hooks: [{ type: 'command', command: hookCommand('Stop') }] }],
       // Observation hooks get 5 seconds by default; putting a Brief together may take longer.
       StopFailure: [{ hooks: [{ type: 'command', command: hookCommand('StopFailure'), timeout: 60 }] }],
@@ -191,7 +208,8 @@ async function plan(ctx: ReadContext): Promise<QuotaSetupPlan> {
   const want = grokHookFileText()
   const have = await textOrNull(file)
   if (have === want) return { status: 'enabled', file, diff: '', message: `already set up in ${shown}` }
-  if (have !== null)
+  const upgrade = have === GROK_HOOK_FILE_V1
+  if (have !== null && !upgrade)
     return {
       status: 'blocked',
       file,
@@ -200,21 +218,25 @@ async function plan(ctx: ReadContext): Promise<QuotaSetupPlan> {
     }
   const problem = await sidebyBinProblem(ctx.env, 'Grok runs `sideby handoff-hook` when a turn ends')
   if (problem) return { status: 'blocked', file, diff: '', message: problem }
+  const lines = (text: string, mark: string) =>
+    text
+      .trimEnd()
+      .split('\n')
+      .map((l) => `${mark}${l}`)
+      .join('\n')
   return {
     status: 'ready',
     file,
-    diff: `--- /dev/null\n+++ ${shown}\n${want
-      .trimEnd()
-      .split('\n')
-      .map((l) => `+${l}`)
-      .join('\n')}\n`,
-    message: `adds ${shown} so Grok tells sideby when a turn hits the usage limit; then run \`sideby doctor grok --fix\` to copy it to every Grok account; undo with \`sideby handoff teardown grok\``,
+    diff: upgrade
+      ? `--- ${shown}\n+++ ${shown}\n${lines(have!, '-')}\n${lines(want, '+')}\n`
+      : `--- /dev/null\n+++ ${shown}\n${lines(want, '+')}\n`,
+    message: `${upgrade ? 'updates' : 'adds'} ${shown} so Grok tells sideby how full its quota is after each tool call and when a turn hits the usage limit; then run \`sideby doctor grok --fix\` to copy it to every Grok account; undo with \`sideby handoff teardown grok\``,
   }
 }
 
 export const grokHookSetup: QuotaSetup = {
   summary:
-    'Adds one sideby hook file to ~/.grok/hooks so a Grok session that hits its usage limit can hand over.',
+    'Adds one sideby hook file to ~/.grok/hooks so a Grok session can hand over when its quota runs low or hits the limit.',
   plan,
   async apply(ctx) {
     const p = await plan(ctx)
@@ -223,12 +245,13 @@ export const grokHookSetup: QuotaSetup = {
     await writeFileAtomic(p.file, grokHookFileText(), 0o644)
     return { ...p, status: 'enabled' }
   },
+  earlierTexts: [GROK_HOOK_FILE_V1],
   async teardown(ctx) {
     const file = hookFile(ctx)
     const shown = tildify(file, ctx.home)
     const have = await textOrNull(file)
     if (have === null) return { ok: true, message: `${shown} is not there; nothing to undo` }
-    if (sha256(have) !== sha256(grokHookFileText()))
+    if (sha256(have) !== sha256(grokHookFileText()) && have !== GROK_HOOK_FILE_V1)
       return {
         ok: false,
         message: `${shown} changed since setup; delete it yourself if you no longer want it`,
@@ -244,7 +267,7 @@ export const grokHookSetup: QuotaSetup = {
 }
 
 export const grokHandoff: FamilyHandoff = {
-  starts: ['limit'],
+  starts: ['quota', 'limit'],
   promptArgs: promptAfterDashes,
   continueArgs: (args) => carryArgs(args, GROK_ARGS),
   resumeArgs: (id) => ['--resume', id],

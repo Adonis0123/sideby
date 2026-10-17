@@ -50,11 +50,13 @@ export function clock(iso: string, now: Date): string {
 }
 
 function windowText(w: QuotaWindow, now: Date): string {
-  if (Date.parse(w.resetsAt) <= now.getTime()) return `${w.label} reset`
+  // A window that covers only some models goes by their name (spec §3.26).
+  const label = w.name ?? w.label
+  if (Date.parse(w.resetsAt) <= now.getTime()) return `${label} reset`
   const pct = Math.round(w.usedPercent)
   const level = quotaLevel(pct)
   const color = level === 'fail' ? c.red : level === 'warn' ? c.yellow : c.green
-  return `${w.label} ${color(`${pct}%`)} ${c.dim(`→ ${clock(w.resetsAt, now)}`)}`
+  return `${label} ${color(`${pct}%`)} ${c.dim(`→ ${clock(w.resetsAt, now)}`)}`
 }
 
 export const QUOTA_REASON: Record<string, string> = {
@@ -63,11 +65,13 @@ export const QUOTA_REASON: Record<string, string> = {
   unrecognized: 'unrecognized format',
   'no-source': 'no public source',
   'api-account': 'API account',
+  'fetch-failed': 'could not get it',
 }
 
 export function quotaText(q: QuotaResult, now: Date): string {
   if (q.status === 'unavailable') return c.dim(QUOTA_REASON[q.reason] ?? q.reason)
-  return `${q.windows.map((w) => windowText(w, now)).join('  ')}  ${c.dim(ago(q.observedAt, now))}`
+  const failed = q.fetchError ? c.yellow(' (latest check failed)') : ''
+  return `${q.windows.map((w) => windowText(w, now)).join('  ')}  ${c.dim(ago(q.observedAt, now))}${failed}`
 }
 
 export function compactNumber(n: number): string {

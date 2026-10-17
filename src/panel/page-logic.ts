@@ -20,7 +20,7 @@ export interface LogicAccount {
   error?: string
   quota?: {
     status: string
-    windows?: { label: string; windowMinutes: number; usedPercent: number; resetsAt: string }[]
+    windows?: { label: string; name?: string; windowMinutes: number; usedPercent: number; resetsAt: string }[]
     observedAt?: string
     plan?: string
     /** The Account the reading came from, when it is another Account of the same login (spec §3.21). */
@@ -88,13 +88,15 @@ export function passedWindow(
 export function quotaPressure(a: LogicAccount, now: number): number {
   const q = a.quota
   if (q?.status !== 'ok' || !q.windows) return -1
+  // A named window covers only some models and never counts (spec §3.26).
+  const windows = q.windows.filter((w) => !w.name)
   let max = -1
-  for (const w of q.windows) {
+  for (const w of windows) {
     const reset = Date.parse(w.resetsAt)
     if (Number.isFinite(reset) && reset <= now) continue
     max = Math.max(max, Math.max(0, Math.min(100, Number(w.usedPercent) || 0)))
   }
-  return q.windows.length && max < 0 ? 0 : max
+  return windows.length && max < 0 ? 0 : max
 }
 
 /**
@@ -116,6 +118,7 @@ export function attentionReasons(
   const q = a.quota
   if (q && q.status === 'ok' && q.windows && !q.from)
     for (const w of q.windows) {
+      if (w.name) continue
       const reset = Date.parse(w.resetsAt)
       if (Number.isFinite(reset) && reset <= now) continue
       if ((Number(w.usedPercent) || 0) >= warn) {
@@ -143,6 +146,7 @@ export function attentionWhy(
   if (reason !== 'quota-high') return { key: `why.${reason}`, vars: {} }
   let top: { label: string; pct: number } | null = null
   for (const w of a.quota?.windows ?? []) {
+    if (w.name) continue
     const reset = Date.parse(w.resetsAt)
     if (Number.isFinite(reset) && reset <= now) continue
     const pct = Number(w.usedPercent) || 0
@@ -151,16 +155,66 @@ export function attentionWhy(
   return { key: 'why.quota-high', vars: { label: top?.label ?? '', pct: Math.round(top?.pct ?? 0), warn } }
 }
 
-/** Sorted copy: `pressure` (fullest Quota first), `name`, or `recent` (last activity first). The Main Account leads ties. */
-export function sortAccounts<T extends LogicAccount>(list: T[], mode: string, now: number): T[] {
+/**
+ * `items` in Display Order (spec §3.25): those whose key is in `order` first, in that order; the others after, in the
+ * order they came. Names no longer there are simply not met.
+ */
+export function inDisplayOrder<T>(
+  items: readonly T[],
+  key: (t: T) => string,
+  order?: readonly string[],
+): T[] {
+  const at = new Map((order ?? []).map((k, i) => [k, i]))
+  return items
+    .map((t, i) => ({ t, i, r: at.has(key(t)) ? (at.get(key(t)) as number) : (order?.length ?? 0) }))
+    .sort((x, y) => x.r - y.r || x.i - y.i)
+    .map((x) => x.t)
+}
+
+/**
+ * The Display Order after a drag (spec §3.25). `all` is every key of the list in the current Display Order, hidden
+ * ones included; `shown` is what the screen showed, in its order, as units (one key, or a Same Login group that moves
+ * as one). The unit at `from` moves to `to`; the shown keys then fill the places shown keys held in `all`, so keys a
+ * filter hides keep their place among themselves.
+ */
+export function reorder(
+  all: readonly string[],
+  shown: readonly (readonly string[])[],
+  from: number,
+  to: number,
+): string[] {
+  const units = shown.slice()
+  if (from < 0 || from >= units.length || to < 0 || to >= units.length) return all.slice()
+  const [unit] = units.splice(from, 1)
+  units.splice(to, 0, unit as readonly string[])
+  const next = units.flat()
+  const visible = new Set(next)
+  const out = all.slice()
+  for (const k of next) if (!out.includes(k)) out.push(k)
+  let i = 0
+  for (let at = 0; at < out.length; at++) if (visible.has(out[at] as string)) out[at] = next[i++] as string
+  return out
+}
+
+/**
+ * Sorted copy: `pressure` (fullest Quota first), `name`, `recent` (last activity first), or `manual` (the Family's
+ * Display Order `order`, names not in it after). The Main Account leads ties.
+ */
+export function sortAccounts<T extends LogicAccount>(
+  list: T[],
+  mode: string,
+  now: number,
+  order?: readonly string[],
+): T[] {
   const byName = (x: LogicAccount, y: LogicAccount) =>
     Number(Boolean(y.isMain)) - Number(Boolean(x.isMain)) ||
     x.name.localeCompare(y.name, undefined, { numeric: true })
   const pressure = (a: LogicAccount) => {
     const q = a.quota
     if (q?.status !== 'ok' || !q.windows) return -1
-    let max = q.windows.length ? 0 : -1
-    for (const w of q.windows) {
+    const windows = q.windows.filter((w) => !w.name)
+    let max = windows.length ? 0 : -1
+    for (const w of windows) {
       const reset = Date.parse(w.resetsAt)
       if (!(Number.isFinite(reset) && reset <= now)) max = Math.max(max, Number(w.usedPercent) || 0)
     }
@@ -172,6 +226,7 @@ export function sortAccounts<T extends LogicAccount>(list: T[], mode: string, no
   }
   const out = list.slice()
   if (mode === 'name') out.sort(byName)
+  else if (mode === 'manual') return inDisplayOrder(out.sort(byName), (a) => a.name, order)
   else if (mode === 'recent') out.sort((x, y) => last(y) - last(x) || byName(x, y))
   else out.sort((x, y) => pressure(y) - pressure(x) || byName(x, y))
   return out

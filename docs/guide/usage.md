@@ -111,10 +111,36 @@ Accounts that link `settings.json` to the Main Account (the default) get quota f
 Sometimes two accounts of Claude Code are signed in as the same claude.ai login, for example `~/.claude` and `~/.claude-001` with the same email and organization. Claude counts one quota for that login, but each directory only records the numbers its own sessions saw, so one could look half full and the other almost empty. sideby notices this by itself (it compares the email and organization it already shows) and:
 
 - shows the same, freshest quota on both, with where it was read: `sideby quota` says `read from claude:001 (same login)`, the panel says so when you hover the quota;
-- marks them: `claude:001 = main` in `sideby list`, in the panel they sit together under one line with the email and the quota, shown once; the quota warning shows once too;
+- marks them: `claude:001 = main` in `sideby list`; in the panel their rows sit together, tied by a line on the left, and the quota shows once, on the first row; the quota warning shows once too;
 - never hands over between them: `sideby next` run inside a session sideby started skips the other directory of that login, and Auto Handoff skips it too, also when your `order` lists it, and says why.
 
 Usage (tokens) still counts per directory. Nothing is moved or deleted; keep both or remove one yourself. Codex is not grouped yet: one email can belong to several ChatGPT workspaces, each with its own quota.
+
+## Grok quota
+
+Grok Build shows each subscription's weekly credit use in its own `/usage` screen. sideby asks the `grok` CLI for the same numbers, so it needs no setup:
+
+```sh
+sideby quota grok             # 7d used and reset time per Grok account
+sideby quota grok --refresh   # ask again now instead of using the last answer
+```
+
+- sideby starts `grok agent --no-leader stdio` with the account's `GROK_HOME` and asks it for the quota. Grok makes the request with its own login; sideby never reads `auth.json` and sends nothing itself. No session is started.
+- It asks at most every 15 minutes per account. The panel asks in the background while it is open, and its **Refresh** button asks again at once.
+- Between asks, sideby also reads the quota Grok writes to the account's `logs/unified.jsonl` at the start of each session and after each turn, and shows whichever is newer.
+- Turn it off in the panel's **Settings** (**Grok Build quota: Off**), or with `"quota": { "check": { "grok": false } }` in the config. It is off in CI.
+- A signed-out account, or one signed in with an API key, is not asked. When an ask fails (Grok too old to answer, network down), the panel says why and keeps the last numbers it had.
+
+With quota, `sideby next grok` ranks Grok accounts too, and Auto Handoff starts from Grok before the limit (see below).
+
+## Your own order
+
+In the panel, drag a tool's group by the grip (⋮⋮) left of its name, or an account by the grip at the start of its row, to put them in the order you like. The grip shows when you point at a row; on a touch screen it is always there. With the keyboard, tab to a grip and press `↑` / `↓` (`Home` / `End` for first and last).
+
+- Moving an account switches the sort to **My order**; the other sorts (by quota, name, last use) still work and keep your order for later. Tool groups stay in your order whatever the sort.
+- Two directories of one login move together.
+- A new account goes last in its group, a new tool last of all. **Default order** next to the sort menu forgets your order.
+- `sideby list` and `sideby quota` use the same order. It is stored in the config as `display`, and only changes what you see: `sideby next` and Auto Handoff still pick by quota.
 
 ## Model and effort
 
@@ -234,7 +260,7 @@ sideby next claude -- --model opus  # Host arguments go after --
 - Accounts without quota data yet come after the ones with known room. API accounts cost money per request, so they join only with `--include-api`.
 - When every account is full, nothing starts and sideby tells you which one comes back first. When no account has quota data yet, nothing starts either: the pick would only be a guess. Turn quota on (`sideby quota setup claude`) or choose with `sideby run`.
 - The new account starts a new session: each account keeps its own sessions. Ask the old session for a short handoff note and paste it in.
-- Claude and Codex only; Grok and pi publish no quota, so `next grok` lists the accounts for you to choose.
+- Claude, Codex and Grok; pi publishes no quota, so `next pi` lists the accounts for you to choose.
 - Two directories signed in as the same login share one quota (see [Two directories, one login](#two-directories-one-login)); run inside a session sideby started, `next` never picks the other one.
 
 sideby recommends; you start the account. It never switches or rotates by itself unless you turn on Auto Handoff below (see the FAQ). The panel marks the same pick as **Next** in each family.
@@ -265,7 +291,7 @@ The same settings live under `handoff` in the config file (see the [configuratio
 |---|---|---|
 | Claude Code | at 80% / 95%, or when a turn fails at the limit | `sideby quota setup claude` (the quota tap); sideby adds its hooks with `--settings` |
 | Codex | at 80% / 95% | trust sideby's hooks once per account: type `/hooks` in Codex; sideby says so the first time |
-| Grok Build | only when a turn fails at the usage limit (Grok has no public quota) | `sideby handoff setup grok --yes`, then `sideby doctor grok --fix`; the default sandbox (`off` or `devbox`); `workspace` and `read-only` can only take over; `strict` and custom profiles take no part. A sandbox set by macOS device management is invisible to sideby |
+| Grok Build | at the threshold, from the quota its CLI reports (see [Grok quota](#grok-quota)), and when a turn fails at the usage limit | `sideby handoff setup grok --yes`, then `sideby doctor grok --fix`; the default sandbox (`off` or `devbox`); `workspace` and `read-only` can only take over; `strict` and custom profiles take no part. A sandbox set by macOS device management is invisible to sideby |
 | pi | never; it can take over | — |
 
 A headless run (`claude -p`, `codex exec`, `grok -p`), Codex with `--remote`, or a session started without sideby never hands over. `sideby doctor` warns when Auto Handoff is on but the Claude quota tap or the Grok hook file is missing, or when `order` is empty or names an account sideby cannot find. Auto Handoff turns itself off for a run, and says so, when the `sideby` on your `PATH` is missing, comes from the npx cache, or is too old to have the hook.
@@ -278,10 +304,10 @@ Tested on 2026-10-05 with the versions below. sideby starts the official binary 
 |---|---|---|---|---|---|
 | Claude Code | `claude` | 2.1.289 | `claude auth login` | status line cache (after `quota setup claude`) | local session records |
 | Codex CLI | `codex` | 0.160.0 | `codex login` | local session files | local session files |
-| Grok Build | `grok` | 1.0.46 | `grok login` | no public source | no public source |
+| Grok Build | `grok` | 1.0.60 | `grok login` | asked from the `grok` CLI | no public source |
 | pi | `pi` | 1.0.2 | `/login` inside pi | no public source | no public source |
 
-sideby counts usage itself from Claude Code's `projects/**/*.jsonl` and Codex's `sessions/**/rollout-*.jsonl`; you do not need ccusage. Grok Build and pi have no quota or usage source. API accounts show usage but no quota. If a Host is not installed, `list` still shows its accounts and marks the Host as missing; `run` tells you where to install it.
+sideby counts usage itself from Claude Code's `projects/**/*.jsonl` and Codex's `sessions/**/rollout-*.jsonl`; you do not need ccusage. Grok Build's quota comes from its CLI; it has no usage source, and pi has neither. API accounts show usage but no quota. If a Host is not installed, `list` still shows its accounts and marks the Host as missing; `run` tells you where to install it.
 
 Host-specific notes:
 

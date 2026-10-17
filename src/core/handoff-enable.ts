@@ -66,8 +66,8 @@ async function throughLink(dir: string, rel: string): Promise<boolean> {
 
 /**
  * The other Accounts of the Family that lack the hook file `file` (a path in the Main Account) at the same place in
- * their own directory. Only that one file is ever written, and one that is already there is left as it is: an
- * Account's other files are never touched.
+ * their own directory, or hold an earlier version of it that an older sideby wrote (`earlierTexts`). Only that one
+ * file is ever written; one with other content is left as it is, and an Account's other files are never touched.
  */
 async function hookCopies(
   rt: Runtime,
@@ -75,6 +75,7 @@ async function hookCopies(
   file: string,
 ): Promise<{ ref: string; target: string }[]> {
   const accounts = (await rt.accounts()).filter((a) => a.family === family)
+  const earlier = rt.families.get(family)?.handoff?.hookSetup?.earlierTexts ?? []
   const main = accounts.find((a) => a.isMain)
   if (!main) return []
   const rel = relative(main.dir, file)
@@ -85,12 +86,15 @@ async function hookCopies(
     if (a.isMain || (await realpathOrNull(a.dir)) === mainReal || (await throughLink(a.dir, rel))) continue
     const target = join(a.dir, rel)
     // Whether the file is there, not whether it can be read: one that cannot be read is still not ours to replace.
-    const have = await lstat(target).then(
-      () => true,
-      () => false,
+    const st = await lstat(target).catch(() => null)
+    // A file that is already there is not ours to replace, unless it is, byte for byte, one an older sideby wrote.
+    if (!st) out.push({ ref: a.ref, target })
+    else if (
+      st.isFile() &&
+      earlier.length &&
+      earlier.includes(await readFile(target, 'utf8').catch(() => ''))
     )
-    // A file that is already there is not ours to replace, whatever it says.
-    if (!have) out.push({ ref: a.ref, target })
+      out.push({ ref: a.ref, target })
   }
   return out
 }

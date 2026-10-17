@@ -103,6 +103,32 @@ describe('list identity', () => {
   })
 })
 
+describe('list in Display Order (spec §3.25)', () => {
+  it('puts the listed families and accounts first, the others after in their usual order', async () => {
+    await withFakeHome(async (h) => {
+      await codexMain(h)
+      for (const d of ['.claude', '.claude-001', '.claude-003', '.claude-002'])
+        await h.write(`${d}/settings.json`, '{}\n')
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ display: { families: ['codex'], accounts: { claude: ['003', 'gone', 'main'] } } }),
+      )
+      const r = await sideby(h, ['list', '--json'])
+      const data = checkSchema('list', r.out) as { accounts: { ref: string }[]; families: { id: string }[] }
+      assert.deepEqual(
+        data.accounts.map((a) => a.ref),
+        ['codex:main', 'claude:003', 'claude:main', 'claude:001', 'claude:002'],
+      )
+      assert.equal(data.families[0]?.id, 'codex')
+      const q = await sideby(h, ['quota', 'claude', '--json'])
+      assert.deepEqual(
+        (JSON.parse(q.out) as { accounts: { ref: string }[] }).accounts.map((a) => a.ref),
+        ['claude:003', 'claude:main', 'claude:001', 'claude:002'],
+      )
+    })
+  })
+})
+
 describe('first run with Claude Code', () => {
   it('lists claude:main, suggests the next command, and reports quota setup state as JSON', async () => {
     await withFakeHome(async (h) => {
@@ -815,9 +841,9 @@ describe('next (Handoff, spec §3.13)', () => {
 
   it('a family without a public quota source, a missing family or argument each say what to do', async () => {
     await withFakeHome(async (h) => {
-      const grok = await sideby(h, ['next', 'grok', '--json'])
-      assert.equal(grok.code, 1)
-      const e = checkSchema('error', grok.out) as { code: string; error: string }
+      const pi = await sideby(h, ['next', 'pi', '--json'])
+      assert.equal(pi.code, 1)
+      const e = checkSchema('error', pi.out) as { code: string; error: string }
       assert.equal(e.code, 'no-quota-source')
       assert.match(e.error, /pick one yourself/)
       const none = await sideby(h, ['next', 'claude'])

@@ -111,10 +111,36 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 有时同一工具的两个账号登录的是同一个 claude.ai 账号，例如 `~/.claude` 和 `~/.claude-001` 的 email 和组织都一样。Claude 只给这个登录算一份额度，但每个目录只记下自己会话看到的数字，所以可能一个显示快用了一半、另一个几乎没用。sideby 会自己认出来（比较它已经显示的 email 和组织），然后：
 
 - 两边显示同一份、最新的额度，并说明读自哪里：`sideby quota` 写 `read from claude:001 (same login)`，面板里鼠标悬停在额度上也会说明；
-- 标出来：`sideby list` 里是 `claude:001 = main`，面板里它们排在一起，上面一行写 email 和额度，只显示一次；额度提醒也只出现一次；
+- 标出来：`sideby list` 里是 `claude:001 = main`；面板里这几行排在一起，左边一条竖线把它们连起来，额度只在第一行显示一次；额度提醒也只出现一次；
 - 不在它们之间交接：在 sideby 启动的会话里运行 `sideby next` 时，跳过这个登录的另一个目录；自动交接也跳过它，`order` 里写了也一样，并说明原因。
 
 用量（token）仍按目录分别统计。sideby 不移动、不删除任何目录；两个都留着，或者你自己删掉一个。Codex 暂时不分组：同一个 email 可能属于几个 ChatGPT 工作区，各有各的额度。
+
+## Grok 额度
+
+Grok Build 在自己的 `/usage` 页面里显示每个订阅本周用了多少 credit。sideby 向 `grok` 命令行要同样的数字，不需要任何设置：
+
+```sh
+sideby quota grok             # 每个 Grok 账号的 7d 已用和重置时间
+sideby quota grok --refresh   # 现在重新查询，不用上一次的结果
+```
+
+- sideby 用这个账号的 `GROK_HOME` 启动 `grok agent --no-leader stdio`，让它查询额度。请求由 Grok 用自己的登录发出；sideby 不读 `auth.json`，自己也不发任何请求，也不会开会话。
+- 每个账号最多每 15 分钟查一次。面板开着时会在后台查询，点 **刷新** 会立即重新查询。
+- 两次查询之间，sideby 也读 Grok 每次开会话、每轮对话结束时写进这个账号 `logs/unified.jsonl` 的额度，显示较新的那一份。
+- 不想查询时，在面板的 **设置** 里把 **Grok Build 额度** 设为 **关**，或在 config 里写 `"quota": { "check": { "grok": false } }`。在 CI 里默认不查。
+- 未登录的账号、用 API key 登录的账号不查。查询失败时（Grok 版本太旧、没网），面板会说明原因，并保留上一次的数字。
+
+有了额度，`sideby next grok` 也能给 Grok 账号排序，自动交接也能在 Grok 撞上限之前开始（见下文）。
+
+## 自己排顺序
+
+在面板里，按住工具名左边的把手（⋮⋮）拖动整组，按住账号行开头的把手拖动账号，就能排成你想要的顺序。鼠标移到行上时会出现把手；触屏上一直显示。用键盘时，Tab 到把手上，按 `↑` / `↓` 移动（`Home` / `End` 移到最前、最后）。
+
+- 拖动账号后，排序会切到 **我的顺序**；其他排序（按额度、名称、最近使用）照常能用，你排好的顺序会留着。工具分组在任何排序下都按你的顺序。
+- 同一登录的两个目录一起移动。
+- 新账号排在本组最后，新工具排在所有分组最后。排序菜单旁边的 **默认顺序** 会清掉你的顺序。
+- `sideby list` 和 `sideby quota` 也按这个顺序。它存在 config 的 `display` 里，只影响显示：`sideby next` 和自动交接照旧按额度挑账号。
 
 ## 模型与 effort
 
@@ -234,7 +260,7 @@ sideby next claude -- --model opus  # 宿主参数放在 -- 之后
 - 还没有额度数据的账号排在有余量的账号后面。API 账号按次花钱，加 `--include-api` 才参与。
 - 全部用满时什么都不启动，并告诉你哪个账号最先恢复。所有账号都还没有额度数据时也不启动，因为那样的推荐只是猜测：先开启额度（`sideby quota setup claude`），或用 `sideby run` 自己选。
 - 新账号会开一个新会话，因为每个账号各存各的会话。可以先让旧会话写一份简短的交接说明，再贴进新会话。
-- 只支持 Claude 和 Codex。Grok、pi 没有公开额度，`next grok` 会列出账号让你自己选。
+- 支持 Claude、Codex 和 Grok。pi 没有公开额度，`next pi` 会列出账号让你自己选。
 - 登录同一个身份的两个目录共用一份额度（见[两个目录，同一个登录](#两个目录同一个登录)）；在 sideby 启动的会话里运行时，`next` 不会选另一个。
 
 sideby 只推荐，账号由你启动；除非你打开下面的自动交接，它从不自己切换或轮换（见常见问题）。面板在每个家族里把同一个推荐账号标成「下一个」。
@@ -265,7 +291,7 @@ sideby handoff disable --yes
 |---|---|---|
 | Claude Code | 80% / 95%，或某一轮撞上限额失败时 | `sideby quota setup claude`（额度 tap）；hook 由 sideby 用 `--settings` 加上 |
 | Codex | 80% / 95% | 每个账号信任一次 sideby 的 hook：在 Codex 里输入 `/hooks`；第一次时 sideby 会提示 |
-| Grok Build | 只在某一轮撞上用量上限失败时（Grok 没有公开额度） | `sideby handoff setup grok --yes`，再 `sideby doctor grok --fix`；默认 sandbox（`off` 或 `devbox`）；`workspace`、`read-only` 只能接手；`strict` 和自定义 profile 不参与。macOS 设备管理下发的 sandbox，sideby 看不到 |
+| Grok Build | 按它命令行查到的额度到达阈值时（见 [Grok 额度](#grok-额度)），以及某一轮撞上用量上限失败时 | `sideby handoff setup grok --yes`，再 `sideby doctor grok --fix`；默认 sandbox（`off` 或 `devbox`）；`workspace`、`read-only` 只能接手；`strict` 和自定义 profile 不参与。macOS 设备管理下发的 sandbox，sideby 看不到 |
 | pi | 不发起，可以接手 | — |
 
 headless 运行（`claude -p`、`codex exec`、`grok -p`）、带 `--remote` 的 Codex、不是 sideby 启动的会话，都不会交接。自动交接打开但缺 Claude 额度 tap 或 Grok hook 文件，或 `order` 为空、里面有找不到的账号时，`sideby doctor` 会提醒。`PATH` 上的 `sideby` 不存在、来自 npx 缓存，或版本太旧没有 hook 入口时，这次运行不启用自动交接，并在终端说明。
@@ -278,10 +304,10 @@ headless 运行（`claude -p`、`codex exec`、`grok -p`）、带 `--remote` 的
 |---|---|---|---|---|---|
 | Claude Code | `claude` | 2.1.289 | `claude auth login` | status line 缓存（先跑 `quota setup claude`） | 本地会话记录 |
 | Codex CLI | `codex` | 0.160.0 | `codex login` | 本地会话文件 | 本地会话文件 |
-| Grok Build | `grok` | 1.0.46 | `grok login` | 没有公开来源 | 没有公开来源 |
+| Grok Build | `grok` | 1.0.60 | `grok login` | 由 `grok` 命令行查询 | 没有公开来源 |
 | pi | `pi` | 1.0.2 | 进入 pi 后执行 `/login` | 没有公开来源 | 没有公开来源 |
 
-用量由 sideby 自己从 Claude Code 的 `projects/**/*.jsonl` 和 Codex 的 `sessions/**/rollout-*.jsonl` 统计，不需要 ccusage。Grok Build 和 pi 没有额度和用量来源。API 账号只显示用量，不显示额度。宿主没装时，`list` 照常列出它的账号并标注「宿主未安装」，`run` 会告诉你去哪里安装。
+用量由 sideby 自己从 Claude Code 的 `projects/**/*.jsonl` 和 Codex 的 `sessions/**/rollout-*.jsonl` 统计，不需要 ccusage。Grok Build 的额度来自它的命令行，没有用量来源；pi 两者都没有。API 账号只显示用量，不显示额度。宿主没装时，`list` 照常列出它的账号并标注「宿主未安装」，`run` 会告诉你去哪里安装。
 
 各宿主的差异：
 

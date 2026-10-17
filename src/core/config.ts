@@ -212,6 +212,43 @@ export const ConfigSchema = Type.Object(
         { additionalProperties: false, description: 'Browser Sign-ins (spec §3.24, ADR-0023).' },
       ),
     ),
+    display: Type.Optional(
+      Type.Object(
+        {
+          families: Type.Optional(
+            Type.Array(Type.String({ minLength: 1 }), {
+              uniqueItems: true,
+              description:
+                'Family ids in the order the Panel and `sideby list` show them; families not listed follow in their usual order.',
+            }),
+          ),
+          accounts: Type.Optional(
+            Type.Record(Type.String(), Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true }), {
+              description:
+                'Per family, account names (not refs or short commands) in the order they are shown; accounts not listed follow, main first, then by name.',
+            }),
+          ),
+        },
+        {
+          additionalProperties: false,
+          description:
+            'Display Order (spec §3.25): the order you dragged families and accounts into in the Panel. Display only: it never changes which account a Handoff picks.',
+        },
+      ),
+    ),
+    quota: Type.Optional(
+      Type.Object(
+        {
+          check: Type.Optional(
+            Type.Record(Type.String(), Type.Boolean(), {
+              description:
+                'Per family, whether sideby may ask for Quota in a way that costs a request (Grok: its own CLI asks xAI, at most every 15 minutes per account). On by default; `false` turns it off. Off in CI.',
+            }),
+          ),
+        },
+        { additionalProperties: false, description: 'Quota that sideby asks for (spec §3.26, ADR-0025).' },
+      ),
+    ),
     shellInitFile: Type.Optional(
       Type.Object(
         {
@@ -293,13 +330,15 @@ async function configTarget(file: string): Promise<string> {
 
 /**
  * Re-reads the config file, lets `edit` change one top-level `key` (sideby writes only `aliases`, `handoff`,
- * `accounts`, `update` and `browser`, spec §3.10), and writes the result: every other key and their order kept (with `$schema`), 2-space JSON
+ * `accounts`, `update`, `browser`, `display` and `quota`, spec §3.10), and an `edit` that returns undefined removes it, and writes the result: every other key and their order kept (with `$schema`), 2-space JSON
  * with a trailing newline, atomically, keeping the file's mode (0600 for a new file). Refuses, without writing, a
  * file that is not valid JSON or not a valid config, a result that is not a valid config, or a file that changed
  * while sideby wrote it. `edit` returns null to leave the file alone; `dryRun` returns the change without writing.
  * `retry` names what to do again after a fix.
  */
-async function editConfigKey<K extends 'aliases' | 'handoff' | 'accounts' | 'update' | 'browser'>(
+async function editConfigKey<
+  K extends 'aliases' | 'handoff' | 'accounts' | 'update' | 'browser' | 'display' | 'quota',
+>(
   file: string,
   key: K,
   retry: string,
@@ -337,10 +376,11 @@ async function editConfigKey<K extends 'aliases' | 'handoff' | 'accounts' | 'upd
   if (after === null || JSON.stringify(after) === JSON.stringify(before))
     return { changed: false, before, after: before }
   // A new file gets the schema link editors use for completion; an existing file keeps its keys in order.
-  const next =
+  const next: Record<string, unknown> =
     raw === null
       ? { $schema: 'https://unpkg.com/sideby/schemas/config.json', [key]: after }
       : { ...data, [key]: after }
+  if (after === undefined) delete next[key]
   if (!Value.Check(ConfigSchema, next))
     throw new ConfigError(`the new ${key} would not match schemas/config.json`)
   const h = handoffSettings(next as Config)
@@ -411,6 +451,47 @@ export function editConfigBrowser(
   opts: { dryRun?: boolean } = {},
 ): Promise<{ changed: boolean; before: BrowserConfig | undefined; after: BrowserConfig | undefined }> {
   return editConfigKey(file, 'browser', 'change the setting', (current) => edit(current ?? {}), opts)
+}
+
+export type DisplayConfig = NonNullable<Config['display']>
+
+/**
+ * The Panel's drag and drop (spec §3.25): replaces the config `display` key, or removes it when `display` is undefined
+ * or empty (see `editConfigKey` for how the file is written).
+ */
+export function editConfigDisplay(
+  file: string,
+  display: DisplayConfig | undefined,
+): Promise<{ changed: boolean; before: DisplayConfig | undefined; after: DisplayConfig | undefined }> {
+  const accounts = Object.fromEntries(
+    Object.entries(display?.accounts ?? {}).filter(([, names]) => names.length),
+  )
+  const next: DisplayConfig = {
+    ...(display?.families?.length ? { families: [...display.families] } : {}),
+    ...(Object.keys(accounts).length ? { accounts } : {}),
+  }
+  return editConfigKey(file, 'display', 'move it again', () => (Object.keys(next).length ? next : undefined))
+}
+
+export type QuotaConfig = NonNullable<Config['quota']>
+
+/**
+ * The Panel's Quota check switch (spec §3.26): `false` writes `quota.check.<family>: false`, `true` removes that key
+ * (on is the default), and an empty `quota` goes away with it (see `editConfigKey` for how the file is written).
+ */
+export function editConfigQuotaCheck(
+  file: string,
+  family: string,
+  on: boolean,
+): Promise<{ changed: boolean; before: QuotaConfig | undefined; after: QuotaConfig | undefined }> {
+  return editConfigKey(file, 'quota', 'change the setting', (current) => {
+    const check = { ...(current?.check ?? {}) }
+    if (on) delete check[family]
+    else check[family] = false
+    const { check: _old, ...rest } = current ?? {}
+    const next: QuotaConfig = { ...rest, ...(Object.keys(check).length ? { check } : {}) }
+    return Object.keys(next).length ? next : undefined
+  })
 }
 
 export type AccountsConfig = NonNullable<Config['accounts']>

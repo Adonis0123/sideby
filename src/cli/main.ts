@@ -25,11 +25,12 @@ Usage:
   sideby resume <family> [-- args]    run the host; a session resumed by id (claude --resume <id>,
                                       codex resume <id>) starts in the account that holds it
   sideby next <family> [--dry-run] [--include-api] [-- args]
-                                      recommend the account with the most quota left (claude, codex)
+                                      recommend the account with the most quota left (claude, codex, grok)
                                       and start it; --dry-run only recommends
   sideby doctor [target] [--fix] [--force]
                                       check shared items and permissions; --fix repairs safe issues
-  sideby quota [account]              quota and 7-day token usage
+  sideby quota [account|family] [--refresh]
+                                      quota and 7-day token usage; --refresh asks Grok again now
   sideby quota setup claude [--yes]   turn on Claude quota (shows the change first)
   sideby quota teardown claude        undo it, restoring the original file
   sideby tune [account|family]        estimate the cheapest auto-compact threshold per model
@@ -226,7 +227,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   new: { flags: ['api', 'json', 'next'], valued: ['alias'] },
   alias: { flags: ['json'] },
   doctor: { flags: ['fix', 'force', 'json'] },
-  quota: { flags: ['json', 'yes'] },
+  quota: { flags: ['json', 'yes', 'refresh'] },
   tune: { flags: ['json', 'yes'] },
   model: { flags: ['json', 'yes'], valued: ['effort'] },
   'remote-control': { flags: ['json', 'yes'] },

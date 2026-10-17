@@ -22,9 +22,9 @@ import {
 } from '../core/remote-control.ts'
 import { SHELLS, type Shell, type ShellInitWrite } from '../core/shell-init.ts'
 import type { TuneApplyPlan } from '../core/tuning-apply.ts'
-import { suggestAlias, suggestName } from '../panel/page-logic.ts'
+import { inDisplayOrder, suggestAlias, suggestName } from '../panel/page-logic.ts'
 import { createRuntime, type Runtime, UnknownFamilyError } from '../runtime.ts'
-import type { Finding } from '../types.ts'
+import type { Account, Finding } from '../types.ts'
 import { type ParsedArgs, UsageError } from './args.ts'
 import { c, clock, compactNumber, quotaText, table, tuningLines, usageText } from './format.ts'
 
@@ -94,15 +94,28 @@ function tilde(text: string, home: string): string {
   return text.split(`${home}/`).join('~/')
 }
 
+/** Accounts in the Display Order the user gave them in the Panel (spec §3.25): Families first, then each one's. */
+function displayOrdered(accounts: Account[], rt: Runtime): Account[] {
+  const d = rt.displayOrder()
+  const ids = inDisplayOrder([...new Set(accounts.map((x) => x.family))], (id) => id, d.families)
+  return ids.flatMap((id) =>
+    inDisplayOrder(
+      accounts.filter((x) => x.family === id),
+      (x) => x.name,
+      d.accounts?.[id],
+    ),
+  )
+}
+
 export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
   const rt = await createRuntime()
-  const accounts = await rt.accounts()
+  const accounts = displayOrdered(await rt.accounts(), rt)
   const [statuses, appProfiles] = await Promise.all([
     withDesktopApps(rt, accounts, Promise.all(accounts.map((x) => rt.status(x)))),
     listAppProfiles(rt),
   ])
   const hasDesktop = statuses.some((s) => s.desktopApp)
-  const families = await rt.familyInfo()
+  const families = inDisplayOrder(await rt.familyInfo(), (f) => f.id, rt.displayOrder().families)
   if (a.flags.has('json')) {
     json(io, { families, accounts: statuses, appProfiles, pluginErrors: [...rt.pluginErrors] })
     return 0
@@ -768,7 +781,13 @@ export async function cmdQuota(a: ParsedArgs, io: Io): Promise<number> {
   const sub = a.positionals[0]
   if (sub === 'setup' || sub === 'teardown') return cmdQuotaSetup(a, io, sub)
   const rt = await createRuntime()
-  const accounts = sub ? [await rt.resolve(sub)] : await rt.accounts()
+  const accounts = !sub
+    ? displayOrdered(await rt.accounts(), rt)
+    : rt.families.has(sub)
+      ? displayOrdered(await rt.accounts(), rt).filter((x) => x.family === sub)
+      : [await rt.resolve(sub)]
+  // Asks the Families that fetch Quota again now (spec §3.26); a check that is turned off stays off.
+  if (a.flags.has('refresh')) await rt.refreshQuota(accounts)
   const rows = await Promise.all(
     accounts.map(async (x) => ({
       ref: x.ref,
@@ -796,8 +815,11 @@ export async function cmdQuota(a: ParsedArgs, io: Io): Promise<number> {
       ['ACCOUNT', 'QUOTA', `USAGE (${USAGE_DAYS}d)`],
     ),
   )
-  for (const r of rows)
+  for (const r of rows) {
     if (r.quota.status === 'unavailable' && r.quota.detail) io.out(c.dim(`${r.ref}: ${r.quota.detail}`))
+    if (r.quota.status === 'ok' && r.quota.fetchError)
+      io.out(c.dim(`${r.ref}: the latest check failed: ${r.quota.fetchError}`))
+  }
   // Suggest a setup only where it would help: the Family has one and its plan can be applied.
   const off = new Set(
     rows

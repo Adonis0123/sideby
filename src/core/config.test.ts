@@ -1,8 +1,15 @@
 // Config loading rules that are not about aliases: the `handoff` settings (spec §3.17).
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { describe, it } from 'node:test'
 import { withFakeHome } from '../../testing/index.ts'
-import { ConfigError, handoffSettings, loadConfig } from './config.ts'
+import {
+  ConfigError,
+  editConfigDisplay,
+  editConfigQuotaCheck,
+  handoffSettings,
+  loadConfig,
+} from './config.ts'
 
 const CONFIG = '.config/sideby/config.json'
 
@@ -55,6 +62,41 @@ describe('handoff settings', () => {
       await assert.rejects(loadConfig(h.path(CONFIG)), ConfigError)
       await h.write(CONFIG, JSON.stringify({ handoff: { rotate: true } }))
       await assert.rejects(loadConfig(h.path(CONFIG)), ConfigError)
+    })
+  })
+})
+
+describe('display and quota checks (spec §3.25, §3.26)', () => {
+  it('writes and removes `display` keeping every other key, and refuses a repeated name', async () => {
+    await withFakeHome(async (h) => {
+      const file = h.path(CONFIG)
+      await h.write(
+        CONFIG,
+        `${JSON.stringify({ aliases: { cc1: 'claude:001' }, resumeRouting: true }, null, 2)}\n`,
+      )
+      const r = await editConfigDisplay(file, {
+        families: ['codex'],
+        accounts: { claude: ['003', 'main'], grok: [] },
+      })
+      assert.deepEqual(r.after, { families: ['codex'], accounts: { claude: ['003', 'main'] } })
+      const data = JSON.parse(await readFile(file, 'utf8'))
+      assert.deepEqual(Object.keys(data), ['aliases', 'resumeRouting', 'display'])
+      assert.deepEqual((await loadConfig(file)).display, r.after)
+      await assert.rejects(editConfigDisplay(file, { families: ['codex', 'codex'] }), ConfigError)
+      await editConfigDisplay(file, undefined)
+      assert.deepEqual(Object.keys(JSON.parse(await readFile(file, 'utf8'))), ['aliases', 'resumeRouting'])
+      await h.write(CONFIG, JSON.stringify({ display: { accounts: { claude: 'main' } } }))
+      await assert.rejects(loadConfig(file), ConfigError)
+    })
+  })
+
+  it('turns a check off with `false` and on by removing the key', async () => {
+    await withFakeHome(async (h) => {
+      const file = h.path(CONFIG)
+      await editConfigQuotaCheck(file, 'grok', false)
+      assert.deepEqual((await loadConfig(file)).quota, { check: { grok: false } })
+      await editConfigQuotaCheck(file, 'grok', true)
+      assert.equal((await loadConfig(file)).quota, undefined)
     })
   })
 })

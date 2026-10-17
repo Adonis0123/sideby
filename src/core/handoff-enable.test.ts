@@ -6,7 +6,7 @@ import { describe, it } from 'node:test'
 import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
 import { claudePlugin } from '../families/claude/index.ts'
 import { codexPlugin } from '../families/codex/index.ts'
-import { grokHookFileText } from '../families/grok/handoff.ts'
+import { GROK_HOOK_FILE_V1, grokHookFileText } from '../families/grok/handoff.ts'
 import { grokPlugin } from '../families/grok/index.ts'
 import { createRuntime } from '../runtime.ts'
 import { applyHandoffEnable, planHandoffEnable } from './handoff-enable.ts'
@@ -195,6 +195,25 @@ describe('Grok and Codex steps', () => {
       assert.deepEqual(r.results.find((x) => x.id === 'copy')!.accounts, ['grok:b'])
       assert.equal(await readFile(h.path('.grok-lab/hooks/sideby-handoff.json'), 'utf8'), '{"mine":true}\n')
       assert.equal(await readFile(h.path('.grok-b/hooks/sideby-handoff.json'), 'utf8'), grokHookFileText())
+    })
+  })
+
+  it('replaces a copy only when it is, byte for byte, the file an older sideby wrote', async () => {
+    await withFakeHome(async (h) => {
+      const rt = await accounts(h)
+      await rm(h.path('.grok-lab/hooks'), { recursive: true })
+      await h.write('.grok-lab/hooks/sideby-handoff.json', GROK_HOOK_FILE_V1)
+      await h.write('.grok-b/auth.json', '{}', 0o600)
+      await h.write('.grok-b/hooks/sideby-handoff.json', `${GROK_HOOK_FILE_V1} `)
+      const plan = await planHandoffEnable(rt)
+      assert.deepEqual(plan.steps.find((s) => s.id === 'copy')!.accounts, ['grok:lab'])
+      const r = await applyHandoffEnable(rt)
+      assert.ok(r.results.every((x) => x.ok))
+      assert.equal(await readFile(h.path('.grok-lab/hooks/sideby-handoff.json'), 'utf8'), grokHookFileText())
+      assert.equal(
+        await readFile(h.path('.grok-b/hooks/sideby-handoff.json'), 'utf8'),
+        `${GROK_HOOK_FILE_V1} `,
+      )
     })
   })
 

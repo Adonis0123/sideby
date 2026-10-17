@@ -6,6 +6,8 @@ import { BUILTIN_LOGOS } from '../logos.ts'
 import { groupedEntryWrittenAt, resumeFlagSession } from '../shared/sessions.ts'
 import { topLevelTomlString } from '../shared/toml.ts'
 import { grokHandoff } from './handoff.ts'
+import { grokQuotaFetch } from './quota.ts'
+import { readGrokLogQuota } from './quota-log.ts'
 
 // Grok's sandbox rejects these paths when they are symlinks; doctor quotes the Host's own words.
 const HOOKS_DIR_MESSAGE = 'Grok hooks directory has wrong type (expected real directory)'
@@ -72,6 +74,9 @@ export const grokFamily: FamilyDef = {
   },
   model: readModel,
   identity: grokIdentity,
+  // Quota (spec §3.26, ADR-0025): Grok's own billing lines in its log, and its CLI asked at most every 15 minutes.
+  readQuota: (account) => readGrokLogQuota(account.dir),
+  fetchQuota: grokQuotaFetch,
   resumedSession: resumeFlagSession,
   handoff: grokHandoff,
   // One directory per session, grouped by working directory: sessions/<encoded cwd>/<id>/.

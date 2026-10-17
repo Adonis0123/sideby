@@ -29,7 +29,7 @@ Use this when the user says an account hit its 5-hour or weekly limit ("usage li
 
 ## Other answers
 
-- Error `code: "no-quota-source"` (Grok, pi): the Host publishes no quota. The message lists the family's accounts; let the user choose one for `sideby run <ref>`.
+- Error `code: "no-quota-source"` (pi, or a plugin family without quota): the Host publishes no quota. The message lists the family's accounts; let the user choose one for `sideby run <ref>`.
 - Error `code: "no-accounts"`: the family has no account yet; see creating accounts.
 - Many `unknown` Claude accounts: Claude quota may be off. `sideby quota --json` shows `not-enabled`; the one-time setup turns it on.
 - Host arguments the user wants (another model, say) go after `--`: `sideby next claude -- --model opus`.
