@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/local.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "running",
+    "local",
+    "kept",
+    "switched"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "running": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "local"
+        },
+        {
+          "type": "string",
+          "const": "npm"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What the global sideby runs: the Local Build, an npm package, or neither (not an npm global install)."
+    },
+    "local": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "commit",
+            "dirty",
+            "builtAt",
+            "version"
+          ],
+          "properties": {
+            "commit": {
+              "type": "string"
+            },
+            "dirty": {
+              "type": "boolean"
+            },
+            "builtAt": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The newest Local Build, the one `on` switches to; null when `pnpm local` never ran."
+    },
+    "kept": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The npm package version kept aside while a Local Build runs."
+    },
+    "to": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "local"
+        },
+        {
+          "type": "string",
+          "const": "npm"
+        }
+      ]
+    },
+    "switched": {
+      "type": "boolean",
+      "description": "A switch ran and succeeded; false for status, a preview (exit 10) or a failure."
+    },
+    "blocked": {
+      "type": "string",
+      "description": "Why the switch cannot run, with what to do."
+    },
+    "message": {
+      "type": "string"
+    },
+    "restartedPanel": {
+      "type": "boolean"
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby local --json"
+}

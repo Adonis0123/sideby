@@ -430,6 +430,32 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     changed: Type.Boolean(),
   }),
   'update-auto': Type.Object({ schemaVersion: Version, auto: Type.Boolean(), changed: Type.Boolean() }),
+  local: Type.Object(
+    {
+      schemaVersion: Version,
+      running: Type.Union([Type.Literal('local'), Type.Literal('npm'), Type.Null()], {
+        description:
+          'What the global sideby runs: the Local Build, an npm package, or neither (not an npm global install).',
+      }),
+      local: Type.Union(
+        [Type.Object({ commit: Str, dirty: Type.Boolean(), builtAt: Str, version: Str }), Type.Null()],
+        {
+          description: 'The newest Local Build, the one `on` switches to; null when `pnpm local` never ran.',
+        },
+      ),
+      kept: Type.Union([Str, Type.Null()], {
+        description: 'The npm package version kept aside while a Local Build runs.',
+      }),
+      to: Type.Optional(Type.Union([Type.Literal('local'), Type.Literal('npm')])),
+      switched: Type.Boolean({
+        description: 'A switch ran and succeeded; false for status, a preview (exit 10) or a failure.',
+      }),
+      blocked: Type.Optional(Type.String({ description: 'Why the switch cannot run, with what to do.' })),
+      message: Type.Optional(Str),
+      restartedPanel: Type.Optional(Type.Boolean()),
+    },
+    { title: 'sideby local --json' },
+  ),
   list: Type.Object(
     {
       schemaVersion: Version,

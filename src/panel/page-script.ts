@@ -308,6 +308,7 @@ const MAIN = String.raw`
     x: 'M6 6l12 12M18 6L6 18',
     arrowUp: 'M12 19V5M5 12l7-7 7 7',
     arrowDown: 'M12 5v14M5 12l7 7 7-7',
+    swap: 'M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7',
     // Lucide "pin" (ISC license)
     pin: 'M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z',
     bot: 'M6 9h12a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2zM12 5v4M9.5 13.5v1M14.5 13.5v1',
@@ -3733,10 +3734,54 @@ const MAIN = String.raw`
         vp.checking ? spinner() : icon('refresh'), vp.checking ? t('upd.checking') : t('upd.check'))))
     }
     if (vp.error) kids.push(errorNote(vp.error, null))
+    const sw = localSwitchKids(u)
+    if (sw) kids.push(sw)
     if (u && !BOOT.readOnly && !isLocal(u))
       kids.push(h('p', { class: 'muted small popover-foot' }, t(u.auto ? 'upd.autoIsOn' : 'upd.autoIsOff'), ' · ',
         h('button', { class: 'link-btn', type: 'button', onclick: toDialog }, t('upd.settings'))))
     return kids
+  }
+  // The switch between a Local Build and the npm package (ADR-0024), only where the state offers it: the other side,
+  // one button. After the switch the page waits for the server to run the new build and reloads into it.
+  const vs = { busy: false, to: null, waitUntil: 0, stuck: false, error: null }
+  function localSwitchKids(u) {
+    const ls = u && u.localSwitch
+    if (!ls || BOOT.readOnly) return null
+    // While it switches the state already shows the other side; keep the words of the side clicked.
+    const toNpm = vs.busy ? vs.to === 'npm' : ls.running === 'local'
+    if (!toNpm && !ls.local) return null
+    const l = ls.local
+    const build = l ? l.version + '-dev · ' + (l.commit || '?') + (l.dirty ? '+' : '') : ''
+    const kids = [h('p', { class: 'muted small' }, toNpm ? t('loc.toNpmHint') : t('loc.toLocalHint', { b: build, at: l.builtAt ? clock(l.builtAt) : '' }))]
+    if (vs.stuck) {
+      kids.push(h('p', { class: 'small' }, t('loc.stuck')))
+      kids.push(h('div', { class: 'popover-actions' }, h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => location.reload() }, icon('refresh'), t('loc.reload'))))
+    } else {
+      kids.push(h('div', { class: 'popover-actions' }, h('button', { class: 'btn btn-sm', type: 'button', disabled: vs.busy, 'aria-busy': vs.busy ? 'true' : null, onclick: () => localSwitchTo(toNpm ? 'npm' : 'local') },
+        vs.busy ? spinner() : icon('swap'), vs.busy ? t('loc.switching') : t(toNpm ? 'loc.toNpm' : 'loc.toLocal'))))
+    }
+    if (vs.error) kids.push(errorNote(vs.error, null))
+    return h('div', { class: 'popover-foot' }, kids)
+  }
+  async function localSwitchTo(to) {
+    vs.busy = true
+    vs.to = to
+    vs.error = null
+    vs.stuck = false
+    renderVerPop()
+    try {
+      await api('/api/local', { to, confirm: true })
+    } catch (e) {
+      // A background Panel restarting from the new code may drop this answer: wait for the build all the same.
+      if (!e.network) { vs.busy = false; vs.error = e; renderVerPop(); return }
+    }
+    vs.waitUntil = Date.now() + 20000
+    localWait()
+  }
+  function localWait() {
+    if (S.newBuild) { location.reload(); return }
+    if (Date.now() > vs.waitUntil) { vs.busy = false; vs.stuck = true; renderVerPop(); return }
+    setTimeout(() => { void load({ silent: true }).then(localWait, localWait) }, 1500)
   }
   async function verPopCheck() {
     vp.checking = true

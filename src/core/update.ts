@@ -185,6 +185,16 @@ export function bindUpdateDeps(deps: Partial<UpdateDeps>): () => void {
 }
 const deps = (): UpdateDeps => ({ ...realDeps, ...override })
 
+/** Runs a program through the swappable machine (tests bind `exec`); a Local Build switch installs with it. */
+export const runProgram: UpdateDeps['exec'] = (file, args, opts) => deps().exec(file, args, opts)
+/** Starts the background Panel again from the code `sideby` now names; see `UpdateDeps.restartPanel`. */
+export const restartPanelByName = (env: Env, port: number): Promise<boolean> =>
+  deps()
+    .restartPanel(env, port)
+    .catch(() => false)
+/** The lock every install shares (`update-install.lock`), so a Local Build switch never races an Update. */
+export const takeInstallLock = (paths: Paths) => takeLock(paths, 'update-install.lock').catch(() => null)
+
 // ---- versions
 
 type Parsed = { core: [number, number, number]; pre: string[] }

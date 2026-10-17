@@ -18,3 +18,12 @@ What to do:
 ## Auto Update
 
 When the user asks to change Auto Update, run `sideby update --auto on|off --json`. It saves immediately and returns `auto` and `changed` (exit 0, including no-op). It keeps the Update Check setting and does not check or install in this invocation. It needs no `--yes`; ordinary `sideby update --json` still previews an installation with exit 10. Never enable Auto Update unless the user asks.
+
+## Local Build and the release
+
+For people who work on sideby itself. A Local Build (`pnpm local` in a sideby checkout) runs the checkout's code behind the global `sideby`. When the user asks to go back to the release, or to the local build again ("切换到正式版", "切回 dev 版本"):
+
+1. Run `sideby local --json`. `running` is what runs now (`local` or `npm`), `local` the kept Local Build (`version`, `commit`, `dirty`, `builtAt`), `kept` the npm version set aside.
+2. Run `sideby local off --json` (back to npm) or `sideby local on --json` (the kept Local Build). It exits `10` with the change; after their yes, add `--yes`. `on` does not rebuild: `pnpm local` in the checkout makes a new build. `blocked` (exit 1) says why it cannot and what to do.
+3. A background panel restarts by itself and open panels reload; a `sideby ui` in a terminal needs a restart.
+

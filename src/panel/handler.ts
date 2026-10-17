@@ -153,6 +153,11 @@ export interface PanelUpdate {
    * Local Build, which `pnpm local --off` brings back to npm together with the skill.
    */
   skillUpdate?: import('../core/update.ts').SkillUpdatePlan
+  /**
+   * The switch between a Local Build and the npm package (ADR-0024): present only while a Local Build runs or one is
+   * kept next to an npm install, so a plain install never sees it.
+   */
+  localSwitch?: import('../core/local-build.ts').LocalStatus
 }
 
 export interface PanelState {
@@ -228,6 +233,38 @@ async function updateState(rt: Runtime, readOnly: boolean): Promise<PanelUpdate>
     canRun: Boolean(plan?.canRun),
     skill: SKILL_INSTALL,
     ...(skillUpdate ? { skillUpdate } : {}),
+    ...(await localSwitchState(rt, method)),
+  }
+}
+
+// npm's global prefix, asked once per process: the page reads the state every 20 s and `npm prefix -g` takes a while.
+let localDirsMemo: Promise<import('../core/local-build.ts').LocalDirs | null> | null = null
+async function localDirsFor(rt: Runtime) {
+  const lb = await import('../core/local-build.ts')
+  localDirsMemo ??= lb.localDirs(rt.env).then((d) => {
+    if (!d) localDirsMemo = null // ask again next time
+    return d
+  })
+  return localDirsMemo
+}
+// An npm install knows its prefix; only a running Local Build needs npm asked where the global package is.
+async function switchDirs(rt: Runtime, method: update.InstallMethod) {
+  const lb = await import('../core/local-build.ts')
+  return method.prefix ? { dev: lb.devDir(rt.env), prefix: method.prefix } : localDirsFor(rt)
+}
+async function localSwitchState(
+  rt: Runtime,
+  method: update.InstallMethod,
+): Promise<{ localSwitch?: PanelUpdate['localSwitch'] }> {
+  if (method.kind !== 'local' && method.kind !== 'npm') return {}
+  try {
+    const lb = await import('../core/local-build.ts')
+    const d = await switchDirs(rt, method)
+    if (!d) return {}
+    const s = await lb.localStatus(d)
+    return s.running === 'local' || (s.running === 'npm' && s.local) ? { localSwitch: s } : {}
+  } catch {
+    return {}
   }
 }
 
@@ -849,6 +886,33 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           restartedPanel: r.restartedPanel,
           refreshedApp: r.refreshedApp,
           ...(r.skillUpdated === undefined ? {} : { skillUpdated: r.skillUpdated }),
+        }
+      },
+    },
+    // The Local Build switch (ADR-0024): without `confirm` the current status; with it, `to` goes behind the global
+    // `sideby` and a background Panel restarts from it. The page then waits for the new build and reloads.
+    '/api/local': {
+      async run(body) {
+        if (!updates) throw new HttpError(403, 'updates are managed by the page that shows this panel')
+        const to = body.to
+        if (to !== 'local' && to !== 'npm') throw new HttpError(400, '"to" must be "local" or "npm"')
+        const rt = await getRuntime()
+        const lb = await import('../core/local-build.ts')
+        const d = await switchDirs(rt, await update.installMethod(rt.env))
+        if (!d)
+          throw new UserError('`npm prefix -g` failed; switching needs npm on PATH and an npm global install')
+        if (!optBool(body, 'confirm')) return { ...(await lb.localStatus(d)), to, switched: false }
+        const { backgroundPanelPort } = await import('./background.ts')
+        const r = await lb.switchLocal(rt.paths, d, to, rt.env, {
+          panelPort: () => backgroundPanelPort(rt.paths),
+        })
+        if (!r.ok) throw new UserError(r.message)
+        return {
+          ...(await lb.localStatus(d)),
+          to,
+          switched: !r.unchanged,
+          message: r.message,
+          restartedPanel: r.restartedPanel,
         }
       },
     },

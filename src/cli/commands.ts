@@ -1501,6 +1501,91 @@ export async function cmdUpdateCheck(_a: ParsedArgs, _io: Io): Promise<number> {
   return 0
 }
 
+/**
+ * `sideby local [on|off]` (ADR-0024): which side the global `sideby` runs, and a switch between the newest Local
+ * Build (`pnpm local` builds it) and the npm package. Shows the change first and exits 10 without `--yes`.
+ */
+export async function cmdLocal(a: ParsedArgs, io: Io): Promise<number> {
+  const usage = 'usage: sideby local [on|off] [--yes] [--json]'
+  const sub = a.positionals[0]
+  if (a.positionals.length > 1 || (sub !== undefined && sub !== 'on' && sub !== 'off'))
+    throw new UsageError(usage)
+  const lb = await import('../core/local-build.ts')
+  const asJson = a.flags.has('json')
+  const d = await lb.localDirs(process.env)
+  if (!d)
+    throw new UserError(
+      '`npm prefix -g` failed; switching needs npm on PATH and an npm global install of sideby',
+    )
+  const s = await lb.localStatus(d)
+  const now = new Date()
+  const build = (l: NonNullable<typeof s.local>) =>
+    `${l.version}-dev · ${l.commit || 'no commit'}${l.dirty ? '+' : ''}${l.builtAt ? `, built ${clock(l.builtAt, now)}` : ''}`
+  if (sub === undefined) {
+    if (asJson) json(io, { ...s, switched: false })
+    else {
+      io.out(
+        s.running === 'local' && s.local
+          ? `The global sideby runs the local build ${build(s.local)}.`
+          : s.running === 'npm'
+            ? 'The global sideby runs the npm package.'
+            : 'The global sideby is not an npm global install; switching supports `npm install -g sideby` only.',
+      )
+      if (s.running === 'local') io.out(c.dim('Back to the release: sideby local off'))
+      else if (s.running === 'npm' && s.local)
+        io.out(c.dim(`A local build is kept (${build(s.local)}): sideby local on`))
+    }
+    return 0
+  }
+  const to = sub === 'on' ? 'local' : 'npm'
+  const blocked = lb.switchBlocker(s, to)
+  if (blocked) {
+    if (asJson) json(io, { ...s, to, switched: false, blocked })
+    else io.err(c.yellow(`sideby cannot switch: ${blocked}`))
+    return 1
+  }
+  if (s.running === to) {
+    if (asJson) json(io, { ...s, to, switched: false })
+    else
+      io.out(
+        `${c.green('✓')} The global sideby already runs the ${to === 'local' ? 'local build' : 'npm package'}.`,
+      )
+    return 0
+  }
+  if (!a.flags.has('yes')) {
+    if (asJson) json(io, { ...s, to, switched: false })
+    else {
+      io.out(
+        to === 'local' && s.local
+          ? `Switching runs the local build ${build(s.local)} instead of the npm package. It is not rebuilt: \`pnpm local\` in the checkout builds a new one.`
+          : `Switching goes back to the npm package: the kept ${s.kept ?? 'copy'} when it is the latest, else \`npm install -g sideby@latest\`.`,
+      )
+      io.out(c.cyan(`\nRun it with \`sideby local ${sub} --yes\`.`))
+    }
+    return 10
+  }
+  const { backgroundPanelPort } = await import('../panel/background.ts')
+  const paths = resolvePaths(process.env)
+  const r = await lb.switchLocal(paths, d, to, process.env, {
+    panelPort: () => backgroundPanelPort(paths),
+    ...(asJson ? {} : { onOutput: (t: string) => process.stderr.write(t) }),
+  })
+  if (asJson)
+    json(io, {
+      ...(await lb.localStatus(d)),
+      to,
+      switched: r.ok,
+      message: r.message,
+      restartedPanel: r.restartedPanel,
+    })
+  else if (r.ok) {
+    io.out(`${c.green('✓')} ${r.message}.`)
+    if (r.restartedPanel)
+      io.out(c.dim('The background panel restarted with it; open panels reload by themselves.'))
+  } else io.err(c.red(`✗ ${r.message}`))
+  return r.ok ? 0 : 1
+}
+
 export async function cmdApp(a: ParsedArgs, io: Io): Promise<number> {
   const sub = a.positionals[0]
   const usage = 'usage: sideby app install [--url <url>] | sideby app uninstall'

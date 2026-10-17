@@ -45,6 +45,7 @@ Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique
 | Turn quota checks on or off, or refresh fetched quota | `sideby quota check <family> on|off --json`, `sideby quota [family] --refresh --json` | `references/quota.md` |
 | Set the model, effort or Remote Control | `sideby model <ref> --json`, `sideby remote-control --json` | `references/panel.md` |
 | Turn Auto Update on or off | `sideby update --auto on|off --json` | `references/update.md` |
+| Switch between a local build of sideby and the release ("切换到正式版", "切回 dev 版本") | `sideby local --json`, `sideby local on|off --json` (exits 10 first) | `references/update.md` |
 | Repair drift or permissions | `sideby doctor [ref] --json`, then `--fix` after they agree | `references/diagnose.md` |
 | Keep working because an account hit its limit | `sideby next <family> --json` | `references/handoff.md` |
 | Turn on Auto Handoff ("自动交接", "hand over when quota runs low"), see what it still needs, hand this session over now, or pick an account with room for a subtask | `sideby handoff status --json`, `sideby handoff enable --json` (exit 10 first), `sideby handoff ready`, `sideby next <family> --json` | `references/handoff.md` |

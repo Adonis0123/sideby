@@ -7,22 +7,32 @@ import { randomBytes } from 'node:crypto'
 import {
   chmod,
   cp,
-  lstat,
   mkdir,
   readdir,
   readFile,
-  readlink,
   realpath,
   rename,
   rm,
   symlink,
   writeFile,
 } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { dirname, join, relative } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { compareVersions, fetchLatest } from '../src/core/update.ts'
+import {
+  devDir,
+  globalPkg,
+  keptVersion,
+  kind,
+  type LocalDirs,
+  linkGlobal,
+  offPlan,
+  pkgDir,
+  switchLocal,
+  unlinkGlobal,
+} from '../src/core/local-build.ts'
+
+export { globalPkg, keptVersion, kind, type LocalDirs, linkGlobal, offPlan, pkgDir, unlinkGlobal }
 
 const run = promisify(execFile)
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -30,26 +40,6 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const COPIED = ['package.json', 'schemas', 'skills', 'README.md', 'README.zh-CN.md', 'LICENSE']
 const KEEP_OLD = 3
 const BIN = 'dist/src/cli/main.js'
-
-export interface LocalDirs {
-  /** `$XDG_DATA_HOME/sideby-dev`: `pkg` (the running build), `old/<id>`, `npm` (the package it replaced). */
-  dev: string
-  /** npm's global prefix: `<prefix>/lib/node_modules/sideby` and `<prefix>/bin/sideby`. */
-  prefix: string
-}
-
-export const pkgDir = (d: LocalDirs) => join(d.dev, 'pkg')
-export const globalPkg = (d: LocalDirs) => join(d.prefix, 'lib', 'node_modules', 'sideby')
-const globalBin = (d: LocalDirs) => join(d.prefix, 'bin', 'sideby')
-
-export async function kind(p: string): Promise<'link' | 'dir' | 'file' | null> {
-  try {
-    const s = await lstat(p)
-    return s.isSymbolicLink() ? 'link' : s.isDirectory() ? 'dir' : 'file'
-  } catch {
-    return null
-  }
-}
 
 async function buildIdOf(dir: string): Promise<string> {
   try {
@@ -83,92 +73,14 @@ export async function switchBack(d: LocalDirs): Promise<boolean> {
   return true
 }
 
-/**
- * Points the global npm package at `pkg`. A real npm install moves to `<dev>/npm` first, so `--off` can put it
- * back without the network; a link elsewhere (npm link) is replaced. Returns what it did, for the summary.
- */
-export async function linkGlobal(d: LocalDirs): Promise<string> {
-  const target = globalPkg(d)
-  const pkg = pkgDir(d)
-  let did = 'the global sideby already runs the local build'
-  const k = await kind(target)
-  if (k !== 'link' || (await readlink(target)) !== pkg) {
-    if (k === 'dir') {
-      await rm(join(d.dev, 'npm'), { recursive: true, force: true })
-      await rename(target, join(d.dev, 'npm'))
-      did = `the npm package moved to ${join(d.dev, 'npm')}; the global sideby now runs the local build`
-    } else {
-      if (k) await rm(target, { force: true })
-      did = 'the global sideby now runs the local build'
-    }
-    await mkdir(dirname(target), { recursive: true })
-    await symlink(pkg, target, 'dir')
-  }
-  const bin = globalBin(d)
-  const want = relative(dirname(bin), join(target, BIN))
-  if ((await kind(bin)) !== 'link' || (await readlink(bin)) !== want) {
-    await rm(bin, { force: true })
-    await mkdir(dirname(bin), { recursive: true })
-    await symlink(want, bin)
-  }
-  return did
-}
-
-/** Undoes linkGlobal: the npm package it moved comes back; false when there is none to restore (install it). */
-export async function unlinkGlobal(d: LocalDirs): Promise<boolean> {
-  const target = globalPkg(d)
-  if ((await kind(target)) === 'link') await rm(target, { force: true })
-  else if (await kind(target)) return true // a real package is already there
-  if (!(await kind(join(d.dev, 'npm')))) return false
-  await rename(join(d.dev, 'npm'), target)
-  return true
-}
-
-/** The version of the npm package kept aside by linkGlobal, or null when none was kept or it cannot be read. */
-export async function keptVersion(d: LocalDirs): Promise<string | null> {
-  try {
-    const v = (
-      JSON.parse(await readFile(join(d.dev, 'npm', 'package.json'), 'utf8')) as { version?: unknown }
-    ).version
-    return typeof v === 'string' ? v : null
-  } catch {
-    return null
-  }
-}
-
-/**
- * What `--off` does: put the kept npm package back when it is the newest published one (or the registry cannot be
- * asked), else install `latest`. After a release the kept copy is the version before it, so restoring it would
- * go back to old code.
- */
-export function offPlan(kept: string | null, latest: string | null): 'restore' | 'install' {
-  if (!kept) return 'install'
-  if (!latest) return 'restore'
-  return (compareVersions(kept, latest) ?? -1) >= 0 ? 'restore' : 'install'
-}
-
 /** `pnpm local --off`: the global sideby runs the npm package again, the newest published one. */
 export async function localOff(d: LocalDirs): Promise<void> {
-  const latest = await fetchLatest(process.env).catch(() => null)
-  const kept = await keptVersion(d)
-  if (offPlan(kept, latest) === 'restore') {
-    await unlinkGlobal(d)
-    console.log(
-      `The global sideby runs the npm package again (${kept}).${latest ? '' : ' The registry could not be asked; run `sideby update` later.'}`,
-    )
-  } else {
-    const target = globalPkg(d)
-    if ((await kind(target)) === 'link') await rm(target, { force: true })
-    await rm(join(d.dev, 'npm'), { recursive: true, force: true })
-    const want = latest ?? 'latest'
-    console.log(
-      kept
-        ? `The kept npm package (${kept}) is older; installing sideby@${want}…`
-        : `Installing sideby@${want} from npm…`,
-    )
-    const r = spawnSync('npm', ['install', '-g', `sideby@${want}`], { stdio: 'inherit' })
-    if (r.status !== 0) throw new Error(`\`npm install -g sideby@${want}\` failed; run it yourself`)
-  }
+  const { resolvePaths } = await import('../src/core/paths.ts')
+  const r = await switchLocal(resolvePaths(), d, 'npm', process.env, {
+    onOutput: (t) => process.stdout.write(t),
+  })
+  if (!r.ok) throw new Error(r.message)
+  console.log(`${r.message[0]?.toUpperCase()}${r.message.slice(1)}.`)
   await restartPanel(['sideby'])
   // The skill agents read is part of the version (spec §3.23): the npm sideby brings it to its own version, as
   // `sideby update --yes` does for anyone. A failure here leaves the switch done and says what to run.
@@ -177,10 +89,9 @@ export async function localOff(d: LocalDirs): Promise<void> {
 }
 
 export function dirs(): LocalDirs {
-  const data = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share')
   const prefix = spawnSync('npm', ['prefix', '-g'], { encoding: 'utf8' })
   if (prefix.status !== 0 || !prefix.stdout.trim()) throw new Error('`npm prefix -g` failed; is npm on PATH?')
-  return { dev: join(data, 'sideby-dev'), prefix: prefix.stdout.trim() }
+  return { dev: devDir(process.env), prefix: prefix.stdout.trim() }
 }
 
 /** Only an npm global install is handled (ADR-0024); pnpm, bun and Volta keep their own records. */

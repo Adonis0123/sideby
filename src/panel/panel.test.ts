@@ -1,7 +1,7 @@
 // Panel: spec §5 items 9 and 10 (security rules, per-card errors) and both mounting modes.
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, readlink, symlink, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
@@ -1723,6 +1723,66 @@ describe('panel updates (spec §3.23, ADR-0021)', () => {
         unbind()
         await close(on.server)
         await close(off.server)
+      }
+    })
+  })
+
+  it('offers the switch between a kept Local Build and npm, and switches through /api/local (ADR-0024)', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const { bindUpdateDeps } = await import('../core/update.ts')
+      const { globalPkg, pkgDir, devDir } = await import('../core/local-build.ts')
+      const { SIDEBY_NO_UPDATE_NOTIFIER: _off, ...env } = h.env
+      const d = { dev: devDir(env), prefix: h.path('.npm-global') }
+      const pkgAt = async (dir: string, build: object) => {
+        await mkdir(join(dir, 'dist'), { recursive: true })
+        await writeFile(join(dir, 'package.json'), JSON.stringify({ name: 'sideby', version: '0.15.0' }))
+        await writeFile(join(dir, 'dist', 'build.json'), JSON.stringify(build))
+      }
+      await pkgAt(globalPkg(d), { id: 'npm' })
+      const execs: string[] = []
+      const unbind = bindUpdateDeps({
+        fetch: (async () => new Response(JSON.stringify({ latest: '0.15.0' }))) as typeof fetch,
+        packageDir: async () => globalPkg(d),
+        writable: async () => true,
+        exec: async (file, args) => {
+          execs.push([file, ...args].join(' '))
+          return { code: 0, output: '' }
+        },
+      })
+      const on = await serve((port) =>
+        createPanelHandler({
+          runtime: () => createRuntime({ env, builtins: [asBuiltin(demoPlugin(demoFamily({})))] }),
+          allowedHosts: [`127.0.0.1:${port}`],
+        }),
+      )
+      const state = async () =>
+        JSON.parse(
+          (await request(on.port, 'GET', '/api/state', { host: `127.0.0.1:${on.port}` })).text,
+        ) as PanelState
+      try {
+        // A plain npm install with no Local Build sees nothing of it.
+        assert.equal((await state()).update?.localSwitch, undefined)
+        await pkgAt(pkgDir(d), {
+          id: 'l1',
+          local: true,
+          commit: 'abc1234',
+          dirty: false,
+          builtAt: '2026-10-17T12:00:00Z',
+        })
+        const s = (await state()).update?.localSwitch
+        assert.equal(s?.running, 'npm')
+        assert.equal(s?.local?.commit, 'abc1234')
+        const good = { origin: `http://127.0.0.1:${on.port}`, 'x-sideby-token': on.handler.token }
+        assert.equal((await post(on.port, '/api/local', { to: 'dev' }, good)).status, 400)
+        const r = await post(on.port, '/api/local', { to: 'local', confirm: true }, good)
+        assert.equal(r.status, 200, JSON.stringify(r.body))
+        assert.deepEqual([r.body.switched, r.body.running], [true, 'local'])
+        assert.equal(await readlink(globalPkg(d)), pkgDir(d))
+        assert.deepEqual(execs, [], 'an npm install knows its prefix; no npm call')
+      } finally {
+        unbind()
+        await close(on.server)
       }
     })
   })

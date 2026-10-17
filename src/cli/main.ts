@@ -74,10 +74,12 @@ Usage:
                                       rewrite the config's shellInitFile with them
   sideby plugins                      list loaded plugins and load errors
   sideby update [--yes]               update sideby to the newest version (shows the command first)
+  sideby local [on|off] [--yes]       for sideby developers: switch the global sideby between the
+                                      last local build (pnpm local) and the npm package
 
 Options:
   --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, remote-control, handoff,
-                families, plugins, app, desktop, browser, update)
+                families, plugins, app, desktop, browser, update, local)
   -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, desktop, browser
   -v, --version show the version
 
@@ -254,6 +256,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   plugins: { flags: ['json'] },
   families: { flags: ['json'] },
   update: { flags: ['json', 'yes'], valued: ['auto'] },
+  local: { flags: ['json', 'yes'] },
   'update-check': { flags: [] },
 }
 
@@ -487,6 +490,8 @@ async function dispatch(
       return await cmds.cmdUpdate(parsed, io)
     case 'update-check':
       return await cmds.cmdUpdateCheck(parsed, io)
+    case 'local':
+      return await cmds.cmdLocal(parsed, io)
   }
   return 2
 }

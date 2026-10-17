@@ -45,3 +45,13 @@ Options considered:
 - `pnpm release <patch|minor>` does the daily release (`npm version`, `git push --follow-tags`), waits until the registry serves the new version, and then runs `--off` when a Local Build is live. A release now ends on the published package, without a step to remember. It never publishes by itself; `release.yml` still does.
 - A Portal that looks up the package of the `sideby` command only at start keeps serving the old folder after `--off` (or after `pnpm local`), because that folder's `dist/build.json` never changes again. A Portal should look the package up again whenever it checks for new code, and load it anew when the folder changes.
 - Published packages are unchanged: `build.json` from `pnpm build` has no `local`, so every other install behaves as before.
+
+## Amendment (2026-10-17): switch from the Panel and `sideby local`
+
+Going between the Local Build and the published package meant a terminal in the checkout. The maintainer looks at the Panel and wants to compare the two there.
+
+- The switching part moves into the package (`src/core/local-build.ts`); `scripts/local.ts` keeps building and imports it.
+- `sideby local [on|off] [--yes] [--json]` shows what the global `sideby` runs, the kept Local Build and the kept npm version. `on` links the newest Local Build back without compiling (`pnpm local` builds); `off` is the switch of `pnpm local --off`. Both show the change first and exit 10 without `--yes`, like `sideby update`.
+- The Panel's version popover offers the other side when there is one: "Switch to the release" while a Local Build runs, "Switch to the local build" (its commit and build time) while npm runs and a Local Build is kept. After the switch the page waits for the new build and reloads, as after an Update. A plain npm install with no Local Build sees nothing new.
+- A switch takes the Update lock, and a failed `npm install` links the Local Build back, so the global `sideby` never goes missing.
+
