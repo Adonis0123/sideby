@@ -36,4 +36,11 @@ Options considered:
 
 - What the maintainer sees is the working tree, including another session's uncommitted edits when there are some. Compile errors never reach the global command; runtime bugs can, and `pnpm local --back` undoes the switch.
 - The global `sideby` follows the checkout until `pnpm local --off`; releases installed with `npm i -g sideby` in the meantime replace the link, which is the same as `--off`.
+
+## Amendment (2026-10-17): back on npm after a release
+
+After 0.14.0 the maintainer was still on the Local Build, and `pnpm local --off` would have put back the npm package kept aside at the first switch, 0.13.1, older than the code just published.
+
+- `--off` now compares the kept copy with the registry's `latest` (the same request as the Update Check, ADR-0021): it restores the copy only when it is not older, or when the registry cannot be asked; otherwise it installs `sideby@<latest>`.
+- `pnpm release <patch|minor>` does the daily release (`npm version`, `git push --follow-tags`), waits until the registry serves the new version, and then runs `--off` when a Local Build is live. A release now ends with the maintainer on the published package, without a step to remember. It never publishes by itself; `release.yml` still does.
 - Published packages are unchanged: `build.json` from `pnpm build` has no `local`, so every other install behaves as before.

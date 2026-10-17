@@ -3,7 +3,15 @@ import { lstat, mkdir, readdir, readFile, readlink, writeFile } from 'node:fs/pr
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../testing/index.ts'
-import { type LocalDirs, linkGlobal, switchBack, switchIn, unlinkGlobal } from './local.ts'
+import {
+  keptVersion,
+  type LocalDirs,
+  linkGlobal,
+  offPlan,
+  switchBack,
+  switchIn,
+  unlinkGlobal,
+} from './local.ts'
 
 const dirsOf = (h: FakeHome): LocalDirs => ({
   dev: h.path('.local/share/sideby-dev'),
@@ -78,6 +86,20 @@ describe('pnpm local', () => {
       await switchIn(d, await stage(d, '20261016T100000-a'))
       await linkGlobal(d)
       assert.equal(await unlinkGlobal(d), false)
+    })
+  })
+
+  it('--off installs the published version when the kept copy is older, and restores it otherwise', async () => {
+    assert.equal(offPlan('0.13.1', '0.14.0'), 'install', 'after a release the kept copy is the old version')
+    assert.equal(offPlan('0.14.0', '0.14.0'), 'restore')
+    assert.equal(offPlan('0.13.1', null), 'restore', 'offline: the kept copy beats nothing')
+    assert.equal(offPlan(null, '0.14.0'), 'install')
+    await withFakeHome(async (h) => {
+      const d = dirsOf(h)
+      assert.equal(await keptVersion(d), null)
+      await mkdir(join(d.dev, 'npm'), { recursive: true })
+      await writeFile(join(d.dev, 'npm', 'package.json'), '{"name":"sideby","version":"0.13.1"}')
+      assert.equal(await keptVersion(d), '0.13.1')
     })
   })
 })

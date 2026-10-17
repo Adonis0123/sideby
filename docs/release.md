@@ -161,9 +161,17 @@ git push origin v0.1.0
 ```sh
 git switch main
 git pull --ff-only
-npm version patch -m "🔖 chore(release): v%s"   # 新功能用 minor
-git push --follow-tags
+pnpm release patch    # 新功能用 minor
 ```
+
+`pnpm release`（`scripts/release.ts`）先确认在 `main`、工作树干净、没有落后 `origin/main`，然后依次：
+
+1. `npm version <patch|minor> -m "🔖 chore(release): v%s"`；
+2. `git push --follow-tags origin main`；
+3. 每 15 秒问一次 registry，直到 `latest` 变成新版本（最多等 25 分钟；超时就去看 GitHub 上的 Release workflow）；
+4. 全局 `sideby` 还挂着 `pnpm local` 的本地构建（ADR-0024）时，自动执行 `pnpm local --off`，换成刚发布的 npm 包，后台 Panel 随之重启。不是本地构建时，提示用 `sideby update`。
+
+它自己不发布：发布仍由 `release.yml` 完成。手动做也可以：`npm version` 加 `git push --follow-tags`，等发布完成后再跑 `pnpm local --off`。`--off` 会对比之前留下的 npm 包和 registry 上的 `latest`：留下的那份更旧（发版后总是这样）就安装 `latest`，不会退回旧版；连不上 registry 时才放回留下的那份。
 
 `npm version` 先跑 `preversion`（`scripts/readme-assets.ts`），列出可能过期的 README 截图、GIF、banner、开场视频和文案。它只提醒、不拦发版；有输出就先让 agent 跑 `readme-assets` skill，处理完再发版。接着它会改 `package.json` 的版本号，并运行 `version` 脚本（`scripts/sync-skill-version.ts`），把 `skills/sideby/SKILL.md` 的 `metadata.version` 改成同一个版本，两者一起提交一次，再打上 `v<版本号>` tag。版本不一致时 `pnpm check` 会失败。推送后 `release.yml` 依次执行：
 
