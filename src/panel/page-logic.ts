@@ -387,6 +387,33 @@ export function panelHint(hint: string, fixable: boolean, action: string): strin
 }
 
 /**
+ * The prompt "Copy for AI" puts on the clipboard: `words.lead`, then each Finding that has no automatic fix
+ * (numbered, with its account, item, level, message and hint), then `words.fixFirst` when some Findings do have
+ * one, then `words.check`. Empty when every Finding has an automatic fix. `words.hint` labels a hint line.
+ */
+export function fixPrompt(
+  findings: readonly {
+    account: string
+    item: string
+    level: string
+    message: string
+    hint?: string
+    fixable?: boolean
+  }[],
+  words: { lead: string; hint: string; fixFirst: string; check: string },
+): string {
+  const manual = findings.filter((f) => !f.fixable)
+  if (!manual.length) return ''
+  const items = manual.map((f, i) => {
+    const lines = [i + 1 + '. [' + f.level + '] ' + f.account + ' · ' + f.item, '   ' + f.message]
+    if (f.hint) lines.push('   ' + words.hint + f.hint)
+    return lines.join('\n')
+  })
+  const tail = manual.length < findings.length ? [words.fixFirst, words.check] : [words.check]
+  return [words.lead, items.join('\n\n'), ...tail].join('\n\n')
+}
+
+/**
  * A short command to offer for a new Account `name` of a Family, from the config aliases of its existing Accounts:
  * an alias that is a prefix plus its Account's name (`cc001` for `claude:001`) gives the prefix, the most common
  * one wins (then the longer, then the first alphabetically), and the offer is that prefix plus `name` (`cc008`).

@@ -9,6 +9,7 @@ import {
   attentionReasons,
   attentionWhy,
   cacheHitRate,
+  fixPrompt,
   formatDuration,
   handoffChangeOf,
   handoffHintAccount,
@@ -406,6 +407,39 @@ describe('suggestName', () => {
     assert.equal(suggestName([]), 'work')
     assert.equal(suggestName(['main', 'work', 'deepseek']), 'work2')
     assert.equal(suggestName(['main', 'work', 'work2', 'work3']), 'work4')
+  })
+})
+
+describe('fixPrompt', () => {
+  const words = { lead: 'LEAD', hint: 'Hint: ', fixFirst: 'FIRST', check: 'CHECK' }
+  const manual = {
+    account: 'claude:work',
+    item: 'skills',
+    level: 'warn',
+    message: 'is a real directory',
+    hint: 'move it aside',
+  }
+  const auto = {
+    account: 'codex:team',
+    item: 'AGENTS.md',
+    level: 'fail',
+    message: 'is missing',
+    fixable: true,
+  }
+  it('lists only the Findings without an automatic fix, with their hints', () => {
+    assert.equal(
+      fixPrompt([manual, { ...manual, account: 'grok:lab', hint: undefined }], words),
+      'LEAD\n\n1. [warn] claude:work · skills\n   is a real directory\n   Hint: move it aside\n\n2. [warn] grok:lab · skills\n   is a real directory\n\nCHECK',
+    )
+  })
+  it('asks for doctor --fix first when some Findings have an automatic fix', () => {
+    const out = fixPrompt([auto, manual], words)
+    assert.ok(out.endsWith('\n\nFIRST\n\nCHECK'))
+    assert.ok(!out.includes('codex:team'))
+  })
+  it('is empty when every Finding has an automatic fix, or there are none', () => {
+    assert.equal(fixPrompt([auto], words), '')
+    assert.equal(fixPrompt([], words), '')
   })
 })
 

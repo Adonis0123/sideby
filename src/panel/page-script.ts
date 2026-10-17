@@ -6,6 +6,7 @@ import {
   attentionReasons,
   attentionWhy,
   cacheHitRate,
+  fixPrompt,
   formatDuration,
   handoffChangeOf,
   handoffHintAccount,
@@ -37,6 +38,7 @@ const LOGIC = [
   attentionReasons,
   attentionWhy,
   cacheHitRate,
+  fixPrompt,
   formatDuration,
   handoffChangeOf,
   handoffHintAccount,
@@ -527,7 +529,7 @@ const MAIN = String.raw`
     try { const u = new URL(url); ok = u.protocol === 'https:' || u.protocol === 'http:' } catch {}
     return ok ? h('a', { class: cls, href: url, target: '_blank', rel: 'noopener noreferrer' }, text) : null
   }
-  async function copyText(text) {
+  async function copyText(text, shown) {
     let ok = true
     try { await navigator.clipboard.writeText(text) } catch {
       const ta = h('textarea', { css: { position: 'fixed', opacity: '0' } })
@@ -537,7 +539,7 @@ const MAIN = String.raw`
       try { ok = document.execCommand('copy') } catch { ok = false }
       ta.remove()
     }
-    if (ok) toast(t('toast.copied', { text: prefs.hideEmail && text.includes('@') ? maskEmail(text) : text }))
+    if (ok) toast(t('toast.copied', { text: shown || (prefs.hideEmail && text.includes('@') ? maskEmail(text) : text) }))
     else toast(t('toast.copyFailed'), { kind: 'fail' })
   }
   function codeCopy(text) {
@@ -1840,6 +1842,7 @@ const MAIN = String.raw`
     const fixable = all ? all.filter((f) => f.fixable).length : 0
     // Say why Fix all is off, unless a running check or fix already explains it.
     const fixWhy = busy || fixable ? null : !all ? t('fix.whyNoCheck') : all.length ? t('fix.whyManual') : t('fix.whyNothing')
+    const prompt = findings && !busy ? fixPrompt(findings, { lead: t('fix.promptLead'), hint: t('fix.promptHint'), fixFirst: t('fix.promptFixFirst'), check: t('fix.promptCheck') }) : ''
     const status = S.checking ? t('health.running') : S.fixing ? t('health.fixing') : at ? t('health.last', { ago: ago(at) }) : t('health.never')
     const out = [h('div', { class: 'section-head' },
       h('div', null,
@@ -1848,6 +1851,7 @@ const MAIN = String.raw`
           tx('health.lead', { shared: h('span', { class: 'label-tip' }, t('health.sharedTerm'), tip('shared')), drift: h('span', { class: 'label-tip' }, t('health.driftTerm'), tip('drift')) }))),
       h('div', { class: 'actions' },
         h('button', { class: 'btn', type: 'button', disabled: busy || !S.state, 'aria-busy': S.checking ? 'true' : null, title: !S.state && !busy ? t('health.waiting') : null, onclick: runCheck }, S.checking ? spinner() : null, S.checking ? t('health.running') : t('health.run')),
+        prompt ? h('button', { class: 'btn', type: 'button', title: t('fix.copyAiTitle'), onclick: () => copyText(prompt, t('fix.promptShown')) }, icon('copy'), t('fix.copyAi')) : null,
         BOOT.readOnly ? null : h('button', { class: 'btn btn-primary', type: 'button', disabled: busy || !fixable, 'aria-busy': S.fixing ? 'true' : null, title: fixWhy, onclick: runFix },
           S.fixing ? spinner() : null, S.fixing ? t('health.fixing') : t('fix.all') + (fixable ? ' (' + fixable + ')' : ''))))]
     if (ref) out.push(h('div', { class: 'filter-bar' },
