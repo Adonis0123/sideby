@@ -5,10 +5,8 @@
 // bounding box and composited back to front, fill before outline, as an SVG renderer would.
 import { deflateSync } from 'node:zlib'
 import {
-  BUDDY,
-  type BuddyDot,
-  type BuddyPath,
-  highlights,
+  type BuddyShape,
+  buddyShapes,
   MARK,
   MARK_COLORS,
   MARK_VIEWBOX,
@@ -276,22 +274,18 @@ function roundedRectMask(
   return m
 }
 
-/** The shapes of one placed buddy, back to front, each with its colour. */
+/** The shapes of one placed buddy, back to front, each with its colour (core/brand-mark.ts buddyShapes). */
 function buddyLayers(size: number, b: PlacedBuddy): { mask: Mask | null; color: Rgb }[] {
   const { k, map } = placement(size, b)
-  const ink = rgb(MARK_COLORS.ink)
-  const fills: Record<Exclude<BuddyPath['fill'], 'none'>, string> = {
-    body: b.colors.body,
-    shade: b.colors.shade,
-  }
+  const { paths, dots, above } = buddyShapes(b)
   const layers: { mask: Mask | null; color: Rgb }[] = []
-  for (const p of BUDDY.paths) {
-    const polys = flatten(p.d, map)
-    if (p.fill !== 'none') layers.push({ mask: fillMask(size, polys), color: rgb(fills[p.fill]) })
-    const stroke = p.stroke === 'chevron' ? rgb(b.colors.chevron) : ink
-    layers.push({ mask: strokeMask(size, polys, (p.width ?? MARK.placedLine) * k), color: stroke })
+  const shape = (s: BuddyShape) => {
+    const polys = flatten(s.d, map)
+    if (s.fill && s.fill !== 'none') layers.push({ mask: fillMask(size, polys), color: rgb(s.fill) })
+    if (s.stroke !== 'none')
+      layers.push({ mask: strokeMask(size, polys, (s.width ?? MARK.placedLine) * k), color: rgb(s.stroke) })
   }
-  const dots: BuddyDot[] = [...BUDDY.eyes, ...highlights(b.look)]
+  paths.forEach(shape)
   for (const e of dots) {
     const [cx, cy] = map(e.cx, e.cy)
     layers.push({
@@ -299,6 +293,7 @@ function buddyLayers(size: number, b: PlacedBuddy): { mask: Mask | null; color: 
       color: rgb(e.fill === 'ink' ? MARK_COLORS.ink : MARK_COLORS.light),
     })
   }
+  above.forEach(shape)
   return layers
 }
 

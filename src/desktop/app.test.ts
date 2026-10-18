@@ -83,7 +83,7 @@ describe('app icon', () => {
     assert.deepEqual(at(MARK.front, 32, 36), [0x3f, 0x8f, 0xc4, 255], 'the front buddy is blue')
     assert.deepEqual(at(MARK.front, 22, 42), [0x1e, 0x2a, 0x44, 255], 'an eye of the front buddy is ink')
     assert.deepEqual(at(MARK.back, 42, 42), [0x1e, 0x2a, 0x44, 255], 'an eye of the back buddy is ink')
-    assert.deepEqual(at(MARK.back, 32, 12), tile, 'above the back buddy is the tile')
+    assert.deepEqual(at(MARK.back, 48, 12), tile, 'above the back buddy, beside its antenna, is the tile')
     const hl = highlights(MARK.front.look)[0]!
     assert.deepEqual(at(MARK.front, hl.cx, hl.cy), [0xf6, 0xf0, 0xe5, 255], 'an eye highlight is light')
     // 3 px inside the tile's corner arc (radius a quarter of the tile) on the diagonal.

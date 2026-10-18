@@ -22,6 +22,7 @@ ADR-0020's conclusions still hold: one colour per character, no diagonal layout 
 - In the Panel the blue buddy's body takes `--logo-fg`, so a Portal's `logoColor` still recolours it. Everything else is fixed. No `PanelTheme` field or token changes.
 - `<basePath>/icon.svg` is the whole pair on a transparent square. Below about 24 px the blue buddy alone is the small cut: `<basePath>/favicon.svg`, the Panel's favicon.
   - Amendment 2026-10-16: the small cut is redrawn for a 16 pt browser tab rather than scaled down. On a 32 grid the body fills the width; arms, `>` and mouth are dropped; eyes are larger; the outline is 2 units (about 6% of the canvas). The Local tools Portal shows it in the browser tab of the sideby page.
+- Amendment 2026-10-18: the buddies follow the redrawn crew of the brand design sheet. The forehead `>` is gone (it belongs to the brand's lead character only); both keep the same gumdrop body and are told apart by two props each in their own accent colour. Sai, the blue one, wears a gold crown and a red cape (`#e0685a`) and smiles; Bai, the amber one, has a bent green antenna and a green spare battery on his back (`#5bb06a`) and laughs. Bai's props are mirrored in the mark so the battery stays on his back as he turns towards Sai. The small cut is Sai alone at half scale on the 32 grid with body, eyes, cape and crown, as the sheet's tab icon.
 
 ## Consequences
 
