@@ -50,7 +50,7 @@
       "files": ["docs/assets/banner.jpg"],
       "watch": ["src/core/brand-mark.ts"],
       "retake": "Codex image generation, 1920×960 JPEG, painted scene with the brand characters",
-      "checked": "8d0c388"
+      "checked": "111d4c7"
     },
     {
       "id": "intro-video",
