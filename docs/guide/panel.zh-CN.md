@@ -43,7 +43,7 @@ AI 要守的规则：改东西之前先给你看改动，等你同意；从不�
 
 **截图和视频。** 把截图粘贴进对话框、把文件拖进去，或者点「添加图片或视频」。图片（PNG、JPEG、GIF、WebP）单个最大 20MB，视频（MP4、MOV、WebM）单个最大 200MB，一次最多 5 个；sideby 按文件内容判断类型，不看文件名。每个文件显示成一张小图，可以单独删掉。AI 会拿到这些文件的路径和你写的话（Codex 还会直接收到图片），所以先确认里面没有密钥或密码。文件存在 sideby 自己的目录里，7 天后删除。只读面板不能添加文件。
 
-**打开哪个终端。** 在「设置」的「首选终端」里选，列表只显示这台电脑装了的终端。没选时，sideby 用启动面板的那个终端，再不行就用「终端」（Terminal）。macOS 上支持 Terminal、iTerm2、Ghostty、Orca、WezTerm、kitty 和 Alacritty；Warp、VS Code 和 Cursor 暂时不能这样运行命令。Orca 会在它当前激活的 worktree 里开新终端。从面板应用或 `sideby ui --background` 启动的面板可能不知道你用哪个终端，请在「设置」里选一个。`sideby terminal` 显示同样的列表，`sideby terminal --set <id>` 保存你的选择。「设置」里的「自定义终端命令」可以填一个模板来支持其他终端，`{cmd}` 和 `{cwd}` 由 sideby 填入。
+**打开哪个终端。** 在「设置」的「首选终端」里选，列表只显示这台电脑装了的终端。没选时，sideby 用启动面板的那个终端，再不行就用「终端」（Terminal）。macOS 上支持 Terminal、iTerm2、Ghostty、Orca、WezTerm、kitty 和 Alacritty；Warp、VS Code 和 Cursor 暂时不能这样运行命令。在 WSL 上，sideby 在 Windows Terminal 里开一个新标签页，回到同一个 Linux 发行版和文件夹运行（这也是 WSL 上的默认终端）；任务文件夹或命令里有 `;` 或 `"` 时，改为复制命令。Orca 会在它当前激活的 worktree 里开新终端。从面板应用或 `sideby ui --background` 启动的面板可能不知道你用哪个终端，请在「设置」里选一个。`sideby terminal` 显示同样的列表，`sideby terminal --set <id>` 保存你的选择。「设置」里的「自定义终端命令」可以填一个模板来支持其他终端，`{cmd}` 和 `{cwd}` 由 sideby 填入。
 
 **终端打不开时。** 面板会复制一条命令 `sideby ask --run <id>`，提示你粘贴到任意终端回车，效果一样。sideby 第一次打开 Terminal、iTerm2 或 Ghostty 时，macOS 会问是否允许 sideby 控制它；如果你点了不允许，去「系统设置 → 隐私与安全性 → 自动化」里打开。任务保留一小时，过期后再点一次即可。
 

@@ -3853,7 +3853,7 @@ const MAIN = String.raw`
   // One dialog for every "let AI do it" entry: what to do, then the account and the terminal it will use, then one
   // button. When nothing can run it, or the panel is read-only, it copies the prompt instead.
   let ak = null
-  const TERM_NAMES = { terminal: 'Terminal', iterm2: 'iTerm2', ghostty: 'Ghostty', orca: 'Orca', wezterm: 'WezTerm', kitty: 'kitty', alacritty: 'Alacritty', custom: 'Custom' }
+  const TERM_NAMES = { terminal: 'Terminal', iterm2: 'iTerm2', ghostty: 'Ghostty', orca: 'Orca', wezterm: 'WezTerm', kitty: 'kitty', alacritty: 'Alacritty', 'windows-terminal': 'Windows Terminal', custom: 'Custom' }
   function termName(id) {
     const list = ak && ak.terms ? ak.terms.terminals : []
     const f = list.find((x) => x.id === id)

@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, mkdtemp, open, readdir, realpath, rm, stat, unlink } from 'node:fs/promises'
+import { userInfo } from 'node:os'
 import { dirname, isAbsolute, join, sep } from 'node:path'
 import { AI_TASK_KINDS, type AiTaskKind, stripSecrets, taskPrompt } from '../panel/page-logic.ts'
 import type { Runtime } from '../runtime.ts'
@@ -33,6 +34,7 @@ import {
   TERMINALS,
   type TerminalId,
   validateCustomTemplate,
+  wslDistro,
 } from './terminal.ts'
 
 export async function pickTaskAccount(
@@ -275,6 +277,7 @@ export async function terminals(rt: Runtime) {
     env: rt.env,
     platform: deps.platform,
     appDirs,
+    ...(deps.wslMount ? { wslMount: deps.wslMount } : {}),
   })
   if (rt.config.terminal?.custom) installed.push({ id: 'custom' })
   return {
@@ -457,6 +460,9 @@ async function openTask(
         custom: rt.config.terminal?.custom,
         installed: choices.installed,
         platform: deps.platform,
+        ...(id === 'windows-terminal'
+          ? { wslDistro: await wslDistro(rt.env, deps.exec), shell: userInfo().shell ?? undefined }
+          : {}),
       },
       deps.exec,
     ))
