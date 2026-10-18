@@ -16,7 +16,7 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import {
@@ -26,11 +26,13 @@ import {
   kind,
   type LocalDirs,
   linkGlobal,
+  npmEnv,
   offPlan,
   pkgDir,
   switchLocal,
   unlinkGlobal,
 } from '../src/core/local-build.ts'
+import type { Env } from '../src/types.ts'
 
 export { globalPkg, keptVersion, kind, type LocalDirs, linkGlobal, offPlan, pkgDir, unlinkGlobal }
 
@@ -110,10 +112,25 @@ async function refreshLoginItem(entry: string): Promise<void> {
     console.log(`The login item was not changed: ${r.note}`)
 }
 
-export function dirs(): LocalDirs {
-  const prefix = spawnSync('npm', ['prefix', '-g'], { encoding: 'utf8' })
-  if (prefix.status !== 0 || !prefix.stdout.trim()) throw new Error('`npm prefix -g` failed; is npm on PATH?')
-  return { dev: devDir(process.env), prefix: prefix.stdout.trim() }
+function askNpmPrefix(env: Env): string {
+  const r = spawnSync('npm', ['prefix', '-g'], { encoding: 'utf8', env })
+  return r.status === 0 ? r.stdout.trim() : ''
+}
+
+/**
+ * The Local Build's folder and npm's global prefix. A prefix inside this checkout is refused: the switch would write
+ * `bin/sideby` and `lib/node_modules/sideby` into the repository instead of the global install.
+ */
+export function dirs(env: Env = process.env, root = ROOT, npmPrefix = askNpmPrefix): LocalDirs {
+  const prefix = npmPrefix(npmEnv(env))
+  if (!prefix) throw new Error('`npm prefix -g` failed; is npm on PATH?')
+  const rel = relative(resolve(root), resolve(prefix))
+  if (rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)))
+    throw new Error(
+      `npm's global prefix (${prefix}) is inside this checkout, so the switch would write into the repository. ` +
+        'Check `npm prefix -g` in a plain shell and the `prefix` set in your .npmrc or NPM_CONFIG_PREFIX, then run `pnpm local` again.',
+    )
+  return { dev: devDir(env), prefix }
 }
 
 /** Only an npm global install is handled (ADR-0024); pnpm, bun and Volta keep their own records. */

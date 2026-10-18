@@ -34,9 +34,20 @@ const globalBin = (d: LocalDirs) => join(d.prefix, 'bin', 'sideby')
 export const devDir = (env: Env) =>
   join(env.XDG_DATA_HOME || join(env.HOME || homedir(), '.local', 'share'), 'sideby-dev')
 
+/**
+ * The environment to ask npm for its global prefix in. A pnpm script gets pnpm's own `--dir` (`pnpm -C <dir> …`) as
+ * `npm_config_dir` and `npm_config_prefix`, and npm would answer with that directory; npm reads the user's real
+ * setting from its config files and from `NPM_CONFIG_PREFIX` without them.
+ */
+export function npmEnv(env: Env): Env {
+  if (!env.npm_config_user_agent?.startsWith('pnpm/')) return env
+  const { npm_config_prefix: _prefix, npm_config_dir: _dir, ...rest } = env
+  return rest
+}
+
 /** Where the switch works, with npm's global prefix from `npm prefix -g`; null when npm cannot be asked. */
 export async function localDirs(env: Env): Promise<LocalDirs | null> {
-  const r = await runProgram('npm', ['prefix', '-g'], { env }).catch(() => null)
+  const r = await runProgram('npm', ['prefix', '-g'], { env: npmEnv(env) }).catch(() => null)
   const prefix = r && r.code === 0 ? r.output.trim().split('\n').at(-1)?.trim() : ''
   return prefix ? { dev: devDir(env), prefix } : null
 }

@@ -5,6 +5,7 @@ import { describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../testing/index.ts'
 import {
   copiedFiles,
+  dirs,
   keptVersion,
   type LocalDirs,
   linkGlobal,
@@ -110,6 +111,39 @@ describe('pnpm local', () => {
       await mkdir(join(d.dev, 'npm'), { recursive: true })
       await writeFile(join(d.dev, 'npm', 'package.json'), '{"name":"sideby","version":"0.13.1"}')
       assert.equal(await keptVersion(d), '0.13.1')
+    })
+  })
+
+  it('asks npm for the real global prefix when pnpm runs it with -C (pnpm sets npm_config_prefix to that dir)', async () => {
+    await withFakeHome(async (h) => {
+      const checkout = h.path('src/sideby')
+      const seen: Record<string, string | undefined>[] = []
+      // A stand-in for `npm prefix -g`: npm answers with npm_config_prefix when it is set.
+      const npmPrefix = (env: NodeJS.ProcessEnv) => {
+        seen.push({ prefix: env.npm_config_prefix, dir: env.npm_config_dir })
+        return env.npm_config_prefix ?? h.path('.nvm/node')
+      }
+      const env = {
+        HOME: h.home,
+        npm_config_user_agent: 'pnpm/10.15.0 npm/? node/v22.18.0 darwin arm64',
+        npm_config_prefix: checkout,
+        npm_config_dir: checkout,
+      }
+      const d = dirs(env, checkout, npmPrefix)
+      assert.equal(d.prefix, h.path('.nvm/node'))
+      assert.deepEqual(seen, [{ prefix: undefined, dir: undefined }])
+    })
+  })
+
+  it('refuses a global prefix inside the checkout and says how to fix it', async () => {
+    await withFakeHome(async (h) => {
+      const checkout = h.path('src/sideby')
+      for (const answer of [checkout, join(checkout, 'node_modules', '.npm')])
+        assert.throws(
+          () => dirs({ HOME: h.home }, checkout, () => answer),
+          (e: Error) => /inside this checkout/.test(e.message) && /npm prefix -g/.test(e.message),
+        )
+      assert.equal(dirs({ HOME: h.home }, checkout, () => `${checkout}-other`).prefix, `${checkout}-other`)
     })
   })
 })
