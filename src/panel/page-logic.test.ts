@@ -51,6 +51,8 @@ import {
   taskFindings,
   taskPrompt,
   updatedAge,
+  widthFollower,
+  widthTier,
   windowState,
   withPinned,
 } from './page-logic.ts'
@@ -1541,5 +1543,91 @@ describe('settings in config, start at login and Auto Handoff facts (spec §3.29
     )
     assert.match(PAGE_SCRIPT, /if \(menu\.kind === 'settings'\) settingsFit\(\)/)
     assert.match(PAGE_SCRIPT, /class: 'menu-item set-more', type: 'button', hidden: true/)
+  })
+})
+
+describe('widthTier', () => {
+  it('puts each width in the band its narrow-screen rules were written for, edges included', () => {
+    assert.deepEqual([1300, 1101, 1100, 761, 760, 561, 560, 320].map(widthTier), [
+      'wide',
+      'wide',
+      'medium',
+      'medium',
+      'narrow',
+      'narrow',
+      'phone',
+      'phone',
+    ])
+  })
+})
+
+describe('widthFollower', () => {
+  function setup(shown = 'wide') {
+    const applied: string[] = []
+    let now = 0
+    let timers: { at: number; fn: () => void; id: number }[] = []
+    let nextId = 1
+    const follow = widthFollower(shown, widthTier, (t) => applied.push(t), 90, {
+      set: (fn, ms) => {
+        const id = nextId++
+        timers.push({ at: now + ms, fn, id })
+        return id
+      },
+      clear: (id) => {
+        timers = timers.filter((t) => t.id !== id)
+      },
+    })
+    const tick = (ms: number) => {
+      now += ms
+      for (const t of timers.filter((t) => t.at <= now)) {
+        timers = timers.filter((x) => x !== t)
+        t.fn()
+      }
+    }
+    return { applied, follow, tick }
+  }
+
+  it('changes the band once, after a sliding width settles, even when it crossed several bands', () => {
+    const { applied, follow, tick } = setup('wide')
+    for (let w = 1300; w >= 600; w -= 20) {
+      follow(w)
+      tick(16)
+    }
+    assert.deepEqual(applied, [])
+    tick(90)
+    assert.deepEqual(applied, ['narrow'])
+  })
+
+  it('changes nothing when the width comes back to the shown band before it settles', () => {
+    const { applied, follow, tick } = setup('medium')
+    follow(740)
+    tick(40)
+    follow(780)
+    tick(200)
+    assert.deepEqual(applied, [])
+  })
+
+  it('ignores moves inside the shown band and follows the next crossing from the band it applied', () => {
+    const { applied, follow, tick } = setup('medium')
+    follow(1000)
+    tick(200)
+    follow(700)
+    tick(90)
+    follow(720)
+    tick(200)
+    follow(920)
+    tick(90)
+    assert.deepEqual(applied, ['narrow', 'medium'])
+  })
+})
+
+describe('layout bands in the page', () => {
+  it('sets the band in the head, before the first paint, and hangs the narrow rules on it', () => {
+    const html = renderPage({ basePath: '/sideby', token: 't', nonce: 'n' })
+    const head = html.slice(0, html.indexOf('</head>'))
+    assert.match(head, /<script nonce="n">document\.documentElement\.dataset\.width = \(function widthTier/)
+    const css = /<style nonce="n">([\s\S]*?)<\/style>/.exec(html)![1]!
+    assert.doesNotMatch(css, /max-width: \d+px\)/, 'no breakpoint media queries are left')
+    assert.match(css, /:where\(:root\[data-width=narrow\], :root\[data-width=phone\]\) \{/)
   })
 })

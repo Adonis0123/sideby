@@ -47,6 +47,8 @@ import {
   switchFailure,
   taskFindings,
   updatedAge,
+  widthFollower,
+  widthTier,
   windowState,
   withPinned,
 } from './page-logic.ts'
@@ -98,6 +100,8 @@ const LOGIC = [
   suggestName,
   updatedAge,
   pinnedIn,
+  widthFollower,
+  widthTier,
   windowState,
   withPinned,
 ]
@@ -121,6 +125,8 @@ const MAIN = String.raw`
   const AUTO_MS = 20000
   const FAST_MS = 5000
   const FAST_FOR_MS = 3 * 60000
+  // How long a changing width must hold still before the layout follows it into another band.
+  const WIDTH_SETTLE_MS = 90
   const S = {
     state: null, loadError: null, loading: false, loadedAt: 0, history: null,
     report: null, checking: false, fixing: false, checkError: null, checkRetry: null, fixes: null,
@@ -761,6 +767,26 @@ const MAIN = String.raw`
   }
   document.addEventListener('pointerdown', (e) => { if (menu.el && !menu.el.contains(e.target) && !menu.anchor.contains(e.target)) closeMenu() })
   window.addEventListener('resize', () => closeMenu())
+  // Layout bands: the page's narrow-screen rules hang on the root's data-width (set before the first paint by the
+  // head script), not on media queries, so a width that slides across a breakpoint (a dragged window, a Portal's
+  // sidebar opening around this frame) changes the layout once, after it settles, as one short cross-fade.
+  function applyWidthTier(tier) {
+    const root = document.documentElement
+    const set = () => { root.dataset.width = tier }
+    if (REDUCED || document.hidden || !document.startViewTransition) return set()
+    root.classList.add('vt-width')
+    document.startViewTransition(set).finished.finally(() => root.classList.remove('vt-width'))
+  }
+  let widthFollow = null
+  function followWidth(width) {
+    if (!widthFollow) {
+      const timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id) }
+      const shown = document.documentElement.dataset.width || widthTier(window.innerWidth)
+      widthFollow = widthFollower(shown, widthTier, applyWidthTier, WIDTH_SETTLE_MS, timers)
+    }
+    widthFollow(width)
+  }
+  window.addEventListener('resize', () => followWidth(window.innerWidth))
   // Capture also sees the scroll of an inner scroller (a dialog, a list); the menu's own scroll is left alone.
   window.addEventListener('scroll', (e) => { if (menu.el && !menu.el.contains(e.target)) placeFloat() }, { passive: true, capture: true })
 

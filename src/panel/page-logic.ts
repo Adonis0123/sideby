@@ -1143,3 +1143,39 @@ export function handoffTaskFacts(
   if (status?.nextSteps?.length) out.push('next steps: ' + status.nextSteps.join('; '))
   return out
 }
+
+/** The Panel's layout bands, widest first; page-styles.ts hangs its narrow-screen rules on them. */
+export type WidthTier = 'wide' | 'medium' | 'narrow' | 'phone'
+
+/** The layout band for a viewport `width` in CSS pixels: up to 560 phone, up to 760 narrow, up to 1100 medium. */
+export function widthTier(width: number): WidthTier {
+  return width <= 560 ? 'phone' : width <= 760 ? 'narrow' : width <= 1100 ? 'medium' : 'wide'
+}
+
+/**
+ * Follows a viewport width that changes frame by frame (a window being dragged, a Portal's sidebar sliding open
+ * around the Panel's frame) and calls `apply` once with the new band, `settleMs` after the width stops changing,
+ * only when it differs from the band shown. A width that comes back to the shown band before then changes nothing,
+ * so a gesture never makes the layout jump back and forth. Returns the function to call with each new width.
+ */
+export function widthFollower<T>(
+  shown: T,
+  tierOf: (width: number) => T,
+  apply: (tier: T) => void,
+  settleMs: number,
+  timers: { set: (fn: () => void, ms: number) => unknown; clear: (id: unknown) => void },
+): (width: number) => void {
+  let current = shown
+  let timer: unknown = null
+  return (width) => {
+    if (timer !== null) timers.clear(timer)
+    timer = null
+    const next = tierOf(width)
+    if (next === current) return
+    timer = timers.set(() => {
+      timer = null
+      current = next
+      apply(next)
+    }, settleMs)
+  }
+}

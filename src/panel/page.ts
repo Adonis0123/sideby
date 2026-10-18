@@ -8,6 +8,7 @@ import { QUOTA_FAIL_PERCENT, QUOTA_WARN_PERCENT, USAGE_DAYS } from '../core/quot
 import { SKILL_INSTALL } from '../core/skill-check.ts'
 import type { LocalBuild } from '../core/version.ts'
 import { MESSAGES } from './i18n.ts'
+import { widthTier } from './page-logic.ts'
 import { PAGE_SCRIPT } from './page-script.ts'
 import { pageStyles } from './page-styles.ts'
 import { type ResolvedTheme, resolveTheme } from './theme.ts'
@@ -57,6 +58,8 @@ function attr(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
 }
 
+// The layout band (page-logic.ts widthTier) is set in the head, so the first paint already has the narrow-screen
+// layout; the page script then follows the width as it changes.
 const SKELETON_ROW = `<div class="sk-row"><span class="sk sk-badge"></span><span class="sk sk-title"></span><span class="sk sk-bar"></span><span class="sk sk-bar"></span></div>`
 const SKELETON_STAT = `<div class="stat"><span class="sk sk-stat w70"></span></div>`
 
@@ -96,6 +99,7 @@ export function renderPage(opts: PageOptions): string {
 <title>sideby</title>
 <link rel="icon" type="image/svg+xml" href="${attr(opts.basePath)}/favicon.svg?v=${FAVICON_VERSION}">
 <style${nonce}>${pageStyles(theme)}</style>
+<script${nonce}>document.documentElement.dataset.width = (${widthTier})(window.innerWidth)</script>
 </head>
 <body${theme.header === 'bar' ? ' class="header-bar"' : ''}>
 <header class="top">

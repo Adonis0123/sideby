@@ -709,7 +709,10 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .checkup { margin-top: 8px; }
 .foot { margin-top: 28px; text-align: center; }
 
-@media (max-width: 1100px) {
+/* The narrow-screen layouts hang on the root's data-width (page-logic.ts widthTier: up to 1100px medium, 760 narrow,
+   560 phone) rather than on media queries, so the page script can change them once a sliding width settles, inside a
+   View Transition. :where() keeps each rule's specificity what it was inside a media query. */
+:where(:root[data-width=medium], :root[data-width=narrow], :root[data-width=phone]) {
   .col-head { display: none; }
   .app-row { flex-wrap: wrap; }
   .app-actions { width: 100%; justify-content: flex-start; }
@@ -726,7 +729,7 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .last-inline::before { content: "·"; color: var(--faint); }
   .row > .row-end { align-self: start; margin-top: -2px; }
 }
-@media (max-width: 760px) {
+:where(:root[data-width=narrow], :root[data-width=phone]) {
   /* The toolbar stays one line: "New account" keeps its icon, its name moves to the tooltip and the label. */
   .toolbar > .btn-primary { width: var(--ctl-h); padding: 0; justify-content: center; }
   .toolbar > .btn-primary > span { display: none; }
@@ -734,8 +737,8 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .stat:nth-child(3) { border-left: 0; }
   .stat:nth-child(n+3) { border-top: 1px solid var(--border); }
 }
-@media (max-width: 560px) {
-  :root { --gutter: 14px; }
+:root[data-width=phone] { --gutter: 14px; }
+:where(:root[data-width=phone]) {
   .top-in { padding: 16px var(--gutter) 0; }
   .header-bar .top-in { min-height: 0; padding: 12px var(--gutter); }
   .update-btn span { display: none; }
@@ -774,6 +777,13 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .panel { padding: 14px; }
   .dlg-head { padding: 14px 14px 2px; } .dlg-body { padding: 10px 14px 14px; } .dlg-foot { padding: 10px 14px; }
 }
+/* A change of layout band runs as a short View Transition (page-script.ts followWidth): each block below moves and
+   resizes to its new place while its old and new look cross-fade; the rest of the page cross-fades as one. */
+::view-transition-group(*) { animation-duration: .2s; animation-timing-function: cubic-bezier(.2, 0, 0, 1); }
+/* Old and new looks keep their own size (pinned top left) instead of stretching to the moving box, so text never
+   grows or shrinks on the way. */
+::view-transition-old(*), ::view-transition-new(*) { animation-duration: .2s; height: 100%; object-fit: none; object-position: left top; }
+.vt-width :is(.top-in, .summary, .stat, .section-head, .toolbar, .group-list, .group-head, .row) { view-transition-name: match-element; }
 @media (prefers-reduced-motion: reduce) {
   .sk, .spin, .is-spinning svg, .toast, .toast.bump, .view-in > *, .row.flash, .card.flash, .pulse { animation: none; }
   .bar > span, .chev, .row { transition: none; }
