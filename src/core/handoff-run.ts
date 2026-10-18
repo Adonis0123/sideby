@@ -6,7 +6,7 @@ import { watch } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { HOOK_FAMILIES } from '../handoff/hook.ts'
-import { firstPrompt } from '../handoff/messages.ts'
+import { firstPrompt, windowText } from '../handoff/messages.ts'
 import type { Runtime } from '../runtime.ts'
 import type { Account, Env, HandoffHookEvent } from '../types.ts'
 import { aliasArgs } from './config.ts'
@@ -287,6 +287,7 @@ export async function runWithHandoff(
             ...(d.kind === 'wait' ? { until: d.until } : {}),
             prepareAt: settings.prepareAt,
             threshold: settings.threshold,
+            adaptive: settings.adaptive,
             ...(elig.agentBrief === false ? { agentBrief: false } : {}),
             acceptsTo: true,
           }
@@ -371,13 +372,18 @@ export async function runWithHandoff(
       cwd: process.cwd(),
     })
     const last = hops.hops[hops.hops.length - 1]!
-    Object.assign(last, { trigger: ready.trigger, briefSource: done.source, brief: done.path })
+    Object.assign(last, {
+      trigger: ready.trigger,
+      briefSource: done.source,
+      brief: done.path,
+      ...(ready.window ? { window: ready.window } : {}),
+    })
     await writeJsonFile(join(dir, FILES.chain), hops)
     await rm(join(dir, FILES.ready), { force: true })
     await rm(join(dir, FILES.request), { force: true })
 
     io.err(
-      `sideby: ${account.ref} saved its session and is handing over because ${WHY[ready.trigger]}; next is ${decision.ref}${skippedText(decision)}. Brief: ${done.path}`,
+      `sideby: ${account.ref} saved its session and is handing over because ${WHY[ready.trigger]}${ready.window ? ` (${windowText(ready.window)})` : ''}; next is ${decision.ref}${skippedText(decision)}. Brief: ${done.path}`,
     )
     if (
       settings.countdownSeconds > 0 &&

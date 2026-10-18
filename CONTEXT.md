@@ -54,8 +54,9 @@ Avoid: *profile* on its own (Codex already uses it for a config layer that does 
 - **Handoff**: moving on to another Account when one Account's Quota runs low. The next Account starts a new session; the old session stays in the old Account. Started by a person (`sideby next`) or by sideby itself (Auto Handoff).
 - **Handoff Order**: which Accounts a Handoff may move on to, and in what order: either the Family's Accounts by lowest Quota Pressure, or a list the user writes, which may name Accounts of other Families.
 - **Handoff Brief**: the note the next Account starts from: what the task is, what is done, what is left. Written by the old session while it still has Quota, or put together by sideby from the old session's local records when it could not.
-- **Handoff Threshold**: the Quota Pressure at which an Auto Handoff begins.
-- **Auto Handoff**: a Handoff sideby carries out by itself when a running session reaches the Handoff Threshold: the old session writes the Handoff Brief and ends, and the next Account in the Handoff Order starts from it in the same terminal.
+- **Handoff Threshold**: the Quota Pressure at which an Auto Handoff begins, and at which an Account counts as full for taking over.
+- **Hand-over Level**: the used percent at which one Quota window of a running session starts an Auto Handoff. It follows how fast that window has been used in the session's recent turns, so a window used slowly hands over later than the Handoff Threshold and one used fast earlier; before any turn is measured it is the Handoff Threshold.
+- **Auto Handoff**: a Handoff sideby carries out by itself when a window of a running session reaches its Hand-over Level: the old session writes the Handoff Brief and ends, and the next Account in the Handoff Order starts from it in the same terminal.
 - **Compaction Threshold**: how large a session's context may grow before the Host compacts it by itself. Not the Handoff Threshold, which is about Quota.
 - **Tuning Suggestion**: a Compaction Threshold that sideby estimates would spend fewer tokens for one model in one Account, replaying that Account's recent local session records. An estimate, never applied by sideby.
 

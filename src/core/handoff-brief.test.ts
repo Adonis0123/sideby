@@ -6,7 +6,8 @@ import { readFile, stat } from 'node:fs/promises'
 import { describe, it } from 'node:test'
 import { withFakeHome } from '../../testing/index.ts'
 import { firstPrompt } from '../handoff/messages.ts'
-import { ASSEMBLED_NOTE, finishBrief, gitSection } from './handoff-brief.ts'
+import { ASSEMBLED_NOTE, finishBrief, gitSection, UNFINISHED_NOTE } from './handoff-brief.ts'
+import { BRIEF_DONE } from './handoff-chain.ts'
 
 const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' }
 
@@ -27,11 +28,21 @@ describe('gitSection', () => {
 describe('finishBrief', () => {
   it('keeps the session’s Brief at the target, adds nothing else outside a repository, mode 600', async () => {
     await withFakeHome(async (h) => {
-      const target = await h.write('chain/1-claude-001.md', '# Goal\nShip it\n')
+      const done = `# Goal\nShip it\n${BRIEF_DONE}\n`
+      const target = await h.write('chain/1-claude-001.md', done)
       const r = await finishBrief({ target, ready: {}, assembled: 'unused', cwd: h.path('.') })
       assert.equal(r.source, 'agent')
-      assert.equal(await readFile(target, 'utf8'), '# Goal\nShip it\n')
+      assert.equal(await readFile(target, 'utf8'), done)
       assert.equal((await stat(target)).mode & 0o777, 0o600)
+    })
+  })
+
+  it('keeps an unfinished session Brief and adds sideby’s records under it', async () => {
+    await withFakeHome(async (h) => {
+      const target = await h.write('chain/1-claude-001.md', '# Goal\nShip it\n')
+      const r = await finishBrief({ target, ready: {}, assembled: '## Task\nX\n', cwd: h.path('.') })
+      assert.equal(r.source, 'agent')
+      assert.equal(await readFile(target, 'utf8'), `# Goal\nShip it\n\n${UNFINISHED_NOTE}\n\n## Task\nX\n`)
     })
   })
 

@@ -1,4 +1,4 @@
-import type { QuotaResult } from '../types.ts'
+import type { QuotaResult, QuotaWindow } from '../types.ts'
 
 /**
  * How full a Quota window must be before the CLI and the Panel warn about it, and the Usage window both
@@ -30,11 +30,22 @@ export function windowReset(resetsAt: string, now: Date): boolean {
  * must be self-contained; a test keeps the two equal.
  */
 export function quotaPressure(quota: QuotaResult | undefined, now: Date): number | null {
+  const windows = openWindows(quota, now)
+  if (windows === null) return null
+  let max = 0
+  for (const w of windows) max = Math.max(max, w.usedPercent)
+  return max
+}
+
+/**
+ * The windows that count toward Quota Pressure and have not reset, with `usedPercent` clamped to 0–100; null when
+ * the Account has no Quota or no window that counts (spec §3.26).
+ */
+export function openWindows(quota: QuotaResult | undefined, now: Date): QuotaWindow[] | null {
   if (quota?.status !== 'ok') return null
   const windows = quota.windows.filter((w) => !w.name)
   if (windows.length === 0) return null
-  let max = 0
-  for (const w of windows)
-    if (!windowReset(w.resetsAt, now)) max = Math.max(max, Math.min(100, Number(w.usedPercent) || 0))
-  return max
+  return windows
+    .filter((w) => !windowReset(w.resetsAt, now))
+    .map((w) => ({ ...w, usedPercent: Math.min(100, Number(w.usedPercent) || 0) }))
 }

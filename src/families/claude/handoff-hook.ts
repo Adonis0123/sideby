@@ -1,6 +1,6 @@
-// Claude Code for the handoff hook (spec §3.17): Quota Pressure from the status line tap's cache, and a used-up
+// Claude Code for the handoff hook (spec §3.17): the Quota windows from the status line tap's cache, and a used-up
 // Quota told apart from a transient rate limit. Leaf module: the hook runs on every tool call.
-import { quotaPressure } from '../../core/quota-levels.ts'
+import { openWindows } from '../../core/quota-levels.ts'
 import { field, type HookReader } from '../../handoff/reader.ts'
 import { accountNameFromEnv, cacheStateDir, readQuotaCache } from './quota-cache.ts'
 
@@ -8,13 +8,13 @@ import { accountNameFromEnv, cacheStateDir, readQuotaCache } from './quota-cache
 const USED_UP = /usage limit|limit reached|out of (extra )?usage/i
 
 export const claudeHookReader: HookReader = {
-  async pressure(_input, env, now) {
+  async windows(_input, env, now) {
     const name = accountNameFromEnv(env)
     if (!name) return null
     try {
       const cache = await readQuotaCache(cacheStateDir(env), name)
       if (cache.status !== 'ok') return null
-      return quotaPressure({ ...cache, source: 'statusline' }, now)
+      return openWindows({ ...cache, source: 'statusline' }, now)
     } catch {
       return null
     }

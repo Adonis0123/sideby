@@ -6,7 +6,15 @@ import { Readable, Writable } from 'node:stream'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
-import { ensureChainDir, FILES, type PlanFile, readJsonFile, writeJsonFile } from '../core/handoff-chain.ts'
+import {
+  BRIEF_DONE,
+  ensureChainDir,
+  FILES,
+  type PlanFile,
+  type ReadyFile,
+  readJsonFile,
+  writeJsonFile,
+} from '../core/handoff-chain.ts'
 import { writeQuotaCache } from '../families/claude/quota-cache.ts'
 import type { Env, HandoffHookEvent } from '../types.ts'
 import { decide, runHandoffHook } from './hook.ts'
@@ -38,11 +46,16 @@ async function setup(h: FakeHome, plan: Partial<PlanFile> = {}) {
   return { dir, brief, env }
 }
 
-async function pressure(env: Env, used: number) {
+async function pressure(env: Env, used: number, weekly?: number) {
   await writeQuotaCache(join(env.XDG_STATE_HOME!, 'sideby'), '001', {
     version: 1,
     observedAt: NOW.toISOString(),
-    windows: [{ label: '5h', windowMinutes: 300, usedPercent: used, resetsAt: '2026-10-09T15:00:00Z' }],
+    windows: [
+      { label: '5h', windowMinutes: 300, usedPercent: used, resetsAt: '2026-10-09T15:00:00Z' },
+      ...(weekly === undefined
+        ? []
+        : [{ label: '7d', windowMinutes: 10080, usedPercent: weekly, resetsAt: '2026-10-12T20:00:00Z' }]),
+    ],
   })
 }
 
@@ -189,13 +202,86 @@ describe('handoff hook', () => {
       const { env, dir, brief } = await setup(h)
       await pressure(env, 96)
       await call(env, 'PostToolUse')
-      await writeFile(brief, '# brief\n')
+      await writeFile(brief, `# brief\n${BRIEF_DONE}\n`)
       const later = new Date(NOW.getTime() + 60_000)
       await utimes(brief, later, later)
       assert.deepEqual(await call(env, 'Stop'), {})
-      const ready = await readJsonFile<{ brief?: string; briefSource?: string }>(join(dir, FILES.ready))
+      const ready = await readJsonFile<ReadyFile>(join(dir, FILES.ready))
       assert.equal(ready?.brief, brief)
       assert.equal(ready?.briefSource, 'agent')
+      assert.deepEqual(ready?.window, { label: '5h', usedPercent: 96, resetsAt: '2026-10-09T15:00:00Z' })
+    })
+  })
+
+  it('on Stop: a Brief without the finished line counts as not written: block once, then ready without it', async () => {
+    await withFakeHome(async (h) => {
+      const { env, dir, brief } = await setup(h)
+      await pressure(env, 96)
+      await call(env, 'PostToolUse')
+      await writeFile(brief, '# brief, half done\n')
+      const later = new Date(NOW.getTime() + 60_000)
+      await utimes(brief, later, later)
+      const blocked = (await call(env, 'Stop')).output as { decision: string; reason: string }
+      assert.equal(blocked.decision, 'block')
+      assert.ok(blocked.reason.includes(BRIEF_DONE))
+      await call(env, 'Stop', { stop_hook_active: true })
+      const ready = await readJsonFile<ReadyFile>(join(dir, FILES.ready))
+      assert.equal(ready?.trigger, 'threshold')
+      assert.equal(ready?.brief, undefined)
+    })
+  })
+
+  it('names the window that reached its level: the weekly one while the 5-hour one is nearly empty', async () => {
+    await withFakeHome(async (h) => {
+      const { env } = await setup(h)
+      await pressure(env, 1, 95)
+      const out = (await call(env, 'PostToolUse')).output as {
+        hookSpecificOutput: { additionalContext: string }
+      }
+      assert.match(out.hookSpecificOutput.additionalContext, /weekly \(7d\) quota is at 95%/)
+    })
+  })
+
+  it('adaptive: a window of light turns hands over later than threshold, a heavy turn earlier', async () => {
+    await withFakeHome(async (h) => {
+      const { env } = await setup(h, { adaptive: true })
+      // Turns of 1–2 points: the level is 100 − 1.5 × 2 = 97.
+      await pressure(env, 90)
+      await call(env, 'PostToolUse')
+      await pressure(env, 92)
+      await call(env, 'Stop')
+      await pressure(env, 93)
+      await call(env, 'Stop')
+      await pressure(env, 96)
+      assert.deepEqual(await call(env, 'PostToolUse'), {})
+      await pressure(env, 97)
+      const out = (await call(env, 'PostToolUse')).output as {
+        hookSpecificOutput: { additionalContext: string }
+      }
+      assert.match(out.hookSpecificOutput.additionalContext, /end your turn/)
+    })
+    await withFakeHome(async (h) => {
+      const { env } = await setup(h, { adaptive: true })
+      // One turn of 8 points: the level is 100 − 12 = 88, so a turn that ends at 88 is told to finish.
+      await pressure(env, 80)
+      await call(env, 'PostToolUse')
+      await pressure(env, 88)
+      const out = (await call(env, 'Stop')).output as { decision: string; reason: string }
+      assert.equal(out.decision, 'block')
+      assert.match(out.reason, /5-hour \(5h\) quota is at 88%/)
+    })
+  })
+
+  it('adaptive: without a measured turn a window uses threshold', async () => {
+    await withFakeHome(async (h) => {
+      const { env } = await setup(h, { adaptive: true })
+      await pressure(env, 94)
+      await call(env, 'PostToolUse')
+      await pressure(env, 95)
+      const out = (await call(env, 'PostToolUse')).output as {
+        hookSpecificOutput: { additionalContext: string }
+      }
+      assert.match(out.hookSpecificOutput.additionalContext, /end your turn/)
     })
   })
 
