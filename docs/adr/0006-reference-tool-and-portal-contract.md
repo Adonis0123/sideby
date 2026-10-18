@@ -43,6 +43,10 @@ ADR-0021 adds two promises, added like every other option (compatible):
 - `GET <basePath>/icon.svg` answers the sideby mark (ADR-0022) as `image/svg+xml`: both buddies on a transparent square, for a Portal's tab or menu. `GET <basePath>/favicon.svg` answers the small cut, the blue buddy alone, which the Panel page uses as its favicon. A Portal draws the mark inside its own tile when it wants one; it never keeps a copy, so a new mark reaches it with the next sideby.
 - `updates?: boolean`, default `true`. With `false` the Panel shows no update label, update button or Auto Update setting, and refuses `/api/update*` with 403, for a Portal that manages sideby's version itself. With `true`, an Update started from a Portal's Panel installs the new package; the Portal loads it as it does any reinstall, and the Panel tells the viewer to reload the page.
 
+## Amendment (2026-10-18): AI Tasks in a Portal
+
+ADR-0030 adds `ask?: { bridge: 'postMessage' }`, added like every other option (compatible) and checked when the handler is created. With it, a Panel inside a frame hides its own "Let AI do it" button and posts each AI Task (`{ type: 'local-tools:ask', version: 1, preset, native: { task, text, context }, text }`) to `window.parent` at its own origin, for a Portal that starts AI Tasks through `sideby ask --spec -`. The CSP and the Host, Origin and token checks do not change.
+
 ## Why not the others
 
 - **One package for every tool, sideby as a plugin of it**: one install, but sideby's published scope would change and one failing tool would break the others.

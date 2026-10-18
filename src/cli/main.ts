@@ -112,7 +112,7 @@ Updates: once a day sideby asks the npm registry for its newest version and says
 
 /** `sideby <command> --help` for the commands agents use to set up and repair accounts (spec §3.16). */
 const COMMAND_HELP: Record<string, string> = {
-  ask: 'sideby ask [<text>] [--task free|fix|quota|account|host|plugin|terminal|handoff] [--account <ref>] [--terminal <id>] [--attach <file>]... [--print] [--json]\nsideby ask --run <id> [--state-dir <dir>]\nOpen a task in your terminal. --attach adds an image (PNG, JPEG, GIF, WebP; up to 20 MB) or a video (MP4, MOV, WebM; up to 200 MB), at most 5. --print prints only the prompt. If opening fails, paste the command into a terminal.',
+  ask: 'sideby ask [<text>] [--task free|fix|quota|account|host|plugin|terminal|handoff] [--account <ref>] [--terminal <id>] [--attach <file>]... [--print] [--json]\nsideby ask --run <id> [--state-dir <dir>]\nsideby ask --spec - [--print] --json\nsideby ask --choices --json\nOpen a task in your terminal. --spec reads a Task Spec (one JSON object, at most 1 MB) from stdin, as a Portal sends it; --choices lists the accounts and terminals a task can use. --attach adds an image (PNG, JPEG, GIF, WebP; up to 20 MB) or a video (MP4, MOV, WebM; up to 200 MB), at most 5. --print prints only the prompt. If opening fails, paste the command into a terminal.',
   terminal:
     "sideby terminal [--set <id>|--custom '<program> … {cwd} … {cmd}'|--unset] [--json]\nList terminals or save your preference; --custom saves and selects your own launch command.",
   key: 'sideby key <account> [--var <NAME>] [--json]\nEnter an API key without echo. Run in a terminal or use the Panel key box.',
@@ -286,7 +286,10 @@ export function nodeTooOld(version = process.versions.node): boolean {
 }
 
 const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
-  ask: { flags: ['json', 'print'], valued: ['task', 'account', 'terminal', 'run', 'state-dir', 'attach'] },
+  ask: {
+    flags: ['json', 'print', 'choices'],
+    valued: ['task', 'account', 'terminal', 'run', 'state-dir', 'attach', 'spec'],
+  },
   terminal: { flags: ['json', 'unset'], valued: ['set', 'custom'] },
   key: { flags: ['json'], valued: ['var'] },
   try: { flags: ['json', 'yes'] },

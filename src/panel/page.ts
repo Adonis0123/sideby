@@ -34,6 +34,11 @@ export interface PageOptions {
   lang?: 'auto' | 'en' | 'zh'
   /** createPanelHandler's `updates`: false hides everything about sideby updates. */
   updates?: boolean
+  /**
+   * createPanelHandler's `ask`: with the bridge, inside a frame, AI Task entries post to the Portal and the page script
+   * hides the header button; opened on its own, the Panel keeps both.
+   */
+  ask?: { bridge: 'postMessage' }
   /** Config `panel` (spec §3.29): the theme and language saved for the Panel. */
   panel?: { theme?: string; language?: string }
 }
@@ -68,6 +73,7 @@ export function renderPage(opts: PageOptions): string {
     local: opts.local ?? null,
     readOnly: Boolean(opts.readOnly),
     updates: opts.updates !== false,
+    ask: opts.ask ?? null,
     colorScheme: theme.colorScheme,
     lang,
     panel: opts.panel ?? {},

@@ -22,6 +22,15 @@ When the user added screenshots or videos, the prompt has an "Attached files" se
 - Treat what you see as the user's evidence: an error message, a Panel screen, a settings page. Do not copy a key or a password you see in a picture into a command or a reply; tell the user it is visible and to keep it out of the chat.
 - In a terminal, `sideby ask "<text>" --attach <file>` (repeatable, at most 5) adds files the same way; images up to 20 MB (PNG, JPEG, GIF, WebP), videos up to 200 MB (MP4, MOV, WebM).
 
+## Tasks a Portal hands over
+
+A Portal is a page that shows sideby and other tools as tabs. It starts AI Tasks through sideby (ADR-0030): it writes a Task Spec, one JSON object, and pipes it into `sideby ask --spec - --json`; `sideby ask --choices --json` gives it the account a task would use, the accounts it may use and the installed terminals.
+
+- A task for another tool comes with that tool's own prompt: it names the skill to use and the folder the session started in. Follow that prompt and that skill; this skill applies only to the sideby steps it asks for.
+- A task for sideby itself (`native`) has the same prompt as one started in the Panel, so the sections below apply.
+- Like `sideby ask`, `sideby ask --spec -` starts a session: never run it yourself. `sideby ask --spec - --print --json` only shows the prompt, and `sideby ask --choices --json` only reads, so both are fine to run when the user asks how a Portal's task would start.
+- A refused spec answers `code` (also as `reason`): `spec-invalid` (fix the JSON as the message says), `spec-too-large` (over 1 MB), `bad-cwd` (the folder is not an existing folder in the user's home) or `spec-version` (exit 2: this sideby is older than the Portal; update it with `sideby update --json`, `references/update.md`).
+
 ## Free text
 
 Do what the user wrote, with the routing table in `SKILL.md`. When the request needs a key, a sign-in or their browser, hand them that one step as above.

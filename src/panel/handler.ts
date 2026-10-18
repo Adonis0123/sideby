@@ -17,6 +17,7 @@ import {
   setCustomTerminal,
   setPreferredTerminal,
   startAiTask,
+  taskContext,
   terminals,
   tryAccount,
 } from '../core/ask.ts'
@@ -101,6 +102,26 @@ export interface PanelHandlerOptions {
    * Panel then refuses `/api/update*` with 403.
    */
   updates?: boolean
+  /**
+   * How the Panel's AI Tasks start (spec §3.28, ADR-0030). `{ bridge: 'postMessage' }` is for a Portal that offers
+   * AI Tasks on every page itself: inside a frame, the Panel hides its header "Let AI do it" button and every AI Task entry posts
+   * `{ type: 'local-tools:ask', version: 1, preset, native: { task, text, context }, text }` to `window.parent`, with
+   * the Panel's own origin as the target origin, instead of opening its dialog. Without it the Panel opens its own
+   * dialog. Checked when the handler is created: anything else throws a TypeError.
+   */
+  ask?: { bridge: 'postMessage' }
+}
+
+function resolveAsk(ask: unknown): { bridge: 'postMessage' } | undefined {
+  if (ask === undefined) return undefined
+  if (
+    !ask ||
+    typeof ask !== 'object' ||
+    (ask as { bridge?: unknown }).bridge !== 'postMessage' ||
+    Object.keys(ask).length !== 1
+  )
+    throw new TypeError('panel ask must be { bridge: "postMessage" } or left out')
+  return { bridge: 'postMessage' }
 }
 
 const PANEL_LANGS = ['auto', 'en', 'zh'] as const
@@ -687,38 +708,7 @@ const AI_TASKS: readonly string[] = AI_TASK_KINDS
 
 /** The `context` of an AI Task body (spec §3.28): only the strings and findings a Task Prompt shows. */
 function askContext(body: Record<string, unknown>): AiTaskInput['context'] {
-  const c = body.context
-  if (c === undefined || c === null) return undefined
-  if (typeof c !== 'object' || Array.isArray(c)) throw new HttpError(400, '"context" must be an object')
-  const out: NonNullable<AiTaskInput['context']> = {}
-  const str = (v: unknown, what: string) => {
-    if (typeof v !== 'string') throw new HttpError(400, `${what} must be a string`)
-    return v
-  }
-  for (const [k, v] of Object.entries(c)) {
-    if (k === 'account' || k === 'family' || k === 'quotaReason' || k === 'version' || k === 'terminalCustom')
-      out[k] = str(v, `"context.${k}"`)
-    else if (k === 'terminals') {
-      if (!Array.isArray(v) || v.length > 50) throw new HttpError(400, '"context.terminals" must be a list')
-      out.terminals = v.map((x) => str(x, 'each of "context.terminals"'))
-    } else if (k === 'handoff') {
-      if (!Array.isArray(v) || v.length > 100) throw new HttpError(400, '"context.handoff" must be a list')
-      out.handoff = v.map((x) => str(x, 'each of "context.handoff"'))
-    } else if (k === 'findings') {
-      if (!Array.isArray(v) || v.length > 100) throw new HttpError(400, '"context.findings" must be a list')
-      out.findings = v.map((f) => {
-        if (!f || typeof f !== 'object' || Array.isArray(f) || typeof f.message !== 'string')
-          throw new HttpError(400, 'each finding needs a "message"')
-        const one: { code?: string; account?: string; item?: string; message: string; hint?: string } = {
-          message: f.message,
-        }
-        for (const key of ['code', 'account', 'item', 'hint'] as const)
-          if (f[key] !== undefined && f[key] !== null) one[key] = str(f[key], `"finding.${key}"`)
-        return one
-      })
-    } else throw new HttpError(400, `unknown context "${k}"`)
-  }
-  return out
+  return taskContext(body.context, (message) => new HttpError(400, message))
 }
 
 /** Task, text, context, language and account of an /api/ask body; unknown tasks are refused. */
@@ -790,6 +780,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   const theme = resolveTheme(opts.theme)
   const lang = resolveLang(opts.lang)
   const updates = opts.updates !== false
+  const ask = resolveAsk(opts.ask)
   const token = randomBytes(32).toString('base64url')
   const serial = writeQueue()
   const getRuntime = typeof opts.runtime === 'function' ? opts.runtime : async () => opts.runtime as Runtime
@@ -1403,6 +1394,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
                   theme,
                   lang,
                   updates,
+                  ...(ask ? { ask } : {}),
                   ...(panel ? { panel } : {}),
                 }),
           )

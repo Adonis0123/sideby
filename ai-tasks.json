@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "tools": {
+    "accounts": {
+      "skill": "sideby",
+      "skillInstall": "npx skills add Adonis0123/sideby -g",
+      "cwd": "engine",
+      "contribute": { "repo": "https://github.com/Adonis0123/sideby", "guide": "CONTRIBUTING.md" },
+      "presets": [
+        {
+          "id": "fix",
+          "native": true,
+          "title": { "en": "Let AI fix it", "zh": "让 AI 修复" },
+          "placeholder": { "en": "Anything to add? You can leave this empty", "zh": "想补充什么？可以不填" },
+          "examples": [
+            { "en": "Fix these problems for me", "zh": "帮我修好这些问题" },
+            { "en": "Explain them first, then fix them", "zh": "先解释一下再修" }
+          ]
+        },
+        {
+          "id": "quota",
+          "native": true,
+          "title": { "en": "Ask AI why", "zh": "问 AI 为什么" },
+          "placeholder": { "en": "Anything to add? You can leave this empty", "zh": "想补充什么？可以不填" },
+          "examples": [
+            { "en": "Why can't I see my quota?", "zh": "为什么看不到额度" },
+            { "en": "Turn on the quota display for me", "zh": "帮我开启额度显示" }
+          ]
+        },
+        {
+          "id": "account",
+          "native": true,
+          "title": { "en": "Let AI set up an account", "zh": "让 AI 帮我配账号" },
+          "placeholder": {
+            "en": "For example: I have a DeepSeek API key",
+            "zh": "比如：我有一个 DeepSeek 的 API key"
+          },
+          "examples": [
+            { "en": "Add a Claude subscription account", "zh": "加一个 Claude 订阅账号" },
+            { "en": "I have an API address or a docs link", "zh": "我有一个 API 地址或文档链接" }
+          ]
+        },
+        {
+          "id": "host",
+          "native": true,
+          "title": { "en": "Let AI support a new tool", "zh": "让 AI 支持一个新工具" },
+          "placeholder": { "en": "Which tool do you want to use?", "zh": "你想用哪个工具？" },
+          "examples": [
+            { "en": "I want to use Gemini CLI", "zh": "我想用 Gemini CLI" },
+            { "en": "I want to use OpenCode", "zh": "我想用 OpenCode" }
+          ]
+        },
+        {
+          "id": "plugin",
+          "native": true,
+          "title": { "en": "Let AI write a plugin", "zh": "让 AI 写插件" },
+          "placeholder": { "en": "What should the plugin do?", "zh": "你想让插件做什么？" },
+          "examples": [
+            { "en": "Switch my proxy before each launch", "zh": "启动前自动切换代理" },
+            { "en": "Copy my settings into each new account", "zh": "新建账号时复制我的配置" }
+          ]
+        },
+        {
+          "id": "terminal",
+          "native": true,
+          "title": { "en": "Let AI set up your terminal", "zh": "让 AI 帮我配终端" },
+          "placeholder": { "en": "Which terminal do you use?", "zh": "你用的是什么终端？" },
+          "examples": [
+            { "en": "I use Warp", "zh": "我用 Warp" },
+            { "en": "sideby doesn't recognize my terminal", "zh": "我用的终端没被认出来" }
+          ]
+        },
+        {
+          "id": "handoff",
+          "native": true,
+          "title": { "en": "Let AI tune it", "zh": "让 AI 帮我调" },
+          "placeholder": {
+            "en": "Anything to add? For example: use work first",
+            "zh": "想补充什么？比如：先用 work"
+          },
+          "examples": [
+            { "en": "Recommend a threshold for my accounts", "zh": "按我的账号推荐阈值" },
+            { "en": "Use my team account last", "zh": "团队账号放到最后" },
+            { "en": "Explain how a handoff works first", "zh": "先讲讲接力是怎么工作的" }
+          ]
+        }
+      ]
+    }
+  }
+}
