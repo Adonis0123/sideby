@@ -205,7 +205,8 @@ function shapeSvg(s: BuddyShape): string {
   return `<path d="${s.d}"${fill}${stroke}${width}/>`
 }
 
-function buddySvg(b: PlacedBuddy, line: number, bodyFill?: string | null): string {
+/** One placed buddy as SVG, drawn inside a group that sets the ink outline (`MARK_OUTLINE`). */
+export function buddySvg(b: PlacedBuddy, line: number, bodyFill?: string | null): string {
   const { paths, dots, above } = buddyShapes(b, bodyFill)
   const eyes = dots
     .map(
@@ -218,14 +219,14 @@ function buddySvg(b: PlacedBuddy, line: number, bodyFill?: string | null): strin
   return `<g${transform} stroke-width="${line}">${paths.map(shapeSvg).join('')}<g stroke="none">${eyes}</g>${above.map(shapeSvg).join('')}</g>`
 }
 
-const OUTLINE = `stroke="${MARK_COLORS.ink}" stroke-linecap="round" stroke-linejoin="round"`
+export const MARK_OUTLINE = `stroke="${MARK_COLORS.ink}" stroke-linecap="round" stroke-linejoin="round"`
 
 /**
  * The mark as SVG children (no outer <svg>). With `front` omitted the blue buddy's body has no fill of its own, so it
  * takes the surrounding `fill` (the Panel's `--logo-fg`, which Portals set with `logoColor`); everything else is fixed.
  */
 export function markSvgBody(front?: string): string {
-  return `<g ${OUTLINE}>${buddySvg(MARK.back, MARK.placedLine)}${buddySvg(MARK.front, MARK.placedLine, front ?? null)}</g>`
+  return `<g ${MARK_OUTLINE}>${buddySvg(MARK.back, MARK.placedLine)}${buddySvg(MARK.front, MARK.placedLine, front ?? null)}</g>`
 }
 
 const viewBox = (v: { x: number; y: number; size: number }) => `${v.x} ${v.y} ${v.size} ${v.size}`
@@ -256,7 +257,7 @@ export const FAVICON_SVG = (() => {
     .join('')
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="sideby">` +
-    `<g transform="translate(0 -1) scale(.5)"><g ${OUTLINE} stroke-width="${MARK.line}">` +
+    `<g transform="translate(0 -1) scale(.5)"><g ${MARK_OUTLINE} stroke-width="${MARK.line}">` +
     `${keep.map(shapeSvg).join('')}<g stroke="none">${eyes}</g>${above.map(shapeSvg).join('')}</g></g></svg>`
   )
 })()
