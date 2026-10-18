@@ -26,10 +26,10 @@ sideby new claude work           # create ~/.claude-work, sharing ~/.claude's sk
 sideby login claude:work         # sign in once
 sideby run work                  # Claude Code on the work account
 sideby quota setup claude --yes  # Claude quota in the panel; undo: sideby quota teardown claude
-sideby ui                        # every account's quota at http://127.0.0.1:17420
+sideby ui --background           # every account's quota at http://127.0.0.1:17420, still there after you close the terminal
 ```
 
-`sideby update` installs a newer sideby when there is one; sideby says so after a command and in the panel. `sideby run claude:main` keeps using `~/.claude` in another terminal at the same time. Arguments after `--` go to the Host: `sideby run work -- --resume`. To try it without installing, run `npx sideby`.
+`sideby app install` adds a Dock icon that opens the panel, and `sideby autostart on` has it ready each time you log in. `sideby update` installs a newer sideby when there is one; sideby says so after a command and in the panel. `sideby run claude:main` keeps using `~/.claude` in another terminal at the same time. Arguments after `--` go to the Host: `sideby run work -- --resume`. To try it without installing, run `npx sideby`.
 
 ## Set up with your AI agent
 

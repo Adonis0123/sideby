@@ -26,10 +26,10 @@ sideby new claude work           # 新建 ~/.claude-work，共用 ~/.claude 的 
 sideby login claude:work         # 登录一次
 sideby run work                  # 用 work 账号启动 Claude Code
 sideby quota setup claude --yes  # 在面板里显示 Claude 额度；撤回：sideby quota teardown claude
-sideby ui                        # 在 http://127.0.0.1:17420 查看所有账号的额度
+sideby ui --background           # 在 http://127.0.0.1:17420 查看所有账号的额度，关掉终端也还在
 ```
 
-有新版本时，命令结束后和面板里都会提示，`sideby update` 一条命令更新。`sideby run claude:main` 可以同时在另一个终端里继续用 `~/.claude`。`--` 之后的参数原样交给宿主：`sideby run work -- --resume`。不想安装，可以先跑 `npx sideby` 试试。
+国内连 npm 慢或超时的话，换镜像安装：`npm i -g sideby --registry=https://registry.npmmirror.com`。`sideby app install` 会在 Dock 里放一个图标，点一下就打开面板；`sideby autostart on` 让面板每次登录电脑后自动在后台准备好。有新版本时，命令结束后和面板里都会提示，`sideby update` 一条命令更新。`sideby run claude:main` 可以同时在另一个终端里继续用 `~/.claude`。`--` 之后的参数原样交给宿主：`sideby run work -- --resume`。不想安装，可以先跑 `npx sideby` 试试。
 
 ## 让 AI 帮你装
 
