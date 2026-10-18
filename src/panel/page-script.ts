@@ -4079,7 +4079,12 @@ const MAIN = String.raw`
       rows.push(h('label', { class: 'field', for: 'ak-term' }, h('span', null, t('ask.terminal')), sel))
     }
     if (rows.length) out.push(h('div', { class: 'ask-pick' }, rows))
-    if (ak.account) out.push(h('p', { class: 'small' }, t('ask.confirm', { terminal: termName(ak.terminal || 'terminal'), ref: ak.account })))
+    if (ak.account) {
+      // Families whose AI Tasks start with permission checks on (ADR-0031) say so after the confirm line.
+      const acct = S.state && S.state.accounts.find((x) => x.ref === ak.account)
+      const safe = acct && family(acct.family).aiTaskSafe
+      out.push(h('p', { class: 'small' }, t('ask.confirm', { terminal: termName(ak.terminal || 'terminal'), ref: ak.account }) + (safe ? ' ' + t('ask.safe') : '')))
+    }
     return out
   }
   function askResult() {

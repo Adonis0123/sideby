@@ -43,7 +43,9 @@ AI 要守的规则：改东西之前先给你看改动，等你同意；从不�
 
 **终端打不开时。** 面板会复制一条命令 `sideby ask --run <id>`，提示你粘贴到任意终端回车，效果一样。sideby 第一次打开 Terminal、iTerm2 或 Ghostty 时，macOS 会问是否允许 sideby 控制它；如果你点了不允许，去「系统设置 → 隐私与安全性 → 自动化」里打开。任务保留一小时，过期后再点一次即可。
 
-终端从 sideby 自己的一个目录开始，AI 不会顺手读你的某个项目。这些不用面板也能做：`sideby ask "帮我加一个 DeepSeek API 账号"`（见[命令](commands.zh-CN.md)）。
+终端从 sideby 自己的一个目录开始，AI 不会顺手读你的某个项目。
+
+**AI 的权限检查保持开启。** AI Task 像 `sideby run` 一样启动账号，只是去掉账号设置里跳过宿主权限检查的参数。Claude Code 用它的 auto 模式启动：日常操作不打断你，但运行下载来的代码、force push、删掉你原有的文件这类有风险的操作会先经过检查。Codex 去掉 `--dangerously-bypass-approvals-and-sandbox`（`--yolo`），按你自己的 Codex 设置来。其他工具照旧启动。你自己用 `sideby run` 开的会话，参数一个不少。这些不用面板也能做：`sideby ask "帮我加一个 DeepSeek API 账号"`（见[命令](commands.zh-CN.md)）。
 
 ## 面板应用
 

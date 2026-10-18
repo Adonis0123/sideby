@@ -11,6 +11,7 @@ import { readCodexQuota, readCodexUsage } from './rollout.ts'
 import { readCodexTuning } from './tuning.ts'
 
 const FILE_STORE_KEY = 'cli_auth_credentials_store'
+const CODEX_BYPASS = ['--dangerously-bypass-approvals-and-sandbox', '--yolo']
 
 async function readModel(account: Account): Promise<string | undefined> {
   try {
@@ -44,6 +45,13 @@ export const codexFamily: FamilyDef = {
   // `-i, --image <FILE>...` takes several values (Codex 0.163.0 --help); AI Tasks pass `--image=<path>`, one value
   // per flag, so the prompt after it stays a positional argument.
   imageArg: '--image',
+  // An AI Task keeps Codex's approvals and sandbox (ADR-0031): the one flag that turns both off, and its `--yolo`
+  // alias, are dropped before `--`. Codex has no mode that blocks only risky actions, so nothing is added.
+  aiTaskArgs(args) {
+    const end = args.indexOf('--')
+    const options = end === -1 ? args : args.slice(0, end)
+    return [...options.filter((a) => !CODEX_BYPASS.includes(a)), ...(end === -1 ? [] : args.slice(end))]
+  },
   sharedItems: [
     { path: 'AGENTS.md', mode: 'link' },
     { path: 'hooks.json', mode: 'link' },

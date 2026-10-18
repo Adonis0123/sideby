@@ -43,7 +43,9 @@ The rules the AI follows: it shows you a change before making it and waits for y
 
 **When the terminal cannot open.** The panel copies one command, `sideby ask --run <id>`, and tells you to paste it into any terminal and press Return. It starts the same task. The first time sideby opens Terminal, iTerm2 or Ghostty, macOS asks whether sideby may control it; if you said no, turn it on in System Settings → Privacy & Security → Automation. The task waits for one hour; after that, click again.
 
-The terminal starts in a folder of sideby's own, so the AI does not read one of your projects along the way. Everything here also works without the panel: `sideby ask "add a DeepSeek API account"` (see [Commands](commands.md)).
+The terminal starts in a folder of sideby's own, so the AI does not read one of your projects along the way.
+
+**The AI keeps its permission checks on.** An AI Task starts the account as `sideby run` would, except that it leaves out any argument in your account settings that skips the Host's permission checks. Claude Code starts in its auto mode: no routine questions, but risky actions such as running downloaded code, force pushes or deleting files you already had are checked first. Codex drops `--dangerously-bypass-approvals-and-sandbox` (`--yolo`) and follows your own Codex settings. Other tools start unchanged. Your own `sideby run` sessions keep every argument. Everything here also works without the panel: `sideby ask "add a DeepSeek API account"` (see [Commands](commands.md)).
 
 ## Panel app
 

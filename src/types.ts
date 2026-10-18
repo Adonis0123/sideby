@@ -94,6 +94,14 @@ export interface FamilyDef {
    * it read the images from the paths the prompt lists. Public contract, additive only.
    */
   imageArg?: string
+  /**
+   * Makes a Launch safe for an AI Task (spec §3.28 "权限检查", ADR-0031): given every argument the Host would get
+   * (Family defaults, the Account's config arguments, the task's own), returns them without any argument that
+   * switches the Host's permission checks off, and may add the Host's own safe mode. Keep the other arguments in
+   * order, and return the same list when nothing needs to change. Only AI Tasks use it; `sideby run` never does.
+   * Public contract, additive only: a Family without it starts AI Tasks with the arguments unchanged.
+   */
+  aiTaskArgs?(args: readonly string[]): string[]
   sharedItems: SharedItemDef[]
   /** Arguments for the Host's sign-in command, or null when sign-in happens inside the Host. */
   login: { args: string[] | null; hint: string }

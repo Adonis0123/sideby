@@ -65,13 +65,69 @@ it('ask --run passes one prompt argument, cwd, Host exit code, and login argumen
     const prompt = 'quotes \'" $(do-not-run) `also-not`\nsecond line'
     const id = await writeTask({ kind: 'prompt', account: 'claude:main', prompt, cwd }, rt.paths)
     assert.equal((await cli(h, ['ask', '--run', id])).code, 7)
-    assert.deepEqual((await readHostLog(h, 'claude'))[0]!.argv, [prompt])
+    assert.deepEqual((await readHostLog(h, 'claude'))[0]!.argv, ['--permission-mode', 'auto', prompt])
     assert.equal(await readFile(h.path('cwd.txt'), 'utf8'), cwd)
     const login = await writeTask({ kind: 'login', account: 'claude:main', cwd }, rt.paths)
     assert.equal((await cli(h, ['ask', '--run', login])).code, 7)
     assert.deepEqual((await readHostLog(h, 'claude'))[1]!.argv, ['auth', 'login'])
   })
 })
+it('ask --run starts Claude without permission bypasses, in auto mode, while sideby run keeps them (ADR-0031)', async () => {
+  await withFakeHome(async (h) => {
+    await h.write('.claude/settings.json', '{}')
+    await fakeHost(h, 'claude')
+    const rt = await createRuntime({ env: h.env })
+    const cwd = await taskWorkDir(rt.paths)
+    const cases: [string[], string[]][] = [
+      [['--dangerously-skip-permissions'], ['--permission-mode', 'auto']],
+      [
+        ['--model', 'opus', '--dangerously-skip-permissions', '--effort', 'high'],
+        ['--permission-mode', 'auto', '--model', 'opus', '--effort', 'high'],
+      ],
+      [
+        ['--permission-mode', 'bypassPermissions', '--verbose'],
+        ['--permission-mode', 'auto', '--verbose'],
+      ],
+      [['--permission-mode=bypassPermissions'], ['--permission-mode', 'auto']],
+      [
+        ['--allow-dangerously-skip-permissions', '--model', 'opus'],
+        ['--permission-mode', 'auto', '--model', 'opus'],
+      ],
+      [
+        ['--dangerously-skip-permissions', '--permission-mode', 'plan'],
+        ['--permission-mode', 'plan'],
+      ],
+    ]
+    let n = 0
+    for (const [args, want] of cases) {
+      await h.write('.config/sideby/config.json', JSON.stringify({ accounts: { 'claude:main': { args } } }))
+      const id = await writeTask({ kind: 'prompt', account: 'claude:main', prompt: 'hi', cwd }, rt.paths)
+      assert.equal((await cli(h, ['ask', '--run', id])).code, 0)
+      assert.deepEqual((await readHostLog(h, 'claude'))[n++]!.argv, [...want, 'hi'], args.join(' '))
+      assert.equal((await cli(h, ['run', 'claude:main', '--', 'hi'])).code, 0)
+      assert.deepEqual((await readHostLog(h, 'claude'))[n++]!.argv, [...args, 'hi'], `run ${args.join(' ')}`)
+    }
+  })
+})
+
+it('ask --run drops the Codex bypass flags for an AI Task only (ADR-0031)', async () => {
+  await withFakeHome(async (h) => {
+    await h.write('.codex/config.toml', '')
+    await fakeHost(h, 'codex')
+    const args = ['--yolo', '-m', 'gpt-5', '--dangerously-bypass-approvals-and-sandbox']
+    await h.write('.config/sideby/config.json', JSON.stringify({ accounts: { 'codex:main': { args } } }))
+    const rt = await createRuntime({ env: h.env })
+    const id = await writeTask(
+      { kind: 'prompt', account: 'codex:main', prompt: 'hi', cwd: await taskWorkDir(rt.paths) },
+      rt.paths,
+    )
+    assert.equal((await cli(h, ['ask', '--run', id])).code, 0)
+    assert.deepEqual((await readHostLog(h, 'codex'))[0]!.argv, ['-m', 'gpt-5', 'hi'])
+    assert.equal((await cli(h, ['run', 'codex:main', '--', 'hi'])).code, 0)
+    assert.deepEqual((await readHostLog(h, 'codex'))[1]!.argv, [...args, 'hi'])
+  })
+})
+
 it("ask --run finds and runs a task the Panel wrote under another state folder, with the Panel's HOME", async () => {
   await withFakeHome(async (h) => {
     await h.write('.claude/settings.json', '{}')
@@ -89,7 +145,7 @@ it("ask --run finds and runs a task the Panel wrote under another state folder, 
     assert.equal((await cli(h, ['ask', '--run', id], terminalEnv)).code, 1, 'not found without the folder')
     assert.equal((await cli(h, ['ask', '--run', id, '--state-dir', rt.paths.stateDir], terminalEnv)).code, 3)
     const record = (await readHostLog(h, 'claude'))[0]!
-    assert.deepEqual(record.argv, ['hi'])
+    assert.deepEqual(record.argv, ['--permission-mode', 'auto', 'hi'])
     assert.equal(record.env.HOME, h.home)
     assert.equal(record.env.XDG_STATE_HOME, h.path('panel-state'))
   })
@@ -457,7 +513,7 @@ it('ask --run gives Codex each attached image as --image=<path> before the promp
       rt.paths,
     )
     assert.equal((await cli(h, ['ask', '--run', claude])).code, 0)
-    assert.deepEqual((await readHostLog(h, 'claude'))[0]!.argv, [prompt])
+    assert.deepEqual((await readHostLog(h, 'claude'))[0]!.argv, ['--permission-mode', 'auto', prompt])
   })
 })
 

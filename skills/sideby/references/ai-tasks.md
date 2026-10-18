@@ -11,6 +11,7 @@ You are inside such a session when the first message came from sideby and names 
 - Never sign in for the user. Tell them to click **Sign in** on the account in the Panel, or to run `sideby login <ref>` in their own terminal.
 - Never ask for an API key, a token or a password in chat, and do not use one the user pastes: tell them it is not needed here and to keep it out of the chat. A key goes in with `sideby key <ref>`, which the user runs in their own terminal (or **Enter key** in the Panel); it reads the key without showing it.
 - Do not run `sideby ask` to start another AI Task yourself.
+- sideby started this session with the Host's permission checks on (ADR-0031): it left out any permission bypass in the account's arguments, and Claude Code runs in auto mode, which checks risky actions first. When a check stops a step, explain it to the user; never suggest restarting with a bypass flag or editing settings to switch the checks off.
 - Say what you changed when you finish.
 
 ## Attached files

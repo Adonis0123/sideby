@@ -13,6 +13,7 @@ import {
   resumeFlagSession,
   withoutResumeFlag,
 } from '../shared/sessions.ts'
+import { claudeAiTaskArgs } from './ai-task.ts'
 import { claudeHandoff } from './handoff.ts'
 import { CLAUDE_LAYOUT } from './layout.ts'
 import { claudeModelChoice } from './model.ts'
@@ -116,6 +117,7 @@ export const claudeFamily: FamilyDef = {
   secretVar: 'ANTHROPIC_AUTH_TOKEN',
   // `-p` is one non-interactive prompt (Claude Code 2.1.301 --help, 2026-10-17).
   probe: { args: ['-p', 'Reply with OK'] },
+  aiTaskArgs: claudeAiTaskArgs,
   sharedItems: [
     ...LINKED.map((path): SharedItemDef => ({ path, mode: 'link' })),
     { path: '.claude.json', mode: 'json-key', key: 'mcpServers', mainPath: '.claude.json', credential: true },

@@ -502,6 +502,10 @@ describe('AI Task routes', () => {
         const claude = JSON.parse(state.text).families.find((f: { id: string }) => f.id === 'claude')
         assert.equal(claude.keyVar, 'ANTHROPIC_AUTH_TOKEN')
         assert.deepEqual(claude.tryCommand, ['claude', '-p', 'Reply with OK'])
+        // The AI dialog says the checks stay on only for a Family that keeps them on (ADR-0031).
+        const families = JSON.parse(state.text).families as { id: string; aiTaskSafe?: true }[]
+        assert.equal(claude.aiTaskSafe, true)
+        assert.equal(families.find((f) => f.id === 'grok')?.aiTaskSafe, undefined)
         assert.deepEqual(diffSnapshots(before, await snapshot(h.path('.claude'))), [])
       } finally {
         await s.close()

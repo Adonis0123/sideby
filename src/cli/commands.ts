@@ -58,17 +58,33 @@ async function whileRunning<T>(rt: Runtime, fn: () => Promise<T>): Promise<T> {
 }
 
 /** Runs the Account with Auto Handoff when it applies (spec §3.17), else the Host as usual. */
-async function runAccount(rt: Runtime, ref: string, args: readonly string[], io: Io): Promise<number> {
-  return whileRunning(rt, () => runAccountNow(rt, ref, args, io))
+/** `opts.aiTask`: an AI Task's Host, started without permission bypasses (ADR-0031); `sideby run` leaves it out. */
+async function runAccount(
+  rt: Runtime,
+  ref: string,
+  args: readonly string[],
+  io: Io,
+  opts: { aiTask?: boolean } = {},
+): Promise<number> {
+  return whileRunning(rt, () => runAccountNow(rt, ref, args, io, opts))
 }
 
-async function runAccountNow(rt: Runtime, ref: string, args: readonly string[], io: Io): Promise<number> {
-  const handed = await runWithHandoff(rt, ref, args, {
-    err: (l) => io.err(c.dim(l)),
-    stdin: io.stdin ?? process.stdin,
-  })
+async function runAccountNow(
+  rt: Runtime,
+  ref: string,
+  args: readonly string[],
+  io: Io,
+  opts: { aiTask?: boolean },
+): Promise<number> {
+  const handed = await runWithHandoff(
+    rt,
+    ref,
+    args,
+    { err: (l) => io.err(c.dim(l)), stdin: io.stdin ?? process.stdin },
+    opts,
+  )
   if (handed !== null) return handed
-  const prepared = await rt.prepareLaunch(ref, args, 'run')
+  const prepared = await rt.prepareLaunch(ref, args, 'run', opts)
   if (prepared.notice) io.err(c.cyan(prepared.notice))
   const code = await runHost(prepared)
   if ((io.stdin ?? process.stdin).isTTY) {
@@ -1931,7 +1947,8 @@ export async function cmdAsk(a: AskArgs, io: Io, runtime?: Runtime): Promise<num
         if ('why' in now) throw movedCwdError(now.why)
         if (now.real !== task.cwd) throw movedCwdError('points somewhere else')
       }
-      if (task.kind === 'prompt') return await runAccount(rt, task.account, await taskHostArgs(rt, task), io)
+      if (task.kind === 'prompt')
+        return await runAccount(rt, task.account, await taskHostArgs(rt, task), io, { aiTask: true })
       const prepared = await rt.prepareLaunch(task.account, [], 'login')
       if (prepared.notice) io.err(prepared.notice)
       return await whileRunning(rt, () => runHost(prepared))
@@ -1964,11 +1981,24 @@ export async function cmdAsk(a: AskArgs, io: Io, runtime?: Runtime): Promise<num
   // A chosen account becomes the next default, as choosing it in the Panel does.
   const result = await startAiTask(rt, { ...input, remember: Boolean(input.account || input.terminal) })
   if (a.flags.has('json')) json(io, result)
-  else if (result.command)
-    io.out(result.opened ? `Opened ${result.terminal} for ${result.account}.` : result.command)
+  else if (result.command) io.out(result.opened ? await openedLine(rt, result) : result.command)
   else io.out(result.prompt ?? preview.prompt)
   if (!result.opened) io.err(result.detail!)
   return result.opened ? 0 : 1
+}
+
+/** What `sideby ask` prints once the terminal opened; a Family with `aiTaskArgs` adds that its checks stay on. */
+async function openedLine(rt: Runtime, result: { terminal: string | null; account: string | null }) {
+  const line = `Opened ${result.terminal} for ${result.account}.`
+  const family = result.account
+    ? await rt.resolve(result.account).then(
+        (a) => rt.families.get(a.family),
+        () => undefined,
+      )
+    : undefined
+  return family?.aiTaskArgs
+    ? `${line} Its permission checks stay on, so risky actions are checked first.`
+    : line
 }
 
 /**
@@ -2015,8 +2045,7 @@ async function cmdAskSpec(a: AskArgs, io: Io, runtime?: Runtime): Promise<number
     }
     const result = await startTaskSpec(rt, spec)
     if (a.flags.has('json')) json(io, result)
-    else if (result.command)
-      io.out(result.opened ? `Opened ${result.terminal} for ${result.account}.` : result.command)
+    else if (result.command) io.out(result.opened ? await openedLine(rt, result) : result.command)
     else io.out(result.prompt ?? '')
     if (!result.opened) io.err(result.detail!)
     return result.opened ? 0 : 1

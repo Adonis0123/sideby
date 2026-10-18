@@ -177,9 +177,11 @@ export type PanelFamily = FamilyInfo & {
   keyAlways?: boolean
   /** What "Try it" runs (`sideby try`): the Host and the probe arguments; absent when it cannot be tried. */
   tryCommand?: string[]
+  /** AI Tasks start this Host with its permission checks on (`aiTaskArgs`, ADR-0031), so the AI dialog says so. */
+  aiTaskSafe?: true
 }
 
-function keyFacts(def: FamilyDef): Pick<PanelFamily, 'keyVar' | 'keyAlways' | 'tryCommand'> {
+function keyFacts(def: FamilyDef): Pick<PanelFamily, 'keyVar' | 'keyAlways' | 'tryCommand' | 'aiTaskSafe'> {
   let keyVar: string | null = null
   try {
     keyVar = secretVarFor(def)
@@ -188,6 +190,7 @@ function keyFacts(def: FamilyDef): Pick<PanelFamily, 'keyVar' | 'keyAlways' | 't
     keyVar,
     ...(def.secretFileMeansApi === false ? { keyAlways: true } : {}),
     ...(def.probe ? { tryCommand: [def.bin, ...def.probe.args] } : {}),
+    ...(def.aiTaskArgs ? { aiTaskSafe: true as const } : {}),
   }
 }
 

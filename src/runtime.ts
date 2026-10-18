@@ -278,7 +278,16 @@ export interface Runtime {
   shellInitScript(shell: Shell): Promise<string>
   /** Rewrites the configured `shellInitFile` of each shell (all configured ones by default). */
   writeShellInitFiles(shells?: readonly Shell[]): Promise<ShellInitWrite[]>
-  prepareLaunch(ref: string, userArgs: readonly string[], command: 'run' | 'login'): Promise<PreparedLaunch>
+  /**
+   * `opts.aiTask`: the Launch is an AI Task's (spec §3.28), so the Family's `aiTaskArgs` removes every permission
+   * bypass from it (ADR-0031). `sideby run` never sets it.
+   */
+  prepareLaunch(
+    ref: string,
+    userArgs: readonly string[],
+    command: 'run' | 'login',
+    opts?: { aiTask?: boolean },
+  ): Promise<PreparedLaunch>
   /**
    * The Host and arguments `prepareLaunch` starts from, without reading the Secret File or running `launch.before`
    * hooks: what a preview may show before the user agrees to start anything.
@@ -886,10 +895,16 @@ export async function createRuntime(
       }
       return out
     },
-    async prepareLaunch(ref, userArgs, command) {
+    async prepareLaunch(ref, userArgs, command, opts = {}) {
       const all = await accounts()
       const inputs = launchInputs(ref, all, userArgs, command)
-      return prepareLaunch({ ...inputs, label: launchLabel(ref, inputs.account, all), baseEnv: env, bus })
+      return prepareLaunch({
+        ...inputs,
+        ...(opts.aiTask ? { aiTask: true } : {}),
+        label: launchLabel(ref, inputs.account, all),
+        baseEnv: env,
+        bus,
+      })
     },
     async launchCommand(ref, userArgs, command) {
       const inputs = launchInputs(ref, await accounts(), userArgs, command)

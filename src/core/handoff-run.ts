@@ -196,13 +196,18 @@ export async function runWithHandoff(
   ref: string,
   userArgs: readonly string[],
   io: HandoffIo,
-  /** For tests: how long the Host gets to exit after SIGTERM. */
-  opts: { exitGraceMs?: number } = {},
+  opts: {
+    /** For tests: how long the Host gets to exit after SIGTERM. */
+    exitGraceMs?: number
+    /** An AI Task (ADR-0031): every Account it hands over to starts without permission bypasses too. */
+    aiTask?: boolean
+  } = {},
 ): Promise<number | null> {
   const grace = opts.exitGraceMs ?? EXIT_GRACE_MS
   const settings = rt.handoffSettings()
   if (!settings.auto || !io.stdin.isTTY) return null
-  const firstLaunch = await rt.prepareLaunch(ref, userArgs, 'run')
+  const launchOpts = opts.aiTask ? { aiTask: true } : {}
+  const firstLaunch = await rt.prepareLaunch(ref, userArgs, 'run', launchOpts)
   const firstHandoff = firstLaunch.family.handoff
   // Only built-in Families have a hook reader (spec §3.17); a Plugin Family can only take over.
   if (!firstHandoff?.starts.length || !HOOK_FAMILIES.includes(firstLaunch.family.id)) return null
@@ -233,7 +238,8 @@ export async function runWithHandoff(
   let n = 1
 
   for (;;) {
-    const launch: PreparedLaunch = n === 1 ? firstLaunch : await rt.prepareLaunch(hop.ref, hop.args, 'run')
+    const launch: PreparedLaunch =
+      n === 1 ? firstLaunch : await rt.prepareLaunch(hop.ref, hop.args, 'run', launchOpts)
     const account = launch.account
     const h = launch.family.handoff
     if (!h) return runHost(launch)
@@ -385,7 +391,7 @@ export async function runWithHandoff(
         return ended.code
       }
       const backArgs = [...h.continueArgs(hop.args), ...h.resumeArgs(ready.sessionId)]
-      const back = await rt.prepareLaunch(account.ref, backArgs, 'run')
+      const back = await rt.prepareLaunch(account.ref, backArgs, 'run', launchOpts)
       // The same per-Account arguments as before (Grok's leader socket), without sideby's hooks.
       const backElig = await h.eligibility(back.args, account, back.env)
       return runHost({ ...back, args: beforeDashes(back.args, backElig.args ?? []) })

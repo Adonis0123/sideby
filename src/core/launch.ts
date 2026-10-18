@@ -94,6 +94,8 @@ export interface LaunchCommandOptions {
   accountArgs: readonly string[]
   userArgs: readonly string[]
   command: 'run' | 'login'
+  /** An AI Task (spec §3.28): the Family's `aiTaskArgs` removes every permission bypass (ADR-0031). */
+  aiTask?: boolean
   /** Config `accountTitle`: set the terminal title to `[<label>]` and keep the Host from replacing it. */
   title?: boolean
 }
@@ -115,15 +117,18 @@ export function launchCommand(opts: LaunchCommandOptions): { bin: string; args: 
     opts.title && family.keepTitle && !opts.userArgs.some((a) => a.includes(family.keepTitle!.key))
       ? family.keepTitle.args
       : []
-  return {
-    bin: family.bin,
-    args: [
-      ...(family.defaultArgs?.(account, opts.userArgs) ?? []),
-      ...keep,
-      ...opts.accountArgs,
-      ...opts.userArgs,
-    ],
-  }
+  const args = [
+    ...(family.defaultArgs?.(account, opts.userArgs) ?? []),
+    ...keep,
+    ...opts.accountArgs,
+    ...opts.userArgs,
+  ]
+  return { bin: family.bin, args: opts.aiTask ? aiTaskArgs(family, args) : args }
+}
+
+/** The arguments of an AI Task's Launch, without the Family's permission bypasses (ADR-0031). */
+function aiTaskArgs(family: FamilyDef, args: string[]): string[] {
+  return family.aiTaskArgs ? family.aiTaskArgs(args) : args
 }
 
 export async function prepareLaunch(
@@ -154,6 +159,8 @@ export async function prepareLaunch(
     config: {},
     command: opts.command,
   })
+  // A `launch.before` hook cannot add a bypass back into an AI Task either.
+  const finalArgs = opts.aiTask && opts.command === 'run' ? aiTaskArgs(family, args) : args
   // Control characters would end the escape sequence early; labels are shell-safe names, so this is a guard only.
   const title = opts.title
     ? [...`[${env.SIDEBY_LABEL ?? account.ref}]`].filter((ch) => ch >= ' ' && ch !== '\x7f').join('')
@@ -162,7 +169,7 @@ export async function prepareLaunch(
     account,
     family,
     bin: family.bin,
-    args,
+    args: finalArgs,
     env,
     ...(notice ? { notice } : {}),
     ...(title ? { title } : {}),
