@@ -637,8 +637,9 @@
         })
         return count
       }
-      // Decoded text: a few noise characters run ahead of the real ones. Same progress, same frame.
-      const NOISE = '01<>/\\_=+*#%$&@'
+      // Decoded text: a few shade blocks run ahead of the real ones. Same progress, same frame. Blocks, not symbols:
+      // the GIF holds each in-between frame for a tenth of a second, and `_&$` after real words reads as garbled text.
+      const NOISE = '░▒▓'
       function decoder(target, text) {
         const progress = motionValue(0)
         progress.on('change', (p) => {
