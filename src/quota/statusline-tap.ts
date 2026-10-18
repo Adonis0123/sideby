@@ -108,7 +108,7 @@ export async function runStatuslineTap(
       // Several sessions of one Account share this cache; an idle one must not put back older numbers.
       const stateDir = cacheStateDir(env)
       const prev = await readQuotaCache(stateDir, name).catch(() => null)
-      const merged = prev?.status === 'ok' ? mergeQuotaCache(prev.windows, cache) : cache
+      const merged = mergeQuotaCache(prev?.status === 'ok' ? prev : null, cache)
       if (!merged) {
         // Older numbers: write nothing, and show what the cache already knows.
         if (prev?.status === 'ok') cache = { ...cache, observedAt: prev.observedAt, windows: prev.windows }

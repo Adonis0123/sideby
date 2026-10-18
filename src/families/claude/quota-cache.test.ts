@@ -82,20 +82,82 @@ describe('mergeQuotaCache', () => {
     usedPercent: used,
     resetsAt: iso,
   })
-  const reading = (used: number, iso: string) => ({
+  const reading = (
+    used: number,
+    iso: string,
+    sessionId?: string,
+    observedAt = '2030-01-01T05:00:00.000Z',
+  ) => ({
     version: 1 as const,
-    observedAt: '2030-01-01T05:00:00.000Z',
+    observedAt,
     windows: [at(iso, used)],
+    ...(sessionId ? { sessionId } : {}),
+  })
+  /** Folds readings into a cache the way the status line tap does; null readings leave it unchanged. */
+  const fold = (...readings: ReturnType<typeof reading>[]) => {
+    let cache: ReturnType<typeof mergeQuotaCache> = null
+    let ignored = 0
+    for (const r of readings) {
+      const merged = mergeQuotaCache(cache, r)
+      if (merged) cache = merged
+      else ignored++
+    }
+    return { cache: cache!, ignored }
+  }
+  const noon = '2030-01-01T12:00:00.000Z'
+  const five = '2030-01-01T17:00:00.000Z'
+
+  it('ignores an idle session repeating its old numbers after another session reported newer ones', () => {
+    const { cache, ignored } = fold(reading(20, noon, 'a'), reading(50, noon, 'b'), reading(20, noon, 'a'))
+    assert.equal(ignored, 1)
+    assert.equal(cache.windows[0]!.usedPercent, 50)
   })
 
-  it('treats resets less than a quarter of the window apart as one window', () => {
-    const cached = [at('2030-01-01T06:00:00.000Z', 96)]
+  it('takes a changed reading even when the vendor moved the reset earlier', () => {
+    const { cache } = fold(reading(50, five, 'a'), reading(10, noon, 'a'))
+    assert.deepEqual(cache.windows, [at(noon, 10)])
+  })
+
+  it('ignores an idle session repeating the old window after the vendor moved the reset later', () => {
+    const { cache, ignored } = fold(reading(90, noon, 'a'), reading(20, five, 'b'), reading(90, noon, 'a'))
+    assert.equal(ignored, 1)
+    assert.deepEqual(cache.windows, [at(five, 20)])
+  })
+
+  it('takes the first reading of a new session, even when it is emptier', () => {
+    const { cache, ignored } = fold(reading(90, noon, 'a'), reading(5, noon, 'b'))
+    assert.equal(ignored, 0)
+    assert.equal(cache.windows[0]!.usedPercent, 5)
+  })
+
+  it('keeps only a hash and a time per session, at most 32, none older than 8 days', () => {
+    const day = (n: number) => new Date(Date.parse('2030-01-01T00:00:00.000Z') + n * 86_400_000).toISOString()
+    const old = fold(reading(1, noon, 'old', day(0)), reading(2, noon, 'fresh', day(5)))
+    assert.deepEqual(Object.keys(old.cache.sessions!).sort(), ['fresh', 'old'])
+    const later = mergeQuotaCache(old.cache, reading(3, noon, 'new', day(9)))!
+    assert.deepEqual(Object.keys(later.sessions!).sort(), ['fresh', 'new'])
+    assert.deepEqual(Object.keys(later.sessions!.new!).sort(), ['hash', 'seenAt'])
+    const many = Array.from({ length: 40 }, (_, i) =>
+      reading(i, noon, `s${i}`, new Date(Date.parse(day(9)) + i * 1000).toISOString()),
+    )
+    const sessions = fold(...many).cache.sessions!
+    assert.equal(Object.keys(sessions).length, 32)
+    assert.ok(sessions.s39 && !sessions.s7)
+    assert.ok(!JSON.stringify(fold(...many).cache).includes('sessionId'))
+  })
+
+  it('without a session id, keeps the higher use within one window and otherwise takes the reading', () => {
+    const cached = { windows: [at('2030-01-01T06:00:00.000Z', 96)] }
     assert.equal(mergeQuotaCache(cached, reading(90, '2030-01-01T06:10:00.000Z')), null)
     assert.equal(mergeQuotaCache(cached, reading(5, '2030-01-01T07:30:00.000Z'))?.windows[0]?.usedPercent, 5)
-  })
-
-  it('writes a repeat of the same numbers, so observedAt moves on', () => {
-    const cached = [at('2030-01-01T06:00:00.000Z', 96)]
-    assert.deepEqual(mergeQuotaCache(cached, reading(96, '2030-01-01T06:00:00.000Z'))?.windows, cached)
+    assert.equal(
+      mergeQuotaCache(cached, reading(80, '2030-01-01T04:00:00.000Z'))?.windows[0]?.usedPercent,
+      80,
+    )
+    // A repeat of the same numbers is written, so observedAt moves on.
+    assert.deepEqual(
+      mergeQuotaCache(cached, reading(96, '2030-01-01T06:00:00.000Z'))?.windows,
+      cached.windows,
+    )
   })
 })

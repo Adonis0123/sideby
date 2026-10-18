@@ -1,6 +1,7 @@
 // The Claude Quota cache: one module owns where it lives, how the Account is named, and how it is written,
 // read and validated. The status line tap writes it on every refresh, so this module imports only leaf
 // modules and Node built-ins (never the Family index, the Runtime or core/accounts.ts).
+import { createHash } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -15,7 +16,27 @@ export interface ClaudeQuotaCache {
   /** When the status line last reported these windows. */
   observedAt: string
   windows: QuotaWindow[]
+  /**
+   * Per status line session id: a hash of the windows it last reported and when that changed. Only these two values
+   * are kept for a session (at most {@link MAX_SESSIONS}, none older than {@link SESSION_DAYS} days). Files written
+   * before sessions were tracked have none.
+   */
+  sessions?: Record<string, SessionSeen>
 }
+
+export interface SessionSeen {
+  hash: string
+  seenAt: string
+}
+
+/** A status line reading: the cache fields and, when Claude Code sent one, the session that reported it. */
+export interface QuotaReading extends ClaudeQuotaCache {
+  sessionId?: string
+}
+
+const MAX_SESSIONS = 32
+const SESSION_DAYS = 8
+const SESSION_ID = /^[A-Za-z0-9._-]{1,128}$/
 
 const WINDOWS = [
   { key: 'five_hour', label: '5h', minutes: 300 },
@@ -42,8 +63,8 @@ export function accountNameFromEnv(env: Env): string | null {
   return name !== 'main' && ACCOUNT_NAME.test(name) ? name : null
 }
 
-/** Extracts the 5h and 7d windows from status line JSON; null when there is nothing usable. */
-export function parseRateLimits(input: string, observedAt: Date): ClaudeQuotaCache | null {
+/** Extracts the 5h and 7d windows and the session id from status line JSON; null when there is nothing usable. */
+export function parseRateLimits(input: string, observedAt: Date): QuotaReading | null {
   let data: unknown
   try {
     data = JSON.parse(input)
@@ -67,7 +88,14 @@ export function parseRateLimits(input: string, observedAt: Date): ClaudeQuotaCac
       resetsAt: new Date(resets * 1000).toISOString(),
     })
   }
-  return windows.length ? { version: 1, observedAt: observedAt.toISOString(), windows } : null
+  if (!windows.length) return null
+  const id = (data as { session_id?: unknown }).session_id
+  return {
+    version: 1,
+    observedAt: observedAt.toISOString(),
+    windows,
+    ...(typeof id === 'string' && SESSION_ID.test(id) ? { sessionId: id } : {}),
+  }
 }
 
 /** Two readings belong to one window when their resets are less than a quarter of the window apart. */
@@ -86,32 +114,62 @@ const order = (label: string) => {
   return i < 0 ? WINDOWS.length : i
 }
 
+/** What a session reported, as a short hash: equal hashes mean the session has made no request since. */
+function windowsHash(windows: readonly QuotaWindow[]): string {
+  const key = windows.map((w) => [w.label, w.usedPercent, w.resetsAt])
+  return createHash('sha256').update(JSON.stringify(key)).digest('hex').slice(0, 16)
+}
+
+/** The newest {@link MAX_SESSIONS} sessions seen in the last {@link SESSION_DAYS} days before `now`. */
+function pruneSessions(sessions: Record<string, SessionSeen>, now: string): Record<string, SessionSeen> {
+  const oldest = Date.parse(now) - SESSION_DAYS * 86_400_000
+  const kept = Object.entries(sessions)
+    .filter(([, s]) => Date.parse(s.seenAt) >= oldest)
+    .sort((a, b) => Date.parse(b[1].seenAt) - Date.parse(a[1].seenAt))
+    .slice(0, MAX_SESSIONS)
+  return Object.fromEntries(kept)
+}
+
 /**
- * Merges a status line reading into the cached windows. Each session reports the Quota of its own last request, so an
- * idle session of the same Account reports older numbers, sometimes of a window that has already reset: within one
- * window the higher use wins, otherwise the later reset; a window the reading lacks is kept. Null when the reading
- * only repeats older numbers, so nothing is written and `observedAt` keeps the time of the newer reading.
+ * Merges a status line reading into the cache (spec §3.7). Each session reports the Quota of its own last request, so
+ * an idle session of the same Account keeps repeating older numbers. A reading whose session reported exactly these
+ * windows before carries nothing new: null, so nothing is written. A reading that changed, or the first of a session,
+ * is a fresh request result and wins for every window it has, the vendor's resets included; a window it lacks is
+ * kept. A reading without a session id falls back to: within one window the higher use wins, otherwise the reading
+ * wins; null when that only repeats the cache.
  */
 export function mergeQuotaCache(
-  cached: readonly QuotaWindow[],
-  next: ClaudeQuotaCache,
+  cached: Pick<ClaudeQuotaCache, 'windows' | 'sessions'> | null,
+  next: QuotaReading,
 ): ClaudeQuotaCache | null {
+  const { sessionId, ...reading } = next
+  const before = cached?.windows ?? []
+  const keepLacking = (windows: QuotaWindow[]) => {
+    for (const c of before) if (!windows.some((w) => w.label === c.label)) windows.push(c)
+    return windows.sort((a, b) => order(a.label) - order(b.label))
+  }
+  if (sessionId) {
+    const hash = windowsHash(reading.windows)
+    if (cached?.sessions?.[sessionId]?.hash === hash) return null
+    const sessions = pruneSessions(
+      { ...cached?.sessions, [sessionId]: { hash, seenAt: reading.observedAt } },
+      reading.observedAt,
+    )
+    return { ...reading, windows: keepLacking([...reading.windows]), sessions }
+  }
   let older = false
-  const windows = next.windows.map((w) => {
-    const c = cached.find((x) => x.label === w.label)
-    if (!c) return w
-    const keep = sameWindow(c, w)
-      ? c.usedPercent > w.usedPercent
-      : Date.parse(c.resetsAt) > Date.parse(w.resetsAt)
-    if (keep) older = true
-    return keep ? c : w
-  })
-  for (const c of cached) if (!windows.some((w) => w.label === c.label)) windows.push(c)
-  windows.sort((a, b) => order(a.label) - order(b.label))
+  const windows = keepLacking(
+    reading.windows.map((w) => {
+      const c = before.find((x) => x.label === w.label)
+      const keep = !!c && sameWindow(c, w) && c.usedPercent > w.usedPercent
+      if (keep) older = true
+      return keep ? c : w
+    }),
+  )
   const unchanged =
-    windows.length === cached.length && windows.every((w) => cached.some((c) => sameReading(c, w)))
+    windows.length === before.length && windows.every((w) => before.some((c) => sameReading(c, w)))
   if (older && unchanged) return null
-  return { ...next, windows }
+  return { ...reading, windows, ...(cached?.sessions ? { sessions: cached.sessions } : {}) }
 }
 
 /** Writes the cache atomically; creates the private parent directory first (writeFileAtomic does not). */
@@ -138,7 +196,7 @@ function validWindow(w: unknown): w is QuotaWindow {
 }
 
 export type CacheRead =
-  | { status: 'ok'; observedAt: string; windows: QuotaWindow[] }
+  | { status: 'ok'; observedAt: string; windows: QuotaWindow[]; sessions?: Record<string, SessionSeen> }
   | { status: 'missing' }
   | { status: 'unrecognized'; detail: string }
 
@@ -155,7 +213,7 @@ export async function readQuotaCache(stateDir: string, name: string): Promise<Ca
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'missing' }
     throw err
   }
-  let cache: { observedAt?: unknown; windows?: unknown }
+  let cache: { observedAt?: unknown; windows?: unknown; sessions?: unknown }
   try {
     cache = JSON.parse(raw) as typeof cache
   } catch {
@@ -168,5 +226,23 @@ export async function readQuotaCache(stateDir: string, name: string): Promise<Ca
     !windows.length
   )
     return { status: 'unrecognized', detail: `${file} has no usable quota windows` }
-  return { status: 'ok', observedAt: cache.observedAt, windows }
+  const sessions = validSessions(cache.sessions)
+  return { status: 'ok', observedAt: cache.observedAt, windows, ...(sessions ? { sessions } : {}) }
+}
+
+/** The well-formed session entries of a cache file; undefined when it has none (older files). */
+function validSessions(raw: unknown): Record<string, SessionSeen> | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
+  const out: Record<string, SessionSeen> = {}
+  for (const [id, v] of Object.entries(raw)) {
+    const s = v as Partial<SessionSeen> | null
+    if (
+      SESSION_ID.test(id) &&
+      typeof s?.hash === 'string' &&
+      typeof s.seenAt === 'string' &&
+      Number.isFinite(Date.parse(s.seenAt))
+    )
+      out[id] = { hash: s.hash, seenAt: s.seenAt }
+  }
+  return Object.keys(out).length ? out : undefined
 }

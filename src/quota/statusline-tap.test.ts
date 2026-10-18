@@ -107,9 +107,11 @@ describe('statusline-tap', () => {
   })
 
   // Several sessions of one Account write one cache; each reports the Quota of its own last request.
-  const T = Math.floor(Date.parse('2030-01-01T06:00:00Z') / 1000)
-  const reading = (five: [number, number], seven?: [number, number]) =>
+  // An hour from now, so the windows these tests report have not reset yet.
+  const T = Math.floor(Date.now() / 1000) + 3600
+  const reading = (five: [number, number], seven?: [number, number], session?: string) =>
     JSON.stringify({
+      ...(session ? { session_id: session } : {}),
       rate_limits: {
         five_hour: { used_percentage: five[0], resets_at: five[1] },
         ...(seven ? { seven_day: { used_percentage: seven[0], resets_at: seven[1] } } : {}),
@@ -120,30 +122,67 @@ describe('statusline-tap', () => {
     return c.windows.find((w: { label: string }) => w.label === '5h')
   }
 
-  it('keeps the higher use when an idle session reports an older one for the same window', async () => {
+  it('ignores an idle session repeating its numbers after another session reported newer ones', async () => {
+    await withFakeHome(async (h) => {
+      await tap([], h.env, reading([90, T], undefined, 'idle'))
+      await tap([], h.env, reading([20, T + 5 * 3600], undefined, 'busy'))
+      const before = await readFile(cacheFile(h, 'main'), 'utf8')
+      const r = await tap([], h.env, reading([90, T], undefined, 'idle'))
+      assert.equal(r.stdout, '5h 20%\n')
+      assert.equal(await readFile(cacheFile(h, 'main'), 'utf8'), before)
+      // The idle session's next request is fresh again, whatever its numbers.
+      await tap([], h.env, reading([21, T], undefined, 'idle'))
+      assert.deepEqual(await fiveHour(h), {
+        label: '5h',
+        windowMinutes: 300,
+        usedPercent: 21,
+        resetsAt: new Date(T * 1000).toISOString(),
+      })
+      const sessions = JSON.parse(await readFile(cacheFile(h, 'main'), 'utf8')).sessions
+      assert.deepEqual(Object.keys(sessions).sort(), ['busy', 'idle'])
+    })
+  })
+
+  it('without a session id, keeps the higher use within one window and otherwise takes the reading', async () => {
     await withFakeHome(async (h) => {
       await tap([], h.env, reading([96, T]))
       const before = await readFile(cacheFile(h, 'main'), 'utf8')
       const r = await tap([], h.env, reading([90, T]))
       assert.equal(r.stdout, '5h 96%\n')
       assert.equal(await readFile(cacheFile(h, 'main'), 'utf8'), before)
-      await tap([], h.env, reading([97, T]))
-      assert.equal((await fiveHour(h)).usedPercent, 97)
+      await tap([], h.env, reading([3, T + 5 * 3600]))
+      assert.equal((await fiveHour(h)).usedPercent, 3)
     })
   })
 
-  it('ignores a reading of a window that has already reset, and takes a new window even when it is emptier', async () => {
+  it('reads and extends a cache written before sessions were kept', async () => {
     await withFakeHome(async (h) => {
-      await tap([], h.env, reading([96, T]))
-      await tap([], h.env, reading([30, T - 5 * 3600]))
-      assert.deepEqual(await fiveHour(h), {
-        label: '5h',
-        windowMinutes: 300,
-        usedPercent: 96,
-        resetsAt: new Date(T * 1000).toISOString(),
-      })
-      await tap([], h.env, reading([3, T + 5 * 3600]))
-      assert.equal((await fiveHour(h)).usedPercent, 3)
+      await h.write(
+        cacheFile(h, 'main').slice(h.home.length + 1),
+        JSON.stringify({
+          version: 1,
+          observedAt: new Date().toISOString(),
+          windows: [
+            {
+              label: '7d',
+              windowMinutes: 10_080,
+              usedPercent: 12,
+              resetsAt: new Date(T * 1000).toISOString(),
+            },
+          ],
+        }),
+        0o600,
+      )
+      await tap([], h.env, reading([40, T], undefined, 'one'))
+      const c = JSON.parse(await readFile(cacheFile(h, 'main'), 'utf8'))
+      assert.deepEqual(
+        c.windows.map((w: { label: string; usedPercent: number }) => [w.label, w.usedPercent]),
+        [
+          ['5h', 40],
+          ['7d', 12],
+        ],
+      )
+      assert.deepEqual(Object.keys(c.sessions), ['one'])
     })
   })
 
