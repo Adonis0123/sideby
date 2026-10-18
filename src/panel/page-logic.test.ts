@@ -1587,24 +1587,43 @@ describe('widthFollower', () => {
     return { applied, follow, tick }
   }
 
-  it('changes the band once, after a sliding width settles, even when it crossed several bands', () => {
+  it('changes the band as soon as the width crosses, then once more where a long slide comes to rest', () => {
     const { applied, follow, tick } = setup('wide')
     for (let w = 1300; w >= 600; w -= 20) {
       follow(w)
       tick(16)
+      // The first crossing (1100) applies at once, with the sliding edge; the rest wait for the width to settle.
+      if (w <= 1100) assert.deepEqual(applied, ['medium'])
     }
-    assert.deepEqual(applied, [])
     tick(90)
-    assert.deepEqual(applied, ['narrow'])
+    assert.deepEqual(applied, ['medium', 'narrow'])
   })
 
-  it('changes nothing when the width comes back to the shown band before it settles', () => {
+  it('changes once, mid-slide, for a sidebar that slides across one breakpoint', () => {
+    const { applied, follow, tick } = setup('medium')
+    for (const w of [864, 845, 820, 790, 760, 735, 712, 704, 700]) {
+      follow(w)
+      tick(16)
+      if (w === 760)
+        assert.deepEqual(applied, ['narrow'], 'it follows the edge as it crosses, not after it stops')
+    }
+    tick(200)
+    assert.deepEqual(applied, ['narrow'])
+    for (const w of [700, 735, 790, 845, 864]) {
+      follow(w)
+      tick(16)
+    }
+    tick(200)
+    assert.deepEqual(applied, ['narrow', 'medium'])
+  })
+
+  it('goes back once when the width returns to the old band during the same gesture', () => {
     const { applied, follow, tick } = setup('medium')
     follow(740)
     tick(40)
     follow(780)
     tick(200)
-    assert.deepEqual(applied, [])
+    assert.deepEqual(applied, ['narrow', 'medium'])
   })
 
   it('ignores moves inside the shown band and follows the next crossing from the band it applied', () => {

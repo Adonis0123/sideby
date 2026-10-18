@@ -1154,9 +1154,11 @@ export function widthTier(width: number): WidthTier {
 
 /**
  * Follows a viewport width that changes frame by frame (a window being dragged, a Portal's sidebar sliding open
- * around the Panel's frame) and calls `apply` once with the new band, `settleMs` after the width stops changing,
- * only when it differs from the band shown. A width that comes back to the shown band before then changes nothing,
- * so a gesture never makes the layout jump back and forth. Returns the function to call with each new width.
+ * around the Panel's frame) and calls `apply` with the new band as soon as the width crosses into one, so the layout
+ * moves together with the sliding edge instead of after it. For `settleMs` after that (restarted while the width keeps
+ * moving) it only notes further crossings, then applies the band the width came to rest in if that differs, so one
+ * gesture changes the layout at most twice and never flickers on every frame. Returns the function to call with each
+ * new width.
  */
 export function widthFollower<T>(
   shown: T,
@@ -1166,16 +1168,24 @@ export function widthFollower<T>(
   timers: { set: (fn: () => void, ms: number) => unknown; clear: (id: unknown) => void },
 ): (width: number) => void {
   let current = shown
+  let latest = shown
   let timer: unknown = null
-  return (width) => {
-    if (timer !== null) timers.clear(timer)
+  const settle = () => {
     timer = null
-    const next = tierOf(width)
-    if (next === current) return
-    timer = timers.set(() => {
-      timer = null
-      current = next
-      apply(next)
-    }, settleMs)
+    if (latest === current) return
+    current = latest
+    apply(latest)
+  }
+  return (width) => {
+    latest = tierOf(width)
+    if (timer !== null) {
+      timers.clear(timer)
+      timer = timers.set(settle, settleMs)
+      return
+    }
+    if (latest === current) return
+    current = latest
+    apply(latest)
+    timer = timers.set(settle, settleMs)
   }
 }

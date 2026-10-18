@@ -125,7 +125,8 @@ const MAIN = String.raw`
   const AUTO_MS = 20000
   const FAST_MS = 5000
   const FAST_FOR_MS = 3 * 60000
-  // How long a changing width must hold still before the layout follows it into another band.
+  // After the layout follows a width into another band, how long the width must hold still before a later crossing
+  // in the same gesture is applied (page-logic.ts, widthFollower).
   const WIDTH_SETTLE_MS = 90
   const S = {
     state: null, loadError: null, loading: false, loadedAt: 0, history: null,
@@ -769,7 +770,7 @@ const MAIN = String.raw`
   window.addEventListener('resize', () => closeMenu())
   // Layout bands: the page's narrow-screen rules hang on the root's data-width (set before the first paint by the
   // head script), not on media queries, so a width that slides across a breakpoint (a dragged window, a Portal's
-  // sidebar opening around this frame) changes the layout once, after it settles, as one short cross-fade.
+  // sidebar opening around this frame) changes the layout as it crosses, as one short cross-fade, not once per frame.
   function applyWidthTier(tier) {
     const root = document.documentElement
     const set = () => { root.dataset.width = tier }
