@@ -404,3 +404,69 @@ test('reads the WSL distribution from the environment, else from wslpath', async
   )
   assert.equal(await wslDistro({}, async () => ({ code: 1, stdout: '', stderr: 'no' })), undefined)
 })
+
+test('on WSL, finds the Windows Orca CLI in the Windows user folder', async () => {
+  await withFakeHome(async (h) => {
+    const deps = { home: h.home, env: { PATH: h.bin }, platform: 'linux' as const, wslMount: h.path('mnt') }
+    await h.write('mnt/c/Users/me/AppData/Local/Programs/orca/resources/bin/orca.exe', '', 0o755)
+    assert.deepEqual(await installedTerminals(deps), [
+      { id: 'orca', executable: h.path('mnt/c/Users/me/AppData/Local/Programs/orca/resources/bin/orca.exe') },
+    ])
+  })
+})
+
+test('Orca on WSL opens a WSL shell in the most recently used worktree of this distribution', async () => {
+  const orca = '/mnt/c/Users/me/AppData/Local/Programs/orca/resources/bin/orca.exe'
+  const worktrees = [
+    { id: 'r1::C:\\src\\app', path: 'C:\\src\\app', lastActivityAt: 30 },
+    {
+      id: 'r2::\\\\wsl.localhost\\Ubuntu\\home\\me\\old',
+      path: '\\\\wsl.localhost\\Ubuntu\\home\\me\\old',
+      lastActivityAt: 10,
+    },
+    {
+      id: 'r3::\\\\wsl.localhost\\Ubuntu\\home\\me\\new',
+      path: '\\\\wsl.localhost\\Ubuntu\\home\\me\\new',
+      lastActivityAt: 20,
+    },
+    {
+      id: 'r4::\\\\wsl.localhost\\Debian\\home\\me\\x',
+      path: '\\\\wsl.localhost\\Debian\\home\\me\\x',
+      lastActivityAt: 40,
+    },
+  ]
+  const calls: string[][] = []
+  const exec = async (file: string, args: readonly string[]) => {
+    calls.push([file, ...args])
+    return args[0] === 'worktree'
+      ? { code: 0, stdout: JSON.stringify({ ok: true, result: { worktrees } }), stderr: '' }
+      : { code: 0, stdout: '{"ok":true}', stderr: '' }
+  }
+  const opts = {
+    cwd,
+    command,
+    platform: 'linux' as const,
+    wslDistro: 'Ubuntu',
+    installed: [{ id: 'orca' as const, executable: orca }],
+  }
+  assert.deepEqual(await openTerminal('orca', opts, exec), { ok: true })
+  assert.deepEqual(calls[0], [orca, 'worktree', 'list', '--json'])
+  assert.deepEqual(calls[1], [
+    orca,
+    'terminal',
+    'create',
+    '--worktree',
+    'id:r3::\\\\wsl.localhost\\Ubuntu\\home\\me\\new',
+    '--shell',
+    'wsl.exe',
+    '--command',
+    command,
+    '--title',
+    'sideby',
+    '--focus',
+    '--json',
+  ])
+  // No WSL project in Orca: say what to do instead of opening a Windows shell.
+  const none = await openTerminal('orca', { ...opts, wslDistro: 'Arch' }, exec)
+  assert.ok(!none.ok && none.reason === 'failed' && /Orca/.test(none.detail))
+})

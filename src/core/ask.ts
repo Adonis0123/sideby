@@ -460,7 +460,8 @@ async function openTask(
         custom: rt.config.terminal?.custom,
         installed: choices.installed,
         platform: deps.platform,
-        ...(id === 'windows-terminal'
+        // Both open from WSL into this distribution (Orca picks its worktree from it).
+        ...(id === 'windows-terminal' || (id === 'orca' && deps.platform === 'linux')
           ? { wslDistro: await wslDistro(rt.env, deps.exec), shell: userInfo().shell ?? undefined }
           : {}),
       },

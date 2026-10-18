@@ -121,27 +121,36 @@ const isExecutable = async (fs: NonNullable<TerminalDeps['fs']>, path: string) =
   ))
 
 /**
- * Windows Terminal on WSL: `wt.exe` on PATH, else the App Execution Alias in a Windows user's folder (a background
- * service's PATH has no Windows folders).
+ * The Windows terminals sideby can open from WSL: Windows Terminal (`wt.exe`) and Orca's Windows CLI (`orca.exe`), each
+ * on PATH or else in a Windows user's folder (a background service's PATH has no Windows folders).
  */
-async function windowsTerminal(deps: TerminalDeps, mount: string): Promise<InstalledTerminal[]> {
+async function wslTerminals(deps: TerminalDeps, mount: string): Promise<InstalledTerminal[]> {
   const fs = { stat, access, readdir, ...deps.fs }
-  for (const dir of (deps.env.PATH ?? '').split(':').filter(Boolean)) {
-    const path = join(dir, 'wt.exe')
-    if (await isExecutable(fs, path)) return [{ id: 'windows-terminal', executable: path }]
-  }
   const users = join(mount, 'c', 'Users')
-  for (const user of await fs.readdir(users).catch(() => [] as string[])) {
-    const path = join(users, user, 'AppData', 'Local', 'Microsoft', 'WindowsApps', 'wt.exe')
-    if (await isExecutable(fs, path)) return [{ id: 'windows-terminal', executable: path }]
+  const names = await fs.readdir(users).catch(() => [] as string[])
+  const find = async (exe: string, inUser: readonly string[]) => {
+    for (const dir of (deps.env.PATH ?? '').split(':').filter(Boolean)) {
+      const path = join(dir, exe)
+      if (await isExecutable(fs, path)) return path
+    }
+    for (const user of names) {
+      const path = join(users, user, ...inUser, exe)
+      if (await isExecutable(fs, path)) return path
+    }
+    return undefined
   }
-  return []
+  const found: InstalledTerminal[] = []
+  const wt = await find('wt.exe', ['AppData', 'Local', 'Microsoft', 'WindowsApps'])
+  if (wt) found.push({ id: 'windows-terminal', executable: wt })
+  const orca = await find('orca.exe', ['AppData', 'Local', 'Programs', 'orca', 'resources', 'bin'])
+  if (orca) found.push({ id: 'orca', executable: orca })
+  return found
 }
 
 /** Finds bundles and command line launchers without opening apps or reading user files. */
 export async function installedTerminals(deps: TerminalDeps): Promise<InstalledTerminal[]> {
   const platform = deps.platform ?? process.platform
-  if (platform === 'linux' && deps.wslMount) return windowsTerminal(deps, deps.wslMount)
+  if (platform === 'linux' && deps.wslMount) return wslTerminals(deps, deps.wslMount)
   if (platform !== 'darwin') return []
   const fs = deps.fs ?? { stat, access }
   const dirs = deps.appDirs ?? [
@@ -285,6 +294,8 @@ export interface TerminalLaunchOptions {
   wslDistro?: string
   /** Windows Terminal: the user's login shell; zsh and bash run the task interactively, so their rc files apply. */
   shell?: string
+  /** Orca's Windows CLI from WSL: the worktree selector to open in; it also gets a WSL shell instead of its default. */
+  orcaWorktree?: string
 }
 
 export interface TerminalCommand {
@@ -421,7 +432,8 @@ end tell`,
           'terminal',
           'create',
           '--worktree',
-          'active',
+          opts.orcaWorktree ?? 'active',
+          ...(opts.orcaWorktree ? ['--shell', 'wsl.exe'] : []),
           '--command',
           command,
           '--title',
@@ -513,7 +525,8 @@ export async function openTerminal(
 ): Promise<TerminalOpenResult> {
   const platform = opts.platform ?? process.platform
   const opensHere =
-    platform === 'darwin' || (platform === 'linux' && (id === 'windows-terminal' || id === 'custom'))
+    platform === 'darwin' ||
+    (platform === 'linux' && (id === 'windows-terminal' || id === 'orca' || id === 'custom'))
   if (!opensHere) return { ok: false, reason: 'unsupported-platform' }
   const installed = opts.installed.find((t) => t.id === id)
   if (!installed && id !== 'custom')
@@ -523,6 +536,17 @@ export async function openTerminal(
       detail:
         'Install this terminal or choose another in Settings; paste the task command into your terminal.',
     }
+  if (platform === 'linux' && id === 'orca') {
+    const worktree = await orcaWslWorktree(installed?.executable ?? 'orca.exe', opts.wslDistro, exec)
+    if (!worktree)
+      return {
+        ok: false,
+        reason: 'failed',
+        detail:
+          'Orca has no project open from this WSL distribution; open one in Orca, or choose another terminal in Settings.',
+      }
+    opts = { ...opts, orcaWorktree: worktree }
+  }
   try {
     const launch = launchArgs(id, { ...opts, ...installed })
     const result = await exec(launch.file, launch.args)
@@ -556,6 +580,39 @@ export async function wslDistro(env: Env, exec: DesktopDeps['exec']): Promise<st
   try {
     const r = await exec('wslpath', ['-w', '/'])
     return r.code === 0 ? /^\\\\wsl(?:\.localhost|\$)\\([^\\]+)/.exec(r.stdout.trim())?.[1] : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Orca's Windows CLI resolves `--worktree active` from its current folder only, so from WSL sideby picks the worktree
+ * of this distribution (`\\wsl.localhost\<distribution>\…`) that Orca used last. Undefined when there is none.
+ */
+async function orcaWslWorktree(
+  orca: string,
+  distro: string | undefined,
+  exec: DesktopDeps['exec'],
+): Promise<string | undefined> {
+  if (!distro) return undefined
+  try {
+    const r = await exec(orca, ['worktree', 'list', '--json'])
+    if (r.code !== 0) return undefined
+    const list = (JSON.parse(r.stdout)?.result?.worktrees ?? []) as {
+      id?: unknown
+      path?: unknown
+      lastActivityAt?: unknown
+    }[]
+    const prefixes = [`\\\\wsl.localhost\\${distro}\\`, `\\\\wsl$\\${distro}\\`].map((p) => p.toLowerCase())
+    let best: { id: string; at: number } | undefined
+    for (const w of list) {
+      if (typeof w.id !== 'string' || typeof w.path !== 'string') continue
+      const path = w.path.toLowerCase()
+      if (!prefixes.some((p) => path.startsWith(p))) continue
+      const at = typeof w.lastActivityAt === 'number' ? w.lastActivityAt : 0
+      if (!best || at > best.at) best = { id: w.id, at }
+    }
+    return best && `id:${best.id}`
   } catch {
     return undefined
   }
