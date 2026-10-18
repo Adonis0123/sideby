@@ -96,6 +96,53 @@ describe('Local Build switch', () => {
     })
   })
 
+  it('points an existing login item at the sideby switched to, and never creates one (spec §3.29)', async () => {
+    await withFakeHome(async (h) => {
+      const d = dirsOf(h)
+      machine('0.15.0')
+      await pkgAt(globalPkg(d), '0.15.0')
+      await pkgAt(pkgDir(d), '0.15.0', localBuild)
+      for (const dir of [globalPkg(d), pkgDir(d)]) {
+        await mkdir(join(dir, 'dist', 'src', 'cli'), { recursive: true })
+        await writeFile(join(dir, 'dist', 'src', 'cli', 'main.js'), '')
+      }
+      const paths = resolvePaths(h.env)
+      const plist = h.path('Library/LaunchAgents/dev.sideby.panel.plist')
+      const calls: string[][] = []
+      const ctx = {
+        platform: 'darwin' as const,
+        uid: 501,
+        loginHome: h.home,
+        exec: async (file: string, args: readonly string[]) => {
+          calls.push([file, ...args])
+          return { code: 0, output: '' }
+        },
+      }
+      // No login item: none is created, and the result says nothing about one.
+      const none = await switchLocal(paths, d, 'local', h.env, { autostart: ctx })
+      assert.equal(none.refreshedAutostart, undefined)
+      assert.equal(await readFile(plist).catch(() => null), null)
+      // One that starts another sideby is rewritten to start the one now in use.
+      const { applyAutostart, planAutostart, parseProgramArguments } = await import('./autostart.ts')
+      const old = { ...ctx, home: h.home, launcher: { node: '/bin/sh', entry: '/bin/ls' } }
+      await applyAutostart(old, await planAutostart(old, 'on'))
+      const launcher = { node: '/bin/sh', entry: '/usr/bin/env' }
+      const back = await switchLocal(paths, d, 'npm', h.env, { autostart: { ...ctx, launcher } })
+      assert.equal(back.refreshedAutostart, true)
+      assert.deepEqual(parseProgramArguments(await readFile(plist, 'utf8'))?.slice(0, 2), [
+        '/bin/sh',
+        '/usr/bin/env',
+      ])
+      // The real entry here sits in a temporary folder, which a login item may not start: it is left as it was.
+      const kept = await switchLocal(paths, d, 'local', h.env, { autostart: ctx })
+      assert.equal(kept.refreshedAutostart, false)
+      assert.deepEqual(parseProgramArguments(await readFile(plist, 'utf8'))?.slice(0, 2), [
+        '/bin/sh',
+        '/usr/bin/env',
+      ])
+    })
+  })
+
   it('starts the skill on its own for the Panel, so the answer does not wait for the network', async () => {
     await withFakeHome(async (h) => {
       const d = dirsOf(h)

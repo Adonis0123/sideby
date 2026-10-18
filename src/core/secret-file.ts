@@ -1,5 +1,7 @@
-import { lstat, readFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
+import type { FamilyDef } from '../types.ts'
 import { UserError } from './errors.ts'
+import { lstatOrNull, realpathOrNull, writeFileAtomic } from './fs-safe.ts'
 
 export class SecretFileError extends UserError {}
 
@@ -95,12 +97,8 @@ export type SecretFileState =
  * with mode 600. Only the file's type and mode are inspected, never its contents.
  */
 export async function inspectSecretFile(file: string): Promise<SecretFileState> {
-  let st: Awaited<ReturnType<typeof lstat>>
-  try {
-    st = await lstat(file)
-  } catch {
-    return { kind: 'missing' }
-  }
+  const st = await lstatOrNull(file)
+  if (!st) return { kind: 'missing' }
   if (!st.isFile()) return { kind: 'not-file' }
   const mode = st.mode & 0o777
   return mode === 0o600 ? { kind: 'ok' } : { kind: 'mode', mode }
@@ -130,4 +128,159 @@ export function secretFileTemplate(vars: readonly string[], familyTitle: string)
     '',
   ]
   return lines.join('\n')
+}
+
+/** Variable names `sideby key` accepts, such as `ANTHROPIC_AUTH_TOKEN`. */
+export const SECRET_VAR_NAME = /^[A-Z][A-Z0-9_]*$/
+
+const KEY_VAR = /(?:_KEY|_TOKEN)$/
+const ASSIGN = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/
+
+export interface SetSecretResult {
+  /** Path whose bytes were written. When `file` is a symlink, this is its real target. */
+  path: string
+  /** True when `file` was a symlink. The link itself is unchanged. */
+  viaLink: boolean
+  name: string
+  /** `replaced` keeps the assignment's line; `appended` adds one at the end. */
+  action: 'replaced' | 'appended'
+}
+
+/**
+ * The Secret File variable `sideby key` writes when the user does not pass `--var`.
+ * Uses `family.secretVar` when the Family sets one, otherwise the first `apiVars` entry
+ * that ends in `_KEY` or `_TOKEN`. Throws when the Family has neither, and says to pass `--var`.
+ */
+export function secretVarFor(family: Pick<FamilyDef, 'title' | 'apiVars' | 'secretVar'>): string {
+  const name = family.secretVar ?? family.apiVars.find((v) => SECRET_VAR_NAME.test(v) && KEY_VAR.test(v))
+  if (!name || !SECRET_VAR_NAME.test(name))
+    throw new SecretFileError(
+      `${family.title} has no default key variable. Run \`sideby key <account> --var <NAME>\` with the variable that tool's documentation names.`,
+    )
+  return name
+}
+
+/**
+ * Writes one assignment into a Secret File. The line that assigns `name` is replaced and stays
+ * where it was; every other line is kept byte for byte. When `name` is absent, a line is appended.
+ * The write is atomic and the file ends at mode 600. A symlink is left in place and the bytes go
+ * to its real target, which `path` reports. `name` must match {@link SECRET_VAR_NAME}. A value
+ * that contains a newline is rejected. The value is never included in an error or in the result.
+ */
+export async function setSecret(file: string, name: string, value: string): Promise<SetSecretResult> {
+  if (!SECRET_VAR_NAME.test(name))
+    throw new SecretFileError(
+      `variable name must match [A-Z][A-Z0-9_]* (for example ANTHROPIC_AUTH_TOKEN). Run \`sideby key <account> --var <NAME>\`.`,
+    )
+  if (value.includes('\n') || value.includes('\r'))
+    throw new SecretFileError(
+      `${name} must be a single line. Run \`sideby key <account>\` and enter one line, or fill the key in the Panel.`,
+    )
+  const formatted = `${name}=${formatSecretValue(value)}`
+  const located = await locateSecretFile(file)
+  let previous = ''
+  if (located.existed) {
+    try {
+      previous = await readFile(located.path, 'utf8')
+    } catch (err) {
+      throw writeFailed(located.path, err)
+    }
+  }
+  const next = assignLine(previous, name, formatted)
+  try {
+    await writeFileAtomic(located.path, next.text, 0o600)
+  } catch (err) {
+    throw writeFailed(located.path, err)
+  }
+  return { path: located.path, viaLink: located.viaLink, name, action: next.action }
+}
+
+/** Where the bytes go. A symlink is not followed by the writer; the caller passes the real target. */
+async function locateSecretFile(file: string): Promise<{ path: string; viaLink: boolean; existed: boolean }> {
+  const st = await lstatOrNull(file)
+  if (!st) return { path: file, viaLink: false, existed: false }
+  if (st.isSymbolicLink()) {
+    const real = await realpathOrNull(file)
+    if (!real)
+      throw new SecretFileError(
+        `${file} is a broken link. Point it at a proxy.env file, or replace the link with a file, then run \`sideby key\` again.`,
+      )
+    const target = await lstatOrNull(real)
+    if (!target?.isFile())
+      throw new SecretFileError(
+        `${file} points at ${real}, which is not a file. Point the link at a proxy.env file, then run \`sideby key\` again.`,
+      )
+    return { path: real, viaLink: true, existed: true }
+  }
+  if (st.isDirectory())
+    throw new SecretFileError(
+      `${file} is a directory. \`sideby key\` writes the proxy.env file; move that directory aside, then run \`sideby key\` again.`,
+    )
+  if (!st.isFile())
+    throw new SecretFileError(
+      `${file} is not a regular file. Replace it with a proxy.env file, then run \`sideby key\` again.`,
+    )
+  return { path: file, viaLink: false, existed: true }
+}
+
+function assignLine(
+  text: string,
+  name: string,
+  formatted: string,
+): { text: string; action: 'replaced' | 'appended' } {
+  const lines = splitKeepEnds(text)
+  let replaced = false
+  const rebuilt = lines
+    .map((line) => {
+      if (assignmentName(line.body) !== name) return line.body + line.eol
+      replaced = true
+      return formatted + line.eol
+    })
+    .join('')
+  if (replaced) return { text: rebuilt, action: 'replaced' }
+  const sep = text.length > 0 && !text.endsWith('\n') ? '\n' : ''
+  return { text: `${text}${sep}${formatted}\n`, action: 'appended' }
+}
+
+function assignmentName(body: string): string | null {
+  const trimmed = body.trim()
+  if (!trimmed || trimmed.startsWith('#')) return null
+  return ASSIGN.exec(body)?.[1] ?? null
+}
+
+/** A value `parseSecretFile` reads back unchanged. Single quotes stay literal; nothing is executed. */
+function formatSecretValue(value: string): string {
+  if (/^[A-Za-z0-9_./:@%+-]*$/.test(value)) return value
+  if (!value.includes("'")) return `'${value}'`
+  const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$')
+  return `"${escaped}"`
+}
+
+function splitKeepEnds(text: string): { body: string; eol: string }[] {
+  if (text === '') return []
+  const out: { body: string; eol: string }[] = []
+  const re = /\r\n|\n/g
+  let last = 0
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    out.push({ body: text.slice(last, m.index), eol: m[0] })
+    last = m.index + m[0].length
+  }
+  if (last < text.length) out.push({ body: text.slice(last), eol: '' })
+  return out
+}
+
+function writeFailed(file: string, err: unknown): SecretFileError {
+  if (err instanceof SecretFileError) return err
+  const code = (err as NodeJS.ErrnoException).code
+  if (code === 'ENOENT')
+    return new SecretFileError(
+      `${file} cannot be written because a parent directory is missing. Create the account with \`sideby new <family> <name> --api\`, then run \`sideby key\` again.`,
+    )
+  if (code === 'EACCES' || code === 'EPERM')
+    return new SecretFileError(
+      `${file} cannot be written (permission denied). Make the account directory yours, then run \`sideby key\` again.`,
+    )
+  return new SecretFileError(
+    `${file} could not be written. Check that the account directory is a real folder you can write to, then run \`sideby key\` again.`,
+  )
 }

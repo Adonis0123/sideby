@@ -992,6 +992,12 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
             'The desktop app (`sideby app install`) was installed and was written again by the new version.',
         }),
       ),
+      refreshedAutostart: Type.Optional(
+        Type.Boolean({
+          description:
+            'A login item (`sideby autostart on`) was installed and now starts the new version (false: that failed). Absent without one.',
+        }),
+      ),
       skill: Type.Optional(
         Type.String({ description: 'The command that installs the sideby skill by hand.' }),
       ),
@@ -1040,6 +1046,130 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     },
     { title: 'sideby error --json' },
   ),
+  ask: Type.Object({
+    schemaVersion: Version,
+    task: Type.Union([Str, Type.Null()]),
+    account: Type.Union([Str, Type.Null()]),
+    terminal: Type.Union([Str, Type.Null()]),
+    opened: Type.Boolean(),
+    command: Type.Union([Str, Type.Null()]),
+    removedSecrets: Type.Boolean(),
+    reason: Type.Optional(
+      Type.String({
+        enum: [
+          'no-accounts',
+          'none-signed-in',
+          'all-full',
+          'not-installed',
+          'automation-denied',
+          'npx-cache',
+          'unsafe-path',
+          'failed',
+          'unsupported-platform',
+        ],
+        description: 'Why nothing opened (only when `opened` is false); `detail` says what to do next.',
+      }),
+    ),
+    detail: Type.Optional(Type.String({ description: 'What to do next, for a person.' })),
+    prompt: Type.Optional(Str),
+    attachments: Type.Array(
+      Type.Object({
+        path: Type.String({ description: 'Absolute path of the copy saved for the task.' }),
+        kind: Type.String({ enum: ['image', 'video'] }),
+        bytes: Type.Integer({ minimum: 0 }),
+      }),
+      { description: 'Files given with `--attach`, in order; empty without any.' },
+    ),
+  }),
+  terminal: Type.Object({
+    schemaVersion: Version,
+    preferred: Type.Union([Str, Type.Null()]),
+    guess: Type.Object({ id: Str, source: Type.String({ enum: ['config', 'env', 'default'] }) }),
+    installed: Type.Array(
+      Type.Object({ id: Str, appPath: Type.Optional(Str), executable: Type.Optional(Str) }),
+    ),
+    terminals: Type.Array(Type.Object({ id: Str, name: Str, installed: Type.Boolean() })),
+  }),
+  key: Type.Object({
+    schemaVersion: Version,
+    account: Str,
+    var: Str,
+    written: Type.Literal(true),
+    path: Str,
+  }),
+  try: Type.Object({
+    schemaVersion: Version,
+    account: Str,
+    confirmed: Type.Boolean(),
+    command: Type.Optional(Type.Array(Str)),
+    ok: Type.Optional(Type.Boolean()),
+    exitCode: Type.Optional(Type.Union([Type.Integer(), Type.Null()])),
+    output: Type.Optional(Str),
+    timedOut: Type.Optional(Type.Boolean()),
+  }),
+  'plugins-new': Type.Object({ schemaVersion: Version, dir: Str, files: Type.Array(Str) }),
+  'plugins-check': Type.Object({
+    schemaVersion: Version,
+    ok: Type.Boolean(),
+    plugin: Type.Optional(Str),
+    families: Type.Array(Str),
+    problems: Type.Array(Type.Object({ code: Str, message: Str, fix: Str })),
+  }),
+  autostart: Type.Object({
+    schemaVersion: Version,
+    supported: Type.Boolean({
+      description: 'False on a system sideby cannot start at login yet; `reason` says so.',
+    }),
+    reason: Type.Optional(Str),
+    state: Type.Union(
+      ['off', 'on', 'stale', 'foreign'].map((k) => Type.Literal(k)),
+      {
+        description:
+          '`stale`: the Node or sideby it starts no longer exists; `foreign`: a file at that path that sideby did not write.',
+      },
+    ),
+    path: Str,
+    programArguments: Type.Optional(Type.Array(Str)),
+    current: Type.Boolean({ description: 'The login item starts this sideby with this Node.' }),
+    missing: Type.Optional(Type.Array(Str)),
+    action: Type.Optional(Type.Union([Type.Literal('on'), Type.Literal('off')])),
+    changed: Type.Optional(Type.Boolean()),
+    applied: Type.Optional(Type.Boolean()),
+    content: Type.Optional(Type.String({ description: 'The file `on` writes.' })),
+    commands: Type.Optional(Type.Array(Type.Array(Str))),
+    loaded: Type.Optional(Type.Boolean({ description: 'launchd took the change now.' })),
+    note: Type.Optional(Str),
+  }),
+  'config-get': Type.Object({
+    schemaVersion: Version,
+    file: Type.Optional(Str),
+    keys: Type.Optional(
+      Type.Array(
+        Type.Object({
+          key: Type.String({ description: 'Dot path; `<…>` marks a part you fill in.' }),
+          meaning: Str,
+          takes: Str,
+          value: Type.Optional(Type.Unknown()),
+          entries: Type.Optional(Type.Array(Type.Object({ key: Str, value: Type.Unknown() }))),
+        }),
+      ),
+    ),
+    key: Type.Optional(Str),
+    set: Type.Optional(Type.Boolean()),
+    value: Type.Optional(Type.Unknown()),
+    meaning: Type.Optional(Str),
+    takes: Type.Optional(Str),
+  }),
+  'config-set': Type.Object({
+    schemaVersion: Version,
+    action: Type.Union([Type.Literal('set'), Type.Literal('unset')]),
+    key: Str,
+    file: Str,
+    changed: Type.Boolean(),
+    applied: Type.Boolean(),
+    before: Type.Optional(Type.Unknown()),
+    after: Type.Optional(Type.Unknown()),
+  }),
   config: ConfigSchema,
 }
 for (const [name, schema] of Object.entries(OUTPUT_SCHEMAS)) {

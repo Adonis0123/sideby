@@ -11,6 +11,7 @@ import {
   applySkillUpdate,
   applyUpdate,
   autoPending,
+  autostartRefreshed,
   autoUpdateBlocker,
   autoUpdateLine,
   backgroundCheck,
@@ -66,10 +67,11 @@ interface Machine {
   execs: { file: string; args: readonly string[] }[]
   restarts: number[]
   appRefreshes: number
+  autostartRefreshes: number
 }
 
 function machine(h: FakeHome, over: Partial<UpdateDeps> & { latest?: string | Error } = {}): Machine {
-  const m: Machine = { execs: [], restarts: [], appRefreshes: 0 }
+  const m: Machine = { execs: [], restarts: [], appRefreshes: 0, autostartRefreshes: 0 }
   const reg = registry(over.latest ?? NEXT_MINOR)
   unbind = bindUpdateDeps({
     fetch: reg.fetch,
@@ -89,6 +91,10 @@ function machine(h: FakeHome, over: Partial<UpdateDeps> & { latest?: string | Er
       m.appRefreshes++
       return true
     },
+    refreshAutostart: async () => {
+      m.autostartRefreshes++
+      return true
+    },
     ...over,
   })
   return m
@@ -98,6 +104,22 @@ const envWithChecks = (h: FakeHome) => {
   const { SIDEBY_NO_UPDATE_NOTIFIER: _off, ...env } = h.env
   return env
 }
+
+describe('autostartRefreshed', () => {
+  it('counts only a refresh that says it changed the login item', () => {
+    assert.equal(autostartRefreshed(0, '{"schemaVersion":1,"state":"on","changed":true}'), true)
+    // Exit 0 also when nothing needed rewriting or the rewrite was refused.
+    assert.equal(autostartRefreshed(0, '{"schemaVersion":1,"state":"on","changed":false}'), false)
+    assert.equal(
+      autostartRefreshed(0, '{"schemaVersion":1,"state":"stale","changed":false,"note":"blocked"}'),
+      false,
+    )
+    assert.equal(autostartRefreshed(0, ''), false)
+    assert.equal(autostartRefreshed(0, 'not json'), false)
+    assert.equal(autostartRefreshed(1, '{"changed":true}'), false)
+    assert.equal(autostartRefreshed(null, '{"changed":true}'), false)
+  })
+})
 
 describe('versions', () => {
   it('compares versions with prereleases before their release', () => {
@@ -378,6 +400,21 @@ describe('Update and Auto Update', () => {
       const r = await applyUpdate(resolvePaths(h.env), plan, h.env)
       assert.equal(r.ok, true)
       assert.deepEqual([r.refreshedApp, m.appRefreshes, homes], [true, 1, [h.home]])
+    })
+  })
+  it('points an existing login item at the new code, and creates none (spec §3.29)', async () => {
+    await withFakeHome(async (h) => {
+      const m = machine(h)
+      const plan = planFrom(await installMethod(h.env), CURRENT, NEXT_MINOR)
+      const none = await applyUpdate(resolvePaths(h.env), plan, h.env)
+      assert.deepEqual([none.refreshedAutostart, m.autostartRefreshes], [undefined, 0])
+      await h.write(
+        'Library/LaunchAgents/dev.sideby.panel.plist',
+        '<!-- Written by `sideby autostart`: … -->\n',
+        0o644,
+      )
+      const r = await applyUpdate(resolvePaths(h.env), plan, h.env)
+      assert.deepEqual([r.refreshedAutostart, m.autostartRefreshes], [true, 1])
     })
   })
   it('keeps a successful Update when refreshing the desktop app fails', async () => {

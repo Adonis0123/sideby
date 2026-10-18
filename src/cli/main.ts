@@ -9,6 +9,10 @@ const MIN_NODE = [22, 18]
 const HELP = `sideby — run every AI coding account side by side
 
 Usage:
+  sideby ask [<text>] [--print]       let your AI handle a sideby task
+  sideby terminal [--set <id>|--custom <t>|--unset] choose your terminal
+  sideby key <account> [--var <NAME>] enter an API key without echo
+  sideby try <account> [--yes]        try the Host with a short paid request
   sideby                              list accounts (same as \`sideby list\`)
   sideby run <account> [-- args]      start the host CLI for one account
   sideby new <family> <name>|--next [--api] [--alias <short>]
@@ -73,14 +77,24 @@ Usage:
   sideby shell-init [zsh|bash] --write
                                       rewrite the config's shellInitFile with them
   sideby plugins                      list loaded plugins and load errors
+  sideby plugins new <id>             create a local Family Plugin skeleton
+  sideby plugins check <id|path>      check a plugin and show fixes
   sideby update [--yes]               update sideby to the newest version (shows the command first)
+  sideby autostart [on|off] [--yes]   start the panel in the background at login (macOS; shows the
+                                      file first)
+  sideby config get [<key>]           every setting with its value and meaning, or one setting
+  sideby config set <key> <value> [--yes]
+                                      change any setting (sideby config set panel.theme dark)
+  sideby config unset <key> [--yes]   back to the default
   sideby local [on|off] [--yes]       for sideby developers: switch the global sideby between the
                                       last local build (pnpm local) and the npm package
 
 Options:
   --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, remote-control, handoff,
-                families, plugins, app, desktop, browser, update, local)
-  -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, desktop, browser
+                families, plugins, app, desktop, browser, update, local, ask, terminal, key, try,
+                autostart, config)
+  -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, desktop, browser,
+                autostart, config
   -v, --version show the version
 
 An <account> is <family>:<name> (claude:work) or just <name> when it is unique.
@@ -98,6 +112,13 @@ Updates: once a day sideby asks the npm registry for its newest version and says
 
 /** `sideby <command> --help` for the commands agents use to set up and repair accounts (spec §3.16). */
 const COMMAND_HELP: Record<string, string> = {
+  ask: 'sideby ask [<text>] [--task free|fix|quota|account|host|plugin|terminal|handoff] [--account <ref>] [--terminal <id>] [--attach <file>]... [--print] [--json]\nsideby ask --run <id> [--state-dir <dir>]\nOpen a task in your terminal. --attach adds an image (PNG, JPEG, GIF, WebP; up to 20 MB) or a video (MP4, MOV, WebM; up to 200 MB), at most 5. --print prints only the prompt. If opening fails, paste the command into a terminal.',
+  terminal:
+    "sideby terminal [--set <id>|--custom '<program> … {cwd} … {cmd}'|--unset] [--json]\nList terminals or save your preference; --custom saves and selects your own launch command.",
+  key: 'sideby key <account> [--var <NAME>] [--json]\nEnter an API key without echo. Run in a terminal or use the Panel key box.',
+  try: 'sideby try <account> [--yes] [--json]\nSend a short request through the Host. This spends a few tokens. Exit 10 waits for --yes.',
+  plugins:
+    'sideby plugins [--json]\nsideby plugins new <id> [--json]\nsideby plugins check <id|path> [--json]\nPlugins run as you, with your permissions. Only load plugins you trust.',
   new: `sideby new <family> <name> [--api] [--alias <short>] [--json]
 sideby new <family> --next [--api] [--alias <short>] [--json]
 
@@ -182,6 +203,42 @@ Examples:
   sideby desktop grok-bot:002 --remove --yes
 Exit: 0 opened, brought to the front or removed; 1 not macOS, no desktop app for that host, API account, app not
 installed, a bad window name, or the app did not open; 10 --remove without --yes; 2 malformed command line.`,
+  autostart: `sideby autostart [on|off] [--yes] [--json]
+
+Start the panel in the background when you log in, so it already shows fresh quota when you open it. It never
+opens a window or a browser and never starts a host. macOS only for now (a LaunchAgent,
+~/Library/LaunchAgents/dev.sideby.panel.plist, that starts this Node and this sideby with ui --background).
+
+Without on or off it says whether it is on, off, out of date (the Node or sideby it starts was moved) or blocked
+by a file that is not sideby's. on and off show the file and the launchctl command first; --yes does it.
+\`sideby update\` and \`pnpm local\` keep an existing login item pointing at the sideby in use.
+
+Examples:
+  sideby autostart --json
+  sideby autostart on --yes
+  sideby autostart off --yes
+Exit: 0 shown, done or nothing to change; 10 a change was shown and waits for --yes; 1 refused (not macOS, sideby
+in the npx cache or a temporary folder, a file that is not sideby's) or failed; 2 malformed command line.`,
+  config: `sideby config get [<key>] [--json]
+sideby config set <key> <value> [--yes] [--json]
+sideby config unset <key> [--yes] [--json]
+
+Read or change any setting in sideby's config file. <key> is a dot path such as handoff.threshold or panel.theme;
+\`sideby config get\` lists every key with its value, what it does and the values it takes. A value is read as
+JSON when it parses (90, true, ["cc002","codex001"]), otherwise as text (dark).
+
+set and unset show the change first; --yes saves it. The whole file must still be a valid config, and other keys
+and their order are kept. A plugin's own settings are not read or changed here (they may hold secrets), only
+plugins.<plugin>.enabled. accounts.<family>:<name>.args takes only the model and effort arguments, as
+\`sideby model\` does.
+
+Examples:
+  sideby config get --json
+  sideby config set panel.theme dark --yes
+  sideby config set handoff.threshold 90 --yes
+  sideby config unset panel.language --yes
+Exit: 0 shown, saved or nothing to change; 10 a change was shown and waits for --yes; 1 not a key, a value the key
+does not take, or the file changed meanwhile; 2 malformed command line.`,
   browser: `sideby browser [--enable|--disable] [--yes] [--json]
        sideby browser open <account> [--profile <folder|name>] [--json]
 
@@ -229,6 +286,12 @@ export function nodeTooOld(version = process.versions.node): boolean {
 }
 
 const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
+  ask: { flags: ['json', 'print'], valued: ['task', 'account', 'terminal', 'run', 'state-dir', 'attach'] },
+  terminal: { flags: ['json', 'unset'], valued: ['set', 'custom'] },
+  key: { flags: ['json'], valued: ['var'] },
+  try: { flags: ['json', 'yes'] },
+  autostart: { flags: ['json', 'yes', 'refresh'] },
+  config: { flags: ['json', 'yes'] },
   list: { flags: ['json'] },
   pin: { flags: ['json'] },
   unpin: { flags: ['json'] },
@@ -260,9 +323,21 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   'update-check': { flags: [] },
 }
 
+/** Every value of a repeatable option (`--attach a --attach=b`), in order. */
+function repeatedValues(args: readonly string[], name: string): string[] {
+  const out: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!
+    if (a === `--${name}` && args[i + 1] !== undefined) out.push(args[++i]!)
+    else if (a.startsWith(`--${name}=`)) out.push(a.slice(name.length + 3))
+  }
+  return out
+}
+
 /** Commands that never print an Update Notice: their output is read by a shell or an agent, or they are internal. */
 function noticeAllowed(cmd: string, parsed: import('./args.ts').ParsedArgs): boolean {
   if (cmd === 'shell-init' || cmd === 'update' || cmd === 'update-check') return false
+  if (cmd === 'ask' && (parsed.flags.has('print') || parsed.flags.has('run'))) return false
   if (cmd === 'ui' && parsed.flags.has('serve-detached')) return false
   if (cmd === 'handoff' && parsed.positionals[0] === 'ready') return false
   return true
@@ -407,6 +482,8 @@ export async function main(argv: string[]): Promise<number> {
       console.log(COMMAND_HELP[cmd] ?? HELP)
       return 0
     }
+    // parseArgs keeps the last value of an option; `ask --attach` may be given several times.
+    if (cmd === 'ask') (parsed as import('./commands.ts').AskArgs).attach = repeatedValues(own, 'attach')
     const cmds = await import('./commands.ts')
     if (wantsJson && noticeAllowed(cmd, parsed)) {
       notice = await jsonNoticeFor()
@@ -441,6 +518,14 @@ async function dispatch(
   cmds: typeof import('./commands.ts'),
 ): Promise<number> {
   switch (cmd) {
+    case 'ask':
+      return cmds.cmdAsk(parsed, io)
+    case 'terminal':
+      return cmds.cmdTerminal(parsed, io)
+    case 'key':
+      return cmds.cmdKey(parsed, io)
+    case 'try':
+      return cmds.cmdTry(parsed, io)
     case 'pin':
     case 'unpin':
       return await cmds.cmdPin(parsed, io, cmd === 'pin')
@@ -492,6 +577,10 @@ async function dispatch(
       return await cmds.cmdUpdateCheck(parsed, io)
     case 'local':
       return await cmds.cmdLocal(parsed, io)
+    case 'autostart':
+      return await cmds.cmdAutostart(parsed, io)
+    case 'config':
+      return await cmds.cmdConfig(parsed, io)
   }
   return 2
 }

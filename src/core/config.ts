@@ -115,8 +115,15 @@ const HandoffSchema = Type.Object(
         Type.String(),
         Type.Object(
           {
-            policy: Type.Optional(Type.Union([Type.Literal('pressure'), Type.Literal('order')])),
-            order: Type.Optional(Type.Array(Type.String())),
+            policy: Type.Optional(
+              Type.Union([Type.Literal('pressure'), Type.Literal('order')], {
+                description:
+                  '`pressure` picks the account with the most Quota left; `order` follows `order`.',
+              }),
+            ),
+            order: Type.Optional(
+              Type.Array(Type.String(), { description: 'Accounts (ref or short command) to try, in order.' }),
+            ),
           },
           { additionalProperties: false },
         ),
@@ -144,10 +151,71 @@ export interface HandoffSettings {
 export const ConfigSchema = Type.Object(
   {
     $schema: Type.Optional(Type.String()),
+    panel: Type.Optional(
+      Type.Object(
+        {
+          theme: Type.Optional(
+            Type.String({
+              enum: ['system', 'light', 'dark'],
+              description: 'Panel colours: follow the system (default), always light, or always dark.',
+            }),
+          ),
+          language: Type.Optional(
+            Type.String({
+              enum: ['auto', 'en', 'zh'],
+              description: "Panel language: the browser's (default), English, or Chinese.",
+            }),
+          ),
+        },
+        { additionalProperties: false, description: 'How the Panel looks (spec §3.29).' },
+      ),
+    ),
+    terminal: Type.Optional(
+      Type.Object(
+        {
+          preferred: Type.Optional(
+            Type.String({
+              enum: ['terminal', 'iterm2', 'ghostty', 'orca', 'wezterm', 'kitty', 'alacritty', 'custom'],
+              description: 'The terminal sideby opens for AI Tasks; without it sideby picks the one you use.',
+            }),
+          ),
+          custom: Type.Optional(
+            Type.String({
+              description:
+                'Your own launch command for `preferred: custom`, with `{cwd}` and `{cmd}` placeholders.',
+            }),
+          ),
+        },
+        { additionalProperties: false, description: 'The terminal AI Tasks open in (spec §3.28).' },
+      ),
+    ),
+    ask: Type.Optional(
+      Type.Object(
+        {
+          account: Type.Optional(
+            Type.String({
+              description:
+                'The account AI Tasks start (`<family>:<name>` or a short command); sideby picks one without it.',
+            }),
+          ),
+        },
+        { additionalProperties: false, description: 'AI Tasks (spec §3.28).' },
+      ),
+    ),
     accounts: Type.Optional(
       Type.Record(
         Type.String(),
-        Type.Object({ args: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),
+        Type.Object(
+          {
+            args: Type.Optional(
+              Type.Array(Type.String(), {
+                description:
+                  'Host arguments sideby starts the account with; `sideby config` and `sideby model` set only the model and effort ones.',
+              }),
+            ),
+          },
+          { additionalProperties: false },
+        ),
         { description: 'Per-Account settings keyed by `<family>:<name>`.' },
       ),
     ),
@@ -166,7 +234,12 @@ export const ConfigSchema = Type.Object(
         description: 'Per-Plugin settings; `enabled: false` turns a Plugin off.',
       }),
     ),
-    extraSharedItems: Type.Optional(Type.Record(Type.String(), Type.Array(SharedItemSchema))),
+    extraSharedItems: Type.Optional(
+      Type.Record(Type.String(), Type.Array(SharedItemSchema), {
+        description:
+          'Per family, more items each account shares with the main account: `{ path, mode }` with a relative path.',
+      }),
+    ),
     accountTitle: Type.Optional(
       Type.Boolean({
         description:
@@ -258,8 +331,8 @@ export const ConfigSchema = Type.Object(
     shellInitFile: Type.Optional(
       Type.Object(
         {
-          zsh: Type.Optional(Type.String({ minLength: 1 })),
-          bash: Type.Optional(Type.String({ minLength: 1 })),
+          zsh: Type.Optional(Type.String({ minLength: 1, description: 'The file for zsh.' })),
+          bash: Type.Optional(Type.String({ minLength: 1, description: 'The file for bash.' })),
         },
         {
           additionalProperties: false,
@@ -335,16 +408,14 @@ async function configTarget(file: string): Promise<string> {
 }
 
 /**
- * Re-reads the config file, lets `edit` change one top-level `key` (sideby writes only `aliases`, `handoff`,
- * `accounts`, `update`, `browser`, `display` and `quota`, spec §3.10), and an `edit` that returns undefined removes it, and writes the result: every other key and their order kept (with `$schema`), 2-space JSON
+ * Re-reads the config file, lets `edit` change one top-level `key` (the keys sideby writes are listed in spec §3.10;
+ * `sideby config set|unset` may change any but plugin settings, §3.29), and an `edit` that returns undefined removes it, and writes the result: every other key and their order kept (with `$schema`), 2-space JSON
  * with a trailing newline, atomically, keeping the file's mode (0600 for a new file). Refuses, without writing, a
  * file that is not valid JSON or not a valid config, a result that is not a valid config, or a file that changed
  * while sideby wrote it. `edit` returns null to leave the file alone; `dryRun` returns the change without writing.
  * `retry` names what to do again after a fix.
  */
-async function editConfigKey<
-  K extends 'aliases' | 'handoff' | 'accounts' | 'update' | 'browser' | 'display' | 'quota',
->(
+async function editConfigKey<K extends Exclude<keyof Config, '$schema'>>(
   file: string,
   key: K,
   retry: string,
@@ -387,8 +458,24 @@ async function editConfigKey<
       ? { $schema: 'https://unpkg.com/sideby/schemas/config.json', [key]: after }
       : { ...data, [key]: after }
   if (after === undefined) delete next[key]
-  if (!Value.Check(ConfigSchema, next))
-    throw new ConfigError(`the new ${key} would not match schemas/config.json`)
+  if (!Value.Check(ConfigSchema, next)) {
+    const first = [...Value.Errors(ConfigSchema, next)][0]
+    const where = (first?.instancePath ?? '').replace(/^\//, '').split('/').join('.') || key
+    throw new ConfigError(
+      `${where} ${first?.message ?? 'is invalid'}, so nothing was changed; \`sideby config get\` lists the keys and the values they take`,
+      { code: 'bad-value' },
+    )
+  }
+  for (const alias of Object.keys((next as Config).aliases ?? {})) {
+    const problem = aliasProblem(alias)
+    if (problem)
+      throw new ConfigError(
+        `alias "${alias}" ${problem} (it becomes a shell function name); pick another name`,
+        {
+          code: 'bad-value',
+        },
+      )
+  }
   const h = handoffSettings(next as Config)
   if (h.prepareAt >= h.threshold)
     throw new ConfigError(
@@ -557,4 +644,298 @@ export async function removeConfigAlias(
     return rest
   })
   return { status, aliases }
+}
+
+export function editConfigTerminal(file: string, patch: { preferred?: string; custom?: string }) {
+  return editConfigKey(file, 'terminal', 'run `sideby terminal`', (current) => {
+    const next = { ...current, ...patch }
+    for (const key of ['preferred', 'custom'] as const) if (next[key] === undefined) delete next[key]
+    return Object.keys(next).length ? next : undefined
+  })
+}
+export function editConfigAsk(file: string, account?: string) {
+  return editConfigKey(file, 'ask', 'run `sideby ask`', () => (account ? { account } : undefined))
+}
+
+export type PanelConfig = NonNullable<Config['panel']>
+
+/**
+ * The Panel's theme and language (spec §3.29): a value sets the key, null removes it (back to the default), and an
+ * empty `panel` goes away with it (see `editConfigKey` for how the file is written).
+ */
+export function editConfigPanel(
+  file: string,
+  patch: { theme?: PanelConfig['theme'] | null; language?: PanelConfig['language'] | null },
+  opts: { dryRun?: boolean } = {},
+): Promise<{ changed: boolean; before: PanelConfig | undefined; after: PanelConfig | undefined }> {
+  return editConfigKey(
+    file,
+    'panel',
+    'change the setting',
+    (current) => {
+      const next: Record<string, unknown> = { ...current }
+      for (const k of ['theme', 'language'] as const)
+        if (patch[k] === null) delete next[k]
+        else if (patch[k] !== undefined) next[k] = patch[k]
+      return Object.keys(next).length ? (next as PanelConfig) : undefined
+    },
+    opts,
+  )
+}
+
+// ---- `sideby config get|set|unset` (spec §3.29): any key of the schema except a plugin's own settings.
+
+type SchemaNode = {
+  type?: string
+  description?: string
+  properties?: Record<string, SchemaNode>
+  patternProperties?: Record<string, SchemaNode>
+  anyOf?: SchemaNode[]
+  items?: SchemaNode
+  enum?: string[]
+  const?: unknown
+  minimum?: number
+  maximum?: number
+}
+
+/** The name shown for a key the user picks, per record in the schema. */
+const PLACEHOLDERS: Record<string, string> = {
+  accounts: '<family>:<name>',
+  aliases: '<short>',
+  plugins: '<plugin>',
+  extraSharedItems: '<family>',
+  'handoff.families': '<family>',
+  'display.accounts': '<family>',
+  'display.pinned': '<family>',
+  'quota.check': '<family>',
+}
+
+const BAD_SEGMENT = new Set(['__proto__', 'constructor', 'prototype'])
+
+export interface SettableKey {
+  /** Dot path; `<…>` marks a part the user fills in (`accounts.<family>:<name>.args`). */
+  key: string
+  /** One line on what it does. */
+  meaning: string
+  /** The values it takes, in words. */
+  takes: string
+  /** The current value of a key without `<…>`; absent when not set. */
+  value?: unknown
+  /** For a key with `<…>`: the keys set now and their values. */
+  entries?: { key: string; value: unknown }[]
+}
+
+function takes(node: SchemaNode): string {
+  if (node.anyOf) {
+    const consts = node.anyOf.filter((n) => n.const !== undefined).map((n) => String(n.const))
+    if (consts.length === node.anyOf.length) return `one of: ${consts.join(', ')}`
+    return 'an account ref (`<family>:<name>`), or JSON {"account": …, "args": […]}'
+  }
+  if (node.enum) return `one of: ${node.enum.join(', ')}`
+  if (node.type === 'boolean') return 'true or false'
+  if (node.type === 'integer')
+    return node.maximum !== undefined
+      ? `a whole number from ${node.minimum ?? 0} to ${node.maximum}`
+      : `a whole number, ${node.minimum ?? 0} or more`
+  if (node.type === 'array')
+    return node.items?.type === 'string' ? 'a JSON list of text, such as ["a","b"]' : 'a JSON list'
+  if (node.type === 'string') return 'text'
+  return 'a JSON object'
+}
+
+/** Every key `sideby config set` takes, with its meaning and current value, in schema order. */
+export function settableKeys(config: Config): SettableKey[] {
+  const out: SettableKey[] = []
+  const walk = (node: SchemaNode, path: string[], meaning: string) => {
+    const key = path.join('.')
+    const here = node.description ?? meaning
+    if (node.properties) {
+      for (const [name, child] of Object.entries(node.properties))
+        if (name !== '$schema') walk(child, [...path, name], here)
+      return
+    }
+    const pattern = node.patternProperties && Object.values(node.patternProperties)[0]
+    if (pattern) {
+      const holder = PLACEHOLDERS[key] ?? '<name>'
+      if (key === 'plugins') {
+        walk(
+          {
+            type: 'boolean',
+            description: 'false turns the plugin off; its own settings are not changed here.',
+          },
+          [...path, holder, 'enabled'],
+          here,
+        )
+        return
+      }
+      if (pattern.properties) return walk(pattern, [...path, holder], here)
+      return leaf(pattern, [...path, holder], here)
+    }
+    leaf(node, path, here)
+  }
+  const leaf = (node: SchemaNode, path: string[], meaning: string) => {
+    const key = path.join('.')
+    const item: SettableKey = { key, meaning: node.description ?? meaning, takes: takes(node) }
+    const holder = path.findIndex((p) => p.startsWith('<'))
+    if (holder < 0) {
+      const v = getIn(config, path)
+      if (v !== undefined) item.value = v
+    } else {
+      const entries: { key: string; value: unknown }[] = []
+      const parent = getIn(config, path.slice(0, holder))
+      if (parent && typeof parent === 'object')
+        for (const name of Object.keys(parent)) {
+          const concrete = [...path.slice(0, holder), name, ...path.slice(holder + 1)]
+          const v = getIn(config, concrete)
+          if (v !== undefined) entries.push({ key: concrete.join('.'), value: v })
+        }
+      if (entries.length) item.entries = entries
+    }
+    out.push(item)
+  }
+  walk(ConfigSchema as unknown as SchemaNode, [], '')
+  return out
+}
+
+function getIn(value: unknown, path: readonly string[]): unknown {
+  let at = value
+  for (const seg of path) {
+    if (!at || typeof at !== 'object' || Array.isArray(at) || !Object.hasOwn(at, seg)) return undefined
+    at = (at as Record<string, unknown>)[seg]
+  }
+  return at
+}
+
+/** Splits and checks a dot path; refuses what `config` may not read or change. */
+export function configKeyPath(key: string): string[] {
+  return describeConfigKey(key).path
+}
+
+/** The path of `key`, what it does and the values it takes; refuses what `config` may not read or change. */
+export function describeConfigKey(key: string): { path: string[]; meaning: string; takes: string } {
+  const path = key.split('.')
+  const list = '`sideby config get` lists the keys you can use'
+  if (!key || path.some((p) => !p || BAD_SEGMENT.has(p)))
+    throw new ConfigError(`"${key}" is not a config key; ${list}`, { code: 'bad-key' })
+  if (path[0] === '$schema')
+    throw new ConfigError(`$schema is for editors and is not a setting; ${list}`, { code: 'bad-key' })
+  if (path[0] === 'plugins' && !(path.length === 3 && path[2] === 'enabled'))
+    throw new ConfigError(
+      `a plugin's own settings may hold secrets, so \`sideby config\` does not read or change them (only plugins.<plugin>.enabled); edit them in the config file`,
+      { code: 'plugin-config' },
+    )
+  let node: SchemaNode | undefined = ConfigSchema as unknown as SchemaNode
+  let meaning = ''
+  for (const seg of path) {
+    const n: SchemaNode | undefined = node
+    if (!n) break
+    const holder: SchemaNode[] = n.anyOf ?? [n]
+    node = undefined
+    for (const h of holder) {
+      if (h.properties?.[seg]) node = h.properties[seg]
+      else if (h.patternProperties) {
+        const [re, child] = Object.entries(h.patternProperties)[0]!
+        if (new RegExp(re).test(seg)) node = child
+      }
+      if (node) break
+    }
+    if (node?.description) meaning = node.description
+  }
+  if (!node) throw new ConfigError(`"${key}" is not a config key; ${list}`, { code: 'bad-key' })
+  if (path[0] === 'plugins') return { path, meaning: 'false turns the plugin off.', takes: 'true or false' }
+  return { path, meaning, takes: takes(node) }
+}
+
+/** A value from the command line: JSON when it parses (90, true, ["a"]), else the text itself. */
+export function parseConfigValue(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
+  }
+}
+
+/** `sideby config get [key]`: the value at `key` (undefined when not set). */
+export async function configGet(file: string, key: string): Promise<{ key: string; value: unknown }> {
+  const path = configKeyPath(key)
+  return { key, value: getIn(await loadConfig(file), path) }
+}
+
+function setIn(value: unknown, path: readonly string[], next: unknown, key: string): unknown {
+  const [seg, ...rest] = path
+  if (seg === undefined) return next
+  if (value !== undefined && (typeof value !== 'object' || value === null || Array.isArray(value)))
+    throw new ConfigError(
+      `${key} cannot be set inside a value that is not an object; set the part before it as a whole (JSON), or unset it first`,
+      { code: 'bad-key' },
+    )
+  const obj: Record<string, unknown> = { ...(value as Record<string, unknown> | undefined) }
+  const child = setIn(obj[seg], rest, next, key)
+  if (child === undefined || (rest.length && isEmptyObject(child) && next === undefined)) delete obj[seg]
+  else obj[seg] = child
+  return obj
+}
+
+const isEmptyObject = (v: unknown) =>
+  typeof v === 'object' && v !== null && !Array.isArray(v) && Object.keys(v).length === 0
+
+export interface ConfigChange {
+  key: string
+  before: unknown
+  after: unknown
+  changed: boolean
+}
+
+/**
+ * `sideby config set|unset` (spec §3.29): sets `key` to `value`, or removes it when `value` is undefined (and parents
+ * left empty with it). The whole result must match the schema; `accounts.<ref>.args` takes only what `argsProblem`
+ * accepts (the model and effort arguments, as `sideby model`), and without `argsProblem` it is refused. Written as
+ * every other config change (see `editConfigKey`); `dryRun` shows the change without writing.
+ */
+export async function editConfigPath(
+  file: string,
+  key: string,
+  value: unknown,
+  opts: { dryRun?: boolean; argsProblem?: (ref: string, args: string[]) => string | null } = {},
+): Promise<ConfigChange> {
+  const path = configKeyPath(key)
+  if (path[0] === 'plugins' && value !== undefined && typeof value !== 'boolean')
+    throw new ConfigError(`${key} takes true or false`, { code: 'bad-value' })
+  const top = path[0] as Exclude<keyof Config, '$schema'>
+  const r = await editConfigKey(
+    file,
+    top,
+    'run the command',
+    (current) => {
+      const next = setIn(current, path.slice(1), value, key) as Config[typeof top]
+      const result = path.length === 1 ? next : isEmptyObject(next) ? undefined : next
+      if (top === 'accounts')
+        checkAccountArgs(
+          current as AccountsConfig | undefined,
+          result as AccountsConfig | undefined,
+          opts.argsProblem,
+        )
+      return result
+    },
+    opts,
+  )
+  const inner = path.slice(1)
+  return { key, before: getIn(r.before, inner), after: getIn(r.after, inner), changed: r.changed }
+}
+
+function checkAccountArgs(
+  before: AccountsConfig | undefined,
+  after: AccountsConfig | undefined,
+  argsProblem: ((ref: string, args: string[]) => string | null) | undefined,
+): void {
+  for (const [ref, entry] of Object.entries(after ?? {})) {
+    const args = entry.args
+    if (!args || JSON.stringify(args) === JSON.stringify(before?.[ref]?.args)) continue
+    const problem = argsProblem ? argsProblem(ref, args) : 'sideby cannot check these arguments here'
+    if (problem)
+      throw new ConfigError(
+        `accounts.${ref}.args: ${problem}. \`sideby config\` sets only the model and effort arguments, as \`sideby model ${ref}\` does; other host arguments go in a short command (\`sideby alias add <short> ${ref} -- <args>\`)`,
+        { code: 'bad-value' },
+      )
+  }
 }

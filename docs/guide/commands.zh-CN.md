@@ -24,11 +24,11 @@
 | `sideby model <acct> [<model>\|default] [--effort <level>\|default] [--yes]` | 显示这个账号启动时用的模型和 effort 及各自来源；给出改动时先展示，加 `--yes` 才保存（Claude、Codex） | 0；等待 `--yes` 为 10；值不合法或是 API 账号为 1 |
 | `sideby tune apply <acct> [tokens] [--yes]` / `sideby tune undo <acct> [--yes]` | 把建议的自动压缩大小（或你给的大小，如 `120k`）用在一个 Claude 账号上，或恢复原值。只写该账号 `settings.json` 里的一个键；不加 `--yes` 只展示改动 | 只展示改动时为 10；完成为 0；被拦下、没有可撤销的、没有建议为 1；命令行有误为 2 |
 | `sideby remote-control [on\|off\|undo] [--yes]` | 显示每个 Claude 设置文件会不会自动打开 Remote Control；`off` 把开着或没设置的都改成 `remoteControlAtStartup: false`，`on` 把关着或没设置的都改成 `true`，`undo` 恢复原来的值（都先展示改动） | 只展示改动时 10；完成或无需改动 0；改不了、失败或没有可撤销的 1 |
-| `sideby handoff status` | 按家族列出本机启用自动交接还差什么，以及接下来要运行的命令 | 0 |
+| `sideby handoff status` | 按家族列出本机启用自动接力还差什么，以及接下来要运行的命令 | 0 |
 | `sideby handoff enable [--same-family] [--order <family>=<acct,…>] [--threshold n] [--prepare-at n] [--yes]` | 展示 config 改动；加 `--yes` 才开启（其他设置保留），并列出还要做的步骤 | 只展示改动时为 10；写入后或已是这样为 0；`--order` 里有找不到的账号为 1 |
 | `sideby handoff disable [--yes]` | 关闭，其他设置保留 | 只展示改动时为 10；写入后或本来就关着为 0 |
-| `sideby handoff ready [--to <account>] [--brief <file>]` | 在 sideby 以自动交接启动的会话里：这一轮结束后交给下一个账号，并说出是哪个；`--to` 指定账号，也可以是这条链用过的账号（交回额度已恢复的账号）；`--brief` 用你自己写的交接说明 | 0；不在这类会话里、读不了 brief 文件，或没有账号（或指定的账号）能接时为 1 |
-| `sideby handoff setup grok [--yes]` | 展示改动；加 `--yes` 才添加 sideby 的 hook 文件，让 Grok 撞上限额时能交接 | 只展示改动时为 10；开启后为 0；无法开启或失败为 1 |
+| `sideby handoff ready [--to <account>] [--brief <file>]` | 在 sideby 以自动接力启动的会话里：这一轮结束后交给下一个账号，并说出是哪个；`--to` 指定账号，也可以是这条链用过的账号（交回额度已恢复的账号）；`--brief` 用你自己写的接力说明 | 0；不在这类会话里、读不了 brief 文件，或没有账号（或指定的账号）能接时为 1 |
+| `sideby handoff setup grok [--yes]` | 展示改动；加 `--yes` 才添加 sideby 的 hook 文件，让 Grok 撞上限额时能接力 | 只展示改动时为 10；开启后为 0；无法开启或失败为 1 |
 | `sideby handoff teardown grok` | 文件未被改动时删除它 | 0；拒绝或失败为 1 |
 | `sideby ui [--port n] [--no-open]` | 本地面板，按 Ctrl+C 停止 | — |
 | `sideby ui --background` / `--stop` | 脱离终端启动面板（已有就复用，sideby 升级后则替换旧的）并打开 / 停掉它 | 0；启动或停止失败为 1 |
@@ -41,10 +41,19 @@
 | `sideby shell-init zsh\|bash` | 输出每个账号和每个别名的 shell 函数 | 0 |
 | `sideby shell-init [zsh\|bash] --write` | 用这份输出重写 config 里配置的 `shellInitFile` | 0；写不了或没有配置为 1 |
 | `sideby plugins` | 已加载的插件和加载错误 | 0；有插件加载失败时为 1 |
+| `sideby plugins new <id>` | 为 sideby 还不支持的工具，在第一个插件目录里建一个本地 Family 插件：`plugin.json`、每个必填字段都带 `TODO` 的 `index.ts` 骨架和一个测试（见[插件](plugins.zh-CN.md#加一个-sideby-还不支持的工具)） | 0；名字不合法或目录已存在为 1 |
+| `sideby plugins check <id>` | 检查这个插件：必填字段、共享项路径、logo、只用 type import、在临时 HOME 里跑一遍发现、启动和体检，以及有没有个人信息；每个问题都写明怎么改 | 0 全部通过；有问题为 1 |
+| `sideby ask [<text>] [--task fix\|quota\|account\|host\|plugin] [--account <acct>] [--terminal <id>] [--attach <file>]… [--print]` | 打开首选终端，用你的一个账号带着这件事的短提示启动，和面板的「让 AI 帮我」一样（见[让 AI 帮我](panel.zh-CN.md#让-ai-帮我)）；`--attach` 加一张截图或一段视频（可写多次，最多 5 个；图片最大 20MB，视频最大 200MB），文件复制到 sideby 自己的目录并列进提示词；`--print` 只打印提示词，文件留在原处 | 0 已打开或已打印；终端打不开、没有能用的账号为 1（`--json` 会给出要粘贴的命令）；未知任务为 2 |
+| `sideby ask --run <id>` | 终端里实际运行的命令：读出面板或 `ask` 准备好的任务，带着提示词启动账号。任务保留一小时 | 宿主的退出码；任务不存在或已过期为 1 |
+| `sideby terminal [--set <id>\|--unset]` | 列出支持的终端、本机装了哪些、当前用哪个；`--set` 保存首选终端 | 0；sideby 不认识的终端为 1 |
+| `sideby autostart [on\|off] [--yes]` | 登录后在后台启动面板（macOS），不打开窗口；不带 `on`/`off` 时报告开着、关着、过期了，还是被一个不是 sideby 写的文件挡住。先显示要写的文件和 `launchctl` 命令 | 0；有变化等 `--yes` 为 10；被拒绝（不是 macOS、sideby 在 npx 缓存或临时目录里、文件不是 sideby 的）为 1 |
+| `sideby config get [<key>]` / `config set <key> <value> [--yes]` / `config unset <key> [--yes]` | 读或改任意设置，比如 `panel.theme`（`system`、`light`、`dark`）、`panel.language`（`auto`、`en`、`zh`）、`handoff.threshold`；`get` 不带 key 列出每个键、当前值和说明。值能按 JSON 解析就按 JSON，否则当文字。插件自己的配置不在这里读写 | `get` 为 0；`set`/`unset` 有变化等 `--yes` 为 10；不是键或值不对为 1；命令写错为 2 |
+| `sideby key <acct> [--var <NAME>]` | 把 API 密钥输入到这个账号的 `proxy.env`，屏幕上不显示（变量默认是宿主的密钥变量）；其他行原样保留，权限 600。用于 API 账号和 pi | 0；不是 API 账号、不是在终端里输入、写不了为 1 |
+| `sideby try <acct> [--yes]` | 试一下账号能不能用：宿主发一次很短的请求（花几个 token），sideby 告诉你它有没有回答 | 只说明了要运行什么为 10；宿主回答了为 0；失败或这个宿主不支持试一下为 1 |
 | `sideby update [--yes]` | 向 npm registry 查 sideby 最新版本，显示安装它的命令；带 `--yes` 就执行，并重启后台面板（见[更新](configuration.zh-CN.md#更新)） | 0 已是最新或已更新；只显示了命令为 10；这种安装方式不能自己更新（会打印要运行的命令）、连不上 registry 或安装失败为 1 |
 
 - 所有命令遇到用法错误（未知选项、缺参数）时退出码为 2；sideby 自身出错（账号不存在、名字不合法、配置读不了）时为 1。
 - `<acct>` 写成 `<family>:<name>`；名字在所有家族里唯一时，只写 `<name>` 也行。有歧义就报错，并列出候选。
 - 退出码 10 表示命令展示了改动、在等你确认：同意的话，加上 `--yes` 再跑一次同一条命令。
-- `list`、`new`、`next`、`alias`、`doctor`、`quota`（包括 `setup` 和 `teardown`）、`tune`、`model`、`remote-control`、`handoff`、`families`、`plugins`、`app`、`desktop` 支持 `--json`，输出带 `schemaVersion: 1`，JSON Schema 随包放在 [`schemas/`](../../schemas/)。有新版本或本机装的 skill 版本不对时，输出里还会多一个 `_notice`（sideby skill 让 agent 提一次并主动问要不要帮你更新；设 `SIDEBY_NO_UPDATE_NOTIFIER=1` 就不带）。加了 `--json` 时，出错会输出 `{ "schemaVersion": 1, "error": "…", "code": "…" }`：命令行写错时 `code` 为 `usage`，其他情况是 `no-quota-source` 这样的原因。只新增字段时版本不变；删除、改名或改语义时加 1。
+- `list`、`new`、`next`、`alias`、`doctor`、`quota`（包括 `setup` 和 `teardown`）、`tune`、`model`、`remote-control`、`handoff`、`families`、`plugins`、`ask`、`terminal`、`key`、`try`、`autostart`、`config`、`app`、`desktop` 支持 `--json`，输出带 `schemaVersion: 1`，JSON Schema 随包放在 [`schemas/`](../../schemas/)。有新版本或本机装的 skill 版本不对时，输出里还会多一个 `_notice`（sideby skill 让 agent 提一次并主动问要不要帮你更新；设 `SIDEBY_NO_UPDATE_NOTIFIER=1` 就不带）。加了 `--json` 时，出错会输出 `{ "schemaVersion": 1, "error": "…", "code": "…" }`：命令行写错时 `code` 为 `usage`，其他情况是 `no-quota-source` 这样的原因。只新增字段时版本不变；删除、改名或改语义时加 1。
 - 任何输出、日志和错误信息里都不会出现凭据的值。

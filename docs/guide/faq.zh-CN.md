@@ -11,7 +11,7 @@
 sideby 的设计只用各宿主已经支持的机制（见 [ADR-0001](../../docs/adr/0001-side-by-side-not-switching.md) 和 [ADR-0003](../../docs/adr/0003-quota-from-local-and-official-sources.md)）：
 
 - 不切换：从不改宿主的全局配置来换当前账号。每个账号是一个独立的配置目录，这是各宿主都写进文档的机制（`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`GROK_HOME`、`PI_CODING_AGENT_DIR`）。
-- 默认不轮换：额度用完时，不会自动换到另一个订阅。`sideby next` 只根据本机已有的数据推荐余量最多的账号，启不启动由你决定。如果你打开[自动交接](usage.zh-CN.md#自动交接auto-handoff)（默认关闭），sideby 启动的会话会在额度快用完时，把任务交给你配置顺序里的下一个账号。同一家厂商的多个订阅之间互相接力来绕过限额，厂商可能认为违反条款；这种接力要另开 `sameFamily`，风险由你承担。
+- 默认不轮换：额度用完时，不会自动换到另一个订阅。`sideby next` 只根据本机已有的数据推荐余量最多的账号，启不启动由你决定。如果你打开[自动接力](usage.zh-CN.md#自动接力auto-handoff)（默认关闭），sideby 启动的会话会在额度快用完时，把任务交给你配置顺序里的下一个账号。同一家厂商的多个订阅之间互相接力来绕过限额，厂商可能认为违反条款；这种接力要另开 `sameFamily`，风险由你承担。
 - 不代理凭据：从不读取订阅 token 去调模型，也不把多个登录凑成一个池子。
 - 不调私有接口：额度来自本地文件，以及 Claude Code 交给 status line 命令的数据。
 
@@ -37,7 +37,7 @@ Node 从 22.18 起默认会剥掉 TypeScript 类型，sideby 才能直接 `impor
 sideby 不往宿主的账号目录里写自己的文件，只有下面几个命令例外。它们都会先展示改动，你确认后才写入：
 
 - `sideby quota setup claude --yes` 包装 `~/.claude/settings.json` 里的 status line（[Claude 额度](usage.zh-CN.md#claude-额度)）。
-- `sideby handoff setup grok --yes` 添加 `~/.grok/hooks/sideby-handoff.json`（[自动交接](usage.zh-CN.md#自动交接auto-handoff)）。
+- `sideby handoff setup grok --yes` 添加 `~/.grok/hooks/sideby-handoff.json`（[自动接力](usage.zh-CN.md#自动接力auto-handoff)）。
 - `sideby tune apply` 设置账号 `settings.json` 里的 `autoCompactWindow`（[上下文调优](usage.zh-CN.md#上下文调优)）。
 - `sideby remote-control off` 把 Claude `settings.json` 里的 `remoteControlAtStartup` 设成 `false`（[Remote Control](usage.zh-CN.md#remote-control)）。
 

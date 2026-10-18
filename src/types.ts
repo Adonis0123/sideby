@@ -77,6 +77,23 @@ export interface FamilyDef {
   hijackVars: string[]
   /** Variables written, commented out, into a new API Account's Secret File. */
   apiVars: string[]
+  /**
+   * Secret File variable `sideby key` writes when the user does not name one (spec §3.28).
+   * The API key, not a base URL or a model. Public contract, additive only.
+   */
+  secretVar?: string
+  /**
+   * Arguments for one short non-interactive check of an Account (`sideby try`, spec §3.28).
+   * sideby runs `bin` with these arguments and no others. Public contract, additive only:
+   * leaving it out means this tool cannot be tried.
+   */
+  probe?: { args: string[] }
+  /**
+   * The Host option that attaches an image to the first prompt, such as Codex's `--image` (spec §3.28 "附件").
+   * An AI Task with attached images adds `<imageArg>=<path>` once per image before the prompt; Families without
+   * it read the images from the paths the prompt lists. Public contract, additive only.
+   */
+  imageArg?: string
   sharedItems: SharedItemDef[]
   /** Arguments for the Host's sign-in command, or null when sign-in happens inside the Host. */
   login: { args: string[] | null; hint: string }

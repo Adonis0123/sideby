@@ -48,7 +48,7 @@ agent 会检查 Node 和宿主 CLI，装好 sideby 和 skill，建账号，告�
 
 https://github.com/user-attachments/assets/3a470c03-9009-4f1d-b7f6-8b4625d74958
 
-<img alt="两个终端：个人号和工作号同时开着，都链接到主账号的 skills 和设置，然后切到本机的额度面板；工作号额度到 95% 时，自动交接把会话换到下一个账号" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/demo.gif" width="1280">
+<img alt="两个终端：个人号和工作号同时开着，都链接到主账号的 skills 和设置，然后切到本机的额度面板；工作号额度到 95% 时，自动接力把会话换到下一个账号" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/demo.gif" width="1280">
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/panel-dark.zh-CN.png">
@@ -72,6 +72,7 @@ cc-switch 自己的说明是：切换时把配置写进宿主正在用的文件�
 
 | 你想 | 命令 | 说明 |
 |---|---|---|
+| 在面板里把事情交给你自己的 AI：配账号、修问题、支持新工具 | 面板的「让 AI 帮我」，或 `sideby ask` | [让 AI 帮我](docs/guide/panel.zh-CN.md#让-ai-帮我) |
 | 加一个 API key 账号（DeepSeek、网关等） | `sideby new claude deepseek --api` | [API 账号](docs/guide/usage.zh-CN.md#api-账号) |
 | 找出并修复账号之间的配置漂移 | `sideby doctor --fix` | [体检](docs/guide/usage.zh-CN.md#体检doctor) |
 | 看 Claude 额度（Codex 不用设置） | `sideby quota setup claude --yes` | [Claude 额度](docs/guide/usage.zh-CN.md#claude-额度) |
@@ -80,7 +81,7 @@ cc-switch 自己的说明是：切换时把配置写进宿主正在用的文件�
 | 一次设置所有账号的 Claude 会话要不要自动连到 claude.ai（Remote Control） | `sideby remote-control off` 或 `on`（或面板的「设置」） | [Remote Control](docs/guide/usage.zh-CN.md#remote-control) |
 | 把常用账号置顶，按自己的习惯排工具和账号 | `sideby pin claude:work`、`sideby order`（或面板的设置） | [自己排顺序](docs/guide/usage.zh-CN.md#自己排顺序) |
 | 账号撞上限额时换一个接着用 | `sideby next claude` | [接力](docs/guide/usage.zh-CN.md#账号撞上限额时) |
-| 额度快用完时，让正在跑的任务自己交给下一个账号（默认关闭，注意风险） | `sideby handoff enable`（或在面板里开启） | [自动交接](docs/guide/usage.zh-CN.md#自动交接auto-handoff) |
+| 额度快用完时，让正在跑的任务自己交给下一个账号（默认关闭，注意风险） | `sideby handoff enable`（或在面板里开启） | [自动接力](docs/guide/usage.zh-CN.md#自动接力auto-handoff) |
 | 用 `ccw` 这样的短命令 | `sideby alias add ccw claude:work` | [Shell 函数](docs/guide/configuration.zh-CN.md#shell-函数) |
 | 在 Orca 这类工具里重开会话时，自动进到存有它的账号 | config 里写 `"resumeRouting": true` | [从其他工具恢复会话](docs/guide/configuration.zh-CN.md#从其他工具恢复会话) |
 | 用某个账号打开 Claude Desktop 或 Codex 应用，几个账号同时开着（macOS） | `sideby desktop claude:work`（或在面板里） | [桌面应用](docs/guide/usage.zh-CN.md#桌面应用) |
@@ -110,7 +111,7 @@ sideby 启动 `PATH` 上的官方程序，从不修改它。测试过的版本�
 
 ## 安全边界
 
-- 不改宿主的全局配置来切换账号。只有你打开自动交接（Auto Handoff）时，才会把任务交给另一个账号；从不代理请求，也不合并登录。
+- 不改宿主的全局配置来切换账号。只有你打开自动接力（Auto Handoff）时，才会把任务交给另一个账号；从不代理请求，也不合并登录。
 - 不读取、不打印、不发送任何凭据的值。账号相关的数据不出本机：sideby 自己发出的唯一请求是每天向 npm registry 查一次自己的最新版本号（用 `NO_UPDATE_NOTIFIER=1` 关闭，见[更新](docs/guide/configuration.zh-CN.md#更新)）。
 - `doctor --fix` 不替换真实文件，也不改链接的指向。
 

@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/config-get.json",
+  "type": "object",
+  "required": [
+    "schemaVersion"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "file": {
+      "type": "string"
+    },
+    "keys": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "meaning",
+          "takes"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Dot path; `<…>` marks a part you fill in."
+          },
+          "meaning": {
+            "type": "string"
+          },
+          "takes": {
+            "type": "string"
+          },
+          "value": {},
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "key",
+                "value"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "value": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "key": {
+      "type": "string"
+    },
+    "set": {
+      "type": "boolean"
+    },
+    "value": {},
+    "meaning": {
+      "type": "string"
+    },
+    "takes": {
+      "type": "string"
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  }
+}

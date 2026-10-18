@@ -55,6 +55,8 @@ $EDITOR ~/.claude-deepseek/proxy.env     # 填好变量；文件权限保持 600
 sideby run deepseek
 ```
 
+`sideby key deepseek` 帮你把密钥输入到 `proxy.env`，屏幕上不显示（`--var <NAME>` 指定别的变量）；`sideby try deepseek` 让宿主回一句很短的话，确认账号能用。不确定该填哪个地址或模型？让你的 AI 照着厂商文档帮你配：面板新建账号对话框里的「让 AI 帮我配」，或者 `sideby ask --task account`（见[让 AI 帮我](panel.zh-CN.md#让-ai-帮我)）。
+
 `proxy.env` 用的是 dotenv 的一个子集：`KEY=VALUE`、可选的 `export ` 前缀、单双引号、`#` 注释，以及 `$NAME` / `${NAME}`。引用只能指向同一文件前面已定义的变量，或 `HOME`、`USER`、`LOGNAME`、`TMPDIR`、`XDG_*_HOME` 这几个位置变量。其他 shell 变量一律不读，也不支持命令替换。里面的变量只进入这次启动的宿主进程。文件权限不是 600 时，sideby 拒绝启动，并提示执行 `chmod 600`。
 
 API 账号不需要登录：登录态是 `not-needed`，在 `sideby list` 的 LOGIN 列显示为 `key`。
@@ -112,9 +114,9 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 
 - 两边显示同一份、最新的额度，并说明读自哪里：`sideby quota` 写 `read from claude:001 (same login)`，面板里鼠标悬停在额度上也会说明；
 - 标出来：`sideby list` 里是 `claude:001 = main`；面板里它们合成一行，标着 **2 个目录 · 共用额度**，额度和额度提醒都只显示一次。展开这一行，能看到每个目录各自的短命令、最近使用和 token，以及 **复制启动命令** 按钮；这一行的 **⋯** 菜单里每个目录各有一段；
-- 不在它们之间交接：在 sideby 启动的会话里运行 `sideby next` 时，跳过这个登录的另一个目录；自动交接也跳过它，`order` 里写了也一样，并说明原因。
+- 不在它们之间接力：在 sideby 启动的会话里运行 `sideby next` 时，跳过这个登录的另一个目录；自动接力也跳过它，`order` 里写了也一样，并说明原因。
 
-用量（token）仍按目录分别统计。sideby 不移动、不删除任何目录；两个都留着，或者你自己删掉一个。Codex 暂时不分组：同一个 email 可能属于几个 ChatGPT 工作区，各有各的额度。
+用量（token）仍按目录分别统计。sideby 不移动、不删除任何目录；两个都留着，或者你自己删掉一个。Codex 账号在 email 和 ChatGPT 工作区（workspace）都相同时，也这样合在一起：同一个 email 可能属于几个工作区，各有各的额度，所以 sideby 还会比较每个目录登录的是哪个工作区。它从目录的 `auth.json` 里读这一项只为比较，从不显示也不保存；工作区不同的两个目录分开显示。
 
 ## Grok 额度
 
@@ -131,7 +133,7 @@ sideby quota grok --refresh   # 现在重新查询，不用上一次的结果
 - 不想查询时，在面板的 **设置** 里把 **Grok Build 额度** 设为 **关**，或在 config 里写 `"quota": { "check": { "grok": false } }`。在 CI 里默认不查。
 - 未登录的账号、用 API key 登录的账号不查。查询失败时（Grok 版本太旧、没网），面板会说明原因，并保留上一次的数字。
 
-有了额度，`sideby next grok` 也能给 Grok 账号排序，自动交接也能在 Grok 撞上限之前开始（见下文）。
+有了额度，`sideby next grok` 也能给 Grok 账号排序，自动接力也能在 Grok 撞上限之前开始（见下文）。
 
 ## 自己排顺序
 
@@ -140,11 +142,11 @@ sideby quota grok --refresh   # 现在重新查询，不用上一次的结果
 - 调整过之后，排序显示 **我的顺序**；其他排序（按额度、名称、最近使用）照常能用，你排好的顺序会留着。工具分组在任何排序下都按你的顺序。
 - 账号只能在本工具里移动。同一登录的两个目录是一行，一起移动。
 - 新账号排在本组最后，新工具排在所有分组最后。横栏里的 **恢复默认顺序** 会清掉你的顺序。
-- `sideby list` 和 `sideby quota` 也按这个顺序。它存在 config 的 `display` 里，只影响显示：`sideby next` 和自动交接照旧按额度挑账号。
+- `sideby list` 和 `sideby quota` 也按这个顺序。它存在 config 的 `display` 里，只影响显示：`sideby next` 和自动接力照旧按额度挑账号。
 
 ### 置顶账号
 
-点账号行末尾、**⋯** 左边的图钉（鼠标移到行上就会出现）。置顶的账号一直显示实心图钉，不管怎么排序都在本工具最前；`sideby list` 也把它排在最前。每个工具最多 3 个；调整顺序时，置顶的账号只在置顶的几个之间移动。**恢复默认顺序** 不会取消置顶；再点一次图钉就取消。置顶不影响 `sideby next` 和自动交接选哪个账号。
+打开账号行的 **⋯** 菜单，选 **置顶**；也可以在 **设置 › 账号顺序与置顶** 里改，或者运行 `sideby pin <账号>`。置顶的账号名字前有一个小图钉，不管怎么排序都在本工具最前；`sideby list` 也把它排在最前。每个工具最多 3 个；调整顺序时，置顶的账号只在置顶的几个之间移动。**恢复默认顺序** 不会取消置顶；在同一个菜单里选 **取消置顶** 就取消。置顶不影响 `sideby next` 和自动接力选哪个账号。
 
 
 CLI 设置（也支持 `--json`）：
@@ -157,7 +159,7 @@ CLI 设置（也支持 `--json`）：
 
 ## 模型与 effort
 
-每个账号行会显示它用的模型和 effort，例如 `opus · high`；鼠标悬停能看到来源：sideby 为这个账号设置、最近一次会话，或工具自己的设置（账号还没有会话时才用）。点它（或账号菜单里的 **模型和 effort…**）就能只为这个账号选模型和 effort。sideby 把选择存成这个账号在它自己配置里的启动参数（Claude Code 用 `--model`、`--effort`，Codex 用 `-m` 和 `-c model_reasoning_effort=…`），所以共用同一个 `settings.json` 的账号也能各用各的，工具自己的文件不变。它只影响之后用 sideby 启动的会话（短命令、`sideby run`、`sideby next`、自动交接）；直接敲 `claude` 不受影响。shell 里的 `ANTHROPIC_MODEL`、`CLAUDE_CODE_EFFORT_LEVEL` 和组织下发的设置仍然优先，sideby 看不到它们。在终端里：`sideby model cc002 opus --effort high`（加 `--yes`）；用 `default` 清掉某一项。
+每个账号行会显示它用的模型和 effort，例如 `opus · high`；鼠标悬停能看到来源：sideby 为这个账号设置、最近一次会话，或工具自己的设置（账号还没有会话时才用）。点它（或账号菜单里的 **模型和 effort…**）就能只为这个账号选模型和 effort。sideby 把选择存成这个账号在它自己配置里的启动参数（Claude Code 用 `--model`、`--effort`，Codex 用 `-m` 和 `-c model_reasoning_effort=…`），所以共用同一个 `settings.json` 的账号也能各用各的，工具自己的文件不变。它只影响之后用 sideby 启动的会话（短命令、`sideby run`、`sideby next`、自动接力）；直接敲 `claude` 不受影响。shell 里的 `ANTHROPIC_MODEL`、`CLAUDE_CODE_EFFORT_LEVEL` 和组织下发的设置仍然优先，sideby 看不到它们。在终端里：`sideby model cc002 opus --effort high`（加 `--yes`）；用 `default` 清掉某一项。
 
 ## 桌面应用
 
@@ -272,17 +274,17 @@ sideby next claude -- --model opus  # 宿主参数放在 -- 之后
 - 有窗口到 85% 的账号算用满；已过重置时间的窗口重新按 0% 算。
 - 还没有额度数据的账号排在有余量的账号后面。API 账号按次花钱，加 `--include-api` 才参与。
 - 全部用满时什么都不启动，并告诉你哪个账号最先恢复。所有账号都还没有额度数据时也不启动，因为那样的推荐只是猜测：先开启额度（`sideby quota setup claude`），或用 `sideby run` 自己选。
-- 新账号会开一个新会话，因为每个账号各存各的会话。可以先让旧会话写一份简短的交接说明，再贴进新会话。
+- 新账号会开一个新会话，因为每个账号各存各的会话。可以先让旧会话写一份简短的接力说明，再贴进新会话。
 - 支持 Claude、Codex 和 Grok。pi 没有公开额度，`next pi` 会列出账号让你自己选。
 - 登录同一个身份的两个目录共用一份额度（见[两个目录，同一个登录](#两个目录同一个登录)）；在 sideby 启动的会话里运行时，`next` 不会选另一个。
 
-sideby 只推荐，账号由你启动；除非你打开下面的自动交接，它从不自己切换或轮换（见常见问题）。面板在每个家族里把同一个推荐账号标成「建议使用」，点它会说明为什么推荐，并给出可复制的命令。
+sideby 只推荐，账号由你启动；除非你打开下面的自动接力，它从不自己切换或轮换（见常见问题）。面板在每个家族里把同一个推荐账号标成「建议使用」，点它会说明为什么推荐，并给出可复制的命令。
 
-## 自动交接（Auto Handoff）
+## 自动接力（Auto Handoff）
 
-默认关闭。最简单的开启方式是面板里的 **自动交接** 页面：点 **一键开启**，看清 sideby 要改的东西（它自己的设置、Claude 的额度显示、Grok 的钩子），确认一次即可。之后页面会显示每个账号的任务接下来交给谁、最近的交接记录，缺哪一步也能在页面里补全。同一个工具的账号之间只有勾选了才会互相切换（页面上写明了风险）。在终端里用 `sideby handoff enable`（先展示 config 改动，加 `--yes` 才写入）；`sideby handoff status` 按家族列出还缺什么，以及每一项要运行的命令。功能关闭时，如果某个账号的额度过了阈值，会话结束后 sideby 每天最多提示一次；面板也会显示一条带 **去设置** 的提示。
+默认关闭。最简单的开启方式是面板里的 **自动接力** 页面：点 **一键开启**，看清 sideby 要改的东西（它自己的设置、Claude 的额度显示、Grok 的钩子），确认一次即可。之后页面会显示每个账号的任务接下来交给谁、最近的接力记录，缺哪一步也能在页面里补全。同一个工具的账号之间只有勾选了才会互相切换（页面上写明了风险）。在终端里用 `sideby handoff enable`（先展示 config 改动，加 `--yes` 才写入）；`sideby handoff status` 按家族列出还缺什么，以及每一项要运行的命令。功能关闭时，如果某个账号的额度过了阈值，会话结束后 sideby 每天最多提示一次；面板也会显示一条带 **去设置** 的提示。
 
-打开后，sideby 启动的会话（`sideby run`、短命令或 `sideby next`）在额度快用完时，会把任务交给下一个账号：旧会话写好交接说明（Brief），sideby 结束它，下一个账号在同一个终端里开一个新会话，从交接说明接着做。
+打开后，sideby 启动的会话（`sideby run`、短命令或 `sideby next`）在额度快用完时，会把任务交给下一个账号：旧会话写好接力说明（Brief），sideby 结束它，下一个账号在同一个终端里开一个新会话，从接力说明接着做。
 
 ```sh
 sideby handoff status
@@ -293,21 +295,27 @@ sideby handoff disable --yes
 
 这些设置都存在 config 文件的 `handoff` 下（见[配置](configuration.zh-CN.md)的 schema）。
 
-- **什么时候。** 最满的窗口到 80%（`prepareAt`）时，会话被要求开始写交接说明并随时更新；到 95%（`threshold`）时，它做完当前一步、更新交接说明、结束这一轮。满了的窗口 30 分钟内就重置时（`waitIfResetWithinMinutes`），sideby 选择等待，不交接：会话保留完整上下文，额度恢复后 Claude Code 自己接着做。额度到 95% 时会话里会显示一行说明，真撞到上限时再发一个桌面通知（支持 OSC 9 或 777 的终端，如 iTerm2、WezTerm、Ghostty）。想立刻换号，就在会话里输入 `! sideby handoff ready`：`!` 让命令不经过模型直接运行，额度用完时模型没法回话。只有会话能自己续上时 sideby 才等：Claude Code 要开着「Continue automatically at usage limit」（账号 `settings.json` 里的 `autoContinueAtUsageLimit`，默认开）；写在托管设置或项目设置里的这个开关 sideby 看不到。Codex 和 Grok 从不等。
+- **什么时候。** 最满的窗口到 80%（`prepareAt`）时，会话被要求开始写接力说明并随时更新；到 95%（`threshold`）时，它做完当前一步、更新接力说明、结束这一轮。满了的窗口 30 分钟内就重置时（`waitIfResetWithinMinutes`），sideby 选择等待，不接力：会话保留完整上下文，额度恢复后 Claude Code 自己接着做。额度到 95% 时会话里会显示一行说明，真撞到上限时再发一个桌面通知（支持 OSC 9 或 777 的终端，如 iTerm2、WezTerm、Ghostty）。想立刻换号，就在会话里输入 `! sideby handoff ready`：`!` 让命令不经过模型直接运行，额度用完时模型没法回话。只有会话能自己续上时 sideby 才等：Claude Code 要开着「Continue automatically at usage limit」（账号 `settings.json` 里的 `autoContinueAtUsageLimit`，默认开）；写在托管设置或项目设置里的这个开关 sideby 看不到。Codex 和 Grok 从不等。
 - **交给谁。** `policy: "order"` 按你写的列表（账号或短命令，可以跨家族）；不写时选本家族余量最多的账号，再补其他家族的 API 账号。一条链里每个账号只用一次，跳过已满和未登录的账号（已经到你设的 `threshold` 的也跳过），也跳过不同组织的账号（先比 organization，没有就比 email 域名），除非它写在 `crossOrganization` 里。和旧账号是同一登录的账号一律跳过，`order` 里写了也跳过：它们是同一份额度。
 - **同一家族。** 只开 `auto` 时，会交给 API 账号（任何家族），以及你写进 `order` 的其他家族账号。同一家厂商的两个账号之间接力（cc001 → cc002）还要写 `"sameFamily": true`。厂商可能认为这是在绕过用量限制并处理账号，风险由你承担。
-- **交接之前。** 有 10 秒倒计时（`countdownSeconds`）；按回车留下，sideby 会在原账号里续接刚才的会话。
-- **手动交接。** 在这类会话里运行 `sideby handoff ready`（或让 agent 运行），可以加 `--brief <file>` 用你自己的交接工具写的说明；这一轮结束后下一个账号启动。自动交接不会回到这条链用过的账号；要把任务交回去（比如第一个账号额度恢复了），运行 `sideby handoff ready --to <account>`。
-- **交接说明。** 放在 `~/.local/state/sideby/handoffs/<chain>/`，权限 600，不写进你的仓库；sideby 补上分支、未提交的文件和 diff 统计，从不 commit 或 stash。新会话拿到的是文件路径，不是正文。旧会话没来得及写时，sideby 从会话记录里拼一份，并注明可能不完整。
+- **接力之前。** 有 10 秒倒计时（`countdownSeconds`）；按回车留下，sideby 会在原账号里续接刚才的会话。
+- **手动接力。** 在这类会话里运行 `sideby handoff ready`（或让 agent 运行），可以加 `--brief <file>` 用你自己的接力工具写的说明；这一轮结束后下一个账号启动。自动接力不会回到这条链用过的账号；要把任务交回去（比如第一个账号额度恢复了），运行 `sideby handoff ready --to <account>`。
+- **接力说明。** 放在 `~/.local/state/sideby/handoffs/<chain>/`，权限 600，不写进你的仓库；sideby 补上分支、未提交的文件和 diff 统计，从不 commit 或 stash。新会话拿到的是文件路径，不是正文。旧会话没来得及写时，sideby 从会话记录里拼一份，并注明可能不完整。
 
-| 宿主 | 何时发起交接 | 需要 |
+| 宿主 | 何时发起接力 | 需要 |
 |---|---|---|
 | Claude Code | 80% / 95%，或某一轮撞上限额失败时 | `sideby quota setup claude`（额度 tap）；hook 由 sideby 用 `--settings` 加上 |
 | Codex | 80% / 95% | 每个账号信任一次 sideby 的 hook：在 Codex 里输入 `/hooks`；第一次时 sideby 会提示 |
 | Grok Build | 按它命令行查到的额度到达阈值时（见 [Grok 额度](#grok-额度)），以及某一轮撞上用量上限失败时 | `sideby handoff setup grok --yes`，再 `sideby doctor grok --fix`；默认 sandbox（`off` 或 `devbox`）；`workspace`、`read-only` 只能接手；`strict` 和自定义 profile 不参与。macOS 设备管理下发的 sandbox，sideby 看不到 |
 | pi | 不发起，可以接手 | — |
 
-headless 运行（`claude -p`、`codex exec`、`grok -p`）、带 `--remote` 的 Codex、不是 sideby 启动的会话，都不会交接。自动交接打开但缺 Claude 额度 tap 或 Grok hook 文件，或 `order` 为空、里面有找不到的账号时，`sideby doctor` 会提醒。`PATH` 上的 `sideby` 不存在、来自 npx 缓存，或版本太旧没有 hook 入口时，这次运行不启用自动交接，并在终端说明。
+headless 运行（`claude -p`、`codex exec`、`grok -p`）、带 `--remote` 的 Codex、不是 sideby 启动的会话，都不会接力。自动接力打开但缺 Claude 额度 tap 或 Grok hook 文件，或 `order` 为空、里面有找不到的账号时，`sideby doctor` 会提醒。`PATH` 上的 `sideby` 不存在、来自 npx 缓存，或版本太旧没有 hook 入口时，这次运行不启用自动接力，并在终端说明。
+
+## 开机启动
+
+`sideby autostart on` 让面板在你登录后自动在后台启动，打开时就是最新额度。它不打开窗口，也不启动任何宿主。它先显示要写的文件（`~/Library/LaunchAgents/dev.sideby.panel.plist`）和 `launchctl` 命令；加 `--yes` 再跑一次就开启，`sideby autostart off --yes` 撤销。`sideby autostart` 告诉你是否开着、是否还指向你正在用的 sideby；`sideby update` 会让它跟着指向新版本。目前只支持 macOS。面板设置里有同一个开关，也可以让你的 AI 帮你开。
+
+其他设置也都有命令：`sideby config get` 列出全部设置和当前值，`sideby config set panel.theme dark` 改一项（先显示改动）。
 
 ## 宿主说明
 

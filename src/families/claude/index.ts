@@ -113,6 +113,9 @@ export const claudeFamily: FamilyDef = {
     'ANTHROPIC_DEFAULT_OPUS_MODEL',
   ],
   apiVars: ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_MODEL'],
+  secretVar: 'ANTHROPIC_AUTH_TOKEN',
+  // `-p` is one non-interactive prompt (Claude Code 2.1.301 --help, 2026-10-17).
+  probe: { args: ['-p', 'Reply with OK'] },
   sharedItems: [
     ...LINKED.map((path): SharedItemDef => ({ path, mode: 'link' })),
     { path: '.claude.json', mode: 'json-key', key: 'mcpServers', mainPath: '.claude.json', credential: true },

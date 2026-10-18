@@ -26,3 +26,17 @@ To change them, run `sideby model claude:work opus --effort high --json`; `defau
 `sideby remote-control --json` returns `action` and `groups`: each has `file`, `accounts`, `state`, `undo` and optional `reason`. `state` is `on`, `default`, `off`, `missing` or `blocked`.
 
 Use `sideby remote-control off --json`, `on --json` or `undo --json`. Exit 10 shows the affected groups and waits for `--yes`; confirm before applying. A result has `applied`, optional `results` (`file`, `accounts`, `ok`, `message`) and optional `message`. Only turn it on when asked. Changes affect new sessions; running sessions remain connected until restarted. Undo restores the earlier value only while the key still holds what sideby wrote.
+
+## Theme, language and any other setting
+
+Every setting in sideby's config has a command. `sideby config get --json` returns `file` and `keys`: each has `key` (a dot path; `<…>` marks a part you fill in, such as `accounts.<family>:<name>.args`), `meaning`, `takes`, and the current `value` or, for a key with `<…>`, the `entries` set now. `sideby config get panel.theme --json` returns `key`, `set`, optional `value`, `meaning`, `takes`.
+
+Prefer the dedicated command where one exists (`model`, `order`, `pin`, `quota check`, `handoff enable`, `terminal`, `update --auto`); `config` covers the rest, such as the Panel's theme and language: `sideby config set panel.theme dark --json` (`system`, `light`, `dark`) or `sideby config set panel.language zh --json` (`auto`, `en`, `zh`). A value is JSON when it parses (`90`, `true`, `["cc002","codex001"]`), else text. Exit 10 returns `action`, `key`, `before`, `after`, `changed`, `applied: false`: show the change, and run the same command with `--yes` after the user agrees. `sideby config unset <key>` goes back to the default the same way. The Panel picks a change up on its next refresh.
+
+A value the key does not take fails with code `bad-value` and changes nothing; an unknown key `bad-key`. A plugin's own settings are never read or changed through `config` (code `plugin-config`, they may hold secrets); only `plugins.<plugin>.enabled`. `accounts.<ref>.args` takes only model and effort arguments; other Host arguments belong in a short command (`sideby alias add <short> <ref> -- <args>`).
+
+## Start at login
+
+`sideby autostart --json` returns `supported`, `state` and `path`. `state` is `off`, `on`, `stale` (the Node or sideby it starts was moved; `missing` names it) or `foreign` (a file at that path sideby did not write: leave it, and tell the user). `current` is false when it starts another sideby than this one.
+
+To turn it on ("start sideby at login", "开机启动"), run `sideby autostart on --json`: exit 10 returns the `content` of the file, the `programArguments` and the `commands` it will run. Show that, and run `sideby autostart on --yes --json` after the user agrees; `stale` or `current: false` is fixed the same way. `sideby autostart off` turns it off the same way. At login the Panel starts in the background without opening a window. macOS only for now; elsewhere `supported` is false and `on` fails with code `unsupported`. Running from the npx cache or a temporary folder fails with `npx-cache` or `temp-dir`: hand the user `npm i -g sideby` first. `sideby update` keeps an existing login item pointing at the new version.

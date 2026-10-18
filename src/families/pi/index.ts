@@ -46,6 +46,10 @@ export const piFamily: FamilyDef = {
     'OPENAI_BASE_URL',
   ],
   apiVars: ['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'OPENAI_API_KEY', 'OPENAI_BASE_URL'],
+  // First key in the proxy.env template `new --api` writes. The OpenAI key is still set with `--var`.
+  secretVar: 'ANTHROPIC_API_KEY',
+  // `-p` is one non-interactive prompt (pi 1.3.0 --help, 2026-10-17).
+  probe: { args: ['-p', 'Reply with OK'] },
   sharedItems: [
     { path: 'AGENTS.md', mode: 'link' },
     { path: 'auth.json', mode: 'info', credential: true },

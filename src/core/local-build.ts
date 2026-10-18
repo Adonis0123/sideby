@@ -2,10 +2,11 @@
 // these; `sideby local` and the Panel's version popover switch between the newest Local Build and npm without the
 // checkout. Only an npm global install is handled: `<prefix>/lib/node_modules/sideby` is the folder every caller
 // resolves, a link to `<dev>/pkg` while a Local Build runs.
-import { lstat, mkdir, readFile, readlink, rename, rm, symlink } from 'node:fs/promises'
+import { lstat, mkdir, readFile, readlink, realpath, rename, rm, symlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import type { Env } from '../types.ts'
+import { type AutostartContext, refreshAutostart } from './autostart.ts'
 import type { Paths } from './paths.ts'
 import {
   compareVersions,
@@ -170,6 +171,27 @@ export interface SwitchResult {
   skillSyncStarted?: boolean
   /** Another install held the lock; nothing ran. */
   busy?: boolean
+  /** An existing login item (ADR-0029) now starts the sideby switched to; absent when there was none to change. */
+  refreshedAutostart?: boolean
+}
+
+/**
+ * Points an existing login item at the sideby now behind the global command (spec §3.29): its entry, with this Node.
+ * Never creates one and never throws; undefined when there is no login item of sideby's, or the entry is missing.
+ */
+async function refreshLoginItem(
+  paths: Paths,
+  d: LocalDirs,
+  ctx: Partial<AutostartContext> = {},
+): Promise<boolean | undefined> {
+  const entry = await realpath(join(globalPkg(d), BIN)).catch(() => null)
+  if (!entry) return undefined
+  const r = await refreshAutostart({
+    home: paths.home,
+    launcher: { node: process.execPath, entry },
+    ...ctx,
+  })
+  return r.state === 'on' || r.state === 'stale' ? r.rewritten : undefined
 }
 
 /**
@@ -190,6 +212,8 @@ export async function switchLocal(
      * network and can take minutes, longer than a Portal waits for an answer (`background`, the Panel).
      */
     skillSync?: 'wait' | 'background'
+    /** Internal, for tests: parts of the machine the login item refresh uses. */
+    autostart?: Partial<AutostartContext>
   } = {},
 ): Promise<SwitchResult> {
   const before = await localStatus(d)
@@ -246,9 +270,12 @@ export async function switchLocal(
   } finally {
     await release().catch(() => {})
   }
+  // The login item records the sideby it starts, like `sideby update` keeps it pointing at the one in use.
+  const refreshed = await refreshLoginItem(paths, d, opts.autostart)
+  const login = refreshed === undefined ? {} : { refreshedAutostart: refreshed }
   const port = opts.panelPort ? await opts.panelPort().catch(() => null) : null
   const restartedPanel = port !== null && (await restartPanelByName(env, port))
-  if (to === 'local') return { ok: true, message, running: to, restartedPanel }
+  if (to === 'local') return { ok: true, message, running: to, restartedPanel, ...login }
   // The skill is part of the version (spec §3.23): the npm code updates it as `sideby update --yes` does for anyone,
   // by name so the new code runs, after the lock above is free. A failure keeps the switch.
   if (opts.skillSync === 'background')
@@ -257,11 +284,12 @@ export async function switchLocal(
       message,
       running: to,
       restartedPanel,
+      ...login,
       skillSyncStarted: await startDetached('sideby', ['update', '--yes'], env),
     }
   const u = await runProgram('sideby', ['update', '--yes'], {
     env,
     ...(opts.onOutput ? { onOutput: opts.onOutput } : {}),
   }).catch(() => ({ code: 1, output: '' }))
-  return { ok: true, message, running: to, restartedPanel, skillSynced: u.code === 0 }
+  return { ok: true, message, running: to, restartedPanel, ...login, skillSynced: u.code === 0 }
 }

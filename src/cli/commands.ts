@@ -1,3 +1,4 @@
+import { StringDecoder } from 'node:string_decoder'
 import { fileURLToPath } from 'node:url'
 import { aliasesByAccount } from '../core/accounts.ts'
 import { listAppProfiles, openAppProfile, parseProfileRef, removeAppProfile } from '../core/app-profiles.ts'
@@ -23,7 +24,16 @@ import {
 } from '../core/remote-control.ts'
 import { SHELLS, type Shell, type ShellInitWrite } from '../core/shell-init.ts'
 import type { TuneApplyPlan } from '../core/tuning-apply.ts'
-import { inDisplayOrder, pinnedIn, suggestAlias, suggestName, withPinned } from '../panel/page-logic.ts'
+import { MODEL_NAME } from '../families/shared/model-args.ts'
+import {
+  AI_TASK_KINDS,
+  type AiTaskKind,
+  inDisplayOrder,
+  pinnedIn,
+  suggestAlias,
+  suggestName,
+  withPinned,
+} from '../panel/page-logic.ts'
 import { createRuntime, type Runtime, UnknownFamilyError } from '../runtime.ts'
 import type { Account, Finding } from '../types.ts'
 import { type ParsedArgs, UsageError } from './args.ts'
@@ -1254,6 +1264,46 @@ export async function cmdHandoff(a: ParsedArgs, io: Io): Promise<number> {
 
 export async function cmdPlugins(a: ParsedArgs, io: Io): Promise<number> {
   const rt = await createRuntime()
+  if (a.positionals.length) {
+    const [action, target, ...extra] = a.positionals
+    if (!target || extra.length || a.rest.length || !['new', 'check'].includes(action!))
+      throw new UsageError('Use sideby plugins new <id> or sideby plugins check <id|path>.')
+    const { join, isAbsolute } = await import('node:path')
+    const { expandUserPath } = await import('../core/paths.ts')
+    const dirs = (rt.config.pluginDirs ?? [rt.paths.userPluginsDir]).map(
+      (p) => expandUserPath(p, rt.paths.home) ?? p,
+    )
+    if (action === 'new') {
+      const { scaffoldPlugin } = await import('../plugins/scaffold.ts')
+      const result = await scaffoldPlugin({ id: target, dir: dirs[0] ?? rt.paths.userPluginsDir })
+      if (a.flags.has('json')) json(io, result)
+      else io.out(`Created ${result.dir}. Fill in the TODOs, then run sideby plugins check ${target}.`)
+      return 0
+    }
+    const { checkPlugin } = await import('../plugins/check.ts')
+    const { access } = await import('node:fs/promises')
+    let dir = target
+    if (!isAbsolute(target) && !target.includes('/') && !target.startsWith('.')) {
+      dir = join(dirs[0] ?? rt.paths.userPluginsDir, target)
+      for (const root of dirs)
+        if (
+          await access(join(root, target)).then(
+            () => true,
+            () => false,
+          )
+        ) {
+          dir = join(root, target)
+          break
+        }
+    }
+    const result = await checkPlugin({ dir })
+    if (a.flags.has('json')) json(io, result)
+    else {
+      io.out(result.ok ? 'OK' : result.problems.map((p) => `${p.message}: ${p.fix}`).join('\n'))
+      io.out('Plugins run as you, with your permissions. Only load plugins you trust.')
+    }
+    return result.ok ? 0 : 1
+  }
   if (a.flags.has('json'))
     // Plugin settings can hold tokens: report which keys are set, never their values.
     json(io, {
@@ -1466,6 +1516,7 @@ export async function cmdUpdate(a: ParsedArgs, io: Io): Promise<number> {
       message: r.message,
       restartedPanel: r.restartedPanel,
       refreshedApp: r.refreshedApp,
+      ...(r.refreshedAutostart === undefined ? {} : { refreshedAutostart: r.refreshedAutostart }),
       skill: SKILL_INSTALL,
       ...(r.skillUpdated === undefined ? {} : { skillUpdated: r.skillUpdated }),
       ...(r.ok ? {} : { output: r.output }),
@@ -1480,6 +1531,9 @@ export async function cmdUpdate(a: ParsedArgs, io: Io): Promise<number> {
   if (r.restartedPanel)
     io.out('  The background panel is restarting with the new version; open pages reload by themselves.')
   if (r.refreshedApp) io.out('  The desktop app now starts the new version and shows its icon.')
+  if (r.refreshedAutostart) io.out('  The login item now starts the new version.')
+  else if (r.refreshedAutostart === false)
+    io.out('  The login item could not be pointed at the new version; run `sideby autostart` to see why.')
   io.out(
     '  A `sideby ui` running in a terminal and sessions already running keep the old version until you restart them.',
   )
@@ -1813,4 +1867,414 @@ export async function cmdFamilies(a: ParsedArgs, io: Io): Promise<number> {
     io.out(c.dim('  Everything else in an account directory is its own: sign-in, sessions and history.'))
   })
   return 0
+}
+
+/** `sideby ask` arguments: `--attach` may repeat, so main.ts collects every value here. */
+export type AskArgs = ParsedArgs & { attach?: string[] }
+
+/** AI Task CLI; the terminal receives only an opaque task id. */
+export async function cmdAsk(a: AskArgs, io: Io, runtime?: Runtime): Promise<number> {
+  const { previewAttachments, promptForTask, readTask, startAiTask, taskEnv, taskHostArgs, taskStateDir } =
+    await import('../core/ask.ts')
+  const run = a.flags.get('run')
+  if (typeof run === 'string') {
+    const stateDir = a.flags.get('state-dir')
+    if (
+      a.positionals.length ||
+      a.rest.length ||
+      [...a.flags.keys()].some((f) => f !== 'run' && f !== 'state-dir') ||
+      stateDir === true
+    )
+      throw new UsageError('Use `sideby ask --run <id> [--state-dir <dir>]` on its own.')
+    // The task names the state folder the Panel wrote it to; without it, this environment's folder is used.
+    const where =
+      typeof stateDir === 'string'
+        ? { stateDir: await taskStateDir(stateDir) }
+        : (runtime?.paths ?? resolvePaths())
+    const task = await readTask(run, where)
+    // The Host starts with the HOME, config and state the Panel used, whatever this terminal's environment says.
+    const rt =
+      task.home && (!runtime || runtime.paths.home !== task.home || runtime.paths.stateDir !== task.stateDir)
+        ? await createRuntime({ env: taskEnv(task, runtime?.env ?? process.env) })
+        : (runtime ?? (await createRuntime()))
+    const cwd = process.cwd()
+    try {
+      process.chdir(task.cwd)
+      if (task.kind === 'prompt') return await runAccount(rt, task.account, await taskHostArgs(rt, task), io)
+      const prepared = await rt.prepareLaunch(task.account, [], 'login')
+      if (prepared.notice) io.err(prepared.notice)
+      return await whileRunning(rt, () => runHost(prepared))
+    } finally {
+      process.chdir(cwd)
+    }
+  }
+  const rt = runtime ?? (await createRuntime())
+  const task = String(a.flags.get('task') ?? 'free')
+  if (!AI_TASK_KINDS.includes(task as AiTaskKind))
+    throw new UsageError(`Choose --task ${AI_TASK_KINDS.join('|')}.`)
+  if (a.positionals.length > 1 || a.rest.length)
+    throw new UsageError('Pass the text as one quoted argument: sideby ask "help me".')
+  const input = {
+    task,
+    text: a.positionals[0],
+    account: a.flags.get('account') as string | undefined,
+    terminal: a.flags.get('terminal') as string | undefined,
+    files: a.attach ?? [],
+  }
+  // The files are checked before anything else; `--print` lists them where they are and copies nothing.
+  const preview = promptForTask(rt, input, await previewAttachments(rt, input))
+  if (preview.removedSecrets)
+    io.err('Key-shaped text was removed. Enter keys with `sideby key` or the Panel key box.')
+  if (a.flags.has('print')) {
+    io.out(preview.prompt)
+    return 0
+  }
+  // A chosen account becomes the next default, as choosing it in the Panel does.
+  const result = await startAiTask(rt, { ...input, remember: Boolean(input.account || input.terminal) })
+  if (a.flags.has('json')) json(io, result)
+  else if (result.command)
+    io.out(result.opened ? `Opened ${result.terminal} for ${result.account}.` : result.command)
+  else io.out(result.prompt ?? preview.prompt)
+  if (!result.opened) io.err(result.detail!)
+  return result.opened ? 0 : 1
+}
+
+export async function cmdTerminal(a: ParsedArgs, io: Io): Promise<number> {
+  const { terminals, setCustomTerminal, setPreferredTerminal } = await import('../core/ask.ts')
+  const rt = await createRuntime()
+  const changes = ['set', 'unset', 'custom'].filter((f) => a.flags.has(f))
+  if (a.positionals.length || a.rest.length || changes.length > 1)
+    throw new UsageError(
+      "Use sideby terminal [--set <id>|--custom '<program> … {cwd} … {cmd}'|--unset] [--json].",
+    )
+  const custom = a.flags.get('custom')
+  if (a.flags.has('custom')) {
+    if (typeof custom !== 'string')
+      throw new UsageError("Use sideby terminal --custom '<program> … {cwd} … {cmd}'.")
+    await setCustomTerminal(rt, custom)
+  } else if (a.flags.has('set') || a.flags.has('unset'))
+    await setPreferredTerminal(rt, a.flags.get('set') as string | undefined)
+  const result = await terminals(rt)
+  if (a.flags.has('json')) json(io, result)
+  else {
+    io.out(
+      table(
+        result.terminals.map((t) => [t.id, t.installed ? 'yes' : 'no']),
+        ['Terminal', 'Installed'],
+      ),
+    )
+    io.out(
+      `Preferred: ${result.preferred ?? 'automatic'}; selected: ${result.guess.id} (${result.guess.source}).`,
+    )
+  }
+  return 0
+}
+
+/** Reads a key only from an interactive terminal, restoring its original mode on every exit. */
+export function readKeyLine(input: NodeJS.ReadStream = process.stdin): Promise<string> {
+  if (!input.isTTY || !input.setRawMode)
+    throw new UserError('Run `sideby key` in a terminal or use the Panel key box.', { code: 'tty-required' })
+  return new Promise((resolve, reject) => {
+    const raw = input.isRaw
+    const paused = input.isPaused()
+    let value = ''
+    const finish = (error?: Error) => {
+      input.off('data', onData)
+      input.off('end', onEnd)
+      input.off('error', onError)
+      input.setRawMode(raw)
+      if (paused) input.pause()
+      if (error) reject(error)
+      else resolve(value)
+    }
+    const onEnd = () => finish(new UserError('Key input ended; rerun `sideby key` in a terminal.'))
+    const onError = () => finish(new UserError('Cannot read the key; use the Panel key box.'))
+    // Bytes decode across chunks, so a character split by a paste arrives whole.
+    const decoder = new StringDecoder('utf8')
+    // An escape sequence (an arrow key: ESC [ D) is dropped whole: 0 none, 1 after ESC, 2 inside CSI, 3 inside SS3.
+    let sequence = 0
+    const onData = (data: Buffer | string) => {
+      for (const ch of typeof data === 'string' ? data : decoder.write(data)) {
+        // A control character (Enter, Ctrl-C) still counts inside a sequence; it also ends the sequence.
+        if (sequence && ch >= ' ' && ch !== '\u007f') {
+          if (sequence === 1) sequence = ch === '[' ? 2 : ch === 'O' ? 3 : 0
+          else if (sequence === 3 || (ch >= '@' && ch <= '~')) sequence = 0
+          continue
+        }
+        sequence = 0
+        if (ch === '\u001b') {
+          sequence = 1
+          continue
+        }
+        if (ch === '\u0003') {
+          finish(new UserError('Cancelled; rerun `sideby key` when ready.'))
+          return
+        }
+        if (ch === '\r' || ch === '\n') {
+          finish()
+          return
+        }
+        if (ch === '\u007f' || ch === '\b') value = [...value].slice(0, -1).join('')
+        else if (ch >= ' ') value += ch
+      }
+    }
+    input.setRawMode(true)
+    input.on('data', onData)
+    input.once('end', onEnd)
+    input.once('error', onError)
+    input.resume()
+  })
+}
+export async function cmdKey(a: ParsedArgs, io: Io, runtime?: Runtime): Promise<number> {
+  const rt = runtime ?? (await createRuntime())
+  const { join } = await import('node:path')
+  const { setSecret, secretVarFor, SECRET_VAR_NAME } = await import('../core/secret-file.ts')
+  if (a.positionals.length !== 1 || a.rest.length)
+    throw new UsageError('Use sideby key <account> [--var <NAME>] [--json].')
+  const account = await rt.resolve(a.positionals[0]!)
+  const family = rt.families.get(account.family)!
+  if (account.kind !== 'api' && family.secretFileMeansApi !== false)
+    throw new UserError(
+      'This is a subscription account; use `sideby login <account>` or create an API account with `sideby new <family> <name> --api`.',
+    )
+  const name = (a.flags.get('var') as string | undefined) ?? secretVarFor(family)
+  if (!SECRET_VAR_NAME.test(name)) throw new UsageError('Use an uppercase variable name such as API_KEY.')
+  const input = (io.stdin ?? process.stdin) as NodeJS.ReadStream
+  if (!input.isTTY)
+    throw new UserError('Run `sideby key` in a terminal or use the Panel key box.', { code: 'tty-required' })
+  io.err(`Enter ${name} (hidden), then press Enter:`)
+  const value = await readKeyLine(input)
+  if (!value.trim())
+    throw new UserError(`No key entered; nothing was written. Run \`sideby key ${account.ref}\` again.`, {
+      code: 'key-empty',
+    })
+  const result = await setSecret(account.secretFile ?? join(account.dir, 'proxy.env'), name, value)
+  if (a.flags.has('json')) json(io, { account: account.ref, var: name, written: true, path: result.path })
+  else io.out(`Wrote ${name} to ${result.path}.`)
+  return 0
+}
+export async function cmdTry(a: ParsedArgs, io: Io): Promise<number> {
+  const { tryAccount, tryPreview } = await import('../core/ask.ts')
+  if (a.positionals.length !== 1 || a.rest.length)
+    throw new UsageError('Use sideby try <account> [--yes] [--json].')
+  const rt = await createRuntime()
+  const { account, command } = await tryPreview(rt, a.positionals[0]!)
+  if (!a.flags.has('yes')) {
+    if (a.flags.has('json')) json(io, { account: account.ref, command, confirmed: false })
+    else
+      io.out(
+        `This spends a few tokens: ${command.map((v) => JSON.stringify(v)).join(' ')}. Run again with --yes to continue.`,
+      )
+    return 10
+  }
+  const { account: ref, command: _command, ...result } = await tryAccount(rt, account.ref)
+  if (a.flags.has('json')) json(io, { account: ref, confirmed: true, ...result })
+  else io.out(result.ok ? 'OK' : result.output || 'The Host did not reply; check the account and try again.')
+  return result.ok ? 0 : 1
+}
+
+/** `sideby autostart [on|off] [--yes]` (spec §3.29, ADR-0029): start the Panel in the background at login. */
+export async function cmdAutostart(a: ParsedArgs, io: Io): Promise<number> {
+  const { applyAutostart, autostartStatus, planAutostart, refreshAutostart } = await import(
+    '../core/autostart.ts'
+  )
+  const [action, extra] = a.positionals
+  if (extra !== undefined || (action !== undefined && action !== 'on' && action !== 'off'))
+    throw new UsageError('usage: sideby autostart [on|off] [--yes] [--json]')
+  if (a.flags.has('yes') && !action)
+    throw new UsageError('--yes needs a change: sideby autostart on|off --yes')
+  const paths = resolvePaths()
+  const home = paths.home
+  const ctx = { home }
+  const wantJson = a.flags.has('json')
+  if (a.flags.has('refresh')) {
+    // After an update or a local build switch: point an existing agent at this sideby; never create one.
+    const r = await refreshAutostart(ctx)
+    const status = await autostartStatus(ctx)
+    if (wantJson)
+      json(io, {
+        ...status,
+        path: tilde(status.path, home),
+        changed: r.rewritten,
+        ...(r.note ? { note: r.note } : {}),
+      })
+    else io.out(r.rewritten ? 'The login item now starts this sideby.' : (r.note ?? 'Nothing to change.'))
+    return 0
+  }
+  if (!action) {
+    const s = await autostartStatus(ctx)
+    if (wantJson) json(io, { ...s, path: tilde(s.path, home) })
+    else if (!s.supported) io.out(`${s.reason}.`)
+    else if (s.state === 'off') io.out('Off: sideby does not start at login. Turn it on: sideby autostart on')
+    else if (s.state === 'foreign')
+      io.out(
+        `${tilde(s.path, home)} is not sideby's, so sideby leaves it alone; remove or rename it yourself if it is not needed.`,
+      )
+    else if (s.state === 'stale')
+      io.out(
+        `Out of date: the login item starts ${s.missing!.join(' and ')}, which no longer exists. Run \`sideby autostart on\` to point it at this sideby.`,
+      )
+    else {
+      io.out('On: the panel starts in the background at login, without opening a window.')
+      if (!s.current)
+        io.out(c.dim('It starts another sideby than this one; `sideby autostart on` points it here.'))
+      io.out(c.dim('Turn it off: sideby autostart off'))
+    }
+    return 0
+  }
+  const plan = await planAutostart(ctx, action)
+  if (plan.blocked) throw new UserError(plan.blocked.message, { code: plan.blocked.code })
+  const yes = a.flags.has('yes')
+  const shown = {
+    ...plan.status,
+    path: tilde(plan.path, home),
+    action,
+    changed: plan.changed,
+    applied: false,
+    ...(plan.content ? { content: plan.content } : {}),
+    ...(plan.programArguments ? { programArguments: plan.programArguments } : {}),
+    commands: plan.commands,
+  }
+  if (!plan.changed) {
+    if (wantJson) json(io, shown)
+    else io.out(action === 'on' ? 'Already on.' : 'Already off.')
+    return 0
+  }
+  if (!yes) {
+    if (wantJson) json(io, shown)
+    else {
+      if (action === 'on') {
+        io.out(`Writes ${tilde(plan.path, home)}:`)
+        io.out(c.dim(plan.content!.trimEnd()))
+      } else io.out(`Removes ${tilde(plan.path, home)}.`)
+      io.out(`Then runs: ${plan.commands.map((cmd) => cmd.join(' ')).join('; ')}`)
+      io.out(
+        action === 'on'
+          ? 'At login the panel starts in the background, without opening a window. Run again with --yes to turn it on.'
+          : 'Run again with --yes to turn it off.',
+      )
+    }
+    return 10
+  }
+  const r = await applyAutostart(ctx, plan)
+  if (wantJson)
+    json(io, {
+      ...shown,
+      state: r.state,
+      applied: true,
+      loaded: r.loaded,
+      ...(r.note ? { note: r.note } : {}),
+    })
+  else {
+    io.out(
+      action === 'on'
+        ? 'On: the panel starts in the background at login. Undo: sideby autostart off'
+        : 'Off: sideby no longer starts at login.',
+    )
+    if (r.note) io.out(c.dim(r.note))
+  }
+  return 0
+}
+
+/** The `accounts.<ref>.args` check of `sideby config set`: only the model and effort arguments, as `sideby model`. */
+function modelArgsProblem(rt: Runtime): (ref: string, args: string[]) => string | null {
+  return (ref, args) => {
+    const family = ref.split(':')[0] ?? ''
+    const f = rt.families.get(family)
+    const mc = f?.modelChoice
+    if (!mc) return `${f?.title ?? family} has no model choice in sideby`
+    const { choice, rest } = mc.fromArgs(args)
+    if (rest.length) return `${rest.join(' ')} is not a model or effort argument`
+    if (choice.effort && !mc.efforts.includes(choice.effort))
+      return `"${choice.effort}" is not an effort level for ${f!.title}; use one of: ${mc.efforts.join(', ')}`
+    if (choice.model && !MODEL_NAME.test(choice.model))
+      return `"${choice.model}" is not a model name sideby passes on`
+    return null
+  }
+}
+
+const shownValue = (v: unknown) => (v === undefined ? '(not set)' : JSON.stringify(v))
+
+/** `sideby config get|set|unset` (spec §3.29): every setting has a command. */
+export async function cmdConfig(a: ParsedArgs, io: Io): Promise<number> {
+  const cfg = await import('../core/config.ts')
+  const [sub = 'get', key, value, ...more] = a.positionals
+  const wantJson = a.flags.has('json')
+  const yes = a.flags.has('yes')
+  const paths = resolvePaths()
+  const file = paths.configFile
+  const shownFile = tilde(file, paths.home)
+  if (sub === 'get') {
+    if (value !== undefined || yes) throw new UsageError('usage: sideby config get [<key>] [--json]')
+    if (key === undefined) {
+      const keys = cfg.settableKeys(await cfg.loadConfig(file))
+      if (wantJson) json(io, { file: shownFile, keys })
+      else {
+        for (const k of keys) {
+          const now =
+            k.value !== undefined
+              ? shownValue(k.value)
+              : k.entries?.length
+                ? k.entries.map((e) => `${e.key}=${JSON.stringify(e.value)}`).join(', ')
+                : c.dim('(not set)')
+          io.out(`${k.key} = ${now}`)
+          io.out(c.dim(`    ${k.meaning} Takes ${k.takes}.`))
+        }
+        io.out(c.dim(`Change one: sideby config set <key> <value>. File: ${shownFile}`))
+      }
+      return 0
+    }
+    const d = cfg.describeConfigKey(key)
+    const r = await cfg.configGet(file, key)
+    if (wantJson)
+      json(io, {
+        key,
+        set: r.value !== undefined,
+        ...(r.value !== undefined ? { value: r.value } : {}),
+        meaning: d.meaning,
+        takes: d.takes,
+      })
+    else {
+      io.out(r.value === undefined ? '(not set)' : JSON.stringify(r.value, null, 2))
+      io.out(c.dim(`${d.meaning} Takes ${d.takes}.`))
+    }
+    return 0
+  }
+  if (sub !== 'set' && sub !== 'unset')
+    throw new UsageError(
+      'usage: sideby config get [<key>] | set <key> <value> | unset <key> [--yes] [--json]',
+    )
+  if (
+    !key ||
+    (sub === 'set' && value === undefined) ||
+    (sub === 'unset' && value !== undefined) ||
+    more.length
+  )
+    throw new UsageError(
+      sub === 'set'
+        ? 'usage: sideby config set <key> <value> [--yes] [--json]  (quote a value with spaces)'
+        : 'usage: sideby config unset <key> [--yes] [--json]',
+    )
+  const next = sub === 'set' ? cfg.parseConfigValue(value!) : undefined
+  const argsProblem = key.startsWith('accounts') ? modelArgsProblem(await createRuntime()) : undefined
+  const r = await cfg.editConfigPath(file, key, next, {
+    dryRun: !yes,
+    ...(argsProblem ? { argsProblem } : {}),
+  })
+  const out = {
+    action: sub,
+    key,
+    file: shownFile,
+    changed: r.changed,
+    applied: r.changed && yes,
+    ...(r.before !== undefined ? { before: r.before } : {}),
+    ...(r.after !== undefined ? { after: r.after } : {}),
+  }
+  if (wantJson) json(io, out)
+  else if (!r.changed) io.out('Nothing to change.')
+  else {
+    io.out(`${key}: ${shownValue(r.before)} → ${shownValue(r.after)}`)
+    io.out(yes ? `Saved to ${shownFile}.` : 'Run again with --yes to save it.')
+  }
+  return r.changed && !yes ? 10 : 0
 }

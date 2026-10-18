@@ -55,6 +55,8 @@ $EDITOR ~/.claude-deepseek/proxy.env     # fill in the variables; the file stays
 sideby run deepseek
 ```
 
+`sideby key deepseek` types the key into `proxy.env` for you without showing it on screen (`--var <NAME>` for another variable), and `sideby try deepseek` asks the Host for one very short reply to check the account works. Not sure which address or model to use? Let your AI set it up from the vendor's docs: **Let AI set it up** in the panel's new-account dialog, or `sideby ask --task account` (see [Let AI do it](panel.md#let-ai-do-it)).
+
 `proxy.env` uses a small dotenv subset (`KEY=VALUE`, optional `export `, quotes, `#` comments, and `$NAME` / `${NAME}` referring to a key set earlier in the same file or to `HOME`, `USER`, `LOGNAME`, `TMPDIR` or an `XDG_*_HOME` location; no other shell variable is read and there is no command substitution). Its variables reach only the launched Host process. sideby refuses to start unless the file's mode is exactly 600 and tells you to run `chmod 600`.
 
 An API account needs no sign-in: its login state is `not-needed`, shown as `key` in the LOGIN column of `sideby list`.
@@ -114,7 +116,7 @@ Sometimes two accounts of Claude Code are signed in as the same claude.ai login,
 - marks them: `claude:001 = main` in `sideby list`; in the panel they are one row, marked **2 directories · shared quota**, with the quota and its warning shown once. Open the row to see each directory with its own short command, last use and tokens, and a **Copy start command** button; the row's **⋯** menu has a part for each directory;
 - never hands over between them: `sideby next` run inside a session sideby started skips the other directory of that login, and Auto Handoff skips it too, also when your `order` lists it, and says why.
 
-Usage (tokens) still counts per directory. Nothing is moved or deleted; keep both or remove one yourself. Codex is not grouped yet: one email can belong to several ChatGPT workspaces, each with its own quota.
+Usage (tokens) still counts per directory. Nothing is moved or deleted; keep both or remove one yourself. Codex accounts group the same way when they share the email and the ChatGPT workspace: one email can belong to several workspaces, each with its own quota, so sideby also compares which workspace each directory is signed in to. It reads this from the directory's `auth.json` only to compare, never shows or keeps it, and two directories in different workspaces stay apart.
 
 ## Grok quota
 
@@ -144,7 +146,7 @@ In the panel, open **Settings** and choose **Account order and pins** (or pick *
 
 ### Pin an account
 
-Click the pin at the end of an account's row, left of **⋯** (it shows when you point at the row). A pinned account keeps a filled pin and stays at the top of its tool in every sort; `sideby list` puts it first too. Up to three per tool; while arranging, pinned accounts move among themselves. **Default order** keeps your pins; Click the pin again to take it off. Pins never change which account `sideby next` or Auto Handoff picks.
+Open the row's **⋯** menu and choose **Pin to top**, or use **Settings › Account order and pins**, or run `sideby pin <account>`. A pinned account shows a small pin before its name and stays at the top of its tool in every sort; `sideby list` puts it first too. Up to three per tool; while arranging, pinned accounts move among themselves. **Default order** keeps your pins; choose **Unpin** in the same menu to take one off. Pins never change which account `sideby next` or Auto Handoff picks.
 
 
 CLI settings (also accept `--json`):
@@ -308,6 +310,12 @@ The same settings live under `handoff` in the config file (see the [configuratio
 | pi | never; it can take over | — |
 
 A headless run (`claude -p`, `codex exec`, `grok -p`), Codex with `--remote`, or a session started without sideby never hands over. `sideby doctor` warns when Auto Handoff is on but the Claude quota tap or the Grok hook file is missing, or when `order` is empty or names an account sideby cannot find. Auto Handoff turns itself off for a run, and says so, when the `sideby` on your `PATH` is missing, comes from the npx cache, or is too old to have the hook.
+
+## Start at login
+
+`sideby autostart on` makes the panel start in the background when you log in, so it already shows fresh quota when you open it. It opens no window and starts no host. It first shows the file it writes (`~/Library/LaunchAgents/dev.sideby.panel.plist`) and the `launchctl` command; run it again with `--yes` to turn it on, and `sideby autostart off --yes` to undo it. `sideby autostart` says whether it is on, and whether it still points at the sideby you use; `sideby update` keeps it pointing at the new version. macOS only for now. The same switch is in the panel's settings, or ask your AI to do it.
+
+Every other setting has a command too: `sideby config get` lists them with their values, and `sideby config set panel.theme dark` changes one (it shows the change first).
 
 ## Host notes
 

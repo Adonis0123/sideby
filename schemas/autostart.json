@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/autostart.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "supported",
+    "state",
+    "path",
+    "current"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "supported": {
+      "type": "boolean",
+      "description": "False on a system sideby cannot start at login yet; `reason` says so."
+    },
+    "reason": {
+      "type": "string"
+    },
+    "state": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "off"
+        },
+        {
+          "type": "string",
+          "const": "on"
+        },
+        {
+          "type": "string",
+          "const": "stale"
+        },
+        {
+          "type": "string",
+          "const": "foreign"
+        }
+      ],
+      "description": "`stale`: the Node or sideby it starts no longer exists; `foreign`: a file at that path that sideby did not write."
+    },
+    "path": {
+      "type": "string"
+    },
+    "programArguments": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "current": {
+      "type": "boolean",
+      "description": "The login item starts this sideby with this Node."
+    },
+    "missing": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "action": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "on"
+        },
+        {
+          "type": "string",
+          "const": "off"
+        }
+      ]
+    },
+    "changed": {
+      "type": "boolean"
+    },
+    "applied": {
+      "type": "boolean"
+    },
+    "content": {
+      "type": "string",
+      "description": "The file `on` writes."
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "loaded": {
+      "type": "boolean",
+      "description": "launchd took the change now."
+    },
+    "note": {
+      "type": "string"
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  }
+}

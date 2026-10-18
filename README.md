@@ -72,6 +72,7 @@ cc-switch's docs describe that switch: it writes the live settings file ([README
 
 | You want to | Run | Guide |
 |---|---|---|
+| Hand a task to your own AI from the panel: set up an account, fix a problem, support a new tool | **Let AI do it** in the panel, or `sideby ask` | [Let AI do it](docs/guide/panel.md#let-ai-do-it) |
 | Add an API key account (DeepSeek, a gateway, …) | `sideby new claude deepseek --api` | [API accounts](docs/guide/usage.md#api-accounts) |
 | Find and fix config drift between accounts | `sideby doctor --fix` | [Doctor](docs/guide/usage.md#doctor) |
 | See Claude quota (Codex needs no setup) | `sideby quota setup claude --yes` | [Claude quota](docs/guide/usage.md#claude-quota) |

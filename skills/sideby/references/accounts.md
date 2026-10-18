@@ -15,7 +15,7 @@ Only pass `--alias` when the user wants a short command. To continue their numbe
 Then:
 
 - **Subscription account**: tell the user to run `sideby login claude:work` in their own terminal (for pi, `sideby login pi:<name>` starts pi; then they type `/login`). Do not run it for them.
-- **API account**: tell the user to open the `proxy.env` path printed by `new` in their editor and fill in the values. Do not read or write it yourself. It then shows `login: "not-needed"`.
+- **API account**: tell the user to run `sideby key <ref>` in their own terminal (or click **Enter key** in the Panel), which writes the key without showing it, or to open the `proxy.env` path printed by `new` in their editor. Never ask for the key or read the file yourself. It then shows `login: "not-needed"`.
 - **pi**: a `proxy.env` in a pi account only loads provider keys; the account stays a subscription account and still needs `/login`.
 - Afterwards: `sideby doctor <ref> --json` to confirm the new account is healthy, then the user starts it with `sideby run <ref>`.
 

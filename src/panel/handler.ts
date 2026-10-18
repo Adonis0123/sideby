@@ -8,6 +8,27 @@ import {
   openAppProfile,
   removeAppProfile,
 } from '../core/app-profiles.ts'
+import {
+  type AiTaskInput,
+  openLoginInTerminal,
+  pickTaskAccount,
+  previewAttachments,
+  promptForTask,
+  setCustomTerminal,
+  setPreferredTerminal,
+  startAiTask,
+  terminals,
+  tryAccount,
+} from '../core/ask.ts'
+import { MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, removeStaged, stageUpload } from '../core/attachments.ts'
+import {
+  type AutostartContext,
+  type AutostartPlan,
+  type AutostartStatus,
+  applyAutostart,
+  autostartStatus,
+  planAutostart,
+} from '../core/autostart.ts'
 import { FAVICON_SVG, ICON_SVG } from '../core/brand-mark.ts'
 import {
   type BrowserReport,
@@ -19,8 +40,11 @@ import {
   aliasArgs,
   aliasRefs,
   type DisplayConfig,
+  editConfigPanel,
+  editConfigTerminal,
   editConfigUpdate,
   type HandoffSettings,
+  type PanelConfig,
 } from '../core/config.ts'
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import { UserError } from '../core/errors.ts'
@@ -31,15 +55,18 @@ import { configureHandoff, type HandoffChange, handoffStatus } from '../core/han
 import { type AccountModel, accountModel, setAccountModel } from '../core/model-choice.ts'
 import { tildify } from '../core/paths.ts'
 import type { RemoteControlGroup } from '../core/remote-control.ts'
+import { SECRET_VAR_NAME, secretVarFor, setSecret } from '../core/secret-file.ts'
 import { SKILL_INSTALL } from '../core/skill-check.ts'
+import { launchArgs, TERMINALS } from '../core/terminal.ts'
 import { MIN_CALLS } from '../core/tuning.ts'
 import type { TuneApplyPlan } from '../core/tuning-apply.ts'
 import * as update from '../core/update.ts'
 import { buildId, localBuild, packageVersion } from '../core/version.ts'
 import { HOOK_FAMILIES } from '../handoff/hook.ts'
 import type { AccountStatus, DoctorHistory, FamilyInfo, QuotaCheckInfo, Runtime } from '../runtime.ts'
-import type { Account, FamilyLogo, QuotaResult, QuotaSetupPlan, UsageResult } from '../types.ts'
+import type { Account, FamilyDef, FamilyLogo, QuotaResult, QuotaSetupPlan, UsageResult } from '../types.ts'
 import { renderPage } from './page.ts'
+import { AI_TASK_KINDS } from './page-logic.ts'
 import { type PanelTheme, resolveTheme } from './theme.ts'
 
 export const PANEL_VERSION = packageVersion()
@@ -120,8 +147,28 @@ export function healthByAccount(
   return out
 }
 
-/** A Family as the page sees it: FamilyInfo plus the mark from its FamilyDef. */
-export type PanelFamily = FamilyInfo & { logo?: FamilyLogo }
+/** A Family as the page sees it: FamilyInfo plus the mark from its FamilyDef, and what the key box needs. */
+export type PanelFamily = FamilyInfo & {
+  logo?: FamilyLogo
+  /** The variable the key box writes by default (spec §3.28); null when the Family names none. */
+  keyVar?: string | null
+  /** The Secret File holds keys even for a subscription (pi), so its accounts offer the key box too. */
+  keyAlways?: boolean
+  /** What "Try it" runs (`sideby try`): the Host and the probe arguments; absent when it cannot be tried. */
+  tryCommand?: string[]
+}
+
+function keyFacts(def: FamilyDef): Pick<PanelFamily, 'keyVar' | 'keyAlways' | 'tryCommand'> {
+  let keyVar: string | null = null
+  try {
+    keyVar = secretVarFor(def)
+  } catch {}
+  return {
+    keyVar,
+    ...(def.secretFileMeansApi === false ? { keyAlways: true } : {}),
+    ...(def.probe ? { tryCommand: [def.bin, ...def.probe.args] } : {}),
+  }
+}
 
 /** What the Panel shows about updates (spec §3.23); absent when the handler was created with `updates: false`. */
 export interface PanelUpdate {
@@ -197,7 +244,54 @@ export interface PanelState {
   display: DisplayConfig
   /** Families that ask for Quota in a way that costs a request (spec §3.26), with their switch; absent when none. */
   quotaChecks?: QuotaCheckInfo[]
+  /** Config `panel` (spec §3.29): the theme and language the Panel shows; absent when neither is set. */
+  panel?: PanelConfig
 }
+
+let autostartOverride: Partial<AutostartContext> = {}
+/**
+ * Internal, for tests: replaces parts of the machine the Panel's start-at-login switch uses (platform, launcher,
+ * `exec`, login home). Not part of the plugin or Portal contract.
+ */
+export function bindPanelAutostart(ctx: Partial<AutostartContext>): () => void {
+  const before = autostartOverride
+  autostartOverride = { ...autostartOverride, ...ctx }
+  return () => {
+    autostartOverride = before
+  }
+}
+const autostartCtx = (rt: Runtime): AutostartContext => ({ home: rt.paths.home, ...autostartOverride })
+
+/**
+ * The start-at-login state as the page shows it (spec §3.29): the agent's path and what it starts, with the home
+ * folder as `~`, and nothing else of the machine.
+ */
+export function autostartView(s: AutostartStatus, home: string) {
+  const t = (p: string) => tildify(p, home)
+  return {
+    supported: s.supported,
+    ...(s.reason ? { reason: s.reason } : {}),
+    state: s.state,
+    path: t(s.path),
+    current: s.current,
+    ...(s.programArguments ? { programArguments: s.programArguments.map(t) } : {}),
+    ...(s.missing ? { missing: s.missing.map(t) } : {}),
+  }
+}
+
+function autostartPlanView(p: AutostartPlan, home: string) {
+  return {
+    action: p.action,
+    changed: p.changed,
+    path: tildify(p.path, home),
+    ...(p.programArguments ? { programArguments: p.programArguments.map((a) => tildify(a, home)) } : {}),
+    ...(p.blocked ? { blocked: p.blocked } : {}),
+    status: autostartView(p.status, home),
+  }
+}
+
+const PANEL_THEMES = ['system', 'light', 'dark'] as const
+const PANEL_LANGUAGES = ['auto', 'en', 'zh'] as const
 
 // One Update Check at a time per process, started by a state read when one is due (the cache also keeps a failed
 // one from being tried again within the hour, though the page asks every 20 s).
@@ -480,9 +574,10 @@ async function buildState(
     readOnly: opts.readOnly,
     generatedAt: ctx.now.toISOString(),
     families: families.map((f) => {
-      const logo = rt.families.get(f.id)?.logo
+      const def = rt.families.get(f.id)
+      const logo = def?.logo
       const g = f.brokenBin ? { ...f, brokenBin: tildify(f.brokenBin, ctx.home) } : f
-      return logo ? { ...g, logo } : g
+      return { ...g, ...(logo ? { logo } : {}), ...(def ? keyFacts(def) : {}) }
     }),
     accounts: list,
     pluginErrors: rt.pluginErrors.map((e) => ({ where: e.where, message: e.message })),
@@ -508,6 +603,7 @@ async function buildState(
     ...(showBrowser ? { browser } : {}),
     display: rt.displayOrder(),
     ...(rt.quotaChecks().length ? { quotaChecks: rt.quotaChecks() } : {}),
+    ...(rt.config.panel && Object.keys(rt.config.panel).length ? { panel: rt.config.panel } : {}),
   }
 }
 
@@ -575,6 +671,99 @@ function handoffChange(body: Record<string, unknown>): HandoffChange {
   return out
 }
 
+/** The terminals for Settings and the confirm area: installed paths stay on the server. */
+async function terminalsView(rt: Runtime) {
+  const r = await terminals(rt)
+  return {
+    installed: r.installed.map((t) => t.id),
+    preferred: r.preferred,
+    guess: r.guess,
+    custom: rt.config.terminal?.custom ?? null,
+    terminals: r.terminals.map((t) => ({ id: t.id, name: t.name, installed: t.installed })),
+  }
+}
+
+const AI_TASKS: readonly string[] = AI_TASK_KINDS
+
+/** The `context` of an AI Task body (spec §3.28): only the strings and findings a Task Prompt shows. */
+function askContext(body: Record<string, unknown>): AiTaskInput['context'] {
+  const c = body.context
+  if (c === undefined || c === null) return undefined
+  if (typeof c !== 'object' || Array.isArray(c)) throw new HttpError(400, '"context" must be an object')
+  const out: NonNullable<AiTaskInput['context']> = {}
+  const str = (v: unknown, what: string) => {
+    if (typeof v !== 'string') throw new HttpError(400, `${what} must be a string`)
+    return v
+  }
+  for (const [k, v] of Object.entries(c)) {
+    if (k === 'account' || k === 'family' || k === 'quotaReason' || k === 'version' || k === 'terminalCustom')
+      out[k] = str(v, `"context.${k}"`)
+    else if (k === 'terminals') {
+      if (!Array.isArray(v) || v.length > 50) throw new HttpError(400, '"context.terminals" must be a list')
+      out.terminals = v.map((x) => str(x, 'each of "context.terminals"'))
+    } else if (k === 'handoff') {
+      if (!Array.isArray(v) || v.length > 100) throw new HttpError(400, '"context.handoff" must be a list')
+      out.handoff = v.map((x) => str(x, 'each of "context.handoff"'))
+    } else if (k === 'findings') {
+      if (!Array.isArray(v) || v.length > 100) throw new HttpError(400, '"context.findings" must be a list')
+      out.findings = v.map((f) => {
+        if (!f || typeof f !== 'object' || Array.isArray(f) || typeof f.message !== 'string')
+          throw new HttpError(400, 'each finding needs a "message"')
+        const one: { code?: string; account?: string; item?: string; message: string; hint?: string } = {
+          message: f.message,
+        }
+        for (const key of ['code', 'account', 'item', 'hint'] as const)
+          if (f[key] !== undefined && f[key] !== null) one[key] = str(f[key], `"finding.${key}"`)
+        return one
+      })
+    } else throw new HttpError(400, `unknown context "${k}"`)
+  }
+  return out
+}
+
+/** Task, text, context, language and account of an /api/ask body; unknown tasks are refused. */
+function askInput(body: Record<string, unknown>): AiTaskInput {
+  const task = optString(body, 'task') ?? 'free'
+  if (!AI_TASKS.includes(task)) throw new HttpError(400, `"task" must be one of ${AI_TASKS.join(', ')}`)
+  const text = optString(body, 'text')
+  if (text && text.length > 8000)
+    throw new HttpError(400, '"text" is too long; keep it under 8000 characters')
+  const lang = optString(body, 'lang')
+  if (lang && lang !== 'en' && lang !== 'zh') throw new HttpError(400, '"lang" must be "en" or "zh"')
+  const account = optString(body, 'account')
+  const terminal = optString(body, 'terminal')
+  if (terminal && !TERMINALS.some((t) => t.id === terminal))
+    throw new HttpError(400, 'unknown terminal; pick one from the list')
+  const context = askContext(body)
+  const uploads = body.attachments
+  if (
+    uploads !== undefined &&
+    !(
+      Array.isArray(uploads) &&
+      uploads.length <= MAX_ATTACHMENTS &&
+      uploads.every((u) => typeof u === 'string' && /^[a-f0-9]{16}$/.test(u))
+    )
+  )
+    throw new HttpError(400, `"attachments" must list at most ${MAX_ATTACHMENTS} upload ids`)
+  return {
+    ...(uploads?.length ? { uploads: uploads as string[] } : {}),
+    task,
+    ...(text ? { text } : {}),
+    ...(context ? { context } : {}),
+    ...(lang ? { lang } : {}),
+    ...(account ? { account } : {}),
+    ...(terminal ? { terminal } : {}),
+  }
+}
+
+/** A terminal open result as the page needs it: macOS refusing Automation gets its own flag (spec §3.28). */
+function opened<T extends { opened: boolean; reason?: string }>(r: T): T & { automation: boolean } {
+  return { ...r, automation: !r.opened && r.reason === 'automation-denied' }
+}
+
+/** The AI Task upload route; its body is a file, not a JSON object, so it sits outside the route table. */
+const ATTACH_ROUTE = '/api/ask/attach'
+
 /** Runs write requests one at a time; a few may wait, the rest are told to retry. */
 function writeQueue() {
   let tail: Promise<unknown> = Promise.resolve()
@@ -609,9 +798,119 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   // to declare it is refused by a read-only Panel instead of slipping through.
   interface Route {
     writes?: (body: Record<string, unknown>) => boolean
+    /** False runs it beside the write queue: a slow read or a probe must not hold other changes back. */
+    queued?: boolean
     run(body: Record<string, unknown>): Promise<unknown>
   }
   const routes: Record<string, Route> = {
+    // AI Tasks (spec §3.28, ADR-0027). The prompt and the account it would use, read only: for the confirm area,
+    // the copy fallback and the read-only Panel.
+    // Frees a staged upload the person removed from the dialog, so it stops counting toward the staging limit.
+    '/api/ask/attach/remove': {
+      async run(body) {
+        const ids = body.ids
+        if (!Array.isArray(ids) || ids.length > MAX_ATTACHMENTS || ids.some((x) => typeof x !== 'string'))
+          throw new HttpError(400, `"ids" must be a list of at most ${MAX_ATTACHMENTS} upload ids`)
+        const rt = await getRuntime()
+        return { removed: await removeStaged(rt.paths, ids as string[]) }
+      },
+    },
+    '/api/ask/prompt': {
+      writes: () => false,
+      queued: false,
+      async run(body) {
+        const input = askInput(body)
+        const rt = await getRuntime()
+        const { prompt, removedSecrets } = promptForTask(rt, input, await previewAttachments(rt, input))
+        const pick = await pickTaskAccount(rt, input)
+        return {
+          prompt,
+          removedSecrets,
+          account: 'account' in pick ? pick.account.ref : null,
+          ...('reason' in pick ? { reason: pick.reason } : {}),
+        }
+      },
+    },
+    // Writes the task file and opens the terminal. An account the person picked, API ones too, is kept as `ask.account`.
+    '/api/ask': {
+      async run(body) {
+        const input = askInput(body)
+        const rt = await getRuntime()
+        return opened(await startAiTask(rt, { ...input, remember: Boolean(input.account || input.terminal) }))
+      },
+    },
+    // Runs `sideby login <ref>` in the person's terminal; no AI is involved (spec §3.28 "登录").
+    '/api/login': {
+      async run(body) {
+        const account = optString(body, 'account')
+        if (!account) throw new HttpError(400, '"account" is required')
+        return opened(await openLoginInTerminal(await getRuntime(), account))
+      },
+    },
+    // The key box: writes one variable of an API Account's proxy.env. The value is never returned or logged.
+    '/api/key': {
+      async run(body) {
+        const account = optString(body, 'account')
+        if (!account) throw new HttpError(400, '"account" is required')
+        const value = body.value
+        if (typeof value !== 'string' || !value.trim()) throw new HttpError(400, 'enter the key')
+        const name = optString(body, 'var')
+        if (name !== undefined && !SECRET_VAR_NAME.test(name))
+          throw new HttpError(400, 'use an uppercase variable name such as API_KEY')
+        const rt = await getRuntime()
+        const found = await rt.resolve(account)
+        const family = rt.families.get(found.family)
+        if (!family) throw new HttpError(400, 'unknown family')
+        if (found.kind !== 'api' && family.secretFileMeansApi !== false)
+          throw new UserError(
+            'This is a subscription account; sign in instead, or create an API account in New account.',
+          )
+        const v = name ?? secretVarFor(family)
+        const { join } = await import('node:path')
+        const r = await setSecret(found.secretFile ?? join(found.dir, 'proxy.env'), v, value.trim())
+        return { account: found.ref, var: v, written: true, path: tildify(r.path, rt.paths.home) }
+      },
+    },
+    // `sideby try`: the page has said it spends a few tokens. It starts a program, so it is a write; it runs beside
+    // the queue because the Host may take up to a minute.
+    '/api/try': {
+      queued: false,
+      async run(body) {
+        const account = optString(body, 'account')
+        if (!account) throw new HttpError(400, '"account" is required')
+        return tryAccount(await getRuntime(), account)
+      },
+    },
+    // Preferred Terminal and Custom terminal command (spec §3.28): `id` null or left out goes back to the guess;
+    // `custom` an empty string removes the template.
+    '/api/terminal': {
+      async run(body) {
+        const id = body.id === undefined ? undefined : optString(body, 'id')
+        if (id && !TERMINALS.some((t) => t.id === id))
+          throw new HttpError(400, 'unknown terminal; pick one from the list')
+        const rt = await getRuntime()
+        if (body.custom !== undefined) {
+          // Same rules as `sideby terminal --custom`: a saved command is also the one chosen; clearing it drops that choice.
+          const custom = optString(body, 'custom')?.trim()
+          if (custom) {
+            try {
+              await setCustomTerminal(rt, custom)
+            } catch (err) {
+              throw new HttpError(400, (err as Error).message)
+            }
+          } else {
+            const wasChosen = rt.config.terminal?.preferred === 'custom'
+            const r = await editConfigTerminal(rt.paths.configFile, {
+              custom: undefined,
+              ...(wasChosen ? { preferred: undefined } : {}),
+            })
+            rt.config.terminal = r.after
+          }
+        }
+        if (body.id !== undefined || body.custom === undefined) await setPreferredTerminal(rt, id)
+        return terminalsView(rt)
+      },
+    },
     '/api/doctor': {
       // Only the record of the check is written, and a read-only Panel skips that (persist: false).
       writes: () => false,
@@ -963,6 +1262,56 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return { family, ...(await rt.setQuotaCheck(family, body.on)) }
       },
     },
+    // The Panel's theme and language (spec §3.29): config `panel.theme` and `panel.language`; null removes one.
+    '/api/panel/settings': {
+      async run(body) {
+        const patch: Parameters<typeof editConfigPanel>[1] = {}
+        for (const [k, v] of Object.entries(body)) {
+          if (k === 'theme') {
+            if (v !== null && !PANEL_THEMES.some((x) => x === v))
+              throw new HttpError(400, '"theme" must be "system", "light", "dark" or null')
+            patch.theme = v as PanelConfig['theme'] | null
+          } else if (k === 'language') {
+            if (v !== null && !PANEL_LANGUAGES.some((x) => x === v))
+              throw new HttpError(400, '"language" must be "auto", "en", "zh" or null')
+            patch.language = v as PanelConfig['language'] | null
+          } else throw new HttpError(400, `unknown setting "${k}"`)
+        }
+        if (!Object.keys(patch).length) throw new HttpError(400, 'send "theme" or "language"')
+        const rt = await getRuntime()
+        const r = await editConfigPanel(rt.paths.configFile, patch)
+        return { changed: r.changed, panel: r.after ?? {} }
+      },
+    },
+    // Start at login (spec §3.29, ADR-0029). Without `confirm` the plan: the file and what it starts, nothing is
+    // written. With it, a fresh plan runs only while it starts what the person saw (`programArguments`).
+    '/api/autostart': {
+      writes: (body) => body.confirm === true,
+      async run(body) {
+        if (typeof body.on !== 'boolean') throw new HttpError(400, '"on" must be true or false')
+        const rt = await getRuntime()
+        const ctx = autostartCtx(rt)
+        const home = rt.paths.home
+        const plan = await planAutostart(ctx, body.on ? 'on' : 'off')
+        const shown = autostartPlanView(plan, home)
+        if (!optBool(body, 'confirm') || plan.blocked) return { plan: shown, applied: false }
+        const saw = body.programArguments
+        const want = shown.programArguments ?? []
+        if (
+          plan.action === 'on' &&
+          (!Array.isArray(saw) || saw.length !== want.length || saw.some((x, i) => x !== want[i]))
+        )
+          return { plan: shown, applied: false, changedSince: true }
+        const r = await applyAutostart(ctx, plan)
+        return {
+          applied: true,
+          changed: r.changed,
+          loaded: r.loaded,
+          ...(r.note ? { note: r.note.split(home).join('~') } : {}),
+          status: autostartView(await autostartStatus(ctx), home),
+        }
+      },
+    },
     // Undo for the quota setup above; the Runtime turns a teardown that throws into `{ ok: false, message }`.
     '/api/quota/teardown': {
       async run(body) {
@@ -972,6 +1321,29 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return { family, result: await rt.quotaSetup(family).teardown() }
       },
     },
+  }
+
+  // An AI Task attachment (spec §3.28 "附件"): the body is the file itself, streamed into the staging folder rather than
+  // read into memory, with its own size limit. The type comes from its first bytes; `Content-Type` is not trusted.
+  const receiveAttachment = async (req: IncomingMessage) => {
+    const declared = Number(req.headers['content-length'])
+    if (Number.isFinite(declared) && declared > MAX_UPLOAD_BYTES)
+      throw new HttpError(413, 'This file is over 200 MB; attach a smaller one.')
+    try {
+      // Stopping early (a wrong type, too big) must not destroy the socket the answer goes out on.
+      const { id, kind, bytes } = await stageUpload(
+        (await getRuntime()).paths,
+        req.iterator({ destroyOnReturn: false }),
+      )
+      return { id, kind, bytes }
+    } catch (err) {
+      const code = (err as UserError).code
+      if (code === 'attachment-too-large') throw new HttpError(413, (err as Error).message)
+      if (code === 'attachment-type') throw new HttpError(415, (err as Error).message)
+      // The staging folder is full: the server's own limit, whatever the page allows.
+      if (code === 'attachment-quota') throw new HttpError(507, (err as Error).message, code)
+      throw err
+    }
   }
 
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<boolean> => {
@@ -992,6 +1364,15 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       if (method === 'GET' || method === 'HEAD') {
         if (sub === '/' || sub === '/index.html') {
           const nonce = randomBytes(16).toString('base64')
+          // The theme and language in config (spec §3.29), so the first paint has them; a config that cannot be
+          // read leaves the defaults, and /api/state reports the problem.
+          const panel =
+            method === 'HEAD'
+              ? undefined
+              : await getRuntime().then(
+                  (rt) => rt.config.panel,
+                  () => undefined,
+                )
           res.writeHead(200, {
             'content-type': 'text/html; charset=utf-8',
             'cache-control': 'no-store',
@@ -1011,7 +1392,19 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           res.end(
             method === 'HEAD'
               ? undefined
-              : renderPage({ basePath, token, nonce, version, build, local, readOnly, theme, lang, updates }),
+              : renderPage({
+                  basePath,
+                  token,
+                  nonce,
+                  version,
+                  build,
+                  local,
+                  readOnly,
+                  theme,
+                  lang,
+                  updates,
+                  ...(panel ? { panel } : {}),
+                }),
           )
           return true
         }
@@ -1036,26 +1429,42 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           send(res, 200, { token })
           return true
         }
+        if (sub === '/api/terminals') {
+          send(res, 200, await terminalsView(await getRuntime()))
+          return true
+        }
+        // Start at login (spec §3.29): its state only; turning it on or off is the POST of the same path.
+        if (sub === '/api/autostart') {
+          const rt = await getRuntime()
+          send(res, 200, autostartView(await autostartStatus(autostartCtx(rt)), rt.paths.home))
+          return true
+        }
         if (sub === '/api/state') {
           send(res, 200, await buildState(await getRuntime(), { version, build, readOnly, updates }))
           return true
         }
-        if (Object.hasOwn(routes, sub)) throw new HttpError(405, 'use POST')
+        if (Object.hasOwn(routes, sub) || sub === ATTACH_ROUTE) throw new HttpError(405, 'use POST')
         throw new HttpError(404, 'not found')
       }
 
       if (method !== 'POST') throw new HttpError(405, 'method not allowed')
       const route = Object.hasOwn(routes, sub) ? routes[sub] : undefined
-      if (!route) throw new HttpError(404, 'not found')
+      if (!route && sub !== ATTACH_ROUTE) throw new HttpError(404, 'not found')
       const origin = req.headers.origin
       if (!origin || origin.toLowerCase() !== `http://${host}`) throw new HttpError(403, 'origin not allowed')
       const given = req.headers['x-sideby-token']
       if (typeof given !== 'string' || !sameSecret(given, token))
         throw new HttpError(403, 'missing or wrong x-sideby-token; reload the page', 'bad-token')
+      if (!route) {
+        // An upload writes a file: a read-only Panel refuses it before reading a byte.
+        if (readOnly) throw new HttpError(403, 'this panel is read-only')
+        send(res, 200, await receiveAttachment(req))
+        return true
+      }
       const body = (await readBody(req)) as Record<string, unknown>
       if (readOnly && (route.writes?.(body) ?? true)) throw new HttpError(403, 'this panel is read-only')
       // Reads that record history (doctor) also run in this queue, so overlapping checks merge in order.
-      send(res, 200, await serial(() => route.run(body)))
+      send(res, 200, await (route.queued === false ? route.run(body) : serial(() => route.run(body))))
       return true
     } catch (err) {
       if (res.headersSent) {
@@ -1064,8 +1473,10 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       }
       if (err instanceof HttpError) {
         const body = err.code ? { error: err.message, code: err.code } : { error: err.message }
-        send(res, err.status, body, err.status === 413 ? { connection: 'close' } : {})
-        if (err.status === 413) req.resume()
+        // A refused body (too big, or an upload stopped early) is left unread: close the connection after answering.
+        const unread = err.status === 413 || (sub === ATTACH_ROUTE && !req.readableEnded)
+        send(res, err.status, body, unread ? { connection: 'close' } : {})
+        if (unread) req.resume()
       } else if (err instanceof UserError) {
         send(res, 400, err.code ? { error: err.message, code: err.code } : { error: err.message })
       } else {

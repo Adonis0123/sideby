@@ -43,7 +43,7 @@ export default {
 
 | 扩展点 | 时机 | 能做什么 | 超时 |
 |---|---|---|---|
-| `api.family(def)` | 加载插件时 | 注册家族：目录约定、选择变量、Hijack Variables、默认参数、共享项、登录命令、登录态判断、模型，可选的 `logo`、`readQuota`、`readUsage`、`quotaSetup`、`keepTitle`（让宿主保留 config `accountTitle` 所设标题的参数） | — |
+| `api.family(def)` | 加载插件时 | 注册家族：目录约定、选择变量、Hijack Variables、默认参数、共享项、登录命令、登录态判断、模型，可选的 `logo`、`readQuota`、`readUsage`、`quotaSetup`、`keepTitle`（让宿主保留 config `accountTitle` 所设标题的参数）、`probe`（发一次很短的非交互请求的宿主参数，`sideby try` 运行它） | — |
 | `launch.before` | 每次 `run`、`login` 之前 | 改 `ctx.env`、`ctx.args`，或用 `throw api.abort(msg)` 中止启动 | 30 秒 |
 | `account.create.before` | `new`（CLI 或面板）写入任何文件之前 | 用 `throw api.abort(msg)` 拒绝新建；`ctx` 里有 `family`、`name`、`api`、该家族已有的 `accounts` 和 `config`。CLI 以退出码 1 结束，面板显示 `msg`，所以要写明改怎么做 | 10 秒 |
 | `account.created` | `new` 成功后 | 补文件，用 `ctx.log()` 打印下一步提示 | 30 秒 |
@@ -58,6 +58,29 @@ logo: { path: 'M11.503.131 1.891 5.678…', title: 'Cursor', color: '#000000' } 
 `path` 只能是 SVG path 数据（命令字母、数字、空格、逗号、点、`+`、`-`，最多 20000 个字符），`color` 必须是十六进制颜色，`fillRule` 取 `nonzero` 或 `evenodd`。不合法的 logo 会被丢弃，并在 `sideby plugins` 里报一条插件错误；家族照常加载，面板改为显示首字母。黑色标志不要设 `color`，这样在深色模式下会跟随文字颜色。
 
 错误信息里总会标明插件名。加载失败只影响它自己；`doctor.check` 出错会变成该账号的一条 fail Finding；`launch.before` 出错会中止启动；家族的读取函数（例如 `model`）抛错时，会出现在 `list` 里该账号的 `problems` 中。`fix()` 只能写当前账号目录，并且要通过 `api.fs.writeFileAtomic` 写。
+
+## 加一个 sideby 还不支持的工具
+
+sideby 没列出的宿主，今天就能以本地 Family 插件的形式用起来。最省事的办法是交给你的 AI：在面板的新建账号对话框里选「其他工具……」，或者运行 `sideby ask --task host`。自己动手的话：
+
+```sh
+sideby plugins new mytool      # ~/.config/sideby/plugins/mytool/：plugin.json、index.ts、index.test.ts
+$EDITOR ~/.config/sideby/plugins/mytool/index.ts
+sideby plugins check mytool    # 反复跑，直到通过
+```
+
+`plugins new` 写在你的第一个插件目录里，权限符合加载器信任检查的要求；目录已存在时拒绝。`index.ts` 是一个 `api.family(def)` 骨架，每个必须填的字段都带 `TODO`。需要查清的事实，每条都以工具自己的文档或 `--help` 为准，并记下你查的版本和日期：
+
+- 二进制名和安装方法；
+- 让工具改用另一个配置目录的环境变量（没有这个变量，sideby 就没法让它的账号同时运行）；
+- 主目录在哪，账号目录长什么样；
+- Hijack Variables：会覆盖账号身份的环境变量；
+- 登录命令，以及只看某个文件存不存在、从不读内容的登录态判断；
+- 每个共享项和它的 Share Mode，以及工具会不会拒绝链接；
+- 有没有本地额度或用量文件（没有就不写读取器）；
+- logo，以及它的来源和许可证。
+
+`plugins check` 跑的检查和 CI 对内置家族跑的一样：必填字段、共享项路径（相对路径、不含 `..`）、logo、只从 sideby `import type`、跑一遍发现、启动和体检，再扫一遍个人信息，例如真实的家目录路径、邮箱和像 token 的字符串。每个问题都写明怎么改。只有 sideby 会加载这个插件时（文件都归你、别人不能写），检查才会运行它；否则只读文件，并先报告这一点。发现、启动和体检在单独的 Node 进程里跑，进程的 HOME 指向一个临时文件夹，20 秒没跑完就停掉。这样检查自己写的文件不会进你的账号，但它不是沙箱：插件和在 sideby 里一样，带着你的全部权限运行。你自己用顺了、想让所有人都能用，见 [CONTRIBUTING.md](../../CONTRIBUTING.md)。
 
 ## `account-script`
 

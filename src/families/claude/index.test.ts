@@ -3,7 +3,7 @@ import { lstat, mkdir, readFile, readlink, stat, symlink } from 'node:fs/promise
 import { describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../../../testing/index.ts'
 import { createRuntime } from '../../runtime.ts'
-import { claudePlugin } from './index.ts'
+import { claudeFamily, claudePlugin } from './index.ts'
 
 const builtins = [{ plugin: claudePlugin, version: '0.1.0', description: '', defaultEnabled: true }]
 
@@ -23,6 +23,11 @@ async function mainAccount(h: FakeHome): Promise<void> {
 }
 
 describe('claude family', () => {
+  it('names the key variable and a one-shot probe', () => {
+    assert.equal(claudeFamily.secretVar, 'ANTHROPIC_AUTH_TOKEN')
+    assert.deepEqual(claudeFamily.probe, { args: ['-p', 'Reply with OK'] })
+  })
+
   it('discovers accounts, reports drift and login state in a fake HOME', async () => {
     await withFakeHome(async (h) => {
       await mainAccount(h)

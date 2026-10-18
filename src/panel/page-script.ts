@@ -1,57 +1,78 @@
 // The Panel page's inline script. Plain browser JavaScript in a string (no template literals inside, so String.raw
 // keeps it verbatim); the pure helpers from page-logic.ts are prepended so the tested code is the code that runs.
 import {
+  aiTaskAccounts,
   aliasArgsOf,
   aliasIssue,
+  askCopy,
   attentionReasons,
   attentionWhy,
+  autostartNote,
   cacheHitRate,
   canLeaveLocal,
+  fileSize,
   fixPrompt,
   formatDuration,
   handoffChangeOf,
   handoffHintAccount,
+  handoffTaskFacts,
   inDisplayOrder,
   loginClusters,
   loginKey,
   maskEmail,
   matchesQuery,
+  menuPlacement,
   mergeDaily,
   newAccountDir,
   nextReset,
   panelFixes,
   panelHint,
   panelLang,
+  panelMigration,
+  panelPrefs,
   passedWindow,
   pinnedIn,
+  quotaAskable,
   quotaPressure,
   remoteControlSummary,
   remoteControlTodo,
   reorder,
+  rowBadge,
   sortAccounts,
+  stripSecrets,
   suggestAlias,
   suggestName,
   switchFailure,
+  taskFindings,
   updatedAge,
   windowState,
   withPinned,
 } from './page-logic.ts'
 
 const LOGIC = [
+  aiTaskAccounts,
+  askCopy,
+  quotaAskable,
+  stripSecrets,
+  taskFindings,
   aliasArgsOf,
   aliasIssue,
   attentionReasons,
   attentionWhy,
+  autostartNote,
   cacheHitRate,
+  fileSize,
   fixPrompt,
   formatDuration,
   handoffChangeOf,
   handoffHintAccount,
+  handoffTaskFacts,
   inDisplayOrder,
   loginClusters,
   loginKey,
   maskEmail,
   matchesQuery,
+  menuPlacement,
   mergeDaily,
   newAccountDir,
   nextReset,
@@ -60,11 +81,14 @@ const LOGIC = [
   panelFixes,
   panelHint,
   panelLang,
+  panelMigration,
+  panelPrefs,
   passedWindow,
   quotaPressure,
   remoteControlSummary,
   remoteControlTodo,
   reorder,
+  rowBadge,
   sortAccounts,
   suggestAlias,
   suggestName,
@@ -119,6 +143,7 @@ const MAIN = String.raw`
     if (raw.hideEmail === true) p.hideEmail = true
     if (typeof raw.ahHintAt === 'number') p.ahHintAt = raw.ahHintAt
     if (raw.rcHide === true) p.rcHide = true
+    if (raw.cfgDone === true) p.cfgDone = true
     if (typeof raw.family === 'string') p.family = raw.family
     if (raw.collapsed && typeof raw.collapsed === 'object')
       for (const k of Object.keys(raw.collapsed)) if (raw.collapsed[k] === true) p.collapsed[k] = true
@@ -129,7 +154,16 @@ const MAIN = String.raw`
   function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)) } catch {} }
   // A host lang other than auto wins over the saved choice (which stays saved) and hides the switch.
   const LANG_FIXED = BOOT.lang === 'en' || BOOT.lang === 'zh'
-  let lang = panelLang(BOOT.lang, prefs.lang, navigator.language)
+  // Theme and language live in config panel.* (spec §3.29), so the CLI and an AI assistant can change them too. A
+  // choice this browser saved before is written there once (cfgDone), then config is the only source. A read-only
+  // Panel cannot write config and keeps the browser's choice.
+  const CFG = !BOOT.readOnly
+  let cfgPanel = Object.assign({}, BOOT.panel || {})
+  let cfgSaving = 0
+  const cfgMigrate = CFG && !prefs.cfgDone ? panelMigration(cfgPanel, { theme: prefs.theme, lang: prefs.lang }) : null
+  if (cfgMigrate) Object.assign(cfgPanel, cfgMigrate)
+  function viewPrefs() { return panelPrefs(cfgPanel, { theme: prefs.theme, lang: prefs.lang }, CFG) }
+  let lang = panelLang(BOOT.lang, viewPrefs().language, navigator.language)
 
   // ---------- text ----------
   function t(key, vars) {
@@ -315,6 +349,8 @@ const MAIN = String.raw`
     swap: 'M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7',
     // Lucide "pin" (ISC license)
     pin: 'M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z',
+    // Lucide "link" (ISC license)
+    link: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
     bot: 'M6 9h12a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2zM12 5v4M9.5 13.5v1M14.5 13.5v1',
     grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
     list: 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01',
@@ -322,6 +358,8 @@ const MAIN = String.raw`
     clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2',
     mail: 'M3 6h18v12H3zM3 7l9 6 9-6',
     globe: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c2.5 2.5 3.8 5.5 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.5-3.8-9S9.5 5.5 12 3z',
+    image: 'M3 5h18v14H3zM3 16l5-5 4 4 3-3 6 6M15 9h.01',
+    film: 'M3 5h18v14H3zM7 5v14M17 5v14M3 9h4M3 15h4M17 9h4M17 15h4',
     eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
     eyeOff: 'M3 3l18 18M10.6 5.1A10.8 10.8 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.2M6.6 6.6A17.4 17.4 0 0 0 2 12s3.5 7 10 7a10.4 10.4 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2',
   }
@@ -590,24 +628,39 @@ const MAIN = String.raw`
 
   // ---------- floating panels: menus and popovers ----------
   // One shared base for everything that floats next to a button: it is placed under (or above) its anchor, kept
-  // inside the window, closed by a click outside, Escape, a resize or a scroll, and only one is open at a time.
+  // inside the window, closed by a click outside, Escape or a resize, and only one is open at a time. One taller than
+  // the room it gets scrolls inside itself (menuPlacement), and that scroll never closes it; a scroll of the page
+  // moves it along with its anchor and closes it only when the anchor leaves the window.
   // openMenu() fills it with menu items; openPopover() with any content that render() returns (re-run by refreshPopover()).
-  const menu = { el: null, anchor: null, kind: null, render: null }
+  // returnTo: where focus goes back on close when that is not the anchor (a right-click menu's point).
+  const menu = { el: null, anchor: null, kind: null, render: null, align: 'end', returnTo: null }
+  function placeFloat() {
+    const el = menu.el
+    const r = menu.anchor.getBoundingClientRect()
+    if (r.bottom < 0 || r.top > window.innerHeight) { closeMenu(); return }
+    // Its full height, not the capped one: a menu that got more room grows back.
+    const height = el.scrollHeight + el.offsetHeight - el.clientHeight
+    const p = menuPlacement(r, { width: el.offsetWidth, height }, { width: window.innerWidth, height: window.innerHeight }, menu.align)
+    el.style.setProperty('left', p.left + 'px')
+    el.style.setProperty('top', p.top + 'px')
+    el.style.setProperty('max-height', p.maxHeight + 'px')
+    if (menu.kind === 'settings') settingsFit()
+  }
   function openFloat(anchor, el, kind, align) {
     closeMenu()
     document.body.append(el)
-    const r = anchor.getBoundingClientRect()
-    const w = el.offsetWidth
-    const hgt = el.offsetHeight
-    const x = align === 'start' ? r.left : r.right - w
-    const left = Math.max(8, Math.min(window.innerWidth - w - 8, x))
-    const top = r.bottom + 4 + hgt > window.innerHeight - 8 && r.top - hgt - 4 > 8 ? r.top - hgt - 4 : r.bottom + 4
-    el.style.setProperty('left', left + 'px')
-    el.style.setProperty('top', top + 'px')
     anchor.setAttribute('aria-expanded', 'true')
     menu.el = el
     menu.anchor = anchor
     menu.kind = kind
+    menu.align = align
+    placeFloat()
+    // The wheel over it never scrolls the page behind: overscroll-behavior covers a menu that scrolls, this one that
+    // does not or has reached its end.
+    el.addEventListener('wheel', (e) => {
+      const end = e.deltaY < 0 ? el.scrollTop <= 0 : el.scrollTop + el.clientHeight >= el.scrollHeight - 1
+      if (end) e.preventDefault()
+    }, { passive: false })
   }
   function openMenu(anchor, items, label) {
     const el = h('div', { class: 'menu', role: 'menu', 'aria-label': label },
@@ -623,7 +676,7 @@ const MAIN = String.raw`
   // A popover: a small panel of text and buttons, lighter than a dialog. A second click on its anchor closes it.
   function openPopover(anchor, kind, label, render, align = 'start') {
     if (menu.anchor === anchor) { closeMenu(true); return }
-    const el = h('div', { class: 'menu popover', role: 'dialog', 'aria-label': label })
+    const el = h('div', { class: 'menu popover pop-' + kind, role: 'dialog', 'aria-label': label })
     el.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeMenu(true) } })
     setKids(el, render())
     openFloat(anchor, el, kind, align)
@@ -632,25 +685,71 @@ const MAIN = String.raw`
     if (first) first.focus()
   }
   function refreshPopover(kind) {
-    if (menu.el && menu.kind === kind && menu.render) setKids(menu.el, menu.render())
+    if (menu.el && menu.kind === kind && menu.render) { setKids(menu.el, menu.render()); placeFloat() }
   }
   function closeMenu(restore) {
     if (!menu.el) return
     menu.el.remove()
     menu.anchor.setAttribute('aria-expanded', 'false')
-    if (restore && menu.anchor.isConnected) menu.anchor.focus()
+    const back = menu.returnTo || menu.anchor
+    if (restore && back.isConnected) back.focus()
+    if (menu.anchor.classList.contains('ctx-anchor')) menu.anchor.remove()
     menu.el = null
     menu.anchor = null
     menu.kind = null
     menu.render = null
+    menu.returnTo = null
+  }
+  // Right-click on an account row or card (spec §3.27) opens the row's "…" menu at the pointer; the ContextMenu key
+  // and Shift+F10 open it at the focused element in the row. Inputs, links, buttons and selected text keep the
+  // browser's own menu. Each row carries its opener as el.sidebyMenu(anchor).
+  let kbMenuAt = 0
+  function menuTarget(node) {
+    let el = node && node.closest ? node.closest('.row, .card, .login-dir') : null
+    while (el && !el.sidebyMenu) el = el.parentElement ? el.parentElement.closest('.row, .card, .login-dir') : null
+    return el && $('accounts').contains(el) ? el : null
+  }
+  function openContextMenu(target, x, y, back) {
+    const pt = h('span', { class: 'ctx-anchor', 'aria-hidden': 'true', css: { left: x + 'px', top: y + 'px' } })
+    document.body.append(pt)
+    target.sidebyMenu(pt)
+    if (menu.anchor !== pt) { pt.remove(); return }
+    // Opens to the right of the point, or to its left where the right edge is too near, as system menus do.
+    menu.align = x + menu.el.offsetWidth + 8 > window.innerWidth ? 'end' : 'start'
+    menu.returnTo = back && back !== document.body && target.contains(back) ? back : target.querySelector('.more')
+    placeFloat()
+  }
+  function onContextMenu(e) {
+    if (Date.now() - kbMenuAt < 600) { e.preventDefault(); return }
+    if (ui.arrange || !e.target.closest || e.target.closest('input, textarea, select, a, button, [contenteditable], .tip')) return
+    if (window.getSelection && String(window.getSelection())) return
+    const target = menuTarget(e.target)
+    if (!target) return
+    e.preventDefault()
+    openContextMenu(target, e.clientX, e.clientY, document.activeElement)
+  }
+  function onMenuKey(e) {
+    if (e.key !== 'ContextMenu' && !(e.key === 'F10' && e.shiftKey)) return
+    if (menu.el || (dlg.el && dlg.el.open) || ui.arrange) return
+    const at = document.activeElement
+    // Text fields and links keep the browser's own menu, as with the mouse; the row's own buttons open the row menu.
+    if (at && at.closest && at.closest('input, textarea, select, a, [contenteditable]')) return
+    const target = menuTarget(at)
+    if (!target) return
+    e.preventDefault()
+    kbMenuAt = Date.now()
+    const r = (at && at !== document.body ? at : target).getBoundingClientRect()
+    openContextMenu(target, r.left, r.bottom, at)
   }
   function menuKeys(e) {
     const items = Array.from(menu.el.querySelectorAll('.menu-item:not(:disabled)'))
     const i = items.indexOf(document.activeElement)
-    if (e.key === 'ArrowDown') items[(i + 1) % items.length].focus()
-    else if (e.key === 'ArrowUp') items[(i - 1 + items.length) % items.length].focus()
-    else if (e.key === 'Home') items[0].focus()
-    else if (e.key === 'End') items[items.length - 1].focus()
+    // A menu that scrolls inside keeps the focused item in sight; focus() alone does not always scroll it there.
+    const go = (it) => { it.focus({ preventScroll: true }); it.scrollIntoView({ block: 'nearest' }) }
+    if (e.key === 'ArrowDown') go(items[(i + 1) % items.length])
+    else if (e.key === 'ArrowUp') go(items[(i - 1 + items.length) % items.length])
+    else if (e.key === 'Home') go(items[0])
+    else if (e.key === 'End') go(items[items.length - 1])
     else if (e.key === 'Escape') closeMenu(true)
     else if (e.key === 'Tab') { closeMenu(true); return }
     else return
@@ -658,7 +757,8 @@ const MAIN = String.raw`
   }
   document.addEventListener('pointerdown', (e) => { if (menu.el && !menu.el.contains(e.target) && !menu.anchor.contains(e.target)) closeMenu() })
   window.addEventListener('resize', () => closeMenu())
-  window.addEventListener('scroll', () => closeMenu(), { passive: true })
+  // Capture also sees the scroll of an inner scroller (a dialog, a list); the menu's own scroll is left alone.
+  window.addEventListener('scroll', (e) => { if (menu.el && !menu.el.contains(e.target)) placeFloat() }, { passive: true, capture: true })
 
   // What one directory does: start it, its short commands, its desktop app, its folder, model, tuning, Health.
   function dirCopies(a) {
@@ -684,20 +784,22 @@ const MAIN = String.raw`
   function loginItems(a) {
     return [
       browserFor(a) ? { icon: 'globe', label: t('br.open'), disabled: Boolean(ui.browserRef), run: () => openBrowserDialog(a) } : null,
+      a.kind !== 'api' && !BOOT.readOnly ? { icon: 'terminal', label: t('menu.signIn'), run: () => signIn(a) } : null,
       a.kind !== 'api' ? { icon: 'key', label: t('menu.copyLogin'), hint: 'sideby login ' + a.ref, run: () => copyText('sideby login ' + a.ref) } : null,
+      keyable(a) ? { icon: 'key', label: t('menu.enterKey'), run: () => openKey(a) } : null,
       a.identity && a.identity.email ? { icon: 'mail', label: t('menu.copyEmail'), hint: emailText(a.identity.email), run: () => copyText(a.identity.email) } : null,
     ]
   }
   function likeItem(a) { return BOOT.readOnly ? null : { icon: 'userPlus', label: t('menu.like'), run: () => openCreate({ family: a.family, api: a.kind === 'api' }) } }
   // Grouped by what the user wants to do: open, copy, manage.
   function accountMenu(a, anchor) {
-    const [browser, login, email] = loginItems(a)
+    const [browser, signInItem, login, key, email] = loginItems(a)
     const opens = [deskItem(a), browser].filter(Boolean)
     const copies = dirCopies(a)
     const items = [pinItem(a),
       opens.length ? '-' : null, opens.length ? { header: t('menu.groupOpen') } : null, ...opens,
       '-', { header: t('menu.groupCopy') }, ...copies, login, email,
-      '-', { header: t('menu.groupManage') }, ...dirTools(a), likeItem(a)]
+      '-', { header: t('menu.groupManage') }, signInItem, key, ...dirTools(a), likeItem(a)]
     openMenu(anchor, items, t('menu.label', { ref: a.ref }))
   }
   // A Same Login row (ADR-0026): pin first, then a section per directory, then what the login shares.
@@ -719,15 +821,19 @@ const MAIN = String.raw`
     const text = t('row.copyRun', { cmd })
     return h('button', { class: 'icon-btn row-run', type: 'button', 'aria-label': text, title: text, onclick: (e) => { e.stopPropagation(); copyText(cmd) } }, icon('terminal'))
   }
-  // The pin at the end of a row (spec §3.25): one click pins or unpins. A pinned row always shows it, filled; the
-  // others show it on hover or focus. A read-only Panel shows the mark of a pinned row and no button.
-  function pinButton(a, label) {
+  // A pinned row (spec §3.25, §3.27) says so with a small muted pin right before its name, and nothing at its end;
+  // pinning and unpinning are in the row's menu and in the arrange mode.
+  function pinMark(a) {
+    return isPinned(a) ? h('span', { class: 'pin-mark', role: 'img', title: t('pin.mark'), 'aria-label': t('pin.mark') }, icon('pin')) : null
+  }
+  // Before the name (spec §3.27, 2026-10-18): a pinned row always shows its pin, and a click unpins it; any other
+  // row shows a fainter pin in the same place on hover or keyboard focus, and a click pins it. The slot keeps its
+  // width when empty, so the name never moves. A read-only Panel shows only the mark.
+  function pinSlot(a) {
+    if (BOOT.readOnly) return pinMark(a)
     const on = isPinned(a)
-    if (BOOT.readOnly) return on ? h('span', { class: 'icon-btn pin-btn row-pin is-on', role: 'img', title: t('pin.mark'), 'aria-label': t('pin.mark') }, icon('pin')) : null
-    const full = !on && pinnedUnits(a.family) >= PIN_MAX
-    const text = full ? t('pin.full', { n: PIN_MAX }) : t(on ? 'pin.unpinName' : 'pin.pinName', { name: label, title: family(a.family).title })
-    return h('button', { class: 'icon-btn pin-btn row-pin' + (on ? ' is-on' : ''), type: 'button', 'aria-pressed': String(on), 'aria-label': text, title: text, 'aria-disabled': full ? 'true' : null,
-      onclick: (e) => { e.stopPropagation(); if (full) toast(t('pin.full', { n: PIN_MAX })); else togglePin(a) } }, icon('pin'))
+    const label = t(on ? 'pin.unpin' : 'pin.pin')
+    return h('button', { class: 'pin-slot' + (on ? ' is-on' : ''), type: 'button', 'aria-label': label, title: label, onclick: (e) => { e.stopPropagation(); togglePin(a) } }, icon('pin'))
   }
   function pinItem(a) {
     if (BOOT.readOnly) return null
@@ -802,12 +908,14 @@ const MAIN = String.raw`
     document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en'
     for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.getAttribute('data-i18n'))
     $('refresh').setAttribute('aria-label', t('top.refresh'))
+    $('ask-ai').setAttribute('aria-label', t('ask.button'))
     renderSettingsButton()
   }
   function applyTheme() {
     if (BOOT.colorScheme !== 'auto') return
-    if (prefs.theme === 'system') document.documentElement.removeAttribute('data-theme')
-    else document.documentElement.setAttribute('data-theme', prefs.theme)
+    const theme = viewPrefs().theme
+    if (theme === 'system') document.documentElement.removeAttribute('data-theme')
+    else document.documentElement.setAttribute('data-theme', theme)
   }
   function stat(label, value, sub, extra, opts) {
     const kids = [h('div', { class: 'stat-text' }, h('div', { class: 'stat-label' }, label), h('div', { class: 'stat-value' }, value), h('div', { class: 'stat-sub' }, sub)), extra]
@@ -992,7 +1100,7 @@ const MAIN = String.raw`
     const setup = setupFor(a.family)
     // One setup turns quota on for every account of the Family, so the switch lives in the group header only.
     // A check that asks the Host (Grok) and is turned off, or failed (spec §3.26): say why and what to do.
-    if (q.reason === 'fetch-failed') return h('div', { class: 'q-note q-off' }, h('span', { class: 'muted' }, t('quota.fetchFailed')), tipRaw(t('quota.fetchFailed'), q.detail || ''))
+    if (q.reason === 'fetch-failed') return h('div', { class: 'q-note q-off' }, h('span', { class: 'muted' }, t('quota.fetchFailed')), tipRaw(t('quota.fetchFailed'), q.detail || ''), askWhy(a, q))
     if (q.reason === 'not-enabled' && checkOf(a.family)) return h('div', { class: 'q-note q-off' }, h('span', { class: 'muted' }, t('quota.checkOff')), tipRaw(t('quota.checkOff'), q.detail || t('quota.checkOffHint')))
     if (q.reason === 'not-enabled') {
       const host = famTitle(a)
@@ -1003,7 +1111,12 @@ const MAIN = String.raw`
     }
     if (q.reason === 'api-account') return h('div', { class: 'q-note' }, t('quota.api'), tip('api'))
     const text = { 'no-session': 'quota.noSession', 'no-source': 'quota.noSource', unrecognized: 'quota.unrecognized' }[q.reason]
-    return h('div', { class: 'q-note', title: q.reason === 'no-session' ? t('quota.noSessionHint') : q.detail || null }, text ? t(text) : t('quota.unavailable', { reason: q.reason }))
+    return h('div', { class: 'q-note', title: q.reason === 'no-session' ? t('quota.noSessionHint') : q.detail || null }, text ? t(text) : t('quota.unavailable', { reason: q.reason }), askWhy(a, q))
+  }
+  // "Ask AI why" in a quota cell with no data or an error (spec §3.28).
+  function askWhy(a, q) {
+    if (!quotaAskable(q.reason)) return null
+    return h('button', { class: 'link-btn small q-ask', type: 'button', onclick: (e) => { e.stopPropagation(); openAsk({ task: 'quota', context: { account: a.ref, family: a.family, quotaReason: q.reason + (q.detail ? ': ' + q.detail : ''), version: BOOT.version } }) } }, t('ask.quotaWhy'))
   }
   function quotaBlock(a, now, cols) {
     const q = a.quota
@@ -1057,53 +1170,82 @@ const MAIN = String.raw`
     return h('button', { class: 'chip chip-btn health' + (lvl ? ' chip-' + lvl : ''), type: 'button', title: t('health.filterHint'), 'aria-label': t('health.chipLabel', { ref: a.ref, status: text }), onclick: () => filterHealth(a.ref) },
       h('span', { class: 'dot' + (lvl ? ' dot-' + lvl : ''), 'aria-hidden': 'true' }), text)
   }
-  // A dot after the name when the account needs a look that no tag shows: a fuller quota window or a Health
-  // finding. Its reason is on hover; the details say more.
-  // Inside a login group the quota warning is the first row's, so another row's dot is only about the row itself.
-  function attentionDot(a) {
+  // Who the attention words speak about. Inside a login group the quota warning is the first row's, so another
+  // row's word is only about the row itself.
+  function attentionSubject(a) {
     const lead = loginLead(a)
-    const subject = !lead ? a
+    return !lead ? a
       : lead !== a.ref ? Object.assign({}, a, { quota: undefined })
         : Object.assign({}, a, { quota: a.quota && Object.assign({}, a.quota, { from: undefined }) })
-    const r = reasonsOf(subject, Date.now())
-    const lvl = r.includes('health-fail') ? 'fail' : r.includes('quota-high') || r.includes('health-warn') ? 'warn' : ''
-    if (!lvl) return null
+  }
+  // A word, not only a colour (spec §3.8): what kind of look the account needs; the reason is on hover.
+  function attentionWord(subject, reason) {
+    const lvl = reason === 'health-fail' ? 'fail' : 'warn'
     const why = whyOf(subject, Date.now())
-    // A word, not only a colour (spec §3.8): what kind of look the account needs; the reason is on hover.
-    const word = r.includes('health-fail') ? t('att.fix') : r.includes('quota-high') ? t('att.quota') : t('att.check')
+    const word = reason === 'health-fail' ? t('att.fix') : reason === 'quota-high' ? t('att.quota') : t('att.check')
     return h('span', { class: 'tag tag-' + lvl + ' att-tag', title: why, 'aria-label': why }, h('span', { class: 'dot dot-' + lvl, 'aria-hidden': 'true' }), word)
+  }
+  // The word a directory inside a Same Login's details shows when it needs a fix or a look.
+  function attentionDot(a) {
+    const subject = attentionSubject(a)
+    const r = reasonsOf(subject, Date.now())
+    const reason = ['health-fail', 'quota-high', 'health-warn'].find((x) => r.includes(x))
+    return reason ? attentionWord(subject, reason) : null
+  }
+  // The one status badge after the name (spec §3.27): needs a fix, running low, the other attention words, then
+  // recommended, then API. The rest is in the details or on hover.
+  function statusBadge(a, members) {
+    const subject = attentionSubject(a)
+    const next = members ? members.some(isNext) : isNext(a)
+    const k = rowBadge(reasonsOf(subject, Date.now()), { next, api: a.kind === 'api' })
+    if (k === 'health-fail' || k === 'quota-high' || k === 'health-warn') return attentionWord(subject, k)
+    if (k === 'signed-out')
+      return h('button', { class: 'tag tag-fail tag-btn', type: 'button', title: t('acct.signInHint'), 'aria-label': t('acct.signedOutLabel', { ref: a.ref }), onclick: (e) => { e.stopPropagation(); signIn(a) } }, h('span', { class: 'dot dot-fail', 'aria-hidden': 'true' }), t('acct.signedOut'))
+    if (k === 'not-installed') return h('span', { class: 'tag tag-warn' }, t(family(a.family).brokenBin ? 'acct.broken' : 'acct.notInstalled'))
+    if (k === 'next') return nextTag(a)
+    if (k === 'api') return h('span', { class: 'tag tag-warn', title: t('tip.api.body') }, t('acct.api'))
+    return null
+  }
+  // The short command, as quiet text after the name; every alias and its arguments are on hover.
+  function aliasText(a) {
+    const all = a.aliases || []
+    if (!all.length) return null
+    const lines = all.map((x) => { const args = aliasArgsOf(a, x); return x + ' · ' + (args ? t('acct.aliasArgs', { args: args.join(' ') }) : t('acct.alias')) })
+    return h('span', { class: 'alias', title: lines.join('\n') }, all[0])
+  }
+  // A Same Login row (spec §3.21) gets a link mark after the name; what it means is on hover.
+  function loginMark(members) {
+    if (!members || members.length < 2) return null
+    const text = t('login.label', { names: members.map((m) => m.name).join(', ') }) + '\n' + t('login.explain')
+    return h('span', { class: 'login-mark', role: 'img', title: text, 'aria-label': text }, icon('link'))
   }
   // members: the directories of a Same Login shown as this one row (spec §3.21).
   function nameLine(a, members) {
-    const next = members ? members.some(isNext) : isNext(a)
     return h('div', { class: 'ident-name' },
+      pinSlot(a),
       h('span', { class: 'name', title: a.name }, a.name),
-      attentionDot(a),
-      (a.aliases || []).slice(0, 3).map((x) => {
-        const args = aliasArgsOf(a, x)
-        return h('span', { class: 'tag tag-alias', title: args ? t('acct.aliasArgs', { args: args.join(' ') }) : t('acct.alias') }, x)
-      }),
-      members ? h('span', { class: 'tag tag-login', title: t('login.explain') }, t('login.dirs', { n: members.length })) : null,
-      a.kind === 'api' ? h('span', { class: 'tag tag-warn', title: t('tip.api.body') }, t('acct.api')) : null,
-      next
-        ? nextTag(a)
-        : null,
-      a.login === 'logged-out' && a.kind !== 'api'
-        ? h('button', { class: 'tag tag-fail tag-btn', type: 'button', title: t('acct.signInHint'), 'aria-label': t('acct.signedOutLabel', { ref: a.ref }), onclick: () => copyText('sideby login ' + a.ref) }, h('span', { class: 'dot dot-fail', 'aria-hidden': 'true' }), t('acct.signedOut'))
-        : null,
-      a.hostInstalled === false ? h('span', { class: 'tag tag-warn' }, t(family(a.family).brokenBin ? 'acct.broken' : 'acct.notInstalled')) : null)
+      loginMark(members),
+      aliasText(a),
+      statusBadge(a, members))
   }
   // An organization name as the vendor wrote it, without a trailing comma or full stop it sometimes carries.
   function orgText(org) { return org ? String(org).replace(/[\s,，;；、。]+$/u, '') : '' }
   // The name part of a ref (claude:001 gives 001), as rows show other Accounts of the same Family.
   function refName(ref) { return String(ref).slice(String(ref).indexOf(':') + 1) }
-  // Who the account is signed in as, under its name; masked while "Hide emails" is on.
+  // Who the account is signed in as, under its name, in full unless the cell is too narrow; masked while "Hide
+  // emails" is on. The Browser Sign-in is in the details (spec §3.27).
   function emailLine(a) {
     const id = a.identity
-    if (!id || (!id.email && !browserButton(a))) return null
-    const email = id.email ? emailText(id.email) : ''
-    return h('div', { class: 'ident-email', title: [email, orgText(id.org)].filter(Boolean).join(' · ') },
-      dots([email ? h('button', { class: 'email email-btn', type: 'button', title: t('menu.copyEmail'), 'aria-label': t('menu.copyEmail') + ' ' + email, onclick: (e) => { e.stopPropagation(); copyText(id.email) } }, email) : null, browserButton(a)]))
+    if (!id || !id.email) return null
+    const email = emailText(id.email)
+    const full = [email, orgText(id.org)].filter(Boolean).join(' · ')
+    return h('div', { class: 'ident-email', title: full },
+      h('button', { class: 'email email-btn', type: 'button', title: full + '\n' + t('menu.copyEmail'), 'aria-label': t('menu.copyEmail') + ' ' + email, onclick: (e) => { e.stopPropagation(); copyText(id.email) } }, email))
+  }
+  // The Browser Sign-in as a line of the details: which Chrome browser user signed in to the account's website.
+  function browserItem(a) {
+    const b = browserButton(a)
+    return b ? h('div', { class: 'rd-item rd-browser' }, h('span', { class: 'rd-label' }, t('row.browser')), b) : null
   }
   function subLine(a) {
     const plan = a.quota && a.quota.status === 'ok' && a.quota.plan
@@ -1385,14 +1527,16 @@ const MAIN = String.raw`
     if (ui.arrange) return arrangeRow(a, [a])
     const open = isOpen(a)
     const email = emailLine(a)
-    return h('div', { class: 'row fold-hit' + (open ? ' row-open' : '') + (a.error ? ' row-error' : ''), role: 'listitem', 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a), onclick: foldClick(a) },
+    return withMenu(h('div', { class: 'row fold-hit' + (open ? ' row-open' : '') + (a.error ? ' row-error' : ''), role: 'listitem', 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a), onclick: foldClick(a) },
       h('div', { class: 'ident' }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a), email || subLine(a))),
       quotaBlock(a, now, cols),
       lastUsed(a),
-      h('div', { class: 'row-end' }, runButton(a), pinButton(a, a.name), moreButton(a)),
+      h('div', { class: 'row-end' }, runButton(a), moreButton(a)),
       open ? rowDetail(a, Boolean(email)) : null,
-      notes(a))
+      notes(a)), (anchor) => accountMenu(a, anchor))
   }
+  // What a right-click on el opens (see openContextMenu).
+  function withMenu(el, open) { el.sidebyMenu = open; return el }
   // Directories signed in as one login (spec §3.21, ADR-0026) are one row: the vendor counts one quota, so the row
   // shows it once, with the email and the newest use; opening it lists each directory with its own short command,
   // last use, tokens, Health, a button that copies its start command and its own menu.
@@ -1422,20 +1566,21 @@ const MAIN = String.raw`
     if (ui.arrange) return arrangeRow(a, ms)
     const open = isOpen(a)
     const email = emailLine(a)
-    return h('div', { class: 'row row-login fold-hit' + (open ? ' row-open' : '') + (a.error ? ' row-error' : ''), role: 'listitem', 'aria-label': t('login.label', { names: ms.map((m) => m.name).join(', ') }), 'data-ref': a.ref, 'data-key': loginKey(ms.map((m) => m.ref)), 'data-sig': sig(ms.map(rowSig)), onclick: foldClick(a) },
+    return withMenu(h('div', { class: 'row row-login fold-hit' + (open ? ' row-open' : '') + (a.error ? ' row-error' : ''), role: 'listitem', 'aria-label': t('login.label', { names: ms.map((m) => m.name).join(', ') }), 'data-ref': a.ref, 'data-key': loginKey(ms.map((m) => m.ref)), 'data-sig': sig(ms.map(rowSig)), onclick: foldClick(a) },
       h('div', { class: 'ident' }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a, ms), email || subLine(a))),
       quotaBlock(a, now, cols),
       lastUsed(newestOf(ms)),
-      h('div', { class: 'row-end' }, runButton(a), pinButton(a, ms.map((m) => m.name).join(', ')), loginMoreButton(ms)),
+      h('div', { class: 'row-end' }, runButton(a), loginMoreButton(ms)),
       open ? loginDetail(ms) : null,
-      notes(a))
+      notes(a)), (anchor) => loginMenu(ms, anchor))
   }
   function loginDetail(ms) {
     return h('div', { class: 'row-detail login-detail' },
       h('p', { class: 'rd-note' }, t('login.explain')),
+      browserItem(ms[0]),
       h('div', { class: 'login-dirs', role: 'list' }, ms.map((m) => {
         const run = 'sideby run ' + m.ref
-        return h('div', { class: 'login-dir', role: 'listitem', 'data-ref': m.ref },
+        return withMenu(h('div', { class: 'login-dir', role: 'listitem', 'data-ref': m.ref },
           h('div', { class: 'ld-name' },
             h('span', { class: 'name' }, m.name),
             m.ref !== ms[0].ref ? attentionDot(m) : null,
@@ -1446,7 +1591,7 @@ const MAIN = String.raw`
           usageBlock(m),
           healthChip(m),
           h('button', { class: 'btn btn-sm', type: 'button', title: run, onclick: () => copyText(run) }, icon('terminal'), t('login.copyRun')),
-          moreButton(m))
+          moreButton(m)), (anchor) => accountMenu(m, anchor))
       })))
   }
   // What a click on a row opens: how it runs (ref, model and effort, a shared login), its tokens and its Health.
@@ -1459,19 +1604,21 @@ const MAIN = String.raw`
     const same = sameLoginNote(a)
     return h('div', { class: 'row-detail' },
       withSub || same ? h('div', { class: 'rd-item rd-run' }, h('span', { class: 'rd-label' }, t('row.runs')), withSub ? subLine(a) : null, same) : null,
+      browserItem(a),
       h('div', { class: 'rd-item rd-usage' }, h('span', { class: 'rd-label' }, t('col.tokens', { n: BOOT.usageDays })), usageBlock(a)),
       h('div', { class: 'rd-item rd-health' }, h('span', { class: 'rd-label' }, t('col.health')), healthChip(a)))
   }
   // A card shows everything at once; it has room for it.
   function card(a, now, cols) {
-    return h('article', { class: 'card' + (a.error ? ' card-error' : ''), 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a), 'aria-label': a.ref },
+    return withMenu(h('article', { class: 'card' + (a.error ? ' card-error' : ''), 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a), 'aria-label': a.ref },
       h('header', { class: 'card-head' },
         badge(a.family, 'sm'),
         h('div', { class: 'ident-text' }, nameLine(a), emailLine(a), subLine(a), sameLoginNote(a)),
-        h('div', { class: 'row-end' }, pinButton(a, a.name), moreButton(a))),
+        h('div', { class: 'row-end' }, moreButton(a))),
       notes(a),
+      browserItem(a),
       quotaBlock(a, now, cols),
-      h('footer', { class: 'card-foot' }, usageBlock(a), h('div', { class: 'card-side' }, lastUsed(a), healthChip(a))))
+      h('footer', { class: 'card-foot' }, usageBlock(a), h('div', { class: 'card-side' }, lastUsed(a), healthChip(a)))), (anchor) => accountMenu(a, anchor))
   }
   // The list's column titles, once per group under its header. Screen readers get each cell's own label instead.
   function colHead(cols, list) {
@@ -1697,7 +1844,7 @@ const MAIN = String.raw`
       fams.length ? h('ul', { class: 'host-list' }, fams.map((f) => h('li', null, badge(f.id, 'sm'), h('span', null, f.title),
         f.installed ? h('span', { class: 'muted small' }, tx('empty.runOnce', { bin: h('code', null, f.bin) })) : f.installCommand ? codeCopy(f.installCommand) : link(t('empty.install'), f.installUrl, 'btn btn-sm')))) : h('p', { class: 'muted small' }, t('empty.noFamilies')),
       BOOT.readOnly ? null : h('button', { class: 'btn btn-primary', type: 'button', onclick: () => openCreate(null) }, icon('plus'), t('empty.create')),
-      BOOT.readOnly ? null : h('p', { class: 'muted small' }, t('ai.emptyHint'), ' ', h('button', { class: 'link-btn', type: 'button', onclick: openAi }, t('ai.how'))))
+      BOOT.readOnly ? null : h('p', { class: 'muted small' }, t('ai.emptyHint'), ' ', h('button', { class: 'link-btn', type: 'button', onclick: () => openAsk({ task: 'account', context: { version: BOOT.version } }) }, t('ask.title.account'))))
   }
   function clearFilters() {
     ui.query = ''
@@ -1826,7 +1973,7 @@ const MAIN = String.raw`
   }
   function arrangeBar() {
     return h('div', { class: 'arrange-bar', role: 'region', 'aria-label': t('sort.arrange'), 'data-key': 'arrange-bar', 'data-sig': sig([ordered(), lang]) },
-      h('span', { class: 'arrange-text' }, icon('grip'), h('span', null, t('order.bar')), h('button', { class: 'link-btn small', type: 'button', onclick: openAi }, t('ai.orderHint'))),
+      h('span', { class: 'arrange-text' }, icon('grip'), h('span', null, t('order.bar')), h('button', { class: 'link-btn small', type: 'button', onclick: () => openAsk() }, t('ai.orderHint'))),
       h('div', { class: 'arrange-actions' },
         h('button', { class: 'link-btn', type: 'button', title: t('order.resetHint'), disabled: ordered() ? undefined : true, onclick: resetOrder }, t('order.resetButton')),
         h('button', { class: 'btn btn-primary btn-sm', type: 'button', onclick: endArrange }, t('order.done'))))
@@ -1845,13 +1992,15 @@ const MAIN = String.raw`
     const pinLabel = full ? t('pin.full', { n: PIN_MAX }) : t(pinned ? 'pin.unpinName' : 'pin.pinName', { name: label, title: family(fam).title })
     return h('div', { class: 'row row-arrange' + (pinned ? ' is-pinned' : ''), role: 'listitem', 'data-ref': a.ref, 'data-key': 'arr:' + loginKey(ms.map((m) => m.ref)), 'data-sig': sig([ms.map(rowSig), at, lo, hi, full]) },
       h('div', { class: 'ident' }, dragHandle('account', fam, a.name, label), badge(fam, 'sm'), h('div', { class: 'ident-text' }, h('div', { class: 'ident-name' },
+        pinMark(a),
         h('span', { class: 'name', title: a.name }, a.name),
-        (a.aliases || []).slice(0, 3).map((x) => h('span', { class: 'tag tag-alias' }, x)),
-        ms.length > 1 ? h('span', { class: 'tag tag-login', title: t('login.explain') }, t('login.dirs', { n: ms.length })) : null))),
+        loginMark(ms),
+        aliasText(a)))),
       h('div', { class: 'arrange-tools' },
         h('button', { class: 'icon-btn', type: 'button', 'aria-label': t('order.up', { name: label }), title: t('order.up', { name: label }), disabled: at <= lo ? true : undefined, onclick: () => moveUnit('account', fam, at, at - 1, { focus: a.name, label, button: 'up' }) }, icon('arrowUp')),
         h('button', { class: 'icon-btn', type: 'button', 'aria-label': t('order.down', { name: label }), title: t('order.down', { name: label }), disabled: at >= hi ? true : undefined, onclick: () => moveUnit('account', fam, at, at + 1, { focus: a.name, label, button: 'down' }) }, icon('arrowDown')),
-        h('button', { class: 'icon-btn pin-btn', type: 'button', 'aria-pressed': String(pinned), 'aria-label': pinLabel, title: pinLabel, 'aria-disabled': full ? 'true' : null, onclick: () => { if (full) toast(t('pin.full', { n: PIN_MAX })); else togglePin(a) } }, icon('pin'))))
+        // Words, not a lone pin icon at the end of the row: the arrange mode is where the order and the pins are set.
+        h('button', { class: 'btn btn-sm pin-btn', type: 'button', 'aria-pressed': String(pinned), 'aria-label': pinLabel, title: pinLabel, 'aria-disabled': full ? 'true' : null, onclick: () => { if (full) toast(t('pin.full', { n: PIN_MAX })); else togglePin(a) } }, t(pinned ? 'pin.unpin' : 'pin.pin'))))
   }
   // A grip to drag a Family group or an account (a Same Login moves as one) into a new place, or to move it with
   // the arrow keys. Only in the arrange mode.
@@ -2158,7 +2307,8 @@ const MAIN = String.raw`
           tx('health.lead', { shared: h('span', { class: 'label-tip' }, t('health.sharedTerm'), tip('shared')), drift: h('span', { class: 'label-tip' }, t('health.driftTerm'), tip('drift')) }))),
       h('div', { class: 'actions' },
         h('button', { class: 'btn', type: 'button', disabled: busy || !S.state, 'aria-busy': S.checking ? 'true' : null, title: !S.state && !busy ? t('health.waiting') : null, onclick: runCheck }, S.checking ? spinner() : null, S.checking ? t('health.running') : t('health.run')),
-        prompt ? h('button', { class: 'btn', type: 'button', title: t('fix.copyAiTitle'), onclick: () => copyText(prompt, t('fix.promptShown')) }, icon('copy'), t('fix.copyAi')) : null,
+        prompt && BOOT.readOnly ? h('button', { class: 'btn', type: 'button', title: t('fix.copyAiTitle'), onclick: () => copyText(prompt, t('fix.promptShown')) }, icon('copy'), t('fix.copyAi')) : null,
+        prompt && !BOOT.readOnly ? h('button', { class: 'btn', type: 'button', title: t('ask.fixTitle'), onclick: () => openAsk({ task: 'fix', context: { findings: taskFindings(forAi(findings)), version: BOOT.version } }) }, icon('bot'), t('ask.title.fix')) : null,
         BOOT.readOnly ? null : h('button', { class: 'btn btn-primary', type: 'button', disabled: busy || !fixable, 'aria-busy': S.fixing ? 'true' : null, title: fixWhy, onclick: runFix },
           S.fixing ? spinner() : null, S.fixing ? t('health.fixing') : t('fix.all') + (fixable ? ' (' + fixable + ')' : ''))))]
     if (ref) out.push(h('div', { class: 'filter-bar' },
@@ -2598,7 +2748,9 @@ const MAIN = String.raw`
     })
     const body = h('form', { id: 'nf-form', class: 'form', novalidate: true, onsubmit: (ev) => { ev.preventDefault(); create() } },
       h('p', { class: 'muted small' }, t('nf.intro')),
-      h('fieldset', { class: 'field fam-field' }, h('legend', null, t('nf.tool')), nf.fams.length ? h('div', { class: 'fam-grid' }, cards) : h('p', { class: 'muted small' }, t('empty.noFamilies'))),
+      h('fieldset', { class: 'field fam-field' }, h('legend', null, t('nf.tool')), h('div', { class: 'fam-grid' }, cards,
+        h('button', { class: 'fam-card fam-other', type: 'button', onclick: () => openAsk({ task: 'host', context: { version: BOOT.version } }) }, h('span', { class: 'badge badge-sm badge-logo', 'aria-hidden': 'true' }, icon('plus')),
+          h('span', { class: 'fam-text' }, h('span', { class: 'fam-title' }, t('ask.otherTool')), h('span', { class: 'fam-sub' }, t('ask.otherToolSub')))))),
       h('div', { class: 'field' }, h('label', { class: 'field', for: 'nf-name' }, h('span', null, t('nf.name')), e.name), e.suggest),
       // The first screen asks only for the tool and a name; the rest waits behind "More options".
       h('details', { class: 'more-opts', open: nf.api || Boolean(nf.alias) || Boolean(nf.error) || undefined },
@@ -2607,7 +2759,8 @@ const MAIN = String.raw`
         h('div', { class: 'check-row' }, h('label', { class: 'check' }, e.api, h('span', null, h('b', null, t('nf.api')), h('span', { class: 'muted small' }, t('nf.apiHint')))), tip('api')),
         e.preview),
       e.error,
-      e.errNote = nf.error ? errorNote(nf.error, create, nf.error.code === 'create-refused' && !nf.api ? t('nf.refusedApi') : null) : null)
+      e.errNote = nf.error ? errorNote(nf.error, create, nf.error.code === 'create-refused' && !nf.api ? t('nf.refusedApi') : null) : null,
+      h('p', { class: 'small ask-setup' }, h('button', { class: 'link-btn', type: 'button', onclick: () => openAsk({ task: 'account', context: nf.family ? { family: nf.family, version: BOOT.version } : { version: BOOT.version } }) }, icon('bot'), t('ask.setUp'))))
     setKids(el, dialogFrame(t('nf.title'), null, body, [
       h('button', { class: 'btn', type: 'button', onclick: () => el.close() }, t('btn.cancel')),
       e.submit,
@@ -2715,8 +2868,11 @@ const MAIN = String.raw`
         : h('div', { class: 'note note-warn' }, h('span', { class: 'small' }, f.message))),
       h('p', { class: 'muted small' }, t('nf.next')),
       h('ol', { class: 'steps' }, r.nextSteps.map(stepRow)))
+    const made = S.state && S.state.accounts.find((x) => x.ref === r.account.ref)
+    const keyNow = r.account.kind === 'api' || (made && keyable(made)) ? { ref: r.account.ref, family: r.account.family, kind: r.account.kind } : null
     return dialogFrame(t('nf.title'), r.account.family, body, [
       h('button', { class: 'btn', type: 'button', onclick: () => openCreate({ family: r.account.family, api: nf.api }) }, t('nf.another')),
+      keyNow ? h('button', { class: 'btn', type: 'button', onclick: () => openKey(keyNow) }, icon('key'), t('menu.enterKey')) : null,
       h('button', { class: 'btn btn-primary', type: 'button', onclick: () => dlg.el.close() }, t('btn.done')),
     ])
   }
@@ -2819,6 +2975,13 @@ const MAIN = String.raw`
     }
     return { auto: s.auto, sameFamily: s.sameFamily, prepareAt: s.prepareAt, threshold: s.threshold, wait: s.waitIfResetWithinMinutes, countdown: s.countdownSeconds, orders }
   }
+  // "Let AI tune it" (spec §3.29): the AI gets the facts of sideby handoff status --json, as far as the page has them.
+  function askHandoff() {
+    const st = ahState()
+    if (!st) return
+    const status = ah && ah.status ? ah.status : null
+    openAsk({ task: 'handoff', context: { handoff: handoffTaskFacts(st.settings, st.starters, S.state.accounts, Date.now(), status), version: BOOT.version } })
+  }
   async function openHandoff() {
     if (!ahState()) return
     ah = { form: handoffForm(), loading: true }
@@ -2907,7 +3070,8 @@ const MAIN = String.raw`
     const st = ahState()
     if (!st || !ah) return
     const f = ah.form
-    const body = [h('p', { class: 'muted small' }, t('ah.intro'))]
+    const body = [h('p', { class: 'muted small' }, t('ah.intro'), ' ',
+      h('button', { class: 'link-btn', type: 'button', onclick: askHandoff }, icon('bot'), t('ask.title.handoff')))]
     if (BOOT.readOnly) body.push(h('p', { class: 'note' }, t('banner.readOnly')))
     body.push(ahCheck('auto', t('ah.auto'), null))
     body.push(ahCheck('sameFamily', t('ah.sameFamily'), t('ah.sameFamilyWarn')))
@@ -3224,6 +3388,7 @@ const MAIN = String.raw`
     const kids = [h('div', { class: 'section-head' },
       h('h2', { id: 'h-handoff' }, t('hp.title')),
       h('div', { class: 'row-actions' },
+        h('button', { class: 'btn btn-sm', type: 'button', onclick: askHandoff }, icon('bot'), t('ask.title.handoff')),
         h('button', { class: 'btn btn-sm', type: 'button', onclick: openHandoff }, t('hp.advanced')),
         h('button', { class: 'btn btn-sm', type: 'button', disabled: hp.loading, onclick: loadHandoffPage }, hp.loading ? spinner() : icon('refresh'), t('top.refresh'))))]
     const on = st.settings.auto
@@ -3368,6 +3533,7 @@ const MAIN = String.raw`
     const out = []
     if (!LANG_FIXED) out.push('lang')
     if (BOOT.colorScheme === 'auto') out.push('theme')
+    out.push('startup')
     if (S.state && S.state.accounts.length && !BOOT.readOnly) out.push('order')
     out.push('ai')
     if (S.state && rcSummary()) out.push('rc')
@@ -3382,59 +3548,208 @@ const MAIN = String.raw`
     const warn = secs.includes('rc') && rcSummary() === 'on'
     setKids(b, [icon('gear'), h('span', { class: 'hide-sm' }, t('set.button')), warn ? h('span', { class: 'dot set-dot', 'aria-hidden': 'true' }) : null])
     b.setAttribute('aria-label', t('set.button') + (warn ? ': ' + t('set.rcOn') : ''))
-    refreshPopover('settings')
+    refreshSettings()
     if (dlg.kind === 'rc') renderRc()
   }
-  function settingsPop() {
+  // The popover and the full settings dialog show the same groups (spec §3.29), top to bottom: Appearance, Startup,
+  // Accounts and quota, Let AI help. leave() closes whichever holds them before a link goes elsewhere; a link that
+  // opens a dialog keeps the dialog element open (opens: true), since one dialog element is shared.
+  function settingsGroups(leave) {
     const secs = settingsSections()
-    const out = []
     const seg = (label, opts, cur, pick) => h('div', { class: 'set-row' }, h('span', { class: 'set-label' }, label),
       h('div', { class: 'seg', role: 'group', 'aria-label': label }, opts.map(([v, text]) =>
         h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === cur), onclick: () => pick(v) }, text))))
-    const link = (label, state, cls, run) => h('button', { class: 'menu-item set-link', type: 'button', onclick: () => { closeMenu(); run() } },
-      h('span', { class: 'menu-label' }, label), h('span', { class: 'chip chip-sm ' + cls }, state), icon('chevron'))
-    if (secs.includes('lang')) out.push(seg(t('set.lang'), [['en', 'English'], ['zh', '中文']], lang, setLang))
-    if (secs.includes('theme')) out.push(seg(t('set.theme'), CHOICES.theme.map((v) => [v, t('set.theme.' + v)]), prefs.theme, setTheme))
-    if (out.length && (secs.includes('order') || secs.includes('rc') || secs.includes('ah'))) out.push(h('div', { class: 'menu-sep', role: 'separator' }))
-    // Everything here can also be asked of an AI assistant through the sideby skill (spec §3.8).
-    if (secs.includes('ai')) out.push(link(t('ai.title'), t(skillInstalled() ? 'ai.installed' : 'ai.notInstalled'), skillInstalled() ? 'chip-ok' : '', openAi))
+    const link = (label, state, cls, run, opens) => h('button', { class: 'menu-item set-link', type: 'button', onclick: () => { leave(opens); run() } },
+      h('span', { class: 'menu-label' }, label), state ? h('span', { class: 'chip chip-sm ' + cls }, state) : null, icon('chevron'))
+    const look = []
+    if (secs.includes('lang')) look.push(seg(t('set.lang'), [['en', 'English'], ['zh', '中文']], lang, setLang))
+    if (secs.includes('theme')) look.push(seg(t('set.theme'), CHOICES.theme.map((v) => [v, t('set.theme.' + v)]), viewPrefs().theme, setTheme))
+    const start = [autostartRow()]
+    if (!BOOT.readOnly) start.push(link(t('term.title'), '', '', openTerminals, true))
+    const acct = []
     // The arrange mode (spec §3.25) has a place here too, where people look for "how do I change this".
     if (secs.includes('order')) {
       const pins = Object.values(displayOf().pinned || {}).some((x) => x.length)
-      out.push(link(t('set.order'), t(ordered() || pins ? 'set.orderMine' : 'set.orderDefault'), '', () => {
+      acct.push(link(t('set.order'), t(ordered() || pins ? 'set.orderMine' : 'set.orderDefault'), '', () => {
         setPage('accounts')
         startArrange()
         const bar = document.querySelector('#accounts .arrange-bar')
         if (bar) bar.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'center' })
       }))
     }
-    if (secs.includes('rc')) {
-      const sum = rcSummary()
-      out.push(link(t('rc.button'), t('rc.state.' + sum), sum === 'on' ? 'chip-warn' : sum === 'off' ? 'chip-ok' : '', openRc))
-    }
-    if (secs.includes('ah')) {
-      const on = ahState().settings.auto
-      out.push(link(t('ah.button'), on ? t('ah.on') : t('ah.off'), on ? 'chip-ok' : '', () => setPage('handoff')))
-    }
     // Quota checks that ask the Host (spec §3.26): one switch per Family, with what it does in plain words.
     if (secs.includes('checks')) {
-      if (out.length) out.push(h('div', { class: 'menu-sep', role: 'separator' }))
       for (const c of S.state.quotaChecks) {
         const label = t('set.quotaCheck', { host: c.title })
-        out.push(h('div', { class: 'set-row set-check' },
+        acct.push(h('div', { class: 'set-row set-check' },
           h('div', { class: 'set-text' }, h('span', { class: 'set-label' }, label), h('span', { class: 'set-hint' }, c.blocked ? c.blocked : t('set.quotaCheckHint', { host: c.title, n: c.everyMinutes }))),
           BOOT.readOnly ? h('span', { class: 'chip chip-sm' + (c.on ? ' chip-ok' : '') }, c.on ? t('ah.on') : t('ah.off'))
             : h('div', { class: 'seg', role: 'group', 'aria-label': label }, [[true, t('ah.on')], [false, t('ah.off')]].map(([v, text]) =>
-              h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === c.on), onclick: () => { if (v !== c.on) { closeMenu(); setCheck(c.family, v) } } }, text)))))
+              h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === c.on), onclick: () => { if (v !== c.on) { leave(false); setCheck(c.family, v) } } }, text)))))
       }
     }
+    if (secs.includes('rc')) {
+      const sum = rcSummary()
+      acct.push(link(t('rc.button'), t('rc.state.' + sum), sum === 'on' ? 'chip-warn' : sum === 'off' ? 'chip-ok' : '', openRc, true))
+    }
+    if (secs.includes('ah')) {
+      const on = ahState().settings.auto
+      acct.push(link(t('ah.button'), on ? t('ah.on') : t('ah.off'), on ? 'chip-ok' : '', () => setPage('handoff')))
+    }
+    // Everything here can also be asked of an AI assistant through the sideby skill (spec §3.8).
+    const ai = [
+      link(t('ai.title'), t(skillInstalled() ? 'ai.installed' : 'ai.notInstalled'), skillInstalled() ? 'chip-ok' : '', () => openAsk(), true),
+      link(t('ask.plugin'), '', '', () => openAsk({ task: 'plugin', context: { version: BOOT.version } }), true),
+    ]
+    return [
+      { title: t('set.g.look'), items: look },
+      { title: t('set.g.start'), items: start },
+      { title: t('set.g.accounts'), items: acct },
+      { title: t('set.g.ai'), items: ai },
+    ].filter((g) => g.items.length)
+  }
+  function settingsBody(leave) {
+    const out = []
+    settingsGroups(leave).forEach((g, i) => {
+      if (i) out.push(h('div', { class: 'menu-sep set-sep', role: 'separator' }))
+      out.push(h('div', { class: 'set-group', role: 'group', 'aria-label': g.title }, h('div', { class: 'set-group-title', 'aria-hidden': 'true' }, g.title), g.items))
+    })
     return out
+  }
+  // Taller than the window, the popover scrolls inside and ends with "More settings…", the same groups in a dialog.
+  function settingsPop() {
+    if (!as.status && !as.loading && !as.error) loadAutostart()
+    return [...settingsBody(() => closeMenu()),
+      h('button', { class: 'menu-item set-more', type: 'button', hidden: true, onclick: () => { closeMenu(); openSettingsDialog() } }, h('span', { class: 'menu-label' }, t('set.more')), icon('chevron'))]
+  }
+  function settingsFit() {
+    const el = menu.el
+    const more = el && el.querySelector('.set-more')
+    if (!more) return
+    more.hidden = true
+    more.hidden = !(el.scrollHeight > el.clientHeight + 1)
+  }
+  function openSettingsDialog() {
+    if (!as.status && !as.loading) loadAutostart()
+    showDialog('settings')
+    renderSettingsDialog()
+  }
+  function renderSettingsDialog() {
+    const leave = (opens) => { if (!opens && dlg.kind === 'settings') dlg.el.close() }
+    setKids(dlg.el, dialogFrame(t('set.title'), null, h('div', { class: 'set-dialog' }, settingsBody(leave)),
+      [h('button', { class: 'btn', type: 'button', onclick: () => dlg.el.close() }, t('btn.close'))]))
+  }
+  function refreshSettings() {
+    refreshPopover('settings')
+    if (dlg.kind === 'settings') renderSettingsDialog()
+  }
+
+  // ---------- start at login (spec §3.29, ADR-0029) ----------
+  // The switch reads its state when the settings open; moving it shows the file and what will run, and only the
+  // confirmation writes. A read-only Panel shows the state only.
+  const as = { status: null, loading: false, error: null, want: null, plan: null, planning: false, planError: null, busy: false }
+  async function loadAutostart() {
+    as.loading = true
+    try { as.status = await api('/api/autostart'); as.error = null } catch (e) { as.error = e }
+    as.loading = false
+    refreshSettings()
+  }
+  function autostartRow() {
+    const s = as.status
+    const n = autostartNote(s, BOOT.readOnly)
+    const label = t('as.label')
+    const hint = [as.error ? t('as.failed', { msg: as.error.message }) : t(n.key)]
+    if (n.action === 'fix') hint.push(' ', h('button', { class: 'link-btn small', type: 'button', onclick: () => autostartAsk(true) }, t('as.fix')))
+    if (s && s.state === 'foreign') hint.push(' ', h('button', { class: 'link-btn small', type: 'button', title: s.path, onclick: () => copyText(s.path) }, t('as.copyPath')))
+    let ctl = null
+    if (!s) ctl = as.loading ? spinner() : null
+    else if (n.toggle) ctl = h('div', { class: 'seg', role: 'group', 'aria-label': label }, [[true, t('ah.on')], [false, t('ah.off')]].map(([v, text]) =>
+      h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === n.on), onclick: () => { if (v !== n.on) autostartAsk(v) } }, text)))
+    else if (s.supported && s.state !== 'foreign') ctl = h('span', { class: 'chip chip-sm' + (n.on ? ' chip-ok' : '') }, n.on ? t('ah.on') : t('ah.off'))
+    return h('div', { class: 'set-row set-check' },
+      h('div', { class: 'set-text' }, h('span', { class: 'set-label' }, label), h('span', { class: 'set-hint' }, hint)), ctl)
+  }
+  async function autostartAsk(on) {
+    if (menu.kind === 'settings') closeMenu()
+    as.want = on
+    as.plan = null
+    as.planError = null
+    as.planning = true
+    showDialog('autostart')
+    renderAutostart()
+    try { as.plan = (await api('/api/autostart', { on })).plan } catch (e) { as.planError = e }
+    as.planning = false
+    if (dlg.kind === 'autostart') renderAutostart()
+  }
+  function renderAutostart() {
+    const p = as.plan
+    const on = as.want
+    const body = []
+    if (as.planning) body.push(h('p', { class: 'muted' }, spinner(), ' ', t('as.planning')))
+    else if (as.planError) body.push(errorNote(as.planError, () => autostartAsk(on)))
+    else if (p && p.blocked) {
+      const own = 'as.block.' + p.blocked.code
+      body.push(h('p', { class: 'note note-fail' }, Object.hasOwn(MESSAGES.en, own) ? t(own) : p.blocked.message))
+      if (['npx-cache', 'temp-dir', 'unsafe-path'].includes(p.blocked.code)) body.push(codeCopy('npm i -g sideby'))
+      if (p.blocked.code === 'foreign') body.push(codeCopy(p.path))
+    } else if (p && !p.changed) body.push(h('p', null, t(on ? 'as.alreadyOn' : 'as.alreadyOff')))
+    else if (p && on) {
+      body.push(h('p', null, t('as.writes')), h('code', { class: 'as-code' }, p.path))
+      body.push(h('p', null, t('as.runs')), h('code', { class: 'as-code' }, (p.programArguments || []).join(' ')))
+      body.push(h('p', { class: 'muted small' }, t('as.noWindow')))
+    } else if (p) {
+      body.push(h('p', null, t('as.removes')), h('code', { class: 'as-code' }, p.path))
+      body.push(h('p', { class: 'muted small' }, t('as.offNote')))
+    }
+    const foot = [h('button', { class: 'btn', type: 'button', disabled: as.busy, onclick: () => dlg.el.close() }, t(p && p.changed && !p.blocked ? 'btn.cancel' : 'btn.close'))]
+    if (p && p.changed && !p.blocked)
+      foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: as.busy, 'aria-busy': as.busy ? 'true' : null, onclick: autostartApply }, as.busy ? spinner() : null, t(on ? 'as.turnOn' : 'as.turnOff')))
+    setKids(dlg.el, dialogFrame(t(on ? 'as.onTitle' : 'as.offTitle'), null, body, foot))
+  }
+  async function autostartApply() {
+    const on = as.want
+    as.busy = true
+    dlg.busy = true
+    renderAutostart()
+    let r = null
+    try { r = await api('/api/autostart', { on, confirm: true, programArguments: as.plan.programArguments || [] }) } catch (e) { as.planError = e }
+    as.busy = false
+    dlg.busy = false
+    if (r && r.applied) {
+      as.status = r.status
+      if (dlg.kind === 'autostart') dlg.el.close()
+      toast(t(on ? 'as.doneOn' : 'as.doneOff') + (on && !r.loaded ? ' ' + t('as.nextLogin') : ''))
+      refreshSettings()
+      return
+    }
+    if (r) { as.plan = r.plan; if (r.changedSince) toast(t('as.changedSince')) }
+    if (dlg.kind === 'autostart') renderAutostart()
   }
   function setLang(v) {
     if (LANG_FIXED || v === lang) return
+    if (CFG) { cfgPanel.language = v; saveCfg({ language: v }) } else { prefs.lang = v; savePrefs() }
+    showLang(v)
+  }
+  // Writes config panel.* (spec §3.29). A failure says so; the next state read then shows what config holds.
+  async function saveCfg(patch, quiet) {
+    cfgSaving++
+    try { await api('/api/panel/settings', patch); return true }
+    catch (e) { if (!quiet) toast(t('set.saveFailed', { msg: e.message }), { kind: 'fail' }); return false }
+    finally { cfgSaving-- }
+  }
+  // A theme or language changed elsewhere (the CLI, an AI assistant) shows at the next state read.
+  function adoptPanel(next) {
+    if (!CFG || cfgSaving) return
+    next = next || {}
+    if (next.theme === cfgPanel.theme && next.language === cfgPanel.language) return
+    cfgPanel = Object.assign({}, next)
+    applyTheme()
+    const l = panelLang(BOOT.lang, viewPrefs().language, navigator.language)
+    if (l !== lang) showLang(l)
+    else refreshSettings()
+  }
+  function showLang(v) {
     lang = v
-    prefs.lang = lang
-    savePrefs()
     renderStatic()
     buildToolbar()
     renderAll()
@@ -3445,32 +3760,23 @@ const MAIN = String.raw`
     else if (dlg.kind === 'browser') renderBrowser()
     else if (dlg.kind === 'update' && up) renderUpdate()
     else if (dlg.kind === 'rc') renderRc()
+    else if (dlg.kind === 'ask' && ak) { if (ak.els.text) ak.text = ak.els.text.value; renderAsk() }
+    else if (dlg.kind === 'key' && ky && ky.step !== 'enter') renderKey()
+    else if (dlg.kind === 'terminal' && tm) renderTerminals()
+    else if (dlg.kind === 'autostart') renderAutostart()
   }
   function setTheme(v) {
-    prefs.theme = v
-    savePrefs()
+    if (CFG) { cfgPanel.theme = v; saveCfg({ theme: v }) } else { prefs.theme = v; savePrefs() }
     applyTheme()
-    refreshPopover('settings')
+    refreshSettings()
   }
   // The sideby Agent Skill: what to say to an AI assistant instead of clicking, and how to install it when needed.
   function skillInstalled() {
     const u = S.state && S.state.update
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.new', 'ai.ask.pin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.rc']
-  function openAi() {
-    showDialog('ai')
-    const asks = AI_ASKS.map((k) => {
-      const text = t(k)
-      return h('li', null, h('button', { class: 'ai-ask', type: 'button', title: t('ai.copy'), onclick: () => copyText(text) }, icon('copy'), h('span', null, text)))
-    })
-    setKids(dlg.el, dialogFrame(t('ai.title'), null, h('div', { class: 'form' },
-      h('p', null, t('ai.intro')),
-      skillInstalled() ? h('p', { class: 'note' }, t('ai.ready')) : h('div', { class: 'field' }, h('p', { class: 'small' }, t('ai.install')), codeCopy(BOOT.skillInstall)),
-      h('p', { class: 'small muted' }, t('ai.examples')),
-      h('ul', { class: 'ai-asks' }, asks)),
-      [h('button', { class: 'btn', type: 'button', onclick: () => dlg.el.close() }, t('btn.close'))]))
-  }
+  // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.rc', 'ai.ask.tool']
   function openRc() {
     if (!S.state || !rcSummary()) return
     rc.target = null
@@ -3504,6 +3810,524 @@ const MAIN = String.raw`
     if (!BOOT.readOnly && !to && undo) foot.push(h('button', { class: 'btn', type: 'button', disabled: rc.busy, onclick: async () => { rc.busy = true; renderRc(); await remoteControlUndo(); rc.busy = false; if (dlg.kind === 'rc') renderRc() } }, t('rc.undo')))
     if (!BOOT.readOnly && to) foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: rc.busy || !todo.length, 'aria-busy': rc.busy ? 'true' : null, onclick: () => setRemoteControl(to) }, rc.busy ? spinner() : null, t(to === 'on' ? 'rc.confirmOn' : 'rc.confirm')))
     setKids(dlg.el, dialogFrame(t('rc.dialogTitle'), null, body, foot))
+  }
+
+  // ---------- AI Tasks (spec §3.28) ----------
+  // One dialog for every "let AI do it" entry: what to do, then the account and the terminal it will use, then one
+  // button. When nothing can run it, or the panel is read-only, it copies the prompt instead.
+  let ak = null
+  const TERM_NAMES = { terminal: 'Terminal', iterm2: 'iTerm2', ghostty: 'Ghostty', orca: 'Orca', wezterm: 'WezTerm', kitty: 'kitty', alacritty: 'Alacritty', custom: 'Custom' }
+  function termName(id) {
+    const list = ak && ak.terms ? ak.terms.terminals : []
+    const f = list.find((x) => x.id === id)
+    return f ? f.name : TERM_NAMES[id] || id
+  }
+  function askBody() {
+    const body = { task: ak.task, lang }
+    const text = ak.els && ak.els.text ? ak.els.text.value.trim() : ak.text
+    if (text) body.text = text
+    if (ak.context) body.context = ak.context
+    if (ak.account && ak.accountChanged) body.account = ak.account
+    if (ak.terminal && ak.terminalChanged) body.terminal = ak.terminal
+    const ids = ak.files.filter((f) => f.status === 'ready').map((f) => f.id)
+    if (ids.length) body.attachments = ids
+    return body
+  }
+  function openAsk(opts) {
+    opts = opts || {}
+    closeMenu()
+    ak = { task: opts.task || 'free', text: opts.text || '', context: opts.context || null, account: null, accountChanged: false, terminal: null, terminalChanged: false, pick: null, reason: null, terms: null, loading: true, busy: false, result: null, error: null, removed: false, files: [], els: {} }
+    showDialog('ask')
+    hookAskDrops()
+    const mine = ak
+    // Uploads still running when the dialog closes are stopped; the server drops staged files it never received.
+    dlg.onClose = () => { mine.files.forEach((f) => { if (f.xhr) f.xhr.abort() }) }
+    renderAsk()
+    if (ak.els.text) ak.els.text.focus()
+    askLoad()
+  }
+  async function askLoad() {
+    const mine = ak
+    const body = askBody()
+    delete body.account
+    try {
+      const [pick, terms] = await Promise.all([
+        api('/api/ask/prompt', body),
+        BOOT.readOnly ? Promise.resolve(null) : api('/api/terminals').catch(() => null),
+      ])
+      if (ak !== mine) return
+      ak.pick = pick.account
+      ak.reason = pick.reason || null
+      if (!ak.accountChanged) ak.account = pick.account
+      ak.terms = terms
+      if (terms && !ak.terminalChanged) ak.terminal = terms.guess.id
+    } catch (e) { if (ak === mine) ak.error = e }
+    if (ak !== mine) return
+    ak.loading = false
+    if (dlg.kind === 'ask') renderAsk()
+  }
+  // Title, placeholder and examples of the dialog for its task (spec §3.28 "每个入口的提示").
+  function askStrings() { return askCopy(ak.task, (k) => Object.hasOwn(MESSAGES.en, k), AI_ASKS) }
+  function askChoices() { return aiTaskAccounts((S.state && S.state.accounts) || []) }
+  function askTaskLine() {
+    if (ak.task === 'free') return null
+    const ctx = ak.context || {}
+    return h('p', { class: 'note' }, t('ask.task.' + ak.task, { n: (ctx.findings || []).length, ref: ctx.account || '' }))
+  }
+  function askTextField() {
+    const e = ak.els
+    const copy = askStrings()
+    e.text = h('textarea', { id: 'ak-text', class: 'ask-text', rows: ak.task === 'free' ? '3' : '2', maxlength: '8000', placeholder: t(copy.placeholder), 'aria-describedby': 'ak-warn' })
+    e.text.value = ak.text
+    e.warn = h('p', { class: 'field-error field-note', id: 'ak-warn', role: 'status' })
+    const warnNow = () => { e.warn.textContent = stripSecrets(e.text.value).removed ? t('ask.keyWarn') : '' }
+    e.text.addEventListener('input', () => { ak.text = e.text.value; warnNow() })
+    warnNow()
+    const label = h('label', { class: 'field', for: 'ak-text' }, h('span', null, t(ak.task === 'free' ? 'ask.what' : 'ask.whatMore')), e.text)
+    const chips = h('div', { class: 'field' }, h('p', { class: 'small muted' }, t('ask.examples')),
+      h('div', { class: 'ask-chips' }, copy.chips.map((k) => h('button', { class: 'chip chip-btn', type: 'button', onclick: () => { e.text.value = t(k); ak.text = e.text.value; warnNow(); e.text.focus() } }, t(k)))))
+    return [h('div', { class: 'field' }, label, e.warn), askAttachField(), chips]
+  }
+
+  // Attachments (spec §3.28 "附件"): pasted, dropped or picked files upload at once, one request each, so a wrong
+  // type or a file that is too big is named right away. The page shows image thumbnails from the file itself as a
+  // data: URL (the CSP allows no blob:); the server decides the type from the first bytes.
+  const ATTACH_MAX = 5
+  const ATTACH_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm'
+  let askHooked = false
+  function hookAskDrops() {
+    if (askHooked) return
+    askHooked = true
+    const el = dlg.el
+    const active = () => dlg.kind === 'ask' && ak && !ak.result && !BOOT.readOnly
+    const hasFiles = (e) => e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0
+    el.addEventListener('paste', (e) => {
+      const files = e.clipboardData ? Array.from(e.clipboardData.files || []) : []
+      if (!active() || !files.length) return
+      // A file copied in Finder also carries its name as text; only the file is wanted.
+      e.preventDefault()
+      askAddFiles(files)
+    })
+    el.addEventListener('dragover', (e) => {
+      if (!active() || !hasFiles(e)) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+      el.classList.add('drop-on')
+    })
+    el.addEventListener('dragleave', (e) => { if (e.target === el || !el.contains(e.relatedTarget)) el.classList.remove('drop-on') })
+    el.addEventListener('drop', (e) => {
+      el.classList.remove('drop-on')
+      if (!active() || !hasFiles(e)) return
+      e.preventDefault()
+      askAddFiles(Array.from(e.dataTransfer.files || []))
+    })
+  }
+  function askAttachField() {
+    if (BOOT.readOnly) return null
+    const input = h('input', { type: 'file', multiple: true, accept: ATTACH_ACCEPT, class: 'sr-only', tabindex: '-1', 'aria-hidden': 'true' })
+    input.addEventListener('change', () => { askAddFiles(Array.from(input.files || [])); input.value = '' })
+    ak.els.files = h('div', { class: 'ask-files-wrap' })
+    renderAskFiles()
+    return h('div', { class: 'field ask-attach' },
+      h('div', { class: 'ask-attach-row' },
+        h('button', { class: 'btn btn-sm', type: 'button', onclick: () => input.click() }, icon('image'), t('ask.attach')),
+        h('span', { class: 'small muted' }, t('ask.attachHint')), input),
+      ak.els.files)
+  }
+  function renderAskFiles() {
+    const box = ak && ak.els.files
+    if (!box) return
+    const files = ak.files
+    const tiles = files.map((f) => {
+      const remove = h('button', { class: 'icon-btn ask-file-x', type: 'button', 'aria-label': t('ask.attachRemove', { name: f.name }), onclick: () => askRemoveFile(f) }, icon('x'))
+      let face
+      if (f.status === 'uploading') {
+        f.pctEl = h('span', { class: 'small' }, t('ask.attachUploading', { pct: Math.round(f.progress * 100) }))
+        face = h('div', { class: 'ask-file-face' }, spinner(), f.pctEl)
+      } else if (f.status === 'error') face = h('div', { class: 'ask-file-face' }, icon('x'))
+      else if (f.thumb) face = h('img', { class: 'ask-file-img', src: f.thumb, alt: f.name })
+      else face = h('div', { class: 'ask-file-face' }, icon(f.kind === 'video' ? 'film' : 'image'), f.kind === 'video' ? h('span', { class: 'small' }, t('ask.attachVideo')) : null)
+      return h('li', { class: 'ask-file' + (f.status === 'error' ? ' is-error' : '') },
+        face,
+        h('span', { class: 'ask-file-name small', title: f.name }, f.name),
+        h('span', { class: 'small muted' }, fileSize(f.bytes || f.size)),
+        remove)
+    })
+    const errors = files.filter((f) => f.status === 'error').map((f) => h('p', { class: 'field-error' }, f.error))
+    const live = files.some((f) => f.status !== 'error')
+    setKids(box, [
+      tiles.length ? h('ul', { class: 'ask-files', 'aria-label': t('ask.attach') }, tiles) : null,
+      errors,
+      ak.attachFull ? h('p', { class: 'field-error' }, t('ask.attachMax')) : null,
+      live ? h('p', { class: 'note note-warn small' }, t('ask.attachWarn')) : null,
+    ])
+  }
+  function askAddFiles(list) {
+    if (!ak || !list.length) return
+    ak.attachFull = false
+    for (const file of list) {
+      if (ak.files.filter((f) => f.status !== 'error').length >= ATTACH_MAX) { ak.attachFull = true; break }
+      const f = { key: Math.random(), name: file.name || 'file', size: file.size, bytes: 0, kind: '', status: 'uploading', progress: 0, id: null, thumb: null, error: '', xhr: null, done: null }
+      ak.files.push(f)
+      // Over the largest limit there is no point uploading: the server would refuse it.
+      if (file.size > 200 * 1024 * 1024) { f.status = 'error'; f.error = t('ask.attachTooBig', { name: f.name }); continue }
+      f.done = askUpload(f, file, ak)
+    }
+    renderAskFiles()
+  }
+  function askRemoveFile(f) {
+    if (f.xhr) f.xhr.abort()
+    // Free the staged copy now; if this fails the server clears it after a day anyway.
+    if (f.id) api('/api/ask/attach/remove', { ids: [f.id] }).catch(() => {})
+    ak.files = ak.files.filter((x) => x !== f)
+    ak.attachFull = false
+    renderAskFiles()
+  }
+  function askPost(file, onProgress, xhrOut) {
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest()
+      xhrOut(xhr)
+      xhr.open('POST', BOOT.basePath + '/api/ask/attach')
+      xhr.setRequestHeader('x-sideby-token', token)
+      xhr.setRequestHeader('content-type', file.type || 'application/octet-stream')
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total) }
+      xhr.onload = () => { let data = null; try { data = JSON.parse(xhr.responseText) } catch {} resolve({ status: xhr.status, data }) }
+      xhr.onerror = () => resolve({ status: 0, data: null })
+      xhr.onabort = () => resolve({ status: -1, data: null })
+      xhr.send(file)
+    })
+  }
+  async function askUpload(f, file, mine) {
+    const progress = (p) => { f.progress = p; if (f.pctEl) f.pctEl.textContent = t('ask.attachUploading', { pct: Math.round(p * 100) }) }
+    let r = await askPost(file, progress, (x) => { f.xhr = x })
+    if (r.status === 403 && r.data && r.data.code === 'bad-token') {
+      try { await refreshToken(); r = await askPost(file, progress, (x) => { f.xhr = x }) } catch {}
+    }
+    f.xhr = null
+    if (r.status === -1 || ak !== mine) return
+    if (r.status === 200 && r.data && r.data.id) {
+      f.id = r.data.id
+      f.kind = r.data.kind
+      f.bytes = r.data.bytes
+      if (f.kind === 'image') f.thumb = await thumbnail(file)
+      f.status = 'ready'
+    } else {
+      f.status = 'error'
+      f.error = t(r.status === 413 ? 'ask.attachTooBig' : r.status === 415 ? 'ask.attachType' : r.status === 507 ? 'ask.attachFull' : 'ask.attachFailed', { name: f.name })
+    }
+    if (ak === mine && dlg.kind === 'ask') renderAskFiles()
+  }
+  // A small JPEG data: URL of an image, drawn on a canvas so a 20 MB screenshot is not kept in the page.
+  function thumbnail(file) {
+    return new Promise((resolve) => {
+      const reader = new FileReader()
+      reader.onerror = () => resolve(null)
+      reader.onload = () => {
+        const img = new Image()
+        img.onerror = () => resolve(null)
+        img.onload = () => {
+          try {
+            const scale = Math.min(1, 192 / Math.max(img.width, img.height))
+            const c = document.createElement('canvas')
+            c.width = Math.max(1, Math.round(img.width * scale))
+            c.height = Math.max(1, Math.round(img.height * scale))
+            c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
+            resolve(c.toDataURL('image/jpeg', 0.8))
+          } catch { resolve(null) }
+        }
+        img.src = String(reader.result)
+      }
+      reader.readAsDataURL(file)
+    })
+  }
+  // Open and Copy prompt wait for uploads still running, so the task carries every file the person added.
+  async function askUploadsDone() {
+    const pending = ak.files.filter((f) => f.status === 'uploading' && f.done).map((f) => f.done)
+    if (pending.length) await Promise.all(pending)
+  }
+  function askConfirm() {
+    if (BOOT.readOnly) return h('p', { class: 'note' }, t('ask.readOnly'))
+    if (ak.loading) return h('p', { class: 'muted small' }, spinner(), ' ', t('ask.loading'))
+    if (ak.error) return errorNote(ak.error, () => { ak.error = null; ak.loading = true; renderAsk(); askLoad() })
+    const choices = askChoices()
+    const out = []
+    if (!ak.account) {
+      out.push(h('div', { class: 'note note-warn' }, h('span', null, t('ask.noAccount.' + (ak.reason || 'no-accounts'))), h('span', { class: 'note-line' }, t('ask.noAccountHint'))))
+      const main = ak.reason === 'none-signed-in' && S.state ? S.state.accounts.find((a) => a.isMain && a.kind !== 'api') : null
+      if (main) out.push(h('div', null, h('button', { class: 'btn btn-sm', type: 'button', onclick: () => signIn(main) }, icon('key'), t('ask.signInMain', { ref: main.ref }))))
+    }
+    const rows = []
+    if (choices.length) {
+      const sel = h('select', { id: 'ak-account', 'aria-label': t('ask.account') },
+        ak.account ? null : h('option', { value: '' }, t('ask.chooseAccount')),
+        choices.map((a) => h('option', { value: a.ref }, a.ref + (a.kind === 'api' ? ' · API' : ''))))
+      sel.value = ak.account || ''
+      sel.addEventListener('change', () => { ak.account = sel.value || null; ak.accountChanged = Boolean(sel.value); renderAsk() })
+      rows.push(h('label', { class: 'field', for: 'ak-account' }, h('span', null, t('ask.account')), sel))
+    }
+    const installed = ak.terms ? ak.terms.installed : []
+    if (installed.length && ak.account) {
+      const sel = h('select', { id: 'ak-term', 'aria-label': t('ask.terminal') }, installed.map((id) => h('option', { value: id }, termName(id))))
+      sel.value = ak.terminal || installed[0]
+      sel.addEventListener('change', () => { ak.terminal = sel.value; ak.terminalChanged = true; renderAsk() })
+      rows.push(h('label', { class: 'field', for: 'ak-term' }, h('span', null, t('ask.terminal')), sel))
+    }
+    if (rows.length) out.push(h('div', { class: 'ask-pick' }, rows))
+    if (ak.account) out.push(h('p', { class: 'small' }, t('ask.confirm', { terminal: termName(ak.terminal || 'terminal'), ref: ak.account })))
+    return out
+  }
+  function askResult() {
+    const r = ak.result
+    const term = termName(r.terminal || ak.terminal || 'terminal')
+    return [
+      h('div', { class: 'note note-warn' }, h('b', null, t('ask.failed', { terminal: term })), h('span', { class: 'note-line' }, t('ask.paste'))),
+      codeCopy(r.command),
+      r.automation ? h('p', { class: 'small' }, t('ask.automation', { terminal: term })) : null,
+      r.reason === 'not-installed' ? h('p', { class: 'small muted' }, t('ask.notInstalled')) : null,
+      !r.automation && r.reason !== 'not-installed' && r.detail ? h('p', { class: 'small muted' }, r.detail) : null,
+    ]
+  }
+  function askYourself() {
+    return h('details', { class: 'more-opts' }, h('summary', null, t('ask.yourself')),
+      h('p', { class: 'small' }, t('ai.intro')),
+      skillInstalled() ? h('p', { class: 'note' }, t('ai.ready')) : h('div', { class: 'field' }, h('p', { class: 'small' }, t('ai.install')), codeCopy(BOOT.skillInstall)))
+  }
+  function renderAsk() {
+    if (!ak) return
+    const el = dlg.el
+    const body = [h('p', { class: 'muted small' }, t('ask.intro')), askTaskLine()]
+    const foot = [h('button', { class: 'btn', type: 'button', disabled: ak.busy, onclick: () => el.close() }, t(ak.result ? 'btn.close' : 'btn.cancel'))]
+    if (ak.result) {
+      body.push(askResult())
+      if (ak.result.removedSecrets) body.push(h('p', { class: 'small muted' }, t('ask.keyRemoved')))
+    } else {
+      body.push(askTextField(), askConfirm(), askYourself())
+      const canOpen = !BOOT.readOnly && !ak.loading && !ak.error && ak.account
+      if (canOpen) {
+        const term = termName(ak.terminal || 'terminal')
+        foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: ak.busy, 'aria-busy': ak.busy ? 'true' : null, onclick: askOpen }, ak.busy ? spinner() : icon('terminal'), ak.busy ? t(ak.files.some((f) => f.status === 'uploading') ? 'ask.attachWaiting' : 'ask.opening') : t('ask.open', { terminal: term })))
+      } else if (!ak.loading || BOOT.readOnly) {
+        foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: ak.busy, onclick: askCopyPrompt }, icon('copy'), t('ask.copyPrompt')))
+      }
+    }
+    setKids(el, dialogFrame(t(askStrings().title), null, body, foot))
+  }
+  async function askCopyPrompt() {
+    const mine = ak
+    ak.busy = true
+    renderAsk()
+    try {
+      await askUploadsDone()
+      const r = await api('/api/ask/prompt', askBody())
+      await copyText(r.prompt, t('ask.promptShown'))
+      if (r.removedSecrets) toast(t('ask.keyRemoved'), { kind: 'info' })
+    } catch (e) { toast(e.message, { kind: 'fail' }) }
+    if (ak !== mine) return
+    ak.busy = false
+    if (dlg.kind === 'ask') renderAsk()
+  }
+  async function askOpen() {
+    const mine = ak
+    ak.busy = true
+    renderAsk()
+    try {
+      await askUploadsDone()
+      if (ak !== mine) return
+      renderAsk()
+      const r = await api('/api/ask', askBody())
+      if (ak !== mine) return
+      ak.busy = false
+      if (r.opened) {
+        toast(t('ask.opened', { terminal: termName(r.terminal), ref: r.account }))
+        if (r.removedSecrets) toast(t('ask.keyRemoved'), { kind: 'info' })
+        dlg.el.close()
+        return
+      }
+      if (!r.command) {
+        // No account can run it after all: the dialog turns into Copy prompt.
+        ak.account = null
+        ak.reason = r.reason || null
+        renderAsk()
+        return
+      }
+      ak.result = r
+      renderAsk()
+      copyText(r.command, t('ask.copiedCmd'))
+    } catch (e) {
+      if (ak !== mine) return
+      ak.busy = false
+      toast(e.message, { kind: 'fail' })
+      renderAsk()
+    }
+  }
+
+  // Sign in: "sideby login <ref>" in the person's terminal, no AI involved; the command is copied when it cannot open.
+  async function signIn(a) {
+    const cmd = 'sideby login ' + a.ref
+    if (BOOT.readOnly) { copyText(cmd); return }
+    try {
+      const r = await api('/api/login', { account: a.ref })
+      if (r.opened) { toast(t('login.opened', { terminal: TERM_NAMES[r.terminal] || r.terminal, ref: a.ref })); return }
+      await copyText(cmd, cmd)
+      toast(r.automation ? t('login.automation', { terminal: TERM_NAMES[r.terminal] || r.terminal }) : t('login.failed'), { kind: 'info' })
+    } catch (e) {
+      await copyText(cmd, cmd)
+      toast(e.message, { kind: 'fail' })
+    }
+  }
+  function keyable(a) { return !BOOT.readOnly && (a.kind === 'api' || Boolean(family(a.family).keyAlways)) }
+
+  // Enter key (spec §3.28): a password field, saved into the account's proxy.env; then an optional "Try it" that says
+  // what it runs and that it spends a few tokens before it runs.
+  let ky = null
+  function openKey(a) {
+    if (!keyable(a)) return
+    const fam = family(a.family)
+    ky = { ref: a.ref, family: a.family, var: fam.keyVar || '', step: 'enter', busy: false, error: null, saved: null, tried: null, els: {} }
+    showDialog('key')
+    renderKey()
+    if (ky.els.value) ky.els.value.focus()
+  }
+  function renderKey() {
+    if (!ky) return
+    const el = dlg.el
+    const fam = family(ky.family)
+    const body = []
+    const foot = [h('button', { class: 'btn', type: 'button', disabled: ky.busy, onclick: () => el.close() }, t(ky.step === 'enter' ? 'btn.cancel' : 'btn.close'))]
+    if (ky.step === 'enter') {
+      const e = ky.els
+      e.value = h('input', { id: 'ky-value', type: 'password', autocomplete: 'off', spellcheck: 'false', 'aria-describedby': 'ky-err' })
+      e.varInput = h('input', { id: 'ky-var', type: 'text', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', maxlength: '64' })
+      e.varInput.value = ky.var
+      e.err = h('p', { class: 'field-error', id: 'ky-err', role: 'alert' }, ky.error ? ky.error.message : '')
+      e.varInput.addEventListener('input', () => { ky.var = e.varInput.value.trim(); e.label.textContent = t('key.label', { var: ky.var || '?' }) })
+      e.label = h('span', null, t('key.label', { var: ky.var || '?' }))
+      body.push(h('p', { class: 'muted small' }, t('key.intro')),
+        h('form', { id: 'ky-form', class: 'form', novalidate: true, onsubmit: (ev) => { ev.preventDefault(); keySave() } },
+          h('label', { class: 'field', for: 'ky-value' }, e.label, e.value),
+          fam.keyVar ? h('details', { class: 'more-opts' }, h('summary', null, t('key.otherVar')),
+            h('label', { class: 'field', for: 'ky-var' }, h('span', null, t('key.varLabel')), e.varInput), h('p', { class: 'field-hint' }, t('key.varHint')))
+            : h('div', { class: 'field' }, h('p', { class: 'field-hint' }, t('key.noVar')), h('label', { class: 'field', for: 'ky-var' }, h('span', null, t('key.varLabel')), e.varInput)),
+          e.err))
+      foot.push(h('button', { class: 'btn btn-primary', type: 'submit', form: 'ky-form', disabled: ky.busy, 'aria-busy': ky.busy ? 'true' : null }, ky.busy ? spinner() : null, ky.busy ? t('key.saving') : t('key.save')))
+    } else {
+      body.push(h('div', { class: 'created-head', role: 'status' }, h('span', { class: 'check-icon', 'aria-hidden': 'true' }, '✓'), h('span', null, t('key.saved', { var: ky.saved.var, file: ky.saved.path }))))
+      const cmd = fam.tryCommand
+      if (!cmd) body.push(h('p', { class: 'small muted' }, tx('key.cannotTry', { cmd: h('code', null, 'sideby run ' + ky.ref) })))
+      else if (ky.step === 'saved') {
+        body.push(h('p', { class: 'small' }, t('key.tryLead')))
+        foot.push(h('button', { class: 'btn btn-primary', type: 'button', onclick: () => { ky.step = 'confirm'; renderKey() } }, t('key.try')))
+      } else if (ky.step === 'confirm' || ky.step === 'trying') {
+        body.push(h('p', { class: 'small' }, t('key.tryCost')), h('pre', { class: 'diff' }, cmd.map((v) => /^[A-Za-z0-9_./:=-]+$/.test(v) ? v : JSON.stringify(v)).join(' ')))
+        if (ky.step === 'trying') body.push(h('p', { class: 'muted small' }, spinner(), ' ', t('key.trying')))
+        foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: ky.step === 'trying', 'aria-busy': ky.step === 'trying' ? 'true' : null, onclick: keyTry }, ky.step === 'trying' ? spinner() : null, t('key.tryRun')))
+      } else if (ky.step === 'tried') {
+        const r = ky.tried
+        if (r.ok) body.push(h('div', { class: 'note' }, t('key.tryOk', { ref: ky.ref })))
+        else {
+          body.push(h('div', { class: 'note note-fail' }, t(r.timedOut ? 'key.tryTimeout' : 'key.tryFail')),
+            h('p', { class: 'small muted' }, t('key.output')),
+            h('pre', { class: 'diff' }, r.output || t('key.noOutput')))
+          foot.push(h('button', { class: 'btn btn-primary', type: 'button', onclick: () => { const ref = ky.ref; const fam = ky.family; openAsk({ task: 'account', context: { account: ref, family: fam }, text: t('key.explainText', { ref, output: r.output || t('key.noOutput') }) }) } }, icon('bot'), t('key.explain')))
+        }
+      }
+      if (ky.error) body.push(errorNote(ky.error, null))
+    }
+    setKids(el, dialogFrame(t('key.title', { ref: ky.ref }), ky.family, body, foot))
+  }
+  async function keySave() {
+    const value = ky.els.value.value
+    const name = ky.var.trim()
+    if (!value.trim()) { ky.els.err.textContent = t('key.empty'); ky.els.value.focus(); return }
+    if (!/^[A-Z][A-Z0-9_]*$/.test(name)) { ky.els.err.textContent = t('key.badVar'); return }
+    const mine = ky
+    ky.busy = true
+    dlg.busy = true
+    ky.error = null
+    renderKey()
+    try {
+      ky.saved = await api('/api/key', { account: ky.ref, var: name, value })
+      ky.step = 'saved'
+    } catch (e) { ky.error = e }
+    dlg.busy = false
+    if (ky !== mine) return
+    ky.busy = false
+    renderKey()
+    if (ky.step === 'enter' && ky.els.value) ky.els.value.focus()
+  }
+  async function keyTry() {
+    const mine = ky
+    ky.step = 'trying'
+    ky.error = null
+    renderKey()
+    try {
+      ky.tried = await api('/api/try', { account: ky.ref })
+      ky.step = 'tried'
+    } catch (e) { ky.error = e; ky.step = 'confirm' }
+    if (ky !== mine || dlg.kind !== 'key') return
+    renderKey()
+  }
+
+  // Preferred terminal and the custom command (spec §3.28): the installed list, "Guess for me" with where the guess
+  // comes from, and a template for any other terminal.
+  let tm = null
+  function openTerminals() {
+    closeMenu()
+    tm = { data: null, busy: false, error: null, draft: null, customOpen: false }
+    showDialog('terminal')
+    renderTerminals()
+    api('/api/terminals').then((d) => { if (tm) { tm.data = d; renderTerminals() } }, (e) => { if (tm) { tm.error = e; renderTerminals() } })
+  }
+  async function termSave(body) {
+    tm.busy = true
+    tm.error = null
+    renderTerminals()
+    try { tm.data = await api('/api/terminal', body); tm.draft = null; toast(t('term.saved')) } catch (e) { tm.error = e }
+    tm.busy = false
+    if (dlg.kind === 'terminal') renderTerminals()
+  }
+  // "Not sure how?": AI writes the custom command, starting from what is typed or saved and what is installed.
+  function termAskAi(d) {
+    const name = (id) => { const f = d.terminals.find((x) => x.id === id); return f ? f.name : id }
+    const typed = tm.draft !== null ? tm.draft.trim() : ''
+    const custom = typed || d.custom || ''
+    const context = { terminals: d.installed.filter((id) => id !== 'custom').map(name), version: BOOT.version }
+    if (custom) context.terminalCustom = custom
+    openAsk({ task: 'terminal', context })
+  }
+  function renderTerminals() {
+    if (!tm) return
+    const body = [h('p', { class: 'muted small' }, t('term.intro'))]
+    const d = tm.data
+    if (!d && !tm.error) body.push(h('p', { class: 'muted small' }, spinner(), ' ', t('term.loading')))
+    if (d) {
+      const name = (id) => { const f = d.terminals.find((x) => x.id === id); return f ? f.name : id }
+      if (!d.installed.length) body.push(h('p', { class: 'note' }, t('term.none')))
+      else {
+        const sel = h('select', { id: 'tm-pick', disabled: tm.busy, 'aria-label': t('term.pick') },
+          h('option', { value: '' }, t('term.auto')),
+          d.installed.map((id) => h('option', { value: id }, name(id))))
+        sel.value = d.preferred && d.installed.includes(d.preferred) ? d.preferred : ''
+        sel.addEventListener('change', () => termSave(sel.value ? { id: sel.value } : {}))
+        body.push(h('label', { class: 'field', for: 'tm-pick' }, h('span', null, t('term.pick')), sel),
+          h('p', { class: 'field-hint' }, t('term.guess.' + d.guess.source, { name: name(d.guess.id) })))
+      }
+      const input = h('input', { id: 'tm-custom', type: 'text', autocomplete: 'off', spellcheck: 'false', placeholder: 'myterm --cwd {cwd} -e {cmd}', disabled: tm.busy })
+      // What was typed stays after a refusal, and so does the open section.
+      input.value = tm.draft !== null ? tm.draft : d.custom || ''
+      input.addEventListener('input', () => { tm.draft = input.value })
+      const more = h('details', { class: 'more-opts', open: tm.customOpen || d.custom ? true : undefined }, h('summary', null, t('term.custom')),
+        h('label', { class: 'field', for: 'tm-custom' }, h('span', null, t('term.custom')), input),
+        h('p', { class: 'field-hint' }, t('term.customHint')),
+        BOOT.readOnly ? null : h('p', { class: 'small' }, h('button', { class: 'link-btn', type: 'button', onclick: () => termAskAi(d) }, icon('bot'), t('term.askAi'))),
+        h('div', { class: 'actions' },
+          h('button', { class: 'btn btn-sm', type: 'button', disabled: tm.busy, onclick: () => termSave({ custom: input.value.trim() }) }, t('term.customSave')),
+          d.custom ? h('button', { class: 'btn btn-sm', type: 'button', disabled: tm.busy, onclick: () => termSave({ custom: '' }) }, t('term.customClear')) : null))
+      more.addEventListener('toggle', () => { tm.customOpen = more.open })
+      body.push(more)
+    }
+    if (tm.error) body.push(errorNote(tm.error, null))
+    setKids(dlg.el, dialogFrame(t('term.title'), null, body, [h('button', { class: 'btn', type: 'button', onclick: () => dlg.el.close() }, t('btn.close'))]))
   }
 
   // ---------- banners ----------
@@ -3566,6 +4390,7 @@ const MAIN = String.raw`
         }
         // A read-only Panel never records checks, so keep the result of its own last check over the disk.
         if (!BOOT.readOnly || !S.history) S.history = state.history || null
+        adoptPanel(state.panel)
       } else if (!error.network) S.loadError = error // a lost connection has its own notice
     }
     S.loading = false
@@ -3966,6 +4791,7 @@ const MAIN = String.raw`
   $('update').addEventListener('click', openUpdate)
   $('ver-top').addEventListener('click', () => openVerPop($('ver-top')))
   $('refresh').addEventListener('click', refreshAll)
+  $('ask-ai').addEventListener('click', () => openAsk())
   $('accounts').addEventListener('dragover', onDragOver)
   $('accounts').addEventListener('drop', onDrop)
   // Escape leaves the arrange mode, as "Done" does, unless a menu or dialog takes it first.
@@ -3974,6 +4800,13 @@ const MAIN = String.raw`
     endArrange()
   })
   $('settings').addEventListener('click', () => openPopover($('settings'), 'settings', t('set.button'), settingsPop, 'end'))
+  document.addEventListener('contextmenu', onContextMenu)
+  document.addEventListener('keydown', onMenuKey)
+  // The first load of this version writes this browser's earlier theme and language into config, once (spec §3.29).
+  if (CFG && !prefs.cfgDone) {
+    if (!cfgMigrate) { prefs.cfgDone = true; savePrefs() }
+    else saveCfg(cfgMigrate, true).then((ok) => { if (ok) { prefs.cfgDone = true; savePrefs() } })
+  }
   applyTheme()
   renderStatic()
   buildToolbar()

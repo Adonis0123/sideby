@@ -34,6 +34,8 @@ export interface PageOptions {
   lang?: 'auto' | 'en' | 'zh'
   /** createPanelHandler's `updates`: false hides everything about sideby updates. */
   updates?: boolean
+  /** Config `panel` (spec §3.29): the theme and language saved for the Panel. */
+  panel?: { theme?: string; language?: string }
 }
 
 /** JSON that is safe inside a `<script>` element: no `</script>`, `<!--` or line separators survive. */
@@ -68,6 +70,7 @@ export function renderPage(opts: PageOptions): string {
     updates: opts.updates !== false,
     colorScheme: theme.colorScheme,
     lang,
+    panel: opts.panel ?? {},
     warn: QUOTA_WARN_PERCENT,
     fail: QUOTA_FAIL_PERCENT,
     usageDays: USAGE_DAYS,
@@ -100,6 +103,7 @@ export function renderPage(opts: PageOptions): string {
     </div>
     <div class="top-actions">
       <button id="update" class="btn update-btn" type="button" hidden></button>
+      <button id="ask-ai" class="btn" type="button" aria-haspopup="dialog" aria-label="Let AI do it"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9h12a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2zM12 5v4M9.5 13.5v1M14.5 13.5v1"/></svg><span class="hide-sm" data-i18n="ask.button">Let AI do it</span></button>
       <button id="settings" class="btn" type="button" aria-haspopup="dialog" aria-expanded="false"${lang === 'auto' ? '' : ' hidden'}><span data-i18n="set.button">Settings</span></button>
       <button id="refresh" class="btn" type="button" aria-label="Refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg><span class="hide-sm" data-i18n="top.refresh">Refresh</span></button>
     </div>

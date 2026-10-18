@@ -972,7 +972,7 @@ describe('same login (spec §3.21)', () => {
     })
   })
 
-  it('does not group codex accounts with the same email (v1)', async () => {
+  it('does not group codex accounts with the same email but no workspace claim', async () => {
     await withFakeHome(async (h) => {
       await codexMain(h)
       await fakeHost(h, 'codex')
@@ -1502,6 +1502,86 @@ describe('model (spec §3.19)', () => {
       assert.equal(bad.code, 1)
       assert.equal(JSON.parse(bad.out).code, 'bad-value')
       assert.equal((await sideby(h, ['model', 'claude:main', '--yes'])).code, 2)
+    })
+  })
+})
+
+describe('config get|set|unset (spec §3.29)', () => {
+  it('previews a change with exit 10, writes it with --yes, and lists every key', async () => {
+    await withFakeHome(async (h) => {
+      const file = h.path('.config/sideby/config.json')
+      const preview = await sideby(h, ['config', 'set', 'panel.theme', 'dark'])
+      assert.equal(preview.code, 10)
+      assert.match(preview.out, /panel\.theme: \(not set\) → "dark"/)
+      await assert.rejects(readFile(file, 'utf8'))
+      const done = checkSchema(
+        'config-set',
+        (await sideby(h, ['config', 'set', 'panel.theme', 'dark', '--yes', '--json'])).out,
+      )
+      assert.deepEqual([done.applied, done.after], [true, 'dark'])
+      assert.equal(JSON.parse(await readFile(file, 'utf8')).panel.theme, 'dark')
+      const one = checkSchema('config-get', (await sideby(h, ['config', 'get', 'panel.theme', '--json'])).out)
+      assert.deepEqual([one.set, one.value], [true, 'dark'])
+      const all = checkSchema('config-get', (await sideby(h, ['config', '--json'])).out)
+      assert.ok((all.keys as { key: string }[]).some((k) => k.key === 'handoff.threshold'))
+      const same = await sideby(h, ['config', 'set', 'panel.theme', 'dark'])
+      assert.equal(same.code, 0)
+      const unset = await sideby(h, ['config', 'unset', 'panel.theme', '--yes'])
+      assert.equal(unset.code, 0)
+      assert.equal(JSON.parse(await readFile(file, 'utf8')).panel, undefined)
+    })
+  })
+
+  it('refuses bad values, plugin settings and non-model account arguments with exit 1, and bad shapes with 2', async () => {
+    await withFakeHome(async (h) => {
+      await fakeHost(h, 'claude')
+      await h.mkdir('.claude/skills')
+      const bad = await sideby(h, ['config', 'set', 'handoff.threshold', '200', '--json'])
+      assert.equal(bad.code, 1)
+      assert.equal(checkSchema('error', bad.out).code, 'bad-value')
+      const plugin = await sideby(h, ['config', 'get', 'plugins.x.token', '--json'])
+      assert.equal(plugin.code, 1)
+      assert.equal(JSON.parse(plugin.out).code, 'plugin-config')
+      const args = await sideby(h, [
+        'config',
+        'set',
+        'accounts.claude:main.args',
+        '["--dangerously-skip-permissions"]',
+      ])
+      assert.equal(args.code, 1)
+      assert.match(args.err, /model and effort/)
+      const ok = await sideby(h, ['config', 'set', 'accounts.claude:main.args', '["--model","opus"]'])
+      assert.equal(ok.code, 10)
+      assert.equal((await sideby(h, ['config', 'set', 'panel.theme'])).code, 2)
+      assert.equal((await sideby(h, ['config', 'frob'])).code, 2)
+    })
+  })
+})
+
+describe('autostart (spec §3.29)', () => {
+  it('reports the state in the schema and refuses or skips without touching launchd', async () => {
+    await withFakeHome(async (h) => {
+      const status = checkSchema('autostart', (await sideby(h, ['autostart', '--json'])).out)
+      assert.equal(status.state, 'off')
+      assert.equal(status.supported, process.platform === 'darwin')
+      const off = await sideby(h, ['autostart', 'off', '--json'])
+      assert.equal(off.code, process.platform === 'darwin' ? 0 : 1)
+      await h.write('Library/LaunchAgents/dev.sideby.panel.plist', '<plist/>\n', 0o644)
+      if (process.platform === 'darwin') {
+        assert.equal(
+          checkSchema('autostart', (await sideby(h, ['autostart', '--json'])).out).state,
+          'foreign',
+        )
+        const refused = await sideby(h, ['autostart', 'off', '--yes', '--json'])
+        assert.equal(refused.code, 1)
+        assert.equal(JSON.parse(refused.out).code, 'foreign')
+      }
+      assert.equal(
+        await readFile(h.path('Library/LaunchAgents/dev.sideby.panel.plist'), 'utf8'),
+        '<plist/>\n',
+      )
+      assert.equal((await sideby(h, ['autostart', 'maybe'])).code, 2)
+      assert.equal((await sideby(h, ['autostart', '--yes'])).code, 2)
     })
   })
 })

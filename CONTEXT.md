@@ -10,9 +10,11 @@ Glossary for sideby. Defines words only. Decisions live in `docs/adr/`, designs 
 - **Main Account**: the Host's default directory (for example `~/.claude`). It is the source every Shared Item points back to.
 - **Subscription Account**: an Account that logs in with the Host's own sign-in (OAuth). Its credentials stay where the Host puts them.
 - **Identity**: who a Subscription Account is signed in as (email, and for Claude Code the organization), read from identity fields of the Host's login file only, never from a token (ADR-0003). The Panel can mask it.
-- **Same Login**: two or more Subscription Accounts of one Family that are signed in as the same Identity (the same email and organization). They are separate directories with separate sessions, but the vendor counts one Quota for all of them. The Panel shows them as one row, with the quota once, and says *same login*.
+- **Same Login**: two or more Subscription Accounts of one Family that are signed in as the same Identity (the same email and organization; for Codex also the same ChatGPT workspace, compared through a Login Key). They are separate directories with separate sessions, but the vendor counts one Quota for all of them. The Panel shows them as one row, with the quota once, and says *same login*.
 - **API Account**: an Account whose directory holds a Secret File. It talks to an API endpoint instead of a subscription. Exception: a Family may keep a Secret File in every Account only to provide keys (pi does); there the file does not make an Account an API Account.
 - **Secret File**: `proxy.env` inside an API Account, readable only by its owner. Its variables exist only in the launched Host process.
+
+- **Login Key**: an opaque hash a Family derives from an Account's login file (for Codex, its ChatGPT workspace and user ids) only to tell whether two Accounts share one login. It is never shown or stored (ADR-0028).
 
 - **Desktop App**: a Family's desktop application (Claude Desktop, the Codex app), which sideby starts for one Account but never modifies. Optional per Family. Not a Host.
 - **App Data**: the data directory a Desktop App keeps for one Account.
@@ -79,3 +81,11 @@ Avoid: *upgrade* (say Update), *self-update* in user-facing text.
 - **Display Order** (the Panel says *my order*): the order the user gives the Families, and the Accounts within each Family, for showing them in the Panel and `sideby list`. Families always appear in it; the Panel's other sorts (by Quota, name, recent use) reorder only the Accounts and leave it as it is. A new Family or Account goes last. It never changes which Account a Handoff picks; that is the Handoff Order.
 - **Pinned Account** (the Panel says *pinned*): an Account the user put at the top of its Family. Pinned Accounts lead their Family in every sort, at most three per Family, and the Accounts of one Same Login are pinned together. Resetting the Display Order keeps them. Like the Display Order, it never changes which Account a Handoff picks.
 - **Portal**: another local server that shows the Panel next to other tools' pages, for example under its own `*.localhost` host with a shared top bar. It mounts `createPanelHandler` under a path of its own origin and shows that path in an iframe on a page of the same host and port. It configures the Panel only through the handler's options and never injects markup into it (ADR-0006).
+
+## Asking AI
+
+- **AI Task** (the Panel says *let AI do it*): a task the user hands from the Panel to one of their own Accounts. sideby opens the Preferred Terminal and starts that Account's Host with a Task Prompt; the Host then does the work with the sideby skill. Not a new assistant: the AI is the user's own Host.
+- **Task Prompt**: the prompt sideby writes for one AI Task: what to do and the context it starts from (which Account, which Finding, the Panel's language), ending with an invitation to contribute the result to sideby. How to do the task lives in the skill, not in the prompt.
+- **Preferred Terminal**: the terminal app sideby opens for an AI Task or a sign-in, chosen by the user or guessed from the terminal the Panel was started in.
+
+Avoid: *assistant* or *agent* for the AI of an AI Task (it is a Host running an Account).

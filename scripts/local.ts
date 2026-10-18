@@ -82,9 +82,28 @@ export async function localOff(d: LocalDirs): Promise<void> {
   if (!r.ok) throw new Error(r.message)
   console.log(`${r.message[0]?.toUpperCase()}${r.message.slice(1)}.`)
   await restartPanel(['sideby'])
+  await refreshLoginItem(join(globalPkg(d), BIN))
   // switchLocal ran `sideby update --yes` of the npm code, which brings the skill to its version (spec §3.23).
   if (r.skillSynced === false)
     console.log('The sideby skill was not brought along; run `sideby update` to see why.')
+}
+
+/**
+ * A login item (`sideby autostart on`, ADR-0029) records the sideby it starts; point an existing one at `entry`, the
+ * sideby now in use. Never creates one; a failure only prints a note.
+ */
+async function refreshLoginItem(entry: string): Promise<void> {
+  const { refreshAutostart } = await import('../src/core/autostart.ts')
+  const { resolvePaths } = await import('../src/core/paths.ts')
+  const real = await realpath(entry).catch(() => null)
+  if (!real) return
+  const r = await refreshAutostart({
+    home: resolvePaths().home,
+    launcher: { node: process.execPath, entry: real },
+  })
+  if (r.rewritten) console.log('The login item now starts it too.')
+  else if (r.note && (r.state === 'on' || r.state === 'stale'))
+    console.log(`The login item was not changed: ${r.note}`)
 }
 
 export function dirs(): LocalDirs {
@@ -175,6 +194,7 @@ async function main(argv: string[]): Promise<void> {
     )
   }
   console.log(await linkGlobal(d))
+  await refreshLoginItem(join(pkgDir(d), BIN))
   if (await restartPanel([process.execPath, join(pkgDir(d), BIN)]))
     console.log('The background panel restarted with it.')
   console.log(

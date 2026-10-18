@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../../testing/index.ts'
 import { createRuntime, type Runtime } from '../../runtime.ts'
 import type { Finding } from '../../types.ts'
-import { grokPlugin } from './index.ts'
+import { grokFamily, grokPlugin } from './index.ts'
 
 const builtins = [{ plugin: grokPlugin, version: '0.1.0', description: '', defaultEnabled: true }]
 
@@ -26,6 +26,11 @@ async function findings(rt: Runtime, ref: string): Promise<Finding[]> {
 const at = (list: Finding[], item: string) => list.filter((f) => f.item === item)
 
 describe('grok family', () => {
+  it('names the key variable and a one-shot probe', () => {
+    assert.equal(grokFamily.secretVar, 'XAI_API_KEY')
+    assert.deepEqual(grokFamily.probe, { args: ['-p', 'Reply with OK'] })
+  })
+
   it('creates an account that passes doctor, with copies where Grok forbids links', async () => {
     await withFakeHome(async (h) => {
       await seedMain(h)

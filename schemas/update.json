@@ -147,6 +147,10 @@
       "type": "boolean",
       "description": "The desktop app (`sideby app install`) was installed and was written again by the new version."
     },
+    "refreshedAutostart": {
+      "type": "boolean",
+      "description": "A login item (`sideby autostart on`) was installed and now starts the new version (false: that failed). Absent without one."
+    },
     "skill": {
       "type": "string",
       "description": "The command that installs the sideby skill by hand."

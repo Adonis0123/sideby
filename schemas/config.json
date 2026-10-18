@@ -6,6 +6,67 @@
     "$schema": {
       "type": "string"
     },
+    "panel": {
+      "type": "object",
+      "properties": {
+        "theme": {
+          "type": "string",
+          "enum": [
+            "system",
+            "light",
+            "dark"
+          ],
+          "description": "Panel colours: follow the system (default), always light, or always dark."
+        },
+        "language": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "en",
+            "zh"
+          ],
+          "description": "Panel language: the browser's (default), English, or Chinese."
+        }
+      },
+      "additionalProperties": false,
+      "description": "How the Panel looks (spec §3.29)."
+    },
+    "terminal": {
+      "type": "object",
+      "properties": {
+        "preferred": {
+          "type": "string",
+          "enum": [
+            "terminal",
+            "iterm2",
+            "ghostty",
+            "orca",
+            "wezterm",
+            "kitty",
+            "alacritty",
+            "custom"
+          ],
+          "description": "The terminal sideby opens for AI Tasks; without it sideby picks the one you use."
+        },
+        "custom": {
+          "type": "string",
+          "description": "Your own launch command for `preferred: custom`, with `{cwd}` and `{cmd}` placeholders."
+        }
+      },
+      "additionalProperties": false,
+      "description": "The terminal AI Tasks open in (spec §3.28)."
+    },
+    "ask": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "description": "The account AI Tasks start (`<family>:<name>` or a short command); sideby picks one without it."
+        }
+      },
+      "additionalProperties": false,
+      "description": "AI Tasks (spec §3.28)."
+    },
     "accounts": {
       "type": "object",
       "patternProperties": {
@@ -16,7 +77,8 @@
               "type": "array",
               "items": {
                 "type": "string"
-              }
+              },
+              "description": "Host arguments sideby starts the account with; `sideby config` and `sideby model` set only the model and effort ones."
             }
           },
           "additionalProperties": false
@@ -143,7 +205,8 @@
             "additionalProperties": false
           }
         }
-      }
+      },
+      "description": "Per family, more items each account shares with the main account: `{ path, mode }` with a relative path."
     },
     "accountTitle": {
       "type": "boolean",
@@ -209,13 +272,15 @@
                       "type": "string",
                       "const": "order"
                     }
-                  ]
+                  ],
+                  "description": "`pressure` picks the account with the most Quota left; `order` follows `order`."
                 },
                 "order": {
                   "type": "array",
                   "items": {
                     "type": "string"
-                  }
+                  },
+                  "description": "Accounts (ref or short command) to try, in order."
                 }
               },
               "additionalProperties": false
@@ -317,11 +382,13 @@
       "properties": {
         "zsh": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The file for zsh."
         },
         "bash": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The file for bash."
         }
       },
       "additionalProperties": false,

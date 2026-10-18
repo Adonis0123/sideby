@@ -13,6 +13,7 @@ import { packageVersion } from '../core/version.ts'
 import type { Runtime } from '../runtime.ts'
 import { createRuntime } from '../runtime.ts'
 import {
+  bindPanelAutostart,
   createPanelHandler,
   handoffByFamily,
   MAX_BODY_BYTES,
@@ -1919,6 +1920,224 @@ describe('display order and quota checks (spec §3.25, §3.26)', () => {
         assert.deepEqual([off.status, off.body.changed], [200, true])
         assert.deepEqual(JSON.parse(await readFile(config, 'utf8')).quota, { check: { grok: false } })
         assert.equal((await post(port, '/api/quota/check', { family: 'nope', on: false }, hdr)).status, 400)
+      } finally {
+        await close(server)
+      }
+    })
+  })
+})
+
+describe('start at login and settings in config (spec §3.29)', () => {
+  // Paths that exist outside any temporary folder; only their existence is checked. launchctl goes to `exec`.
+  const LAUNCHER = { node: '/bin/sh', entry: '/usr/bin/env' }
+  const headers = (port: number, token: string) => ({
+    host: `127.0.0.1:${port}`,
+    origin: `http://127.0.0.1:${port}`,
+    'x-sideby-token': token,
+  })
+
+  it('refuses writes on a read-only Panel but shows the state and the plan', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const calls: string[][] = []
+      const unbind = bindPanelAutostart({
+        platform: 'darwin',
+        launcher: LAUNCHER,
+        uid: 501,
+        loginHome: h.home,
+        exec: async (file, args) => {
+          calls.push([file, ...args])
+          return { code: 0, output: '' }
+        },
+      })
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({ runtime: factory(h), allowedHosts: [`127.0.0.1:${p}`], readOnly: true }),
+      )
+      try {
+        const hdr = headers(port, handler.token)
+        const got = await request(port, 'GET', '/api/autostart', { host: `127.0.0.1:${port}` })
+        assert.equal(got.status, 200)
+        assert.equal(JSON.parse(got.text).state, 'off')
+        assert.equal((await post(port, '/api/autostart', { on: true }, hdr)).status, 200)
+        assert.equal((await post(port, '/api/autostart', { on: true, confirm: true }, hdr)).status, 403)
+        assert.equal((await post(port, '/api/panel/settings', { theme: 'dark' }, hdr)).status, 403)
+        assert.equal(
+          await readFile(h.path('Library/LaunchAgents/dev.sideby.panel.plist')).catch(() => null),
+          null,
+        )
+        assert.deepEqual(calls, [])
+      } finally {
+        unbind()
+        await close(server)
+      }
+    })
+  })
+
+  it('plans, then applies only what was shown, and turns it off again; the state names only the file and the program', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const calls: string[][] = []
+      const unbind = bindPanelAutostart({
+        platform: 'darwin',
+        launcher: LAUNCHER,
+        uid: 501,
+        loginHome: h.home,
+        exec: async (file, args) => {
+          calls.push([file, ...args])
+          return { code: 0, output: '' }
+        },
+      })
+      const plist = h.path('Library/LaunchAgents/dev.sideby.panel.plist')
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({ runtime: factory(h), allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      try {
+        const hdr = headers(port, handler.token)
+        const state = async () =>
+          JSON.parse((await request(port, 'GET', '/api/autostart', { host: `127.0.0.1:${port}` })).text)
+        const off = await state()
+        assert.deepEqual(off, {
+          supported: true,
+          state: 'off',
+          path: '~/Library/LaunchAgents/dev.sideby.panel.plist',
+          current: false,
+        })
+
+        const plan = await post(port, '/api/autostart', { on: true }, hdr)
+        assert.equal(plan.status, 200)
+        const shown = plan.body.plan as { changed: boolean; path: string; programArguments: string[] }
+        assert.equal(shown.changed, true)
+        assert.equal(shown.path, '~/Library/LaunchAgents/dev.sideby.panel.plist')
+        assert.deepEqual(shown.programArguments, [
+          '/bin/sh',
+          '/usr/bin/env',
+          'ui',
+          '--background',
+          '--no-open',
+        ])
+        assert.equal(await readFile(plist).catch(() => null), null)
+
+        // A plan that starts something else than what the person saw is not applied.
+        const stale = await post(
+          port,
+          '/api/autostart',
+          { on: true, confirm: true, programArguments: ['/bin/sh', '/bin/ls'] },
+          hdr,
+        )
+        assert.deepEqual([stale.body.applied, stale.body.changedSince], [false, true])
+        assert.equal(await readFile(plist).catch(() => null), null)
+        assert.deepEqual(calls, [])
+
+        const on = await post(
+          port,
+          '/api/autostart',
+          { on: true, confirm: true, programArguments: shown.programArguments },
+          hdr,
+        )
+        assert.deepEqual([on.status, on.body.applied, on.body.loaded], [200, true, true])
+        assert.match(await readFile(plist, 'utf8'), /Written by `sideby autostart`/)
+        assert.deepEqual(calls, [['launchctl', 'bootstrap', 'gui/501', plist]])
+        const now = await state()
+        assert.deepEqual([now.state, now.current], ['on', true])
+        // Nothing but the agent's path and what it starts, with the home folder as ~.
+        assert.deepEqual(Object.keys(now).sort(), [
+          'current',
+          'path',
+          'programArguments',
+          'state',
+          'supported',
+        ])
+        assert.ok(!JSON.stringify(now).includes(h.home))
+
+        const gone = await post(port, '/api/autostart', { on: false, confirm: true }, hdr)
+        assert.deepEqual([gone.body.applied, (gone.body.status as { state: string }).state], [true, 'off'])
+        assert.equal(await readFile(plist).catch(() => null), null)
+        assert.deepEqual(calls.at(-1), ['launchctl', 'bootout', 'gui/501/dev.sideby.panel'])
+        assert.equal((await post(port, '/api/autostart', {}, hdr)).status, 400)
+      } finally {
+        unbind()
+        await close(server)
+      }
+    })
+  })
+
+  it('reports a system it cannot start on and changes nothing', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const unbind = bindPanelAutostart({ platform: 'linux', launcher: LAUNCHER })
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({ runtime: factory(h), allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      try {
+        const got = JSON.parse(
+          (await request(port, 'GET', '/api/autostart', { host: `127.0.0.1:${port}` })).text,
+        )
+        assert.equal(got.supported, false)
+        assert.match(got.reason, /macOS only/)
+        const r = await post(
+          port,
+          '/api/autostart',
+          { on: true, confirm: true },
+          headers(port, handler.token),
+        )
+        assert.equal(r.body.applied, false)
+        assert.equal((r.body.plan as { blocked: { code: string } }).blocked.code, 'unsupported')
+      } finally {
+        unbind()
+        await close(server)
+      }
+    })
+  })
+
+  it('writes the theme and language to config, shows them in the state and the page, and refuses bad values', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const config = h.path('.config/sideby/config.json')
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({ runtime: factory(h), allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      try {
+        const hdr = headers(port, handler.token)
+        const set = await post(port, '/api/panel/settings', { theme: 'dark', language: 'zh' }, hdr)
+        assert.deepEqual([set.status, set.body.panel], [200, { theme: 'dark', language: 'zh' }])
+        assert.deepEqual(JSON.parse(await readFile(config, 'utf8')).panel, { theme: 'dark', language: 'zh' })
+        const state = JSON.parse(
+          (await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text,
+        )
+        assert.deepEqual(state.panel, { theme: 'dark', language: 'zh' })
+        const page = (await request(port, 'GET', '/', { host: `127.0.0.1:${port}` })).text
+        const boot = JSON.parse(
+          /<script type="application\/json" id="sideby-boot">(.*?)<\/script>/.exec(page)![1]!,
+        )
+        assert.deepEqual(boot.panel, { theme: 'dark', language: 'zh' })
+        for (const bad of [{ theme: 'blue' }, { language: 'fr' }, { font: 'x' }, {}])
+          assert.equal((await post(port, '/api/panel/settings', bad, hdr)).status, 400, JSON.stringify(bad))
+        await post(port, '/api/panel/settings', { theme: null, language: null }, hdr)
+        assert.equal(JSON.parse(await readFile(config, 'utf8')).panel, undefined)
+      } finally {
+        await close(server)
+      }
+    })
+  })
+
+  it('carries handoff facts in an AI Task context', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({ runtime: factory(h), allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      try {
+        const hdr = headers(port, handler.token)
+        const r = await post(
+          port,
+          '/api/ask/prompt',
+          { task: 'handoff', lang: 'en', context: { handoff: ['threshold: 90'] } },
+          hdr,
+        )
+        assert.equal(r.status, 200)
+        assert.match(r.body.prompt as string, /- threshold: 90/)
+        const bad = await post(port, '/api/ask/prompt', { task: 'handoff', context: { handoff: 'x' } }, hdr)
+        assert.equal(bad.status, 400)
       } finally {
         await close(server)
       }

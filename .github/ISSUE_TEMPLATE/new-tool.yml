@@ -1,0 +1,42 @@
+name: Support a new tool
+description: Ask sideby to support an AI coding tool it does not list yet.
+title: "feat: support "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        English or Chinese is fine. You can also try it yourself today: choose "Other tool…" in the panel's new-account dialog and your own AI writes a local plugin for it, or see "Add a tool sideby does not support" in docs/guide/plugins.md. A pull request is welcome without this issue; see CONTRIBUTING.md.
+  - type: input
+    id: name
+    attributes:
+      label: Tool name
+      placeholder: Gemini CLI
+    validations:
+      required: true
+  - type: input
+    id: docs
+    attributes:
+      label: Link to its docs
+      description: The tool's own documentation, ideally the page about its config directory or settings.
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Environment variable that selects its config directory
+      description: If you know it. Without one, sideby cannot run its accounts side by side.
+      placeholder: GEMINI_CONFIG_DIR
+  - type: input
+    id: version
+    attributes:
+      label: Version you tried
+      description: The output of `<tool> --version`, and the date.
+      placeholder: 1.2.3 on 2026-10-17
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: Secrets
+      options:
+        - label: I did not paste a token, API key, or the contents of a credential file.
+          required: true

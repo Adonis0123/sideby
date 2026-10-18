@@ -37,6 +37,9 @@ jobs:
 
       - run: pnpm check
 
+      - name: Built-in families pass the plugin check
+        run: node scripts/check-families.ts
+
       - run: pnpm build
 
       - name: Schemas are up to date

@@ -3,11 +3,16 @@ import { lstat, readlink, symlink } from 'node:fs/promises'
 import { describe, it } from 'node:test'
 import { withFakeHome } from '../../../testing/index.ts'
 import { createRuntime } from '../../runtime.ts'
-import { piPlugin } from './index.ts'
+import { piFamily, piPlugin } from './index.ts'
 
 const builtins = [{ plugin: piPlugin, version: '0.1.0', description: '', defaultEnabled: true }]
 
 describe('pi family', () => {
+  it('names the first template key and a one-shot probe', () => {
+    assert.equal(piFamily.secretVar, 'ANTHROPIC_API_KEY')
+    assert.deepEqual(piFamily.probe, { args: ['-p', 'Reply with OK'] })
+  })
+
   it('uses the extra agent/ level for discovery, creation, doctor and login state', async () => {
     await withFakeHome(async (h) => {
       await h.write('.pi/agent/AGENTS.md', '# shared rules\n')

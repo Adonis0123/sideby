@@ -78,6 +78,19 @@ export function isZombieStat(stat: string): boolean {
 }
 
 /** Swapped in tests through `bindUpdateDeps`; the real machine otherwise. */
+/**
+ * Whether `sideby autostart --refresh --json` rewrote the login item: it exits 0 also when nothing changed or the
+ * rewrite was refused, so only its `changed: true` counts.
+ */
+export function autostartRefreshed(code: number | null, stdout: string): boolean {
+  if (code !== 0) return false
+  try {
+    return (JSON.parse(stdout) as { changed?: unknown } | null)?.changed === true
+  } catch {
+    return false
+  }
+}
+
 export interface UpdateDeps {
   fetch: typeof fetch
   now: () => Date
@@ -99,6 +112,10 @@ export interface UpdateDeps {
   appInstalled: (home: string, env: Env) => Promise<boolean>
   /** Runs `sideby app install --json` from the newly installed code and waits; false when it failed. */
   refreshApp: (env: Env) => Promise<boolean>
+  /** Whether `sideby autostart on` put a login item in this home (its file carries the sideby marker). */
+  autostartInstalled: (home: string) => Promise<boolean>
+  /** Runs `sideby autostart --refresh --json` from the newly installed code and waits; false when it failed. */
+  refreshAutostart: (env: Env) => Promise<boolean>
 }
 
 /** The folder of the sideby package this module belongs to: two levels above src/, three above dist/src/. */
@@ -194,6 +211,25 @@ const realDeps: UpdateDeps = {
       })
       child.once('error', () => resolve(false))
       child.once('close', (code) => resolve(code === 0))
+    }),
+  autostartInstalled: async (home) => {
+    const { autostartInstalled } = await import('./autostart.ts')
+    return autostartInstalled(home)
+  },
+  refreshAutostart: (env) =>
+    new Promise((resolve) => {
+      // By name, like refreshApp: the new code records its own Node and entry; it never creates a login item.
+      const child = spawn('sideby', ['autostart', '--refresh', '--json'], {
+        env: env as NodeJS.ProcessEnv,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 60_000,
+      })
+      let out = ''
+      child.stdout?.on('data', (d) => {
+        if (out.length < 65_536) out += d.toString()
+      })
+      child.once('error', () => resolve(false))
+      child.once('close', (code) => resolve(autostartRefreshed(code, out)))
     }),
 }
 
@@ -945,6 +981,8 @@ export interface UpdateResult {
   restartedPanel: boolean
   /** The desktop app was installed and `sideby app install` ran again from the new code. */
   refreshedApp: boolean
+  /** A login item was installed (spec §3.29) and `sideby autostart --refresh` ran from the new code; absent without one. */
+  refreshedAutostart?: boolean
   /** Another Update held the lock; nothing ran. */
   busy?: boolean
   /** The installed sideby skill was updated too (true), or that failed (false); absent when it was not tried. */
@@ -1005,6 +1043,9 @@ export async function applyUpdate(
     // the new code writes it again. Only where one is installed; a failure here never fails the Update.
     const installed = await d.appInstalled(paths.home, env).catch(() => false)
     const refreshed = installed && (await d.refreshApp(env).catch(() => false))
+    // The login item records the Node and entry it starts, like the app (ADR-0029); never created here.
+    const autostart = await d.autostartInstalled(paths.home).catch(() => false)
+    const refreshedAutostart = autostart ? await d.refreshAutostart(env).catch(() => false) : undefined
     // The skill teaches agents this version's commands, so it follows the CLI; a failure there keeps the Update.
     const skill = await applySkillUpdate(plan.skill, env, opts.onOutput)
     return {
@@ -1014,6 +1055,7 @@ export async function applyUpdate(
       message: `updated sideby from ${plan.current} to ${plan.latest}`,
       restartedPanel: restarted,
       refreshedApp: refreshed,
+      ...(refreshedAutostart !== undefined ? { refreshedAutostart } : {}),
       ...(skill ? { skillUpdated: skill.ok, skillMessage: skill.message } : {}),
     }
   } finally {

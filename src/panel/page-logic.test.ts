@@ -4,43 +4,62 @@ import { ALIAS_NAME, RESERVED_ALIASES } from '../core/config.ts'
 import { MESSAGES } from './i18n.ts'
 import { renderPage } from './page.ts'
 import {
+  AI_TASK_KINDS,
+  aiTaskAccounts,
   aliasArgsOf,
   aliasIssue,
+  askCopy,
   attentionReasons,
   attentionWhy,
+  autostartNote,
   cacheHitRate,
   canLeaveLocal,
+  fileSize,
   fixPrompt,
   formatDuration,
   handoffChangeOf,
   handoffHintAccount,
+  handoffTaskFacts,
   inDisplayOrder,
   type LogicAccount,
   loginClusters,
   loginKey,
   maskEmail,
   matchesQuery,
+  menuPlacement,
   mergeDaily,
   newAccountDir,
   nextReset,
   panelFixes,
   panelHint,
   panelLang,
+  panelMigration,
+  panelPrefs,
   passedWindow,
   pinnedIn,
+  quotaAskable,
   quotaPressure,
   remoteControlSummary,
   remoteControlTodo,
   reorder,
+  rowBadge,
   sortAccounts,
+  stripSecrets,
   suggestAlias,
   suggestName,
   switchFailure,
+  taskFindings,
+  taskPrompt,
   updatedAge,
   windowState,
   withPinned,
 } from './page-logic.ts'
 import { PAGE_SCRIPT } from './page-script.ts'
+import { pageStyles } from './page-styles.ts'
+
+// Fake key prefixes, joined at run time so the source never holds a key-shaped string (leak-check).
+const SK = 'sk' + '-'
+const XAI = 'xai' + '-'
 
 const NOW = Date.parse('2026-10-05T12:00:00Z')
 const at = (h: number) => new Date(NOW + h * 3_600_000).toISOString()
@@ -147,6 +166,21 @@ describe('page logic', () => {
       attentionReasons(acct('k', { kind: 'api', login: 'logged-out' }), { fail: 0, warn: 2 }, NOW, 60),
       ['health-warn'],
     )
+  })
+
+  it('shows one badge per row: a fix, then running low, then the other looks, then recommended, then API', () => {
+    assert.equal(
+      rowBadge(['error', 'signed-out', 'quota-high', 'health-fail'], { next: true, api: true }),
+      'health-fail',
+    )
+    assert.equal(rowBadge(['signed-out', 'quota-high'], { next: true }), 'quota-high')
+    assert.equal(rowBadge(['health-warn', 'not-installed', 'signed-out'], { next: true }), 'signed-out')
+    assert.equal(rowBadge(['health-warn', 'not-installed'], {}), 'not-installed')
+    assert.equal(rowBadge(['health-warn'], { next: true }), 'health-warn')
+    assert.equal(rowBadge([], { next: true, api: true }), 'next')
+    assert.equal(rowBadge([], { api: true }), 'api')
+    // A read error has its own note under the row, not a badge.
+    assert.equal(rowBadge(['error'], {}), null)
   })
 
   it('warns about a shared Quota once per Same Login: only where it was read, not where it is borrowed', () => {
@@ -553,11 +587,42 @@ describe('panel page lang', () => {
     )
   })
   it('picks the language through panelLang and never saves it while the host fixes it', () => {
-    assert.match(PAGE_SCRIPT, /let lang = panelLang\(BOOT\.lang, prefs\.lang, navigator\.language\)/)
+    assert.match(
+      PAGE_SCRIPT,
+      /let lang = panelLang\(BOOT\.lang, viewPrefs\(\)\.language, navigator\.language\)/,
+    )
     assert.match(PAGE_SCRIPT, /if \(!LANG_FIXED\) out\.push\('lang'\)/)
-    // The only write of prefs.lang is setLang, after its guard.
+    // The only writes of the language are in setLang, after its guard: config, or the browser when read-only.
     assert.equal(PAGE_SCRIPT.match(/prefs\.lang =/g)?.length, 1)
-    assert.match(PAGE_SCRIPT, /if \(LANG_FIXED \|\| v === lang\) return\n\s+lang = v\n\s+prefs\.lang = lang/)
+    assert.equal(PAGE_SCRIPT.match(/cfgPanel\.language =/g)?.length, 1)
+    assert.match(
+      PAGE_SCRIPT,
+      /if \(LANG_FIXED \|\| v === lang\) return\n\s+if \(CFG\) \{ cfgPanel\.language = v; saveCfg\(\{ language: v \}\) \} else \{ prefs\.lang = v; savePrefs\(\) \}/,
+    )
+  })
+  it('takes theme and language from config, writes them there, and migrates the browser choice once (spec §3.29)', () => {
+    const body = (name: string) => {
+      const at = PAGE_SCRIPT.indexOf(`  function ${name}(`)
+      assert.ok(at >= 0, name)
+      return PAGE_SCRIPT.slice(at, PAGE_SCRIPT.indexOf('\n  function ', at + 10))
+    }
+    assert.match(PAGE_SCRIPT, /const CFG = !BOOT\.readOnly/)
+    assert.match(
+      body('setTheme'),
+      /if \(CFG\) \{ cfgPanel\.theme = v; saveCfg\(\{ theme: v \}\) \} else \{ prefs\.theme = v; savePrefs\(\) \}/,
+    )
+    assert.match(body('applyTheme'), /viewPrefs\(\)\.theme/)
+    assert.match(
+      PAGE_SCRIPT,
+      /async function saveCfg\(patch, quiet\) \{\n[^\n]*\n\s+try \{ await api\('\/api\/panel\/settings', patch\)/,
+    )
+    // A change made elsewhere shows at the next read, but never while a write is on its way.
+    assert.match(body('adoptPanel'), /if \(!CFG \|\| cfgSaving\) return/)
+    assert.match(PAGE_SCRIPT, /adoptPanel\(state\.panel\)/)
+    assert.match(
+      PAGE_SCRIPT,
+      /if \(CFG && !prefs\.cfgDone\) \{\n\s+if \(!cfgMigrate\) \{ prefs\.cfgDone = true; savePrefs\(\) \}/,
+    )
   })
 })
 
@@ -661,15 +726,25 @@ describe('Display Order in the page (spec §3.25)', () => {
     assert.match(body('dragHandle'), /!ui\.arrange\) return null/)
     assert.doesNotMatch(body('appRow'), /dragHandle/)
   })
-  it('puts a one-click pin on every row, Same Login row and card, next to the menu', () => {
-    assert.match(body('row'), /pinButton\(a, a\.name\), moreButton\(a\)/)
-    assert.match(body('loginRow'), /pinButton\(a, /)
-    assert.match(body('card'), /pinButton\(a, a\.name\)/)
-    assert.match(body('pinButton'), /togglePin\(a\)/)
+  it('keeps pins in the menu and the arrange mode, and puts the pin before the name, not at its end', () => {
+    assert.doesNotMatch(PAGE_SCRIPT, /pinButton|row-pin/)
+    for (const name of ['row', 'loginRow', 'card']) assert.doesNotMatch(body(name), /pin/i)
+    // The slot before the name (spec §3.27, 2026-10-18): a button that pins or unpins; read-only, the mark only.
+    assert.match(body('nameLine'), /pinSlot\(a\),\s*h\('span', \{ class: 'name'/)
+    assert.match(body('pinSlot'), /if \(BOOT\.readOnly\) return pinMark\(a\)/)
+    assert.match(body('pinSlot'), /t\(on \? 'pin\.unpin' : 'pin\.pin'\)/)
+    assert.match(body('pinSlot'), /e\.stopPropagation\(\); togglePin\(a\)/)
+    assert.match(body('arrangeRow'), /pinMark\(a\),\s*h\('span', \{ class: 'name'/)
+    assert.match(body('pinMark'), /isPinned\(a\)[\s\S]*'aria-label': t\('pin\.mark'\)/)
+    assert.match(body('pinItem'), /togglePin\(a\)/)
+    assert.match(body('accountMenu'), /\[pinItem\(a\)/)
+    assert.match(body('loginMenu'), /\[pinItem\(ms\[0\]\)\]/)
+    assert.match(body('arrangeRow'), /togglePin\(a\)/)
+    assert.match(body('arrangeRow'), /t\('pin\.full'/)
   })
   it('opens the arrange mode from Settings too, not only from the sort menu', () => {
     assert.match(body('settingsSections'), /out\.push\('order'\)/)
-    assert.match(body('settingsPop'), /t\('set\.order'\)[\s\S]*startArrange\(\)/)
+    assert.match(body('settingsGroups'), /t\('set\.order'\)[\s\S]*startArrange\(\)/)
   })
   it('never switches the sort to my order behind the user, only the arrange mode does', () => {
     assert.doesNotMatch(body('moveUnit'), /prefs\.sort/)
@@ -680,6 +755,86 @@ describe('Display Order in the page (spec §3.25)', () => {
       PAGE_SCRIPT,
       /withPinned\(sortAccounts\(list, prefs\.sort, now, accountOrder\(fam\)\), pinnedOf\(fam\)\)/,
     )
+  })
+})
+
+describe('menuPlacement', () => {
+  const view = { width: 1280, height: 700 }
+  const at = (top: number, left = 1000) => ({ top, bottom: top + 28, left, right: left + 28 })
+  it('opens below when the whole menu fits there, its right edge on the anchor', () => {
+    assert.deepEqual(menuPlacement(at(100), { width: 260, height: 300 }, view, 'end'), {
+      left: 768,
+      top: 132,
+      maxHeight: 560,
+      above: false,
+    })
+  })
+  it('fits exactly below at the edge, and flips above one pixel later', () => {
+    // Room below: 700 - 8 - 128 - 4 = 560.
+    assert.equal(menuPlacement(at(100), { width: 260, height: 560 }, view, 'end').above, false)
+    const up = menuPlacement(at(600), { width: 260, height: 561 }, view, 'end')
+    assert.deepEqual(up, { left: 768, top: 35, maxHeight: 588, above: true })
+    assert.equal(up.top + 561, 600 - 4)
+  })
+  it('opens above near the bottom of the window when it fits there', () => {
+    const p = menuPlacement(at(620), { width: 260, height: 400 }, view, 'end')
+    assert.deepEqual(p, { left: 768, top: 216, maxHeight: 608, above: true })
+  })
+  it('caps a menu taller than either side at the larger side, so it scrolls inside', () => {
+    assert.deepEqual(menuPlacement(at(500), { width: 260, height: 900 }, view, 'end'), {
+      left: 768,
+      top: 8,
+      maxHeight: 488,
+      above: true,
+    })
+    assert.deepEqual(menuPlacement(at(150), { width: 260, height: 900 }, view, 'end'), {
+      left: 768,
+      top: 182,
+      maxHeight: 510,
+      above: false,
+    })
+  })
+  it('takes the whole height of a tiny window when neither side has room', () => {
+    const tiny = { width: 390, height: 200 }
+    const p = menuPlacement(
+      { top: 90, bottom: 118, left: 340, right: 368 },
+      { width: 260, height: 500 },
+      tiny,
+      'end',
+    )
+    assert.deepEqual(p, { left: 108, top: 8, maxHeight: 184, above: false })
+    // A short menu that fits one side of a tiny window still goes there.
+    assert.equal(
+      menuPlacement({ top: 20, bottom: 48, left: 0, right: 28 }, { width: 200, height: 60 }, tiny, 'start')
+        .top,
+      52,
+    )
+    assert.equal(
+      menuPlacement(at(0), { width: 200, height: 60 }, { width: 100, height: 10 }, 'end').maxHeight,
+      0,
+    )
+  })
+  it('keeps it inside the window sideways', () => {
+    assert.equal(menuPlacement(at(100, 4), { width: 260, height: 100 }, view, 'end').left, 8)
+    assert.equal(menuPlacement(at(100, 1270), { width: 260, height: 100 }, view, 'start').left, 1012)
+    assert.equal(menuPlacement(at(100, 40), { width: 260, height: 100 }, view, 'start').left, 40)
+  })
+})
+
+describe('floating menus in the page', () => {
+  const body = (name: string) => {
+    const at = PAGE_SCRIPT.indexOf(`  function ${name}(`)
+    return PAGE_SCRIPT.slice(at, PAGE_SCRIPT.indexOf('\n  function ', at + 10))
+  }
+  it('caps its height with menuPlacement and lets it scroll inside without closing', () => {
+    assert.match(body('placeFloat'), /menuPlacement\(/)
+    assert.match(body('placeFloat'), /'max-height', p\.maxHeight/)
+    assert.match(
+      PAGE_SCRIPT,
+      /addEventListener\('scroll', \(e\) => \{ if \(menu\.el && !menu\.el\.contains\(e\.target\)\) placeFloat\(\) \}/,
+    )
+    assert.doesNotMatch(PAGE_SCRIPT, /addEventListener\('scroll', \(\) => closeMenu\(\)/)
+    assert.match(pageStyles(), /\.menu \{[^}]*overflow-y: auto; overscroll-behavior: contain;/)
   })
 })
 
@@ -729,9 +884,49 @@ describe('whole-Panel UX pass (three-way audit, 2026-10-17)', () => {
   })
   it('points to the sideby skill from Settings, the arrange bar and the empty state', () => {
     assert.match(body('settingsSections'), /out\.push\('ai'\)/)
-    assert.match(body('arrangeBar'), /openAi/)
-    assert.match(body('emptyState'), /openAi/)
-    assert.match(body('openAi'), /BOOT\.skillInstall/)
+    assert.match(body('arrangeBar'), /openAsk\(/)
+    assert.match(body('emptyState'), /openAsk\(\{ task: 'account'/)
+    assert.match(body('askYourself'), /BOOT\.skillInstall/)
+  })
+  it('offers every AI Task entry of spec §3.28 and keeps the copy fallbacks', () => {
+    const asyncBody = (name: string) => {
+      const at = PAGE_SCRIPT.indexOf(`  async function ${name}(`)
+      assert.ok(at >= 0, name)
+      return PAGE_SCRIPT.slice(at, PAGE_SCRIPT.indexOf('\n  function ', at + 10))
+    }
+    // Settings: the general box, a plugin and the terminal choice (the last one only where it can be saved).
+    assert.match(body('settingsGroups'), /link\(t\('ai\.title'\)[^\n]*openAsk\(\)/)
+    assert.match(body('settingsGroups'), /task: 'plugin'/)
+    assert.match(body('settingsGroups'), /if \(!BOOT\.readOnly\) start\.push\(link\(t\('term\.title'\)/)
+    // Auto Handoff: Let AI tune it, with the handoff facts (spec §3.29).
+    assert.match(body('askHandoff'), /task: 'handoff', context: \{ handoff: handoffTaskFacts\(/)
+    assert.match(body('renderHandoffPage'), /onclick: askHandoff/)
+    assert.match(body('renderHandoff'), /onclick: askHandoff/)
+    // Health check: Let AI fix it with those findings; the read-only Panel keeps Copy for AI.
+    assert.match(body('renderCheckup'), /prompt && BOOT\.readOnly \? [^\n]*fix\.copyAi/)
+    assert.match(
+      body('renderCheckup'),
+      /prompt && !BOOT\.readOnly \? [^\n]*task: 'fix', context: \{ findings: taskFindings\(forAi\(findings\)\)/,
+    )
+    // Quota cell, new-account dialog (Let AI set it up, Other tool…).
+    assert.match(body('askWhy'), /quotaAskable\(q\.reason\)/)
+    assert.match(body('askWhy'), /task: 'quota'/)
+    assert.match(body('renderCreate'), /task: 'host'/)
+    assert.match(body('renderCreate'), /task: 'account'/)
+    // Sign in opens the terminal and copies the command when it cannot; read-only copies at once.
+    assert.match(asyncBody('signIn'), /if \(BOOT\.readOnly\) \{ copyText\(cmd\); return \}/)
+    assert.match(asyncBody('signIn'), /api\('\/api\/login'/)
+    assert.match(asyncBody('signIn'), /await copyText\(cmd, cmd\)/)
+    // The dialog copies the prompt when no account can run it or the Panel is read-only.
+    assert.match(
+      body('renderAsk'),
+      /const canOpen = !BOOT\.readOnly && !ak\.loading && !ak\.error && ak\.account/,
+    )
+    assert.match(asyncBody('askCopyPrompt'), /api\('\/api\/ask\/prompt'/)
+    // The key never stays in the page state: it is read from the field when saving.
+    assert.match(asyncBody('keySave'), /const value = ky\.els\.value\.value/)
+    assert.doesNotMatch(asyncBody('keySave'), /ky\.value =/)
+    assert.match(body('renderKey'), /type: 'password'/)
   })
 })
 
@@ -816,5 +1011,535 @@ describe('Remote Control button state', () => {
   it('ignores groups used only by API Accounts', () => {
     assert.equal(remoteControlSummary([g('off', 'claude:main'), g('on', 'claude:ds')], ['claude:ds']), 'off')
     assert.equal(remoteControlSummary([g('on', 'claude:main', 'claude:ds')], ['claude:ds']), 'on')
+  })
+})
+
+describe('stripSecrets', () => {
+  const random40 = 'q8Zr3kLm0vXy7TbN2wPc9HdJ4sGf1aEu6iOo5nRt'
+  it('removes keys with a known prefix and long random strings', () => {
+    const out = stripSecrets(
+      `key ${SK}ant-api03-AbCdEfGh1234567890_xyz and ${XAI}0123456789abcdefABCD, also ${random40}.`,
+    )
+    assert.equal(out.text, 'key [key removed] and [key removed], also [key removed].')
+    assert.equal(out.removed, true)
+  })
+  it('keeps a variable name before its value and a key glued to Chinese text', () => {
+    assert.equal(stripSecrets(`ANTHROPIC_API_KEY=${random40}`).text, 'ANTHROPIC_API_KEY=[key removed]')
+    assert.equal(stripSecrets(`我的密钥是${SK}abcdefghij0123456789`).text, '我的密钥是[key removed]')
+    for (const key of [
+      'gsk_abcdefghij0123456789',
+      'AIzaSyA1b2C3d4E5f6G7h8',
+      'ghp_abcdefghij0123456789',
+      'github_pat_11ABCDEFG0123456789',
+    ])
+      assert.equal(stripSecrets(key).text, '[key removed]', key)
+  })
+  // Joined at run time so this file never holds a key-shaped string (leak-check).
+  const akia = ['AK', 'IA', 'ABCDEFGHIJ012345'].join('')
+  const asia = ['AS', 'IA', 'Z9Y8X7W6V5U4T3S2'].join('')
+  const jwt = ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxIn0', 'a'.repeat(43)].join('.')
+  it('removes AWS access key ids, JWTs and sk-proj- keys, also inside URLs and query strings', () => {
+    for (const key of [akia, asia, jwt, `${SK}proj-Ab12Cd34Ef56Gh78Ij90`, `${jwt.slice(0, -43)}`])
+      assert.deepEqual(stripSecrets(`key ${key} end`), { text: 'key [key removed] end', removed: true }, key)
+    assert.equal(
+      stripSecrets(`https://bucket.example.com/x?AWSAccessKeyId=${akia}&Signature=abc`).text,
+      'https://bucket.example.com/x?AWSAccessKeyId=[key removed]&Signature=abc',
+    )
+    assert.equal(
+      stripSecrets(`https://app.example.com/cb?token=${jwt}`).text,
+      'https://app.example.com/cb?token=[key removed]',
+    )
+    assert.equal(stripSecrets(`Authorization: Bearer ${jwt}`).text, 'Authorization: Bearer [key removed]')
+    assert.equal(stripSecrets(`AWS_ACCESS_KEY_ID=${akia}`).text, 'AWS_ACCESS_KEY_ID=[key removed]')
+  })
+  it('keeps words that only look close to an AWS key id or a JWT', () => {
+    const text = [
+      'AKIAabcdefghijklmnop is lowercase, AKIA0123 is short',
+      'see /tmp/eyJ/notes.md and eyJhbG.short.x',
+      'https://example.com/page?id=eyJ',
+    ].join('\n')
+    assert.deepEqual(stripSecrets(text), { text, removed: false })
+  })
+  it('may remove a 40-character git SHA, as any long mixed run', () => {
+    assert.equal(stripSecrets('commit 0a1b2c3d4e5f60718293a4b5c6d7e8f901234567').text, 'commit [key removed]')
+  })
+  it('keeps URLs, file paths, emails, words and Chinese text', () => {
+    const text = [
+      'Docs: https://docs.example.com/api/keys?session=0123456789abcdefghijABCDEFGHIJ0123456789&lang=en',
+      'Path: /tmp/sideby-demo/home/.cache/0123456789abcdef0123456789abcdef/settings.json',
+      'Mail me@example.com about internationalization-and-localization-guidelines',
+      '把 claude:work 的额度修好，谢谢 task-skip-xai-handling risk-assessment-guidelines-v2',
+    ].join('\n')
+    assert.deepEqual(stripSecrets(text), { text, removed: false })
+  })
+  it('passes quotes, command substitution, backticks and newlines through verbatim', () => {
+    const text = `say "hi" and 'bye'\n$(rm -rf ~) \`whoami\`; rm x\n\n  indented`
+    assert.deepEqual(stripSecrets(text), { text, removed: false })
+  })
+  it('handles empty text', () => {
+    assert.deepEqual(stripSecrets(''), { text: '', removed: false })
+  })
+})
+
+describe('fileSize', () => {
+  it('shows KB below a megabyte and MB from there', () => {
+    assert.equal(fileSize(10), '1 KB')
+    assert.equal(fileSize(300 * 1024), '300 KB')
+    assert.equal(fileSize(1.25 * 1024 * 1024), '1.3 MB')
+    assert.equal(fileSize(150 * 1024 * 1024), '150 MB')
+  })
+})
+
+describe('askCopy', () => {
+  const free = ['ai.ask.quota', 'ai.ask.new']
+  for (const lang of ['en', 'zh'] as const)
+    it(`gives every task kind its own title, placeholder and examples in ${lang}`, () => {
+      const table = MESSAGES[lang]
+      const has = (k: string) => Object.hasOwn(table, k)
+      for (const task of AI_TASK_KINDS) {
+        const copy = askCopy(task, has, free)
+        if (task === 'free') {
+          assert.deepEqual(copy, { title: 'ask.title', placeholder: 'ask.ph.free', chips: free })
+          continue
+        }
+        assert.equal(copy.title, `ask.title.${task}`)
+        assert.equal(copy.placeholder, `ask.ph.${task}`)
+        assert.ok(copy.chips.length >= 2 && copy.chips.length <= 3, task)
+        for (const k of [copy.title, copy.placeholder, ...copy.chips])
+          assert.ok(table[k]?.trim(), `${lang} ${k}`)
+      }
+      for (const k of ['ask.title', 'ask.ph.free', ...free]) assert.ok(table[k]?.trim(), `${lang} ${k}`)
+    })
+  it("falls back to free's strings for a task without its own", () => {
+    assert.deepEqual(
+      askCopy('later', () => false, free),
+      { title: 'ask.title', placeholder: 'ask.ph.free', chips: free },
+    )
+    const partial = askCopy('later', (k) => k === 'ask.title.later', free)
+    assert.deepEqual(partial, { title: 'ask.title.later', placeholder: 'ask.ph.free', chips: free })
+  })
+})
+
+describe('taskPrompt', () => {
+  const context = {
+    account: 'claude:work',
+    family: 'claude',
+    findings: [
+      {
+        code: 'link.dangling',
+        account: 'claude:work',
+        item: 'skills',
+        message: 'points nowhere',
+        hint: 'remove it',
+      },
+    ],
+    quotaReason: 'no status line tap',
+    version: '0.16.1',
+  }
+  const tasks = ['free', 'fix', 'quota', 'account', 'host', 'plugin'] as const
+  const expect: Record<string, Record<(typeof tasks)[number], string[]>> = {
+    en: {
+      free: ['What to do\nAsk me what I want to do with sideby, then do it for me.'],
+      fix: [
+        "What to do\nFix the problems below that sideby's health check cannot fix by itself.",
+        'Pointers\nRun `sideby doctor --json` first',
+      ],
+      quota: [
+        'What to do\nsideby shows no quota for claude:work. Find out why and make it show.',
+        'Pointers\nUse `sideby quota --json`',
+      ],
+      account: [
+        'What to do\nHelp me add a claude account to sideby',
+        "vendor's official docs",
+        '`sideby key <account>`, then try it with `sideby try <account>`',
+        'run `sideby login <account>`',
+      ],
+      host: [
+        'first as a local Family Plugin',
+        '`sideby plugins new <id>`',
+        'Host version and the date',
+        '`sideby plugins check <id>` and try it in a demo HOME',
+      ],
+      plugin: ['What to do\nHelp me write a sideby plugin or hook.', 'docs/guide/plugins.md'],
+    },
+    zh: {
+      free: ['要做的事\n问我想用 sideby 做什么，然后帮我做。'],
+      fix: ['要做的事\nsideby 的体检发现了下面这些不能自动修复的问题', '提示\n先运行 `sideby doctor --json`'],
+      quota: ['额度格没有显示 claude:work 的额度', '提示\n用 `sideby quota --json`'],
+      account: [
+        '帮我在 sideby 里加一个 claude 账号',
+        '厂商的官方文档',
+        '`sideby try <账号>`',
+        '`sideby login <账号>`',
+      ],
+      host: ['先做成本机的 Family 插件', '`sideby plugins new <id>`', '宿主的版本和日期', '演示 HOME'],
+      plugin: ['帮我写一个 sideby 插件或 hook。', 'docs/guide/plugins.zh-CN.md'],
+    },
+  }
+  const fixed = {
+    en: [
+      'Context\n- Account: claude:work\n- Family: claude\n- Health check findings:\n  1. [link.dangling] claude:work · skills: points nowhere\n     remove it\n- Quota reason: no status line tap\n- sideby version: 0.16.1\n- Panel language: English',
+      'Rules\n- Use the sideby skill; its references/ai-tasks.md says how.',
+      '`npx skills add Adonis0123/sideby -g`',
+      'add `--yes` only after I agree',
+      'Never sign in for me and never ask me to send you an API key',
+      'ask me whether to share the improvement with sideby. Only with my yes, follow the CONTRIBUTING.md',
+      'remove my own account names, paths and emails.',
+    ],
+    zh: [
+      '上下文\n- 账号：claude:work\n- 家族：claude\n- 体检发现：\n  1. [link.dangling] claude:work · skills: points nowhere\n     remove it\n- 额度原因：no status line tap\n- sideby 版本：0.16.1\n- 面板语言：中文',
+      '规则\n- 先用 sideby skill，怎么做见它的 references/ai-tasks.md。',
+      '`npx skills add Adonis0123/sideby -g`',
+      '我同意后才加 `--yes`',
+      '不要替我登录，也不要让我把密钥发给你',
+      '问我愿不愿意把这次的改进分享给 sideby。我同意后，按 sideby 仓库的 CONTRIBUTING.md',
+      '去掉我自己的账号名、路径和邮箱。',
+    ],
+  }
+  for (const lang of ['en', 'zh'] as const)
+    for (const task of tasks)
+      it(`writes the ${task} prompt in ${lang}`, () => {
+        const out = taskPrompt({ task, context, lang }, stripSecrets)
+        for (const part of [...expect[lang]![task], ...fixed[lang]])
+          assert.ok(out.includes(part), `${part}\n---\n${out}`)
+        assert.ok(out.startsWith(lang === 'zh' ? '要做的事\n' : 'What to do\n'))
+        assert.ok(out.endsWith(lang === 'zh' ? '邮箱。' : 'emails.'))
+      })
+
+  it('writes the terminal prompt with the saved command, the installed terminals and the terminal-table invitation', () => {
+    const ctx = {
+      terminalCustom: 'my-term --cwd {cwd} -e {cmd}',
+      terminals: ['Terminal', 'Ghostty'],
+      version: '0.16.1',
+    }
+    const en = taskPrompt({ task: 'terminal', text: 'I use Warp', context: ctx, lang: 'en' }, stripSecrets)
+    for (const part of [
+      'What to do\nHelp sideby open AI Tasks in the terminal I use: write a custom terminal command.\nIn my words: I use Warp',
+      'Context\n- Custom terminal command now: my-term --cwd {cwd} -e {cmd}\n- Supported terminals installed here: Terminal, Ghostty\n- sideby version: 0.16.1',
+      "Pointers\nAsk me which terminal I use first. Read only that terminal's official docs and its `--help`",
+      '`{cmd}` is the command and `{cwd}` the folder',
+      "Save it with `sideby terminal --custom '<template>'`, which changes sideby's settings, so ask me first.",
+      'click Let AI do it in the Panel once to try it',
+      'add a row to the terminal table in src/core/terminal.ts of the sideby repository with tests',
+    ])
+      assert.ok(en.includes(part), `${part}\n---\n${en}`)
+    assert.ok(en.endsWith('emails.'))
+    assert.ok(!en.includes('share the improvement'))
+    const zh = taskPrompt({ task: 'terminal', context: { terminals: [] }, lang: 'zh' }, stripSecrets)
+    for (const part of [
+      '要做的事\n帮我让 sideby 能在我用的终端里打开 AI 任务：写一条自定义终端命令。',
+      '上下文\n- 本机没找到 sideby 支持的终端\n- 面板语言：中文',
+      '提示\n先问我用的是什么终端。只看这个终端的官方文档和它的 `--help`',
+      "`sideby terminal --custom '<模板>'`，它会改 sideby 的设置，先问我",
+      '在面板上点一次「让 AI 帮我」试一下',
+      '在 sideby 仓库 src/core/terminal.ts 的终端表里加一行并补上测试',
+    ])
+      assert.ok(zh.includes(part), `${part}\n---\n${zh}`)
+    assert.ok(zh.endsWith('邮箱。'))
+    assert.ok(!zh.includes('现在的自定义终端命令'))
+  })
+
+  it('keeps terminal context out of other tasks', () => {
+    const out = taskPrompt({ task: 'fix', context: { terminals: ['Ghostty'] }, lang: 'en' }, stripSecrets)
+    assert.ok(!out.includes('Ghostty'))
+  })
+
+  it('puts the order of sections as the spec gives it', () => {
+    const out = taskPrompt({ task: 'host', text: 'Add Example Code', lang: 'en' }, stripSecrets)
+    assert.equal(
+      out,
+      [
+        'What to do\nHelp me add an AI coding tool (Host) that sideby does not support yet, first as a local Family Plugin.\nIn my words: Add Example Code',
+        'Context\n- Panel language: English (talk to me in English)',
+        'Rules\n- Use the sideby skill; its references/ai-tasks.md says how. If the skill is not installed, ask me first, and with my yes run `npx skills add Adonis0123/sideby -g`.\n- Show me the preview of any command that changes files; add `--yes` only after I agree.\n- Never sign in for me and never ask me to send you an API key: I enter keys myself with `sideby key <account>`.',
+        'Pointers\nStart with `sideby plugins new <id>`; note the Host version and the date with every fact you gather; check it with `sideby plugins check <id>` and try it in a demo HOME.',
+        'When it works, ask me whether to share the improvement with sideby. Only with my yes, follow the CONTRIBUTING.md of the sideby repository to open a pull request, and first remove my own account names, paths and emails.',
+      ].join('\n\n'),
+    )
+  })
+
+  it('lists attached files with their kind after the context, and says how to look at a video', () => {
+    const attachments = [
+      { path: '/tmp/sideby-demo/state/sideby/ai/attachments/0123456789abcdef/1.png', kind: 'image' },
+      { path: '/tmp/sideby-demo/state/sideby/ai/attachments/0123456789abcdef/2.mp4', kind: 'video' },
+    ]
+    const en = taskPrompt({ task: 'free', text: 'Why this error?', attachments, lang: 'en' }, stripSecrets)
+    assert.ok(
+      en.includes(
+        '\n\nAttached files\n- /tmp/sideby-demo/state/sideby/ai/attachments/0123456789abcdef/1.png (image)\n- /tmp/sideby-demo/state/sideby/ai/attachments/0123456789abcdef/2.mp4 (video)\nTo see what a video shows, extract a few frames with ffmpeg first',
+      ),
+    )
+    assert.ok(
+      en.indexOf('Context\n') < en.indexOf('Attached files') &&
+        en.indexOf('Attached files') < en.indexOf('Rules\n'),
+    )
+    const zh = taskPrompt({ task: 'free', attachments: attachments.slice(0, 1), lang: 'zh' }, stripSecrets)
+    assert.ok(
+      zh.includes(
+        '\n\n附件\n- /tmp/sideby-demo/state/sideby/ai/attachments/0123456789abcdef/1.png (图片)\n\n规则',
+      ),
+    )
+    assert.ok(!zh.includes('ffmpeg'))
+    for (const none of [undefined, []]) {
+      const out = taskPrompt({ task: 'free', attachments: none, lang: 'en' }, stripSecrets)
+      assert.ok(!out.includes('Attached files'))
+    }
+  })
+
+  it("uses the user's text as the free task, without key-shaped strings", () => {
+    const text = `Use https://api.example.com/v1?ref=0123456789abcdef0123456789abcdef with key ${SK}ant-api03-AbCdEfGh1234567890`
+    const out = taskPrompt({ task: 'free', text, lang: 'en' }, stripSecrets)
+    assert.ok(
+      out.startsWith(
+        'What to do\nUse https://api.example.com/v1?ref=0123456789abcdef0123456789abcdef with key [key removed]\n\n',
+      ),
+    )
+    assert.ok(!out.includes('sk-ant'))
+    assert.ok(!out.includes('Pointers'))
+  })
+
+  it('strips key-shaped strings from context too, and falls back to free for an unknown task', () => {
+    const out = taskPrompt(
+      { task: 'nope', context: { quotaReason: `got ${XAI}0123456789abcdefABCD back` }, lang: 'zh' },
+      stripSecrets,
+    )
+    assert.ok(out.includes('- 额度原因：got [key removed] back'))
+    assert.ok(out.startsWith('要做的事\n问我想用 sideby 做什么'))
+  })
+
+  it("keeps the user's quotes, command substitution, backticks and newlines verbatim", () => {
+    const text = `fix "it" and 'that'\n$(touch /tmp/x) \`id\`; rm y`
+    const out = taskPrompt({ task: 'free', text, lang: 'en' }, stripSecrets)
+    assert.ok(out.startsWith(`What to do\n${text}\n\n`))
+  })
+
+  it('treats empty text as no text', () => {
+    assert.equal(
+      taskPrompt({ task: 'plugin', text: '   ', lang: 'en' }, stripSecrets),
+      taskPrompt({ task: 'plugin', lang: 'en' }, stripSecrets),
+    )
+  })
+})
+
+describe('AI Task helpers (spec §3.28)', () => {
+  it('lists signed-in subscriptions first, then API accounts, each by ref', () => {
+    const list = [
+      { ref: 'codex:main', kind: 'subscription', login: 'logged-in' },
+      { ref: 'claude:api', kind: 'api', login: 'not-needed' },
+      { ref: 'claude:work', kind: 'subscription', login: 'logged-out' },
+      { ref: 'claude:main', kind: 'subscription', login: 'logged-in' },
+      { ref: 'grok:lab', kind: 'subscription', login: 'unknown' },
+    ]
+    assert.deepEqual(
+      aiTaskAccounts(list).map((a) => a.ref),
+      ['claude:main', 'codex:main', 'claude:api'],
+    )
+    assert.deepEqual(aiTaskAccounts([]), [])
+  })
+  it('asks AI about quota only where no button of its own helps', () => {
+    for (const r of ['no-session', 'fetch-failed', 'unrecognized', 'read-failed'])
+      assert.equal(quotaAskable(r), true, r)
+    for (const r of ['not-enabled', 'api-account', 'no-source', undefined, ''])
+      assert.equal(quotaAskable(r), false, String(r))
+  })
+  it('passes only the fields a Task Prompt shows', () => {
+    const f = {
+      code: 'link.dangling',
+      account: 'claude:work',
+      item: 'skills',
+      message: 'dangling',
+      level: 'fail',
+      fixable: false,
+    }
+    assert.deepEqual(taskFindings([f]), [
+      { code: 'link.dangling', account: 'claude:work', item: 'skills', message: 'dangling' },
+    ])
+    assert.deepEqual(taskFindings([{ message: 'x', hint: 'run it' }]), [{ message: 'x', hint: 'run it' }])
+  })
+})
+
+describe('settings in config, start at login and Auto Handoff facts (spec §3.29)', () => {
+  it('shows config panel.* when the Panel can write, and the browser choice when read-only', () => {
+    const local = { theme: 'dark', lang: 'zh' }
+    assert.deepEqual(panelPrefs({}, local, true), { theme: 'system', language: '' })
+    assert.deepEqual(panelPrefs({ theme: 'light', language: 'en' }, local, true), {
+      theme: 'light',
+      language: 'en',
+    })
+    assert.deepEqual(panelPrefs({ language: 'auto' }, local, true), { theme: 'system', language: '' })
+    assert.deepEqual(panelPrefs({ theme: 'light' }, local, false), { theme: 'dark', language: 'zh' })
+  })
+  it('migrates only a choice the browser made and config lacks', () => {
+    assert.deepEqual(panelMigration({}, { theme: 'dark', lang: 'zh' }), { theme: 'dark', language: 'zh' })
+    assert.deepEqual(panelMigration({ theme: 'light' }, { theme: 'dark', lang: '' }), null)
+    assert.deepEqual(panelMigration({ language: 'en' }, { theme: 'system', lang: 'zh' }), null)
+    assert.deepEqual(panelMigration({}, { theme: 'system', lang: '' }), null)
+    assert.deepEqual(panelMigration({ language: 'auto' }, { theme: 'light', lang: 'zh' }), { theme: 'light' })
+  })
+  it('explains each start-at-login state with one line and the right action', () => {
+    const s = (state: string, current = true, supported = true) => ({ supported, state, current })
+    assert.deepEqual(autostartNote(null, false), {
+      key: 'as.checking',
+      on: false,
+      toggle: false,
+      action: null,
+    })
+    assert.deepEqual(autostartNote(s('off', false, false), false), {
+      key: 'as.unsupported',
+      on: false,
+      toggle: false,
+      action: null,
+    })
+    assert.deepEqual(autostartNote(s('off', false), false), {
+      key: 'as.hint',
+      on: false,
+      toggle: true,
+      action: null,
+    })
+    assert.deepEqual(autostartNote(s('on'), false), { key: 'as.hint', on: true, toggle: true, action: null })
+    assert.deepEqual(autostartNote(s('on', false), false), {
+      key: 'as.other',
+      on: true,
+      toggle: true,
+      action: 'fix',
+    })
+    assert.deepEqual(autostartNote(s('stale', false), false), {
+      key: 'as.stale',
+      on: true,
+      toggle: true,
+      action: 'fix',
+    })
+    assert.deepEqual(autostartNote(s('foreign', false), false), {
+      key: 'as.foreign',
+      on: false,
+      toggle: false,
+      action: null,
+    })
+    // Read-only: the state, never a switch or an action.
+    assert.deepEqual(autostartNote(s('stale', false), true), {
+      key: 'as.stale',
+      on: true,
+      toggle: false,
+      action: null,
+    })
+    for (const key of ['as.checking', 'as.unsupported', 'as.hint', 'as.other', 'as.stale', 'as.foreign'])
+      assert.ok(MESSAGES.en[key] && MESSAGES.zh[key], key)
+  })
+  it('lists the Auto Handoff facts by ref, never an email', () => {
+    const settings = {
+      auto: false,
+      sameFamily: true,
+      threshold: 90,
+      prepareAt: 75,
+      waitIfResetWithinMinutes: 30,
+      countdownSeconds: 10,
+      families: { claude: { policy: 'order', order: ['work', 'main'] } },
+    }
+    const future = new Date(Date.now() + 3600000).toISOString()
+    const accounts: LogicAccount[] = [
+      {
+        family: 'claude',
+        name: 'main',
+        ref: 'claude:main',
+        kind: 'subscription',
+        login: 'logged-in',
+        identity: { email: 'me@example.com' },
+        quota: {
+          status: 'ok',
+          source: 'claude-tap',
+          windows: [{ label: '5h', windowMinutes: 300, usedPercent: 41.6, resetsAt: future }],
+        } as LogicAccount['quota'],
+      },
+      {
+        family: 'claude',
+        name: 'work',
+        ref: 'claude:work',
+        kind: 'subscription',
+        login: 'logged-out',
+        quota: { status: 'unavailable', reason: 'no-session' } as LogicAccount['quota'],
+      },
+      { family: 'claude', name: 'ds', ref: 'claude:ds', kind: 'api' },
+    ]
+    const facts = handoffTaskFacts(settings, ['claude'], accounts, Date.now(), {
+      families: [{ family: 'claude', ready: false, problems: ['Claude reports no quota to sideby yet'] }],
+      nextSteps: ['sideby handoff enable', 'sideby quota setup claude'],
+    })
+    assert.deepEqual(facts, [
+      'auto: false',
+      'sameFamily: true',
+      'threshold: 90',
+      'prepareAt: 75',
+      'waitIfResetWithinMinutes: 30',
+      'countdownSeconds: 10',
+      'families that can start a handoff: claude',
+      'order of claude: order [work, main]',
+      'claude:main: quota from claude-tap, 42% used',
+      'claude:work: no quota data (no-session), logged-out',
+      'claude:ds: API account, no quota',
+      'not ready, claude: Claude reports no quota to sideby yet',
+      'next steps: sideby handoff enable; sideby quota setup claude',
+    ])
+    assert.ok(!facts.join('\n').includes('example.com'))
+  })
+  it('puts the handoff facts in the Task Prompt with its own sentence and pointer', () => {
+    for (const lang of ['en', 'zh']) {
+      const p = taskPrompt(
+        {
+          task: 'handoff',
+          context: { handoff: ['threshold: 90', `${SK}ant-api03-abcdefghijklmnopqrstu`] },
+          lang,
+        },
+        stripSecrets,
+      )
+      assert.match(p, /sideby handoff status --json/)
+      assert.match(p, /- threshold: 90/)
+      assert.match(p, /sideby handoff enable/)
+      assert.match(p, /sideby config set handoff\./)
+      assert.ok(!p.includes('abcdefghijklmnopqrstu'), 'key-shaped context is removed')
+    }
+    assert.ok(AI_TASK_KINDS.includes('handoff'))
+    // Every task but free has its own dialog line and title in both languages, or the dialog shows a raw key.
+    for (const k of AI_TASK_KINDS.filter((x) => x !== 'free'))
+      for (const key of [`ask.task.${k}`, `ask.title.${k}`])
+        assert.ok(MESSAGES.en[key] && MESSAGES.zh[key], key)
+  })
+  it('opens the row menu on a right-click and from the keyboard, and leaves inputs, links and buttons alone (spec §3.27)', () => {
+    const fn = (name: string) => {
+      const at = PAGE_SCRIPT.indexOf(`  function ${name}(`)
+      assert.ok(at >= 0, name)
+      return PAGE_SCRIPT.slice(at, PAGE_SCRIPT.indexOf('\n  function ', at + 10))
+    }
+    assert.match(
+      fn('onContextMenu'),
+      /e\.target\.closest\('input, textarea, select, a, button, \[contenteditable\], \.tip'\)\) return/,
+    )
+    assert.match(
+      fn('onContextMenu'),
+      /e\.preventDefault\(\)\n\s+openContextMenu\(target, e\.clientX, e\.clientY/,
+    )
+    assert.match(fn('onMenuKey'), /e\.key !== 'ContextMenu' && !\(e\.key === 'F10' && e\.shiftKey\)/)
+    assert.match(fn('row'), /\(anchor\) => accountMenu\(a, anchor\)\)/)
+    assert.match(fn('loginRow'), /\(anchor\) => loginMenu\(ms, anchor\)\)/)
+    assert.match(fn('card'), /\(anchor\) => accountMenu\(a, anchor\)\)/)
+    // Placed like the "…" menu, to the left of the point near the right edge; Escape returns focus.
+    assert.match(
+      fn('openContextMenu'),
+      /menu\.align = x \+ menu\.el\.offsetWidth \+ 8 > window\.innerWidth \? 'end' : 'start'/,
+    )
+    assert.match(fn('closeMenu'), /const back = menu\.returnTo \|\| menu\.anchor/)
+    assert.match(PAGE_SCRIPT, /document\.addEventListener\('contextmenu', onContextMenu\)/)
+  })
+  it('groups the settings in the spec order and ends a tall popover with More settings', () => {
+    const at = PAGE_SCRIPT.indexOf('  function settingsGroups(')
+    const groups = PAGE_SCRIPT.slice(at, PAGE_SCRIPT.indexOf('\n  function ', at + 10))
+    const order = ['set.g.look', 'set.g.start', 'set.g.accounts', 'set.g.ai'].map((k) =>
+      groups.indexOf(`t('${k}')`),
+    )
+    assert.ok(
+      order.every((i, n) => i > 0 && (n === 0 || i > order[n - 1]!)),
+      String(order),
+    )
+    assert.match(PAGE_SCRIPT, /if \(menu\.kind === 'settings'\) settingsFit\(\)/)
+    assert.match(PAGE_SCRIPT, /class: 'menu-item set-more', type: 'button', hidden: true/)
   })
 })

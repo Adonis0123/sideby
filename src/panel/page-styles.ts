@@ -198,7 +198,8 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .next-why { margin: 0 0 10px; max-width: 280px; line-height: 1.5; }
 .next-cmd { display: block; margin-top: 8px; color: var(--muted); font-size: 11px; }
 /* A Same Login (spec §3.21, ADR-0026): one row; opened, a short line per directory. */
-.tag-login { font-weight: 400; }
+.login-mark { display: inline-flex; flex: none; color: var(--muted); cursor: help; }
+.login-mark .ic { width: 13px; height: 13px; }
 .login-detail { flex-direction: column; gap: 8px; }
 .login-detail .rd-note { margin: 0; }
 /* The directories share one set of columns (subgrid), so a wider cell in one line moves every line alike. */
@@ -221,9 +222,9 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .arrange-tools { display: inline-flex; align-items: center; gap: 2px; }
 .arrange-tools .icon-btn { width: 28px; height: 28px; }
 .arrange-tools .icon-btn .ic { width: 14px; height: 14px; }
-.pin-btn { color: var(--faint); }
-.pin-btn[aria-pressed="true"] { color: var(--accent); }
-.pin-btn[aria-pressed="true"] .ic { fill: currentColor; }
+/* One width for "Pin to top" and "Unpin", so the arrows line up down the list. */
+.arrange-tools .pin-btn { min-width: 96px; margin-left: 6px; justify-content: center; }
+.pin-btn[aria-disabled="true"] { color: var(--faint); cursor: not-allowed; }
 .drag-handle { width: 20px; height: 28px; color: var(--muted); cursor: grab; }
 .drag-handle:hover { color: var(--accent); }
 .drag-handle .ic { width: 14px; height: 14px; }
@@ -255,6 +256,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .ident-text { min-width: 0; flex: 1; }
 .ident-name { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; row-gap: 3px; }
 .ident-name .name { font-weight: var(--strong-weight); font-size: var(--font-size); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.ident-name .alias { color: var(--muted); font-family: var(--mono); font-size: 12px; white-space: nowrap; }
 .ident-email { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
 .email-btn, .model-btn { all: unset; cursor: pointer; border-radius: 4px; }
 .model-btn:hover { color: var(--text); text-decoration: underline dotted; }
@@ -264,11 +266,12 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .br-list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .br-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--ctl-radius); }
 .email-btn:hover { color: var(--text); text-decoration: underline dotted; }
+/* A button is laid out as one box, so the parent's ellipsis does not reach its text: it ends its own. */
+.ident-email .email-btn { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .email-btn:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
-.ident-email:has(.br-btn) { display: flex; align-items: center; }
-.ident-email:has(.br-btn) > * { flex: none; }
-.ident-email:has(.br-btn) > .email-btn:not(.br-btn) { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.br-btn { display: inline-flex; align-items: center; gap: 3px; vertical-align: bottom; }
+.br-btn { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; max-width: 100%; }
+.br-btn:hover { color: var(--text); text-decoration: underline dotted; }
+.card > .rd-browser { flex-direction: row; align-items: center; gap: 8px; }
 .br-ico { width: 12px; height: 12px; flex: none; }
 .ident-email + .ident-sub { color: var(--faint); margin-top: 0; }
 .tools .tb-icon { width: var(--ctl-h); height: var(--ctl-h); border-color: var(--border-strong); background: var(--surface); }
@@ -283,19 +286,21 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .row > .quota { grid-area: quota; }
 .row > .last { grid-area: last; }
 .row > .row-end { grid-area: more; display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
-/* The row's pin (spec §3.25): filled and always there on a pinned row; on the others it shows on hover or focus. */
 .row-run { width: 28px; height: 28px; color: var(--muted); }
 .row-run .ic { width: 15px; height: 15px; }
 .row-run:hover { color: var(--accent); }
-.row-pin { width: 28px; height: 28px; color: var(--faint); opacity: 0; transition: opacity .12s, color .12s; }
-.row-pin .ic { width: 15px; height: 15px; }
-.row:hover .row-pin, .card:hover .row-pin, .row-pin:focus-visible, .row-pin.is-on { opacity: 1; }
 .card-head > .row-end { display: flex; align-items: center; gap: 2px; margin-left: auto; }
-.row-pin:hover { color: var(--accent); }
-.row-pin.is-on { color: var(--accent); }
-.row-pin.is-on .ic { fill: currentColor; }
-.row-pin[aria-disabled="true"] { cursor: not-allowed; }
-@media (hover: none) { .row-pin { opacity: .6; } }
+/* A pinned row's mark (spec §3.25, §3.27): a small muted outline pin right before the name, not a button. */
+.pin-mark { display: inline-flex; flex: none; margin-right: -2px; color: var(--faint); }
+.pin-mark .ic { width: 12px; height: 12px; }
+/* The pin before the name (spec §3.27): always there when pinned; a fainter one on hover or focus in the row
+   otherwise. The slot keeps its width either way, so the name never moves. */
+.pin-slot { display: inline-grid; place-items: center; flex: none; width: 16px; height: 16px; margin: 0 -4px 0 -2px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--faint); cursor: pointer; opacity: 0; }
+.pin-slot .ic { width: 12px; height: 12px; }
+.pin-slot.is-on { opacity: 1; }
+.row:hover .pin-slot:not(.is-on), .row:focus-within .pin-slot:not(.is-on), .card:hover .pin-slot:not(.is-on), .card:focus-within .pin-slot:not(.is-on) { opacity: .5; }
+.pin-slot:hover, .pin-slot:focus-visible { opacity: 1 !important; color: var(--accent); background: var(--hover); outline: none; }
+.ctx-anchor { position: fixed; width: 0; height: 0; pointer-events: none; }
 .row-notes { grid-area: notes; display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 
 /* Quota meters: percent and countdown over a bar colored by level (ok, warn at 60%, fail at 85% used). */
@@ -522,6 +527,31 @@ input[type=text]:hover:not(:disabled), input[type=number]:hover:not(:disabled), 
 input[type=text]:focus, input[type=search]:focus, select:focus { border-color: var(--focus); }
 input[type=text]:disabled, select:disabled { background-color: var(--surface-2); color: var(--faint); cursor: not-allowed; }
 input.invalid { border-color: var(--fail); }
+/* AI Tasks (spec §3.28): the text box, the key field, the example chips and the account and terminal pickers. */
+input[type=password] { height: var(--field-h); border-radius: var(--ctl-radius); border: 1px solid var(--border-strong); background-color: var(--surface); color: var(--text); font: inherit; padding: 0 12px; width: 100%; }
+textarea.ask-text { min-height: 64px; resize: vertical; border-radius: var(--ctl-radius); border: 1px solid var(--border-strong); background-color: var(--surface); color: var(--text); font: inherit; padding: 8px 12px; width: 100%; line-height: 1.45; }
+input[type=password]:focus, textarea.ask-text:focus { border-color: var(--focus); }
+textarea.ask-text:focus-visible, input[type=password]:focus-visible { outline: var(--focus-outline); outline-offset: 2px; box-shadow: var(--focus-ring); }
+textarea::placeholder { color: var(--faint); }
+.ask-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ask-chips .chip { font: inherit; font-size: var(--small); text-align: left; white-space: normal; }
+.ask-attach-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.ask-files-wrap { display: grid; gap: 6px; }
+.ask-files-wrap:empty { display: none; }
+.ask-files { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.ask-file { position: relative; display: grid; gap: 2px; width: 104px; padding: 4px; border: 1px solid var(--border); border-radius: var(--ctl-radius); background: var(--surface); }
+.ask-file.is-error { border-color: var(--fail); }
+.ask-file-img, .ask-file-face { width: 94px; height: 64px; border-radius: calc(var(--ctl-radius) - 2px); }
+.ask-file-img { object-fit: cover; display: block; }
+.ask-file-face { display: grid; place-items: center; align-content: center; gap: 2px; background: var(--surface-2); color: var(--muted); }
+.ask-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-file-x { position: absolute; top: 2px; right: 2px; width: 22px; height: 22px; background: var(--surface); }
+.dialog.drop-on { outline: 2px dashed var(--focus); outline-offset: -6px; }
+.ask-pick {display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.ask-setup .link-btn { display: inline-flex; align-items: center; gap: 6px; }
+.ask-setup .ic { width: 14px; height: 14px; }
+.fam-other { background: transparent; color: inherit; font: inherit; text-align: left; border-style: dashed; }
+.q-ask { margin-left: 6px; }
 /* The select draws its own chevron with two gradient strokes (the CSP allows no external images), so it follows the
    text color in both schemes and on hover. */
 select { --chevron: var(--muted); appearance: none; padding-right: 32px; cursor: pointer; text-overflow: ellipsis;
@@ -582,7 +612,7 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .dlg-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 var(--radius) var(--radius); }
 
 /* Menu, tooltips, toasts */
-.menu { position: fixed; z-index: 40; min-width: 230px; max-width: min(380px, calc(100vw - 16px)); padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: calc(var(--ctl-radius) + 2px); box-shadow: var(--float-shadow); }
+.menu { position: fixed; z-index: 40; min-width: 230px; max-width: min(380px, calc(100vw - 16px)); padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: calc(var(--ctl-radius) + 2px); box-shadow: var(--float-shadow); overflow-y: auto; overscroll-behavior: contain; }
 .menu-item { display: flex; align-items: center; gap: 10px; width: 100%; height: 32px; padding: 0 10px; border: 0; border-radius: calc(var(--ctl-radius) - 2px); background: none; color: var(--text); font: inherit; font-size: var(--control-size); text-align: left; cursor: pointer; }
 .menu-item .ic { flex: none; color: var(--muted); }
 .menu-item:hover:not(:disabled), .menu-item:focus-visible { background: var(--hover); outline: none; }
@@ -605,6 +635,24 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .set-hint { color: var(--faint); font-size: 12px; max-width: 260px; }
 .set-link { margin: 0 -8px; width: calc(100% + 16px); }
 .set-link .chip { margin-left: auto; }
+/* Groups in the settings (spec §3.29): a small muted title, then its rows; a line between groups. */
+.pop-settings { width: 340px; }
+.set-group { display: flex; flex-direction: column; gap: 8px; }
+.set-check .set-label { white-space: normal; }
+.set-link .menu-label { flex: 1 1 auto; min-width: 0; white-space: normal; line-height: 1.3; }
+.set-link { height: auto; min-height: 32px; padding-top: 6px; padding-bottom: 6px; }
+.set-link .chip { flex: none; }
+.set-group-title { color: var(--faint); font-size: 11px; font-weight: var(--strong-weight); letter-spacing: .02em; }
+.popover .set-sep { margin: 0 -14px; }
+.set-hint .link-btn { font-size: 12px; }
+/* "More settings…" stays at the bottom of a popover that scrolls. */
+.set-more { position: sticky; bottom: -12px; margin: 0 -14px -12px; width: calc(100% + 28px); height: 40px; padding: 0 16px 0 17px; border-top: 1px solid var(--border); border-radius: 0; background: var(--surface); }
+.set-more:hover { background: var(--hover); }
+.set-more .ic { margin-left: auto; }
+.set-dialog { display: flex; flex-direction: column; gap: 12px; }
+.set-dialog .set-hint { max-width: none; }
+.set-dialog .set-link { margin: 0 -10px; width: calc(100% + 20px); }
+.as-code { display: block; margin: -4px 0 4px; padding: 8px 10px; border-radius: var(--ctl-radius); background: var(--hover); font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
 .set-dot { background: var(--warn-bar); }
 .tip { display: inline-flex; position: relative; vertical-align: middle; }
 .tip-btn { display: inline-grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--surface); color: var(--muted); font: 700 10px/1 var(--font); cursor: help; }

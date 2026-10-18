@@ -51,6 +51,9 @@ export const grokFamily: FamilyDef = {
   layout: { main: '.grok', account: '.grok-<name>' },
   hijackVars: ['XAI_API_KEY', 'GROK_MODELS_BASE_URL'],
   apiVars: ['GROK_MODELS_BASE_URL', 'XAI_API_KEY'],
+  secretVar: 'XAI_API_KEY',
+  // `-p` is one non-interactive prompt (Grok Build 1.0.60 --help, 2026-10-17).
+  probe: { args: ['-p', 'Reply with OK'] },
   sharedItems: [
     { path: 'skills', mode: 'link' },
     { path: 'installed-plugins', mode: 'link' },
