@@ -46,7 +46,7 @@ agent 会检查 Node 和宿主 CLI，装好 sideby 和 skill，建账号，告�
 
 25 秒的小故事：一个账号被任务淹没，然后几个账号并排开工、共用一套配置，一个额度用完时任务交给下一个。
 
-https://github.com/user-attachments/assets/3c652c33-d749-4b1b-bb85-afd63c207271
+https://github.com/user-attachments/assets/51d9f96f-7723-4410-8c5f-136b2a66a50e
 
 <img alt="两个终端：个人号和工作号同时开着，都链接到主账号的 skills 和设置，然后切到本机的额度面板；工作号额度到 95% 时，自动接力把会话换到下一个账号" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/demo.gif" width="1280">
 
