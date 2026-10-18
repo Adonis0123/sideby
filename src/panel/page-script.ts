@@ -12,6 +12,7 @@ import {
   autostartNote,
   cacheHitRate,
   canLeaveLocal,
+  codeSwapOutcome,
   fileSize,
   fixPrompt,
   formatDuration,
@@ -40,6 +41,7 @@ import {
   remoteControlTodo,
   reorder,
   rowBadge,
+  runCodeSwap,
   sortAccounts,
   stripSecrets,
   suggestAlias,
@@ -83,6 +85,8 @@ const LOGIC = [
   newAccountDir,
   nextReset,
   canLeaveLocal,
+  codeSwapOutcome,
+  runCodeSwap,
   switchFailure,
   panelFixes,
   panelHint,
@@ -4521,7 +4525,7 @@ const MAIN = String.raw`
   }
   function openUpdate() {
     if (!BOOT.updates) return
-    up = { busy: false, error: null, done: null, changed: false, skillDone: false, skillChanged: false, autoPlan: null, autoBusy: false, waitUntil: 0, checking: false, checked: false }
+    up = { busy: false, error: null, done: null, confirming: null, unknown: null, changed: false, skillDone: false, skillChanged: false, autoPlan: null, autoBusy: false, waitUntil: 0, checking: false, checked: false }
     showDialog('update')
     renderUpdate()
   }
@@ -4531,24 +4535,36 @@ const MAIN = String.raw`
     up.busy = true
     dlg.busy = true
     up.error = null
+    up.unknown = null
     renderUpdate()
-    try {
-      const r = await api('/api/update', { confirm: true, version: u.latest })
-      if (!r.updated) {
-        // The registry names another version than the dialog showed: show the new plan and let the person look again.
-        Object.assign(S.state.update, { latest: r.latest, available: r.available, command: r.command, canRun: r.canRun, releaseNotes: r.releaseNotes, method: r.method })
-        up.changed = true
-      } else {
-        up.done = r
+    const target = u.latest
+    const free = () => { up.busy = false; dlg.busy = false }
+    await codeSwap({
+      send: () => api('/api/update', { confirm: true, version: target }),
+      landed: () => { const now = updState(); return now ? now.current === target : null },
+      // The answer was cut: say only that it is being confirmed, never "updated", until the state shows it.
+      confirming: () => { free(); up.confirming = target; renderUpdate() },
+      done: (r) => {
+        free()
+        up.confirming = null
+        if (r && !r.updated) {
+          // The registry names another version than the dialog showed: show the new plan and let the person look again.
+          Object.assign(S.state.update, { latest: r.latest, available: r.available, command: r.command, canRun: r.canRun, releaseNotes: r.releaseNotes, method: r.method })
+          up.changed = true
+          renderUpdate()
+          return false
+        }
+        up.done = r || { updated: true, latest: target }
         up.waitUntil = Date.now() + 20000
-        updWait()
-      }
-    } catch (e) { up.error = e }
-    up.busy = false
-    dlg.busy = false
-    renderUpdate()
+        renderUpdate()
+        return true
+      },
+      stuck: () => { up.waitUntil = 0; renderUpdate() },
+      fail: (e) => { free(); up.confirming = null; up.error = e; renderUpdate() },
+      unknown: () => { free(); up.confirming = null; up.unknown = target; renderUpdate() },
+    })
   }
-  // The CLI is current and the skill is behind: update the skill alone, as sideby update --yes does.
+  // The CLI is current and the skill is behind: update the skill alone, as sideby update --skill --yes does.
   async function updSkillRun() {
     up.busy = true
     dlg.busy = true
@@ -4620,7 +4636,7 @@ const MAIN = String.raw`
   }
   // The switch between a Local Build and the npm package (ADR-0024), only where the state offers it: the other side,
   // one button. After the switch the page waits for the server to run the new build and reloads into it.
-  const vs = { busy: false, to: null, waitUntil: 0, stuck: false, error: null }
+  const vs = { busy: false, to: null, stuck: false, unknown: false, error: null }
   function localSwitchKids(u) {
     const ls = u && u.localSwitch
     if (!ls || BOOT.readOnly) return null
@@ -4630,8 +4646,8 @@ const MAIN = String.raw`
     const l = ls.local
     const build = l ? l.version + '-dev · ' + (l.commit || '?') + (l.dirty ? '+' : '') : ''
     const kids = [h('p', { class: 'muted small' }, toNpm ? t('loc.toNpmHint') : t('loc.toLocalHint', { b: build, at: l.builtAt ? clock(l.builtAt) : '' }))]
-    if (vs.stuck) {
-      kids.push(h('p', { class: 'small' }, t('loc.stuck')))
+    if (vs.stuck || vs.unknown) {
+      kids.push(h('p', { class: 'small' }, t(vs.stuck ? 'loc.stuck' : 'loc.unconfirmed')))
       kids.push(h('div', { class: 'popover-actions' }, h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => location.reload() }, icon('refresh'), t('loc.reload'))))
     } else {
       const newer = toNpm && u.available && u.latest
@@ -4650,27 +4666,36 @@ const MAIN = String.raw`
     vs.to = to
     vs.error = null
     vs.stuck = false
+    vs.unknown = false
     renderSwitch()
-    try {
-      await api('/api/local', { to, confirm: true })
-    } catch (e) {
-      // A background Panel restarting from the new code may drop this answer, and a Portal moving to it may answer
-      // 5xx (spec §3.23): the state then says whether the switch happened. Only a switch that did not is an error.
-      const kind = switchFailure(e)
-      if (kind === 'fail') { vs.busy = false; vs.error = e; renderSwitch(); return }
-      if (kind === 'check') {
-        await load({ silent: true })
-        const ls = updState() && updState().localSwitch
-        if (!ls || ls.running !== to) { vs.busy = false; vs.error = e; renderSwitch(); return }
-      }
-    }
-    vs.waitUntil = Date.now() + 20000
-    localWait()
+    await codeSwap({
+      send: () => api('/api/local', { to, confirm: true }),
+      landed: () => { const now = updState(); return now && now.localSwitch ? now.localSwitch.running === to : null },
+      confirming: () => {},
+      done: () => true,
+      stuck: () => { vs.busy = false; vs.stuck = true; renderSwitch() },
+      fail: (e) => { vs.busy = false; vs.error = e; renderSwitch() },
+      unknown: () => { vs.busy = false; vs.unknown = true; renderSwitch() },
+    })
   }
-  function localWait() {
-    if (S.newBuild) { location.reload(); return }
-    if (Date.now() > vs.waitUntil) { vs.busy = false; vs.stuck = true; renderSwitch(); return }
-    setTimeout(() => { void load({ silent: true }).then(localWait, localWait) }, 1500)
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  // Reads the state; true when this read answered (a cut connection or a load already running leaves the old state).
+  async function readState() {
+    const before = S.loadedAt
+    try { await load({ silent: true }) } catch {}
+    return S.loadedAt !== before
+  }
+  // A request that may swap the server's code (runCodeSwap): each wait is 20 s, read every 1.5 s.
+  function codeSwap(o) {
+    return runCodeSwap(Object.assign({
+      readState,
+      newBuild: () => !!S.newBuild,
+      reload: () => location.reload(),
+      now: () => Date.now(),
+      pause,
+      windowMs: 20000,
+      pollMs: 1500,
+    }, o))
   }
   async function verPopCheck() {
     vp.checking = true
@@ -4698,12 +4723,6 @@ const MAIN = String.raw`
     } catch (e) { up.error = e }
     up.checking = false
     renderUpdate()
-  }
-  // After an Update the server (or the Portal's worker) comes back with a new build; load() then reloads the page.
-  function updWait() {
-    if (!up || !up.done || S.newBuild) { if (S.newBuild) location.reload(); return }
-    if (Date.now() > up.waitUntil) { renderUpdate(); return }
-    setTimeout(() => { void load({ silent: true }).then(updWait) }, 1500)
   }
   async function updAuto(on) {
     up.autoBusy = true
@@ -4751,19 +4770,27 @@ const MAIN = String.raw`
       return
     }
     body.push(h('p', null, t('upd.current', { v: u.current })))
-    if (up.done) {
+    // While an Update runs, is being confirmed or could not be, the dialog offers nothing else to start.
+    const swapping = Boolean(up.done || up.confirming || up.unknown)
+    if (up.confirming) {
+      body.push(h('p', { class: 'muted small' }, spinner(), ' ', t('upd.confirming', { v: up.confirming })))
+    } else if (up.unknown) {
+      body.push(h('p', { class: 'note note-warn' }, t('upd.unconfirmed', { v: up.unknown })))
+    } else if (up.done) {
       body.push(h('p', { class: 'note' }, t('upd.done', { v: up.done.latest })))
       body.push(h('p', { class: 'muted small' }, Date.now() > up.waitUntil ? t('upd.restartHint') : [spinner(), ' ', t('upd.reloading')]))
       if (up.done.skillUpdated) body.push(h('p', { class: 'small' }, t('upd.skillDone')))
+      else if (up.done.skillSyncStarted) body.push(h('p', { class: 'muted small' }, t('upd.skillSyncing')))
       else body.push(...updSkill(u))
     } else if (up.skillDone && !skillOld(u)) {
       body.push(h('p', { class: 'note' }, t('upd.skillDoneOnly')))
-    } else if (u.available && isLocal(u) && (leavesLocal(u) || vs.busy || vs.stuck)) {
+    } else if (u.available && isLocal(u) && (leavesLocal(u) || vs.busy || vs.stuck || vs.unknown)) {
       // A Local Build the Panel can leave (ADR-0024): switching to the release is the update, and brings the skill.
       body.push(h('p', null, t('upd.localSwitch', { v: u.latest }), ' ',
         h('a', { href: u.releaseNotes, target: '_blank', rel: 'noopener noreferrer' }, t('upd.notes'))))
       if (vs.busy) body.push(h('p', { class: 'muted small' }, spinner(), ' ', t('upd.reloading')))
       if (vs.stuck) body.push(h('p', { class: 'note' }, t('loc.stuck')))
+      if (vs.unknown) body.push(h('p', { class: 'note note-warn' }, t('loc.unconfirmed')))
       if (vs.error) body.push(errorNote(vs.error, null))
       body.push(updManual([h('p', { class: 'small' }, t('upd.localManual')), codeCopy(u.command)]))
     } else if (u.available && isLocal(u)) {
@@ -4803,11 +4830,11 @@ const MAIN = String.raw`
       body.push(h('p', { class: 'muted small' }, t('upd.latest') + (u.checkedAt ? ' · ' + t('upd.checked', { ago: ago(u.checkedAt) }) : '')))
     } else body.push(h('p', { class: 'muted small' }, t('upd.notYet')))
     // A read-only Panel sends no request and writes nothing, so it cannot check (spec §3.23).
-    if (!BOOT.readOnly && !up.done && !u.available && !skillDue(u))
+    if (!BOOT.readOnly && !swapping && !u.available && !skillDue(u))
       body.push(h('p', null, h('button', { class: 'btn btn-sm', type: 'button', disabled: up.checking || up.busy, 'aria-busy': up.checking ? 'true' : null, onclick: updCheck },
         up.checking ? spinner() : icon('refresh'), up.checking ? t('upd.checking') : t('upd.check'))))
-    if (!BOOT.readOnly && !up.done && isLocal(u)) body.push(h('p', { class: 'muted small' }, t('upd.autoLocal')))
-    else if (!BOOT.readOnly && !up.done) {
+    if (!BOOT.readOnly && !swapping && isLocal(u)) body.push(h('p', { class: 'muted small' }, t('upd.autoLocal')))
+    else if (!BOOT.readOnly && !swapping) {
       const box = h('input', { type: 'checkbox', disabled: up.autoBusy || !u.method.canUpdate })
       box.checked = up.autoPlan ? up.autoPlan.auto : u.auto
       box.addEventListener('change', () => updAuto(box.checked))
@@ -4820,12 +4847,12 @@ const MAIN = String.raw`
     if (up.error) body.push(errorNote(up.error, null))
     const foot = [h('button', { class: 'btn', type: 'button', disabled: up.busy, onclick: () => dlg.el.close() }, t('btn.close'))]
     const primary = (label, run) => h('button', { class: 'btn btn-primary', type: 'button', disabled: up.busy, 'aria-busy': up.busy ? 'true' : null, onclick: run }, up.busy ? spinner() : null, up.busy ? t('upd.updating') : label)
-    if (u.available && isLocal(u) && vs.stuck) foot.push(h('button', { class: 'btn btn-primary', type: 'button', onclick: () => location.reload() }, icon('refresh'), t('loc.reload')))
+    if (up.unknown || (u.available && isLocal(u) && (vs.stuck || vs.unknown))) foot.push(h('button', { class: 'btn btn-primary', type: 'button', onclick: () => location.reload() }, icon('refresh'), t('loc.reload')))
     else if (u.available && isLocal(u) && (leavesLocal(u) || vs.busy))
       foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: vs.busy, 'aria-busy': vs.busy ? 'true' : null, onclick: () => localSwitchTo('npm') },
         vs.busy ? spinner() : icon('swap'), vs.busy ? t('loc.switching') : t('loc.toNpmV', { v: u.latest })))
-    else if (u.available && u.canRun && !BOOT.readOnly && !up.done) foot.push(primary(t('upd.now', { v: u.latest }), updRun))
-    else if (skillDue(u) && !BOOT.readOnly && !up.done) foot.push(primary(t('upd.skillNow'), updSkillRun))
+    else if (u.available && u.canRun && !BOOT.readOnly && !swapping) foot.push(primary(t('upd.now', { v: u.latest }), updRun))
+    else if (skillDue(u) && !BOOT.readOnly && !swapping) foot.push(primary(t('upd.skillNow'), updSkillRun))
     setKids(dlg.el, dialogFrame(t('upd.title'), null, body, foot))
   }
 

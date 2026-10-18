@@ -5,6 +5,7 @@ import { execFile, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { takeFileLock } from '../core/lock.ts'
 import { loginShellPath } from '../core/login-path.ts'
 import type { Paths } from '../core/paths.ts'
 import { buildId } from '../core/version.ts'
@@ -21,6 +22,7 @@ import {
 export const DETACHED_FLAG = 'serve-detached'
 const START_TIMEOUT_MS = 20_000
 const LOCK_STALE_MS = 30_000
+const LOCK_BEAT_MS = 5000
 const STOP_TIMEOUT_MS = 5000
 const LOG_MAX_BYTES = 1_000_000
 
@@ -135,30 +137,22 @@ async function stopOutdated(p: Paths, build: string): Promise<boolean> {
   return (await stopBackgroundPanel(p)).status === 'stopped'
 }
 
-/** Takes the start lock, waiting while another launch holds it; a lock older than 30 s is taken over. */
+/**
+ * Takes the start lock, waiting while another launch holds it. Its holder touches it every 5 s; a lock whose pid is gone
+ * or that nobody touched for 30 s is taken over, and after waiting START_TIMEOUT_MS this launch takes it regardless.
+ */
 async function withStartLock<T>(p: Paths, fn: () => Promise<T>): Promise<T> {
   const lock = lockPath(p)
-  const deadline = Date.now() + START_TIMEOUT_MS
-  for (;;) {
-    try {
-      const fh = await open(lock, 'wx', 0o600)
-      await fh.writeFile(String(process.pid))
-      await fh.close()
-      break
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
-      const age = await stat(lock).then(
-        (s) => Date.now() - s.mtimeMs,
-        () => 0,
-      )
-      if (age > LOCK_STALE_MS || Date.now() > deadline) await rm(lock, { force: true })
-      else await sleep(200)
-    }
+  const opts = { staleMs: LOCK_STALE_MS, beatMs: LOCK_BEAT_MS }
+  let release = await takeFileLock(lock, { ...opts, wait: { timeoutMs: START_TIMEOUT_MS, pollMs: 200 } })
+  while (!release) {
+    await rm(lock, { force: true })
+    release = await takeFileLock(lock, opts)
   }
   try {
     return await fn()
   } finally {
-    await rm(lock, { force: true })
+    await release()
   }
 }
 

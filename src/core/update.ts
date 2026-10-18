@@ -2,15 +2,18 @@
 // only network request sideby makes on its own: one GET for the `latest` dist-tag, carrying nothing about the user.
 // Everything it learns goes to one state file shared by the CLI and every Panel.
 import { spawn } from 'node:child_process'
-import { readFileSync } from 'node:fs'
-import { access, constants, mkdir, open, readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
+import { access, constants, mkdir, readdir, readFile, realpath, rm } from 'node:fs/promises'
 import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Env } from '../types.ts'
+import { afterInstall, runSkillUpdate } from './after-install.ts'
 import { writeFileAtomic } from './fs-safe.ts'
+import { processAlive, takeFileLock } from './lock.ts'
 import type { Paths } from './paths.ts'
 import { installedSkills, SKILL_UPDATE, SKILL_UPDATE_SHOWN, skillOwnerRepo } from './skill-check.ts'
 import { localBuild, packageVersion, parseLocalBuild } from './version.ts'
+
+export { isZombieStat } from './lock.ts'
 
 export const DEFAULT_REGISTRY = 'https://registry.npmjs.org'
 export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
@@ -70,11 +73,6 @@ export interface InstallMethod {
   reasonAt?: string
   /** npm only: the prefix whose `lib/node_modules` holds sideby. */
   prefix?: string
-}
-
-/** Whether a Linux `/proc/<pid>/stat` line is of a zombie: the state after the parenthesised command name is `Z`. */
-export function isZombieStat(stat: string): boolean {
-  return /\)\s+Z\s/.test(stat.slice(stat.lastIndexOf(')')))
 }
 
 /** Swapped in tests through `bindUpdateDeps`; the real machine otherwise. */
@@ -142,20 +140,7 @@ const realDeps: UpdateDeps = {
       () => true,
       () => false,
     ),
-  alive(pid) {
-    try {
-      process.kill(pid, 0)
-    } catch (err) {
-      return (err as NodeJS.ErrnoException).code === 'EPERM'
-    }
-    // An exited process nobody waited for (its parent went first) still answers signal 0 on Linux: a zombie holds
-    // no lock and runs no session.
-    try {
-      return !isZombieStat(readFileSync(`/proc/${pid}/stat`, 'utf8'))
-    } catch {
-      return true // no /proc (macOS): signal 0 is the answer
-    }
-  },
+  alive: processAlive,
   exec: (file, args, opts) =>
     new Promise((resolve) => {
       let output = ''
@@ -246,16 +231,8 @@ const deps = (): UpdateDeps => ({ ...realDeps, ...override })
 
 /** Runs a program through the swappable machine (tests bind `exec`); a Local Build switch installs with it. */
 export const runProgram: UpdateDeps['exec'] = (file, args, opts) => deps().exec(file, args, opts)
-/** Starts the background Panel again from the code `sideby` now names; see `UpdateDeps.restartPanel`. */
-export const restartPanelByName = (env: Env, port: number): Promise<boolean> =>
-  deps()
-    .restartPanel(env, port)
-    .catch(() => false)
-/** Starts a program detached through the swappable machine; see `UpdateDeps.startDetached`. */
-export const startDetached = (file: string, args: readonly string[], env: Env): Promise<boolean> =>
-  deps()
-    .startDetached(file, args, env)
-    .catch(() => false)
+/** The machine in use: the real one, or the parts tests bound. Internal, for after-install.ts and local-build.ts. */
+export const updateMachine = (): UpdateDeps => deps()
 /** The lock every install shares (`update-install.lock`), so a Local Build switch never races an Update. */
 export const takeInstallLock = (paths: Paths) => takeLock(paths, 'update-install.lock').catch(() => null)
 
@@ -488,38 +465,29 @@ export async function refreshUpdateCheck(paths: Paths, env: Env): Promise<Update
 const LOCK_MAX_MS = 60 * 60 * 1000
 /** A lock file another process has just created and not yet written to. */
 const LOCK_WRITE_GRACE_MS = 60 * 1000
+/** How often a holder touches its lock, and how long a lock nobody touched counts as held. */
+const LOCK_BEAT_MS = 15 * 1000
+const LOCK_STALE_MS = 2 * 60 * 1000
 
 /**
- * An exclusive lock file in the state directory holding `<pid> <ms since epoch>`. It is held while that pid runs and
- * the lock is under an hour old, however long an install takes on a slow mirror; an empty or unreadable lock is held
- * for a minute (its owner may still be writing it). Null when held: the second caller fails at once instead of
- * waiting. Release removes the file only while it still names this process.
+ * An exclusive lock file in the state directory holding `<pid> <ms since epoch>`. It is held while that pid runs, the
+ * lock is under an hour old and its holder still touches it (every 15 s), however long an install takes on a slow
+ * mirror. A lock not touched for two minutes is free even when its pid runs: a Portal's worker thread that was ended
+ * mid-install leaves it behind in a process that lives on. An empty or unreadable lock is held for a minute (its owner
+ * may still be writing it). Null when held: the second caller fails at once instead of waiting. Release removes the
+ * file only while it still names this process.
  */
 async function takeLock(paths: Paths, name: string): Promise<(() => Promise<void>) | null> {
-  const file = join(paths.stateDir, name)
   const d = deps()
-  const me = `${process.pid} ${d.now().getTime()}`
   await mkdir(paths.stateDir, { recursive: true, mode: 0o700 })
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const fh = await open(file, 'wx', 0o600)
-      await fh.writeFile(me)
-      await fh.close()
-      return async () => {
-        if ((await readFile(file, 'utf8').catch(() => '')) === me) await rm(file, { force: true })
-      }
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') return null
-      const text = await readFile(file, 'utf8').catch(() => '')
-      const m = /^(\d+) (\d+)$/.exec(text)
-      const held = m
-        ? d.alive(Number(m[1])) && d.now().getTime() - Number(m[2]) < LOCK_MAX_MS
-        : d.now().getTime() - ((await stat(file).catch(() => null))?.mtimeMs ?? 0) < LOCK_WRITE_GRACE_MS
-      if (held) return null
-      await rm(file, { force: true })
-    }
-  }
-  return null
+  return takeFileLock(join(paths.stateDir, name), {
+    alive: d.alive,
+    now: () => d.now().getTime(),
+    maxMs: LOCK_MAX_MS,
+    staleMs: LOCK_STALE_MS,
+    beatMs: LOCK_BEAT_MS,
+    writeGraceMs: LOCK_WRITE_GRACE_MS,
+  }).catch(() => null)
 }
 
 // ---- the notice
@@ -930,20 +898,25 @@ export async function planUpdate(paths: Paths, env: Env): Promise<UpdatePlan> {
   return skill ? { ...plan, skill } : plan
 }
 
+/**
+ * The plan of `sideby update --skill`: the installed skill toward this version, never the CLI. Asks no registry: what
+ * it says of a newer CLI comes from the last Update Check.
+ */
+export async function planSkillUpdate(paths: Paths, env: Env): Promise<UpdatePlan> {
+  const current = packageVersion()
+  const cache = await readUpdateCache(paths).catch((): UpdateCache => ({}))
+  const plan = planFrom(await installMethod(env), current, cache.latest ?? current, env)
+  const skill = await skillUpdatePlan(paths.home, current).catch(() => null)
+  return skill ? { ...plan, skill } : plan
+}
+
 /** Updates the installed sideby skill when the plan says it is outdated and sideby may; null when it did nothing. */
 export async function applySkillUpdate(
   plan: SkillUpdatePlan | undefined,
   env: Env,
   onOutput?: (text: string) => void,
 ): Promise<{ ok: boolean; message: string } | null> {
-  if (!plan?.outdated || !plan.canRun) return null
-  const [file, ...args] = SKILL_UPDATE
-  const r = await deps()
-    .exec(file, args, { env, ...(onOutput ? { onOutput } : {}) })
-    .catch((e: unknown) => ({ code: 1, output: e instanceof Error ? e.message : String(e) }))
-  return r.code === 0
-    ? { ok: true, message: 'updated the sideby skill' }
-    : { ok: false, message: `\`${plan.command}\` failed (exit ${r.code}); run it yourself to see why` }
+  return runSkillUpdate(deps(), plan, env, onOutput)
 }
 
 /**
@@ -988,20 +961,28 @@ export interface UpdateResult {
   /** The installed sideby skill was updated too (true), or that failed (false); absent when it was not tried. */
   skillUpdated?: boolean
   skillMessage?: string
+  /** With `skillSync: 'background'`: the `sideby update --skill --yes` that updates the skill started on its own. */
+  skillSyncStarted?: boolean
 }
 
 /**
- * Runs the Update the plan names, then starts a running background Panel again from the new code and, when the
- * desktop app is installed, runs `sideby app install` again from the new code. The caller has
- * shown the plan and got a confirmation (or this is an Auto Update). One Update runs at a time on this machine (the
- * CLI, a Panel and an Auto Update share the lock). `panelPort` gives the port of the background Panel to restart, or
- * null when none runs. A successful Update is recorded as said, so no notice for it follows.
+ * Runs the Update the plan names, then what follows an install (after-install.ts): the desktop app and the login item
+ * are written again from the new code where installed, the skill follows, and a running background Panel starts again
+ * from the new code, last. The caller has shown the plan and got a confirmation (or this is an Auto Update). One
+ * Update runs at a time on this machine (the CLI, a Panel and an Auto Update share the lock). `panelPort` gives the
+ * port of the background Panel to restart, or null when none runs. A successful Update is recorded as said, so no
+ * notice for it follows.
  */
 export async function applyUpdate(
   paths: Paths,
   plan: UpdatePlan,
   env: Env,
-  opts: { onOutput?: (text: string) => void; panelPort?: () => Promise<number | null> } = {},
+  opts: {
+    onOutput?: (text: string) => void
+    panelPort?: () => Promise<number | null>
+    /** `background` (the Panel): the new code updates the skill on its own; see `AfterInstallOptions.skillSync`. */
+    skillSync?: 'wait' | 'background'
+  } = {},
 ): Promise<UpdateResult> {
   const cmd = updateCommand(plan.method, plan.latest, env)
   const fail = (message: string, extra: Partial<UpdateResult> = {}): UpdateResult => ({
@@ -1021,6 +1002,12 @@ export async function applyUpdate(
     return fail('another sideby update is running; wait for it to finish, then run `sideby update` again', {
       busy: true,
     })
+  let released = false
+  const free = async () => {
+    if (released) return
+    released = true
+    await release().catch(() => {})
+  }
   try {
     const d = deps()
     const r = await d.exec(cmd.run.file, cmd.run.args, {
@@ -1037,29 +1024,25 @@ export async function applyUpdate(
     await updateUpdateCache(paths, {
       notified: { version: plan.latest, at: d.now().toISOString() },
     }).catch(() => {})
-    const port = opts.panelPort ? await opts.panelPort().catch(() => null) : null
-    const restarted = port !== null && (await d.restartPanel(env, port).catch(() => false))
-    // The desktop app records the Node and entry it starts and carries the icon of the version that wrote it, so
-    // the new code writes it again. Only where one is installed; a failure here never fails the Update.
-    const installed = await d.appInstalled(paths.home, env).catch(() => false)
-    const refreshed = installed && (await d.refreshApp(env).catch(() => false))
-    // The login item records the Node and entry it starts, like the app (ADR-0029); never created here.
-    const autostart = await d.autostartInstalled(paths.home).catch(() => false)
-    const refreshedAutostart = autostart ? await d.refreshAutostart(env).catch(() => false) : undefined
     // The skill teaches agents this version's commands, so it follows the CLI; a failure there keeps the Update.
-    const skill = await applySkillUpdate(plan.skill, env, opts.onOutput)
+    const after = await afterInstall(d, env, {
+      home: paths.home,
+      release: free,
+      app: true,
+      skill: { plan: plan.skill },
+      ...(opts.skillSync ? { skillSync: opts.skillSync } : {}),
+      ...(opts.panelPort ? { panelPort: opts.panelPort } : {}),
+      ...(opts.onOutput ? { onOutput: opts.onOutput } : {}),
+    })
     return {
       ok: true,
       code: 0,
       output: r.output,
       message: `updated sideby from ${plan.current} to ${plan.latest}`,
-      restartedPanel: restarted,
-      refreshedApp: refreshed,
-      ...(refreshedAutostart !== undefined ? { refreshedAutostart } : {}),
-      ...(skill ? { skillUpdated: skill.ok, skillMessage: skill.message } : {}),
+      ...after,
     }
   } finally {
-    await release().catch(() => {})
+    await free()
   }
 }
 

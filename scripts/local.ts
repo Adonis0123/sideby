@@ -89,7 +89,7 @@ export async function localOff(d: LocalDirs): Promise<void> {
   console.log(`${r.message[0]?.toUpperCase()}${r.message.slice(1)}.`)
   await restartPanel(['sideby'])
   await refreshLoginItem(join(globalPkg(d), BIN))
-  // switchLocal ran `sideby update --yes` of the npm code, which brings the skill to its version (spec §3.23).
+  // switchLocal ran `sideby update --skill --yes` of the npm code, which brings the skill to its version (spec §3.23).
   if (r.skillSynced === false)
     console.log('The sideby skill was not brought along; run `sideby update` to see why.')
 }

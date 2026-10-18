@@ -1155,7 +1155,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const plan = await update.planUpdate(rt.paths, rt.env)
         const shown = update.shownPlan(plan)
         if (!optBool(body, 'confirm')) return { ...shown, updated: false }
-        // The CLI is current and the skill is behind: `skill: true` updates it alone, as `sideby update --yes` does.
+        // The CLI is current and the skill is behind: `skill: true` updates it alone, as `sideby update --skill --yes` does.
         if (optBool(body, 'skill')) {
           if (plan.available || plan.method.kind === 'local')
             return { ...shown, updated: false, changed: true }
@@ -1170,6 +1170,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const { backgroundPanelPort } = await import('./background.ts')
         const r = await update.applyUpdate(rt.paths, plan, rt.env, {
           panelPort: () => backgroundPanelPort(rt.paths),
+          skillSync: 'background',
         })
         if (!r.ok) throw new UserError(r.message)
         return {
@@ -1179,6 +1180,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           restartedPanel: r.restartedPanel,
           refreshedApp: r.refreshedApp,
           ...(r.skillUpdated === undefined ? {} : { skillUpdated: r.skillUpdated }),
+          ...(r.skillSyncStarted === undefined ? {} : { skillSyncStarted: r.skillSyncStarted }),
         }
       },
     },

@@ -53,6 +53,7 @@
 | `sideby key <acct> [--var <NAME>]` | 把 API 密钥输入到这个账号的 `proxy.env`，屏幕上不显示（变量默认是宿主的密钥变量）；其他行原样保留，权限 600。用于 API 账号和 pi | 0；不是 API 账号、不是在终端里输入、写不了为 1 |
 | `sideby try <acct> [--yes]` | 试一下账号能不能用：宿主发一次很短的请求（花几个 token），sideby 告诉你它有没有回答 | 只说明了要运行什么为 10；宿主回答了为 0；失败或这个宿主不支持试一下为 1 |
 | `sideby update [--yes]` | 向 npm registry 查 sideby 最新版本，显示安装它的命令；带 `--yes` 就执行，并重启后台面板（见[更新](configuration.zh-CN.md#更新)） | 0 已是最新或已更新；只显示了命令为 10；这种安装方式不能自己更新（会打印要运行的命令）、连不上 registry 或安装失败为 1 |
+| `sideby update --skill [--yes]` | 只把 agent 读的 sideby skill 更新到当前 sideby 的版本；不安装 sideby 本身，即使有新版本 | 0 已更新、已是最新，或因 skill 归某个 git 仓库管而不动它（会打印要运行的命令）；只显示了命令为 10；skill 更新失败为 1 |
 
 - 所有命令遇到用法错误（未知选项、缺参数）时退出码为 2；sideby 自身出错（账号不存在、名字不合法、配置读不了）时为 1。
 - `<acct>` 写成 `<family>:<name>`；名字在所有家族里唯一时，只写 `<name>` 也行。有歧义就报错，并列出候选。

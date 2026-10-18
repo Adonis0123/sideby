@@ -456,7 +456,7 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       skillSynced: Type.Optional(
         Type.Boolean({
           description:
-            'Back on npm, `sideby update --yes` brought the sideby skill to that version (true) or failed (false).',
+            'Back on npm, `sideby update --skill --yes` brought the sideby skill to that version (true) or failed (false).',
         }),
       ),
     },

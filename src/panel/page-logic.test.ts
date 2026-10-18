@@ -14,6 +14,7 @@ import {
   autostartNote,
   cacheHitRate,
   canLeaveLocal,
+  codeSwapOutcome,
   fileSize,
   fixPrompt,
   formatDuration,
@@ -43,6 +44,7 @@ import {
   remoteControlTodo,
   reorder,
   rowBadge,
+  runCodeSwap,
   sortAccounts,
   stripSecrets,
   suggestAlias,
@@ -490,6 +492,101 @@ describe('switchFailure', () => {
     assert.equal(switchFailure({ status: 502 }), 'check')
     assert.equal(switchFailure({ status: 400 }), 'fail')
     assert.equal(switchFailure({}), 'fail')
+  })
+})
+
+describe('runCodeSwap', () => {
+  // A fake clock: `pause` and a slow `send` move it; `states` answers each read in turn (the last one repeats).
+  const run = async (o: {
+    sendMs?: number
+    send?: 'ok' | 'network' | 502 | 400
+    states?: (boolean | null)[]
+    newBuildAt?: number
+  }) => {
+    let t = 0
+    const seen: string[] = []
+    let reads = 0
+    const states = o.states ?? [null]
+    let last: boolean | null = null
+    await runCodeSwap({
+      send: async () => {
+        t += o.sendMs ?? 0
+        if (o.send === 'network') throw { network: true, status: 0 }
+        if (o.send === 502 || o.send === 400) throw { status: o.send }
+        return { updated: true }
+      },
+      readState: async () => {
+        last = states[Math.min(reads++, states.length - 1)] ?? null
+        return last !== null
+      },
+      landed: () => last,
+      newBuild: () => o.newBuildAt !== undefined && t >= o.newBuildAt,
+      reload: () => seen.push('reload'),
+      now: () => t,
+      pause: async (ms) => {
+        t += ms
+      },
+      windowMs: 20000,
+      pollMs: 1500,
+      confirming: () => seen.push('confirming'),
+      done: () => (seen.push('done'), true),
+      stuck: () => seen.push('stuck'),
+      fail: () => seen.push('fail'),
+      unknown: () => seen.push('unknown'),
+    })
+    return { seen, t, reads }
+  }
+
+  it('starts the wait after a slow install, so a 5xx that landed is confirmed, not failed', async () => {
+    const r = await run({ sendMs: 30000, send: 502, states: [false, false, true] })
+    assert.deepEqual(r.seen.slice(0, 2), ['confirming', 'done'])
+    assert.equal(r.reads >= 3, true)
+  })
+  it('waits the whole window for the new build after a slow successful answer', async () => {
+    const r = await run({ sendMs: 30000, send: 'ok', newBuildAt: 40000 })
+    assert.deepEqual(r.seen, ['done', 'reload'])
+  })
+  it('says stuck only after a full window without a new build', async () => {
+    const r = await run({ sendMs: 30000, send: 'ok' })
+    assert.deepEqual(r.seen, ['done', 'stuck'])
+    assert.equal(r.t > 50000, true)
+  })
+  it('fails when the state still shows the old code at the end, and cannot confirm when it never answers', async () => {
+    assert.deepEqual((await run({ send: 502, states: [false] })).seen, ['confirming', 'fail'])
+    assert.deepEqual((await run({ send: 'network', states: [null] })).seen, ['confirming', 'unknown'])
+  })
+  it('fails at once on what the server refused, and reloads as soon as a new build answers', async () => {
+    assert.deepEqual((await run({ send: 400 })).seen, ['fail'])
+    assert.deepEqual((await run({ send: 'network', newBuildAt: 0 })).seen, ['confirming', 'reload'])
+  })
+})
+
+describe('codeSwapOutcome', () => {
+  const at = (failure: 'wait' | 'check' | 'fail' | null, landed: boolean | null, waitedOut: boolean) =>
+    codeSwapOutcome({ failure, landed, waitedOut })
+  it('trusts an answer, and a refusal', () => {
+    assert.equal(at(null, null, false), 'done')
+    assert.equal(at(null, false, true), 'done')
+    assert.equal(at('fail', true, false), 'failed')
+    assert.equal(at('fail', null, true), 'failed')
+  })
+  it('after a cut answer claims success only once the state shows the change', () => {
+    for (const f of ['wait', 'check'] as const) {
+      assert.equal(at(f, true, false), 'done')
+      assert.equal(at(f, true, true), 'done')
+    }
+  })
+  it('keeps reading while the wait lasts, whether the state is unreadable or not there yet', () => {
+    for (const f of ['wait', 'check'] as const) {
+      assert.equal(at(f, null, false), 'waiting')
+      assert.equal(at(f, false, false), 'waiting')
+    }
+  })
+  it('after the wait fails when the state shows no change and says so plainly when it cannot be read', () => {
+    for (const f of ['wait', 'check'] as const) {
+      assert.equal(at(f, false, true), 'failed')
+      assert.equal(at(f, null, true), 'unknown')
+    }
   })
 })
 

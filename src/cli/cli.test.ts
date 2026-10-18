@@ -1908,6 +1908,40 @@ describe('sideby update (spec §3.23)', () => {
     })
   })
 
+  it('--skill updates only the installed skill, even with a newer sideby out, and asks no registry', async () => {
+    await withFakeHome(async (h) => {
+      // Checked just now, so no Update Check starts: the last check knows of a newer sideby.
+      const now = new Date().toISOString()
+      await h.write(
+        '.local/state/sideby/update.json',
+        JSON.stringify({ checkedAt: now, triedAt: now, latest: '99.0.0' }),
+      )
+      await h.write('.agents/skills/sideby/SKILL.md', '---\nname: sideby\nmetadata:\n  version: 0.0.1\n---\n')
+      await fakeHost(h, 'npx')
+      await fakeHost(h, 'npm')
+      // A registry that cannot be reached: --skill never asks it.
+      const env = { SIDEBY_UPDATE_REGISTRY: 'http://127.0.0.1:9' }
+      const preview = await sideby(h, ['update', '--skill', '--json'], env)
+      assert.equal(preview.code, 10, preview.err)
+      assert.equal(checkSchema('update', preview.out).updated, false)
+      assert.deepEqual(await readHostLog(h, 'npx'), [])
+      const r = await sideby(h, ['update', '--skill', '--yes', '--json'], env)
+      assert.equal(r.code, 0, r.err)
+      const data = checkSchema('update', r.out)
+      assert.deepEqual(
+        [data.available, data.latest, data.updated, data.skillUpdated],
+        [true, '99.0.0', false, true],
+      )
+      assert.deepEqual(
+        (await readHostLog(h, 'npx')).map((x) => x.argv),
+        [['-y', 'skills', 'update', 'sideby', '-g', '-y']],
+      )
+      assert.deepEqual(await readHostLog(h, 'npm'), [], 'the CLI is never installed')
+      const text = await sideby(h, ['update', '--skill', '--yes'], env)
+      assert.match(text.out, /99\.0\.0 is available; updating sideby itself is separate: `sideby update`/)
+    })
+  })
+
   it('reports a registry it cannot reach as an error with what to do', async () => {
     await withFakeHome(async (h) => {
       const r = await sideby(h, ['update', '--json'], { SIDEBY_UPDATE_REGISTRY: 'http://127.0.0.1:9' })

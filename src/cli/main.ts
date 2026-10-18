@@ -27,6 +27,7 @@ Usage:
   sideby order --reset               restore default order, keeping pins
   sideby quota check <family> on|off  turn quota fetching on or off
   sideby update --auto on|off         set Auto Update without running an update
+  sideby update --skill [--yes]       update only the installed sideby skill to this version
   sideby families [family]            what each host's accounts share with the main account,
                                       where they live and how they sign in
   sideby alias add <short> <account> [-- args]
@@ -321,7 +322,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   'shell-init': { flags: ['write'] },
   plugins: { flags: ['json'] },
   families: { flags: ['json'] },
-  update: { flags: ['json', 'yes'], valued: ['auto'] },
+  update: { flags: ['json', 'yes', 'skill'], valued: ['auto'] },
   local: { flags: ['json', 'yes'] },
   'update-check': { flags: [] },
 }

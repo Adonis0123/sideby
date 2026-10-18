@@ -6,16 +6,10 @@ import { lstat, mkdir, readFile, readlink, realpath, rename, rm, symlink } from 
 import { homedir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import type { Env } from '../types.ts'
+import { afterInstall } from './after-install.ts'
 import { type AutostartContext, refreshAutostart } from './autostart.ts'
 import type { Paths } from './paths.ts'
-import {
-  compareVersions,
-  fetchLatest,
-  restartPanelByName,
-  runProgram,
-  startDetached,
-  takeInstallLock,
-} from './update.ts'
+import { compareVersions, fetchLatest, runProgram, takeInstallLock, updateMachine } from './update.ts'
 import { type LocalBuild, parseLocalBuild } from './version.ts'
 
 const BIN = 'dist/src/cli/main.js'
@@ -174,11 +168,11 @@ export interface SwitchResult {
   unchanged?: boolean
   restartedPanel: boolean
   /**
-   * Back on npm, `sideby update --yes` of the npm code brought the skill agents read to its version (true), or that
-   * failed (false); absent for a switch to the Local Build, which has no skill of its own to bring.
+   * Back on npm, `sideby update --skill --yes` of the npm code brought the skill agents read to its version (true), or
+   * that failed (false); absent for a switch to the Local Build, which has no skill of its own to bring.
    */
   skillSynced?: boolean
-  /** With `skillSync: 'background'`: that `sideby update --yes` started on its own and is not waited for. */
+  /** With `skillSync: 'background'`: that `sideby update --skill --yes` started on its own and is not waited for. */
   skillSyncStarted?: boolean
   /** Another install held the lock; nothing ran. */
   busy?: boolean
@@ -207,8 +201,9 @@ async function refreshLoginItem(
 
 /**
  * Puts `to` behind the global `sideby`. `local` links the newest Local Build; `npm` restores the kept package or
- * installs `latest` (a failed install links the Local Build back, so `sideby` never goes missing). Afterwards a
- * background Panel on `panelPort` starts again from the new code. One install at a time (the Update lock).
+ * installs `latest` (a failed install links the Local Build back, so `sideby` never goes missing). Afterwards
+ * (after-install.ts) an existing login item follows, back on npm the skill does, and a background Panel on `panelPort`
+ * starts again from the new code, last. One install at a time (the Update lock).
  */
 export async function switchLocal(
   paths: Paths,
@@ -251,6 +246,12 @@ export async function switchLocal(
   const release = await takeInstallLock(paths)
   if (!release)
     return fail('a sideby update is running; wait for it to finish, then switch again', { busy: true })
+  let released = false
+  const free = async () => {
+    if (released) return
+    released = true
+    await release().catch(() => {})
+  }
   let message: string
   try {
     if (to === 'local') {
@@ -278,29 +279,28 @@ export async function switchLocal(
         message = `the global sideby runs the npm package ${want}`
       }
     }
-  } finally {
-    await release().catch(() => {})
-  }
-  // The login item records the sideby it starts, like `sideby update` keeps it pointing at the one in use.
-  const refreshed = await refreshLoginItem(paths, d, opts.autostart)
-  const login = refreshed === undefined ? {} : { refreshedAutostart: refreshed }
-  const port = opts.panelPort ? await opts.panelPort().catch(() => null) : null
-  const restartedPanel = port !== null && (await restartPanelByName(env, port))
-  if (to === 'local') return { ok: true, message, running: to, restartedPanel, ...login }
-  // The skill is part of the version (spec §3.23): the npm code updates it as `sideby update --yes` does for anyone,
-  // by name so the new code runs, after the lock above is free. A failure keeps the switch.
-  if (opts.skillSync === 'background')
+    // The login item records the sideby it starts, like `sideby update` keeps it pointing at the one in use. Back on
+    // npm the skill is part of the version (spec §3.23): the npm code updates it alone, by name so the new code runs,
+    // after the lock is free. A failure there keeps the switch.
+    const after = await afterInstall(updateMachine(), env, {
+      home: paths.home,
+      release: free,
+      autostart: () => refreshLoginItem(paths, d, opts.autostart),
+      ...(to === 'npm' ? { skill: 'by-name' as const } : {}),
+      ...(opts.skillSync ? { skillSync: opts.skillSync } : {}),
+      ...(opts.panelPort ? { panelPort: opts.panelPort } : {}),
+      ...(opts.onOutput ? { onOutput: opts.onOutput } : {}),
+    })
     return {
       ok: true,
       message,
       running: to,
-      restartedPanel,
-      ...login,
-      skillSyncStarted: await startDetached('sideby', ['update', '--yes'], env),
+      restartedPanel: after.restartedPanel,
+      ...(after.refreshedAutostart === undefined ? {} : { refreshedAutostart: after.refreshedAutostart }),
+      ...(after.skillSynced === undefined ? {} : { skillSynced: after.skillSynced }),
+      ...(after.skillSyncStarted === undefined ? {} : { skillSyncStarted: after.skillSyncStarted }),
     }
-  const u = await runProgram('sideby', ['update', '--yes'], {
-    env,
-    ...(opts.onOutput ? { onOutput: opts.onOutput } : {}),
-  }).catch(() => ({ code: 1, output: '' }))
-  return { ok: true, message, running: to, restartedPanel, ...login, skillSynced: u.code === 0 }
+  } finally {
+    await free()
+  }
 }

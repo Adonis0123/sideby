@@ -1448,11 +1448,70 @@ export async function cmdUi(a: ParsedArgs, io: Io): Promise<number> {
 }
 
 /**
+ * `sideby update --skill [--yes] [--json]` (spec §3.23): only the installed sideby skill, toward this version. It
+ * never installs the CLI, also when a newer one exists (it says that update is separate), and asks no registry. The
+ * new code runs it after an install, so a registry that moved meanwhile never installs a version nobody confirmed.
+ */
+async function cmdUpdateSkill(a: ParsedArgs, io: Io): Promise<number> {
+  if (a.positionals.length || a.rest.length)
+    throw new UsageError('usage: sideby update --skill [--yes] [--json]')
+  const u = await import('../core/update.ts')
+  const { SKILL_INSTALL } = await import('../core/skill-check.ts')
+  const paths = resolvePaths(process.env)
+  const asJson = a.flags.has('json')
+  const plan = await u.planSkillUpdate(paths, process.env)
+  const shown = u.shownPlan(plan)
+  const sk = plan.skill
+  // The skills tool fetches the newest skill, so a newer CLI should follow; that stays the user's own step.
+  const cliLine = () => {
+    if (plan.available)
+      io.out(
+        c.cyan(`sideby ${plan.latest} is available; updating sideby itself is separate: \`sideby update\`.`),
+      )
+  }
+  if (!sk?.outdated || !sk.canRun) {
+    if (asJson) json(io, { ...shown, updated: false })
+    else {
+      if (!sk) io.out(`No sideby skill is installed. To install it: ${SKILL_INSTALL}`)
+      else if (!sk.outdated) io.out(`${c.green('✓')} The sideby skill is already for sideby ${plan.current}.`)
+      else io.out(c.yellow(`The sideby skill is not updated by sideby: ${sk.reason}.\n  ${sk.command}`))
+      cliLine()
+    }
+    return 0
+  }
+  if (!a.flags.has('yes')) {
+    if (asJson) json(io, { ...shown, updated: false })
+    else {
+      const from = sk.installed.map((v) => v ?? 'no version').join(', ')
+      io.out(`Updating the sideby skill (for ${from}) to sideby ${plan.current} runs:\n  ${sk.command}`)
+      cliLine()
+      io.out(c.cyan('\nRun it with `sideby update --skill --yes`.'))
+    }
+    return 10
+  }
+  if (!asJson) io.out(c.dim(`$ ${sk.command}`))
+  const r = await u.applySkillOnly(
+    paths,
+    sk,
+    process.env,
+    asJson ? undefined : (t) => process.stderr.write(t),
+  )
+  if (asJson) json(io, { ...shown, updated: false, skillUpdated: r?.ok ?? false, message: r?.message ?? '' })
+  else {
+    if (r?.ok) io.out(`${c.green('✓')} ${r.message}; agents load it in their next session.`)
+    else io.err(c.red(`✗ ${r?.message}`))
+    cliLine()
+  }
+  return r?.ok ? 0 : 1
+}
+
+/**
  * `sideby update [--yes] [--json]` (spec §3.23): asks the registry now, shows what an Update runs, and runs it with
- * `--yes` (exit 10 before). An install sideby cannot update gets the command to run and exit 1.
+ * `--yes` (exit 10 before). An install sideby cannot update gets the command to run and exit 1. `--skill` updates the
+ * skill alone (cmdUpdateSkill).
  */
 export async function cmdUpdate(a: ParsedArgs, io: Io): Promise<number> {
-  if (a.positionals.length) throw new UsageError('usage: sideby update [--yes] [--json]')
+  if (a.positionals.length) throw new UsageError('usage: sideby update [--skill] [--yes] [--json]')
   if (a.flags.has('auto')) {
     if (a.rest.length) throw new UsageError('usage: sideby update --auto on|off [--json]')
     const auto = onOff(a.flags.get('auto'), 'usage: sideby update --auto on|off [--json]')
@@ -1462,6 +1521,7 @@ export async function cmdUpdate(a: ParsedArgs, io: Io): Promise<number> {
     else io.out(`Auto Update ${auto ? 'on' : 'off'}${r.changed ? '.' : ' (unchanged).'}`)
     return 0
   }
+  if (a.flags.has('skill')) return cmdUpdateSkill(a, io)
   const u = await import('../core/update.ts')
   const { SKILL_INSTALL } = await import('../core/skill-check.ts')
   const { backgroundPanelPort } = await import('../panel/background.ts')

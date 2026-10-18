@@ -29,6 +29,7 @@ const en = {
   'upd.cannot': 'sideby cannot update itself here: {why}. Run this yourself:',
   'upd.skillToo': 'The sideby skill agents read is updated with it.',
   'upd.skillDone': 'The sideby skill was updated too; agents load it in their next session.',
+  'upd.skillSyncing': 'The sideby skill is updating in the background; agents load it in their next session.',
   'upd.skillManaged': 'sideby leaves the skill alone ({why}). Update it with:',
   'upd.checksOff': 'Update checks are off ({why}).',
   'upd.latest': 'This is the newest version',
@@ -51,6 +52,8 @@ const en = {
   'loc.stuck':
     'Switched, but this page still runs the old code. Reload it; a panel started with sideby ui needs a restart.',
   'loc.reload': 'Reload page',
+  'loc.unconfirmed':
+    'Could not confirm the switch: this page cannot reach sideby. Reload the page to see which build runs.',
   'upd.open': 'Update…',
   'upd.autoIsOn': 'Auto Update: on',
   'upd.autoIsOff': 'Auto Update: off',
@@ -70,6 +73,10 @@ const en = {
   'upd.now': 'Update to {v}',
   'upd.updating': 'Updating…',
   'upd.done': 'Updated to sideby {v}.',
+  'upd.confirming':
+    'The connection dropped while sideby {v} was installing; checking whether the update finished…',
+  'upd.unconfirmed':
+    'Could not confirm the update to sideby {v}: this page cannot reach sideby. Reload the page to see which version runs.',
   'upd.reloading': 'Waiting for the new version; this page reloads by itself.',
   'upd.restartHint':
     'This page still runs the old version. Restart sideby ui (or reload the page in your portal) to use the new one.',
@@ -1056,6 +1063,7 @@ const zh: Record<MessageKey, string> = {
   'upd.cannot': '这种安装方式下 sideby 不能自己更新：{why}。请自己运行：',
   'upd.skillToo': 'agent 读的 sideby skill 会一起更新。',
   'upd.skillDone': 'sideby skill 也已更新，agent 下次开会话时生效。',
+  'upd.skillSyncing': 'sideby skill 正在后台更新，agent 下次开会话时生效。',
   'upd.skillManaged': 'sideby 不会自动更新这个 skill（{why}）。请用这条命令更新：',
   'upd.checksOff': '检查更新已关闭（{why}）。',
   'upd.latest': '已是最新版本',
@@ -1076,6 +1084,7 @@ const zh: Record<MessageKey, string> = {
   'loc.switching': '正在切换…',
   'loc.stuck': '已经切换，但这个页面还在跑旧代码。刷新页面；用 sideby ui 打开的面板要重启一下。',
   'loc.reload': '刷新页面',
+  'loc.unconfirmed': '没能确认是否已经切换：这个页面连不上 sideby。刷新页面看看现在跑的是哪个版本。',
   'upd.open': '更新…',
   'upd.autoIsOn': '自动更新：开',
   'upd.autoIsOff': '自动更新：关',
@@ -1093,6 +1102,8 @@ const zh: Record<MessageKey, string> = {
   'upd.now': '更新到 {v}',
   'upd.updating': '更新中…',
   'upd.done': '已更新到 sideby {v}。',
+  'upd.confirming': '安装 sideby {v} 时连接断了，正在确认是否已经更新好…',
+  'upd.unconfirmed': '没能确认是否已更新到 sideby {v}：这个页面连不上 sideby。刷新页面看看现在是哪个版本。',
   'upd.reloading': '等待新版本启动，本页会自动刷新。',
   'upd.restartHint': '本页仍在运行旧版本。重启 sideby ui（在 Portal 里就刷新页面）后使用新版本。',
   'upd.skillLabel': '更新 skill',
