@@ -17,6 +17,7 @@ import {
   codeSwapOutcome,
   fileSize,
   fixPrompt,
+  foldSkips,
   formatDuration,
   handoffChangeOf,
   handoffHintAccount,
@@ -1745,5 +1746,19 @@ describe('layout bands in the page', () => {
     const css = /<style nonce="n">([\s\S]*?)<\/style>/.exec(html)![1]!
     assert.doesNotMatch(css, /max-width: \d+px\)/, 'no breakpoint media queries are left')
     assert.match(css, /:where\(:root\[data-width=narrow\], :root\[data-width=phone\]\) \{/)
+  })
+})
+
+describe('foldSkips', () => {
+  // A stand-in for Element.closest: matches when the click sits inside an element of one of the given classes or tags.
+  const at = (...inside: string[]) => ({
+    closest: (selector: string) => selector.split(', ').some((s) => inside.includes(s)) || null,
+  })
+  it('folds on a click on the row itself', () => {
+    assert.equal(foldSkips(at('.row')), false)
+  })
+  it('leaves the row alone for controls, tooltips and anything in the open details', () => {
+    for (const where of ['button', 'a', 'input', '.tip', '.row-detail'])
+      assert.equal(foldSkips(at(where)), true, where)
   })
 })

@@ -237,6 +237,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 /* The arrow at a row's start opens and closes its details; so does a click anywhere else in the row. */
 .row-toggle { width: 28px; height: 28px; margin: -4px -6px -4px -8px; }
 .fold-hit { cursor: pointer; }
+.fold-hit .row-detail { cursor: auto; }
 .fold-hit:hover .row-toggle { background: var(--hover); color: var(--text); }
 .row-toggle[aria-expanded=true] .chev { transform: rotate(90deg); }
 .row-toggle[aria-expanded=true]:not(:hover) { background: transparent; color: var(--muted); }

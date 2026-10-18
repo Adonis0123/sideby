@@ -1219,6 +1219,14 @@ export function handoffTaskFacts(
   return out
 }
 
+/**
+ * Whether a click on `target` inside a foldable row leaves the row as it is: a control, a tooltip, or anything in
+ * the open details, whose lines (a Same Login row's directories among them) are there to use, not to close the row.
+ */
+export function foldSkips(target: { closest(selector: string): unknown }): boolean {
+  return Boolean(target.closest('button, a, input, select, textarea, .tip, .row-detail'))
+}
+
 /** The Panel's layout bands, widest first; page-styles.ts hangs its narrow-screen rules on them. */
 export type WidthTier = 'wide' | 'medium' | 'narrow' | 'phone'
 

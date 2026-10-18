@@ -15,6 +15,7 @@ import {
   codeSwapOutcome,
   fileSize,
   fixPrompt,
+  foldSkips,
   formatDuration,
   handoffChangeOf,
   handoffHintAccount,
@@ -71,6 +72,7 @@ const LOGIC = [
   cacheHitRate,
   fileSize,
   fixPrompt,
+  foldSkips,
   formatDuration,
   handoffChangeOf,
   handoffHintAccount,
@@ -1458,7 +1460,7 @@ const MAIN = String.raw`
   function foldClick(a) { return foldHit(() => toggleRow(a)) }
   function foldHit(run) {
     return (e) => {
-      if (e.target.closest('button, a, input, select, textarea, .tip')) return
+      if (foldSkips(e.target)) return
       const dragged = downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 4
       if (dragged && window.getSelection && String(window.getSelection())) return
       run()
