@@ -23,7 +23,7 @@
         "scripts/shoot-panel.ts"
       ],
       "retake": "node scripts/shoot-panel.ts",
-      "checked": "bdaaade"
+      "checked": "9c7d593"
     },
     {
       "id": "demo-gif",
@@ -42,7 +42,7 @@
         "src/panel/page-styles.ts"
       ],
       "retake": "node scripts/record-demo.ts",
-      "checked": "7c64f14"
+      "checked": "9c7d593"
     },
     {
       "id": "banner",
