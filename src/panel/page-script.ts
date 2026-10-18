@@ -1157,9 +1157,14 @@ const MAIN = String.raw`
         h('div', { class: 'u-sub' }, rate === null ? tn('usage.sessions', u.sessions) : t('usage.cache', { n: Math.round(rate * 100) }))),
       u.totalTokens ? spark(u.daily) : null)
   }
-  function lastUsed(a) {
+  function lastUsed(a, cls = 'last') {
     const at = a.usage && a.usage.status === 'ok' && a.usage.lastActivityAt
-    return h('div', { class: 'last', title: at ? t('last.title', { at: clock(at) }) : t('last.unknown') }, at ? ago(at) : h('span', { class: 'faint' }, '—'))
+    return h('div', { class: cls, title: at ? t('last.title', { at: clock(at) }) : t('last.unknown') }, at ? ago(at) : h('span', { class: 'faint' }, '—'))
+  }
+  // The line under a row's name, with a copy of the last use at its end: the medium-width list shows that copy
+  // instead of the column (the styles show one of the two), so the time stays next to the account it belongs to.
+  function metaLine(line, a) {
+    return h('div', { class: 'ident-meta' }, line, lastUsed(a, 'last-inline'))
   }
   function healthChip(a) {
     const hs = healthOf(a.ref)
@@ -1532,7 +1537,7 @@ const MAIN = String.raw`
     const open = isOpen(a)
     const email = emailLine(a)
     return withMenu(h('div', { class: 'row fold-hit' + (open ? ' row-open' : '') + (a.error ? ' row-error' : ''), role: 'listitem', 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a), onclick: foldClick(a) },
-      h('div', { class: 'ident' }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a), email || subLine(a))),
+      h('div', { class: 'ident' }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a), metaLine(email || subLine(a), a))),
       quotaBlock(a, now, cols),
       lastUsed(a),
       h('div', { class: 'row-end' }, runButton(a), moreButton(a)),
@@ -1571,7 +1576,7 @@ const MAIN = String.raw`
     const open = isOpen(a)
     const email = emailLine(a)
     return withMenu(h('div', { class: 'row row-login fold-hit' + (open ? ' row-open' : '') + (a.error ? ' row-error' : ''), role: 'listitem', 'aria-label': t('login.label', { names: ms.map((m) => m.name).join(', ') }), 'data-ref': a.ref, 'data-key': loginKey(ms.map((m) => m.ref)), 'data-sig': sig(ms.map(rowSig)), onclick: foldClick(a) },
-      h('div', { class: 'ident' }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a, ms), email || subLine(a))),
+      h('div', { class: 'ident' }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a, ms), metaLine(email || subLine(a), newestOf(ms)))),
       quotaBlock(a, now, cols),
       lastUsed(newestOf(ms)),
       h('div', { class: 'row-end' }, runButton(a), loginMoreButton(ms)),

@@ -287,6 +287,9 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .plan { text-transform: capitalize; }
 .row > .quota { grid-area: quota; }
 .row > .last { grid-area: last; }
+.ident-meta { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.ident-meta > :first-child { min-width: 0; }
+.last-inline { display: none; }
 .row > .row-end { grid-area: more; display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 .row-run { width: 28px; height: 28px; color: var(--muted); }
 .row-run .ic { width: 15px; height: 15px; }
@@ -309,11 +312,12 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .quota { display: grid; grid-template-columns: repeat(var(--qn), minmax(0, 1fr)); column-gap: var(--col-gap); row-gap: 4px; min-width: 0; }
 .row > .quota { grid-template-columns: repeat(var(--qn), var(--q-w)); }
 .meter { min-width: 0; }
-.m-top { display: flex; align-items: baseline; gap: 6px; font-size: 12px; line-height: 1.35; white-space: nowrap; min-width: 0; }
+/* The countdown never ends in an ellipsis: where the line is too short it wraps to a line of its own, at the right. */
+.m-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; font-size: 12px; line-height: 1.35; white-space: nowrap; min-width: 0; }
 .m-label { color: var(--muted); font-weight: var(--strong-weight); }
 .m-pct { font-weight: var(--strong-weight); font-size: 13px; font-variant-numeric: tabular-nums; }
 .m-unit { color: var(--faint); font-weight: 400; font-size: 11.5px; }
-.m-reset { margin-left: auto; color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
+.m-reset { margin-left: auto; color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .m-passed { color: var(--muted); }
 .m-none { color: var(--faint); }
 .bar { height: 6px; border-radius: 999px; background: var(--track); overflow: hidden; margin-top: 5px; }
@@ -709,13 +713,18 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .col-head { display: none; }
   .app-row { flex-wrap: wrap; }
   .app-actions { width: 100%; justify-content: flex-start; }
-  .row { grid-template-columns: minmax(0, 1fr) auto var(--m-w); grid-template-areas: "id last more" "quota quota quota" "detail detail detail" "notes notes notes"; row-gap: 10px; }
+  /* No column titles here, so the last use sits right after the name and email, on the email's line, and the
+     menu stays on the name's line; the quota windows share the full width below. */
+  .row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "id more" "quota quota" "detail detail" "notes notes"; row-gap: 8px; }
   .row-detail { margin-left: 0; }
 
-  .row > .quota { grid-template-columns: repeat(var(--qn), minmax(0, 1fr)); max-width: 560px; }
+  .row > .quota { grid-template-columns: repeat(var(--qn), minmax(0, 1fr)); }
   .rows .m-label, .rows .m-unit, .rows .u-unit { display: inline; }
   .rows .usage { justify-content: flex-start; }
-  .row > .last { justify-self: end; }
+  .row > .last { display: none; }
+  .last-inline { display: flex; flex: none; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; margin-top: 1px; }
+  .last-inline::before { content: "·"; color: var(--faint); }
+  .row > .row-end { align-self: start; margin-top: -2px; }
 }
 @media (max-width: 760px) {
   .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -741,7 +750,11 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .tools { width: 100%; }
   .tools .tb-select { flex: 1 1 140px; min-width: 0; }
   .toolbar > .btn-primary { flex: 1; }
-  .row { padding: 10px 12px; }
+  /* A phone keeps the last use as a column of its own: the line under the name has no room for it. */
+  .row { padding: 10px 12px; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "id last more" "quota quota quota" "detail detail detail" "notes notes notes"; }
+  .row > .last { display: block; justify-self: end; }
+  .last-inline { display: none; }
+  .row > .row-end { align-self: center; margin-top: 0; }
   #accounts { --col-gap: 14px; }
   /* One window per line, so the reset time is never cut off. */
   .row > .quota { grid-template-columns: 1fr; row-gap: 10px; max-width: none; }
