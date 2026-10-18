@@ -4,6 +4,8 @@ import {
   aiTaskAccounts,
   aliasArgsOf,
   aliasIssue,
+  askBridge,
+  askBridged,
   askCopy,
   attentionReasons,
   attentionWhy,
@@ -51,6 +53,8 @@ import {
 
 const LOGIC = [
   aiTaskAccounts,
+  askBridge,
+  askBridged,
   askCopy,
   quotaAskable,
   stripSecrets,
@@ -3836,6 +3840,8 @@ const MAIN = String.raw`
   function openAsk(opts) {
     opts = opts || {}
     closeMenu()
+    // In a Portal that offers AI Tasks itself (createPanelHandler's ask bridge), the task goes to its dialog.
+    if (askBridge(BOOT, opts, window)) return
     ak = { task: opts.task || 'free', text: opts.text || '', context: opts.context || null, account: null, accountChanged: false, terminal: null, terminalChanged: false, pick: null, reason: null, terms: null, loading: true, busy: false, result: null, error: null, removed: false, files: [], els: {} }
     showDialog('ask')
     hookAskDrops()
@@ -4792,6 +4798,8 @@ const MAIN = String.raw`
   $('ver-top').addEventListener('click', () => openVerPop($('ver-top')))
   $('refresh').addEventListener('click', refreshAll)
   $('ask-ai').addEventListener('click', () => openAsk())
+  // In a Portal that offers AI Tasks itself the Portal has the button; opened on its own, the Panel keeps it.
+  $('ask-ai').hidden = askBridged(BOOT, window)
   $('accounts').addEventListener('dragover', onDragOver)
   $('accounts').addEventListener('drop', onDrop)
   // Escape leaves the arrange mode, as "Done" does, unless a menu or dialog takes it first.

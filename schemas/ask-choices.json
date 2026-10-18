@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/ask-choices.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "account",
+    "accounts",
+    "terminal",
+    "terminals",
+    "reason",
+    "detail"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "account": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The Account an AI Task would use now; null when none can be picked (see `reason`)."
+    },
+    "accounts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "ref",
+          "label",
+          "signedIn"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string",
+            "description": "What to show for it, as the Panel does."
+          },
+          "signedIn": {
+            "type": "boolean",
+            "description": "False for a Subscription Account that is signed out."
+          }
+        }
+      },
+      "description": "Signed-in Subscription Accounts, then API Accounts, then signed-out ones; each by ref."
+    },
+    "terminal": {
+      "type": "string",
+      "description": "The terminal a task opens: the preferred one, else the guess."
+    },
+    "terminals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "The supported terminals installed here."
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "no-accounts",
+            "none-signed-in",
+            "all-full"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "detail": {
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "What to do next, for a person."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby ask --choices --json"
+}

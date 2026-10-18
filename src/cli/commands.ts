@@ -1884,8 +1884,17 @@ export type AskArgs = ParsedArgs & { attach?: string[] }
 
 /** AI Task CLI; the terminal receives only an opaque task id. */
 export async function cmdAsk(a: AskArgs, io: Io, runtime?: Runtime): Promise<number> {
-  const { previewAttachments, promptForTask, readTask, startAiTask, taskEnv, taskHostArgs, taskStateDir } =
-    await import('../core/ask.ts')
+  const {
+    movedCwdError,
+    previewAttachments,
+    promptForTask,
+    readTask,
+    realCwdInHome,
+    startAiTask,
+    taskEnv,
+    taskHostArgs,
+    taskStateDir,
+  } = await import('../core/ask.ts')
   const run = a.flags.get('run')
   if (typeof run === 'string') {
     const stateDir = a.flags.get('state-dir')
@@ -1909,7 +1918,19 @@ export async function cmdAsk(a: AskArgs, io: Io, runtime?: Runtime): Promise<num
         : (runtime ?? (await createRuntime()))
     const cwd = process.cwd()
     try {
-      process.chdir(task.cwd)
+      try {
+        process.chdir(task.cwd)
+      } catch (err) {
+        if (task.cwdInHome) throw movedCwdError('does not exist')
+        throw err
+      }
+      // A Portal's folder is checked where the process now is, so a link swapped in after the task was written is
+      // caught, and the folder cannot change between the check and the Host start.
+      if (task.cwdInHome) {
+        const now = await realCwdInHome(process.cwd(), task.home ?? rt.paths.home)
+        if ('why' in now) throw movedCwdError(now.why)
+        if (now.real !== task.cwd) throw movedCwdError('points somewhere else')
+      }
       if (task.kind === 'prompt') return await runAccount(rt, task.account, await taskHostArgs(rt, task), io)
       const prepared = await rt.prepareLaunch(task.account, [], 'login')
       if (prepared.notice) io.err(prepared.notice)
@@ -1918,6 +1939,7 @@ export async function cmdAsk(a: AskArgs, io: Io, runtime?: Runtime): Promise<num
       process.chdir(cwd)
     }
   }
+  if (a.flags.has('spec') || a.flags.has('choices')) return cmdAskSpec(a, io, runtime)
   const rt = runtime ?? (await createRuntime())
   const task = String(a.flags.get('task') ?? 'free')
   if (!AI_TASK_KINDS.includes(task as AiTaskKind))
@@ -1947,6 +1969,65 @@ export async function cmdAsk(a: AskArgs, io: Io, runtime?: Runtime): Promise<num
   else io.out(result.prompt ?? preview.prompt)
   if (!result.opened) io.err(result.detail!)
   return result.opened ? 0 : 1
+}
+
+/**
+ * `sideby ask --spec - [--print]` and `sideby ask --choices` (ADR-0030): the AI Tasks a Portal starts. The Task Spec
+ * comes on stdin, never through a shell. A refused spec exits 1 with its `code` (and `reason`, as the Portal reads
+ * it), or 2 for a spec version this sideby does not know.
+ */
+async function cmdAskSpec(a: AskArgs, io: Io, runtime?: Runtime): Promise<number> {
+  const { previewTaskSpec, parseTaskSpec, readSpecText, SpecError, startTaskSpec, taskChoices } =
+    await import('../core/task-spec.ts')
+  const choices = a.flags.has('choices')
+  const allowed = choices ? ['choices', 'json'] : ['spec', 'print', 'json']
+  if (
+    a.positionals.length ||
+    a.rest.length ||
+    a.attach?.length ||
+    [...a.flags.keys()].some((f) => !allowed.includes(f))
+  )
+    throw new UsageError(
+      'Use `sideby ask --spec - [--print] --json` or `sideby ask --choices --json` on their own.',
+    )
+  const rt = runtime ?? (await createRuntime())
+  if (choices) {
+    const result = await taskChoices(rt)
+    if (a.flags.has('json')) json(io, result)
+    else {
+      io.out(result.account ? `Account: ${result.account}` : `No account: ${result.detail}`)
+      io.out(`Terminal: ${result.terminal}`)
+    }
+    return 0
+  }
+  if (a.flags.get('spec') !== '-')
+    throw new UsageError('Pass the Task Spec on stdin: sideby ask --spec - --json')
+  const stdin = io.stdin ?? process.stdin
+  if (stdin.isTTY)
+    throw new UsageError('Pipe the Task Spec into stdin: sideby ask --spec - --json < spec.json')
+  try {
+    const spec = parseTaskSpec(await readSpecText(stdin as AsyncIterable<Buffer>))
+    if (a.flags.has('print')) {
+      const preview = await previewTaskSpec(rt, spec)
+      if (a.flags.has('json')) json(io, preview)
+      else io.out(preview.prompt)
+      return 0
+    }
+    const result = await startTaskSpec(rt, spec)
+    if (a.flags.has('json')) json(io, result)
+    else if (result.command)
+      io.out(result.opened ? `Opened ${result.terminal} for ${result.account}.` : result.command)
+    else io.out(result.prompt ?? '')
+    if (!result.opened) io.err(result.detail!)
+    return result.opened ? 0 : 1
+  } catch (err) {
+    // A folder that changed between the check and the task file is refused like a bad one.
+    if (!(err instanceof SpecError) && !(err instanceof UserError && err.code === 'bad-cwd')) throw err
+    if (a.flags.has('json'))
+      json(io, { schemaVersion: 1, error: err.message, code: err.code, reason: err.code })
+    else io.err(`sideby: ${err.message}`)
+    return err.code === 'spec-version' ? 2 : 1
+  }
 }
 
 export async function cmdTerminal(a: ParsedArgs, io: Io): Promise<number> {

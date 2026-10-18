@@ -742,6 +742,79 @@ export function askCopy(
 }
 
 /**
+ * Whether the Panel hands its AI Tasks to the Portal around it (ADR-0030): createPanelHandler was given
+ * `ask: { bridge: 'postMessage' }` and the page sits in a frame. A Panel opened on its own is its own parent; it keeps
+ * its header "Let AI do it" button and its own dialog. The page decides this when it loads.
+ */
+export function askBridged(boot: { ask?: { bridge?: string } | null }, win: { parent: unknown }): boolean {
+  return boot.ask?.bridge === 'postMessage' && Boolean(win.parent) && win.parent !== win
+}
+
+/**
+ * Hands an AI Task to the Portal around the Panel (ADR-0030) when `askBridged` says so: posts
+ * `{ type: 'local-tools:ask', version: 1, preset, native: { task, text, context }, text }` to the parent with the
+ * Panel's own origin as the target, and says it did, so the Panel opens no dialog of its own. Otherwise posts nothing
+ * and returns false.
+ */
+export function askBridge(
+  boot: { ask?: { bridge?: string } | null },
+  opts: { task?: string; text?: string; context?: object | null } | undefined,
+  win: {
+    parent: { postMessage(message: unknown, targetOrigin: string): void } | null
+    location: { origin: string }
+  },
+): boolean {
+  if (!askBridged(boot, win) || !win.parent) return false
+  const o = opts || {}
+  const task = o.task || 'free'
+  const text = o.text || ''
+  win.parent.postMessage(
+    {
+      type: 'local-tools:ask',
+      version: 1,
+      preset: task,
+      native: { task, text, context: o.context || {} },
+      text,
+    },
+    win.location.origin,
+  )
+  return true
+}
+
+/**
+ * The "Attached files" section of a Task Prompt (spec §3.28 "附件"), in `lang` (`zh`, otherwise English): one line
+ * per file with its absolute path and kind, plus how to look at a video. Empty without files. `heading` goes before
+ * the section title, so a prompt with Markdown headings (`## `, a Task Spec from a Portal) gets one of its level.
+ * sideby's own Task Prompts and the ones a Portal hands over (ADR-0030) share it, word for word.
+ */
+export function attachedSection(
+  files: readonly { path: string; kind: string }[],
+  lang: string,
+  heading = '',
+): string {
+  if (!files.length) return ''
+  const L =
+    lang === 'zh'
+      ? {
+          attached: '附件',
+          image: '图片',
+          video: '视频',
+          videoHint:
+            '需要看视频内容时，用 ffmpeg 抽几帧再看，例如 `ffmpeg -i <视频> -vf fps=1 -frames:v 5 frame-%d.png`。',
+        }
+      : {
+          attached: 'Attached files',
+          image: 'image',
+          video: 'video',
+          videoHint:
+            'To see what a video shows, extract a few frames with ffmpeg first, for example `ffmpeg -i <video> -vf fps=1 -frames:v 5 frame-%d.png`.',
+        }
+  const lines = files.map((f) => '- ' + f.path + ' (' + (f.kind === 'video' ? L.video : L.image) + ')')
+  if (files.some((f) => f.kind === 'video')) lines.push(L.videoHint)
+  return heading + L.attached + '\n' + lines.join('\n')
+}
+
+/**
  * The Task Prompt of an AI Task (spec §3.28), in `lang` (`zh`, otherwise English): what to do, the context given,
  * the fixed rules, pointers for the task and the invitation to contribute. For `free` the user's `text` is what to
  * do; for the other tasks it follows the task's own sentence. `text` and every context string go through `strip`
@@ -820,11 +893,6 @@ export function taskPrompt(
           '照 sideby 仓库的插件指南 docs/guide/plugins.zh-CN.md 写；写完用 `sideby plugins check <id>` 检查。',
         pTerminal:
           "先问我用的是什么终端。只看这个终端的官方文档和它的 `--help`，找出「在指定目录新开一个窗口运行一条命令」的写法，写明你看的版本。写成一个模板：`{cmd}` 是要运行的命令，`{cwd}` 是文件夹，sideby 按参数填入，不经过 shell。保存要用 `sideby terminal --custom '<模板>'`，它会改 sideby 的设置，先问我。保存后让我在面板上点一次「让 AI 帮我」试一下，打不开就一起看错误再改。",
-        attached: '附件',
-        image: '图片',
-        video: '视频',
-        videoHint:
-          '需要看视频内容时，用 ffmpeg 抽几帧再看，例如 `ffmpeg -i <视频> -vf fps=1 -frames:v 5 frame-%d.png`。',
         share:
           '做好之后，问我愿不愿意把这次的改进分享给 sideby。我同意后，按 sideby 仓库的 CONTRIBUTING.md 提一个 pull request，提交前去掉我自己的账号名、路径和邮箱。',
         shareTerminal:
@@ -874,11 +942,6 @@ export function taskPrompt(
           'Follow the plugins guide in the sideby repository (docs/guide/plugins.md); check it with `sideby plugins check <id>`.',
         pTerminal:
           "Ask me which terminal I use first. Read only that terminal's official docs and its `--help` to find how it opens a new window that runs one command in a given folder, and note the version you read. Write it as a template: `{cmd}` is the command and `{cwd}` the folder; sideby fills them in as separate arguments, no shell runs it. Save it with `sideby terminal --custom '<template>'`, which changes sideby's settings, so ask me first. Then have me click Let AI do it in the Panel once to try it; if it does not open, look at the error with me and fix the template.",
-        attached: 'Attached files',
-        image: 'image',
-        video: 'video',
-        videoHint:
-          'To see what a video shows, extract a few frames with ffmpeg first, for example `ffmpeg -i <video> -vf fps=1 -frames:v 5 frame-%d.png`.',
         share:
           'When it works, ask me whether to share the improvement with sideby. Only with my yes, follow the CONTRIBUTING.md of the sideby repository to open a pull request, and first remove my own account names, paths and emails.',
         shareTerminal:
@@ -925,12 +988,8 @@ export function taskPrompt(
   facts.push('- ' + L.cLang)
   const pointer = (L as Record<string, string>)['p' + task.charAt(0).toUpperCase() + task.slice(1)]
   const parts = [L.task + '\n' + what, L.context + '\n' + facts.join('\n')]
-  const files = input.attachments || []
-  if (files.length) {
-    const lines = files.map((f) => '- ' + f.path + ' (' + (f.kind === 'video' ? L.video : L.image) + ')')
-    if (files.some((f) => f.kind === 'video')) lines.push(L.videoHint)
-    parts.push(L.attached + '\n' + lines.join('\n'))
-  }
+  const attached = attachedSection(input.attachments || [], input.lang)
+  if (attached) parts.push(attached)
   parts.push(L.rules + '\n- ' + L.r1 + '\n- ' + L.r2 + '\n- ' + L.r3)
   if (pointer) parts.push(L.pointers + '\n' + pointer)
   parts.push(task === 'terminal' ? L.shareTerminal : L.share)

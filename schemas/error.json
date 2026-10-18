@@ -20,6 +20,10 @@
       "type": "string",
       "description": "`usage` for a malformed command line (exit 2), a reason such as `no-quota-source` or `alias-invalid`, or `error`."
     },
+    "reason": {
+      "type": "string",
+      "description": "Same as `code`, for a refused Task Spec (`sideby ask --spec -`): `spec-invalid`, `spec-too-large`, `bad-cwd`, or `spec-version` (exit 2: update sideby)."
+    },
     "_notice": {
       "type": "object",
       "properties": {

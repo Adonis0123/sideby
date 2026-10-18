@@ -1043,6 +1043,12 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
         description:
           '`usage` for a malformed command line (exit 2), a reason such as `no-quota-source` or `alias-invalid`, or `error`.',
       }),
+      reason: Type.Optional(
+        Type.String({
+          description:
+            'Same as `code`, for a refused Task Spec (`sideby ask --spec -`): `spec-invalid`, `spec-too-large`, `bad-cwd`, or `spec-version` (exit 2: update sideby).',
+        }),
+      ),
     },
     { title: 'sideby error --json' },
   ),
@@ -1081,6 +1087,42 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       { description: 'Files given with `--attach`, in order; empty without any.' },
     ),
   }),
+  'ask-print': Type.Object(
+    {
+      schemaVersion: Version,
+      prompt: Type.String({
+        description: 'The Task Prompt the Host would get, attachments section included.',
+      }),
+      removedSecrets: Type.Boolean({ description: 'Whether key-shaped text was taken out of the prompt.' }),
+    },
+    { title: 'sideby ask --spec - --print --json' },
+  ),
+  'ask-choices': Type.Object(
+    {
+      schemaVersion: Version,
+      account: Type.Union([Str, Type.Null()], {
+        description: 'The Account an AI Task would use now; null when none can be picked (see `reason`).',
+      }),
+      accounts: Type.Array(
+        Type.Object({
+          ref: Str,
+          label: Type.String({ description: 'What to show for it, as the Panel does.' }),
+          signedIn: Type.Boolean({ description: 'False for a Subscription Account that is signed out.' }),
+        }),
+        {
+          description:
+            'Signed-in Subscription Accounts, then API Accounts, then signed-out ones; each by ref.',
+        },
+      ),
+      terminal: Type.String({ description: 'The terminal a task opens: the preferred one, else the guess.' }),
+      terminals: Type.Array(Type.Object({ id: Str, label: Str }), {
+        description: 'The supported terminals installed here.',
+      }),
+      reason: Type.Union([Type.String({ enum: ['no-accounts', 'none-signed-in', 'all-full'] }), Type.Null()]),
+      detail: Type.Union([Type.String({ description: 'What to do next, for a person.' }), Type.Null()]),
+    },
+    { title: 'sideby ask --choices --json' },
+  ),
   terminal: Type.Object({
     schemaVersion: Version,
     preferred: Type.Union([Str, Type.Null()]),

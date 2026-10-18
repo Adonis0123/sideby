@@ -84,7 +84,8 @@ Avoid: *upgrade* (say Update), *self-update* in user-facing text.
 
 ## Asking AI
 
-- **AI Task** (the Panel says *let AI do it*): a task the user hands from the Panel to one of their own Accounts. sideby opens the Preferred Terminal and starts that Account's Host with a Task Prompt; the Host then does the work with the sideby skill. Not a new assistant: the AI is the user's own Host.
+- **AI Task** (the Panel says *let AI do it*): a task the user hands to one of their own Accounts, from the Panel, the CLI or a Portal. sideby opens the Preferred Terminal and starts that Account's Host with a Task Prompt; the Host then does the work with a Skill: the sideby skill for sideby's own tasks, or another Tool's Skill for a task a Portal hands over for that Tool. Not a new assistant: the AI is the user's own Host.
+- **Task Spec**: the JSON object a Portal sends `sideby ask --spec -` on stdin to start an AI Task (ADR-0030): either a Task Prompt the Portal wrote for another Tool, with the folder it starts in, or one of sideby's own tasks (`native`), whose Task Prompt sideby writes. It carries a `specVersion`.
 - **Task Prompt**: the prompt sideby writes for one AI Task: what to do and the context it starts from (which Account, which Finding, the Panel's language), ending with an invitation to contribute the result to sideby. How to do the task lives in the skill, not in the prompt.
 - **Preferred Terminal**: the terminal app sideby opens for an AI Task or a sign-in, chosen by the user or guessed from the terminal the Panel was started in.
 

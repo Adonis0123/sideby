@@ -49,6 +49,7 @@
     "dist",
     "schemas",
     "skills",
+    "ai-tasks.json",
     "README.md",
     "README.zh-CN.md",
     "LICENSE"

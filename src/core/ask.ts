@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { constants } from 'node:fs'
-import { lstat, mkdtemp, open, readdir, rm, unlink } from 'node:fs/promises'
-import { dirname, isAbsolute, join } from 'node:path'
+import { lstat, mkdtemp, open, readdir, realpath, rm, stat, unlink } from 'node:fs/promises'
+import { dirname, isAbsolute, join, sep } from 'node:path'
 import { AI_TASK_KINDS, type AiTaskKind, stripSecrets, taskPrompt } from '../panel/page-logic.ts'
 import type { Runtime } from '../runtime.ts'
 import type { Account, Env } from '../types.ts'
@@ -74,6 +74,37 @@ export interface TaskFile {
   stateDir?: string
   /** Files attached to the task (spec §3.28 "附件"), saved under `ai/attachments/<task-id>/`; never their content. */
   attachments?: { path: string; kind: 'image' | 'video' }[]
+  /**
+   * The folder came from a Task Spec (ADR-0030): `cwd` is its real path, which must still be an existing folder inside
+   * `home` when the task is written and again when `ask --run` has changed into it.
+   */
+  cwdInHome?: true
+}
+
+/**
+ * Why `cwd` cannot be the folder of a Portal's task (ADR-0030), or its real path: it must be an absolute path whose
+ * real path is an existing directory inside the real `home`. A link, or a link in an ancestor, counts where it points.
+ */
+export async function realCwdInHome(cwd: string, home: string): Promise<{ real: string } | { why: string }> {
+  if (!isAbsolute(cwd) || cwd.includes('\0')) return { why: 'is not an absolute path' }
+  let real: string
+  try {
+    real = await realpath(cwd)
+    if (!(await stat(real)).isDirectory()) return { why: 'is not a folder' }
+  } catch {
+    return { why: 'does not exist' }
+  }
+  const realHome = await realpath(home).catch(() => home)
+  if (real !== realHome && !real.startsWith(realHome + sep)) return { why: 'is outside your home' }
+  return { real }
+}
+
+/** A Portal's task folder that stopped being a folder inside the HOME after it was checked. */
+export function movedCwdError(why: string): UserError {
+  return new UserError(
+    `The task folder ${why} now; it changed after the task was prepared. Check the folder, then start the task again.`,
+    { code: 'bad-cwd' },
+  )
 }
 export async function taskWorkDir(paths: Paths = resolvePaths()): Promise<string> {
   return privateDir(join(paths.stateDir, 'ai'))
@@ -213,6 +244,7 @@ export async function readTask(
         !isAbsolute(task.cwd) ||
         (task.kind === 'prompt' && typeof task.prompt !== 'string') ||
         (task.attachments !== undefined && !validAttachments(task.attachments)) ||
+        (task.cwdInHome !== undefined && task.cwdInHome !== true) ||
         // Paths are all there or all absent (a task written before they were recorded), and the state folder is the
         // one the task was read from.
         !(
@@ -292,6 +324,44 @@ export interface AiTaskInput {
   files?: string[]
 }
 
+/**
+ * The `context` of an AI Task as a page or a Task Spec sends it (spec §3.28): only the strings and findings a Task
+ * Prompt shows; anything else is refused through `fail`, which makes the caller's error (a 400, a Task Spec error).
+ */
+export function taskContext(c: unknown, fail: (message: string) => Error): AiTaskInput['context'] {
+  if (c === undefined || c === null) return undefined
+  if (typeof c !== 'object' || Array.isArray(c)) throw fail('"context" must be an object')
+  const out: NonNullable<AiTaskInput['context']> = {}
+  const str = (v: unknown, what: string) => {
+    if (typeof v !== 'string') throw fail(`${what} must be a string`)
+    return v
+  }
+  for (const [k, v] of Object.entries(c)) {
+    if (k === 'account' || k === 'family' || k === 'quotaReason' || k === 'version' || k === 'terminalCustom')
+      out[k] = str(v, `"context.${k}"`)
+    else if (k === 'terminals') {
+      if (!Array.isArray(v) || v.length > 50) throw fail('"context.terminals" must be a list')
+      out.terminals = v.map((x) => str(x, 'each of "context.terminals"'))
+    } else if (k === 'handoff') {
+      if (!Array.isArray(v) || v.length > 100) throw fail('"context.handoff" must be a list')
+      out.handoff = v.map((x) => str(x, 'each of "context.handoff"'))
+    } else if (k === 'findings') {
+      if (!Array.isArray(v) || v.length > 100) throw fail('"context.findings" must be a list')
+      out.findings = v.map((f) => {
+        if (!f || typeof f !== 'object' || Array.isArray(f) || typeof f.message !== 'string')
+          throw fail('each finding needs a "message"')
+        const one: { code?: string; account?: string; item?: string; message: string; hint?: string } = {
+          message: f.message,
+        }
+        for (const key of ['code', 'account', 'item', 'hint'] as const)
+          if (f[key] !== undefined && f[key] !== null) one[key] = str(f[key], `"finding.${key}"`)
+        return one
+      })
+    } else throw fail(`unknown context "${k}"`)
+  }
+  return out
+}
+
 /** The attachments a prompt shown before the task exists lists: uploads still staged, the user's files in place. */
 export async function previewAttachments(rt: Runtime, input: AiTaskInput): Promise<Attachment[]> {
   if (input.uploads?.length) return stagedAttachments(rt.paths, input.uploads)
@@ -304,6 +374,11 @@ async function takeAttachments(rt: Runtime, input: AiTaskInput, taskId: string):
   return []
 }
 
+/** The language of a Task Prompt: the one asked for, else Chinese under a `zh` locale, else English. */
+export function taskLang(rt: Runtime, lang?: string): string {
+  return lang ?? (/^zh/i.test(rt.env.LC_ALL || rt.env.LC_MESSAGES || rt.env.LANG || '') ? 'zh' : 'en')
+}
+
 export function promptForTask(rt: Runtime, input: AiTaskInput, attachments: readonly Attachment[] = []) {
   if (input.task && !AI_TASK_KINDS.includes(input.task as AiTaskKind))
     throw new UserError(`Choose a task: ${AI_TASK_KINDS.join(', ')}; rerun \`sideby ask\`.`)
@@ -313,8 +388,7 @@ export function promptForTask(rt: Runtime, input: AiTaskInput, attachments: read
       ...input,
       task: input.task ?? 'free',
       attachments: attachments.map(({ path, kind }) => ({ path, kind })),
-      lang:
-        input.lang ?? (/^zh/i.test(rt.env.LC_ALL || rt.env.LC_MESSAGES || rt.env.LANG || '') ? 'zh' : 'en'),
+      lang: taskLang(rt, input.lang),
     },
     (text) => {
       const cleaned = stripSecrets(text)
@@ -336,7 +410,7 @@ export type AiTaskReason =
   | 'failed'
   | 'unsupported-platform'
 
-const PICK_DETAIL: Record<'no-accounts' | 'none-signed-in' | 'all-full', string> = {
+export const PICK_DETAIL: Record<'no-accounts' | 'none-signed-in' | 'all-full', string> = {
   'no-accounts':
     'No account yet: create one with `sideby new <family> --next`, or paste the prompt into any AI.',
   'none-signed-in':
@@ -358,6 +432,12 @@ async function openTask(
     throw new UserError(
       `Unknown terminal; choose one of ${TERMINALS.map((t) => t.id).join(', ')}, or run \`sideby terminal\` to see which are installed.`,
     )
+  // A Portal's folder was checked before the Account and terminal were chosen; it may have been swapped since.
+  if (task.cwdInHome) {
+    const now = await realCwdInHome(task.cwd, rt.paths.home)
+    if ('why' in now) throw movedCwdError(now.why)
+    if (now.real !== task.cwd) throw movedCwdError('points somewhere else')
+  }
   await writeTask(task, rt.paths, taskId)
   const problem = launcherProblem(launcher, rt.paths.stateDir)
   // An unsafe path cannot go into the command; the user pastes it where sideby is on PATH.
@@ -404,6 +484,25 @@ export async function startAiTask(rt: Runtime, input: AiTaskInput) {
   const taskId = newTaskId()
   const attachments = await takeAttachments(rt, input, taskId)
   const { prompt, removedSecrets } = promptForTask(rt, input, attachments)
+  return openPromptTask(rt, input, { taskId, prompt, removedSecrets, attachments })
+}
+
+/**
+ * Picks the Account and opens the Preferred Terminal for a written Task Prompt, as every AI Task does (spec §3.28):
+ * sideby's own, and one a Portal hands over in a Task Spec (ADR-0030), which names its own `cwd`.
+ */
+export async function openPromptTask(
+  rt: Runtime,
+  input: Pick<AiTaskInput, 'account' | 'family' | 'terminal' | 'remember'>,
+  written: {
+    taskId: string
+    prompt: string
+    removedSecrets: boolean
+    attachments: Attachment[]
+    cwd?: string
+  },
+) {
+  const { taskId, prompt, removedSecrets, attachments } = written
   const pick = await pickTaskAccount(rt, input)
   // Without an account the prompt is copied instead; the saved attachments stay where it says, until the cleanup.
   if ('reason' in pick)
@@ -431,7 +530,8 @@ export async function startAiTask(rt: Runtime, input: AiTaskInput) {
     kind: 'prompt',
     account: pick.account.ref,
     prompt,
-    cwd: await taskWorkDir(rt.paths),
+    cwd: written.cwd ?? (await taskWorkDir(rt.paths)),
+    ...(written.cwd ? { cwdInHome: true as const } : {}),
   }
   if (attachments.length) task.attachments = attachments.map(({ path, kind }) => ({ path, kind }))
   return {
