@@ -115,6 +115,7 @@ macOS and Linux. CI runs the suite on `ubuntu-latest` and `macos-latest`, Node 2
 - It never edits a Host's global config to switch accounts. It moves a task to another account only when you turn on Auto Handoff, and never proxies requests or pools logins.
 - It never reads, prints or sends a credential value. Nothing about your accounts leaves your machine: the only request sideby makes on its own is a daily check of the npm registry for its newest version (off with `NO_UPDATE_NOTIFIER=1`; see [Updates](docs/guide/configuration.md#updates)).
 - `doctor --fix` never replaces a real file and never changes where a link points.
+- The panel answers only on `127.0.0.1` and refuses web pages from other sites, but it trusts every user of this computer. On a shared Mac, do not leave it running in the background ([details](docs/guide/panel.md#who-can-reach-the-panel)).
 
 Details and the terms-of-service question are in the [FAQ](docs/guide/faq.md).
 

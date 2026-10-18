@@ -16,6 +16,10 @@ The panel listens on `127.0.0.1` only. If another sideby panel already runs on t
 
 **Settings** groups what you set once: Appearance (theme and language), Startup, Accounts and quota, and Let AI help. Theme and language are saved in sideby's config, so `sideby config set panel.theme dark` changes them too. Under Startup, **Start sideby in the background at login** (macOS) starts the panel without opening a window each time you log in, so it is up to date when you open it. Turning it on or off first shows the file it writes or removes and the command it runs; nothing changes until you confirm. `sideby autostart on|off` does the same in a terminal.
 
+## Who can reach the panel
+
+The panel answers only on `127.0.0.1`, so other computers cannot reach it. A web page from another site cannot read it or act through it either: the panel checks where each request comes from, and every change needs a key that only its own page gets. What it does not do is tell the users of one computer apart. A program run by another user of the same Mac can read what the panel shows (account names, emails, quota and usage, never a credential) and press its buttons. On a computer that is yours alone this changes nothing. On a shared Mac, start the panel with `sideby ui` when you need it, and leave start at login and `sideby ui --background` off.
+
 ## Let AI do it
 
 When you would rather not work something out yourself, the panel can hand it to your own AI. It opens your terminal, starts one of your own accounts (Claude Code, Codex or Grok Build) and gives it a short note saying what to do. The AI then does the work with the sideby skill, and you watch and answer its questions in that terminal.
