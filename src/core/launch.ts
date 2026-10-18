@@ -88,19 +88,52 @@ export function accountEnv(family: FamilyDef, account: Account, baseEnv: Env): E
   return env
 }
 
-export async function prepareLaunch(opts: {
+export interface LaunchCommandOptions {
   account: Account
   family: FamilyDef
-  baseEnv: Env
   accountArgs: readonly string[]
   userArgs: readonly string[]
   command: 'run' | 'login'
-  bus: HookBus
-  /** What the Host may show as the Account (`SIDEBY_LABEL`): the short command, else the ref. */
-  label?: string
   /** Config `accountTitle`: set the terminal title to `[<label>]` and keep the Host from replacing it. */
   title?: boolean
-}): Promise<PreparedLaunch> {
+}
+
+/**
+ * The Host and its arguments for a Launch before any `launch.before` hook: Family defaults, the title arguments, the
+ * Account's config arguments, then the user's. Pure: reads no file and runs no Plugin, so a preview can show it.
+ */
+export function launchCommand(opts: LaunchCommandOptions): { bin: string; args: string[]; notice?: string } {
+  const { account, family } = opts
+  if (opts.command === 'login') {
+    // Family arguments still apply: Codex must store a non-main login in the Account's own file.
+    const base = family.defaultArgs?.(account, []) ?? []
+    return family.login.args
+      ? { bin: family.bin, args: [...base, ...family.login.args] }
+      : { bin: family.bin, args: base, notice: family.login.hint }
+  }
+  const keep =
+    opts.title && family.keepTitle && !opts.userArgs.some((a) => a.includes(family.keepTitle!.key))
+      ? family.keepTitle.args
+      : []
+  return {
+    bin: family.bin,
+    args: [
+      ...(family.defaultArgs?.(account, opts.userArgs) ?? []),
+      ...keep,
+      ...opts.accountArgs,
+      ...opts.userArgs,
+    ],
+  }
+}
+
+export async function prepareLaunch(
+  opts: LaunchCommandOptions & {
+    baseEnv: Env
+    bus: HookBus
+    /** What the Host may show as the Account (`SIDEBY_LABEL`): the short command, else the ref. */
+    label?: string
+  },
+): Promise<PreparedLaunch> {
   const { account, family } = opts
   const env = accountEnv(family, account, opts.baseEnv)
   if (account.secretFile) Object.assign(env, await readSecretFile(account.secretFile, opts.baseEnv))
@@ -111,28 +144,7 @@ export async function prepareLaunch(opts: {
   env.SIDEBY_ACCOUNT = account.ref
   env.SIDEBY_LABEL = opts.label || account.ref
 
-  let args: string[]
-  let notice: string | undefined
-  if (opts.command === 'login') {
-    // Family arguments still apply: Codex must store a non-main login in the Account's own file.
-    const base = family.defaultArgs?.(account, []) ?? []
-    if (family.login.args) args = [...base, ...family.login.args]
-    else {
-      args = base
-      notice = family.login.hint
-    }
-  } else {
-    const keep =
-      opts.title && family.keepTitle && !opts.userArgs.some((a) => a.includes(family.keepTitle!.key))
-        ? family.keepTitle.args
-        : []
-    args = [
-      ...(family.defaultArgs?.(account, opts.userArgs) ?? []),
-      ...keep,
-      ...opts.accountArgs,
-      ...opts.userArgs,
-    ]
-  }
+  const { args, notice } = launchCommand(opts)
 
   await opts.bus.run('launch.before', family.id, {
     account,

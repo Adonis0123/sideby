@@ -36,6 +36,8 @@ import {
   accountEnv,
   brokenOnPath,
   type HostLaunch,
+  type LaunchCommandOptions,
+  launchCommand,
   type PreparedLaunch,
   prepareLaunch,
   which,
@@ -52,7 +54,7 @@ import {
   undoRemoteControlOff,
 } from './core/remote-control.ts'
 import { findResumeRoute } from './core/resume.ts'
-import { SAME_LOGIN_FAMILIES, sameLoginGroups, sharedQuota } from './core/same-login.ts'
+import { type LoginMember, SAME_LOGIN_FAMILIES, sameLoginGroups, sharedQuota } from './core/same-login.ts'
 import { shareMeaning } from './core/share-meaning.ts'
 import {
   SHELLS,
@@ -81,6 +83,7 @@ import {
 } from './core/tuning-apply.ts'
 import { packageVersion } from './core/version.ts'
 import { BUILTIN_PLUGINS } from './families/index.ts'
+import { LOGIN_KEY_READERS } from './families/login-keys.ts'
 import { HookBus } from './plugins/bus.ts'
 import { type BuiltinPlugin, type LoadedPlugin, loadPlugins, type PluginLoadError } from './plugins/loader.ts'
 import type {
@@ -277,6 +280,15 @@ export interface Runtime {
   writeShellInitFiles(shells?: readonly Shell[]): Promise<ShellInitWrite[]>
   prepareLaunch(ref: string, userArgs: readonly string[], command: 'run' | 'login'): Promise<PreparedLaunch>
   /**
+   * The Host and arguments `prepareLaunch` starts from, without reading the Secret File or running `launch.before`
+   * hooks: what a preview may show before the user agrees to start anything.
+   */
+  launchCommand(
+    ref: string,
+    userArgs: readonly string[],
+    command: 'run' | 'login',
+  ): Promise<{ account: Account; family: FamilyDef; bin: string; args: string[] }>
+  /**
    * Starts the non-main Account that holds the session the Host arguments resume, or else the Host unchanged
    * (spec §3.15). Throws UnknownFamilyError, or a UserError when the Family cannot route sessions.
    */
@@ -370,6 +382,20 @@ async function readIdentity(f: FamilyDef, account: Account): Promise<AccountIden
   }
 }
 
+/**
+ * An Account's Login Key (ADR-0028), only for grouping a Same Login: it stays inside `groupsOf` and never reaches an
+ * output, an error, a log or a cache. Undefined for a Family without a reader, or on any problem.
+ */
+async function readLoginKey(account: Account): Promise<string | undefined> {
+  const read = LOGIN_KEY_READERS.get(account.family)
+  if (!read || account.kind === 'api') return undefined
+  try {
+    return await read(account)
+  } catch {
+    return undefined
+  }
+}
+
 export async function createRuntime(
   opts: {
     env?: Env
@@ -438,9 +464,18 @@ export async function createRuntime(
         .filter(
           (a) => a.kind === 'subscription' && SAME_LOGIN_FAMILIES.has(a.family) && families.has(a.family),
         )
-        .map(async (a) => {
-          const identity = await readIdentity(familyOf(a.family), a)
-          return { ref: a.ref, family: a.family, kind: a.kind, ...(identity ? { identity } : {}) }
+        .map(async (a): Promise<LoginMember> => {
+          const [identity, loginKey] = await Promise.all([
+            readIdentity(familyOf(a.family), a),
+            readLoginKey(a),
+          ])
+          return {
+            ref: a.ref,
+            family: a.family,
+            kind: a.kind,
+            ...(identity ? { identity } : {}),
+            ...(loginKey ? { loginKey } : {}),
+          }
         }),
     )
     return sameLoginGroups(members)
@@ -555,6 +590,25 @@ export async function createRuntime(
     config.aliases && Object.hasOwn(config.aliases, name) ? config.aliases[name] : undefined
   /** The config value of `ref` when it names an alias (no colon), as `resolveRef` reads it. */
   const aliasValue = (ref: string): AliasValue | undefined => (ref.includes(':') ? undefined : ownAlias(ref))
+
+  /** What `prepareLaunch` and `launchCommand` both start from, so a preview cannot differ from the Launch. */
+  const launchInputs = (
+    ref: string,
+    all: readonly Account[],
+    userArgs: readonly string[],
+    command: 'run' | 'login',
+  ): LaunchCommandOptions => {
+    const account = resolveRef(ref, all, aliasRefs(config.aliases))
+    return {
+      title: config.accountTitle === true,
+      account,
+      family: familyOf(account.family),
+      accountArgs: config.accounts?.[account.ref]?.args ?? [],
+      // An alias's arguments come before the user's; the Family sees both as the user's choice (ADR-0005).
+      userArgs: command === 'run' ? [...aliasArgs(aliasValue(ref)), ...userArgs] : userArgs,
+      command,
+    }
+  }
 
   const aliasEdit = async (
     alias: string,
@@ -834,19 +888,12 @@ export async function createRuntime(
     },
     async prepareLaunch(ref, userArgs, command) {
       const all = await accounts()
-      const account = resolveRef(ref, all, aliasRefs(config.aliases))
-      return prepareLaunch({
-        label: launchLabel(ref, account, all),
-        title: config.accountTitle === true,
-        account,
-        family: familyOf(account.family),
-        baseEnv: env,
-        accountArgs: config.accounts?.[account.ref]?.args ?? [],
-        // An alias's arguments come before the user's; the Family sees both as the user's choice (ADR-0005).
-        userArgs: command === 'run' ? [...aliasArgs(aliasValue(ref)), ...userArgs] : userArgs,
-        command,
-        bus,
-      })
+      const inputs = launchInputs(ref, all, userArgs, command)
+      return prepareLaunch({ ...inputs, label: launchLabel(ref, inputs.account, all), baseEnv: env, bus })
+    },
+    async launchCommand(ref, userArgs, command) {
+      const inputs = launchInputs(ref, await accounts(), userArgs, command)
+      return { account: inputs.account, family: inputs.family, ...launchCommand(inputs) }
     },
     async resumeLaunch(familyId, userArgs) {
       const family = familyOf(familyId)

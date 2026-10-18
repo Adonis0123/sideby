@@ -2,30 +2,37 @@
 // vendor Quota. Pure: the Runtime gathers each Account's Identity and own Quota reading, this groups and picks.
 import type { Account, AccountIdentity, QuotaResult } from '../types.ts'
 
+/** Families whose Accounts can be a Same Login (ADR-0016, ADR-0028). */
+export const SAME_LOGIN_FAMILIES: ReadonlySet<string> = new Set(['claude', 'codex'])
+
 /**
- * Families whose Identity tells one Quota apart. Codex is left out: its Identity is an email only, and one email can
- * belong to several ChatGPT workspaces, each with its own Quota (ADR-0016).
+ * Families whose Identity alone does not tell one Quota apart, so two Accounts also need equal Login Keys. Codex: one
+ * email can belong to several ChatGPT workspaces, each with its own Quota (ADR-0028).
  */
-export const SAME_LOGIN_FAMILIES: ReadonlySet<string> = new Set(['claude'])
+export const LOGIN_KEY_FAMILIES: ReadonlySet<string> = new Set(['codex'])
 
 export interface LoginMember {
   ref: string
   family: string
   kind: Account['kind']
   identity?: AccountIdentity
+  /** The opaque Login Key (ADR-0028), only for comparing here; never put into an output. */
+  loginKey?: string
 }
 
 const norm = (s: string | undefined) => s?.trim().toLowerCase()
 
 /**
  * Whether two Accounts are the same login: same Family (one that groups), both subscriptions, the same email, and the
- * same organization (both have one and it is equal, or neither has one). Without an email nothing groups.
+ * same organization (both have one and it is equal, or neither has one). Without an email nothing groups. In a Family
+ * of `LOGIN_KEY_FAMILIES` both must also have a Login Key, and the keys must be equal.
  */
 export function isSameLogin(a: LoginMember, b: LoginMember): boolean {
   if (a.ref === b.ref || a.family !== b.family || !SAME_LOGIN_FAMILIES.has(a.family)) return false
   if (a.kind !== 'subscription' || b.kind !== 'subscription') return false
   const ea = norm(a.identity?.email)
   if (!ea || ea !== norm(b.identity?.email)) return false
+  if (LOGIN_KEY_FAMILIES.has(a.family) && (!a.loginKey || a.loginKey !== b.loginKey)) return false
   return norm(a.identity?.org) === norm(b.identity?.org)
 }
 

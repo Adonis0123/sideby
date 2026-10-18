@@ -37,13 +37,28 @@ describe('isSameLogin', () => {
     assert.equal(isSameLogin(m('claude:001', { email: 'a@x.dev' }), a), false)
   })
 
-  it('never groups without an email, API Accounts, different Families, or codex (v1)', () => {
+  it('groups codex only with the same email and equal Login Keys (ADR-0028)', () => {
+    const id = { email: 'a@x.dev' }
+    const k = (loginKey: string) => ({ loginKey })
+    assert.ok(isSameLogin(m('codex:main', id, k('aaaa')), m('codex:001', { email: 'A@x.dev' }, k('aaaa'))))
+    assert.equal(isSameLogin(m('codex:main', id, k('aaaa')), m('codex:001', id, k('bbbb'))), false)
+    assert.equal(isSameLogin(m('codex:main', id, k('aaaa')), m('codex:001', id)), false)
+    assert.equal(isSameLogin(m('codex:main', id), m('codex:001', id, k('aaaa'))), false)
+    assert.equal(
+      isSameLogin(m('codex:main', id, k('aaaa')), m('codex:001', { email: 'b@x.dev' }, k('aaaa'))),
+      false,
+    )
+    // Claude ignores a key: its rule stays email plus organization.
+    assert.ok(isSameLogin(m('claude:main', id, k('aaaa')), m('claude:001', id, k('bbbb'))))
+  })
+
+  it('never groups without an email, API Accounts, different Families, or codex without equal Login Keys', () => {
     assert.equal(isSameLogin(m('claude:main', { org: 'Acme' }), m('claude:001', { org: 'Acme' })), false)
     assert.equal(isSameLogin(m('claude:main'), m('claude:001')), false)
     const id = { email: 'a@x.dev' }
     assert.equal(isSameLogin(m('claude:main', id), m('claude:key', id, { kind: 'api' })), false)
     assert.equal(isSameLogin(m('claude:main', id), m('codex:main', id)), false)
-    assert.equal(isSameLogin(m('codex:main', id), m('codex:001', id)), false)
+    assert.equal(isSameLogin(m('codex:main', id), m('codex:001', id)), false, 'codex needs Login Keys')
     assert.equal(isSameLogin(m('grok:main', id), m('grok:001', id)), false)
     assert.equal(isSameLogin(m('claude:main', id), m('claude:main', id)), false, 'not with itself')
   })
