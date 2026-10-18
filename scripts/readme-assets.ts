@@ -7,6 +7,7 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { manifestText } from './manifest.ts'
 
 interface Asset {
   id: string
@@ -38,11 +39,8 @@ if (markArg !== -1) {
     process.exit(1)
   }
   target.checked = git('rev-parse', '--short', 'HEAD')
-  writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`)
-  // Keep the file as `pnpm lint` wants it.
-  execFileSync(join(root, 'node_modules/.bin/biome'), ['format', '--write', manifestFile], {
-    stdio: 'ignore',
-  })
+  // Keep the file as `pnpm lint` wants it, from whatever directory this runs in.
+  writeFileSync(manifestFile, manifestText(manifest))
   console.log(`readme-assets: ${id} checked at ${target.checked}; commit docs/assets/manifest.json`)
   process.exit(0)
 }

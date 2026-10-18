@@ -88,7 +88,7 @@ src/
 testing/          fake HOME, fake Host binaries, snapshots; also published as `sideby/testing`
 schemas/          generated JSON Schemas for config and every `--json` output
 skills/sideby/    Agent Skill shipped in the package: SKILL.md routes to references/*.md; metadata.version = package version
-scripts/          local.ts (`pnpm local`, Local Build, ADR-0024), release.ts (`pnpm release`), leak-check.sh, demo-home.ts, record-demo.ts (README demo GIF), shoot-panel.ts (README screenshots), chrome.ts (shared by both), readme-assets.ts (run by `preversion`), sync-skill-version.ts (run by `npm version`), write-build-id.ts (run by `pnpm build`), pin-english-npm-readme.ts (run by `prepublishOnly`, so the npm readme is README.md)
+scripts/          local.ts (`pnpm local`, Local Build, ADR-0024), release.ts (`pnpm release`), leak-check.sh, demo-home.ts, record-demo.ts (README demo GIF), shoot-panel.ts (README screenshots), chrome.ts (shared by both), readme-assets.ts (run by `preversion`; manifest.ts formats what its `--mark` writes), sync-skill-version.ts (run by `npm version`), write-build-id.ts (run by `pnpm build`), pin-english-npm-readme.ts (run by `prepublishOnly`, so the npm readme is README.md)
 docs/             adr/, specs/, plans/, verification/, guide/ (user guide, English and .zh-CN.md), assets/ (README banner and screenshots), release.md
 ```
 
