@@ -126,7 +126,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 
 /* Toolbar */
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
-.search { position: relative; flex: 1 1 240px; min-width: 0; display: block; }
+.search { position: relative; flex: 1 1 160px; min-width: 120px; display: block; }
 .search-ic { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--faint); pointer-events: none; }
 .search .search-input { padding-left: 34px; padding-right: 34px; height: var(--ctl-h); }
 .kbd { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); font: 11px/16px var(--mono); color: var(--faint); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; pointer-events: none; }
@@ -309,7 +309,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .row-notes { grid-area: notes; display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 
 /* Quota meters: percent and countdown over a bar colored by level (ok, warn at 60%, fail at 85% used). */
-.quota { display: grid; grid-template-columns: repeat(var(--qn), minmax(0, 1fr)); column-gap: var(--col-gap); row-gap: 4px; min-width: 0; }
+.quota { display: grid; grid-template-columns: repeat(var(--qr, var(--qn)), minmax(0, 1fr)); column-gap: var(--col-gap); row-gap: 4px; min-width: 0; }
 .row > .quota { grid-template-columns: repeat(var(--qn), var(--q-w)); }
 .meter { min-width: 0; }
 /* The countdown never ends in an ellipsis: where the line is too short it wraps to a line of its own, at the right. */
@@ -718,7 +718,7 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "id more" "quota quota" "detail detail" "notes notes"; row-gap: 8px; }
   .row-detail { margin-left: 0; }
 
-  .row > .quota { grid-template-columns: repeat(var(--qn), minmax(0, 1fr)); }
+  .row > .quota { grid-template-columns: repeat(var(--qr, var(--qn)), minmax(0, 1fr)); }
   .rows .m-label, .rows .m-unit, .rows .u-unit { display: inline; }
   .rows .usage { justify-content: flex-start; }
   .row > .last { display: none; }
@@ -727,6 +727,9 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .row > .row-end { align-self: start; margin-top: -2px; }
 }
 @media (max-width: 760px) {
+  /* The toolbar stays one line: "New account" keeps its icon, its name moves to the tooltip and the label. */
+  .toolbar > .btn-primary { width: var(--ctl-h); padding: 0; justify-content: center; }
+  .toolbar > .btn-primary > span { display: none; }
   .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat:nth-child(3) { border-left: 0; }
   .stat:nth-child(n+3) { border-top: 1px solid var(--border); }
@@ -749,7 +752,8 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .search { flex-basis: 100%; }
   .tools { width: 100%; }
   .tools .tb-select { flex: 1 1 140px; min-width: 0; }
-  .toolbar > .btn-primary { flex: 1; }
+  .toolbar > .btn-primary { flex: 1; width: auto; padding: 0 14px; }
+  .toolbar > .btn-primary > span { display: inline; }
   /* A phone keeps the last use as a column of its own: the line under the name has no room for it. */
   .row { padding: 10px 12px; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "id last more" "quota quota quota" "detail detail detail" "notes notes notes"; }
   .row > .last { display: block; justify-self: end; }

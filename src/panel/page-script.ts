@@ -1016,7 +1016,7 @@ const MAIN = String.raw`
     })
     const display = h('button', { class: 'btn tb-display', type: 'button', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', title: t('tb.display') }, icon('sliders'), h('span', null, t('tb.display')))
     display.addEventListener('click', () => openPopover(display, 'display', t('tb.display'), displayPanel, 'end'))
-    const create = BOOT.readOnly ? null : h('button', { class: 'btn btn-primary', type: 'button', 'aria-label': t('tb.new'), onclick: () => openCreate(null) }, icon('plus'), h('span', null, t('tb.new')))
+    const create = BOOT.readOnly ? null : h('button', { class: 'btn btn-primary', type: 'button', 'aria-label': t('tb.new'), title: t('tb.new'), onclick: () => openCreate(null) }, icon('plus'), h('span', null, t('tb.new')))
     setKids($('toolbar'), [
       h('label', { class: 'search' }, icon('search', 'search-ic'), tb.search, h('kbd', { class: 'kbd', 'aria-hidden': 'true' }, '/')),
       h('div', { class: 'tools' }, tb.family, tb.sort, display),
@@ -1134,7 +1134,9 @@ const MAIN = String.raw`
     const via = q.fetched ? t('quota.fetchedFrom', { host: famTitle(a), ago: ago(q.observedAt) }) : null
     const failed = q.fetchError ? t('quota.lastCheckFailed', { why: q.fetchError }) : null
     const title = [from || via || (stale ? null : t('quota.dataFrom', { ago: ago(q.observedAt) })), failed].filter(Boolean).join('\n') || null
-    return h('div', { class: 'quota' + (stale ? ' is-stale' : ''), title },
+    // --qr: this row's own number of windows, so a narrow list can split the width between them alone (--qn is the
+    // widest Family's, for the wide list's shared columns).
+    return h('div', { class: 'quota' + (stale ? ' is-stale' : ''), title, css: wins.length ? { '--qr': String(cols.length) } : null },
       wins.length ? cols.map((c) => {
         const w = wins.find((x) => winKey(x) === c)
         return w ? meter(w, now, stale, q.observedAt) : noMeter(winTitle(c))
