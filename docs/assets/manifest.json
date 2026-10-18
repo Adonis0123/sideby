@@ -42,7 +42,7 @@
         "src/panel/page-styles.ts"
       ],
       "retake": "node scripts/record-demo.ts",
-      "checked": "35d7e57"
+      "checked": "7883829"
     },
     {
       "id": "banner",
