@@ -778,11 +778,12 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .dlg-head { padding: 14px 14px 2px; } .dlg-body { padding: 10px 14px 14px; } .dlg-foot { padding: 10px 14px; }
 }
 /* A change of layout band runs as a short View Transition (page-script.ts followWidth): each block below moves and
-   resizes to its new place while its old and new look cross-fade; the rest of the page cross-fades as one. */
-::view-transition-group(*) { animation-duration: .2s; animation-timing-function: cubic-bezier(.2, 0, 0, 1); }
+   resizes to its new place while its old and new look cross-fade; the rest of the page cross-fades as one. Same
+   length and ease as a Portal's sliding sidebar (.26s, quick start, soft landing), so both read as one move. */
+::view-transition-group(*) { animation-duration: .26s; animation-timing-function: cubic-bezier(.32, .72, 0, 1); }
 /* Old and new looks keep their own size (pinned top left) instead of stretching to the moving box, so text never
    grows or shrinks on the way. */
-::view-transition-old(*), ::view-transition-new(*) { animation-duration: .2s; height: 100%; object-fit: none; object-position: left top; }
+::view-transition-old(*), ::view-transition-new(*) { animation-duration: .26s; height: 100%; object-fit: none; object-position: left top; }
 .vt-width :is(.top-in, .summary, .stat, .section-head, .toolbar, .group-list, .group-head, .row) { view-transition-name: match-element; }
 @media (prefers-reduced-motion: reduce) {
   .sk, .spin, .is-spinning svg, .toast, .toast.bump, .view-in > *, .row.flash, .card.flash, .pulse { animation: none; }
