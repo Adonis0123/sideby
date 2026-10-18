@@ -391,9 +391,8 @@ const en = {
 
   'health.title': 'Health check',
   'health.intro': 'Checks that shared skills, settings and credentials are in place for every account.',
-  'health.lead': 'Checks {shared} and reports {drift}.',
-  'health.sharedTerm': 'Shared Items',
-  'health.driftTerm': 'Drift',
+  'health.lead': 'Checks that every account {shared} the main account the way it should.',
+  'health.sharedTerm': 'shares settings with',
   'health.more.one': 'Show {n} more',
   'health.more.other': 'Show {n} more',
   'health.run': 'Run check',
@@ -1401,9 +1400,8 @@ const zh: Record<MessageKey, string> = {
 
   'health.title': '健康检查',
   'health.intro': '检查每个账号的共享 skills、设置和凭据文件是否就位。',
-  'health.lead': '检查{shared}，报告{drift}。',
-  'health.sharedTerm': '共享项',
-  'health.driftTerm': '偏离',
+  'health.lead': '检查每个账号是否按规则{shared}。',
+  'health.sharedTerm': '和主账号共享设置',
   'health.more.one': '再显示 {n} 条',
   'health.more.other': '再显示 {n} 条',
   'health.run': '运行检查',

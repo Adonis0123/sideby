@@ -21,7 +21,7 @@ import {
   type PanelState,
 } from './handler.ts'
 import { jsonForScript, pageStyles, renderPage } from './page.ts'
-import { startPanelServer } from './server.ts'
+import { isSidebyPanel, panelOwner, startPanelServer } from './server.ts'
 import { resolveTheme } from './theme.ts'
 
 function factory(h: FakeHome, broken = false) {
@@ -243,6 +243,54 @@ describe('panel server', () => {
         await srv.close()
         await close(blocker)
       }
+    })
+  })
+
+  it("never reuses another user's panel on the same port, but still reuses one too old to name its owner", async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      // Another macOS user's sideby: it answers health as sideby, with an owner that is not ours.
+      const fake = (owner?: string) =>
+        createServer((_req, res) => {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ app: 'sideby', version: '0.0.1', ...(owner ? { owner } : {}) }))
+        })
+      const other = fake('ffffffffffffffff')
+      await new Promise<void>((r) => other.listen(0, '127.0.0.1', r))
+      const otherPort = (other.address() as AddressInfo).port
+      const srv = await startPanelServer({ runtimeFactory: factory(h), port: otherPort, log: () => {} })
+      // Created after the Panel picked its port: the next free port could otherwise be this one.
+      const old = fake()
+      await new Promise<void>((r) => old.listen(0, '127.0.0.1', r))
+      const oldPort = (old.address() as AddressInfo).port
+      try {
+        assert.equal(srv.reused, false)
+        assert.notEqual(srv.url, `http://127.0.0.1:${otherPort}/`)
+        // No version passed: health still names app and version, the Portal contract (ADR-0006).
+        const health = (await (await fetch(new URL('api/health', srv.url))).json()) as {
+          app?: string
+          version?: string
+          owner?: string
+        }
+        assert.equal(health.app, 'sideby')
+        assert.equal(health.version, packageVersion())
+        assert.equal(health.owner, panelOwner())
+        assert.equal(await isSidebyPanel(otherPort), false)
+        assert.equal(await isSidebyPanel(oldPort), true)
+      } finally {
+        await srv.close()
+        await close(other)
+        await close(old)
+      }
+    })
+  })
+
+  it('gives one HOME reached through a symlink the same panel owner', async () => {
+    await withFakeHome(async (h) => {
+      const alias = join(h.home, '..', 'home-alias')
+      await symlink(h.home, alias)
+      assert.equal(panelOwner(alias), panelOwner(h.home))
+      assert.notEqual(panelOwner(join(h.home, 'missing')), panelOwner(h.home))
     })
   })
 

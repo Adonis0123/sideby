@@ -296,7 +296,7 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
     io.out('No accounts found yet.')
     const installed = families.filter((f) => f.installed)
     if (installed.length === 0)
-      io.out(`Install a host first: ${families.map((f) => `${f.title} (${installHint(f)})`).join(', ')}`)
+      io.out(`Install a host first:\n${families.map((f) => `  ${f.title}: ${installHint(f)}`).join('\n')}`)
     else io.out(`Run ${installed.map((f) => f.bin).join(' or ')} once, then \`sideby new <family> <name>\`.`)
   } else {
     // `= main`: the other Accounts of its Same Login, which share its Quota (spec §3.21).
@@ -336,8 +336,9 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
       io.out(c.dim('\n= <account>: signed in as the same login as that account, so they share one quota.'))
     io.out(c.dim('\nsideby run <account>  ·  sideby new <family> <name>  ·  sideby quota  ·  sideby ui'))
   }
-  // App Profiles (ADR-0019): windows of an app that signs in apart from the Accounts above.
-  for (const app of new Set(appProfiles.map((p) => p.app))) {
+  // App Profiles (ADR-0019): windows of an app that signs in apart from the Accounts above. Not on the first screen
+  // of someone without Accounts yet, where they would only distract from installing a Host; --json keeps them.
+  for (const app of statuses.length ? new Set(appProfiles.map((p) => p.app)) : []) {
     const list = appProfiles.filter((p) => p.app === app)
     io.out(`\n${c.bold(app)} ${c.dim('(signs in on its own, not with the accounts above)')}`)
     io.out(
@@ -423,8 +424,17 @@ export async function cmdNew(a: ParsedArgs, io: Io): Promise<number> {
   const where = tildify(res.account.dir, home)
   if (res.ok) io.out(`${c.green('✓')} created ${c.bold(res.account.ref)} at ${where}`)
   else io.out(`${c.yellow('!')} created ${c.bold(res.account.ref)} at ${where} with problems; see below`)
-  for (const s of res.steps.filter((x) => !x.ok || x.action === 'skipped'))
+  // Items the main account does not have are normal for a new setup: one line, not one per item, so a beginner does
+  // not read a list of problems.
+  const notInMain = res.steps.filter(
+    (x) => x.ok && x.action === 'skipped' && x.message === 'not in the main account',
+  )
+  for (const s of res.steps.filter((x) => (!x.ok || x.action === 'skipped') && !notInMain.includes(x)))
     io.out(`  ${s.ok ? c.dim('·') : c.red('✗')} ${s.item}: ${s.message ?? s.action}`)
+  if (notInMain.length)
+    io.out(
+      `  ${c.dim('·')} nothing to share yet: ${notInMain.map((x) => x.item).join(', ')} ${notInMain.length === 1 ? 'is' : 'are'} not in the main account (add ${notInMain.length === 1 ? 'it' : 'them'} there; \`sideby doctor\` then says what to do)`,
+    )
   for (const e of res.hookErrors) io.err(c.red(`  ${e.message}`))
   if (res.alias?.added) io.out(`${c.green('✓')} short command ${c.bold(res.alias.name)} (in a new shell)`)
   else if (res.alias) io.out(`  ${c.red('✗')} ${res.alias.message}`)

@@ -426,7 +426,7 @@ export async function main(argv: string[]): Promise<number> {
   }
   if (nodeTooOld()) {
     console.error(
-      `sideby needs Node ${MIN_NODE.join('.')} or newer (you have ${process.versions.node}). Upgrade: https://nodejs.org`,
+      `sideby needs Node ${MIN_NODE.join('.')} or newer (you have ${process.versions.node}). Upgrade: https://nodejs.org, or with nvm: \`nvm install 22 && nvm alias default 22\`, then \`npm i -g sideby\` again (each Node version has its own global packages).`,
     )
     return 1
   }

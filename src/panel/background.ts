@@ -14,6 +14,7 @@ import {
   isSidebyPanel,
   type PanelServer,
   panelIdentity,
+  panelOwner,
   startPanelServer,
 } from './server.ts'
 
@@ -119,7 +120,7 @@ export async function findRunningPanel(p: Paths, port: number): Promise<string |
     if (check.status === 'ours') return rec.url
     if (check.status === 'stale') await rm(pidFilePath(p), { force: true })
   }
-  return (await isSidebyPanel(port)) ? `http://127.0.0.1:${port}/` : undefined
+  return (await isSidebyPanel(port, panelOwner(p.home))) ? `http://127.0.0.1:${port}/` : undefined
 }
 
 /**
@@ -263,6 +264,7 @@ export async function serveDetached(opts: {
   const srv: PanelServer = await startPanelServer({
     runtimeFactory: async () => opts.runtimeFactory(await envReady),
     instance,
+    owner: panelOwner(opts.paths.home),
     ...(opts.port ? { port: opts.port } : {}),
     open: false,
     log,

@@ -2304,7 +2304,7 @@ const MAIN = String.raw`
       h('div', null,
         h('h2', { id: 'h-checkup' }, t('health.title')),
         h('p', { class: 'muted small' }, status, h('span', { class: 'sep', 'aria-hidden': 'true' }, '·'),
-          tx('health.lead', { shared: h('span', { class: 'label-tip' }, t('health.sharedTerm'), tip('shared')), drift: h('span', { class: 'label-tip' }, t('health.driftTerm'), tip('drift')) }))),
+          tx('health.lead', { shared: h('span', { class: 'label-tip' }, t('health.sharedTerm'), tip('shared')) }))),
       h('div', { class: 'actions' },
         h('button', { class: 'btn', type: 'button', disabled: busy || !S.state, 'aria-busy': S.checking ? 'true' : null, title: !S.state && !busy ? t('health.waiting') : null, onclick: runCheck }, S.checking ? spinner() : null, S.checking ? t('health.running') : t('health.run')),
         prompt && BOOT.readOnly ? h('button', { class: 'btn', type: 'button', title: t('fix.copyAiTitle'), onclick: () => copyText(prompt, t('fix.promptShown')) }, icon('copy'), t('fix.copyAi')) : null,

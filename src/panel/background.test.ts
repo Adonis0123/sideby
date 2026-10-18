@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { type FakeHome, fakeHost, withFakeHome } from '../../testing/index.ts'
 import { resolvePaths } from '../core/paths.ts'
 import { processStartTime } from './background.ts'
-import { isSidebyPanel } from './server.ts'
+import { isSidebyPanel, panelOwner } from './server.ts'
 
 const MAIN = fileURLToPath(new URL('../cli/main.ts', import.meta.url))
 
@@ -66,7 +66,7 @@ describe('background panel', () => {
         assert.ok(rec, 'pid file written')
         pid = rec.pid
         assert.ok(first.out.includes(rec.url))
-        assert.ok(await isSidebyPanel(rec.port))
+        assert.ok(await isSidebyPanel(rec.port, panelOwner(h.env.HOME)))
 
         const state = (await (await fetch(`${rec.url}api/state`)).json()) as {
           families: { id: string; installed: boolean }[]
@@ -86,7 +86,7 @@ describe('background panel', () => {
         assert.match(stop.out, /stopped the background panel/)
         assert.equal(alive(pid), false)
         assert.equal(await readPid(h), undefined)
-        assert.equal(await isSidebyPanel(rec.port), false)
+        assert.equal(await isSidebyPanel(rec.port, panelOwner(h.env.HOME)), false)
 
         const again = await sideby(env, ['ui', '--stop'])
         assert.equal(again.code, 0)
@@ -206,7 +206,7 @@ describe('background panel', () => {
         assert.equal(r.code, 0, r.err)
         assert.match(r.out, /removed a stale pid file/)
         assert.equal(alive(real.pid), true, 'the other panel keeps running')
-        assert.ok(await isSidebyPanel(real.port))
+        assert.ok(await isSidebyPanel(real.port, panelOwner(h.env.HOME)))
 
         // Its own pid file still stops it.
         r = await sideby(otherEnv, ['ui', '--stop'])
