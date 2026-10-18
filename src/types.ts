@@ -103,6 +103,12 @@ export interface FamilyDef {
    */
   aiTaskArgs?(args: readonly string[]): string[]
   sharedItems: SharedItemDef[]
+  /**
+   * The Host's own settings file, relative to the account directory (`settings.json`), which `sideby edit` opens in
+   * the user's editor (spec §3.30, ADR-0033). sideby never reads or writes it for this. Public contract, additive
+   * only: a Family without it offers no such file.
+   */
+  settingsFile?: string
   /** Arguments for the Host's sign-in command, or null when sign-in happens inside the Host. */
   login: { args: string[] | null; hint: string }
   /** Arguments sideby adds before the Account's and the user's arguments. */

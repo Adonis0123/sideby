@@ -36,6 +36,7 @@ English | [中文](commands.zh-CN.md)
 | `sideby browser [--enable\|--disable] [--yes]` | Which Chrome browser user signed in to each account's website, read on this computer only; off until `--enable --yes` (macOS; in WSL, Chrome on Windows) | 0; 10 `--enable`/`--disable` without `--yes` |
 | `sideby browser open <acct> [--profile <name>]` | Open claude.ai, chatgpt.com or grok.com in the browser user that signed in to that account, or the one `--profile` names (macOS; in WSL, Chrome on Windows) | 0; 1 not macOS or WSL, Chrome not installed, no or several browser users to choose from, or it did not open |
 | `sideby desktop grok-bot:<name> [--remove [--yes]]` | Open a Grok Bot window by name, making a new signed-out one for a new name; `--remove` deletes a window you made and its data (macOS) | 0; 1 not macOS, bad name, app not installed, window open (for `--remove`) or it did not open; 10 `--remove` without `--yes` |
+| `sideby edit <acct> [--path]` | Open the account's own settings file (`settings.json`, `config.toml`) in your default editor; `--path` only prints where it is. sideby reads none of it | 0; 1 no such file, the host names none, or it could not be opened |
 | `sideby app install [--url <url>]` | Add a panel app (macOS, Linux) that opens the panel, or `<url>` | 0; 1 on an unsupported platform or a file it did not create in the way |
 | `sideby app uninstall` | Remove what `app install` created | 0; 1 if it left a file it did not create |
 | `sideby shell-init zsh\|bash` | Print shell functions for every account and your aliases | 0 |

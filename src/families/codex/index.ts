@@ -52,6 +52,7 @@ export const codexFamily: FamilyDef = {
     const options = end === -1 ? args : args.slice(0, end)
     return [...options.filter((a) => !CODEX_BYPASS.includes(a)), ...(end === -1 ? [] : args.slice(end))]
   },
+  settingsFile: 'config.toml',
   sharedItems: [
     { path: 'AGENTS.md', mode: 'link' },
     { path: 'hooks.json', mode: 'link' },

@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/edit.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "ref",
+    "family",
+    "file",
+    "path",
+    "sharedWith",
+    "opened"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "ref": {
+      "type": "string"
+    },
+    "family": {
+      "type": "string"
+    },
+    "file": {
+      "type": "string",
+      "description": "The settings file as the family names it, such as `settings.json`."
+    },
+    "path": {
+      "type": "string",
+      "description": "The file inside the account directory."
+    },
+    "target": {
+      "type": "string",
+      "description": "Where the file really is; only when `path` is a link."
+    },
+    "sharedWith": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Other accounts of the family whose settings file is this same file, so a change applies to them too."
+    },
+    "opened": {
+      "type": "boolean",
+      "description": "False with --path, which only says where the file is."
+    },
+    "command": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The program and arguments that opened the file."
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby edit --json"
+}

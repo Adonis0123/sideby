@@ -1860,6 +1860,29 @@ describe('sideby desktop (spec §3.20)', () => {
   })
 })
 
+describe('sideby edit (spec §3.30)', () => {
+  it('prints where the settings file is with --path and says what to do when it is missing, opening nothing', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}\n')
+      await h.write('.claude-empty/CLAUDE.md', '# rules\n')
+      assert.equal((await sideby(h, ['edit'])).code, 2)
+      const path = await sideby(h, ['edit', 'claude:main', '--path', '--json'])
+      assert.equal(path.code, 0)
+      const r = checkSchema('edit', path.out)
+      assert.equal(r.opened, false)
+      assert.equal(r.path, h.path('.claude/settings.json'))
+      assert.equal(
+        (await sideby(h, ['edit', 'claude:main', '--path'])).out.trim(),
+        h.path('.claude/settings.json'),
+      )
+      const missing = await sideby(h, ['edit', 'claude:empty', '--json'])
+      assert.equal(missing.code, 1)
+      assert.equal(checkSchema('error', missing.out).code, 'settings-missing')
+      assert.match((await sideby(h, ['edit', '--help'])).out, /sideby edit <account> \[--path\]/)
+    })
+  })
+})
+
 describe('sideby update (spec §3.23)', () => {
   /** A registry on localhost answering `latest`, so the test never leaves the machine. */
   async function fakeRegistry(latest: string) {

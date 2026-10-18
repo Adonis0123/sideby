@@ -6,6 +6,7 @@ import { browserReport, openInBrowser, setBrowserSignIns } from '../core/browser
 import { aliasRefs, type DisplayConfig, editConfigUpdate } from '../core/config.ts'
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import type { DoctorReport } from '../core/doctor.ts'
+import { editSettings } from '../core/edit-settings.ts'
 import { UserError } from '../core/errors.ts'
 import { requestHandoff } from '../core/handoff-chain.ts'
 import { handoffOverview } from '../core/handoff-overview.ts'
@@ -1801,6 +1802,29 @@ export async function cmdDesktop(a: ParsedArgs, io: Io): Promise<number> {
   if (r.appData) io.out(c.dim(`  its data: ${tildify(r.appData, home)}`))
   for (const f of r.linked) io.out(c.dim(`  linked ${f} to the main account's`))
   for (const n of r.notices) io.err(c.cyan(n))
+  return 0
+}
+
+/** `sideby edit <account> [--path]`: the Account's Host settings file in the user's editor (spec §3.30, ADR-0033). */
+export async function cmdEdit(a: ParsedArgs, io: Io): Promise<number> {
+  const [ref, ...extra] = a.positionals
+  if (!ref || extra.length || a.rest.length) throw new UsageError('usage: sideby edit <account> [--path]')
+  const rt = await createRuntime()
+  const r = await editSettings(rt, ref, { open: !a.flags.has('path') })
+  if (a.flags.has('json')) {
+    json(io, r)
+    return 0
+  }
+  const home = rt.paths.home
+  if (!r.opened) io.out(r.target ?? r.path)
+  else io.out(`${c.green('✓')} opened ${c.bold(r.ref)}'s ${r.file} with your default program`)
+  if (r.opened || r.target)
+    io.out(
+      c.dim(
+        `  ${tildify(r.target ?? r.path, home)}${r.target ? ` (linked from ${tildify(r.path, home)})` : ''}`,
+      ),
+    )
+  if (r.sharedWith.length) io.out(c.dim(`  shared: a change also applies to ${r.sharedWith.join(', ')}`))
   return 0
 }
 

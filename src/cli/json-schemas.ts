@@ -88,6 +88,11 @@ const FamilyInfo = Type.Object({
   brokenBin: Type.Optional(Str),
   plugin: Str,
   tuning: Type.Boolean(),
+  settingsFile: Type.Optional(
+    Type.String({
+      description: "The Host's settings file `sideby edit` opens, relative to the account directory.",
+    }),
+  ),
 })
 
 const ShareModeSchema = Type.Union(
@@ -882,6 +887,29 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       notices: Type.Array(Str),
     },
     { title: 'sideby desktop --json' },
+  ),
+  edit: Type.Object(
+    {
+      schemaVersion: Version,
+      ref: Str,
+      family: Str,
+      file: Type.String({
+        description: 'The settings file as the family names it, such as `settings.json`.',
+      }),
+      path: Type.String({ description: 'The file inside the account directory.' }),
+      target: Type.Optional(
+        Type.String({ description: 'Where the file really is; only when `path` is a link.' }),
+      ),
+      sharedWith: Type.Array(Str, {
+        description:
+          'Other accounts of the family whose settings file is this same file, so a change applies to them too.',
+      }),
+      opened: Type.Boolean({ description: 'False with --path, which only says where the file is.' }),
+      command: Type.Optional(
+        Type.Array(Str, { description: 'The program and arguments that opened the file.' }),
+      ),
+    },
+    { title: 'sideby edit --json' },
   ),
   'desktop-remove': Type.Object(
     {

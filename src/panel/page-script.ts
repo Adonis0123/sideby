@@ -358,6 +358,7 @@ const MAIN = String.raw`
     terminal: 'M4 17l6-5-6-5M12 19h8',
     key: 'M15 9a3 3 0 1 0-.01 0M12.9 11.1L4 20M7 17l2 2M9.5 14.5l2 2',
     folder: 'M3 6h6l2 2h10v11H3z',
+    file: 'M14 3H6v18h12V7zM14 3v4h4M9 13h6M9 17h6',
     check: 'M9 12l2 2 4-4M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z',
     userPlus: 'M15 19a6 6 0 0 0-12 0M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M16 11h6',
     x: 'M6 6l12 12M18 6L6 18',
@@ -814,8 +815,23 @@ const MAIN = String.raw`
     return [
       a.modelInfo && a.modelInfo.settable ? { icon: 'terminal', label: t('menu.model'), run: () => openModel(a) } : null,
       family(a.family).tuning ? { icon: 'check', label: t('menu.tune'), run: () => openTune(a) } : null,
+      settingsItem(a),
       { icon: 'check', label: t('menu.check'), disabled: S.checking || S.fixing || Boolean(ui.checkingRef), run: () => checkAccount(a.ref) },
     ]
+  }
+  // The directory's own Host settings file, opened in the user's editor (spec §3.30); it starts a program, so a
+  // read-only Panel has no such item.
+  function settingsItem(a) {
+    const file = family(a.family).settingsFile
+    if (!file || !a.dir || BOOT.readOnly) return null
+    return { icon: 'file', label: t('menu.editSettings', { file }), hint: a.dir + '/' + file, run: () => editSettings(a, file) }
+  }
+  async function editSettings(a, file) {
+    try {
+      const r = await api('/api/account/edit-settings', { account: a.ref })
+      toast(t('edit.opened', { ref: a.ref, file }))
+      if (r.sharedWith && r.sharedWith.length) toast(t('edit.shared', { names: r.sharedWith.map(refName).join(', ') }), { kind: 'info', duration: 8000 })
+    } catch (e) { toast(t('edit.failed', { ref: a.ref, file, msg: e.message }), { kind: 'fail' }) }
   }
   // What the login does, whichever directory: the browser, signing in, the email, a new account like it.
   function loginItems(a) {

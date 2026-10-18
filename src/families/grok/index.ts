@@ -54,6 +54,7 @@ export const grokFamily: FamilyDef = {
   secretVar: 'XAI_API_KEY',
   // `-p` is one non-interactive prompt (Grok Build 1.0.60 --help, 2026-10-17).
   probe: { args: ['-p', 'Reply with OK'] },
+  settingsFile: 'config.toml',
   sharedItems: [
     { path: 'skills', mode: 'link' },
     { path: 'installed-plugins', mode: 'link' },

@@ -48,6 +48,7 @@ import {
   type PanelConfig,
 } from '../core/config.ts'
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
+import { editSettings } from '../core/edit-settings.ts'
 import { UserError } from '../core/errors.ts'
 import { planHandoff } from '../core/handoff.ts'
 import { applyHandoffEnable, type EnablePlan, planHandoffEnable } from '../core/handoff-enable.ts'
@@ -1070,6 +1071,18 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           appPath: tildify(r.appPath, home),
           ...(r.appData ? { appData: tildify(r.appData, home) } : {}),
         }
+      },
+    },
+    // Opens the Account's Host settings file with the system's default program (spec §3.30, ADR-0033). It reads none
+    // of the file but starts a program, so a read-only Panel refuses it (writes defaults to true).
+    '/api/account/edit-settings': {
+      async run(body) {
+        const account = optString(body, 'account')
+        if (!account) throw new HttpError(400, '"account" is required')
+        const rt = await getRuntime()
+        const r = await editSettings(rt, account)
+        const home = rt.paths.home
+        return { ...r, path: tildify(r.path, home), ...(r.target ? { target: tildify(r.target, home) } : {}) }
       },
     },
     // Browser Sign-ins on or off (spec §3.24): config `browser.signIns`, shown first like every config change.

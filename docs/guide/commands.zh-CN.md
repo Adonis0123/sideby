@@ -36,6 +36,7 @@
 | `sideby browser [--enable\|--disable] [--yes]` | 每个账号的网站在哪个 Chrome 浏览器用户里登录过，只在本机读取；`--enable --yes` 之前不读（macOS；WSL 里读 Windows 上的 Chrome） | 0；`--enable`/`--disable` 不带 `--yes` 为 10 |
 | `sideby browser open <acct> [--profile <名字>]` | 用登录过这个账号的浏览器用户打开 claude.ai、chatgpt.com 或 grok.com，或者用 `--profile` 指定的那个（macOS；WSL 里用 Windows 上的 Chrome） | 0；不是 macOS 或 WSL、没装 Chrome、没有或有多个浏览器用户可选、没能打开为 1 |
 | `sideby desktop grok-bot:<名字> [--remove [--yes]]` | 按名字打开一个 Grok Bot 窗口，新名字就新建一个未登录的窗口；`--remove` 删掉你建的窗口和它的数据（macOS） | 0；不是 macOS、名字不对、应用没装、窗口开着（`--remove` 时）或没能打开为 1；`--remove` 不带 `--yes` 为 10 |
+| `sideby edit <acct> [--path]` | 用默认编辑器打开这个账号自己的设置文件（`settings.json`、`config.toml`）；`--path` 只输出路径。sideby 不读文件内容 | 0；文件不存在、这个宿主没有设置文件或没能打开为 1 |
 | `sideby app install [--url <url>]` | 添加打开面板（或 `<url>`）的面板应用（macOS、Linux） | 0；平台不支持或目标位置有不是它创建的文件为 1 |
 | `sideby app uninstall` | 删除 `app install` 创建的文件 | 0；留下了不是它创建的文件为 1 |
 | `sideby shell-init zsh\|bash` | 输出每个账号和每个别名的 shell 函数 | 0 |

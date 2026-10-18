@@ -68,6 +68,8 @@ Usage:
   sideby desktop <account>            open the desktop app (Claude Desktop, the Codex app) as this
                                       account, next to the others (macOS)
   sideby desktop grok-bot:<name>      open a Grok Bot window, a new one for a new name (macOS)
+  sideby edit <account> [--path]      open the account's own settings file (settings.json,
+                                      config.toml) in your editor
   sideby browser [--enable [--yes]]   which Chrome browser user signed in to each account's website
                                       (read on this computer only; off until you enable it)
   sideby browser open <account> [--profile <name>]
@@ -92,9 +94,9 @@ Usage:
 
 Options:
   --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, remote-control, handoff,
-                families, plugins, app, desktop, browser, update, local, ask, terminal, key, try,
+                families, plugins, app, desktop, edit, browser, update, local, ask, terminal, key, try,
                 autostart, config)
-  -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, desktop, browser,
+  -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, desktop, edit, browser,
                 autostart, config
   -v, --version show the version
 
@@ -204,6 +206,21 @@ Examples:
   sideby desktop grok-bot:002 --remove --yes
 Exit: 0 opened, brought to the front or removed; 1 not macOS, no desktop app for that host, API account, app not
 installed, a bad window name, or the app did not open; 10 --remove without --yes; 2 malformed command line.`,
+  edit: `sideby edit <account> [--path] [--json]
+
+Open the account's own settings file in your editor: settings.json for claude and pi accounts, config.toml for codex
+and grok accounts. It opens with the system's default program (the default text editor on macOS, the Windows default
+program on WSL, xdg-open on other Linux). --path only prints where the file is.
+
+sideby reads nothing of the file and never changes it; your editor does. When the file is a link (accounts that
+share their settings with the main account), it says where the real file is and which accounts the change affects.
+A missing file is not created: the message says how to get one.
+
+Examples:
+  sideby edit claude:work
+  sideby edit cc008 --path
+Exit: 0 opened (or printed with --path); 1 no settings file, the family names none, or it could not be opened; 2
+malformed command line.`,
   autostart: `sideby autostart [on|off] [--yes] [--json]
 
 Start the panel in the background when you log in, so it already shows fresh quota when you open it. It never
@@ -318,6 +335,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   ui: { flags: ['no-open', 'background', 'stop', 'serve-detached'], valued: ['port'] },
   app: { flags: ['json'], valued: ['url'] },
   desktop: { flags: ['json', 'remove', 'yes'] },
+  edit: { flags: ['json', 'path'] },
   browser: { flags: ['json', 'enable', 'disable', 'yes'], valued: ['profile'] },
   'shell-init': { flags: ['write'] },
   plugins: { flags: ['json'] },
@@ -567,6 +585,8 @@ async function dispatch(
       return await cmds.cmdApp(parsed, io)
     case 'desktop':
       return await cmds.cmdDesktop(parsed, io)
+    case 'edit':
+      return await cmds.cmdEdit(parsed, io)
     case 'browser':
       return await cmds.cmdBrowser(parsed, io)
     case 'shell-init':
