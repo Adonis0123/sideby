@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../testing/index.ts'
 import {
+  copiedFiles,
   keptVersion,
   type LocalDirs,
   linkGlobal,
@@ -28,6 +29,15 @@ const runningId = async (d: LocalDirs) =>
   (JSON.parse(await readFile(join(d.dev, 'pkg', 'dist', 'build.json'), 'utf8')) as { id: string }).id
 
 describe('pnpm local', () => {
+  it('copies package.json and every package.json `files` entry but dist into the build', async () => {
+    const files = await copiedFiles()
+    const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as {
+      files: string[]
+    }
+    assert.deepEqual(files, ['package.json', ...pkg.files.filter((f) => f !== 'dist')])
+    assert.ok(files.includes('ai-tasks.json'), 'a Portal reads ai-tasks.json from the package root')
+  })
+
   it('switches a build into the same pkg folder and keeps the three newest old ones', async () => {
     await withFakeHome(async (h) => {
       const d = dirsOf(h)

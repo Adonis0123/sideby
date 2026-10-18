@@ -36,8 +36,6 @@ export { globalPkg, keptVersion, kind, type LocalDirs, linkGlobal, offPlan, pkgD
 
 const run = promisify(execFile)
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-/** What a published package holds besides `dist` (package.json `files`). */
-const COPIED = ['package.json', 'schemas', 'skills', 'README.md', 'README.zh-CN.md', 'LICENSE']
 const KEEP_OLD = 3
 const BIN = 'dist/src/cli/main.js'
 
@@ -52,6 +50,12 @@ async function buildIdOf(dir: string): Promise<string> {
 }
 
 /** Moves the running build to `old/<id>` and `stage` into its place: two renames, never a half-written `pkg`. */
+/** What a published package holds besides `dist`: package.json and its `files`, read from it so the two never drift. */
+export async function copiedFiles(root = ROOT): Promise<string[]> {
+  const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as { files?: string[] }
+  return ['package.json', ...(pkg.files ?? []).filter((f) => f !== 'dist')]
+}
+
 export async function switchIn(d: LocalDirs, stage: string): Promise<void> {
   const pkg = pkgDir(d)
   await mkdir(join(d.dev, 'old'), { recursive: true })
@@ -144,7 +148,8 @@ async function build(d: LocalDirs): Promise<{ stage: string; id: string; commit:
     throw new Error(`tsc failed; the running build was kept:\n${out.split('\n').slice(0, 20).join('\n')}`)
   }
   await chmod(join(stage, BIN), 0o755)
-  for (const f of COPIED) await cp(join(ROOT, f), join(stage, f), { recursive: true }).catch(() => {})
+  for (const f of await copiedFiles())
+    await cp(join(ROOT, f), join(stage, f), { recursive: true }).catch(() => {})
   // The real folder: a worktree's node_modules is often itself a link that goes away with the worktree.
   await symlink(await realpath(join(ROOT, 'node_modules')), join(stage, 'node_modules'), 'dir')
   const commit = await git(['rev-parse', '--short', 'HEAD']).catch(() => '')
