@@ -253,7 +253,9 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .col-head > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .col-head .quota > span { overflow: hidden; text-overflow: ellipsis; }
 .ident { grid-area: id; display: flex; align-items: center; gap: 10px; min-width: 0; }
-.ident-text { min-width: 0; flex: 1; }
+.ident-text { min-width: 0; flex: 1; position: relative; padding-left: 18px; }
+/* The pin sits in the text column's own gutter, so the name and the email below it start at the same place. */
+.ident-text .pin-slot, .ident-text .pin-mark { position: absolute; left: 0; top: 2px; margin: 0; }
 .ident-name { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; row-gap: 3px; }
 .ident-name .name { font-weight: var(--strong-weight); font-size: var(--font-size); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .ident-name .alias { color: var(--muted); font-family: var(--mono); font-size: 12px; white-space: nowrap; }
