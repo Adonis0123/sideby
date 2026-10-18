@@ -206,6 +206,24 @@ test('AppleScript gets only the fixed command, escaped for AppleScript, and neve
   }
 })
 
+test('brings Orca to the front after creating its terminal, ignoring activation failures', async () => {
+  const opts = { cwd, command, platform: 'darwin' as const, installed: [{ id: 'orca' as const }] }
+  const calls: Array<[string, readonly string[]]> = []
+  const exec = async (file: string, args: readonly string[]) => {
+    calls.push([file, args])
+    return { code: 0, stdout: '', stderr: '' }
+  }
+  assert.deepEqual(await openTerminal('orca', opts, exec), { ok: true })
+  assert.deepEqual(calls[1], ['/usr/bin/open', ['-b', 'com.stablyai.orca']])
+  const failing = async (file: string) => {
+    if (file === '/usr/bin/open') throw new Error('activation failed')
+    return { code: 0, stdout: '', stderr: '' }
+  }
+  assert.deepEqual(await openTerminal('orca', opts, failing), { ok: true })
+  const refused = async (file: string) => ({ code: file === '/usr/bin/open' ? 1 : 0, stdout: '', stderr: '' })
+  assert.deepEqual(await openTerminal('orca', opts, refused), { ok: true })
+})
+
 test('maps platform, missing installation, Automation refusal and exec failures', async () => {
   const opts = { cwd, command, platform: 'darwin' as const, installed: [{ id: 'terminal' as const }] }
   let calls = 0
