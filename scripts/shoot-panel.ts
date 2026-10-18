@@ -7,7 +7,7 @@
 // Do not point it at a real HOME: everything runs inside a throwaway demo HOME.
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { demoHome, openChrome, root, startPanel, workDir } from './chrome.ts'
+import { demoHome, openChrome, panelLoaded, root, startPanel, workDir } from './chrome.ts'
 
 const outArg = process.argv.indexOf('--out')
 const out = outArg === -1 ? join(root, 'docs/assets') : resolve(process.argv[outArg + 1] ?? '.')
@@ -43,11 +43,7 @@ for (const shot of shots) {
     features: [{ name: 'prefers-color-scheme', value: shot.scheme }],
   })
   await chrome.page('Page.navigate', { url: panelUrl })
-  await chrome.until(
-    `document.documentElement.lang.startsWith(${JSON.stringify(shot.lang.slice(0, 2))}) &&
-      /\\d+%/.test(document.querySelector('.row[data-ref="claude:work"] .quota')?.innerText ?? '')`,
-    `the ${shot.lang} Panel to load quota`,
-  )
+  await chrome.until(panelLoaded(shot.lang), `the ${shot.lang} Panel to load quota`)
   await new Promise((r) => setTimeout(r, 800))
   writeFileSync(join(out, shot.file), await chrome.screenshot())
   console.log(`wrote ${join(out, shot.file)}`)

@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { cli, demoHome, fail, openChrome, root, startPanel, track, workDir } from './chrome.ts'
+import { cli, demoHome, fail, openChrome, panelLoaded, root, startPanel, track, workDir } from './chrome.ts'
 
 const out = join(root, 'docs/assets/demo.gif')
 const FPS = 10
@@ -150,11 +150,8 @@ await page('Emulation.setDeviceMetricsOverride', {
   mobile: false,
 })
 await page('Page.navigate', { url: panelUrl })
-await until(
-  // Token usage moved behind a click (6ea716b); the 7-day quota of claude:work is what the scene zooms into.
-  `/\\d+%/.test(document.querySelector('.row[data-ref="claude:work"] .quota')?.innerText ?? '')`,
-  'the Panel to load quota',
-)
+// Token usage moved behind a click (6ea716b); the 7-day quota of claude:work is what the scene zooms into.
+await until(panelLoaded(), 'the Panel to load quota')
 await new Promise((r) => setTimeout(r, 800))
 // Where the scene zooms and rings: the Claude Code group, work's 7-day window and the account marked Suggested
 // (found by its tag's button, not its words, which change with the language and the copy).

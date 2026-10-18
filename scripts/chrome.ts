@@ -66,6 +66,37 @@ export async function startPanel(env: NodeJS.ProcessEnv, port: number): Promise<
   })
 }
 
+/**
+ * A page expression: true once the Panel shows claude:work's quota (and, with `lang`, its page is in that language).
+ * Mid-navigation the document can have no root element yet, so every step tolerates a missing one.
+ */
+export function panelLoaded(lang?: string): string {
+  const quota = `/\\d+%/.test(document.querySelector('.row[data-ref="claude:work"] .quota')?.innerText ?? '')`
+  if (!lang) return quota
+  return `(document.documentElement?.lang ?? '').startsWith(${JSON.stringify(lang.slice(0, 2))}) && ${quota}`
+}
+
+/**
+ * Calls `check` until it returns something truthy. A check that throws counts as "not yet": while a page navigates,
+ * its old context goes away and its new one may have no document element.
+ */
+export async function pollUntil(
+  check: () => Promise<unknown>,
+  { tries = 100, waitMs = 150 } = {},
+): Promise<{ ok: true } | { ok: false; lastError?: unknown }> {
+  let lastError: unknown
+  for (let i = 0; i < tries; i++) {
+    try {
+      if (await check()) return { ok: true }
+      lastError = undefined
+    } catch (e) {
+      lastError = e
+    }
+    if (i < tries - 1) await new Promise((r) => setTimeout(r, waitMs))
+  }
+  return { ok: false, lastError }
+}
+
 function findChrome(): string {
   const candidates = [
     process.env.CHROME,
@@ -145,26 +176,30 @@ export async function openChrome(work: string): Promise<Chrome> {
   const { targetId } = await send('Target.createTarget', { url: 'about:blank' })
   const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true })
   const page = (method: string, params: object = {}) => send(method, params, sessionId)
-  async function evaluate(expression: string) {
+  async function tryEvaluate(expression: string) {
     const { result, exceptionDetails } = await page('Runtime.evaluate', {
       expression,
       awaitPromise: true,
       returnByValue: true,
     })
     if (exceptionDetails)
-      fail(`page script failed: ${exceptionDetails.exception?.description ?? exceptionDetails.text}`)
+      throw new Error(
+        `page script failed: ${exceptionDetails.exception?.description ?? exceptionDetails.text}`,
+      )
     return result.value
+  }
+  async function evaluate(expression: string) {
+    return tryEvaluate(expression).catch((e: Error) => fail(e.message))
   }
   return {
     send: (method, params) => send(method, params),
     page,
     evaluate,
     async until(expression, what) {
-      for (let i = 0; i < 100; i++) {
-        if (await evaluate(expression)) return
-        await new Promise((r) => setTimeout(r, 150))
-      }
-      fail(`timed out waiting for ${what}`)
+      const r = await pollUntil(() => tryEvaluate(expression))
+      if (r.ok) return
+      const last = r.lastError instanceof Error ? `; last error: ${r.lastError.message}` : ''
+      fail(`timed out waiting for ${what}${last}`)
     },
     async screenshot() {
       const shot = await page('Page.captureScreenshot', { format: 'png' })
