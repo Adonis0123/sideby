@@ -23,7 +23,7 @@
         "scripts/shoot-panel.ts"
       ],
       "retake": "node scripts/shoot-panel.ts",
-      "checked": "5d7bef7"
+      "checked": "07c8d57"
     },
     {
       "id": "demo-gif",
