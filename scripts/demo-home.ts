@@ -316,7 +316,7 @@ if (variant !== 'empty') {
         { label: '7d', windowMinutes: 10080, usedPercent: seven, resetsAt: iso(96 * H) },
       ],
     })
-  await write('.local/state/sideby/quota/claude/main.json', cache(72, 44, 0.2 * H))
+  await write('.local/state/sideby/quota/claude/main.json', cache(35, 44, 0.2 * H))
   await write('.local/state/sideby/quota/claude/work.json', cache(23, 91, 1.1 * H))
   const wrapped = JSON.stringify(
     { model: 'opus', statusLine: { type: 'command', command: 'sideby statusline-tap' } },
