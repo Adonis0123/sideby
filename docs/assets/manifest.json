@@ -55,10 +55,10 @@
     {
       "id": "intro-video",
       "kind": "creative",
-      "url": "https://github.com/user-attachments/assets/3a470c03-9009-4f1d-b7f6-8b4625d74958",
-      "checked": "88856b8",
+      "url": "https://github.com/user-attachments/assets/fd6138ae-499d-4055-b94f-25ef9ce74035",
+      "checked": "27a713d",
       "watch": ["src/core/brand-mark.ts"],
-      "retake": "painted-animation skill, in the intro film's own project (kept outside this repository)"
+      "retake": "painted-animation skill, in the intro film's own project (kept outside this repository); English captions in README.md, Chinese captions in README.zh-CN.md (https://github.com/user-attachments/assets/3c652c33-d749-4b1b-bb85-afd63c207271)"
     }
   ],
   "copy": {

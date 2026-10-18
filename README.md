@@ -46,7 +46,7 @@ The agent checks Node and your Host CLIs, installs sideby and the skill, creates
 
 The 25-second story: one account buried in tasks, then accounts side by side sharing one setup, and a task moving on when one runs out.
 
-https://github.com/user-attachments/assets/3a470c03-9009-4f1d-b7f6-8b4625d74958
+https://github.com/user-attachments/assets/fd6138ae-499d-4055-b94f-25ef9ce74035
 
 <img alt="Two terminals: the personal account and the work account running at the same time, both linked to the main account's skills and settings, then the local quota panel, and at 95% Auto Handoff moving work's session to the next account" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/demo.gif" width="1280">
 
