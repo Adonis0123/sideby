@@ -480,6 +480,7 @@ export async function checkAppData(
   plugins: readonly LoadedPlugin[],
   home: string,
   account: Account,
+  force = false,
 ): Promise<CheckResult[]> {
   if (account.isMain || account.kind === 'api') return []
   const def = desktopAppOf(plugins, account.family)
@@ -491,7 +492,7 @@ export async function checkAppData(
     const item: SharedItemDef = { path: f.path, mode: 'link' }
     const mainPath = join(home, f.mainPath)
     const p = join(dir, item.path)
-    const ctx = { account, item, mainPath, accountPath: p, accountDir: dir, force: false }
+    const ctx = { account, item, mainPath, accountPath: p, accountDir: dir, force }
     let res = await checkItem(ctx)
     // The Desktop App writes its own file when the Main Account had none at first open, and replaces the link when
     // it saves its preferences: not the user's doing, and a new link would be replaced again. With a `key`, only
