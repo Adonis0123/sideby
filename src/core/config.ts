@@ -198,7 +198,17 @@ export const ConfigSchema = Type.Object(
         {
           preferred: Type.Optional(
             Type.String({
-              enum: ['terminal', 'iterm2', 'ghostty', 'orca', 'wezterm', 'kitty', 'alacritty', 'custom'],
+              enum: [
+                'terminal',
+                'iterm2',
+                'ghostty',
+                'orca',
+                'wezterm',
+                'kitty',
+                'alacritty',
+                'windows-terminal',
+                'custom',
+              ],
               description: 'The terminal sideby opens for AI Tasks; without it sideby picks the one you use.',
             }),
           ),

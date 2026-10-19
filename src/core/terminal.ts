@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Env } from '../types.ts'
 import type { DesktopDeps } from './desktop-app.ts'
+import { askWindowsDirs, type WindowsExec } from './windows-dirs.ts'
 
 export type TerminalId =
   | 'terminal'
@@ -108,6 +109,8 @@ export interface TerminalDeps {
   fs?: { stat: typeof stat; access: typeof access; readdir?: typeof readdir }
   /** On WSL, where Windows drives are mounted (normally `/mnt`); undefined elsewhere. */
   wslMount?: string
+  /** On WSL, runs `cmd.exe` to name the current Windows user's folders (core/windows-dirs.ts). */
+  exec?: WindowsExec
 }
 
 const isExecutable = async (fs: NonNullable<TerminalDeps['fs']>, path: string) =>
@@ -122,27 +125,35 @@ const isExecutable = async (fs: NonNullable<TerminalDeps['fs']>, path: string) =
 
 /**
  * The Windows terminals sideby can open from WSL: Windows Terminal (`wt.exe`) and Orca's Windows CLI (`orca.exe`), each
- * on PATH or else in a Windows user's folder (a background service's PATH has no Windows folders).
+ * on PATH or else in the current Windows user's `%LOCALAPPDATA%` (a background service's PATH has no Windows folders).
+ * When cmd.exe cannot name that user, a terminal only one user under `C:\Users` has is used; several are not guessed
+ * between.
  */
 async function wslTerminals(deps: TerminalDeps, mount: string): Promise<InstalledTerminal[]> {
   const fs = { stat, access, readdir, ...deps.fs }
+  const local = deps.exec ? (await askWindowsDirs(deps.exec, mount))?.localAppData?.unix : undefined
   const users = join(mount, 'c', 'Users')
-  const names = await fs.readdir(users).catch(() => [] as string[])
-  const find = async (exe: string, inUser: readonly string[]) => {
+  const names = local ? [] : await fs.readdir(users).catch(() => [] as string[])
+  const find = async (exe: string, inLocal: readonly string[]) => {
     for (const dir of (deps.env.PATH ?? '').split(':').filter(Boolean)) {
       const path = join(dir, exe)
       if (await isExecutable(fs, path)) return path
     }
-    for (const user of names) {
-      const path = join(users, user, ...inUser, exe)
-      if (await isExecutable(fs, path)) return path
+    if (local) {
+      const path = join(local, ...inLocal, exe)
+      return (await isExecutable(fs, path)) ? path : undefined
     }
-    return undefined
+    const hits: string[] = []
+    for (const user of names) {
+      const path = join(users, user, 'AppData', 'Local', ...inLocal, exe)
+      if (await isExecutable(fs, path)) hits.push(path)
+    }
+    return hits.length === 1 ? hits[0] : undefined
   }
   const found: InstalledTerminal[] = []
-  const wt = await find('wt.exe', ['AppData', 'Local', 'Microsoft', 'WindowsApps'])
+  const wt = await find('wt.exe', ['Microsoft', 'WindowsApps'])
   if (wt) found.push({ id: 'windows-terminal', executable: wt })
-  const orca = await find('orca.exe', ['AppData', 'Local', 'Programs', 'orca', 'resources', 'bin'])
+  const orca = await find('orca.exe', ['Programs', 'orca', 'resources', 'bin'])
   if (orca) found.push({ id: 'orca', executable: orca })
   return found
 }

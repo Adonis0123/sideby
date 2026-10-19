@@ -15,6 +15,7 @@ import { type BrowserConfig, editConfigBrowser } from './config.ts'
 import { type DesktopDeps, depsFor, findApp } from './desktop-app.ts'
 import { UserError } from './errors.ts'
 import { localStorageKeys } from './leveldb-keys.ts'
+import { askWindowsDirs, type WindowsDirs } from './windows-dirs.ts'
 
 const OPEN = '/usr/bin/open'
 export const CHROME = {
@@ -31,46 +32,13 @@ export function chromeUserData(home: string): string {
 }
 
 /** Windows folders sideby needs on WSL, each as a Windows path and as the WSL path it is mounted at. */
-interface WindowsDirs {
-  localAppData?: { win: string; unix: string }
-  programs: { win: string; unix: string }[]
-}
-
-/** A Windows drive path (`C:\Windows`) as WSL mounts it (`/mnt/c/Windows`); undefined for anything else. */
-function toUnix(win: string, mount: string): string | undefined {
-  const m = /^([A-Za-z]):\\(.*)$/.exec(win.trim())
-  if (!m) return undefined
-  return join(mount, (m[1] as string).toLowerCase(), ...(m[2] as string).split('\\').filter(Boolean))
-}
-
-const windowsMemo = new Map<string, WindowsDirs>()
-
 /**
- * `%LOCALAPPDATA%` and the Program Files folders, from one `cmd.exe` call, remembered for the process. When cmd.exe
- * fails, the only Windows user with Chrome data under `<mount>/c/Users`; several are not guessed between.
+ * `%LOCALAPPDATA%` and the Program Files folders (core/windows-dirs.ts). When cmd.exe fails, the only Windows user
+ * with Chrome data under `<mount>/c/Users`; several are not guessed between.
  */
 async function windowsDirs(deps: DesktopDeps, mount: string, problems: string[]): Promise<WindowsDirs> {
-  const hit = windowsMemo.get(mount)
-  if (hit) return hit
-  const r = await deps.exec(join(mount, 'c', 'Windows', 'System32', 'cmd.exe'), [
-    '/d',
-    '/c',
-    'echo %LOCALAPPDATA%^|%ProgramFiles%^|%ProgramFiles(x86)%',
-  ])
-  const parts = r.code === 0 ? r.stdout.trim().split('|') : []
-  const dir = (win: string | undefined) => {
-    const unix = win ? toUnix(win, mount) : undefined
-    return win && unix ? { win: win.trim(), unix } : undefined
-  }
-  const local = dir(parts[0])
-  if (local) {
-    const found: WindowsDirs = {
-      localAppData: local,
-      programs: [dir(parts[1]), dir(parts[2])].filter((d) => d !== undefined),
-    }
-    windowsMemo.set(mount, found)
-    return found
-  }
+  const asked = await askWindowsDirs((file, args) => deps.exec(file, args), mount)
+  if (asked) return asked
   // cmd.exe did not answer (interop off, or no C: drive): look for the one Windows user that has Chrome.
   const users = join(mount, 'c', 'Users')
   const withChrome: string[] = []

@@ -338,6 +338,39 @@ test('on WSL, finds Windows Terminal on PATH or in a Windows user folder', async
   })
 })
 
+test('on WSL, looks only in the current Windows user folder, and never guesses between users', async () => {
+  await withFakeHome(async (h) => {
+    const wt = (user: string) => `mnt/c/Users/${user}/AppData/Local/Microsoft/WindowsApps/wt.exe`
+    await h.write(wt('other'), '', 0o755)
+    await h.write(wt('me'), '', 0o755)
+    const base = { home: h.home, env: { PATH: h.bin }, platform: 'linux' as const, wslMount: h.path('mnt') }
+    // cmd.exe cannot answer: two users have Windows Terminal, so neither is taken.
+    const silent = { ...base, exec: async () => ({ code: 1, stdout: '' }) }
+    assert.deepEqual(await installedTerminals(silent), [])
+    // cmd.exe names this user's %LOCALAPPDATA%: only that folder counts, also on another drive.
+    const calls: string[][] = []
+    await h.write('mnt/d/Profiles/me/AppData/Local/Microsoft/WindowsApps/wt.exe', '', 0o755)
+    const named = {
+      ...base,
+      wslMount: h.path('mnt'),
+      exec: async (file: string, args: readonly string[]) => {
+        calls.push([file, ...args])
+        return {
+          code: 0,
+          stdout: 'D:\\Profiles\\me\\AppData\\Local|C:\\Program Files|C:\\Program Files (x86)\r\n',
+        }
+      },
+    }
+    assert.deepEqual(await installedTerminals(named), [
+      {
+        id: 'windows-terminal',
+        executable: h.path('mnt/d/Profiles/me/AppData/Local/Microsoft/WindowsApps/wt.exe'),
+      },
+    ])
+    assert.equal(calls[0]?.[0], h.path('mnt/c/Windows/System32/cmd.exe'))
+  })
+})
+
 test('Windows Terminal opens a tab that runs the task in this WSL distribution', () => {
   const wt = '/mnt/c/Users/me/AppData/Local/Microsoft/WindowsApps/wt.exe'
   // wt.exe splits its command line at `;`, so the hold after a failure is written without one.

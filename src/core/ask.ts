@@ -278,7 +278,7 @@ export async function terminals(rt: Runtime) {
     env: rt.env,
     platform: deps.platform,
     appDirs,
-    ...(deps.wslMount ? { wslMount: deps.wslMount } : {}),
+    ...(deps.wslMount ? { wslMount: deps.wslMount, exec: (file, args) => deps.exec(file, args) } : {}),
   })
   if (rt.config.terminal?.custom) installed.push({ id: 'custom' })
   return {
