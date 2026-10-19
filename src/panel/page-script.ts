@@ -4548,7 +4548,7 @@ const MAIN = String.raw`
         body.push(h('div', { class: 'pk-row' }, head,
           h('p', { class: 'small' }, h('code', { class: 'mono' }, name), ' ', t('pk.exists', { host: info.title })),
           h('div', { class: 'actions' },
-            h('button', { class: 'btn btn-sm', type: 'button', disabled: pk.busy, onclick: () => startPick(name) }, icon('terminal'), t('pk.start')),
+            h('button', { class: 'btn btn-sm', type: 'button', disabled: pk.busy, onclick: () => startPick(name) }, icon('terminal'), pickStartLabel(), h('code', { class: 'mono' }, name)),
             BOOT.readOnly ? null : h('button', { class: 'btn btn-sm btn-ghost', type: 'button', disabled: pk.busy, onclick: () => { pk.renaming[fam] = true; renderPick(); const el = document.getElementById('pk-name-' + fam); if (el) el.focus() } }, t('pk.rename')),
             BOOT.readOnly ? null : h('button', { class: 'btn btn-sm btn-ghost', type: 'button', disabled: pk.busy, onclick: () => pickRemove(name) }, t('pk.remove')))))
         continue
@@ -4587,13 +4587,15 @@ const MAIN = String.raw`
     return h('div', { class: 'note note-warn ss-note', role: 'status' },
       h('div', { class: 'note-line' }, h('b', null, t('ss.title')), ' ', t('ss.body', { rc: ss.rc })),
       h('code', { class: 'mono note-line' }, line),
-      h('button', { class: 'btn btn-sm btn-primary', type: 'button', disabled: ssBusy, onclick: () => shellSetup(false) }, ssBusy ? t('ss.adding') : t('ss.add')))
+      h('button', { class: 'btn btn-sm btn-primary', type: 'button', disabled: ssBusy, onclick: () => shellSetup(false) }, ssBusy ? t('ss.adding') : t('ss.add', { rc: ss.rc })))
   }
+  // The label ends in a colon and the command name follows: a space after an English colon, none after a Chinese one.
+  function pickStartLabel() { const l = t('pk.start'); return /[:：]$/.test(l) && lang !== 'zh' ? l + ' ' : l }
   // In a tool's group head: the button that starts the account with the most room, or the offer to add one.
   function pickHead(fam) {
     const name = pickOf(fam)
     // On a narrow screen only the icon and the name stay; the words are in the hover text and the label.
-    if (name) return h('button', { class: 'btn btn-sm', type: 'button', title: t('pk.startTip', { name, host: family(fam).title }), 'aria-label': t('pk.startTip', { name, host: family(fam).title }), onclick: () => startPick(name) }, icon('terminal'), h('span', { class: 'hide-sm' }, t('pk.start') + ' '), h('code', { class: 'mono' }, name))
+    if (name) return h('button', { class: 'btn btn-sm', type: 'button', title: t('pk.startTip', { name, host: family(fam).title }), 'aria-label': t('pk.startTip', { name, host: family(fam).title }), onclick: () => startPick(name) }, icon('terminal'), h('span', { class: 'hide-sm' }, pickStartLabel()), h('code', { class: 'mono' }, name))
     const offer = (S.state.pickOffers || {})[fam]
     if (!offer || BOOT.readOnly) return null
     return h('button', { class: 'link-btn small', type: 'button', onclick: () => openPick(fam) }, offer.name ? [t('pk.offerShort', { name: offer.name }), h('span', { class: 'hide-sm' }, t('pk.offerMore'))] : t('pk.offerNoName'))
