@@ -319,6 +319,8 @@ headless 运行（`claude -p`、`codex exec`、`grok -p`）、带 `--remote` 的
 
 在 macOS 上运行 `sideby menubar on`（或在面板「设置」里打开**在状态栏显示额度**），状态栏就会多一个 sideby 小人。各工具额度都充足时只显示小人；某个工具连最合适的账号都用到 60% 以上时，旁边出现工具名和百分比（橙色，85% 起变红），不用打开面板也能一眼看出还能不能继续干活。点开它，第一行写着用得最多的是哪个账号，下面是每个账号的额度条，点任一账号直接在终端启动，或打开面板；运行 `sideby menubar off` 即可隐藏。在任何地方按 ⌥⌘S 打开菜单，再按一次关上；`sideby config set menubar.hotkey cmd+shift+0` 可以换成别的快捷键，设成 `off` 就关闭。看不到的话，是状态栏满了或图标在刘海后面：按住 ⌘ 拖动图标腾出位置，macOS 会记住位置。开启前先显示要写的文件（`~/Library/LaunchAgents/dev.sideby.menubar.plist`），加 `--yes` 才生效。
 
+<img alt="sideby 状态栏下拉菜单：各工具、各账号的额度条" src="../assets/menubar.zh-CN.png" width="468">
+
 其他设置也都有命令：`sideby config get` 列出全部设置和当前值，`sideby config set panel.theme dark` 改一项（先显示改动）。
 
 ## 宿主说明

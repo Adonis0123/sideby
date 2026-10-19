@@ -319,6 +319,8 @@ A headless run (`claude -p`, `codex exec`, `grok -p`), Codex with `--remote`, or
 
 On macOS, run `sideby menubar on` (or turn on **Show quota in the menu bar** in the Panel's Settings) to put the sideby buddy in your menu bar. While every tool has quota left it shows just the icon; when even the best account of a tool has used 60% or more, the tool and its percent appear next to it (orange, red from 85%), so you can tell at a glance whether you can keep working. Click it to see every account's quota as small bars, with a first line that says which account is highest, start any account in your terminal, or open the panel; `sideby menubar off` hides it again. Press ⌥⌘S from anywhere to open the menu, and again to close it; `sideby config set menubar.hotkey cmd+shift+0` picks another shortcut and `off` turns it off. If you cannot see it, your menu bar is full or the icon sits under the notch: hold ⌘ and drag icons to make room, and macOS keeps the place. Turning it on first shows the file it writes (`~/Library/LaunchAgents/dev.sideby.menubar.plist`); add `--yes` to do it.
 
+<img alt="sideby menu bar dropdown: quota bars per tool and account" src="../assets/menubar.png" width="468">
+
 Every other setting has a command too: `sideby config get` lists them with their values, and `sideby config set panel.theme dark` changes one (it shows the change first).
 
 ## Host notes

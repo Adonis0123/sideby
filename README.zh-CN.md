@@ -56,6 +56,14 @@ https://github.com/user-attachments/assets/51d9f96f-7723-4410-8c5f-136b2a66a50e
   <img alt="sideby 面板：每个账号的 5h、7d 额度，近 7 天 token 用量和健康状态" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/panel.zh-CN.png" width="1280">
 </picture>
 
+macOS 上，同样的额度也可以常驻状态栏（`sideby menubar on`）：点一下或按 `⌥⌘S` 展开，点任意账号就能在终端里打开。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/menubar-dark.zh-CN.png">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/menubar.zh-CN.png">
+  <img alt="sideby macOS 状态栏下拉菜单：顶部状态卡片，下面列出各工具的 5 小时与每周额度条、重置时间，并标出首选账号" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/menubar.zh-CN.png" width="468">
+</picture>
+
 ## 为什么不直接写个别名？
 
 每个账号一条别名，再配上 `CLAUDE_CONFIG_DIR`，第二个账号确实能开起来。但它不会帮你把 skills 和设置收成一份，也看不到每个账号还剩多少额度。[会不会违反服务条款？](docs/guide/faq.zh-CN.md#terms)
