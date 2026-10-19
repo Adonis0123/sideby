@@ -12,6 +12,7 @@ import {
   openTerminal,
   TERMINALS,
   validateCustomTemplate,
+  wslDistro,
 } from './terminal.ts'
 
 const launcher = { node: '/opt/node/bin/node', entry: '/opt/sideby/dist/src/cli/main.js' }
@@ -317,4 +318,209 @@ test('finds the bundled Orca CLI when PATH has no Orca', async () => {
     })
     assert.equal(found[0]?.executable, h.path('Applications/Orca.app/Contents/Resources/bin/orca'))
   })
+})
+
+// Windows user folders as WSL mounts them, joined so no home path sits in the source (scripts/leak-check.sh).
+const USERS = ['mnt', 'c', 'Users'].join('/')
+
+test('on WSL, finds Windows Terminal on PATH or in a Windows user folder', async () => {
+  await withFakeHome(async (h) => {
+    const deps = { home: h.home, env: { PATH: h.bin }, platform: 'linux' as const, wslMount: h.path('mnt') }
+    assert.deepEqual(await installedTerminals(deps), [])
+    await h.write(`${USERS}/me/AppData/Local/Microsoft/WindowsApps/wt.exe`, '', 0o755)
+    assert.deepEqual(await installedTerminals(deps), [
+      {
+        id: 'windows-terminal',
+        executable: h.path(`${USERS}/me/AppData/Local/Microsoft/WindowsApps/wt.exe`),
+      },
+    ])
+    const onPath = await fakeHost(h, 'wt.exe')
+    assert.equal((await installedTerminals(deps))[0]?.executable, onPath)
+    // Plain Linux has no Windows Terminal to open.
+    assert.deepEqual(await installedTerminals({ ...deps, wslMount: undefined }), [])
+  })
+})
+
+test('on WSL, looks only in the current Windows user folder, and never guesses between users', async () => {
+  await withFakeHome(async (h) => {
+    const wt = (user: string) => `${USERS}/${user}/AppData/Local/Microsoft/WindowsApps/wt.exe`
+    await h.write(wt('other'), '', 0o755)
+    await h.write(wt('me'), '', 0o755)
+    const base = { home: h.home, env: { PATH: h.bin }, platform: 'linux' as const, wslMount: h.path('mnt') }
+    // cmd.exe cannot answer: two users have Windows Terminal, so neither is taken.
+    const silent = { ...base, exec: async () => ({ code: 1, stdout: '' }) }
+    assert.deepEqual(await installedTerminals(silent), [])
+    // cmd.exe names this user's %LOCALAPPDATA%: only that folder counts, also on another drive.
+    const calls: string[][] = []
+    await h.write('mnt/d/Profiles/me/AppData/Local/Microsoft/WindowsApps/wt.exe', '', 0o755)
+    const named = {
+      ...base,
+      wslMount: h.path('mnt'),
+      exec: async (file: string, args: readonly string[]) => {
+        calls.push([file, ...args])
+        return {
+          code: 0,
+          stdout: 'D:\\Profiles\\me\\AppData\\Local|C:\\Program Files|C:\\Program Files (x86)\r\n',
+        }
+      },
+    }
+    assert.deepEqual(await installedTerminals(named), [
+      {
+        id: 'windows-terminal',
+        executable: h.path('mnt/d/Profiles/me/AppData/Local/Microsoft/WindowsApps/wt.exe'),
+      },
+    ])
+    assert.equal(calls[0]?.[0], h.path('mnt/c/Windows/System32/cmd.exe'))
+  })
+})
+
+test('Windows Terminal opens a tab that runs the task in this WSL distribution', () => {
+  const wt = `/${USERS}/me/AppData/Local/Microsoft/WindowsApps/wt.exe`
+  // wt.exe splits its command line at `;`, so the hold after a failure is written without one.
+  const tabHeld = `${command} || (echo && echo sideby: press Return to close && read _)`
+  assert.deepEqual(launchArgs('windows-terminal', { cwd, command, executable: wt, wslDistro: 'Ubuntu' }), {
+    file: wt,
+    args: [
+      '-w',
+      '0',
+      'new-tab',
+      '--title',
+      'sideby',
+      'wsl.exe',
+      '-d',
+      'Ubuntu',
+      '--cd',
+      cwd,
+      '-e',
+      '/bin/sh',
+      '-lc',
+      tabHeld,
+    ],
+  })
+  assert.deepEqual(launchArgs('windows-terminal', { cwd, command, executable: wt }).args.slice(5, 8), [
+    'wsl.exe',
+    '--cd',
+    cwd,
+  ])
+  // A zsh or bash login shell runs it interactively, like a new tab would, so its rc file puts sideby on PATH.
+  assert.deepEqual(
+    launchArgs('windows-terminal', { cwd, command, executable: wt, shell: '/usr/bin/zsh' }).args.slice(-3),
+    ['/usr/bin/zsh', '-lic', tabHeld],
+  )
+  assert.deepEqual(
+    launchArgs('windows-terminal', { cwd, command, executable: wt, shell: '/usr/bin/fish' }).args.slice(
+      -3,
+      -1,
+    ),
+    ['/bin/sh', '-lc'],
+  )
+  // A `;` or `"` would be split or unquoted on the way through wt.exe and wsl.exe; refuse instead of guessing.
+  for (const bad of ['/tmp/a;b', '/tmp/"a"'])
+    assert.throws(() => launchArgs('windows-terminal', { cwd: bad, command, executable: wt }))
+})
+
+test('opens Windows Terminal and custom templates on Linux, and only those', async () => {
+  const exec = async () => ({ code: 0, stdout: '', stderr: '' })
+  const installed = [{ id: 'windows-terminal' as const, executable: '/mnt/c/wt.exe' }]
+  assert.deepEqual(
+    await openTerminal('windows-terminal', { cwd, command, platform: 'linux', installed }, exec),
+    { ok: true },
+  )
+  assert.deepEqual(
+    await openTerminal(
+      'custom',
+      { cwd, command, custom: 'my-term --cwd {cwd} -e {cmd}', platform: 'linux', installed: [] },
+      exec,
+    ),
+    { ok: true },
+  )
+  assert.deepEqual(await openTerminal('ghostty', { cwd, command, platform: 'linux', installed }, exec), {
+    ok: false,
+    reason: 'unsupported-platform',
+  })
+})
+
+test('guesses Windows Terminal on WSL, where there is no macOS Terminal', () => {
+  assert.equal(guessTerminal({ env: {}, installed: [{ id: 'windows-terminal' }] }).id, 'windows-terminal')
+  assert.equal(
+    guessTerminal({ env: {}, installed: [{ id: 'windows-terminal' }, { id: 'custom' }] }).id,
+    'windows-terminal',
+  )
+})
+
+test('reads the WSL distribution from the environment, else from wslpath', async () => {
+  const exec = async () => ({ code: 0, stdout: '\\\\wsl.localhost\\Ubuntu-24.04\\\n', stderr: '' })
+  assert.equal(await wslDistro({ WSL_DISTRO_NAME: 'Debian' }, exec), 'Debian')
+  assert.equal(await wslDistro({}, exec), 'Ubuntu-24.04')
+  assert.equal(
+    await wslDistro({}, async () => ({ code: 0, stdout: '\\\\wsl$\\Ubuntu\\', stderr: '' })),
+    'Ubuntu',
+  )
+  assert.equal(await wslDistro({}, async () => ({ code: 1, stdout: '', stderr: 'no' })), undefined)
+})
+
+test('on WSL, finds the Windows Orca CLI in the Windows user folder', async () => {
+  await withFakeHome(async (h) => {
+    const deps = { home: h.home, env: { PATH: h.bin }, platform: 'linux' as const, wslMount: h.path('mnt') }
+    await h.write(`${USERS}/me/AppData/Local/Programs/orca/resources/bin/orca.exe`, '', 0o755)
+    assert.deepEqual(await installedTerminals(deps), [
+      { id: 'orca', executable: h.path(`${USERS}/me/AppData/Local/Programs/orca/resources/bin/orca.exe`) },
+    ])
+  })
+})
+
+test('Orca on WSL opens a WSL shell in the most recently used worktree of this distribution', async () => {
+  const orca = `/${USERS}/me/AppData/Local/Programs/orca/resources/bin/orca.exe`
+  const worktrees = [
+    { id: 'r1::C:\\src\\app', path: 'C:\\src\\app', lastActivityAt: 30 },
+    {
+      id: 'r2::\\\\wsl.localhost\\Ubuntu\\home\\me\\old',
+      path: '\\\\wsl.localhost\\Ubuntu\\home\\me\\old',
+      lastActivityAt: 10,
+    },
+    {
+      id: 'r3::\\\\wsl.localhost\\Ubuntu\\home\\me\\new',
+      path: '\\\\wsl.localhost\\Ubuntu\\home\\me\\new',
+      lastActivityAt: 20,
+    },
+    {
+      id: 'r4::\\\\wsl.localhost\\Debian\\home\\me\\x',
+      path: '\\\\wsl.localhost\\Debian\\home\\me\\x',
+      lastActivityAt: 40,
+    },
+  ]
+  const calls: string[][] = []
+  const exec = async (file: string, args: readonly string[]) => {
+    calls.push([file, ...args])
+    return args[0] === 'worktree'
+      ? { code: 0, stdout: JSON.stringify({ ok: true, result: { worktrees } }), stderr: '' }
+      : { code: 0, stdout: '{"ok":true}', stderr: '' }
+  }
+  const opts = {
+    cwd,
+    command,
+    platform: 'linux' as const,
+    wslDistro: 'Ubuntu',
+    installed: [{ id: 'orca' as const, executable: orca }],
+  }
+  assert.deepEqual(await openTerminal('orca', opts, exec), { ok: true })
+  assert.deepEqual(calls[0], [orca, 'worktree', 'list', '--json'])
+  assert.deepEqual(calls[1], [
+    orca,
+    'terminal',
+    'create',
+    '--worktree',
+    'id:r3::\\\\wsl.localhost\\Ubuntu\\home\\me\\new',
+    '--shell',
+    'wsl.exe',
+    '--command',
+    command,
+    '--title',
+    'sideby',
+    '--focus',
+    '--json',
+  ])
+  // No WSL project in Orca: say what to do instead of opening a Windows shell.
+  const none = await openTerminal('orca', { ...opts, wslDistro: 'Arch' }, exec)
+  assert.ok(!none.ok && none.reason === 'failed' && /Orca/.test(none.detail))
 })

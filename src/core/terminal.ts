@@ -1,9 +1,10 @@
 import { constants, realpathSync } from 'node:fs'
-import { access, stat } from 'node:fs/promises'
+import { access, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Env } from '../types.ts'
 import type { DesktopDeps } from './desktop-app.ts'
+import { askWindowsDirs, type WindowsExec } from './windows-dirs.ts'
 
 export type TerminalId =
   | 'terminal'
@@ -13,6 +14,7 @@ export type TerminalId =
   | 'wezterm'
   | 'kitty'
   | 'alacritty'
+  | 'windows-terminal'
   | 'custom'
 
 export interface TerminalDef {
@@ -25,7 +27,7 @@ export interface TerminalDef {
   binary?: string
 }
 
-/** Supported macOS terminals; custom templates have no app bundle or environment marker. */
+/** Supported terminals: macOS apps, and Windows Terminal on WSL; custom templates have no app bundle or environment marker. */
 export const TERMINALS: readonly TerminalDef[] = [
   {
     id: 'terminal',
@@ -81,6 +83,15 @@ export const TERMINALS: readonly TerminalDef[] = [
     termPrograms: [],
     marker: 'ALACRITTY_WINDOW_ID',
   },
+  {
+    id: 'windows-terminal',
+    name: 'Windows Terminal',
+    bundleId: null,
+    app: null,
+    termPrograms: [],
+    marker: 'WT_SESSION',
+    binary: 'wt.exe',
+  },
   { id: 'custom', name: 'Custom', bundleId: null, app: null, termPrograms: [] },
 ]
 
@@ -95,12 +106,63 @@ export interface TerminalDeps {
   env: Env
   platform?: NodeJS.Platform
   appDirs?: readonly string[]
-  fs?: { stat: typeof stat; access: typeof access }
+  fs?: { stat: typeof stat; access: typeof access; readdir?: typeof readdir }
+  /** On WSL, where Windows drives are mounted (normally `/mnt`); undefined elsewhere. */
+  wslMount?: string
+  /** On WSL, runs `cmd.exe` to name the current Windows user's folders (core/windows-dirs.ts). */
+  exec?: WindowsExec
+}
+
+const isExecutable = async (fs: NonNullable<TerminalDeps['fs']>, path: string) =>
+  (await fs.stat(path).then(
+    (s) => s.isFile(),
+    () => false,
+  )) &&
+  (await fs.access(path, constants.X_OK).then(
+    () => true,
+    () => false,
+  ))
+
+/**
+ * The Windows terminals sideby can open from WSL: Windows Terminal (`wt.exe`) and Orca's Windows CLI (`orca.exe`), each
+ * on PATH or else in the current Windows user's `%LOCALAPPDATA%` (a background service's PATH has no Windows folders).
+ * When cmd.exe cannot name that user, a terminal only one user under `C:\Users` has is used; several are not guessed
+ * between.
+ */
+async function wslTerminals(deps: TerminalDeps, mount: string): Promise<InstalledTerminal[]> {
+  const fs = { stat, access, readdir, ...deps.fs }
+  const local = deps.exec ? (await askWindowsDirs(deps.exec, mount))?.localAppData?.unix : undefined
+  const users = join(mount, 'c', 'Users')
+  const names = local ? [] : await fs.readdir(users).catch(() => [] as string[])
+  const find = async (exe: string, inLocal: readonly string[]) => {
+    for (const dir of (deps.env.PATH ?? '').split(':').filter(Boolean)) {
+      const path = join(dir, exe)
+      if (await isExecutable(fs, path)) return path
+    }
+    if (local) {
+      const path = join(local, ...inLocal, exe)
+      return (await isExecutable(fs, path)) ? path : undefined
+    }
+    const hits: string[] = []
+    for (const user of names) {
+      const path = join(users, user, 'AppData', 'Local', ...inLocal, exe)
+      if (await isExecutable(fs, path)) hits.push(path)
+    }
+    return hits.length === 1 ? hits[0] : undefined
+  }
+  const found: InstalledTerminal[] = []
+  const wt = await find('wt.exe', ['Microsoft', 'WindowsApps'])
+  if (wt) found.push({ id: 'windows-terminal', executable: wt })
+  const orca = await find('orca.exe', ['Programs', 'orca', 'resources', 'bin'])
+  if (orca) found.push({ id: 'orca', executable: orca })
+  return found
 }
 
 /** Finds bundles and command line launchers without opening apps or reading user files. */
 export async function installedTerminals(deps: TerminalDeps): Promise<InstalledTerminal[]> {
-  if ((deps.platform ?? process.platform) !== 'darwin') return []
+  const platform = deps.platform ?? process.platform
+  if (platform === 'linux' && deps.wslMount) return wslTerminals(deps, deps.wslMount)
+  if (platform !== 'darwin') return []
   const fs = deps.fs ?? { stat, access }
   const dirs = deps.appDirs ?? [
     '/Applications',
@@ -128,16 +190,7 @@ export async function installedTerminals(deps: TerminalDeps): Promise<InstalledT
     if (terminal.binary) {
       for (const dir of (deps.env.PATH ?? '').split(':').filter(Boolean)) {
         const path = join(dir, terminal.binary)
-        if (
-          (await fs.stat(path).then(
-            (s) => s.isFile(),
-            () => false,
-          )) &&
-          (await fs.access(path, constants.X_OK).then(
-            () => true,
-            () => false,
-          ))
-        ) {
+        if (await isExecutable(fs, path)) {
           executable = path
           break
         }
@@ -155,7 +208,7 @@ export async function installedTerminals(deps: TerminalDeps): Promise<InstalledT
   return found
 }
 
-/** Chooses an installed preference, then the launching environment, then macOS Terminal. */
+/** Chooses an installed preference, then the launching environment, then macOS Terminal (Windows Terminal on WSL). */
 export function guessTerminal(opts: {
   preferred?: string
   env: Env
@@ -168,7 +221,8 @@ export function guessTerminal(opts: {
       has(t.id) &&
       (t.termPrograms.includes(opts.env.TERM_PROGRAM ?? '') || Boolean(t.marker && opts.env[t.marker])),
   )
-  return match ? { id: match.id, source: 'env' } : { id: 'terminal', source: 'default' }
+  if (match) return { id: match.id, source: 'env' }
+  return { id: has('windows-terminal') ? 'windows-terminal' : 'terminal', source: 'default' }
 }
 
 /** What the terminal runs: this Node and this sideby's CLI entry, so neither PATH nor the login shell matters. */
@@ -247,6 +301,12 @@ export interface TerminalLaunchOptions {
   custom?: string
   appPath?: string
   executable?: string
+  /** Windows Terminal: the WSL distribution the tab returns to; the default distribution when absent. */
+  wslDistro?: string
+  /** Windows Terminal: the user's login shell; zsh and bash run the task interactively, so their rc files apply. */
+  shell?: string
+  /** Orca's Windows CLI from WSL: the worktree selector to open in; it also gets a WSL shell instead of its default. */
+  orcaWorktree?: string
 }
 
 export interface TerminalCommand {
@@ -383,7 +443,8 @@ end tell`,
           'terminal',
           'create',
           '--worktree',
-          'active',
+          opts.orcaWorktree ?? 'active',
+          ...(opts.orcaWorktree ? ['--shell', 'wsl.exe'] : []),
           '--command',
           command,
           '--title',
@@ -417,6 +478,35 @@ end tell`,
           held,
         ],
       }
+    // wt.exe splits its command line at `;`, and a `"` would be unquoted again on the way through wsl.exe; refuse
+    // both rather than guess at three layers of quoting. The hold therefore uses `&&` instead of `;`.
+    case 'windows-terminal': {
+      if (/[;"]/.test(command) || /[;"]/.test(cwd))
+        throw new Error(
+          'The task folder or command has ; or " in it; paste the task command into your terminal.',
+        )
+      const tabHeld = `${command} || (echo && echo sideby: press Return to close && read _)`
+      // Like Terminal.app, run it in the user's own interactive shell: on WSL, version managers such as nvm put
+      // sideby on PATH only in ~/.zshrc or ~/.bashrc, and the Host runs `sideby` by name for Auto Handoff.
+      const shell = opts.shell && /\/(zsh|bash)$/.test(opts.shell) ? [opts.shell, '-lic'] : ['/bin/sh', '-lc']
+      return {
+        file: opts.executable ?? 'wt.exe',
+        args: [
+          '-w',
+          '0',
+          'new-tab',
+          '--title',
+          'sideby',
+          'wsl.exe',
+          ...(opts.wslDistro ? ['-d', opts.wslDistro] : []),
+          '--cd',
+          cwd,
+          '-e',
+          ...shell,
+          tabHeld,
+        ],
+      }
+    }
     case 'custom': {
       const [file, ...args] = validateCustomTemplate(opts.custom ?? '')
       return {
@@ -444,7 +534,11 @@ export async function openTerminal(
   opts: TerminalLaunchOptions & { platform?: NodeJS.Platform; installed: readonly InstalledTerminal[] },
   exec: DesktopDeps['exec'],
 ): Promise<TerminalOpenResult> {
-  if ((opts.platform ?? process.platform) !== 'darwin') return { ok: false, reason: 'unsupported-platform' }
+  const platform = opts.platform ?? process.platform
+  const opensHere =
+    platform === 'darwin' ||
+    (platform === 'linux' && (id === 'windows-terminal' || id === 'orca' || id === 'custom'))
+  if (!opensHere) return { ok: false, reason: 'unsupported-platform' }
   const installed = opts.installed.find((t) => t.id === id)
   if (!installed && id !== 'custom')
     return {
@@ -453,6 +547,17 @@ export async function openTerminal(
       detail:
         'Install this terminal or choose another in Settings; paste the task command into your terminal.',
     }
+  if (platform === 'linux' && id === 'orca') {
+    const worktree = await orcaWslWorktree(installed?.executable ?? 'orca.exe', opts.wslDistro, exec)
+    if (!worktree)
+      return {
+        ok: false,
+        reason: 'failed',
+        detail:
+          'Orca has no project open from this WSL distribution; open one in Orca, or choose another terminal in Settings.',
+      }
+    opts = { ...opts, orcaWorktree: worktree }
+  }
   try {
     const launch = launchArgs(id, { ...opts, ...installed })
     const result = await exec(launch.file, launch.args)
@@ -479,5 +584,52 @@ export async function openTerminal(
     ok: false,
     reason: 'failed',
     detail: 'Could not open the terminal; check its settings or paste the task command into your terminal.',
+  }
+}
+
+/**
+ * The WSL distribution this runs in: `WSL_DISTRO_NAME`, which a background service lacks, else the name in
+ * `wslpath -w /` (`\\wsl.localhost\Ubuntu\`). Undefined when neither says.
+ */
+export async function wslDistro(env: Env, exec: DesktopDeps['exec']): Promise<string | undefined> {
+  if (env.WSL_DISTRO_NAME) return env.WSL_DISTRO_NAME
+  try {
+    const r = await exec('wslpath', ['-w', '/'])
+    return r.code === 0 ? /^\\\\wsl(?:\.localhost|\$)\\([^\\]+)/.exec(r.stdout.trim())?.[1] : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Orca's Windows CLI resolves `--worktree active` from its current folder only, so from WSL sideby picks the worktree
+ * of this distribution (`\\wsl.localhost\<distribution>\…`) that Orca used last. Undefined when there is none.
+ */
+async function orcaWslWorktree(
+  orca: string,
+  distro: string | undefined,
+  exec: DesktopDeps['exec'],
+): Promise<string | undefined> {
+  if (!distro) return undefined
+  try {
+    const r = await exec(orca, ['worktree', 'list', '--json'])
+    if (r.code !== 0) return undefined
+    const list = (JSON.parse(r.stdout)?.result?.worktrees ?? []) as {
+      id?: unknown
+      path?: unknown
+      lastActivityAt?: unknown
+    }[]
+    const prefixes = [`\\\\wsl.localhost\\${distro}\\`, `\\\\wsl$\\${distro}\\`].map((p) => p.toLowerCase())
+    let best: { id: string; at: number } | undefined
+    for (const w of list) {
+      if (typeof w.id !== 'string' || typeof w.path !== 'string') continue
+      const path = w.path.toLowerCase()
+      if (!prefixes.some((p) => path.startsWith(p))) continue
+      const at = typeof w.lastActivityAt === 'number' ? w.lastActivityAt : 0
+      if (!best || at > best.at) best = { id: w.id, at }
+    }
+    return best && `id:${best.id}`
+  } catch {
+    return undefined
   }
 }
