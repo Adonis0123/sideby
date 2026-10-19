@@ -1,6 +1,6 @@
 {
   "name": "sideby",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "description": "Run work, personal and API-key accounts at the same time, without their configs drifting apart.",
   "license": "MIT",
   "author": "Adonis0123 (https://github.com/Adonis0123)",
