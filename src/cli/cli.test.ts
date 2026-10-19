@@ -1593,7 +1593,9 @@ describe('menubar (spec §3.31)', () => {
       const status = checkSchema('menubar', (await sideby(h, ['menubar', '--json'])).out)
       assert.deepEqual([status.state, status.supported], ['off', process.platform === 'darwin'])
       const shown = await sideby(h, ['menubar', 'on', '--json'])
-      if (process.platform === 'darwin') {
+      // A checkout in a temporary folder cannot start at login, so `on` refuses it there (`temp-dir`).
+      const inTemp = shown.code === 1 && JSON.parse(shown.out).code === 'temp-dir'
+      if (process.platform === 'darwin' && !inTemp) {
         assert.equal(shown.code, 10)
         const plan = checkSchema('menubar', shown.out)
         assert.equal((plan.programArguments as string[])[0], '/usr/bin/osascript')
