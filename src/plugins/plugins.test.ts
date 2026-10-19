@@ -117,6 +117,35 @@ describe('account-script', () => {
     })
   })
 
+  it('keeps the tail of stderr while the event loop is saturated', async () => {
+    // Guard against going back to a pipe plus a short drain timer, which dropped the tail on a loaded runner. Busy
+    // chunks longer than such a timer run while the script writes and exits; in-process load alone does not
+    // reliably reproduce the race, so the script also checks that its stderr is a regular file, the contract.
+    await withFakeHome(async (h) => {
+      const lines = Array.from({ length: 30 }, (_, i) => `echo line${i} >&2`).join('\n')
+      const rt = await prepared(
+        h,
+        `#!/bin/sh\n[ -f /dev/fd/2 ] || { echo stderr-is-not-a-file >&2; exit 3; }\nsleep 0.1\n${lines}\nexit 7\n`,
+      )
+      const until = Date.now() + 700
+      const hog = new Promise<void>((resolve) => {
+        const step = () => {
+          const end = Date.now() + 250
+          while (Date.now() < end) {}
+          if (Date.now() < until) setImmediate(step)
+          else resolve()
+        }
+        setImmediate(step)
+      })
+      await assert.rejects(rt.prepareLaunch('demo:work', [], 'run'), (e: Error) => {
+        assert.match(e.message, /exited with 7/)
+        assert.match(e.message, /line29/)
+        return true
+      })
+      await hog
+    })
+  })
+
   it('does not wait for a background process the script left holding stderr', async () => {
     await withFakeHome(async (h) => {
       const rt = await prepared(h, '#!/bin/sh\nsleep 3 &\necho started >&2\nexit 0\n')

@@ -50,6 +50,8 @@ export const accountScript: Plugin = {
       // stderr goes to a private temp file rather than a pipe: once the script has exited, everything it wrote is
       // in the file, so its last lines are read back without racing the event loop, and a background process the
       // script started (a gateway, say) that inherits stderr cannot hold the launch open.
+      // Do not go back to a pipe plus a drain timer: on a loaded runner the timer can fire before the pipe is read and
+      // drop the tail. The file is the contract; the saturated-event-loop test guards it.
       const tmp = await mkdtemp(join(tmpdir(), 'sideby-before-launch-'))
       let code: number | null
       let timedOut: boolean
