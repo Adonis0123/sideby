@@ -258,6 +258,12 @@ export const ConfigSchema = Type.Object(
           'Short shell function names created by `sideby shell-init`, mapped to an Account ref or to `{ account, args }`.',
       }),
     ),
+    pickCommands: Type.Optional(
+      Type.Record(Type.String({ pattern: '^[A-Za-z_][A-Za-z0-9_-]*$' }), Type.String({ minLength: 1 }), {
+        description:
+          'Pick Commands: short shell function names created by `sideby shell-init`, mapped to a Family. Each run starts the Account of that Family with the most Quota left, or the Main Account when none has Quota data (ADR-0035). They share one namespace with `aliases`.',
+      }),
+    ),
     ignore: Type.Optional(Type.Array(Type.String(), { description: 'Account refs that are not Accounts.' })),
     pluginDirs: Type.Optional(
       Type.Array(Type.String(), { description: 'Absolute or `~/` paths of Plugin directories.' }),
@@ -433,7 +439,21 @@ export async function loadConfig(file: string): Promise<Config> {
     if (problem)
       throw new ConfigError(`${file}: alias "${alias}" ${problem} (it becomes a shell function name)`)
   }
+  const shortProblem = shortCommandProblem(data)
+  if (shortProblem) throw new ConfigError(`${file}: ${shortProblem}`)
   return data
+}
+
+/** A Pick Command whose name is unsafe in a shell or also an Alias (they share one namespace), or null. */
+function shortCommandProblem(data: Config): string | null {
+  for (const name of Object.keys(data.pickCommands ?? {})) {
+    const problem = aliasProblem(name)
+    if (problem)
+      return `pick command "${name}" ${problem} (it becomes a shell function name); pick another name`
+    if (data.aliases && Object.hasOwn(data.aliases, name))
+      return `"${name}" is both an alias and a pick command; remove one with \`sideby alias rm ${name}\` and add it again`
+  }
+  return null
 }
 
 /** Where the config file is read and written: the target of a link (a dotfiles manager may link it). */
@@ -510,6 +530,8 @@ async function editConfigKey<K extends Exclude<keyof Config, '$schema'>>(
         },
       )
   }
+  const shortProblem = shortCommandProblem(next as Config)
+  if (shortProblem) throw new ConfigError(shortProblem, { code: 'bad-value' })
   const h = handoffSettings(next as Config)
   if (h.prepareAt >= h.threshold)
     throw new ConfigError(
@@ -680,6 +702,46 @@ export async function removeConfigAlias(
   return { status, aliases }
 }
 
+/**
+ * Adds `name → family` to the config file's `pickCommands` (see `editConfigKey` for how the file is written). Refuses
+ * an invalid name, one that is an Alias, or one that already picks in another Family.
+ */
+export async function addConfigPickCommand(
+  file: string,
+  name: string,
+  family: string,
+): Promise<{ status: 'added' | 'exists'; pickCommands: Record<string, string> }> {
+  const problem = aliasProblem(name)
+  if (problem) throw new ConfigError(`pick command "${name}" ${problem} (it becomes a shell function name)`)
+  let status: 'added' | 'exists' = 'added'
+  const r = await editConfigKey(file, 'pickCommands', 'add the pick command', (current) => {
+    const now = current ?? {}
+    if (!Object.hasOwn(now, name)) return { ...now, [name]: family }
+    if (now[name] !== family)
+      throw new ConfigError(
+        `"${name}" already starts the ${now[name]} account with the most room; pick another name, or remove it first with \`sideby alias rm ${name}\``,
+      )
+    status = 'exists'
+    return null
+  })
+  return { status, pickCommands: r.after ?? {} }
+}
+
+/** Removes `name` from `pickCommands`; `absent` when it was not there. An emptied key goes away with it. */
+export async function removeConfigPickCommand(
+  file: string,
+  name: string,
+): Promise<{ status: 'removed' | 'absent'; pickCommands: Record<string, string> }> {
+  let status: 'removed' | 'absent' = 'absent'
+  const r = await editConfigKey(file, 'pickCommands', 'remove the pick command', (current) => {
+    if (!current || !Object.hasOwn(current, name)) return null
+    status = 'removed'
+    const { [name]: _gone, ...rest } = current
+    return Object.keys(rest).length ? rest : undefined
+  })
+  return { status, pickCommands: r.after ?? {} }
+}
+
 export function editConfigTerminal(file: string, patch: { preferred?: string; custom?: string }) {
   return editConfigKey(file, 'terminal', 'run `sideby terminal`', (current) => {
     const next = { ...current, ...patch }
@@ -736,6 +798,7 @@ type SchemaNode = {
 const PLACEHOLDERS: Record<string, string> = {
   accounts: '<family>:<name>',
   aliases: '<short>',
+  pickCommands: '<short>',
   plugins: '<plugin>',
   extraSharedItems: '<family>',
   'handoff.families': '<family>',

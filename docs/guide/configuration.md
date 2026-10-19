@@ -41,6 +41,7 @@ Optional. `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json`, schema in [`schema
 | `ignore` | Account refs (`<family>:<name>`) that look like accounts but are not. Doctor warns about names containing `bak`, `backup`, `old` or `tmp` and suggests adding them here. |
 | `pluginDirs` | Extra plugin directories. Absolute paths or paths starting with `~/`. |
 | `plugins.<name>` | Settings for one plugin; `enabled` turns it on or off, built-in families included. |
+| `pickCommands` | Pick commands: short names mapped to a family (`{ "cc": "claude" }`). Each run starts that family's account with the most quota left, or the main account when none has quota data yet. They share one set of names with `aliases`; add them with `sideby alias add <short> --pick <family>`. |
 | `shellInitFile` | Optional `{ "zsh": …, "bash": … }`, absolute or `~/` paths. Whenever sideby adds an account or adds or removes an alias (`sideby new`, `sideby alias`, the panel), it rewrites each file with what `sideby shell-init <shell>` prints, so a shell that sources the file picks up new commands. It never overwrites a file that `shell-init` did not write. |
 | `accountTitle` | Optional, off by default. When `true`, starting an account sets the terminal tab title to `[<short command or ref>]`, and Codex is started with `-c tui.terminal_title=[]` so it keeps that title (unless your arguments set `tui.terminal_title`). Other Hosts may replace the title with their own; see [Show which account a session is](usage.md#show-which-account-a-session-is). |
 | `resumeRouting` | Optional, off by default. When `true`, `shell-init` also defines functions named after the Hosts (`claude`, `codex`, `grok`) that resume a session by id in the account that holds it; see [Resuming from other tools](#resuming-from-other-tools). |
@@ -67,6 +68,21 @@ sideby alias rm pi-kimi
 ```
 
 The panel shows every alias next to its account (hover one to see its arguments) and finds an account by them in search. Entry points that also change environment variables are not aliases; keep them in your shell rc.
+
+### Start the account with the most room
+
+A pick command is a short command for a tool rather than for one account. Each time you type it, it starts the account of that tool with the most quota left, the one `sideby next` would pick, and prints which:
+
+```sh
+sideby alias add cc --pick claude --yes    # without --yes it only shows what it adds
+sideby shell-init setup --yes              # once: new terminals load your short commands
+# then, in a new terminal:
+cc                                   # sideby: cc → claude:work (12% used, the most room)
+```
+
+When no account of the tool has quota data yet, it starts the main account and says so. When every account is full or signed out, it starts nothing and tells you which comes back first. API accounts are never picked. If the name is already a command on your computer (`cc` is the C compiler on macOS), sideby says what it would hide. A shell alias of the same name in your rc (`alias cc=…`) still wins over the pick command; remove it to use the pick command. `sideby alias list` shows pick commands and aliases together; `sideby alias rm cc` removes one. In the panel, the tool's row has a "Start the one with most room" button once it has one, and offers to add one when the tool has two accounts; the same list is in Settings. In the config they live under `pickCommands`.
+
+Short commands exist in a terminal only when your shell rc file loads them. `sideby shell-init setup` shows the line it would add to `~/.zshrc` (or `~/.bashrc`), `--yes` adds it, and `--undo` takes out exactly that line; it does nothing when the file already loads sideby. The panel offers the same where you add a short command.
 
 If you prefer sourcing a file over `eval` (a new shell then does not start Node), set `shellInitFile` and source it:
 

@@ -41,6 +41,7 @@
 | `ignore` | 看起来像账号、其实不是的账号引用（`<family>:<name>`）。名字里有 `bak`、`backup`、`old`、`tmp` 时，doctor 会给一条 warn，建议加到这里。 |
 | `pluginDirs` | 额外的插件目录，只接受绝对路径或以 `~/` 开头的路径。 |
 | `plugins.<name>` | 单个插件的设置；`enabled` 控制开关，内置家族也适用。 |
+| `pickCommands` | 自动选号命令：短名到家族的映射（`{ "cc": "claude" }`）。每次运行启动这个家族额度最多的账号，都没有额度数据时启动主账号。与 `aliases` 共用一套名字；用 `sideby alias add <短名> --pick <family>` 添加。 |
 | `shellInitFile` | 可选，`{ "zsh": …, "bash": … }`，绝对路径或以 `~/` 开头。sideby 每次新增账号、新增或删除别名（`sideby new`、`sideby alias`、面板）后，都用 `sideby shell-init <shell>` 的输出重写这些文件，source 它的 shell 就能用上新命令。不是 `shell-init` 写的文件，它不会覆盖。 |
 | `accountTitle` | 可选，默认关。设为 `true` 时，启动账号会把终端标签页标题设成 `[<短命令或 ref>]`，并用 `-c tui.terminal_title=[]` 启动 Codex，让它保留这个标题（你的参数里自己设了 `tui.terminal_title` 时不加）。其他宿主可能换成自己的标题；见[在会话里显示是哪个账号](usage.zh-CN.md#在会话里显示是哪个账号)。 |
 | `resumeRouting` | 可选，默认关。设为 `true` 时，`shell-init` 还会生成与宿主同名的函数（`claude`、`codex`、`grok`），按 id 恢复会话时转到存有该会话的账号；见[从其他工具恢复会话](#从其他工具恢复会话)。 |
@@ -67,6 +68,21 @@ sideby alias rm pi-kimi
 ```
 
 面板在账号旁边列出它的每个短命令（悬停能看到参数），搜索也能按参数找到账号。还要改环境变量的入口不算短命令，继续写在你的 shell rc 里。
+
+### 自动启动最空的账号
+
+自动选号命令（pick command）绑定一个工具，不绑定某个账号。每次输入它，都会启动这个工具里额度剩得最多的账号，也就是 `sideby next` 会选的那个，并打印选了谁：
+
+```sh
+sideby alias add cc --pick claude --yes    # 不加 --yes 只显示会加什么
+sideby shell-init setup --yes              # 只需一次：让新终端能用短命令
+# 然后在新终端里：
+cc                                   # sideby: cc → claude:work (12% used, the most room)
+```
+
+这个工具的账号都还没有额度数据时，启动主账号，并说明原因。所有账号都满了或没登录时，不启动，并告诉你哪个账号最早恢复。API 账号不参与挑选。名字和电脑上已有的命令重名时（macOS 的 `cc` 是 C 编译器），sideby 会说明会遮住哪个命令。你的 shell rc 里如果有同名 alias（`alias cc=…`），alias 仍然优先；要用自动选号命令，先删掉那个 alias。`sideby alias list` 同时列出自动选号命令和短命令，`sideby alias rm cc` 删除。面板里，工具标题行在有了它之后显示「启动最空的账号」按钮；工具有两个账号时提议添加；设置里也有同一份列表。配置里它们在 `pickCommands` 下。
+
+短命令要你的 shell 配置文件加载了才存在。`sideby shell-init setup` 先显示要加到 `~/.zshrc`（或 `~/.bashrc`）的那一行，`--yes` 才加上，`--undo` 只删掉这一行；文件里已经加载了 sideby 时什么也不做。面板在你添加短命令的地方也会提供同样的操作。
 
 如果你想 source 一个文件、不用 `eval`（这样开新 shell 时不用启动 Node），设置 `shellInitFile` 后 source 它：
 

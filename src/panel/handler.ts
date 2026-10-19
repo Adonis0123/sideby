@@ -11,6 +11,7 @@ import {
 import {
   type AiTaskInput,
   openLoginInTerminal,
+  openPickInTerminal,
   pickTaskAccount,
   previewAttachments,
   promptForTask,
@@ -251,6 +252,15 @@ export interface PanelState {
   history?: DoctorHistory
   /** The config `aliases` as alias → Account ref (arguments left out), so the page can tell which names are taken. */
   configAliases?: Record<string, string>
+  /** The config `pickCommands`, name → Family (spec §3.13, ADR-0035). */
+  pickCommands?: Record<string, string>
+  /**
+   * Family → the Pick Command the page offers to add: a Family with two or more Subscription Accounts and none yet,
+   * with the command on PATH the name would hide; `name: null` when no default name is free (the user types one).
+   */
+  pickOffers?: Record<string, { name: string | null; shadows?: string }>
+  /** Whether new terminals load the short commands (`sideby shell-init setup`, ADR-0036), and the rc file it would edit. */
+  shellSetup: { shell: 'zsh' | 'bash'; rc: string; loaded: boolean; added: boolean; block: string }
   /**
    * Family → the Account `sideby next <family>` would pick (spec §3.13). Only Families with a Quota source,
    * at least two subscription Accounts, some Quota data and a pick; API Accounts are left out as in the CLI default.
@@ -602,6 +612,14 @@ async function buildState(
     }
   })
   const handoff = handoffByFamily(rt, list, ctx.now)
+  const pickOffers: Record<string, { name: string | null; shadows?: string }> = {}
+  for (const f of families) {
+    const offer = await rt.pickSuggestion(f.id, accounts).catch(() => null)
+    if (offer && !offer.exists)
+      pickOffers[f.id] = { name: offer.name, ...(offer.shadows ? { shadows: offer.shadows } : {}) }
+  }
+  const { setupBlock, shellSetupStatus, userShell } = await import('../core/shell-setup.ts')
+  const shellSt = await shellSetupStatus(userShell(rt.env), ctx.home, rt.env, rt.config.shellInitFile)
   const browser = await browserReport(rt, accounts).catch(() => undefined)
   const showBrowser = browser && (browser.families.matched.length || browser.families.openOnly.length)
   return {
@@ -621,6 +639,9 @@ async function buildState(
     quotaSetups,
     ...(history ? { history } : {}),
     ...(rt.config.aliases ? { configAliases: aliasRefs(rt.config.aliases) } : {}),
+    ...(rt.config.pickCommands ? { pickCommands: { ...rt.config.pickCommands } } : {}),
+    ...(Object.keys(pickOffers).length ? { pickOffers } : {}),
+    shellSetup: { ...shellSt, rc: tildify(shellSt.rc, ctx.home), block: setupBlock(shellSt.shell) },
     ...(Object.keys(handoff).length ? { handoff } : {}),
     ...(remoteControl.length ? { remoteControl: rcView(remoteControl, ctx.home) } : {}),
     ...(appProfiles.length
@@ -972,6 +993,62 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const alias = optString(body, 'alias')
         const rt = await getRuntime()
         return rt.createAccount(family, name, { api, ...(alias ? { alias } : {}) })
+      },
+    },
+    // Pick Commands (spec §3.13, ADR-0035): start the Account with the most room in the Preferred Terminal, add one
+    // (a name that hides a command on PATH comes back as `confirm` until the page sends confirm: true), remove one.
+    '/api/pick/start': {
+      async run(body) {
+        const name = optString(body, 'name')
+        if (!name) throw new HttpError(400, '"name" is required')
+        const rt = await getRuntime()
+        const { family, choice } = await rt.pickChoice(name)
+        if (choice.ref === null)
+          throw new UserError(
+            choice.earliestReset
+              ? `Every ${family} account is at its limit; ${choice.earliestReset.ref} is back first.`
+              : `No ${family} account can be used now; sign one in first.`,
+            { code: 'none-usable' },
+          )
+        // The terminal runs the Pick Command itself, so it picks again as it starts and prints which and why.
+        const r = opened(await openPickInTerminal(rt, name))
+        return {
+          ...r,
+          name,
+          family,
+          picked: choice.ref,
+          reason: choice.reason,
+          ...('pressure' in choice ? { pressure: choice.pressure } : {}),
+        }
+      },
+    },
+    '/api/pick/add': {
+      async run(body) {
+        const name = optString(body, 'name')?.trim()
+        const family = optString(body, 'family')
+        if (!name || !family) throw new HttpError(400, 'enter a name and pick a family')
+        const rt = await getRuntime()
+        return rt.addPickCommand(name, family, { yes: optBool(body, 'confirm') })
+      },
+    },
+    '/api/pick/remove': {
+      async run(body) {
+        const name = optString(body, 'name')
+        if (!name) throw new HttpError(400, '"name" is required')
+        const rt = await getRuntime()
+        if (rt.pickCommandFamily(name) === undefined) throw new HttpError(400, `no pick command "${name}"`)
+        return rt.removeAlias(name)
+      },
+    },
+    // `sideby shell-init setup` (ADR-0036): the page has shown the line and the file; undo takes out only that line.
+    '/api/shell-init/setup': {
+      async run(body) {
+        const rt = await getRuntime()
+        const { applyShellSetup, userShell } = await import('../core/shell-setup.ts')
+        const r = await applyShellSetup(userShell(rt.env), rt.paths.home, rt.env, rt.config.shellInitFile, {
+          undo: optBool(body, 'undo'),
+        })
+        return { status: r.status, shell: r.shell, rc: tildify(r.rc, rt.paths.home) }
       },
     },
     '/api/quota/setup': {

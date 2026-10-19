@@ -37,8 +37,26 @@
         {
           "type": "string",
           "const": "absent"
+        },
+        {
+          "type": "string",
+          "const": "confirm"
         }
-      ]
+      ],
+      "description": "`confirm` (exit 10): the pick command would hide a command on PATH, so nothing was written; run again with `--yes`."
+    },
+    "kind": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "account"
+        },
+        {
+          "type": "string",
+          "const": "pick"
+        }
+      ],
+      "description": "`pick` for a Pick Command (`--pick`), `account` for a short command of one Account."
     },
     "account": {
       "type": "string"
@@ -49,6 +67,14 @@
         "type": "string"
       },
       "description": "Host arguments `sideby run <alias>` adds."
+    },
+    "family": {
+      "type": "string",
+      "description": "The Family a Pick Command picks in."
+    },
+    "shadows": {
+      "type": "string",
+      "description": "The command on PATH this Pick Command hides in the shell, such as /usr/bin/cc."
     },
     "shellInitFiles": {
       "type": "array",

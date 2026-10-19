@@ -29,3 +29,13 @@ To start one account with fixed Host arguments, such as another model, put them 
 - A refusal names the next step (`sideby alias rm <short>` first).
 - Entry points that need environment variables are not aliases: leave them in the user's shell rc.
 - Do not edit `aliases` in the config by hand.
+
+## Pick commands (start the account with the most room)
+
+A pick command is a short command bound to a tool (Family), not to one account: each run starts the account of that tool `sideby next` would pick, the one with the lowest Quota Pressure, and prints which (`cc → claude:work (12% used, the most room)`). When no account of the tool has quota data yet it starts the main account and says so; when every account is full or signed out it starts nothing and says which comes back first. API accounts are never picked.
+
+- Add: `sideby alias add <short> --pick <family> --json` exits 10 with `status: "confirm"` and writes nothing; tell the user what it adds, then run it again with `--yes`. Then make sure new terminals load it: `sideby shell-init setup --json` (see `setup.md` step 7). Offer `cc` for Claude, `cx` for Codex, `gk` for Grok, or the letters the user's numbered short commands share (`cc001`, `cc008` → `cc`); pi gets none, since `pi` is the tool itself. `sideby new` offers one (`pickCommandOffer`) when a tool gets its second subscription account.
+- With `shadows` in that answer, the name hides a command on PATH (for example `/usr/bin/cc`, the C compiler on macOS). Tell the user that typing the name would start the tool instead, and run again with `--yes` only after they agree to that, or pick another name.
+- `sideby alias list --json` lists both kinds (`kind: "pick"` or `"account"`); `sideby alias rm <short>` removes either. Pick commands and short commands share one set of names.
+- The user types the name in a new terminal; you never run it (it starts an interactive session). A shell alias of the same name in their rc (`alias cc=…`) still wins: when the name does not start sideby, tell them to remove that alias.
+- Do not edit `pickCommands` in the config by hand.

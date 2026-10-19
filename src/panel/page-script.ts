@@ -1891,7 +1891,8 @@ const MAIN = String.raw`
             h('span', { class: 'muted small' }, t('quota.turnOnFamilyNote', { host: info.title })),
             h('button', { class: 'btn btn-sm', type: 'button', title: setup.summary, 'aria-label': t('quota.turnOnFamilyLabel', { host: info.title }), onclick: () => openSetup(fam) }, t('quota.turnOnFamily')))
           : null,
-        off && setup && setup.plan.status === 'blocked' ? h('span', { class: 'muted small label-tip' }, t('quota.blocked'), tipRaw(t('quota.blocked'), setup.plan.message)) : null))
+        off && setup && setup.plan.status === 'blocked' ? h('span', { class: 'muted small label-tip' }, t('quota.blocked'), tipRaw(t('quota.blocked'), setup.plan.message)) : null,
+        ui.arrange ? null : pickHead(fam)))
     const body = collapsedNow ? null : cards
       ? h('div', { class: 'grid', id: bodyId, 'data-key': 'cards', 'data-patch': '' }, list.map((a) => card(a, now, cols)))
       : h('div', { class: 'rows', id: bodyId, role: 'list', 'data-key': ui.arrange ? 'rows-arrange' : 'rows', 'data-patch': '' }, loginClusters(list).map((x) => Array.isArray(x) ? loginRow(x, now, cols) : row(x, now, cols)))
@@ -2926,6 +2927,7 @@ const MAIN = String.raw`
         r.hookErrors.map((e) => h('span', { class: 'small' }, 'plugin ' + e.plugin + ': ' + e.message))) : null,
       r.account.dir ? h('p', { class: 'small' }, h('span', { class: 'muted' }, t('nf.dir') + ' '), h('code', null, r.account.dir)) : null,
       r.alias && r.alias.added ? h('div', { class: 'small created-alias' }, h('span', { class: 'muted' }, t('nf.alias') + ' '), codeCopy(r.alias.name), h('span', { class: 'muted' }, ' ' + t('nf.aliasNewShell'))) : null,
+      r.alias && r.alias.added ? shellSetupNote() : null,
       r.alias && !r.alias.added ? h('div', { class: 'note note-warn' }, h('b', null, t('nf.aliasNotAdded')), ' ', h('span', { class: 'small' }, r.alias.message || '')) : null,
       (r.shellInitFiles || []).map((f) => f.ok
         ? h('p', { class: 'muted small' }, t(f.action === 'unchanged' ? 'nf.shellFileSame' : 'nf.shellFileUpdated', { file: f.path }))
@@ -3654,6 +3656,10 @@ const MAIN = String.raw`
               h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === c.on), onclick: () => { if (v !== c.on) { leave(false); setCheck(c.family, v) } } }, text)))))
       }
     }
+    if (pickFamilies().length) {
+      const names = Object.keys(S.state.pickCommands || {})
+      acct.push(link(t('pk.title'), names.length ? names.join(', ') : t('pk.noneYet'), names.length ? 'chip-ok' : '', () => openPick(null), true))
+    }
     if (secs.includes('rc')) {
       const sum = rcSummary()
       acct.push(link(t('rc.button'), t('rc.state.' + sum), sum === 'on' ? 'chip-warn' : sum === 'off' ? 'chip-ok' : '', openRc, true))
@@ -3850,6 +3856,7 @@ const MAIN = String.raw`
     else if (dlg.kind === 'key' && ky && ky.step !== 'enter') renderKey()
     else if (dlg.kind === 'terminal' && tm) renderTerminals()
     else if (dlg.kind === 'autostart') renderAutostart()
+    else if (dlg.kind === 'pick' && pk) renderPick()
   }
   function setTheme(v) {
     if (CFG) { cfgPanel.theme = v; saveCfg({ theme: v }) } else { prefs.theme = v; savePrefs() }
@@ -3862,7 +3869,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.tool']
   function openRc() {
     if (!S.state || !rcSummary()) return
     rc.target = null
@@ -4421,6 +4428,175 @@ const MAIN = String.raw`
     }
     if (tm.error) body.push(errorNote(tm.error, null))
     setKids(dlg.el, dialogFrame(t('term.title'), null, body, [h('button', { class: 'btn', type: 'button', onclick: () => dlg.el.close() }, t('btn.close'))]))
+  }
+
+  // ---------- pick commands (spec §3.13, ADR-0035) ----------
+  // A short command per tool that starts, each time, the account with the most quota left. The dialog lists every
+  // tool that has one or could have one; adding shows what the name would hide in the shell before it writes.
+  let pk = null
+  function pickOf(fam) { const e = Object.entries(S.state.pickCommands || {}).find(([, f]) => f === fam); return e ? e[0] : null }
+  function pickFamilies() { return S.state.families.map((f) => f.id).filter((id) => pickOf(id) || (S.state.pickOffers || {})[id]) }
+  function openPick(fam) {
+    closeMenu()
+    pk = { focus: fam || null, busy: false, drafts: {}, confirm: {}, renaming: {}, error: null }
+    showDialog('pick')
+    renderPick()
+    const input = fam && document.getElementById('pk-name-' + fam)
+    if (input) input.focus()
+  }
+  async function startPick(name) {
+    if (BOOT.readOnly) { copyText(name, name); return }
+    try {
+      const r = await api('/api/pick/start', { name })
+      const why = r.reason === 'most-room' ? t('pk.why.room', { n: String(r.pressure) }) : t(r.reason === 'others-full' ? 'pk.why.othersFull' : 'pk.why.noData')
+      if (r.opened) { toast(t('pk.started', { terminal: TERM_NAMES[r.terminal] || r.terminal, ref: r.picked, why })); return }
+      await copyText(name, name)
+      toast(r.automation ? t('login.automation', { terminal: TERM_NAMES[r.terminal] || r.terminal }) : t('login.failed'), { kind: 'info' })
+    } catch (e) { toast(e.message, { kind: 'fail' }) }
+  }
+  // The dialog is the preview: a name that hides nothing is added at once; one that hides a command on PATH shows
+  // that first and needs a second click. A rename adds the new name, then removes the old one.
+  async function pickAdd(fam, name, shown, replaces) {
+    pk.busy = true
+    pk.error = null
+    renderPick()
+    try {
+      let r = await api('/api/pick/add', { name, family: fam, confirm: Boolean(shown) })
+      if (r.status === 'confirm' && !r.shadows) r = await api('/api/pick/add', { name, family: fam, confirm: true })
+      if (r.status === 'confirm') pk.confirm[fam] = { name, shadows: r.shadows }
+      else {
+        const old = replaces && replaces !== name ? await api('/api/pick/remove', { name: replaces }) : null
+        delete pk.renaming[fam]
+        delete pk.drafts[fam]
+        const later = S.state.shellSetup && !S.state.shellSetup.loaded
+        pickToast([r, old], t((old ? 'pk.renamed' : 'pk.added') + (later ? 'Setup' : ''), { name, old: replaces }))
+        await load({ silent: true })
+      }
+    } catch (e) { pk.error = e }
+    if (!pk) return
+    pk.busy = false
+    if (dlg.kind === 'pick') renderPick()
+  }
+  async function pickRemove(name) {
+    pk.busy = true
+    pk.error = null
+    renderPick()
+    try {
+      pickToast([await api('/api/pick/remove', { name })], t('pk.removed', { name }))
+      await load({ silent: true })
+    } catch (e) { pk.error = e }
+    if (!pk) return
+    pk.busy = false
+    if (dlg.kind === 'pick') renderPick()
+  }
+  // The config is written first; a shell-init file sideby could not rewrite is said, not hidden behind "added".
+  function pickToast(results, done) {
+    const failed = results.filter(Boolean).flatMap((r) => (r.shellInitFiles || []).filter((f) => !f.ok).map((f) => f.message))
+    if (failed.length) toast(t('pk.fileFailed', { msg: failed.join('; ') }), { kind: 'fail', duration: 12000 })
+    else toast(done)
+  }
+  // A name field with what it would hide and its button; typing updates them in place, so the caret stays put.
+  function nameEditor(fam, info, initial, replaces) {
+    const id = 'pk-name-' + fam
+    const input = h('input', { id, type: 'text', class: 'mono', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', maxlength: '64', placeholder: t('pk.namePh'), disabled: pk.busy, 'aria-describedby': id + '-hint' })
+    input.value = pk.drafts[fam] !== undefined ? pk.drafts[fam] : initial || ''
+    const offer = (S.state.pickOffers || {})[fam]
+    const note = h('p', { class: 'note' })
+    const go = h('button', { class: 'btn btn-sm btn-primary', type: 'button' })
+    const shadowsOf = (n) => {
+      const asked = pk.confirm[fam]
+      return asked && asked.name === n ? asked.shadows : offer && n && n === offer.name ? offer.shadows : null
+    }
+    const sync = () => {
+      const n = input.value.trim()
+      const shadows = shadowsOf(n)
+      note.hidden = !shadows
+      note.textContent = shadows ? t('pk.shadows', { name: n, path: shadows, host: info.title }) : ''
+      go.textContent = t(shadows ? 'pk.addAnyway' : replaces ? 'pk.save' : 'pk.add')
+      go.disabled = pk.busy || !n || n === replaces
+    }
+    const add = () => { const n = input.value.trim(); if (n && n !== replaces) pickAdd(fam, n, shadowsOf(n), replaces) }
+    input.addEventListener('input', () => { pk.drafts[fam] = input.value; sync() })
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add() } })
+    go.addEventListener('click', add)
+    sync()
+    return [
+      h('label', { class: 'field', for: id }, h('span', null, t('pk.nameLabel', { host: info.title })), input),
+      h('p', { class: 'field-hint', id: id + '-hint' }, t('pk.hint', { host: info.title })),
+      note,
+      h('div', { class: 'actions' }, go,
+        replaces ? h('button', { class: 'btn btn-sm btn-ghost', type: 'button', disabled: pk.busy, onclick: () => { delete pk.renaming[fam]; delete pk.drafts[fam]; renderPick() } }, t('btn.cancel')) : null),
+    ]
+  }
+  function renderPick() {
+    if (!pk) return
+    const body = [h('p', { class: 'muted small' }, t('pk.intro'))]
+    const fams = pickFamilies()
+    // Once a pick command exists, the line that makes terminals load it is the next step: first, not below the fold.
+    const setupFirst = Object.keys(S.state.pickCommands || {}).length ? shellSetupNote() : null
+    if (setupFirst) body.push(setupFirst)
+    if (!fams.length) body.push(h('p', { class: 'note' }, t('pk.none')))
+    for (const fam of fams) {
+      const info = family(fam)
+      const name = pickOf(fam)
+      const head = h('div', { class: 'title-logo' }, badge(fam, 'sm'), h('b', null, info.title))
+      if (name && pk.renaming[fam] && !BOOT.readOnly) {
+        body.push(h('div', { class: 'pk-row' }, head, nameEditor(fam, info, name, name)))
+        continue
+      }
+      if (name) {
+        body.push(h('div', { class: 'pk-row' }, head,
+          h('p', { class: 'small' }, h('code', { class: 'mono' }, name), ' ', t('pk.exists', { host: info.title })),
+          h('div', { class: 'actions' },
+            h('button', { class: 'btn btn-sm', type: 'button', disabled: pk.busy, onclick: () => startPick(name) }, icon('terminal'), t('pk.start')),
+            BOOT.readOnly ? null : h('button', { class: 'btn btn-sm btn-ghost', type: 'button', disabled: pk.busy, onclick: () => { pk.renaming[fam] = true; renderPick(); const el = document.getElementById('pk-name-' + fam); if (el) el.focus() } }, t('pk.rename')),
+            BOOT.readOnly ? null : h('button', { class: 'btn btn-sm btn-ghost', type: 'button', disabled: pk.busy, onclick: () => pickRemove(name) }, t('pk.remove')))))
+        continue
+      }
+      if (BOOT.readOnly) continue
+      body.push(h('div', { class: 'pk-row' }, head, nameEditor(fam, info, S.state.pickOffers[fam].name, null)))
+    }
+    if (fams.length && !setupFirst) body.push(shellSetupNote() || h('p', { class: 'muted small' }, t('pk.newShell')))
+    if (pk.error) body.push(errorNote(pk.error, null))
+    setKids(dlg.el, dialogFrame(t('pk.title'), null, body, [h('button', { class: 'btn', type: 'button', onclick: () => dlg.el.close() }, t('btn.close'))]))
+  }
+  // New terminals load short commands only through one line in the shell's rc file (ADR-0036). Where a short command
+  // is added and that line is missing, say so and offer to add it: the line and the file shown are the preview.
+  let ssBusy = false
+  async function shellSetup(undo) {
+    if (ssBusy) return
+    ssBusy = true
+    renderShellSetupHosts()
+    try {
+      const r = await api('/api/shell-init/setup', undo ? { undo: true } : {})
+      if (r.status === 'added') toast(t('ss.added', { rc: r.rc }), { action: { label: t('ss.undo'), run: () => shellSetup(true) } })
+      else if (r.status === 'removed') toast(t('ss.removed', { rc: r.rc }))
+      await load({ silent: true })
+    } catch (e) { toast(e.message, { kind: 'fail' }) }
+    ssBusy = false
+    renderShellSetupHosts()
+  }
+  function renderShellSetupHosts() {
+    if (dlg.kind === 'pick' && pk) renderPick()
+    else if (dlg.kind === 'create' && nf && nf.result) renderCreate()
+  }
+  function shellSetupNote() {
+    const ss = S.state.shellSetup
+    if (!ss || ss.loaded || BOOT.readOnly) return null
+    const line = ss.block.split('\n').find((l) => l.startsWith('eval '))
+    return h('div', { class: 'note note-warn ss-note', role: 'status' },
+      h('div', { class: 'note-line' }, h('b', null, t('ss.title')), ' ', t('ss.body', { rc: ss.rc })),
+      h('code', { class: 'mono note-line' }, line),
+      h('button', { class: 'btn btn-sm btn-primary', type: 'button', disabled: ssBusy, onclick: () => shellSetup(false) }, ssBusy ? t('ss.adding') : t('ss.add')))
+  }
+  // In a tool's group head: the button that starts the account with the most room, or the offer to add one.
+  function pickHead(fam) {
+    const name = pickOf(fam)
+    // On a narrow screen only the icon and the name stay; the words are in the hover text and the label.
+    if (name) return h('button', { class: 'btn btn-sm', type: 'button', title: t('pk.startTip', { name, host: family(fam).title }), 'aria-label': t('pk.startTip', { name, host: family(fam).title }), onclick: () => startPick(name) }, icon('terminal'), h('span', { class: 'hide-sm' }, t('pk.start') + ' '), h('code', { class: 'mono' }, name))
+    const offer = (S.state.pickOffers || {})[fam]
+    if (!offer || BOOT.readOnly) return null
+    return h('button', { class: 'link-btn small', type: 'button', onclick: () => openPick(fam) }, offer.name ? [t('pk.offerShort', { name: offer.name }), h('span', { class: 'hide-sm' }, t('pk.offerMore'))] : t('pk.offerNoName'))
   }
 
   // ---------- banners ----------

@@ -594,7 +594,7 @@ describe('short commands', () => {
       assert.deepEqual(config.aliases, { codex002: 'codex:002', codex003: 'codex:003' })
       const file = await readFile(h.path('.config/sideby/shell-init.zsh'), 'utf8')
       assert.equal(file, (await sideby(h, ['shell-init', 'zsh'])).out)
-      assert.match(file, /^codex003\(\) \{ command sideby run 'codex003' -- "\$@"; \}$/m)
+      assert.match(file, /^function codex003 \{ command sideby run 'codex003' -- "\$@"; \}$/m)
 
       // --write regenerates on demand, and says what to configure when nothing is.
       await writeFile(h.path('.config/sideby/shell-init.zsh'), `${file}# stale\n`)
@@ -639,7 +639,7 @@ describe('alias add and rm', () => {
       })
       const file = await readFile(h.path('.config/sideby/shell-init.zsh'), 'utf8')
       assert.equal(file, (await sideby(h, ['shell-init', 'zsh'])).out)
-      assert.match(file, /^cx-m\(\) \{ command sideby run 'cx-m' -- "\$@"; \}$/m)
+      assert.match(file, /^function cx-m \{ command sideby run 'cx-m' -- "\$@"; \}$/m)
 
       // Family args, then the Account's, then the alias's, then the user's; login and doctor ignore the alias's.
       assert.equal((await sideby(h, ['run', 'cx-m', '--', '--resume'])).code, 0)
@@ -710,7 +710,7 @@ describe('read-only commands', () => {
       checkSchema('quota', (await sideby(h, ['quota', '--json'])).out)
       const init = await sideby(h, ['shell-init', 'zsh'])
       assert.match(init.out, /sideby-codex-work\(\) \{ command sideby run 'codex:work' -- "\$@"; \}/)
-      assert.match(init.out, /cx2\(\) \{ command sideby run 'cx2' -- "\$@"; \}/)
+      assert.match(init.out, /function cx2 \{ command sideby run 'cx2' -- "\$@"; \}/)
       // bash accepts these names outside POSIX mode: the script parses and the functions are callable.
       const { execFileSync } = await import('node:child_process')
       const bashInit = (await sideby(h, ['shell-init', 'bash'])).out
@@ -719,6 +719,18 @@ describe('read-only commands', () => {
         `${bashInit}\ntype sideby-codex-work cx2 >/dev/null && echo ok`,
       ]).toString()
       assert.equal(typed.trim(), 'ok')
+      // A user's own zsh alias of the same name must not break the script: every function is still defined.
+      const zshPath = '/bin/zsh'
+      if (await stat(zshPath).catch(() => null)) {
+        // Outside the fake HOME, which this test checks for writes.
+        const file = join(h.bin, 'init.zsh')
+        await writeFile(file, (await sideby(h, ['shell-init', 'zsh'])).out)
+        const zsh = execFileSync(zshPath, [
+          '-fc',
+          `alias cx2=echo; eval "$(cat '${file}')"; type sideby-codex-work cx2 >/dev/null && echo ok`,
+        ]).toString()
+        assert.equal(zsh.trim(), 'ok')
+      }
       // An alias also works wherever an account is named.
       const doctorAlias = JSON.parse((await sideby(h, ['doctor', 'cx2', '--json'])).out)
       assert.deepEqual(
@@ -874,6 +886,128 @@ describe('next (Handoff, spec §3.13)', () => {
       const usage = await sideby(h, ['next', '--json'])
       assert.equal(usage.code, 2)
       assert.equal((checkSchema('error', usage.out) as { code: string }).code, 'usage')
+    })
+  })
+
+  it('a pick command starts the account with the most room, or the main account without quota data (ADR-0035)', async () => {
+    await withFakeHome(async (h) => {
+      await claudeAccounts(h)
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ shellInitFile: { zsh: '~/.config/sideby/shell-init.zsh' } }),
+      )
+      // A name that hides a command on PATH waits for --yes and writes nothing.
+      await writeFile(join(h.bin, 'cc'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+      const configBefore = await readFile(h.path('.config/sideby/config.json'), 'utf8')
+      const ask = await sideby(h, ['alias', 'add', 'cc', '--pick', 'claude', '--json'])
+      assert.equal(ask.code, 10, ask.err)
+      const asked = checkSchema('alias', ask.out)
+      assert.equal(asked.status, 'confirm')
+      assert.equal(asked.shadows, join(h.bin, 'cc'))
+      assert.equal(await readFile(h.path('.config/sideby/config.json'), 'utf8'), configBefore)
+      const human = await sideby(h, ['alias', 'add', 'cc', '--pick', 'claude'])
+      assert.equal(human.code, 10)
+      assert.match(human.out, /already a command .*bin\/cc.*--yes/s)
+      const add = await sideby(h, ['alias', 'add', 'cc', '--pick', 'claude', '--yes', '--json'])
+      assert.equal(add.code, 0, add.err)
+      const added = checkSchema('alias', add.out)
+      assert.deepEqual([added.status, added.kind, added.family], ['added', 'pick', 'claude'])
+      assert.deepEqual(
+        JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8')).pickCommands,
+        {
+          cc: 'claude',
+        },
+      )
+      const init = await readFile(h.path('.config/sideby/shell-init.zsh'), 'utf8')
+      assert.match(init, /^function cc \{ command sideby run 'cc' -- "\$@"; \}$/m)
+
+      // No quota data: the main account, and the line says why.
+      const first = await sideby(h, ['run', 'cc', '--', '--print', 'hi'])
+      assert.equal(first.code, 0, first.err)
+      assert.match(first.err, /cc → claude:main \(no quota data yet/)
+      // With quota data: the account with the lowest pressure.
+      await cache(h, 'main', 95, 40)
+      await cache(h, 'work', 30, 50)
+      await cache(h, 'lab', 10, 20)
+      const second = await sideby(h, ['run', 'cc'])
+      assert.equal(second.code, 0, second.err)
+      assert.match(second.err, /cc → claude:lab \(20% used, the most room\)/)
+      const [one, two] = await readHostLog(h, 'claude')
+      assert.equal(one?.env.CLAUDE_CONFIG_DIR, undefined)
+      assert.deepEqual(one?.argv.slice(-2), ['--print', 'hi'])
+      assert.equal(two?.env.CLAUDE_CONFIG_DIR, h.path('.claude-lab'))
+      // Every account full: nothing starts, and it says which comes back first.
+      await cache(h, 'work', 99, 50, 1)
+      await cache(h, 'lab', 99, 20, 5)
+      const full = await sideby(h, ['run', 'cc'])
+      assert.equal(full.code, 1)
+      assert.match(full.err, /cc: every claude account is at its limit; claude:work is back at/)
+      assert.equal((await readHostLog(h, 'claude')).length, 2)
+
+      // One namespace: an alias cannot take the name, and a pick command cannot take an alias's.
+      const clash = await sideby(h, ['alias', 'add', 'cc', 'claude:work', '--json'])
+      assert.equal(clash.code, 1)
+      assert.match(checkSchema('error', clash.out).error as string, /already a pick command/)
+      assert.equal((await sideby(h, ['alias', 'add', 'cc8', 'claude:work'])).code, 0)
+      assert.equal((await sideby(h, ['alias', 'add', 'cc8', '--pick', 'claude'])).code, 1)
+      assert.equal((await sideby(h, ['alias', 'add', 'claude', '--pick', 'claude'])).code, 1)
+      assert.equal((await sideby(h, ['alias', 'add', 'cx', '--pick', 'nope'])).code, 1)
+      assert.equal((await sideby(h, ['alias', 'add', 'cx', 'claude:work', '--pick', 'claude'])).code, 2)
+
+      const list = await sideby(h, ['alias', 'list', '--json'])
+      assert.equal(list.code, 0, list.err)
+      assert.deepEqual((checkSchema('alias-list', list.out) as { shortCommands: unknown[] }).shortCommands, [
+        { name: 'cc', kind: 'pick', family: 'claude' },
+        { name: 'cc8', kind: 'account', account: 'claude:work' },
+      ])
+      assert.match((await sideby(h, ['alias', 'list'])).out, /cc\s+the claude account with the most room/)
+
+      const rm = await sideby(h, ['alias', 'rm', 'cc', '--json'])
+      assert.equal(rm.code, 0, rm.err)
+      const removed = checkSchema('alias', rm.out)
+      assert.deepEqual([removed.status, removed.kind, removed.family], ['removed', 'pick', 'claude'])
+      const config = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8'))
+      assert.equal(config.pickCommands, undefined)
+      assert.doesNotMatch(await readFile(h.path('.config/sideby/shell-init.zsh'), 'utf8'), /^function cc /m)
+    })
+  })
+
+  it('shell-init setup shows the line first, adds it with --yes, and undo takes it out', async () => {
+    await withFakeHome(async (h) => {
+      const env = { SHELL: '/bin/zsh' }
+      await h.write('.zshrc', 'export EDITOR=vim\n')
+      const preview = await sideby(h, ['shell-init', 'setup', '--json'], env)
+      assert.equal(preview.code, 10, preview.err)
+      const data = checkSchema('shell-init-setup', preview.out)
+      assert.deepEqual([data.status, data.shell, data.rc], ['confirm', 'zsh', '~/.zshrc'])
+      assert.equal(await readFile(h.path('.zshrc'), 'utf8'), 'export EDITOR=vim\n')
+      const human = await sideby(h, ['shell-init', 'setup'], env)
+      assert.equal(human.code, 10)
+      assert.match(human.out, /eval "\$\(sideby shell-init zsh\)"/)
+      const yes = await sideby(h, ['shell-init', 'setup', '--yes', '--json'], env)
+      assert.equal(yes.code, 0, yes.err)
+      assert.equal(checkSchema('shell-init-setup', yes.out).status, 'added')
+      assert.match(await readFile(h.path('.zshrc'), 'utf8'), /^eval "\$\(sideby shell-init zsh\)"$/m)
+      const again = await sideby(h, ['shell-init', 'setup', '--json'], env)
+      assert.equal(again.code, 0)
+      assert.equal(checkSchema('shell-init-setup', again.out).status, 'loaded')
+      const undo = await sideby(h, ['shell-init', 'setup', '--undo', '--json'], env)
+      assert.equal(checkSchema('shell-init-setup', undo.out).status, 'removed')
+      assert.equal(await readFile(h.path('.zshrc'), 'utf8'), 'export EDITOR=vim\n')
+      assert.equal((await sideby(h, ['shell-init', 'setup', 'fish'])).code, 2)
+    })
+  })
+
+  it('new offers a pick command once, when a family gets its second subscription account', async () => {
+    await withFakeHome(async (h) => {
+      await codexMain(h)
+      await fakeHost(h, 'codex')
+      const second = await sideby(h, ['new', 'codex', 'work', '--json'])
+      assert.equal(second.code, 0, second.err)
+      const offer = checkSchema('new', second.out).pickCommandOffer as { name: string; command: string }
+      assert.deepEqual(offer, { name: 'cx', command: 'sideby alias add cx --pick codex' })
+      const third = await sideby(h, ['new', 'codex', 'lab'])
+      assert.doesNotMatch(third.out, /--pick/)
     })
   })
 })
@@ -1092,7 +1226,9 @@ describe('resume (spec §3.15)', () => {
         '.config/sideby/config.json',
         `${JSON.stringify({ resumeRouting: true, aliases: { claude: 'claude:work' } })}\n`,
       )
-      assert.doesNotMatch((await sideby(h, ['shell-init', 'zsh'])).out, /function claude/)
+      const aliased = (await sideby(h, ['shell-init', 'zsh'])).out
+      assert.doesNotMatch(aliased, /sideby resume/)
+      assert.match(aliased, /^function claude \{ command sideby run 'claude' -- "\$@"; \}$/m)
     })
   })
 

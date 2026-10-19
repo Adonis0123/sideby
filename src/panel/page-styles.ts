@@ -140,6 +140,8 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .pages { margin: 0 0 14px; }
 .row-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .tune-confirm { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
+.pk-row { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; border-top: 1px solid var(--border); }
+.pk-row p { margin: 0; }
 .tune-confirm ul { margin: 0; padding-left: 18px; }
 .tune-undo { margin: 0; }
 .tune-details { margin-top: 4px; }

@@ -195,7 +195,7 @@ describe('Runtime createAccount with an alias', () => {
       const fresh = await rtFor(h.env)
       assert.equal(file, await fresh.shellInitScript('zsh'))
       assert.ok(file.startsWith(SHELL_INIT_HEADER))
-      assert.match(file, /^dm008\(\) \{ command sideby run 'dm008' -- "\$@"; \}$/m)
+      assert.match(file, /^function dm008 \{ command sideby run 'dm008' -- "\$@"; \}$/m)
       assert.match(file, /^sideby-demo-008\(\) /m)
       assert.equal(fresh.config.aliases?.dm008, 'demo:008')
       // Without an alias the file still gains the new Account's function.

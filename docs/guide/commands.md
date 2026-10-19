@@ -12,7 +12,10 @@ English | [中文](commands.zh-CN.md)
 | `sideby new <family> <name>\|--next [--api] [--alias <short>]` | Create an account and lay out its Shared Items; `--next` picks the next free name and short command (`cc008`); `--alias` also adds a short command such as `cc008` to `aliases` | 0; 1 if partly failed or the alias was not added |
 | `sideby families [family]` | What each Host's accounts share with the main account, where they live and how they sign in | 0 |
 | `sideby alias add <short> <acct> [-- args]` | Add a short command for an existing account, optionally with Host arguments that `sideby run` adds | 0, also when it already exists; 1 if the name is taken, invalid or the account does not exist |
-| `sideby alias rm <short>` | Remove a short command | 0, also when it is not there |
+| `sideby alias rm <short>` | Remove a short command or a pick command | 0, also when it is not there |
+| `sideby alias add <short> --pick <family> [--yes]` | Add a pick command: each run starts the family's account with the most quota left, or the main account without quota data | 0; 10 without `--yes` (shows what it adds, and the command on PATH it would hide); 1 if the name is taken or invalid |
+| `sideby shell-init setup [zsh\|bash] [--yes\|--undo]` | Make new terminals load your short commands: add one line to `~/.zshrc` or `~/.bashrc`, shown first | 0; 10 without `--yes` |
+| `sideby alias list` | List short commands and pick commands | 0 |
 | `sideby resume <family> [-- args]` | Run the Host; when the arguments resume a session by id (`claude --resume <id>`, `codex resume <id>`, `grok --resume <id>`), start the account that holds it, as `run` would. A Claude session that was never saved starts anew in the account that started it. Otherwise run the Host unchanged | the Host's code; 1 if the family is unknown or cannot route sessions (pi) |
 | `sideby login <acct>` | Run the family's sign-in command for that account; for pi, start pi and tell you to type `/login` | the Host's code |
 | `sideby next <family> [--dry-run] [--include-api] [-- args]` | Recommend the account with the most quota left (Claude, Codex) and start it; `--dry-run` only recommends | the Host's code; 0 for `--dry-run` or `--json` with a pick; 1 if no account can be used, none has quota data yet, the family has no quota source or no accounts |

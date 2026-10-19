@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { aliasesByAccount } from '../core/accounts.ts'
 import { listAppProfiles, openAppProfile, parseProfileRef, removeAppProfile } from '../core/app-profiles.ts'
 import { browserReport, openInBrowser, setBrowserSignIns } from '../core/browser-profiles.ts'
-import { aliasRefs, type DisplayConfig, editConfigUpdate } from '../core/config.ts'
+import { aliasAccount, aliasArgs, aliasRefs, type DisplayConfig, editConfigUpdate } from '../core/config.ts'
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import type { DoctorReport } from '../core/doctor.ts'
 import { editSettings } from '../core/edit-settings.ts'
@@ -431,8 +431,13 @@ export async function cmdNew(a: ParsedArgs, io: Io): Promise<number> {
     api: a.flags.has('api'),
     ...(alias !== undefined ? { alias } : {}),
   })
+  const pickOffer = await pickOfferAfterNew(rt, res.account)
   if (a.flags.has('json')) {
-    json(io, suggestion ? { ...res, suggestion } : res)
+    json(io, {
+      ...res,
+      ...(suggestion ? { suggestion } : {}),
+      ...(pickOffer ? { pickCommandOffer: pickOffer } : {}),
+    })
     return res.ok ? 0 : 1
   }
   if (suggestion?.aliasProblem)
@@ -458,7 +463,33 @@ export async function cmdNew(a: ParsedArgs, io: Io): Promise<number> {
   printShellInitWrites(io, res.shellInitFiles ?? [], home)
   io.out('\nNext:')
   for (const n of res.nextSteps) io.out(`  ${n}`)
+  if (pickOffer)
+    io.out(
+      c.dim(
+        `\nTip: with two ${res.account.family} accounts, \`${pickOffer.command}\` adds ${pickOffer.name}, which starts the one with the most quota left each time.`,
+      ),
+    )
   return res.ok ? 0 : 1
+}
+
+/**
+ * The Pick Command `sideby new` offers once, when the new Account is its Family's second Subscription Account and
+ * the Family has none yet (spec §3.13).
+ */
+async function pickOfferAfterNew(
+  rt: Runtime,
+  account: Account,
+): Promise<{ name: string; command: string; shadows?: string } | null> {
+  if (account.kind === 'api') return null
+  const subs = (await rt.accounts()).filter((x) => x.family === account.family && x.kind !== 'api')
+  if (subs.length !== 2) return null
+  const offer = await rt.pickSuggestion(account.family)
+  if (!offer || offer.exists || offer.name === null) return null
+  return {
+    name: offer.name,
+    command: `sideby alias add ${offer.name} --pick ${account.family}`,
+    ...(offer.shadows ? { shadows: offer.shadows } : {}),
+  }
 }
 
 function printShellInitWrites(io: Io, files: readonly ShellInitWrite[], home: string) {
@@ -476,10 +507,31 @@ export async function cmdRun(a: ParsedArgs, io: Io, command: 'run' | 'login'): P
   if (command === 'login' && (extra.length || a.rest.length))
     throw new UsageError('login takes no extra arguments')
   const rt = await createRuntime()
+  if (command === 'run' && rt.pickCommandFamily(ref) !== undefined)
+    return runPick(rt, ref, [...extra, ...a.rest], io)
   if (command === 'run') return runAccount(rt, ref, [...extra, ...a.rest], io)
   const prepared = await rt.prepareLaunch(ref, [...extra, ...a.rest], command)
   if (prepared.notice) io.err(c.cyan(prepared.notice))
   return whileRunning(rt, () => runHost(prepared))
+}
+
+/** A Pick Command (spec §3.13, ADR-0035): start the Account with the most room, else the Main Account, and say which. */
+async function runPick(rt: Runtime, name: string, args: readonly string[], io: Io): Promise<number> {
+  const { choice, family } = await rt.pickChoice(name)
+  if (choice.ref === null) {
+    const now = rt.readContext().now
+    const why = choice.earliestReset
+      ? `every ${family} account is at its limit; ${choice.earliestReset.ref} is back at ${clock(choice.earliestReset.at, now)}`
+      : `no ${family} account can be used now`
+    const signIn = choice.signIn.length
+      ? `; sign in with \`sideby login ${choice.signIn.join('` or `sideby login ')}\``
+      : ''
+    io.err(c.yellow(`${name}: ${why}${signIn}, or start one yourself with \`sideby run <account>\`.`))
+    return 1
+  }
+  const { pickLine } = await import('../core/pick-commands.ts')
+  io.err(c.dim(`sideby: ${pickLine(name, choice)}`))
+  return runAccount(rt, choice.ref, args, io)
 }
 
 /**
@@ -1356,6 +1408,7 @@ export async function cmdPlugins(a: ParsedArgs, io: Io): Promise<number> {
 }
 
 export async function cmdShellInit(a: ParsedArgs, io: Io): Promise<number> {
+  if (a.positionals[0] === 'setup') return cmdShellSetup(a, io)
   const shell = a.positionals[0]
   const write = a.flags.has('write')
   const usage = 'usage: sideby shell-init zsh|bash  |  sideby shell-init [zsh|bash] --write'
@@ -1376,6 +1429,51 @@ export async function cmdShellInit(a: ParsedArgs, io: Io): Promise<number> {
   const files = await rt.writeShellInitFiles(wanted)
   printShellInitWrites(io, files, rt.paths.home)
   return files.every((f) => f.ok) ? 0 : 1
+}
+
+/**
+ * `sideby shell-init setup [zsh|bash] [--yes|--undo]` (spec §3.13, ADR-0036): shows the line it would add to the rc
+ * file and exits 10, adds it with --yes, or takes out exactly what it added with --undo.
+ */
+async function cmdShellSetup(a: ParsedArgs, io: Io): Promise<number> {
+  const [, given, ...extra] = a.positionals
+  if (extra.length || (given !== undefined && !SHELLS.includes(given as Shell)) || a.flags.has('write'))
+    throw new UsageError('usage: sideby shell-init setup [zsh|bash] [--yes|--undo] [--json]')
+  const { applyShellSetup, setupBlock, shellSetupStatus, userShell } = await import('../core/shell-setup.ts')
+  const rt = await createRuntime()
+  const shell = (given as Shell | undefined) ?? userShell(rt.env)
+  const home = rt.paths.home
+  const undo = a.flags.has('undo')
+  const st = await shellSetupStatus(shell, home, rt.env, rt.config.shellInitFile)
+  const rc = tildify(st.rc, home)
+  const out = (data: object, code: number) => {
+    if (a.flags.has('json')) json(io, { shell, rc, ...data })
+    return code
+  }
+  if (!undo && st.loaded) {
+    if (!a.flags.has('json')) io.out(`${c.green('✓')} new terminals already load your short commands (${rc})`)
+    return out({ status: 'loaded' }, 0)
+  }
+  if (undo && !st.added) {
+    if (!a.flags.has('json')) io.out(`${c.dim('·')} ${rc} has no line sideby added; nothing to undo`)
+    return out({ status: 'not-added' }, 0)
+  }
+  if (!a.flags.has('yes') && !undo) {
+    if (!a.flags.has('json')) {
+      io.out(`New terminals do not load your short commands yet. sideby would add to the end of ${rc}:\n`)
+      io.out(c.dim(setupBlock(shell).replace(/\n$/, '')))
+      io.out('\nRun again with --yes to add it; `sideby shell-init setup --undo` takes it out again.')
+    }
+    return out({ status: 'confirm', block: setupBlock(shell) }, 10)
+  }
+  const r = await applyShellSetup(shell, home, rt.env, rt.config.shellInitFile, { undo })
+  if (!a.flags.has('json'))
+    io.out(
+      r.status === 'added'
+        ? `${c.green('✓')} added the line to ${rc}; it works in a new terminal window`
+        : `${c.green('✓')} took sideby's line out of ${rc}`,
+    )
+  return out({ status: r.status }, 0)
 }
 
 /** Absolute path of this CLI's entry (`main.ts` from source, `main.js` from dist), for detached processes. */
@@ -1917,26 +2015,92 @@ export async function cmdBrowser(a: ParsedArgs, io: Io): Promise<number> {
 export async function cmdAlias(a: ParsedArgs, io: Io): Promise<number> {
   const [sub, alias, target, ...more] = a.positionals
   const usage =
-    'usage: sideby alias add <short-command> <account> [-- host args]  |  sideby alias rm <short-command>'
-  const add = sub === 'add' && alias !== undefined && target !== undefined && more.length === 0
-  const rm = sub === 'rm' && alias !== undefined && target === undefined && a.rest.length === 0
-  if (!add && !rm) throw new UsageError(usage)
+    'usage: sideby alias add <short-command> <account> [-- host args]  |  sideby alias add <short-command> --pick <family> [--yes]  |  sideby alias rm <short-command>  |  sideby alias list'
+  const pick = a.flags.get('pick')
+  if (sub === 'list' && alias === undefined && pick === undefined) return aliasList(a, io)
+  const addPick =
+    sub === 'add' && alias !== undefined && typeof pick === 'string' && target === undefined && !a.rest.length
+  const add =
+    sub === 'add' && pick === undefined && alias !== undefined && target !== undefined && more.length === 0
+  const rm =
+    sub === 'rm' && pick === undefined && alias !== undefined && target === undefined && a.rest.length === 0
+  if (!add && !rm && !addPick) throw new UsageError(usage)
   const rt = await createRuntime()
-  const res = add ? await rt.addAlias(alias, target, a.rest) : await rt.removeAlias(alias)
+  const res = addPick
+    ? await rt.addPickCommand(alias, pick, { yes: a.flags.has('yes') })
+    : add
+      ? await rt.addAlias(alias, target, a.rest)
+      : await rt.removeAlias(alias)
   if (a.flags.has('json')) {
     json(io, res)
-    return res.ok ? 0 : 1
+    return res.status === 'confirm' ? 10 : res.ok ? 0 : 1
   }
-  const starts = res.account ? ` → ${res.account}${res.args ? ` ${res.args.join(' ')}` : ''}` : ''
+  if (res.status === 'confirm') {
+    io.out(
+      `Adds ${c.bold(res.alias)}: typed in a new terminal, it starts the ${res.family} account with the most quota left.`,
+    )
+    io.out(c.dim(`Saved in ${tildify(rt.paths.configFile, rt.paths.home)} (pickCommands).`))
+    if (res.shadows)
+      io.out(
+        `${c.yellow('!')} ${res.alias} is already a command (${res.shadows}): in your shell, typing ${res.alias} would start ${res.family} instead.`,
+      )
+    io.out(`Run again with --yes to add it${res.shadows ? ' anyway, or pick another name' : ''}.`)
+    return 10
+  }
+  const starts =
+    res.kind === 'pick'
+      ? ` → the ${res.family} account with the most room`
+      : res.account
+        ? ` → ${res.account}${res.args ? ` ${res.args.join(' ')}` : ''}`
+        : ''
+  const what = res.kind === 'pick' ? 'pick command' : 'short command'
   const said = {
-    added: `${c.green('✓')} short command ${c.bold(res.alias)}${starts} (in a new shell)`,
-    exists: `${c.green('✓')} short command ${c.bold(res.alias)}${starts} was already in the config`,
-    removed: `${c.green('✓')} removed short command ${c.bold(res.alias)}${starts}`,
+    added: `${c.green('✓')} ${what} ${c.bold(res.alias)}${starts} (in a new shell)`,
+    exists: `${c.green('✓')} ${what} ${c.bold(res.alias)}${starts} was already in the config`,
+    removed: `${c.green('✓')} removed ${what} ${c.bold(res.alias)}${starts}`,
     absent: `${c.dim('·')} no short command ${res.alias} in the config; nothing to remove`,
   }
   io.out(said[res.status])
   printShellInitWrites(io, res.shellInitFiles ?? [], rt.paths.home)
   return res.ok ? 0 : 1
+}
+
+/** `sideby alias list`: every Alias and Pick Command in the config. */
+async function aliasList(a: ParsedArgs, io: Io): Promise<number> {
+  const rt = await createRuntime()
+  const shortCommands = [
+    ...Object.entries(rt.config.aliases ?? {}).map(([name, v]) => {
+      const args = aliasArgs(v)
+      return { name, kind: 'account' as const, account: aliasAccount(v), ...(args.length ? { args } : {}) }
+    }),
+    ...Object.entries(rt.config.pickCommands ?? {}).map(([name, family]) => ({
+      name,
+      kind: 'pick' as const,
+      family,
+    })),
+  ].sort((x, y) => x.name.localeCompare(y.name))
+  if (a.flags.has('json')) {
+    json(io, { shortCommands })
+    return 0
+  }
+  if (!shortCommands.length) {
+    io.out(
+      'No short commands yet. Add one with `sideby alias add cc --pick claude` or `sideby alias add cc008 claude:008`.',
+    )
+    return 0
+  }
+  io.out(
+    table(
+      shortCommands.map((s) => [
+        c.bold(s.name),
+        s.kind === 'pick'
+          ? `the ${s.family} account with the most room`
+          : `${s.account}${s.args ? ` ${s.args.join(' ')}` : ''}`,
+      ]),
+      ['SHORT', 'STARTS'],
+    ),
+  )
+  return 0
 }
 
 /** `sideby families [family]`: each Family's layout, sign-in and Shared Items, from its FamilyDef (spec §3.16). */
@@ -2033,7 +2197,10 @@ export async function cmdAsk(a: AskArgs, io: Io, runtime?: Runtime): Promise<num
       }
       if (task.kind === 'prompt')
         return await runAccount(rt, task.account, await taskHostArgs(rt, task), io, { aiTask: true })
-      if (task.kind === 'run') return await runAccount(rt, task.account, [], io)
+      if (task.kind === 'run')
+        return rt.pickCommandFamily(task.account) !== undefined
+          ? await runPick(rt, task.account, [], io)
+          : await runAccount(rt, task.account, [], io)
       const prepared = await rt.prepareLaunch(task.account, [], 'login')
       if (prepared.notice) io.err(prepared.notice)
       return await whileRunning(rt, () => runHost(prepared))

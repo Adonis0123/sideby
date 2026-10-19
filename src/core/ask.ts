@@ -560,6 +560,18 @@ export async function openRunInTerminal(rt: Runtime, ref: string) {
 }
 
 /**
+ * Starts a Pick Command in the Preferred Terminal (spec §3.13): the terminal runs it as `sideby run <name>` does, so it
+ * picks the Account when it starts and says which there.
+ */
+export async function openPickInTerminal(rt: Runtime, name: string) {
+  if (rt.pickCommandFamily(name) === undefined)
+    throw new UserError(
+      `No short command "${name}" picks an account; add one in the Panel or with \`sideby alias add ${name} --pick <family>\`.`,
+    )
+  return openTask(rt, { kind: 'run', account: name, cwd: rt.paths.home })
+}
+
+/**
  * What `try` will run for an Account, computed as `sideby run` would (Family defaults, config arguments) but without
  * reading its Secret File or running `launch.before` hooks: nothing runs before the user agrees.
  */

@@ -133,6 +133,16 @@
       },
       "description": "Short shell function names created by `sideby shell-init`, mapped to an Account ref or to `{ account, args }`."
     },
+    "pickCommands": {
+      "type": "object",
+      "patternProperties": {
+        "^[A-Za-z_][A-Za-z0-9_-]*$": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "description": "Pick Commands: short shell function names created by `sideby shell-init`, mapped to a Family. Each run starts the Account of that Family with the most Quota left, or the Main Account when none has Quota data (ADR-0035). They share one namespace with `aliases`."
+    },
     "ignore": {
       "type": "array",
       "items": {

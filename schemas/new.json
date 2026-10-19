@@ -194,6 +194,25 @@
       },
       "description": "Only with `--next`: the picked name, the short command that follows the existing pattern, or why that short command was left out."
     },
+    "pickCommandOffer": {
+      "type": "object",
+      "required": [
+        "name",
+        "command"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string"
+        },
+        "shadows": {
+          "type": "string"
+        }
+      },
+      "description": "Set once, when this is the Family’s second subscription account and it has no pick command: the command that adds one."
+    },
     "_notice": {
       "type": "object",
       "properties": {

@@ -33,7 +33,11 @@ Usage:
   sideby alias add <short> <account> [-- args]
                                       add a short command, optionally with host arguments
                                       (sideby alias add pi-kimi pi:main -- --model kimi-coding/k3)
+  sideby alias add <short> --pick <family> [--yes]
+                                      add a pick command: each run starts the account with the
+                                      most quota left (sideby alias add cc --pick claude)
   sideby alias rm <short>             remove a short command
+  sideby alias list                   list short commands and pick commands
   sideby login <account>              sign in to an account
   sideby resume <family> [-- args]    run the host; a session resumed by id (claude --resume <id>,
                                       codex resume <id>) starts in the account that holds it
@@ -79,6 +83,9 @@ Usage:
   sideby shell-init zsh|bash          print shell functions, e.g. eval "$(sideby shell-init zsh)"
   sideby shell-init [zsh|bash] --write
                                       rewrite the config's shellInitFile with them
+  sideby shell-init setup [zsh|bash] [--yes|--undo]
+                                      make new terminals load your short commands: adds one line to
+                                      ~/.zshrc (or ~/.bashrc), shown first; --undo takes it out
   sideby plugins                      list loaded plugins and load errors
   sideby plugins new <id>             create a local Family Plugin skeleton
   sideby plugins check <id|path>      check a plugin and show fixes
@@ -143,20 +150,28 @@ Writes: the account directory; the config \`aliases\` and every \`shellInitFile\
 Next: the user signs in with \`sideby login <account>\` (subscription) or fills in proxy.env (API).
 Exit: 0 done; 1 invalid name or alias, directory exists, or partly failed; 2 malformed command line.`,
   alias: `sideby alias add <short> <account> [-- host args] [--json]
+sideby alias add <short> --pick <family> [--yes] [--json]
 sideby alias rm <short> [--json]
+sideby alias list [--json]
 
 A short command starts one account: \`sideby run <short>\`, or just \`<short>\` once your shell loads
 \`sideby shell-init\`. Host arguments after -- are added only when it starts through the short command; it is
 the same account (same sign-in, same sessions), so do not create an account per model.
 
+A pick command (--pick) starts, each time, the account of that family with the most quota left, the one
+\`sideby next\` would pick; when no account has quota data yet it starts the main account. It prints which
+account it started. A name that hides a command on PATH (cc is the C compiler on macOS) needs --yes.
+
 Examples:
   sideby alias add cc008 claude:008
   sideby alias add pi-kimi pi:main -- --model kimi-coding/k3
+  sideby alias add cc --pick claude      # says first if cc hides a command (exit 10)
   sideby alias rm cc008
 
-Writes: the config \`aliases\` and every \`shellInitFile\`. New shell functions work in a new shell, or after
-eval "$(sideby shell-init zsh)" (put that line in ~/.zshrc once).
-Exit: 0 done (also when it already exists or is absent); 1 invalid, reserved or taken; 2 malformed.`,
+Writes: the config \`aliases\` or \`pickCommands\` and every \`shellInitFile\`. New shell functions work in a
+new shell, or after eval "$(sideby shell-init zsh)" (put that line in ~/.zshrc once).
+Exit: 0 done (also when it already exists or is absent); 1 invalid, reserved or taken; 2 malformed;
+10 a pick command would hide a command on PATH, run again with --yes.`,
   login: `sideby login <account>
 
 Run the host's own sign-in for one account: claude auth login, codex login, grok login. For pi it starts pi;
@@ -345,7 +360,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   login: { flags: [] },
   next: { flags: ['dry-run', 'include-api', 'json'] },
   new: { flags: ['api', 'json', 'next'], valued: ['alias'] },
-  alias: { flags: ['json'] },
+  alias: { flags: ['json', 'yes'], valued: ['pick'] },
   doctor: { flags: ['fix', 'force', 'json'] },
   quota: { flags: ['json', 'yes', 'refresh'] },
   tune: { flags: ['json', 'yes'] },
@@ -360,7 +375,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   desktop: { flags: ['json', 'remove', 'yes'] },
   edit: { flags: ['json', 'path'] },
   browser: { flags: ['json', 'enable', 'disable', 'yes'], valued: ['profile'] },
-  'shell-init': { flags: ['write'] },
+  'shell-init': { flags: ['write', 'yes', 'undo', 'json'] },
   plugins: { flags: ['json'] },
   families: { flags: ['json'] },
   update: { flags: ['json', 'yes', 'skill'], valued: ['auto'] },
@@ -381,7 +396,12 @@ function repeatedValues(args: readonly string[], name: string): string[] {
 
 /** Commands that never print an Update Notice: their output is read by a shell or an agent, or they are internal. */
 function noticeAllowed(cmd: string, parsed: import('./args.ts').ParsedArgs): boolean {
-  if (cmd === 'shell-init' || cmd === 'update' || cmd === 'update-check') return false
+  if (
+    (cmd === 'shell-init' && parsed.positionals[0] !== 'setup') ||
+    cmd === 'update' ||
+    cmd === 'update-check'
+  )
+    return false
   if (cmd === 'ask' && (parsed.flags.has('print') || parsed.flags.has('run'))) return false
   if (cmd === 'ui' && parsed.flags.has('serve-detached')) return false
   if (cmd === 'handoff' && parsed.positionals[0] === 'ready') return false

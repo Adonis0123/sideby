@@ -13,7 +13,10 @@
 | `sideby new <family> <name>\|--next [--api] [--alias <short>]` | 新建账号并铺好共享项；`--next` 自动选下一个空闲的名字和短命令（`cc008`）；`--alias` 同时把 `cc008` 这样的短命令加进 `aliases` | 0；部分失败或短命令没加上为 1 |
 | `sideby families [family]` | 每个宿主的账号和主账号共享什么、放在哪、怎么登录 | 0 |
 | `sideby alias add <short> <acct> [-- args]` | 给已有账号加短命令，可以带 `sideby run` 时附加的宿主参数 | 0，已存在也是 0；名字被占用、不合法或账号不存在为 1 |
-| `sideby alias rm <short>` | 删掉一个短命令 | 0，不存在也是 0 |
+| `sideby alias rm <short>` | 删掉一个短命令或自动选号命令 | 0，不存在也是 0 |
+| `sideby alias add <short> --pick <family> [--yes]` | 加一个自动选号命令：每次启动这个家族额度最多的账号，没有额度数据时启动主账号 | 0；没有 `--yes` 时为 10（显示会加什么、会遮住 PATH 上哪个命令）；名字被占用或不合法为 1 |
+| `sideby shell-init setup [zsh\|bash] [--yes\|--undo]` | 让新终端能用短命令：往 `~/.zshrc` 或 `~/.bashrc` 加一行，先显示再写 | 0；没有 `--yes` 时为 10 |
+| `sideby alias list` | 列出短命令和自动选号命令 | 0 |
 | `sideby resume <family> [-- args]` | 运行宿主；参数按 id 恢复会话时（`claude --resume <id>`、`codex resume <id>`、`grok --resume <id>`），像 `run` 一样启动存有该会话的账号；从没保存过的 Claude 会话，在起过它的账号开新会话；其他情况原样运行宿主 | 宿主的退出码；家族不存在或不支持会话路由（pi）为 1 |
 | `sideby login <acct>` | 用该账号运行家族的登录命令；pi 会直接启动，并提示你输入 `/login` | 宿主的退出码 |
 | `sideby doctor [acct\|family] [--fix] [--force]` | 检查共享项、凭据文件权限和备份残留；`--fix` 修复安全的部分 | 0 没有 fail（允许有 warn）；1 至少一条 fail |

@@ -55,8 +55,10 @@ export function shellInitScript(
   for (const acc of accounts)
     lines.push(`sideby-${acc.family}-${acc.name}() { command sideby run ${quote(acc.ref)} -- "$@"; }`)
   // An alias function runs the alias itself, so `sideby run` reads its Account and arguments from the config.
+  // `function name {`: zsh expands a shell alias of the same name in `name() {` and rejects the whole script, so a
+  // user's own `alias cc=…` would leave every function undefined. With this form their alias still wins.
   for (const alias of Object.keys(aliases ?? {}))
-    if (!aliasProblem(alias)) lines.push(`${alias}() { command sideby run ${quote(alias)} -- "$@"; }`)
+    if (!aliasProblem(alias)) lines.push(`function ${alias} { command sideby run ${quote(alias)} -- "$@"; }`)
   // An Alias with the Host's name wins: it already starts a chosen Account.
   for (const r of routes) {
     const fn = aliases && Object.hasOwn(aliases, r.bin) ? null : resumeRouteFunction(r)

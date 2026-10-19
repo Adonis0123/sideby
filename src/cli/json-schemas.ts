@@ -845,6 +845,15 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
           },
         ),
       ),
+      pickCommandOffer: Type.Optional(
+        Type.Object(
+          { name: Str, command: Str, shadows: Type.Optional(Str) },
+          {
+            description:
+              'Set once, when this is the Family’s second subscription account and it has no pick command: the command that adds one.',
+          },
+        ),
+      ),
     },
     { title: 'sideby new --json' },
   ),
@@ -853,17 +862,74 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       schemaVersion: Version,
       ok: Type.Boolean({ description: 'False when a config `shellInitFile` was not rewritten.' }),
       alias: Str,
-      status: Type.Union([
-        Type.Literal('added'),
-        Type.Literal('exists'),
-        Type.Literal('removed'),
-        Type.Literal('absent'),
-      ]),
+      status: Type.Union(
+        [
+          Type.Literal('added'),
+          Type.Literal('exists'),
+          Type.Literal('removed'),
+          Type.Literal('absent'),
+          Type.Literal('confirm'),
+        ],
+        {
+          description:
+            '`confirm` (exit 10): the pick command would hide a command on PATH, so nothing was written; run again with `--yes`.',
+        },
+      ),
+      kind: Type.Optional(
+        Type.Union([Type.Literal('account'), Type.Literal('pick')], {
+          description: '`pick` for a Pick Command (`--pick`), `account` for a short command of one Account.',
+        }),
+      ),
       account: Type.Optional(Str),
       args: Type.Optional(Type.Array(Str, { description: 'Host arguments `sideby run <alias>` adds.' })),
+      family: Type.Optional(Type.String({ description: 'The Family a Pick Command picks in.' })),
+      shadows: Type.Optional(
+        Type.String({
+          description: 'The command on PATH this Pick Command hides in the shell, such as /usr/bin/cc.',
+        }),
+      ),
       shellInitFiles: Type.Optional(ShellInitFiles),
     },
     { title: 'sideby alias add|rm --json' },
+  ),
+  'shell-init-setup': Type.Object(
+    {
+      schemaVersion: Version,
+      shell: Type.Union([Type.Literal('zsh'), Type.Literal('bash')]),
+      rc: Type.String({ description: 'The rc file, with ~ for the home folder.' }),
+      status: Type.Union(
+        [
+          Type.Literal('loaded'),
+          Type.Literal('confirm'),
+          Type.Literal('added'),
+          Type.Literal('removed'),
+          Type.Literal('not-added'),
+        ],
+        {
+          description:
+            '`loaded`: new terminals already load the short commands. `confirm` (exit 10): nothing written; `block` is what --yes appends. `not-added`: --undo found no line sideby added.',
+        },
+      ),
+      block: Type.Optional(Type.String()),
+    },
+    { title: 'sideby shell-init setup --json' },
+  ),
+  'alias-list': Type.Object(
+    {
+      schemaVersion: Version,
+      shortCommands: Type.Array(
+        Type.Object({
+          name: Str,
+          kind: Type.Union([Type.Literal('account'), Type.Literal('pick')]),
+          account: Type.Optional(
+            Type.String({ description: 'The Account a short command of kind `account` starts.' }),
+          ),
+          args: Type.Optional(Type.Array(Str)),
+          family: Type.Optional(Type.String({ description: 'The Family a Pick Command picks in.' })),
+        }),
+      ),
+    },
+    { title: 'sideby alias list --json' },
   ),
   plugins: Type.Object(
     {

@@ -4,6 +4,7 @@ import { type AccountRefError, aliasesByAccount, discoverAccounts, resolveRef } 
 import {
   type AliasValue,
   addConfigAlias,
+  addConfigPickCommand,
   aliasAccount,
   aliasArgs,
   aliasProblem,
@@ -16,6 +17,7 @@ import {
   handoffSettings,
   loadConfig,
   removeConfigAlias,
+  removeConfigPickCommand,
 } from './core/config.ts'
 import { type CreateResult, createAccount } from './core/create.ts'
 import { bindDesktopDeps, checkAppData, type DesktopDeps } from './core/desktop-app.ts'
@@ -45,6 +47,7 @@ import {
 } from './core/launch.ts'
 import { memoStore } from './core/memo-store.ts'
 import { type Paths, resolvePaths } from './core/paths.ts'
+import { choosePick, type PickChoice, suggestPickName } from './core/pick-commands.ts'
 import { fetchedQuota, type QuotaFetchMode, quotaCheckOff, shownQuota } from './core/quota-fetch.ts'
 import {
   type RemoteControlChange,
@@ -130,9 +133,16 @@ export interface AliasResult {
 export interface AliasEditResult {
   ok: boolean
   alias: string
-  status: 'added' | 'exists' | 'removed' | 'absent'
+  /** `confirm`: a Pick Command would hide a command on PATH, so nothing was written until the user agrees. */
+  status: 'added' | 'exists' | 'removed' | 'absent' | 'confirm'
+  /** `pick` for a Pick Command, `account` for an Alias; absent for `absent`. */
+  kind?: 'account' | 'pick'
   /** The Account ref the alias starts (for `rm`, started before it was removed). */
   account?: string
+  /** The Family a Pick Command picks in. */
+  family?: string
+  /** The command on PATH a Pick Command of this name hides in the shell (`/usr/bin/cc`). */
+  shadows?: string
   /** Host arguments the alias adds to `sideby run`; absent when there are none. */
   args?: string[]
   /** One entry per file in config `shellInitFile`; absent when none is configured. */
@@ -275,6 +285,25 @@ export interface Runtime {
   addAlias(alias: string, target: string, args?: readonly string[]): Promise<AliasEditResult>
   /** Removes a short command from the config, then rewrites every `shellInitFile`. */
   removeAlias(alias: string): Promise<AliasEditResult>
+  /**
+   * Adds a Pick Command (spec §3.13, ADR-0035), then rewrites every `shellInitFile`. Without `opts.yes` it only
+   * returns `confirm`, with the command on PATH the name would hide, and writes nothing. Refuses a name taken by an
+   * Alias or another Family.
+   */
+  addPickCommand(name: string, family: string, opts?: { yes?: boolean }): Promise<AliasEditResult>
+  /** The Family a Pick Command picks in, or undefined when `name` is not one. */
+  pickCommandFamily(name: string): string | undefined
+  /** The Account the Pick Command `name` starts now, or why it starts nothing (ADR-0035). */
+  pickChoice(name: string): Promise<{ name: string; family: string; choice: PickChoice }>
+  /**
+   * The Pick Command to offer for a Family: the existing one, else a free name following its Aliases (or cc, cx, gk),
+   * with the command on PATH it would hide, or `name: null` when no such name is free (the user types one); null when
+   * the Family has fewer than two Subscription Accounts. `all` saves discovering the Accounts again.
+   */
+  pickSuggestion(
+    family: string,
+    all?: readonly Account[],
+  ): Promise<{ name: string | null; exists: boolean; shadows?: string } | null>
   /** Why `alias` cannot start `ref` (shell-safe, not reserved, not taken by another Account), or null. */
   aliasProblem(alias: string, ref: string): string | null
   /** What `sideby shell-init <shell>` prints, from the Accounts on disk and the config aliases. */
@@ -633,7 +662,7 @@ export async function createRuntime(
       ok: files.every((f) => f.ok),
       alias,
       status,
-      ...(value === undefined ? {} : { account: aliasAccount(value) }),
+      ...(value === undefined ? {} : { kind: 'account' as const, account: aliasAccount(value) }),
       ...(args.length ? { args } : {}),
       ...(files.length ? { shellInitFiles: files } : {}),
     }
@@ -857,6 +886,11 @@ export async function createRuntime(
     async addAlias(alias, target, args = []) {
       const bad = aliasProblem(alias)
       if (bad) throw new UserError(`alias "${alias}" ${bad} (it becomes a shell function name)`)
+      if (rt.pickCommandFamily(alias) !== undefined)
+        throw new UserError(
+          `"${alias}" is already a pick command; pick another name, or remove it first with \`sideby alias rm ${alias}\``,
+          { code: 'alias-invalid' },
+        )
       // Resolve first so the config only ever names an Account that exists, by its ref.
       const account = resolveRef(target, await accounts(), aliasRefs(config.aliases))
       const r = await addConfigAlias(paths.configFile, alias, account.ref, args)
@@ -864,14 +898,103 @@ export async function createRuntime(
       return aliasEdit(alias, r.status, r.aliases[alias])
     },
     async removeAlias(alias) {
+      const pickFamily = rt.pickCommandFamily(alias)
+      if (pickFamily !== undefined) {
+        const r = await removeConfigPickCommand(paths.configFile, alias)
+        config.pickCommands = Object.keys(r.pickCommands).length ? r.pickCommands : undefined
+        const files = await rt.writeShellInitFiles()
+        return {
+          ok: files.every((f) => f.ok),
+          alias,
+          status: r.status,
+          ...(r.status === 'removed' ? { kind: 'pick' as const, family: pickFamily } : {}),
+          ...(files.length ? { shellInitFiles: files } : {}),
+        }
+      }
       const before = ownAlias(alias)
       const r = await removeConfigAlias(paths.configFile, alias)
       config.aliases = r.aliases
       return aliasEdit(alias, r.status, r.status === 'removed' ? before : undefined)
     },
+    async addPickCommand(name, familyId, o = {}) {
+      const f = familyOf(familyId)
+      const bad = aliasProblem(name)
+      if (bad)
+        throw new UserError(`"${name}" ${bad} (it becomes a shell function name)`, { code: 'alias-invalid' })
+      const taken = ownAlias(name)
+      if (taken !== undefined)
+        throw new UserError(
+          `"${name}" already starts ${aliasAccount(taken)}; pick another name, or remove it first with \`sideby alias rm ${name}\``,
+          { code: 'alias-invalid' },
+        )
+      if (name === f.bin)
+        throw new UserError(`"${name}" is the ${f.title} command itself; pick another name`, {
+          code: 'alias-invalid',
+        })
+      const same = rt.pickCommandFamily(name) === f.id
+      const shadows = same ? null : await which(name, env)
+      const base = { alias: name, kind: 'pick' as const, family: f.id, ...(shadows ? { shadows } : {}) }
+      // A preview first, as for every change sideby offers (spec §3.13): it writes only with `yes`.
+      if (!same && !o.yes) return { ok: true, status: 'confirm', ...base }
+      const r = await addConfigPickCommand(paths.configFile, name, f.id)
+      config.pickCommands = r.pickCommands
+      const files = await rt.writeShellInitFiles()
+      return {
+        ok: files.every((f) => f.ok),
+        status: r.status,
+        ...base,
+        ...(files.length ? { shellInitFiles: files } : {}),
+      }
+    },
+    pickCommandFamily(name) {
+      return config.pickCommands && Object.hasOwn(config.pickCommands, name)
+        ? config.pickCommands[name]
+        : undefined
+    },
+    async pickChoice(name) {
+      const family = rt.pickCommandFamily(name)
+      if (family === undefined)
+        throw new UserError(
+          `no pick command "${name}"; add one with \`sideby alias add ${name} --pick <family>\``,
+        )
+      const f = familyOf(family)
+      // API Accounts are never picked, also not as the fallback (ADR-0035).
+      const subs = (await accounts()).filter((a) => a.family === f.id && a.kind !== 'api')
+      if (!subs.length)
+        throw new UserError(
+          `no ${f.title} subscription accounts yet; create one with \`sideby new ${f.id} --next\``,
+          { code: 'no-accounts' },
+        )
+      const main = subs.find((a) => a.isMain)?.ref ?? null
+      if (!f.readQuota && !f.fetchQuota)
+        return { name, family, choice: { ref: main ?? subs[0]!.ref, reason: 'no-quota-data' } }
+      return { name, family, choice: choosePick(await rt.handoff(f.id), main) }
+    },
+    async pickSuggestion(familyId, given) {
+      const f = families.get(familyId)
+      if (!f) return null
+      const existing = Object.entries(config.pickCommands ?? {}).find(([, fam]) => fam === f.id)
+      if (existing) return { name: existing[0], exists: true }
+      const all = given ?? (await accounts())
+      if (all.filter((a) => a.family === f.id && a.kind !== 'api').length < 2) return null
+      const familyAliases = aliasesByAccount(aliasRefs(config.aliases), all)
+      const names = all.filter((a) => a.family === f.id).flatMap((a) => familyAliases.get(a.ref) ?? [])
+      const name = suggestPickName(f.id, f.bin, names)
+      if (
+        !name ||
+        aliasProblem(name) ||
+        ownAlias(name) !== undefined ||
+        rt.pickCommandFamily(name) !== undefined
+      )
+        return { name: null, exists: false }
+      const shadows = await which(name, env)
+      return { name, exists: false, ...(shadows ? { shadows } : {}) }
+    },
     aliasProblem(alias, ref) {
       const bad = aliasProblem(alias)
       if (bad) return `alias "${alias}" ${bad} (it becomes a shell function name)`
+      if (rt.pickCommandFamily(alias) !== undefined)
+        return `"${alias}" is already a pick command; pick another name`
       const value = ownAlias(alias)
       const taken = value === undefined ? undefined : aliasAccount(value)
       if (taken !== undefined && taken !== ref)
@@ -889,9 +1012,16 @@ export async function createRuntime(
             )
             .map((f) => ({ family: f.id, bin: f.bin, selectVar: f.selectVar }))
         : []
-      return shellInitScript(list, config.aliases, routes)
+      return shellInitScript(list, { ...config.aliases, ...config.pickCommands }, routes)
     },
     async writeShellInitFiles(shells = SHELLS) {
+      // Another process may have changed the other kind of short command since this Runtime read the config: write
+      // what the file holds now, so a rewrite never drops one.
+      const fresh = await loadConfig(paths.configFile).catch(() => null)
+      if (fresh) {
+        config.aliases = fresh.aliases
+        config.pickCommands = fresh.pickCommands
+      }
       const out: ShellInitWrite[] = []
       for (const shell of shells) {
         const file = config.shellInitFile?.[shell]

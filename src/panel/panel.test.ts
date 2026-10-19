@@ -838,6 +838,113 @@ describe('panel handoff (spec §3.13)', () => {
       assert.equal((await stateOf(h, 'none')).handoff, undefined, 'no quota data yet, no recommendation')
     })
   })
+
+  it('offers a pick command once a family has two accounts, and adds and removes it (ADR-0035)', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      assert.equal((await stateOf(h, true)).pickOffers, undefined, 'one account, nothing to pick')
+      await (await runtime(h, true)()).createAccount('demo', 'work')
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ aliases: { dm1: 'demo:main', dm2: 'demo:work' } }),
+      )
+      assert.deepEqual((await stateOf(h, true)).pickOffers, { demo: { name: 'dm' } })
+      const { server, port, handler } = await serve((port) =>
+        createPanelHandler({ runtime: runtime(h, true), allowedHosts: [`127.0.0.1:${port}`] }),
+      )
+      try {
+        const good = { origin: `http://127.0.0.1:${port}`, 'x-sideby-token': handler.token }
+        const taken = await post(port, '/api/pick/add', { name: 'dm1', family: 'demo' }, good)
+        assert.equal(taken.status, 400)
+        assert.match(String(taken.body.error), /already starts demo:main/)
+        // A preview first: nothing is written without confirm.
+        const preview = await post(port, '/api/pick/add', { name: 'dm', family: 'demo' }, good)
+        assert.equal(preview.body.status, 'confirm')
+        assert.equal((await stateOf(h, true)).pickCommands, undefined)
+        const added = await post(port, '/api/pick/add', { name: 'dm', family: 'demo', confirm: true }, good)
+        assert.equal(added.status, 200, JSON.stringify(added.body))
+        assert.deepEqual([added.body.status, added.body.kind], ['added', 'pick'])
+      } finally {
+        await close(server)
+      }
+      const after = await stateOf(h, true)
+      assert.deepEqual(after.pickCommands, { dm: 'demo' })
+      assert.equal(after.pickOffers, undefined)
+      const again = await serve((port) =>
+        createPanelHandler({ runtime: runtime(h, true), allowedHosts: [`127.0.0.1:${port}`] }),
+      )
+      try {
+        const good = { origin: `http://127.0.0.1:${again.port}`, 'x-sideby-token': again.handler.token }
+        assert.equal((await post(again.port, '/api/pick/remove', { name: 'dm1' }, good)).status, 400)
+        const removed = await post(again.port, '/api/pick/remove', { name: 'dm' }, good)
+        assert.equal(removed.body.status, 'removed')
+      } finally {
+        await close(again.server)
+      }
+      assert.equal((await stateOf(h, true)).pickCommands, undefined)
+    })
+  })
+
+  it('starts the account with the most room in the terminal, and offers an empty name when the default is taken', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      for (const n of ['work', 'lab']) await (await runtime(h, true)()).createAccount('demo', n)
+      // `dm` is taken by a short command, so the offer leaves the name for the user to type.
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ aliases: { dm: 'demo:main', dm2: 'demo:work', dm3: 'demo:lab' } }),
+      )
+      assert.deepEqual((await stateOf(h, true)).pickOffers, { demo: { name: null } })
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ aliases: { dm2: 'demo:work' }, pickCommands: { dmx: 'demo' } }),
+      )
+      const apps = await h.mkdir('apps/Terminal.app')
+      const calls: string[][] = []
+      const withTerminal = () =>
+        createRuntime({
+          env: h.env,
+          desktop: {
+            platform: 'darwin',
+            appDirs: [join(apps, '..')],
+            exec: async (_cmd, args) => {
+              calls.push([...args])
+              return { code: 0, stdout: '', stderr: '' }
+            },
+          },
+          builtins: [
+            asBuiltin(
+              demoPlugin(
+                demoFamily({
+                  loginState: async () => 'logged-in',
+                  readQuota: async (a) => quotaOf(used[a.name] ?? 0),
+                }),
+              ),
+            ),
+          ],
+        })
+      const { server, port, handler } = await serve((port) =>
+        createPanelHandler({ runtime: withTerminal, allowedHosts: [`127.0.0.1:${port}`] }),
+      )
+      try {
+        const good = { origin: `http://127.0.0.1:${port}`, 'x-sideby-token': handler.token }
+        const r = await post(port, '/api/pick/start', { name: 'dmx' }, good)
+        assert.equal(r.status, 200, JSON.stringify(r.body))
+        assert.deepEqual(
+          [r.body.opened, r.body.picked, r.body.reason, r.body.pressure],
+          [true, 'demo:lab', 'most-room', 10],
+        )
+        const { readTask } = await import('../core/ask.ts')
+        const task = await readTask(r.body.task as string, (await withTerminal()).paths)
+        // The terminal runs the pick command itself, so it picks again there and prints which and why.
+        assert.deepEqual([task.kind, task.account], ['run', 'dmx'])
+        assert.equal(calls.length, 1)
+        assert.equal((await post(port, '/api/pick/start', { name: 'nope' }, good)).status, 400)
+      } finally {
+        await close(server)
+      }
+    })
+  })
 })
 
 describe('same login in the Panel (spec §3.21)', () => {
