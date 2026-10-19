@@ -34,6 +34,32 @@ describe('FileMemo', () => {
     assert.equal(parses, 5)
   })
 
+  it('parses a file version once when two passes ask for it at the same time', async () => {
+    const memo = new FileMemo<string>()
+    let parses = 0
+    let release = () => {}
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    const parse = async () => {
+      parses++
+      await gate
+      return 'v'
+    }
+    const a = memo.pass('/login').get('/login', st(10), parse)
+    const b = memo.pass('/login').get('/login', st(10), parse)
+    release()
+    assert.deepEqual(await Promise.all([a, b]), ['v', 'v'])
+    assert.equal(parses, 1)
+    assert.deepEqual(memo.stats, { hits: 1, misses: 1 })
+    // A failed parse is not kept running: the next reader parses again.
+    const failing = memo.pass('/x').get('/x', st(1), async () => {
+      throw new Error('unreadable')
+    })
+    await assert.rejects(failing)
+    assert.equal(await memo.pass('/x').get('/x', st(1), async () => 'ok'), 'ok')
+  })
+
   it('forgets files a pass did not ask for, keeps scopes apart and skips values `keep` refuses', async () => {
     const memo = new FileMemo<string>()
     let p = memo.pass('one')

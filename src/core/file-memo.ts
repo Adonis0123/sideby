@@ -40,6 +40,11 @@ export const persistedMemos = new Map<string, FileMemo<unknown>>()
 
 export class FileMemo<T> {
   readonly #scopes = new Map<string, Map<string, { sig: string; value: T }>>()
+  /**
+   * Parses running now, by scope and path: a second reader of the same file version (two passes at once, such as an
+   * Account's own identity and the Same Login check) waits for that parse instead of starting another.
+   */
+  readonly #running = new Map<string, { sig: string; value: Promise<T> }>()
   /** Counters for tests and timing. */
   readonly stats = { hits: 0, misses: 0 }
   /** True when a pass changed what is remembered since the last `dump`. */
@@ -65,10 +70,24 @@ export class FileMemo<T> {
           seen.set(path, hit)
           return hit.value
         }
+        const key = `${scope}\0${path}`
+        const running = this.#running.get(key)
+        if (running && running.sig === sig) {
+          this.stats.hits++
+          const value = await running.value
+          if (!keep || keep(value)) seen.set(path, { sig, value })
+          return value
+        }
         this.stats.misses++
-        const value = await parse()
-        if (!keep || keep(value)) seen.set(path, { sig, value })
-        return value
+        const started = parse()
+        this.#running.set(key, { sig, value: started })
+        try {
+          const value = await started
+          if (!keep || keep(value)) seen.set(path, { sig, value })
+          return value
+        } finally {
+          if (this.#running.get(key)?.value === started) this.#running.delete(key)
+        }
       },
       done: () => {
         if (!before || before.size !== seen.size || [...seen].some(([k, v]) => before.get(k) !== v))
