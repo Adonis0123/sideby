@@ -10,7 +10,7 @@ import { afterInstall, runSkillUpdate } from './after-install.ts'
 import { writeFileAtomic } from './fs-safe.ts'
 import { processAlive, takeFileLock } from './lock.ts'
 import type { Paths } from './paths.ts'
-import { installedSkills, SKILL_UPDATE, SKILL_UPDATE_SHOWN, skillOwnerRepo } from './skill-check.ts'
+import { installedSkills, REPO_URL, SKILL_UPDATE, SKILL_UPDATE_SHOWN, skillOwnerRepo } from './skill-check.ts'
 import { localBuild, packageVersion, parseLocalBuild } from './version.ts'
 
 export { isZombieStat } from './lock.ts'
@@ -23,7 +23,7 @@ export const RETRY_INTERVAL_MS = 60 * 60 * 1000
 /** A failed Auto Update of one version is tried again after this long (a mirror may not have it yet). */
 export const AUTO_RETRY_MS = 24 * 60 * 60 * 1000
 const FETCH_TIMEOUT_MS = 5000
-export const RELEASE_NOTES = (v: string) => `https://github.com/Adonis0123/sideby/releases/tag/v${v}`
+export const RELEASE_NOTES = (v: string) => `${REPO_URL}/releases/tag/v${v}`
 
 /** What `update.json` in the state directory holds. Every field is optional; a broken file reads as `{}`. */
 export interface UpdateCache {

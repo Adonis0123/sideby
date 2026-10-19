@@ -7,6 +7,7 @@ export type PanelLang = 'en' | 'zh'
 const en = {
   'top.tagline': 'Every AI coding account, side by side.',
   'top.refresh': 'Refresh',
+  'top.repo': 'sideby on GitHub',
   'top.loading': 'Loading…',
   'top.refreshing': 'Refreshing…',
   'top.updated': 'Read {ago} · refreshes every {s} s',
@@ -1074,6 +1075,7 @@ export type MessageKey = keyof typeof en
 const zh: Record<MessageKey, string> = {
   'top.tagline': '所有 AI 编程账号，并排运行。',
   'top.refresh': '刷新',
+  'top.repo': 'sideby 的 GitHub 仓库',
   'top.loading': '加载中…',
   'top.refreshing': '刷新中…',
   'top.updated': '{ago}读取 · 每 {s} 秒自动刷新',

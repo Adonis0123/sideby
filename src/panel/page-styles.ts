@@ -447,6 +447,7 @@ a.btn:hover { text-decoration: none; }
 .icon-btn:disabled { color: var(--faint); cursor: not-allowed; }
 .top-actions .icon-btn { width: var(--ctl-h); height: var(--ctl-h); border-color: var(--border-strong); background: var(--surface); }
 .top-actions .icon-btn:hover { background: var(--hover); }
+.repo-link svg { width: 17px; height: 17px; fill: currentColor; }
 .btn:focus-visible, .icon-btn:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible, .stat-btn:focus-visible { outline: var(--focus-outline); outline-offset: 2px; box-shadow: var(--focus-ring); }
 .btn:focus-visible { border-color: var(--focus); }
 .note a, .banner a { color: inherit; text-decoration: underline; text-underline-offset: 2px; font-weight: var(--strong-weight); }

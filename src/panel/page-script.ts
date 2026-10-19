@@ -963,6 +963,9 @@ const MAIN = String.raw`
     for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.getAttribute('data-i18n'))
     $('refresh').setAttribute('aria-label', t('top.refresh'))
     $('ask-ai').setAttribute('aria-label', t('ask.button'))
+    const repo = $('repo')
+    for (const k of ['aria-label', 'title']) repo.setAttribute(k, t('top.repo'))
+    if (/^https:\/\/github\.com\//.test(BOOT.repoUrl || '')) { repo.href = BOOT.repoUrl; repo.hidden = false }
     renderSettingsButton()
   }
   function applyTheme() {

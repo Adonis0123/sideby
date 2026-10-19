@@ -8,6 +8,8 @@ import { mainDirOf } from './accounts.ts'
 import { tildify } from './paths.ts'
 
 export const SKILL_SOURCE = 'Adonis0123/sideby'
+/** sideby's repository, linked from the Panel's header. */
+export const REPO_URL = `https://github.com/${SKILL_SOURCE}`
 export const SKILL_INSTALL = `npx skills add ${SKILL_SOURCE} -g`
 /** The command a person runs to update the skill where sideby leaves it alone. */
 export const SKILL_UPDATE_SHOWN = 'npx skills update sideby -g'
