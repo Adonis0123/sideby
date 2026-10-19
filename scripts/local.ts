@@ -89,7 +89,7 @@ export async function localOff(d: LocalDirs): Promise<void> {
   console.log(`${r.message[0]?.toUpperCase()}${r.message.slice(1)}.`)
   await restartPanel(['sideby'])
   await refreshLoginItem(join(globalPkg(d), BIN))
-  // switchLocal ran `sideby update --yes` of the npm code, which brings the skill to its version (spec §3.23).
+  // switchLocal ran `sideby update --skill --yes` of the npm code, which brings the skill to its version (spec §3.23).
   if (r.skillSynced === false)
     console.log('The sideby skill was not brought along; run `sideby update` to see why.')
 }
@@ -103,10 +103,11 @@ async function refreshLoginItem(entry: string): Promise<void> {
   const { resolvePaths } = await import('../src/core/paths.ts')
   const real = await realpath(entry).catch(() => null)
   if (!real) return
-  const r = await refreshAutostart({
-    home: resolvePaths().home,
-    launcher: { node: process.execPath, entry: real },
-  })
+  const ctx = { home: resolvePaths().home, launcher: { node: process.execPath, entry: real } }
+  const { MENUBAR_AGENT } = await import('../src/menubar/agent.ts')
+  const m = await refreshAutostart(ctx, MENUBAR_AGENT)
+  if (m.rewritten) console.log('The menu bar item now runs it too.')
+  const r = await refreshAutostart(ctx)
   if (r.rewritten) console.log('The login item now starts it too.')
   else if (r.note && (r.state === 'on' || r.state === 'stale'))
     console.log(`The login item was not changed: ${r.note}`)

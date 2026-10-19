@@ -449,6 +449,81 @@ export function switchFailure(e: { network?: boolean; status?: number }): 'wait'
   if (e.network) return 'wait'
   return (e.status ?? 0) >= 500 ? 'check' : 'fail'
 }
+/**
+ * What a request that may swap the server's code (an Update, a Local Build switch; spec §3.23) has done. `failure` is
+ * how the request failed (`switchFailure`), null for an answer. `landed` is what a fresh read of the state says
+ * (the version runs, the switch is in place), null while the state cannot be read. `waitedOut`: the wait for the new
+ * code is over. Without an answer only the state can confirm success; until the wait is over the page keeps reading.
+ */
+export function codeSwapOutcome(s: {
+  failure: 'wait' | 'check' | 'fail' | null
+  landed: boolean | null
+  waitedOut: boolean
+}): 'done' | 'waiting' | 'failed' | 'unknown' {
+  if (s.failure === null) return 'done'
+  if (s.failure === 'fail') return 'failed'
+  if (s.landed === true) return 'done'
+  if (!s.waitedOut) return 'waiting'
+  return s.landed === false ? 'failed' : 'unknown'
+}
+/**
+ * Runs a request that may swap the server's code (an Update, a Local Build switch; spec §3.23). A background Panel
+ * restarting from the new code drops the answer, and a Portal moving to it may answer 5xx: without an answer only a
+ * fresh read of the state that shows the change counts as success (`codeSwapOutcome`). Each wait starts when the
+ * previous step ended, never before the request (an install can take longer than a wait): `windowMs` to confirm the
+ * change, reading every `pollMs` and once more at the end, then `windowMs` for the new build, which `reload`s the
+ * page. `done(answer)` returns false to stop after it; `stuck` when no new build came, `fail(error)` when the change
+ * did not happen, `unknown` when the state never answered.
+ */
+export async function runCodeSwap(io: {
+  send: () => Promise<unknown>
+  /** Reads the state; true when this read answered. */
+  readState: () => Promise<boolean>
+  /** What the state just read says: the change is in place (true), is not (false), or cannot tell (null). */
+  landed: () => boolean | null
+  newBuild: () => boolean
+  reload: () => void
+  now: () => number
+  pause: (ms: number) => Promise<void>
+  windowMs: number
+  pollMs: number
+  confirming: () => void
+  done: (answer: unknown) => boolean
+  stuck: () => void
+  fail: (error: unknown) => void
+  unknown: () => void
+}): Promise<void> {
+  let answer: unknown = null
+  let error: unknown = null
+  let failure: 'wait' | 'check' | 'fail' | null = null
+  try {
+    answer = await io.send()
+  } catch (e) {
+    error = e
+    failure = switchFailure((e ?? {}) as { network?: boolean; status?: number })
+  }
+  const cut = failure === 'wait' || failure === 'check'
+  if (cut) io.confirming()
+  let until = io.now() + io.windowMs
+  for (;;) {
+    const landed = cut ? ((await io.readState()) ? io.landed() : null) : null
+    // The server runs another build: the change is in place, and this page reloads into it.
+    if (io.newBuild()) return io.reload()
+    const out = codeSwapOutcome({ failure, landed, waitedOut: io.now() > until })
+    if (out === 'failed') return io.fail(error)
+    if (out === 'unknown') return io.unknown()
+    if (out === 'done') break
+    await io.pause(io.pollMs)
+  }
+  if (!io.done(answer)) return
+  until = io.now() + io.windowMs
+  for (;;) {
+    if (io.newBuild()) return io.reload()
+    if (io.now() > until) return io.stuck()
+    await io.pause(io.pollMs)
+    await io.readState()
+  }
+}
 export function panelFixes(f: { code?: string }, skillUpdatable: boolean): boolean {
   return skillUpdatable && f.code === 'skill.outdated'
 }
@@ -1144,6 +1219,14 @@ export function handoffTaskFacts(
   return out
 }
 
+/**
+ * Whether a click on `target` inside a foldable row leaves the row as it is: a control, a tooltip, or anything in
+ * the open details, whose lines (a Same Login row's directories among them) are there to use, not to close the row.
+ */
+export function foldSkips(target: { closest(selector: string): unknown }): boolean {
+  return Boolean(target.closest('button, a, input, select, textarea, .tip, .row-detail'))
+}
+
 /** The Panel's layout bands, widest first; page-styles.ts hangs its narrow-screen rules on them. */
 export type WidthTier = 'wide' | 'medium' | 'narrow' | 'phone'
 
@@ -1154,9 +1237,11 @@ export function widthTier(width: number): WidthTier {
 
 /**
  * Follows a viewport width that changes frame by frame (a window being dragged, a Portal's sidebar sliding open
- * around the Panel's frame) and calls `apply` once with the new band, `settleMs` after the width stops changing,
- * only when it differs from the band shown. A width that comes back to the shown band before then changes nothing,
- * so a gesture never makes the layout jump back and forth. Returns the function to call with each new width.
+ * around the Panel's frame) and calls `apply` with the new band as soon as the width crosses into one, so the layout
+ * moves together with the sliding edge instead of after it. For `settleMs` after that (restarted while the width keeps
+ * moving) it only notes further crossings, then applies the band the width came to rest in if that differs, so one
+ * gesture changes the layout at most twice and never flickers on every frame. Returns the function to call with each
+ * new width.
  */
 export function widthFollower<T>(
   shown: T,
@@ -1166,16 +1251,24 @@ export function widthFollower<T>(
   timers: { set: (fn: () => void, ms: number) => unknown; clear: (id: unknown) => void },
 ): (width: number) => void {
   let current = shown
+  let latest = shown
   let timer: unknown = null
-  return (width) => {
-    if (timer !== null) timers.clear(timer)
+  const settle = () => {
     timer = null
-    const next = tierOf(width)
-    if (next === current) return
-    timer = timers.set(() => {
-      timer = null
-      current = next
-      apply(next)
-    }, settleMs)
+    if (latest === current) return
+    current = latest
+    apply(latest)
+  }
+  return (width) => {
+    latest = tierOf(width)
+    if (timer !== null) {
+      timers.clear(timer)
+      timer = timers.set(settle, settleMs)
+      return
+    }
+    if (latest === current) return
+    current = latest
+    apply(latest)
+    timer = timers.set(settle, settleMs)
   }
 }

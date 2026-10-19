@@ -8,6 +8,9 @@ import { claudeHookReader } from '../families/claude/handoff-hook.ts'
 import { codexHookReader } from '../families/codex/handoff-hook.ts'
 import { grokHookReader } from '../families/grok/handoff-hook.ts'
 
+/** The fullest window's used percent, as the hook reads it; null when unknown. */
+const top = (w: { usedPercent: number }[] | null) => (w ? Math.max(0, ...w.map((x) => x.usedPercent)) : null)
+
 const NOW = new Date('2026-10-09T12:00:00Z')
 
 describe('Claude hook reader', () => {
@@ -72,15 +75,15 @@ describe('Codex hook reader', () => {
     await withFakeHome(async (h) => {
       const file = await h.write('rollout.jsonl', event(70) + event(91))
       await appendFile(file, event(99).slice(0, 40))
-      assert.equal(await codexHookReader.pressure!({ transcript_path: file }, {}, NOW), 91)
+      assert.equal(top(await codexHookReader.windows!({ transcript_path: file }, {}, NOW)), 91)
     })
   })
 
   it('returns null without a transcript or rate_limits', async () => {
     await withFakeHome(async (h) => {
       const file = await h.write('rollout.jsonl', '{"type":"session_meta"}\n')
-      assert.equal(await codexHookReader.pressure!({ transcript_path: file }, {}, NOW), null)
-      assert.equal(await codexHookReader.pressure!({}, {}, NOW), null)
+      assert.equal(top(await codexHookReader.windows!({ transcript_path: file }, {}, NOW)), null)
+      assert.equal(top(await codexHookReader.windows!({}, {}, NOW)), null)
     })
   })
 })

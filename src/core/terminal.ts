@@ -550,7 +550,12 @@ export async function openTerminal(
   try {
     const launch = launchArgs(id, { ...opts, ...installed })
     const result = await exec(launch.file, launch.args)
-    if (result.code === 0) return { ok: true }
+    if (result.code === 0) {
+      // `orca terminal create --focus` only switches tabs inside Orca; bring its window to the front too.
+      const bundleId = id === 'orca' ? TERMINALS.find((t) => t.id === 'orca')?.bundleId : null
+      if (bundleId) await exec('/usr/bin/open', ['-b', bundleId]).catch(() => undefined)
+      return { ok: true }
+    }
     if (
       launch.file === '/usr/bin/osascript' &&
       (result.code === -1743 || /-1743|Not authorized to send Apple events/i.test(result.stderr))

@@ -56,6 +56,14 @@ https://github.com/user-attachments/assets/d1d7e8dd-1df1-4881-ac88-e468c2dd4a1d
   <img alt="sideby panel: every account's 5h and 7d quota, 7-day token usage and health in one page" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/panel.png" width="1280">
 </picture>
 
+On macOS, the same quota sits in the menu bar (`sideby menubar on`): click or press `⌥⌘S` to open it, and click an account to start it in the terminal.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/menubar-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/menubar.png">
+  <img alt="sideby macOS menu bar dropdown: a status card, each tool with 5-hour and weekly quota bars, reset times, and the suggested account marked" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/menubar.png" width="468">
+</picture>
+
 ## Why not just an alias?
 
 `CLAUDE_CONFIG_DIR` plus a shell alias already starts a second account. It does not keep skills and settings in one place, and it does not show quota for every account. [Does this break a provider's terms?](docs/guide/faq.md#terms)
@@ -73,6 +81,7 @@ cc-switch's docs describe that switch: it writes the live settings file ([README
 | You want to | Run | Guide |
 |---|---|---|
 | Hand a task to your own AI from the panel: set up an account, fix a problem, support a new tool | **Let AI do it** in the panel, or `sideby ask` | [Let AI do it](docs/guide/panel.md#let-ai-do-it) |
+| See quota at a glance in the macOS menu bar | **Settings › Startup** in the panel, or `sideby menubar on` | [Quota in the menu bar](docs/guide/usage.md#quota-in-the-menu-bar) |
 | Have the panel ready in the background whenever you log in | **Settings › Startup** in the panel, or `sideby autostart on` | [Start at login](docs/guide/usage.md#start-at-login) |
 | Add an API key account (DeepSeek, a gateway, …) | `sideby new claude deepseek --api` | [API accounts](docs/guide/usage.md#api-accounts) |
 | Find and fix config drift between accounts | `sideby doctor --fix` | [Doctor](docs/guide/usage.md#doctor) |

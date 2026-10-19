@@ -1,11 +1,11 @@
-// Grok Build for the handoff hook (spec §3.17, §3.26): Quota Pressure from the kept answer of its CLI and the billing
+// Grok Build for the handoff hook (spec §3.17, §3.26): the Quota windows from the kept answer of its CLI and the billing
 // lines it writes to its log, and a turn that failed at the limit. Leaf module: the hook runs on every tool call. The
 // wording comes from the grok 1.0.50 binary; check it again when Grok changes.
 import { homedir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { ACCOUNT_NAME } from '../../core/account-name.ts'
 import { resolvePaths } from '../../core/paths.ts'
-import { quotaPressure } from '../../core/quota-levels.ts'
+import { openWindows } from '../../core/quota-levels.ts'
 import { quotaStoreFile, readQuotaStore } from '../../core/quota-store.ts'
 import { field, type HookReader } from '../../handoff/reader.ts'
 import type { Env } from '../../types.ts'
@@ -40,7 +40,7 @@ export const GROK_USED_UP = [
 ]
 
 export const grokHookReader: HookReader = {
-  async pressure(_input, env, now) {
+  async windows(_input, env, now) {
     const account = grokAccountFromEnv(env)
     if (!account) return null
     try {
@@ -55,7 +55,7 @@ export const grokHookReader: HookReader = {
             ? log
             : fetched
           : (log ?? fetched)
-      return newer ? quotaPressure(newer, now) : null
+      return newer ? openWindows(newer, now) : null
     } catch {
       return null
     }

@@ -47,6 +47,15 @@ ADR-0021 adds two promises, added like every other option (compatible):
 
 ADR-0030 adds `ask?: { bridge: 'postMessage' }`, added like every other option (compatible) and checked when the handler is created. With it, a Panel inside a frame hides its own "Let AI do it" button and posts each AI Task (`{ type: 'local-tools:ask', version: 1, preset, native: { task, text, context }, text }`) to `window.parent` at its own origin, for a Portal that starts AI Tasks through `sideby ask --spec -`. The CSP and the Host, Origin and token checks do not change.
 
+## Amendment (2026-10-18): loading new code without cutting requests
+
+"The Portal loads it as it does any reinstall" leaves out what happens to requests the old code is still answering. An Update or a Local Build switch started from the Panel installs a new package inside a request; a Portal that notices the new package and ends the old handler (a worker thread, say) a fixed few seconds later can cut that request. The viewer then sees the Portal's 5xx for a change that may have landed, and anything the old code still had to do (a skill update, a lock to release) is lost. What any Portal that reloads the Panel when its code changes must do:
+
+- Send new requests to the new handler, but end the old one only after the requests it is answering have finished. A time limit for a request that never ends is fine; it should be minutes, not seconds.
+- When it cannot reach the old handler any more, answer 5xx; the page then reads the state to tell whether the change landed (spec §3.23).
+
+sideby does not rely on this alone. Its own side keeps such requests short: it answers once the new package is installed and leaves slower follow-ups (the sideby skill) to the new code, a background Panel restarts last, and a lock whose holder stopped touching it is free within two minutes even when the holding process lives on. The CSP and the Host, Origin and token checks do not change.
+
 ## Why not the others
 
 - **One package for every tool, sideby as a plugin of it**: one install, but sideby's published scope would change and one failing tool would break the others.

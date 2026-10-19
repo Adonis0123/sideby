@@ -469,6 +469,20 @@ describe('sideby desktop: claude_desktop_config.json', () => {
     })
   })
 
+  it('checkAppData: with --force, a server only the app has is removed and the rest of the file is kept', async () => {
+    await withFakeHome(async (h) => {
+      const { rt } = await setup(h)
+      const file = `${SUPPORT}/sideby/claude/work/claude_desktop_config.json`
+      await h.write(file, '{"mcpServers":{"mine":{"command":"y"}},"other":1}\n')
+      const rs = await checkAppData(rt.plugins, h.home, await rt.resolve('claude:work'), true)
+      assert.equal(rs.length, 1)
+      assert.equal(rs[0]!.code, 'json-key.drift')
+      assert.ok(rs[0]!.fixable && rs[0]!.fix)
+      assert.equal((await rs[0]!.fix!()).ok, true)
+      assert.deepEqual(JSON.parse(await readFile(h.path(file), 'utf8')), { mcpServers: {}, other: 1 })
+    })
+  })
+
   it('checkAppData: a missing link is fixable, and the fix writes only inside the app data', async () => {
     await withFakeHome(async (h) => {
       const { rt } = await setup(h)

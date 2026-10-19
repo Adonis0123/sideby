@@ -1,5 +1,6 @@
 // Text the handoff hook puts in front of the model, and the first prompt of the next session (spec §3.17).
 // English, since Hosts and models read it; complete in itself, so it works without any skill installed.
+import { BRIEF_DONE, type WindowReading } from '../core/handoff-chain.ts'
 
 const TEMPLATE = [
   'the goal of the task',
@@ -9,20 +10,33 @@ const TEMPLATE = [
   'the files that matter',
 ].join('; ')
 
-const RULES =
-  'Reference specs, ADRs, commits and diffs by path instead of repeating them, list the skills the next agent should use, and never include keys, passwords or personal data.'
+const RULES = `Reference specs, ADRs, commits and diffs by path instead of repeating them, list the skills the next agent should use, and never include keys, passwords or personal data. End the brief with the line ${BRIEF_DONE} once it covers all of this.`
 
-export function prepareMessage(brief: string, pressure: number): string {
-  return `sideby: this account's quota is at ${Math.round(pressure)}%. Write a handoff brief to ${brief} now (${TEMPLATE}). ${RULES} Keep it current after each step, then go on with the task. Do not tell the user that the work will move to another account: sideby decides that and tells them itself.`
+const WINDOW_NAMES: Record<string, string> = { '5h': '5-hour', '7d': 'weekly' }
+
+const when = (iso: string) => {
+  const t = new Date(iso)
+  if (Number.isNaN(t.getTime())) return 'an unknown time'
+  return t.toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })
 }
 
-export function thresholdMessage(brief: string, pressure: number): string {
-  return `sideby: this account's quota is at ${Math.round(pressure)}%. Finish the current step, update the handoff brief at ${brief} (${TEMPLATE}; ${RULES}), then end your turn. sideby will start the next account from that brief.`
+/** Which window, how full and when it resets, so nobody mistakes the weekly window for the 5-hour one (ADR-0032). */
+export function windowText(w: WindowReading): string {
+  const name = WINDOW_NAMES[w.label] ? `${WINDOW_NAMES[w.label]} (${w.label})` : w.label
+  return `${name} quota is at ${Math.round(w.usedPercent)}%, back at ${when(w.resetsAt)}`
+}
+
+export function prepareMessage(brief: string, window: WindowReading): string {
+  return `sideby: this account's ${windowText(window)}. Write a handoff brief to ${brief} now (${TEMPLATE}). ${RULES} Keep it current after each step, then go on with the task. Do not tell the user that the work will move to another account: sideby decides that and tells them itself.`
+}
+
+export function thresholdMessage(brief: string, window: WindowReading): string {
+  return `sideby: this account's ${windowText(window)}. Finish the current step, update the handoff brief at ${brief} (${TEMPLATE}; ${RULES}), then end your turn. sideby will start the next account from that brief.`
 }
 
 /** At the threshold when the session cannot write a Brief: sideby puts one together from its records. */
-export function endTurnMessage(pressure: number): string {
-  return `sideby: this account's quota is at ${Math.round(pressure)}%. Finish the current step and end your turn; sideby will start the next account and tell it what you did.`
+export function endTurnMessage(window: WindowReading): string {
+  return `sideby: this account's ${windowText(window)}. Finish the current step and end your turn; sideby will start the next account and tell it what you did.`
 }
 
 export function stopMessage(brief: string): string {

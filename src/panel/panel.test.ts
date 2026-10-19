@@ -2109,6 +2109,61 @@ describe('start at login and settings in config (spec §3.29)', () => {
     })
   })
 
+  it('turns the menu bar item on and off through the same plan, naming its script instead of sending it (spec §3.31)', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const calls: string[][] = []
+      const unbind = bindPanelAutostart({
+        platform: 'darwin',
+        launcher: LAUNCHER,
+        uid: 501,
+        loginHome: h.home,
+        exec: async (file, args) => {
+          calls.push([file, ...args])
+          return { code: 0, output: '' }
+        },
+      })
+      const plist = h.path('Library/LaunchAgents/dev.sideby.menubar.plist')
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({ runtime: factory(h), allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      try {
+        const hdr = headers(port, handler.token)
+        const plan = await post(port, '/api/menubar', { on: true }, hdr)
+        const shown = plan.body.plan as { path: string; programArguments: string[] }
+        assert.equal(shown.path, '~/Library/LaunchAgents/dev.sideby.menubar.plist')
+        assert.deepEqual(shown.programArguments, [
+          '/usr/bin/osascript',
+          '-l',
+          'JavaScript',
+          '-e',
+          '(menu bar script)',
+          '/bin/sh',
+          '/usr/bin/env',
+        ])
+        const on = await post(
+          port,
+          '/api/menubar',
+          { on: true, confirm: true, programArguments: shown.programArguments },
+          hdr,
+        )
+        assert.deepEqual([on.body.applied, (on.body.status as { state: string }).state], [true, 'on'])
+        assert.match(await readFile(plist, 'utf8'), /Written by `sideby menubar`/)
+        // The Panel's own login item stays off.
+        const panelItem = JSON.parse(
+          (await request(port, 'GET', '/api/autostart', { host: `127.0.0.1:${port}` })).text,
+        )
+        assert.equal(panelItem.state, 'off')
+        const gone = await post(port, '/api/menubar', { on: false, confirm: true }, hdr)
+        assert.equal(gone.body.applied, true)
+        assert.deepEqual(calls.at(-1), ['launchctl', 'bootout', 'gui/501/dev.sideby.menubar'])
+      } finally {
+        unbind()
+        await close(server)
+      }
+    })
+  })
+
   it('reports a system it cannot start on and changes nothing', async () => {
     await withFakeHome(async (h) => {
       await seedDemoMain(h.write)

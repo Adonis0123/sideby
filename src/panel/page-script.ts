@@ -12,8 +12,10 @@ import {
   autostartNote,
   cacheHitRate,
   canLeaveLocal,
+  codeSwapOutcome,
   fileSize,
   fixPrompt,
+  foldSkips,
   formatDuration,
   handoffChangeOf,
   handoffHintAccount,
@@ -40,6 +42,7 @@ import {
   remoteControlTodo,
   reorder,
   rowBadge,
+  runCodeSwap,
   sortAccounts,
   stripSecrets,
   suggestAlias,
@@ -69,6 +72,7 @@ const LOGIC = [
   cacheHitRate,
   fileSize,
   fixPrompt,
+  foldSkips,
   formatDuration,
   handoffChangeOf,
   handoffHintAccount,
@@ -83,6 +87,8 @@ const LOGIC = [
   newAccountDir,
   nextReset,
   canLeaveLocal,
+  codeSwapOutcome,
+  runCodeSwap,
   switchFailure,
   panelFixes,
   panelHint,
@@ -125,7 +131,8 @@ const MAIN = String.raw`
   const AUTO_MS = 20000
   const FAST_MS = 5000
   const FAST_FOR_MS = 3 * 60000
-  // How long a changing width must hold still before the layout follows it into another band.
+  // After the layout follows a width into another band, how long the width must hold still before a later crossing
+  // in the same gesture is applied (page-logic.ts, widthFollower).
   const WIDTH_SETTLE_MS = 90
   const S = {
     state: null, loadError: null, loading: false, loadedAt: 0, history: null,
@@ -153,6 +160,7 @@ const MAIN = String.raw`
     if (raw.hideEmail === true) p.hideEmail = true
     if (typeof raw.ahHintAt === 'number') p.ahHintAt = raw.ahHintAt
     if (raw.rcHide === true) p.rcHide = true
+    if (raw.mbHintDone === true) p.mbHintDone = true
     if (raw.cfgDone === true) p.cfgDone = true
     if (typeof raw.family === 'string') p.family = raw.family
     if (raw.collapsed && typeof raw.collapsed === 'object')
@@ -351,6 +359,7 @@ const MAIN = String.raw`
     terminal: 'M4 17l6-5-6-5M12 19h8',
     key: 'M15 9a3 3 0 1 0-.01 0M12.9 11.1L4 20M7 17l2 2M9.5 14.5l2 2',
     folder: 'M3 6h6l2 2h10v11H3z',
+    file: 'M14 3H6v18h12V7zM14 3v4h4M9 13h6M9 17h6',
     check: 'M9 12l2 2 4-4M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z',
     userPlus: 'M15 19a6 6 0 0 0-12 0M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M16 11h6',
     x: 'M6 6l12 12M18 6L6 18',
@@ -769,7 +778,7 @@ const MAIN = String.raw`
   window.addEventListener('resize', () => closeMenu())
   // Layout bands: the page's narrow-screen rules hang on the root's data-width (set before the first paint by the
   // head script), not on media queries, so a width that slides across a breakpoint (a dragged window, a Portal's
-  // sidebar opening around this frame) changes the layout once, after it settles, as one short cross-fade.
+  // sidebar opening around this frame) changes the layout as it crosses, as one short cross-fade, not once per frame.
   function applyWidthTier(tier) {
     const root = document.documentElement
     const set = () => { root.dataset.width = tier }
@@ -807,8 +816,23 @@ const MAIN = String.raw`
     return [
       a.modelInfo && a.modelInfo.settable ? { icon: 'terminal', label: t('menu.model'), run: () => openModel(a) } : null,
       family(a.family).tuning ? { icon: 'check', label: t('menu.tune'), run: () => openTune(a) } : null,
+      settingsItem(a),
       { icon: 'check', label: t('menu.check'), disabled: S.checking || S.fixing || Boolean(ui.checkingRef), run: () => checkAccount(a.ref) },
     ]
+  }
+  // The directory's own Host settings file, opened in the user's editor (spec §3.30); it starts a program, so a
+  // read-only Panel has no such item.
+  function settingsItem(a) {
+    const file = family(a.family).settingsFile
+    if (!file || !a.dir || BOOT.readOnly) return null
+    return { icon: 'file', label: t('menu.editSettings', { file }), hint: a.dir + '/' + file, run: () => editSettings(a, file) }
+  }
+  async function editSettings(a, file) {
+    try {
+      const r = await api('/api/account/edit-settings', { account: a.ref })
+      toast(t('edit.opened', { ref: a.ref, file }))
+      if (r.sharedWith && r.sharedWith.length) toast(t('edit.shared', { names: r.sharedWith.map(refName).join(', ') }), { kind: 'info', duration: 8000 })
+    } catch (e) { toast(t('edit.failed', { ref: a.ref, file, msg: e.message }), { kind: 'fail' }) }
   }
   // What the login does, whichever directory: the browser, signing in, the email, a new account like it.
   function loginItems(a) {
@@ -1453,7 +1477,7 @@ const MAIN = String.raw`
   function foldClick(a) { return foldHit(() => toggleRow(a)) }
   function foldHit(run) {
     return (e) => {
-      if (e.target.closest('button, a, input, select, textarea, .tip')) return
+      if (foldSkips(e.target)) return
       const dragged = downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 4
       if (dragged && window.getSelection && String(window.getSelection())) return
       run()
@@ -3601,7 +3625,9 @@ const MAIN = String.raw`
     const look = []
     if (secs.includes('lang')) look.push(seg(t('set.lang'), [['en', 'English'], ['zh', '中文']], lang, setLang))
     if (secs.includes('theme')) look.push(seg(t('set.theme'), CHOICES.theme.map((v) => [v, t('set.theme.' + v)]), viewPrefs().theme, setTheme))
-    const start = [autostartRow()]
+    const start = [autostartRow('autostart')]
+    // The menu bar switch shows only where it works (macOS); while its state loads it waits, unseen.
+    if (li.menubar.status && li.menubar.status.supported) start.push(autostartRow('menubar'))
     if (!BOOT.readOnly) start.push(link(t('term.title'), '', '', openTerminals, true))
     const acct = []
     // The arrange mode (spec §3.25) has a place here too, where people look for "how do I change this".
@@ -3655,7 +3681,7 @@ const MAIN = String.raw`
   }
   // Taller than the window, the popover scrolls inside and ends with "More settings…", the same groups in a dialog.
   function settingsPop() {
-    if (!as.status && !as.loading && !as.error) loadAutostart()
+    loadAutostart()
     return [...settingsBody(() => closeMenu()),
       h('button', { class: 'menu-item set-more', type: 'button', hidden: true, onclick: () => { closeMenu(); openSettingsDialog() } }, h('span', { class: 'menu-label' }, t('set.more')), icon('chevron'))]
   }
@@ -3667,7 +3693,7 @@ const MAIN = String.raw`
     more.hidden = !(el.scrollHeight > el.clientHeight + 1)
   }
   function openSettingsDialog() {
-    if (!as.status && !as.loading) loadAutostart()
+    loadAutostart()
     showDialog('settings')
     renderSettingsDialog()
   }
@@ -3681,85 +3707,105 @@ const MAIN = String.raw`
     if (dlg.kind === 'settings') renderSettingsDialog()
   }
 
-  // ---------- start at login (spec §3.29, ADR-0029) ----------
-  // The switch reads its state when the settings open; moving it shows the file and what will run, and only the
-  // confirmation writes. A read-only Panel shows the state only.
-  const as = { status: null, loading: false, error: null, want: null, plan: null, planning: false, planError: null, busy: false }
-  async function loadAutostart() {
-    as.loading = true
-    try { as.status = await api('/api/autostart'); as.error = null } catch (e) { as.error = e }
-    as.loading = false
-    refreshSettings()
+  // ---------- start at login (spec §3.29, ADR-0029) and the Menu Bar Item (spec §3.31, ADR-0034) ----------
+  // Each switch reads its state when the settings open; moving it shows the file and what will run, and only the
+  // confirmation writes. A read-only Panel shows the state only. mb.* words override as.* for the menu bar.
+  const liState = () => ({ status: null, loading: false, error: null, want: null, plan: null, planning: false, planError: null, busy: false })
+  const li = { autostart: liState(), menubar: liState() }
+  let liKind = 'autostart'
+  function lt(k, key, vars) {
+    const own = (k === 'menubar' ? 'mb.' : 'as.') + key
+    return t(Object.hasOwn(MESSAGES.en, own) ? own : 'as.' + key, vars)
   }
-  function autostartRow() {
-    const s = as.status
+  function loadAutostart() {
+    // A failed read is not retried here: the settings re-render after every read, so a retry would loop.
+    for (const k of Object.keys(li)) if (!li[k].status && !li[k].loading && !li[k].error) loadLoginItem(k)
+  }
+  async function loadLoginItem(k) {
+    const st = li[k]
+    st.loading = true
+    try { st.status = await api('/api/' + k); st.error = null } catch (e) { st.error = e }
+    st.loading = false
+    refreshSettings()
+    if (k === 'menubar') renderAll()
+  }
+  function autostartRow(k) {
+    const st = li[k]
+    const s = st.status
     const n = autostartNote(s, BOOT.readOnly)
-    const label = t('as.label')
-    const hint = [as.error ? t('as.failed', { msg: as.error.message }) : t(n.key)]
-    if (n.action === 'fix') hint.push(' ', h('button', { class: 'link-btn small', type: 'button', onclick: () => autostartAsk(true) }, t('as.fix')))
-    if (s && s.state === 'foreign') hint.push(' ', h('button', { class: 'link-btn small', type: 'button', title: s.path, onclick: () => copyText(s.path) }, t('as.copyPath')))
+    const label = lt(k, 'label')
+    const hint = [st.error ? lt(k, 'failed', { msg: st.error.message }) : lt(k, n.key.slice(3))]
+    if (n.action === 'fix') hint.push(' ', h('button', { class: 'link-btn small', type: 'button', onclick: () => autostartAsk(true, k) }, lt(k, 'fix')))
+    if (s && s.state === 'foreign') hint.push(' ', h('button', { class: 'link-btn small', type: 'button', title: s.path, onclick: () => copyText(s.path) }, lt(k, 'copyPath')))
     let ctl = null
-    if (!s) ctl = as.loading ? spinner() : null
+    if (!s) ctl = st.loading ? spinner() : null
     else if (n.toggle) ctl = h('div', { class: 'seg', role: 'group', 'aria-label': label }, [[true, t('ah.on')], [false, t('ah.off')]].map(([v, text]) =>
-      h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === n.on), onclick: () => { if (v !== n.on) autostartAsk(v) } }, text)))
+      h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === n.on), onclick: () => { if (v !== n.on) autostartAsk(v, k) } }, text)))
     else if (s.supported && s.state !== 'foreign') ctl = h('span', { class: 'chip chip-sm' + (n.on ? ' chip-ok' : '') }, n.on ? t('ah.on') : t('ah.off'))
     return h('div', { class: 'set-row set-check' },
       h('div', { class: 'set-text' }, h('span', { class: 'set-label' }, label), h('span', { class: 'set-hint' }, hint)), ctl)
   }
-  async function autostartAsk(on) {
+  async function autostartAsk(on, k) {
     if (menu.kind === 'settings') closeMenu()
-    as.want = on
-    as.plan = null
-    as.planError = null
-    as.planning = true
+    liKind = k
+    const st = li[k]
+    st.want = on
+    st.plan = null
+    st.planError = null
+    st.planning = true
     showDialog('autostart')
     renderAutostart()
-    try { as.plan = (await api('/api/autostart', { on })).plan } catch (e) { as.planError = e }
-    as.planning = false
-    if (dlg.kind === 'autostart') renderAutostart()
+    try { st.plan = (await api('/api/' + k, { on })).plan } catch (e) { st.planError = e }
+    st.planning = false
+    if (dlg.kind === 'autostart' && liKind === k) renderAutostart()
   }
   function renderAutostart() {
-    const p = as.plan
-    const on = as.want
+    const k = liKind
+    const st = li[k]
+    const p = st.plan
+    const on = st.want
     const body = []
-    if (as.planning) body.push(h('p', { class: 'muted' }, spinner(), ' ', t('as.planning')))
-    else if (as.planError) body.push(errorNote(as.planError, () => autostartAsk(on)))
+    if (st.planning) body.push(h('p', { class: 'muted' }, spinner(), ' ', lt(k, 'planning')))
+    else if (st.planError) body.push(errorNote(st.planError, () => autostartAsk(on, k)))
     else if (p && p.blocked) {
       const own = 'as.block.' + p.blocked.code
       body.push(h('p', { class: 'note note-fail' }, Object.hasOwn(MESSAGES.en, own) ? t(own) : p.blocked.message))
       if (['npx-cache', 'temp-dir', 'unsafe-path'].includes(p.blocked.code)) body.push(codeCopy('npm i -g sideby'))
       if (p.blocked.code === 'foreign') body.push(codeCopy(p.path))
-    } else if (p && !p.changed) body.push(h('p', null, t(on ? 'as.alreadyOn' : 'as.alreadyOff')))
+    } else if (p && !p.changed) body.push(h('p', null, lt(k, on ? 'alreadyOn' : 'alreadyOff')))
     else if (p && on) {
-      body.push(h('p', null, t('as.writes')), h('code', { class: 'as-code' }, p.path))
-      body.push(h('p', null, t('as.runs')), h('code', { class: 'as-code' }, (p.programArguments || []).join(' ')))
-      body.push(h('p', { class: 'muted small' }, t('as.noWindow')))
+      body.push(h('p', null, lt(k, 'writes')), h('code', { class: 'as-code' }, p.path))
+      body.push(h('p', null, lt(k, 'runs')), h('code', { class: 'as-code' }, (p.programArguments || []).join(' ')))
+      body.push(h('p', { class: 'muted small' }, lt(k, 'noWindow')))
     } else if (p) {
-      body.push(h('p', null, t('as.removes')), h('code', { class: 'as-code' }, p.path))
-      body.push(h('p', { class: 'muted small' }, t('as.offNote')))
+      body.push(h('p', null, lt(k, 'removes')), h('code', { class: 'as-code' }, p.path))
+      body.push(h('p', { class: 'muted small' }, lt(k, 'offNote')))
     }
-    const foot = [h('button', { class: 'btn', type: 'button', disabled: as.busy, onclick: () => dlg.el.close() }, t(p && p.changed && !p.blocked ? 'btn.cancel' : 'btn.close'))]
+    const foot = [h('button', { class: 'btn', type: 'button', disabled: st.busy, onclick: () => dlg.el.close() }, t(p && p.changed && !p.blocked ? 'btn.cancel' : 'btn.close'))]
     if (p && p.changed && !p.blocked)
-      foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: as.busy, 'aria-busy': as.busy ? 'true' : null, onclick: autostartApply }, as.busy ? spinner() : null, t(on ? 'as.turnOn' : 'as.turnOff')))
-    setKids(dlg.el, dialogFrame(t(on ? 'as.onTitle' : 'as.offTitle'), null, body, foot))
+      foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: st.busy, 'aria-busy': st.busy ? 'true' : null, onclick: autostartApply }, st.busy ? spinner() : null, lt(k, on ? 'turnOn' : 'turnOff')))
+    setKids(dlg.el, dialogFrame(lt(k, on ? 'onTitle' : 'offTitle'), null, body, foot))
   }
   async function autostartApply() {
-    const on = as.want
-    as.busy = true
+    const k = liKind
+    const st = li[k]
+    const on = st.want
+    st.busy = true
     dlg.busy = true
     renderAutostart()
     let r = null
-    try { r = await api('/api/autostart', { on, confirm: true, programArguments: as.plan.programArguments || [] }) } catch (e) { as.planError = e }
-    as.busy = false
+    try { r = await api('/api/' + k, { on, confirm: true, programArguments: st.plan.programArguments || [] }) } catch (e) { st.planError = e }
+    st.busy = false
     dlg.busy = false
     if (r && r.applied) {
-      as.status = r.status
+      st.status = r.status
       if (dlg.kind === 'autostart') dlg.el.close()
-      toast(t(on ? 'as.doneOn' : 'as.doneOff') + (on && !r.loaded ? ' ' + t('as.nextLogin') : ''))
+      toast(lt(k, on ? 'doneOn' : 'doneOff') + (on && !r.loaded ? ' ' + lt(k, 'nextLogin') : ''))
       refreshSettings()
+      if (k === 'menubar') renderAll()
       return
     }
-    if (r) { as.plan = r.plan; if (r.changedSince) toast(t('as.changedSince')) }
+    if (r) { st.plan = r.plan; if (r.changedSince) toast(lt(k, 'changedSince')) }
     if (dlg.kind === 'autostart') renderAutostart()
   }
   function setLang(v) {
@@ -3813,7 +3859,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.rc', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.tool']
   function openRc() {
     if (!S.state || !rcSummary()) return
     rc.target = null
@@ -4375,6 +4421,23 @@ const MAIN = String.raw`
   }
 
   // ---------- banners ----------
+  // Offered once on macOS (spec §3.31), when quota shows and the menu bar item is off; "No thanks" is for good.
+  function menubarHint() {
+    if (BOOT.readOnly || prefs.mbHintDone) return null
+    const st = li.menubar
+    if (!st.status) {
+      if (!st.loading && !st.error) loadLoginItem('menubar')
+      return null
+    }
+    if (!st.status.supported || st.status.state !== 'off') return null
+    if (!S.state.accounts.some((a) => a.quota && a.quota.status === 'ok')) return null
+    const done = () => { prefs.mbHintDone = true; savePrefs(); renderBanners() }
+    return h('div', { class: 'banner', role: 'status' },
+      h('div', null, h('b', null, t('mb.hintTitle') + ' '), t('mb.hintBody')),
+      h('div', { class: 'banner-actions' },
+        h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => { done(); autostartAsk(true, 'menubar') } }, t('mb.hintYes')),
+        h('button', { class: 'btn btn-sm', type: 'button', onclick: done }, t('mb.hintNo'))))
+  }
   function renderBanners() {
     const out = []
     if (S.loadError && S.state) out.push(h('div', { class: 'banner banner-fail', role: 'alert' },
@@ -4388,6 +4451,10 @@ const MAIN = String.raw`
         h('div', { class: 'banner-actions' },
           h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => setPage('handoff') }, t('ah.setUp')),
           h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { prefs.ahHintAt = Date.now(); savePrefs(); renderBanners() } }, t('ah.dismiss')))))
+      else {
+        const mb = menubarHint()
+        if (mb) out.push(mb)
+      }
       const rcBanner = remoteControlBanner()
       if (rcBanner) out.push(rcBanner)
       const errs = S.state.pluginErrors
@@ -4520,7 +4587,7 @@ const MAIN = String.raw`
   }
   function openUpdate() {
     if (!BOOT.updates) return
-    up = { busy: false, error: null, done: null, changed: false, skillDone: false, skillChanged: false, autoPlan: null, autoBusy: false, waitUntil: 0, checking: false, checked: false }
+    up = { busy: false, error: null, done: null, confirming: null, unknown: null, changed: false, skillDone: false, skillChanged: false, autoPlan: null, autoBusy: false, waitUntil: 0, checking: false, checked: false }
     showDialog('update')
     renderUpdate()
   }
@@ -4530,24 +4597,36 @@ const MAIN = String.raw`
     up.busy = true
     dlg.busy = true
     up.error = null
+    up.unknown = null
     renderUpdate()
-    try {
-      const r = await api('/api/update', { confirm: true, version: u.latest })
-      if (!r.updated) {
-        // The registry names another version than the dialog showed: show the new plan and let the person look again.
-        Object.assign(S.state.update, { latest: r.latest, available: r.available, command: r.command, canRun: r.canRun, releaseNotes: r.releaseNotes, method: r.method })
-        up.changed = true
-      } else {
-        up.done = r
+    const target = u.latest
+    const free = () => { up.busy = false; dlg.busy = false }
+    await codeSwap({
+      send: () => api('/api/update', { confirm: true, version: target }),
+      landed: () => { const now = updState(); return now ? now.current === target : null },
+      // The answer was cut: say only that it is being confirmed, never "updated", until the state shows it.
+      confirming: () => { free(); up.confirming = target; renderUpdate() },
+      done: (r) => {
+        free()
+        up.confirming = null
+        if (r && !r.updated) {
+          // The registry names another version than the dialog showed: show the new plan and let the person look again.
+          Object.assign(S.state.update, { latest: r.latest, available: r.available, command: r.command, canRun: r.canRun, releaseNotes: r.releaseNotes, method: r.method })
+          up.changed = true
+          renderUpdate()
+          return false
+        }
+        up.done = r || { updated: true, latest: target }
         up.waitUntil = Date.now() + 20000
-        updWait()
-      }
-    } catch (e) { up.error = e }
-    up.busy = false
-    dlg.busy = false
-    renderUpdate()
+        renderUpdate()
+        return true
+      },
+      stuck: () => { up.waitUntil = 0; renderUpdate() },
+      fail: (e) => { free(); up.confirming = null; up.error = e; renderUpdate() },
+      unknown: () => { free(); up.confirming = null; up.unknown = target; renderUpdate() },
+    })
   }
-  // The CLI is current and the skill is behind: update the skill alone, as sideby update --yes does.
+  // The CLI is current and the skill is behind: update the skill alone, as sideby update --skill --yes does.
   async function updSkillRun() {
     up.busy = true
     dlg.busy = true
@@ -4619,7 +4698,7 @@ const MAIN = String.raw`
   }
   // The switch between a Local Build and the npm package (ADR-0024), only where the state offers it: the other side,
   // one button. After the switch the page waits for the server to run the new build and reloads into it.
-  const vs = { busy: false, to: null, waitUntil: 0, stuck: false, error: null }
+  const vs = { busy: false, to: null, stuck: false, unknown: false, error: null }
   function localSwitchKids(u) {
     const ls = u && u.localSwitch
     if (!ls || BOOT.readOnly) return null
@@ -4629,8 +4708,8 @@ const MAIN = String.raw`
     const l = ls.local
     const build = l ? l.version + '-dev · ' + (l.commit || '?') + (l.dirty ? '+' : '') : ''
     const kids = [h('p', { class: 'muted small' }, toNpm ? t('loc.toNpmHint') : t('loc.toLocalHint', { b: build, at: l.builtAt ? clock(l.builtAt) : '' }))]
-    if (vs.stuck) {
-      kids.push(h('p', { class: 'small' }, t('loc.stuck')))
+    if (vs.stuck || vs.unknown) {
+      kids.push(h('p', { class: 'small' }, t(vs.stuck ? 'loc.stuck' : 'loc.unconfirmed')))
       kids.push(h('div', { class: 'popover-actions' }, h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => location.reload() }, icon('refresh'), t('loc.reload'))))
     } else {
       const newer = toNpm && u.available && u.latest
@@ -4649,27 +4728,36 @@ const MAIN = String.raw`
     vs.to = to
     vs.error = null
     vs.stuck = false
+    vs.unknown = false
     renderSwitch()
-    try {
-      await api('/api/local', { to, confirm: true })
-    } catch (e) {
-      // A background Panel restarting from the new code may drop this answer, and a Portal moving to it may answer
-      // 5xx (spec §3.23): the state then says whether the switch happened. Only a switch that did not is an error.
-      const kind = switchFailure(e)
-      if (kind === 'fail') { vs.busy = false; vs.error = e; renderSwitch(); return }
-      if (kind === 'check') {
-        await load({ silent: true })
-        const ls = updState() && updState().localSwitch
-        if (!ls || ls.running !== to) { vs.busy = false; vs.error = e; renderSwitch(); return }
-      }
-    }
-    vs.waitUntil = Date.now() + 20000
-    localWait()
+    await codeSwap({
+      send: () => api('/api/local', { to, confirm: true }),
+      landed: () => { const now = updState(); return now && now.localSwitch ? now.localSwitch.running === to : null },
+      confirming: () => {},
+      done: () => true,
+      stuck: () => { vs.busy = false; vs.stuck = true; renderSwitch() },
+      fail: (e) => { vs.busy = false; vs.error = e; renderSwitch() },
+      unknown: () => { vs.busy = false; vs.unknown = true; renderSwitch() },
+    })
   }
-  function localWait() {
-    if (S.newBuild) { location.reload(); return }
-    if (Date.now() > vs.waitUntil) { vs.busy = false; vs.stuck = true; renderSwitch(); return }
-    setTimeout(() => { void load({ silent: true }).then(localWait, localWait) }, 1500)
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  // Reads the state; true when this read answered (a cut connection or a load already running leaves the old state).
+  async function readState() {
+    const before = S.loadedAt
+    try { await load({ silent: true }) } catch {}
+    return S.loadedAt !== before
+  }
+  // A request that may swap the server's code (runCodeSwap): each wait is 20 s, read every 1.5 s.
+  function codeSwap(o) {
+    return runCodeSwap(Object.assign({
+      readState,
+      newBuild: () => !!S.newBuild,
+      reload: () => location.reload(),
+      now: () => Date.now(),
+      pause,
+      windowMs: 20000,
+      pollMs: 1500,
+    }, o))
   }
   async function verPopCheck() {
     vp.checking = true
@@ -4697,12 +4785,6 @@ const MAIN = String.raw`
     } catch (e) { up.error = e }
     up.checking = false
     renderUpdate()
-  }
-  // After an Update the server (or the Portal's worker) comes back with a new build; load() then reloads the page.
-  function updWait() {
-    if (!up || !up.done || S.newBuild) { if (S.newBuild) location.reload(); return }
-    if (Date.now() > up.waitUntil) { renderUpdate(); return }
-    setTimeout(() => { void load({ silent: true }).then(updWait) }, 1500)
   }
   async function updAuto(on) {
     up.autoBusy = true
@@ -4750,19 +4832,27 @@ const MAIN = String.raw`
       return
     }
     body.push(h('p', null, t('upd.current', { v: u.current })))
-    if (up.done) {
+    // While an Update runs, is being confirmed or could not be, the dialog offers nothing else to start.
+    const swapping = Boolean(up.done || up.confirming || up.unknown)
+    if (up.confirming) {
+      body.push(h('p', { class: 'muted small' }, spinner(), ' ', t('upd.confirming', { v: up.confirming })))
+    } else if (up.unknown) {
+      body.push(h('p', { class: 'note note-warn' }, t('upd.unconfirmed', { v: up.unknown })))
+    } else if (up.done) {
       body.push(h('p', { class: 'note' }, t('upd.done', { v: up.done.latest })))
       body.push(h('p', { class: 'muted small' }, Date.now() > up.waitUntil ? t('upd.restartHint') : [spinner(), ' ', t('upd.reloading')]))
       if (up.done.skillUpdated) body.push(h('p', { class: 'small' }, t('upd.skillDone')))
+      else if (up.done.skillSyncStarted) body.push(h('p', { class: 'muted small' }, t('upd.skillSyncing')))
       else body.push(...updSkill(u))
     } else if (up.skillDone && !skillOld(u)) {
       body.push(h('p', { class: 'note' }, t('upd.skillDoneOnly')))
-    } else if (u.available && isLocal(u) && (leavesLocal(u) || vs.busy || vs.stuck)) {
+    } else if (u.available && isLocal(u) && (leavesLocal(u) || vs.busy || vs.stuck || vs.unknown)) {
       // A Local Build the Panel can leave (ADR-0024): switching to the release is the update, and brings the skill.
       body.push(h('p', null, t('upd.localSwitch', { v: u.latest }), ' ',
         h('a', { href: u.releaseNotes, target: '_blank', rel: 'noopener noreferrer' }, t('upd.notes'))))
       if (vs.busy) body.push(h('p', { class: 'muted small' }, spinner(), ' ', t('upd.reloading')))
       if (vs.stuck) body.push(h('p', { class: 'note' }, t('loc.stuck')))
+      if (vs.unknown) body.push(h('p', { class: 'note note-warn' }, t('loc.unconfirmed')))
       if (vs.error) body.push(errorNote(vs.error, null))
       body.push(updManual([h('p', { class: 'small' }, t('upd.localManual')), codeCopy(u.command)]))
     } else if (u.available && isLocal(u)) {
@@ -4802,11 +4892,11 @@ const MAIN = String.raw`
       body.push(h('p', { class: 'muted small' }, t('upd.latest') + (u.checkedAt ? ' · ' + t('upd.checked', { ago: ago(u.checkedAt) }) : '')))
     } else body.push(h('p', { class: 'muted small' }, t('upd.notYet')))
     // A read-only Panel sends no request and writes nothing, so it cannot check (spec §3.23).
-    if (!BOOT.readOnly && !up.done && !u.available && !skillDue(u))
+    if (!BOOT.readOnly && !swapping && !u.available && !skillDue(u))
       body.push(h('p', null, h('button', { class: 'btn btn-sm', type: 'button', disabled: up.checking || up.busy, 'aria-busy': up.checking ? 'true' : null, onclick: updCheck },
         up.checking ? spinner() : icon('refresh'), up.checking ? t('upd.checking') : t('upd.check'))))
-    if (!BOOT.readOnly && !up.done && isLocal(u)) body.push(h('p', { class: 'muted small' }, t('upd.autoLocal')))
-    else if (!BOOT.readOnly && !up.done) {
+    if (!BOOT.readOnly && !swapping && isLocal(u)) body.push(h('p', { class: 'muted small' }, t('upd.autoLocal')))
+    else if (!BOOT.readOnly && !swapping) {
       const box = h('input', { type: 'checkbox', disabled: up.autoBusy || !u.method.canUpdate })
       box.checked = up.autoPlan ? up.autoPlan.auto : u.auto
       box.addEventListener('change', () => updAuto(box.checked))
@@ -4819,12 +4909,12 @@ const MAIN = String.raw`
     if (up.error) body.push(errorNote(up.error, null))
     const foot = [h('button', { class: 'btn', type: 'button', disabled: up.busy, onclick: () => dlg.el.close() }, t('btn.close'))]
     const primary = (label, run) => h('button', { class: 'btn btn-primary', type: 'button', disabled: up.busy, 'aria-busy': up.busy ? 'true' : null, onclick: run }, up.busy ? spinner() : null, up.busy ? t('upd.updating') : label)
-    if (u.available && isLocal(u) && vs.stuck) foot.push(h('button', { class: 'btn btn-primary', type: 'button', onclick: () => location.reload() }, icon('refresh'), t('loc.reload')))
+    if (up.unknown || (u.available && isLocal(u) && (vs.stuck || vs.unknown))) foot.push(h('button', { class: 'btn btn-primary', type: 'button', onclick: () => location.reload() }, icon('refresh'), t('loc.reload')))
     else if (u.available && isLocal(u) && (leavesLocal(u) || vs.busy))
       foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: vs.busy, 'aria-busy': vs.busy ? 'true' : null, onclick: () => localSwitchTo('npm') },
         vs.busy ? spinner() : icon('swap'), vs.busy ? t('loc.switching') : t('loc.toNpmV', { v: u.latest })))
-    else if (u.available && u.canRun && !BOOT.readOnly && !up.done) foot.push(primary(t('upd.now', { v: u.latest }), updRun))
-    else if (skillDue(u) && !BOOT.readOnly && !up.done) foot.push(primary(t('upd.skillNow'), updSkillRun))
+    else if (u.available && u.canRun && !BOOT.readOnly && !swapping) foot.push(primary(t('upd.now', { v: u.latest }), updRun))
+    else if (skillDue(u) && !BOOT.readOnly && !swapping) foot.push(primary(t('upd.skillNow'), updSkillRun))
     setKids(dlg.el, dialogFrame(t('upd.title'), null, body, foot))
   }
 

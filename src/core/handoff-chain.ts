@@ -17,6 +17,17 @@ export const HANDOFF_ENV = {
 
 export type HandoffTrigger = 'threshold' | 'limit' | 'manual'
 
+/** The last line of a Brief the session finished (ADR-0032); a Brief without it is treated as unfinished. */
+export const BRIEF_DONE = '<!-- handoff brief complete -->'
+
+/** One Quota window as the hook read it: which window, how full, when it resets. */
+export interface WindowReading {
+  /** `5h`, `7d` or `<n>m`, as `QuotaWindow.label`. */
+  label: string
+  usedPercent: number
+  resetsAt: string
+}
+
 /** What the parent decided the next Handoff would do, refreshed while the Host runs. */
 export interface PlanFile {
   /** The run this plan is for; a plan left by an earlier hop of the chain is ignored. */
@@ -30,6 +41,8 @@ export interface PlanFile {
   until?: string
   prepareAt: number
   threshold: number
+  /** Each window hands over at its own pace (ADR-0032); missing (an older parent) means every window uses `threshold`. */
+  adaptive?: boolean
   /** False when the session cannot write its Brief: no preparing step, and the threshold only ends the turn. */
   agentBrief?: boolean
   /** The parent reads `to` from a manual request; a parent from before 0.9.3 does not write it and ignores `to`. */
@@ -43,6 +56,12 @@ export interface RunState {
   stopBlocked?: boolean
   /** The user was told this run waits for a reset instead of moving on (ADR-0018). */
   waitNoticeSentAt?: string
+  /** The window that reached its Hand-over Level, when the threshold message went out. */
+  thresholdWindow?: WindowReading
+  /** Each window at the last `Stop`, by label: where the next turn's growth is measured from (ADR-0032). */
+  turnMark?: Record<string, { usedPercent: number; resetsAt: string }>
+  /** Each window's growth in the run's last finished turns, newest last, by label. */
+  turnUse?: Record<string, number[]>
   sessionId?: string
   transcriptPath?: string
 }
@@ -55,6 +74,8 @@ export interface ReadyFile {
   /** The Brief file, when the session or the user wrote one. */
   brief?: string
   briefSource?: 'agent' | 'user'
+  /** The window that started a `threshold` or `limit` Handoff. */
+  window?: WindowReading
   /** `sideby handoff ready --to`: the Account ref to hand over to. */
   to?: string
   sessionId?: string
@@ -75,6 +96,8 @@ export interface ChainHop {
   trigger?: HandoffTrigger
   briefSource?: 'agent' | 'sideby' | 'user'
   brief?: string
+  /** The window that started the Handoff, when the Quota did. */
+  window?: WindowReading
 }
 
 export interface ChainFile {

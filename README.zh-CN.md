@@ -56,6 +56,14 @@ https://github.com/user-attachments/assets/51d9f96f-7723-4410-8c5f-136b2a66a50e
   <img alt="sideby 面板：每个账号的 5h、7d 额度，近 7 天 token 用量和健康状态" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/panel.zh-CN.png" width="1280">
 </picture>
 
+macOS 上，同样的额度也可以常驻状态栏（`sideby menubar on`）：点一下或按 `⌥⌘S` 展开，点任意账号就能在终端里打开。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/menubar-dark.zh-CN.png">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/menubar.zh-CN.png">
+  <img alt="sideby macOS 状态栏下拉菜单：顶部状态卡片，下面列出各工具的 5 小时与每周额度条、重置时间，并标出首选账号" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/menubar.zh-CN.png" width="468">
+</picture>
+
 ## 为什么不直接写个别名？
 
 每个账号一条别名，再配上 `CLAUDE_CONFIG_DIR`，第二个账号确实能开起来。但它不会帮你把 skills 和设置收成一份，也看不到每个账号还剩多少额度。[会不会违反服务条款？](docs/guide/faq.zh-CN.md#terms)
@@ -73,6 +81,7 @@ cc-switch 自己的说明是：切换时把配置写进宿主正在用的文件�
 | 你想 | 命令 | 说明 |
 |---|---|---|
 | 在面板里把事情交给你自己的 AI：配账号、修问题、支持新工具 | 面板的「让 AI 帮我」，或 `sideby ask` | [让 AI 帮我](docs/guide/panel.zh-CN.md#让-ai-帮我) |
+| 在 macOS 状态栏一眼看到额度 | 面板的「设置 › 启动」，或 `sideby menubar on` | [状态栏额度](docs/guide/usage.zh-CN.md#状态栏额度) |
 | 登录电脑后面板就在后台准备好 | 面板的「设置 › 启动」，或 `sideby autostart on` | [开机启动](docs/guide/usage.zh-CN.md#开机启动) |
 | 加一个 API key 账号（DeepSeek、网关等） | `sideby new claude deepseek --api` | [API 账号](docs/guide/usage.zh-CN.md#api-账号) |
 | 找出并修复账号之间的配置漂移 | `sideby doctor --fix` | [体检](docs/guide/usage.zh-CN.md#体检doctor) |

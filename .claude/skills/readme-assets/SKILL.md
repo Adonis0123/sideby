@@ -26,6 +26,7 @@ These are deterministic and free, so retake them directly, then look at the resu
 | id | Retake | Look at |
 |---|---|---|
 | `panel-screenshots` | `node scripts/shoot-panel.ts` (try `--out <dir>` first) | Read all four PNGs: English and Chinese, light and dark, 1280×860, nothing cut off or loading |
+| `menubar-screenshots` | `node scripts/shoot-menubar.ts` (macOS; try `--out <dir>` first) | Read all four PNGs: English and Chinese, light and dark, no row highlighted, no desktop showing through; it stops when the menu bar has no room for one more icon |
 | `demo-gif` | `node scripts/record-demo.ts` (needs ffmpeg, gifsicle, Chrome) | `--frames 2,8,14,20` first and Read the PNGs; the full run fails above 4 MB; every pixel that moves costs bytes, so keep borders and backgrounds still |
 
 Retake from a clean working tree, or uncommitted Panel changes end up in the README. If a retake looks wrong, fix the cause (usually `scripts/demo-home.ts` or `docs/assets/demo.html`), not the image.

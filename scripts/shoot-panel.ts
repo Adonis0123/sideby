@@ -7,7 +7,7 @@
 // Do not point it at a real HOME: everything runs inside a throwaway demo HOME.
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { demoHome, openChrome, panelLoaded, root, startPanel, workDir } from './chrome.ts'
+import { demoHome, openChrome, panelLoaded, QUIET_PANEL, root, startPanel, workDir } from './chrome.ts'
 
 const outArg = process.argv.indexOf('--out')
 const out = outArg === -1 ? join(root, 'docs/assets') : resolve(process.argv[outArg + 1] ?? '.')
@@ -36,7 +36,7 @@ for (const shot of shots) {
   if (langScript) await chrome.page('Page.removeScriptToEvaluateOnNewDocument', { identifier: langScript })
   langScript = (
     await chrome.page('Page.addScriptToEvaluateOnNewDocument', {
-      source: `Object.defineProperty(navigator, 'language', { get: () => ${JSON.stringify(shot.lang)} })`,
+      source: `${QUIET_PANEL}; Object.defineProperty(navigator, 'language', { get: () => ${JSON.stringify(shot.lang)} })`,
     })
   ).identifier
   await chrome.page('Emulation.setEmulatedMedia', {

@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { writeFileAtomic } from './fs-safe.ts'
-import type { ReadyFile } from './handoff-chain.ts'
+import { BRIEF_DONE, type ReadyFile } from './handoff-chain.ts'
 
 const run = promisify(execFile)
 const GIT_TIMEOUT_MS = 3000
@@ -54,9 +54,13 @@ async function nonEmpty(path: string | undefined): Promise<string | null> {
 export const ASSEMBLED_NOTE =
   '> Put together by sideby from the previous session’s records, without a model; it may be incomplete. Check the repository before continuing.'
 
+export const UNFINISHED_NOTE =
+  '> The previous session did not finish the brief above. sideby added what it found in the session’s records below.'
+
 /**
  * Writes the final Brief to `target` (mode 600) and says where it came from: the user's or the session's Brief
- * named in `ready`, the session's Brief already at `target`, else `assembled`, plus the repository state.
+ * named in `ready`, the session's Brief already at `target`, else `assembled`, plus the repository state. A session's
+ * Brief without `BRIEF_DONE` is kept, with `assembled` added under it (ADR-0032).
  */
 export async function finishBrief(opts: {
   target: string
@@ -73,7 +77,8 @@ export async function finishBrief(opts: {
   if (!body) {
     source = 'sideby'
     body = `${ASSEMBLED_NOTE}\n\n${opts.assembled ?? 'sideby could not read the previous session’s records.\n'}`
-  }
+  } else if (source === 'agent' && !body.includes(BRIEF_DONE) && opts.assembled)
+    body = `${body.trimEnd()}\n\n${UNFINISHED_NOTE}\n\n${opts.assembled}`
   const repo = await gitSection(opts.cwd)
   await writeFileAtomic(opts.target, `${body.trimEnd()}\n${repo ? `\n${repo}` : ''}`, 0o600)
   return { path: opts.target, source }

@@ -11,6 +11,9 @@ import { grokPlugin } from './index.ts'
 import { fetchGrokQuota } from './quota.ts'
 import { GROK_BILLING_MSG, grokQuota, lastGrokBilling, readGrokLogQuota } from './quota-log.ts'
 
+/** The fullest window's used percent, as the hook reads it; null when unknown. */
+const top = (w: { usedPercent: number }[] | null) => (w ? Math.max(0, ...w.map((x) => x.usedPercent)) : null)
+
 const builtins = [{ plugin: grokPlugin, version: '0.1.0', description: '', defaultEnabled: true }]
 
 const iso = (hours: number) => new Date(Date.now() + hours * 3600_000).toISOString()
@@ -398,19 +401,19 @@ describe('Grok handoff hook pressure (spec §3.26)', () => {
       assert.equal(grokAccountFromEnv({ ...h.env, GROK_HOME: '/tmp/other' }), null)
       const env = { ...h.env, GROK_HOME: h.path('.grok-work') }
       const now = new Date()
-      assert.equal(await grokHookReader.pressure!({}, env, now), null)
+      assert.equal(top(await grokHookReader.windows!({}, env, now)), null)
       const stateDir = h.path('.local/state/sideby')
       await writeQuotaStore(quotaStoreFile(stateDir, 'grok', 'work'), {
         version: 1,
         attemptedAt: iso(-0.1),
         quota: grokQuota(billing(70), iso(-0.1), 'grok agent')!,
       })
-      assert.equal(await grokHookReader.pressure!({}, env, now), 70)
+      assert.equal(top(await grokHookReader.windows!({}, env, now)), 70)
       await h.write(
         '.grok-work/logs/unified.jsonl',
         `${logLine(iso(-0.01), GROK_BILLING_MSG, billing(96))}\n`,
       )
-      assert.equal(await grokHookReader.pressure!({}, env, now), 96)
+      assert.equal(top(await grokHookReader.windows!({}, env, now)), 96)
     })
   })
 })

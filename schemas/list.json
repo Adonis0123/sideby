@@ -53,6 +53,10 @@
           },
           "tuning": {
             "type": "boolean"
+          },
+          "settingsFile": {
+            "type": "string",
+            "description": "The Host's settings file `sideby edit` opens, relative to the account directory."
           }
         }
       }

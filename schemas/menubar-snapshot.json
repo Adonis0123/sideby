@@ -1,0 +1,646 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/menubar-snapshot.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "title",
+    "level",
+    "tooltip",
+    "updatedAt",
+    "lang",
+    "card",
+    "hotkey",
+    "headline",
+    "sections",
+    "labels"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "title": {
+      "type": "string",
+      "description": "The words next to the icon, such as `Codex 62%`, once the tightest tool reaches 60%; empty otherwise."
+    },
+    "level": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "ok"
+        },
+        {
+          "type": "string",
+          "const": "warn"
+        },
+        {
+          "type": "string",
+          "const": "fail"
+        },
+        {
+          "type": "string",
+          "const": "none"
+        }
+      ]
+    },
+    "tooltip": {
+      "type": "string"
+    },
+    "updatedAt": {
+      "type": "string",
+      "description": "When this snapshot was made (ISO)."
+    },
+    "lang": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "en"
+        },
+        {
+          "type": "string",
+          "const": "zh"
+        }
+      ]
+    },
+    "card": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "status",
+            "detail",
+            "level"
+          ],
+          "properties": {
+            "status": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "level": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "ok"
+                },
+                {
+                  "type": "string",
+                  "const": "warn"
+                },
+                {
+                  "type": "string",
+                  "const": "fail"
+                },
+                {
+                  "type": "string",
+                  "const": "none"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The card at the top of the menu: a bold status and a line naming the account; null without quota data."
+    },
+    "hotkey": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "keyCode",
+            "modifiers",
+            "label"
+          ],
+          "properties": {
+            "keyCode": {
+              "type": "number"
+            },
+            "modifiers": {
+              "type": "number"
+            },
+            "label": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The shortcut that opens the menu (config `menubar.hotkey`): a macOS key code and Carbon modifiers."
+    },
+    "headline": {
+      "type": "string",
+      "description": "The grey first line of the menu: which account the title belongs to; empty without quota data."
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "family",
+          "title",
+          "logo",
+          "columns",
+          "rows",
+          "more"
+        ],
+        "properties": {
+          "family": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "logo": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "path"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "fillRule": {
+                    "type": "string",
+                    "enum": [
+                      "nonzero",
+                      "evenodd"
+                    ]
+                  },
+                  "color": {
+                    "type": "string",
+                    "description": "Brand colour; without one the mark follows the text colour."
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "columns": {
+            "type": "array",
+            "additionalItems": false,
+            "items": [
+              {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            ],
+            "minItems": 2,
+            "description": "The window names over the two bar columns, such as `5h` and `7d`."
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "ref",
+                "label",
+                "detail",
+                "level",
+                "recommended",
+                "tip",
+                "bars",
+                "reset",
+                "note"
+              ],
+              "properties": {
+                "ref": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": "string",
+                  "description": "The whole row as one line of text."
+                },
+                "level": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "ok"
+                    },
+                    {
+                      "type": "string",
+                      "const": "warn"
+                    },
+                    {
+                      "type": "string",
+                      "const": "fail"
+                    },
+                    {
+                      "type": "string",
+                      "const": "none"
+                    }
+                  ]
+                },
+                "recommended": {
+                  "type": "boolean",
+                  "description": "The account `sideby next` would pick in this Family."
+                },
+                "tip": {
+                  "type": "string",
+                  "description": "Hover text: when each window resets, and what a click does."
+                },
+                "bars": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "additionalItems": false,
+                      "items": [
+                        {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "label",
+                                "percent",
+                                "level"
+                              ],
+                              "properties": {
+                                "label": {
+                                  "type": "string"
+                                },
+                                "percent": {
+                                  "type": "number"
+                                },
+                                "level": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "ok"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "warn"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "fail"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "none"
+                                    }
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "label",
+                                "percent",
+                                "level"
+                              ],
+                              "properties": {
+                                "label": {
+                                  "type": "string"
+                                },
+                                "percent": {
+                                  "type": "number"
+                                },
+                                "level": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "ok"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "warn"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "fail"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "none"
+                                    }
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      ],
+                      "minItems": 2
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The shorter window, then the longer one; a single window fills the second. Null without quota."
+                },
+                "reset": {
+                  "type": "string",
+                  "description": "Until the fullest window resets, such as `4d 17h`; empty when nothing is used."
+                },
+                "note": {
+                  "type": "string",
+                  "description": "Text drawn instead of bars, such as `API key`; empty when bars are drawn."
+                }
+              }
+            },
+            "description": "The recommended account first, then Display Order."
+          },
+          "more": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "title",
+                  "rows"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "rows": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "ref",
+                        "label",
+                        "detail",
+                        "level",
+                        "recommended",
+                        "tip",
+                        "bars",
+                        "reset",
+                        "note"
+                      ],
+                      "properties": {
+                        "ref": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string",
+                          "description": "The whole row as one line of text."
+                        },
+                        "level": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "ok"
+                            },
+                            {
+                              "type": "string",
+                              "const": "warn"
+                            },
+                            {
+                              "type": "string",
+                              "const": "fail"
+                            },
+                            {
+                              "type": "string",
+                              "const": "none"
+                            }
+                          ]
+                        },
+                        "recommended": {
+                          "type": "boolean",
+                          "description": "The account `sideby next` would pick in this Family."
+                        },
+                        "tip": {
+                          "type": "string",
+                          "description": "Hover text: when each window resets, and what a click does."
+                        },
+                        "bars": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "additionalItems": false,
+                              "items": [
+                                {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "required": [
+                                        "label",
+                                        "percent",
+                                        "level"
+                                      ],
+                                      "properties": {
+                                        "label": {
+                                          "type": "string"
+                                        },
+                                        "percent": {
+                                          "type": "number"
+                                        },
+                                        "level": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "const": "ok"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "warn"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "fail"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "none"
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "required": [
+                                        "label",
+                                        "percent",
+                                        "level"
+                                      ],
+                                      "properties": {
+                                        "label": {
+                                          "type": "string"
+                                        },
+                                        "percent": {
+                                          "type": "number"
+                                        },
+                                        "level": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "const": "ok"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "warn"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "fail"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "none"
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              ],
+                              "minItems": 2
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The shorter window, then the longer one; a single window fills the second. Null without quota."
+                        },
+                        "reset": {
+                          "type": "string",
+                          "description": "Until the fullest window resets, such as `4d 17h`; empty when nothing is used."
+                        },
+                        "note": {
+                          "type": "string",
+                          "description": "Text drawn instead of bars, such as `API key`; empty when bars are drawn."
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "API key and signed-out accounts behind one submenu; null when there are none."
+          }
+        }
+      },
+      "description": "One per Family with accounts, in Display Order."
+    },
+    "labels": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "type": "string"
+        }
+      },
+      "description": "Footer words; `{n}` in `updatedMinutes` is minutes."
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  }
+}

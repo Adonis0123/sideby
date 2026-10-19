@@ -1,9 +1,10 @@
 // Entry for `sideby handoff-hook <family> <event>` (spec §3.17). A Host runs it on PostToolUse, Stop and
 // StopFailure, so it imports only Node built-ins and leaf modules: never the Runtime, a Family index or
 // core/accounts.ts. It never fails the Host: any problem means no output and exit 0.
-import { rm, stat } from 'node:fs/promises'
+import { readFile, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
+  BRIEF_DONE,
   FILES,
   HANDOFF_ENV,
   type PlanFile,
@@ -16,6 +17,7 @@ import { claudeHookReader } from '../families/claude/handoff-hook.ts'
 import { codexHookReader } from '../families/codex/handoff-hook.ts'
 import { grokHookReader } from '../families/grok/handoff-hook.ts'
 import type { Env, HandoffHookEvent } from '../types.ts'
+import { crossedWindow, firstMark, fullestWindow, recordTurn } from './levels.ts'
 import {
   endTurnMessage,
   notifySequence,
@@ -55,11 +57,13 @@ const contextOutput = (text: string, hookEventName: 'SessionStart' | 'PostToolUs
 })
 const blockOutput = (reason: string) => ({ decision: 'block', reason })
 
-async function mtimeMs(path: string): Promise<number | null> {
+/** The session's Brief was written after `since` and ends finished (`BRIEF_DONE`, ADR-0032). */
+async function briefFinished(path: string, since: number): Promise<boolean> {
   try {
-    return (await stat(path)).mtimeMs
+    if ((await stat(path)).mtimeMs <= since) return false
+    return (await readFile(path, 'utf8')).includes(BRIEF_DONE)
   } catch {
-    return null
+    return false
   }
 }
 
@@ -105,19 +109,27 @@ export async function decide(opts: {
   }
 
   const threshold = usable?.threshold ?? 95
-  const pressure = reader.pressure ? await reader.pressure(input, env, now) : null
+  const levels = usable ?? { prepareAt: 80, threshold }
+  const windows = reader.windows ? await reader.windows(input, env, now) : null
+  const pressure = windows ? Math.max(0, ...windows.map((w) => w.usedPercent)) : null
   const ref = env.SIDEBY_ACCOUNT ?? family
   const waiting = usable?.decision === 'wait' && usable.until ? usable.until : undefined
+  let st = state
+  const keep = async (next: RunState) => {
+    st = next
+    await save(next)
+  }
   // Once per run, shown to the user (not the model): sideby will wait for the reset, and how to move on now.
   const waitOutput = async () => {
-    if (!waiting || pressure === null || pressure < threshold || state.waitNoticeSentAt) return undefined
-    await save({ ...state, waitNoticeSentAt: now.toISOString() })
+    if (!waiting || pressure === null || pressure < threshold || st.waitNoticeSentAt) return undefined
+    await keep({ ...st, waitNoticeSentAt: now.toISOString() })
     return { systemMessage: waitNotice(ref, waiting, pressure) }
   }
 
   if (event === 'StopFailure') {
     if (!reader.limitHit?.(input, pressure, threshold)) return {}
-    await ready({ trigger: 'limit' })
+    const window = windows ? fullestWindow(windows) : undefined
+    await ready({ trigger: 'limit', ...(window ? { window } : {}) })
     // The Host keeps only `terminalSequence` of a StopFailure hook's output.
     return waiting ? { output: { terminalSequence: notifySequence(waitNotice(ref, waiting)) } } : {}
   }
@@ -133,48 +145,55 @@ export async function decide(opts: {
       return {}
     }
     if (!usable) return {}
+    // The turn that just ended joins the window's recent turns before anything is judged (ADR-0032).
+    if (windows) await keep(recordTurn(st, windows))
     const notice = await waitOutput()
     if (notice) return { output: notice }
-    if (state.thresholdSentAt && usable.agentBrief === false) {
-      await ready({ trigger: 'threshold' })
+    const window = st.thresholdWindow ? { window: st.thresholdWindow } : {}
+    if (st.thresholdSentAt && usable.agentBrief === false) {
+      await ready({ trigger: 'threshold', ...window })
       return {}
     }
-    if (state.thresholdSentAt) {
-      const written = await mtimeMs(usable.brief)
-      if (written !== null && written > Date.parse(state.thresholdSentAt))
-        await ready({ trigger: 'threshold', brief: usable.brief, briefSource: 'agent' })
-      else if (!state.stopBlocked && input.stop_hook_active !== true && input.stopHookActive !== true) {
-        await save({ ...state, stopBlocked: true })
+    if (st.thresholdSentAt) {
+      if (await briefFinished(usable.brief, Date.parse(st.thresholdSentAt)))
+        await ready({ trigger: 'threshold', brief: usable.brief, briefSource: 'agent', ...window })
+      else if (!st.stopBlocked && input.stop_hook_active !== true && input.stopHookActive !== true) {
+        await keep({ ...st, stopBlocked: true })
         return { output: blockOutput(stopMessage(usable.brief)) }
-      } else await ready({ trigger: 'threshold' })
+      } else await ready({ trigger: 'threshold', ...window })
       return {}
     }
-    // A turn without tool calls: the threshold is first seen here.
-    if (pressure !== null && pressure >= threshold && usable.decision === 'pick') {
+    // A turn without tool calls: the level is first reached here.
+    const crossed = windows ? crossedWindow(windows, levels, st) : undefined
+    if (crossed && usable.decision === 'pick') {
       if (usable.agentBrief === false) {
-        await ready({ trigger: 'threshold' })
+        await ready({ trigger: 'threshold', window: crossed })
         return {}
       }
-      await save({ ...state, thresholdSentAt: now.toISOString(), stopBlocked: true })
-      return { output: blockOutput(thresholdMessage(usable.brief, pressure)) }
+      await keep({ ...st, thresholdSentAt: now.toISOString(), thresholdWindow: crossed, stopBlocked: true })
+      return { output: blockOutput(thresholdMessage(usable.brief, crossed)) }
     }
     return {}
   }
 
   // PostToolUse
-  if (!usable || pressure === null) return {}
+  if (!usable || windows === null || pressure === null) return {}
+  const first = firstMark(st, windows)
+  if (first) await keep(first)
   const notice = await waitOutput()
   if (notice) return { output: notice }
-  if (pressure >= usable.threshold && usable.decision === 'pick' && !state.thresholdSentAt) {
-    await save({ ...state, thresholdSentAt: now.toISOString() })
+  const crossed = crossedWindow(windows, levels, st)
+  if (crossed && usable.decision === 'pick' && !st.thresholdSentAt) {
+    await keep({ ...st, thresholdSentAt: now.toISOString(), thresholdWindow: crossed })
     const text =
-      usable.agentBrief === false ? endTurnMessage(pressure) : thresholdMessage(usable.brief, pressure)
+      usable.agentBrief === false ? endTurnMessage(crossed) : thresholdMessage(usable.brief, crossed)
     return { output: contextOutput(text) }
   }
   if (usable.agentBrief === false) return {}
-  if (pressure >= usable.prepareAt && !state.prepareSentAt && !state.thresholdSentAt) {
-    await save({ ...state, prepareSentAt: now.toISOString() })
-    return { output: contextOutput(prepareMessage(usable.brief, pressure)) }
+  const top = fullestWindow(windows)
+  if (top && pressure >= usable.prepareAt && !st.prepareSentAt && !st.thresholdSentAt) {
+    await keep({ ...st, prepareSentAt: now.toISOString() })
+    return { output: contextOutput(prepareMessage(usable.brief, top)) }
   }
   return {}
 }

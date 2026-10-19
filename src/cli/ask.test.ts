@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { chmod, mkdir, readdir, readFile, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { it } from 'node:test'
@@ -70,6 +70,11 @@ it('ask --run passes one prompt argument, cwd, Host exit code, and login argumen
     const login = await writeTask({ kind: 'login', account: 'claude:main', cwd }, rt.paths)
     assert.equal((await cli(h, ['ask', '--run', login])).code, 7)
     assert.deepEqual((await readHostLog(h, 'claude'))[1]!.argv, ['auth', 'login'])
+    // The Menu Bar Item's `run` (spec §3.31): the Host as `sideby run` starts it, with no prompt.
+    const run = await writeTask({ kind: 'run', account: 'claude:main', cwd: h.home }, rt.paths)
+    assert.equal((await cli(h, ['ask', '--run', run])).code, 7)
+    assert.ok(!(await readHostLog(h, 'claude'))[2]!.argv.includes('--permission-mode'))
+    assert.equal(await readFile(h.path('cwd.txt'), 'utf8'), await realpath(h.home))
   })
 })
 it('ask --run starts Claude without permission bypasses, in auto mode, while sideby run keeps them (ADR-0031)', async () => {
@@ -309,7 +314,7 @@ it('key accepts hidden TTY input with backspace and never returns the value', as
 
 it('shared Panel launch helpers open prompt and login tasks through injected exec', async () => {
   await withFakeHome(async (h) => {
-    const { openLoginInTerminal, readTask, startAiTask } = await import('../core/ask.ts')
+    const { openLoginInTerminal, openRunInTerminal, readTask, startAiTask } = await import('../core/ask.ts')
     await h.write('.claude/settings.json', '{}')
     await h.write('.claude.json', '{"oauthAccount":{}}', 0o600)
     const apps = await h.mkdir('apps/Terminal.app')
@@ -334,6 +339,10 @@ it('shared Panel launch helpers open prompt and login tasks through injected exe
     const login = await openLoginInTerminal(rt, 'claude:main')
     assert.equal(login.opened, true)
     assert.equal((await readTask(login.task, rt.paths)).kind, 'login')
+    const started = await openRunInTerminal(rt, 'main')
+    assert.equal(started.opened, true)
+    const runTask = await readTask(started.task, rt.paths)
+    assert.deepEqual([runTask.kind, runTask.account, runTask.cwd], ['run', 'claude:main', rt.paths.home])
     const out: string[] = []
     const blocked = await createRuntime({
       env: h.env,

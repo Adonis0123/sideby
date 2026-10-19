@@ -27,6 +27,7 @@ Usage:
   sideby order --reset               restore default order, keeping pins
   sideby quota check <family> on|off  turn quota fetching on or off
   sideby update --auto on|off         set Auto Update without running an update
+  sideby update --skill [--yes]       update only the installed sideby skill to this version
   sideby families [family]            what each host's accounts share with the main account,
                                       where they live and how they sign in
   sideby alias add <short> <account> [-- args]
@@ -67,6 +68,8 @@ Usage:
   sideby desktop <account>            open the desktop app (Claude Desktop, the Codex app) as this
                                       account, next to the others (macOS)
   sideby desktop grok-bot:<name>      open a Grok Bot window, a new one for a new name (macOS)
+  sideby edit <account> [--path]      open the account's own settings file (settings.json,
+                                      config.toml) in your editor
   sideby browser [--enable [--yes]]   which Chrome browser user signed in to each account's website
                                       (read on this computer only; off until you enable it)
   sideby browser open <account> [--profile <name>]
@@ -82,6 +85,7 @@ Usage:
   sideby update [--yes]               update sideby to the newest version (shows the command first)
   sideby autostart [on|off] [--yes]   start the panel in the background at login (macOS; shows the
                                       file first)
+  sideby menubar [on|off] [--yes]     show quota in the macOS menu bar; click an account to start it
   sideby config get [<key>]           every setting with its value and meaning, or one setting
   sideby config set <key> <value> [--yes]
                                       change any setting (sideby config set panel.theme dark)
@@ -91,10 +95,10 @@ Usage:
 
 Options:
   --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, remote-control, handoff,
-                families, plugins, app, desktop, browser, update, local, ask, terminal, key, try,
-                autostart, config)
-  -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, desktop, browser,
-                autostart, config
+                families, plugins, app, desktop, edit, browser, update, local, ask, terminal, key, try,
+                autostart, menubar, config)
+  -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, desktop, edit, browser,
+                autostart, menubar, config
   -v, --version show the version
 
 An <account> is <family>:<name> (claude:work) or just <name> when it is unique.
@@ -203,6 +207,21 @@ Examples:
   sideby desktop grok-bot:002 --remove --yes
 Exit: 0 opened, brought to the front or removed; 1 not macOS, no desktop app for that host, API account, app not
 installed, a bad window name, or the app did not open; 10 --remove without --yes; 2 malformed command line.`,
+  edit: `sideby edit <account> [--path] [--json]
+
+Open the account's own settings file in your editor: settings.json for claude and pi accounts, config.toml for codex
+and grok accounts. It opens with the system's default program (the default text editor on macOS, the Windows default
+program on WSL, xdg-open on other Linux). --path only prints where the file is.
+
+sideby reads nothing of the file and never changes it; your editor does. When the file is a link (accounts that
+share their settings with the main account), it says where the real file is and which accounts the change affects.
+A missing file is not created: the message says how to get one.
+
+Examples:
+  sideby edit claude:work
+  sideby edit cc008 --path
+Exit: 0 opened (or printed with --path); 1 no settings file, the family names none, or it could not be opened; 2
+malformed command line.`,
   autostart: `sideby autostart [on|off] [--yes] [--json]
 
 Start the panel in the background when you log in, so it already shows fresh quota when you open it. It never
@@ -219,6 +238,27 @@ Examples:
   sideby autostart off --yes
 Exit: 0 shown, done or nothing to change; 10 a change was shown and waits for --yes; 1 refused (not macOS, sideby
 in the npx cache or a temporary folder, a file that is not sideby's) or failed; 2 malformed command line.`,
+  menubar: `sideby menubar [on|off] [--yes] [--json]
+sideby menubar snapshot [--lang en|zh] [--json]
+sideby menubar start <account> [--json]
+
+Show quota in the macOS menu bar: a gauge with one percent, how much the account sideby would pick next has used
+in your tightest tool (orange from 60%, red from 85%). Click it for every account's 5-hour and 7-day quota; click
+an account to start it in your preferred terminal. It runs the system's osascript, starts at login and has no Dock
+icon. macOS only for now (a LaunchAgent, ~/Library/LaunchAgents/dev.sideby.menubar.plist).
+
+Without on or off it says whether it is on, off, out of date or blocked by a file that is not sideby's. on and off
+show the file first; --yes does it. snapshot prints what the menu shows (the menu bar item runs it every 2 minutes).
+start opens an account in your preferred terminal, as clicking it does.
+
+Examples:
+  sideby menubar on --yes
+  sideby menubar snapshot --json
+  sideby menubar start claude:work
+  sideby menubar off --yes
+Exit: 0 shown, done or nothing to change; 10 a change was shown and waits for --yes; 1 refused (not macOS, sideby
+in the npx cache or a temporary folder, a file that is not sideby's), failed, or the terminal did not open; 2
+malformed command line.`,
   config: `sideby config get [<key>] [--json]
 sideby config set <key> <value> [--yes] [--json]
 sideby config unset <key> [--yes] [--json]
@@ -294,6 +334,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   key: { flags: ['json'], valued: ['var'] },
   try: { flags: ['json', 'yes'] },
   autostart: { flags: ['json', 'yes', 'refresh'] },
+  menubar: { flags: ['json', 'yes', 'refresh'], valued: ['lang'] },
   config: { flags: ['json', 'yes'] },
   list: { flags: ['json'] },
   pin: { flags: ['json'] },
@@ -317,11 +358,12 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   ui: { flags: ['no-open', 'background', 'stop', 'serve-detached'], valued: ['port'] },
   app: { flags: ['json'], valued: ['url'] },
   desktop: { flags: ['json', 'remove', 'yes'] },
+  edit: { flags: ['json', 'path'] },
   browser: { flags: ['json', 'enable', 'disable', 'yes'], valued: ['profile'] },
   'shell-init': { flags: ['write'] },
   plugins: { flags: ['json'] },
   families: { flags: ['json'] },
-  update: { flags: ['json', 'yes'], valued: ['auto'] },
+  update: { flags: ['json', 'yes', 'skill'], valued: ['auto'] },
   local: { flags: ['json', 'yes'] },
   'update-check': { flags: [] },
 }
@@ -566,6 +608,8 @@ async function dispatch(
       return await cmds.cmdApp(parsed, io)
     case 'desktop':
       return await cmds.cmdDesktop(parsed, io)
+    case 'edit':
+      return await cmds.cmdEdit(parsed, io)
     case 'browser':
       return await cmds.cmdBrowser(parsed, io)
     case 'shell-init':
@@ -582,6 +626,8 @@ async function dispatch(
       return await cmds.cmdLocal(parsed, io)
     case 'autostart':
       return await cmds.cmdAutostart(parsed, io)
+    case 'menubar':
+      return await cmds.cmdMenubar(parsed, io)
     case 'config':
       return await cmds.cmdConfig(parsed, io)
   }

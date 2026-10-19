@@ -2,7 +2,7 @@
 name: sideby
 description: Use when the user runs, or wants to run, several AI coding accounts (Claude Code, Codex, Grok Build, pi) side by side. Covers installing sideby and setting up a new account ("install sideby", "set up another Claude account", "add cc008", "配置一个 cc00x", "再加一个 Codex 账号"), explaining what accounts share and what stays separate ("what do my accounts share?", "这些账号共享了什么"), showing which account a session is ("show [cc001] in the status line", "加上账号标识"), seeing accounts, quota and usage, moving on when one hits its 5-hour or weekly limit, moving the current task to another account ("用 cc008 继续", "交回 cc008"), adding a short command (alias), adding an API account from a vendor's docs ("加一个 DeepSeek API 账号"), supporting a new tool, and repairing drifted account directories (skills, hooks, rules or settings not shared, wrong symlinks, credential file permissions). Drives the `sideby` CLI with `--json`; the agent does every step except browser sign-in, filling in secrets and starting interactive sessions, which it hands to the user as one command (inside an Auto Handoff session, `sideby handoff ready --to` moves the task itself).
 metadata:
-  version: "0.17.0"
+  version: "0.18.0"
   requires:
     bins: [sideby, node]
   cliHelp: sideby --help
@@ -45,6 +45,7 @@ Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique
 | Turn quota checks on or off, or refresh fetched quota | `sideby quota check <family> on|off --json`, `sideby quota [family] --refresh --json` | `references/quota.md` |
 | Set the model, effort or Remote Control | `sideby model <ref> --json`, `sideby remote-control --json` | `references/panel.md` |
 | Start sideby at login ("开机启动", "start the panel when I log in") | `sideby autostart --json`, `sideby autostart on --json` (exit 10 first) | `references/panel.md` |
+| Show quota in the macOS menu bar ("状态栏显示额度", "menu bar") | `sideby menubar --json`, `sideby menubar on --json` (exit 10 first), `sideby menubar snapshot --json` | `references/panel.md` |
 | Change the Panel's theme or language, or any other setting ("改成深色", "change any setting") | `sideby config get --json`, `sideby config set <key> <value> --json` (exit 10 first) | `references/panel.md` |
 | Turn Auto Update on or off | `sideby update --auto on|off --json` | `references/update.md` |
 | Switch between a local build of sideby and the release ("切换到正式版", "切回 dev 版本") | `sideby local --json`, `sideby local on|off --json` (exits 10 first) | `references/update.md` |
@@ -76,6 +77,8 @@ When a terminal manager such as Orca reopens a pane with a bare `claude --resume
 To open Claude Desktop or the Codex app as one account (macOS, subscription accounts), run `sideby desktop <ref> --json` yourself: it opens a new window for that account, or brings its open window to the front, and never closes anything. Relay its `notices`: the first Claude Desktop sign-in should happen while other Claude Desktop windows are closed, and a sign-in screen that suggests the main account ("Welcome back" in the Codex app) must not be used for another account.
 
 Grok Bot is not a grok account's app: it signs in with a Cursor account, apart from Grok Build. For several Grok Bot windows at once, run `sideby desktop grok-bot:<name> --json` (a new name makes a new, signed-out window; `grok-bot` is its default one) and relay the notice: sign in inside the new window with the account meant for it, with the other Grok Bot windows closed. `sideby list --json` lists them under `appProfiles`. Removing one (`--remove --yes`) signs it out and deletes its data: do it only when the user asks, after they quit that window.
+
+To let the user look at or change one account's own Host settings (`settings.json` for claude and pi, `config.toml` for codex and grok), run `sideby edit <ref> --json`: it opens the file in their default editor and reads none of it. Relay `sharedWith`: a linked file is the main account's, so a change applies to those accounts too. Use `--path` when you only need where the file is. Never print the file's content back: Claude's `settings.json` may hold API keys under `env`.
 
 To find which Chrome browser user the user signed in to an account's website with, or to open claude.ai, chatgpt.com or grok.com there, run `sideby browser --json` and `sideby browser open <ref> --json`. Finding is off until the user agrees: run `sideby browser --enable` to show them what it reads (all on this computer), and add `--yes` only after they say yes. To stop reading Browser Sign-ins, use `sideby browser --disable --json`, show its preview, then add `--yes` after approval. A match may be left over from before a sign-out; say so. Grok accounts need `--profile <name>`.
 

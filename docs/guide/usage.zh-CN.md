@@ -295,7 +295,7 @@ sideby handoff disable --yes
 
 这些设置都存在 config 文件的 `handoff` 下（见[配置](configuration.zh-CN.md)的 schema）。
 
-- **什么时候。** 最满的窗口到 80%（`prepareAt`）时，会话被要求开始写接力说明并随时更新；到 95%（`threshold`）时，它做完当前一步、更新接力说明、结束这一轮。满了的窗口 30 分钟内就重置时（`waitIfResetWithinMinutes`），sideby 选择等待，不接力：会话保留完整上下文，额度恢复后 Claude Code 自己接着做。额度到 95% 时会话里会显示一行说明，真撞到上限时再发一个桌面通知（支持 OSC 9 或 777 的终端，如 iTerm2、WezTerm、Ghostty）。想立刻换号，就在会话里输入 `! sideby handoff ready`：`!` 让命令不经过模型直接运行，额度用完时模型没法回话。只有会话能自己续上时 sideby 才等：Claude Code 要开着「Continue automatically at usage limit」（账号 `settings.json` 里的 `autoContinueAtUsageLimit`，默认开）；写在托管设置或项目设置里的这个开关 sideby 看不到。Codex 和 Grok 从不等。
+- **什么时候。** 最满的窗口到 80%（`prepareAt`）时，会话被要求开始写接力说明并随时更新；某个窗口快用完时，它做完当前一步、更新接力说明、结束这一轮。「快用完」按窗口分别判断（`adaptive`，默认开）：会话跑完一轮后，某个窗口剩下的额度不够最近单轮最大用量的 1.5 倍时就接力，范围在 `prepareAt` 到 99% 之间。5 小时窗口里轻活能用到 97–99% 左右，重活会早一些接力；每周窗口一般在 98–99%。还没跑完一轮时，以及 `adaptive: false` 时，每个窗口都在 95%（`threshold`）接力。提示和终端会写明是哪个窗口，例如「weekly (7d) quota is at 98%, back at Sun 20:00」，不会把每周额度误当成 5 小时额度。接力说明最后一行写 `<!-- handoff brief complete -->` 才算写完；否则会再要求一次，还没写完时 sideby 保留已写的部分，再补上从会话记录里找到的内容。满了的窗口 30 分钟内就重置时（`waitIfResetWithinMinutes`），sideby 选择等待，不接力：会话保留完整上下文，额度恢复后 Claude Code 自己接着做。额度到 95% 时会话里会显示一行说明，真撞到上限时再发一个桌面通知（支持 OSC 9 或 777 的终端，如 iTerm2、WezTerm、Ghostty）。想立刻换号，就在会话里输入 `! sideby handoff ready`：`!` 让命令不经过模型直接运行，额度用完时模型没法回话。只有会话能自己续上时 sideby 才等：Claude Code 要开着「Continue automatically at usage limit」（账号 `settings.json` 里的 `autoContinueAtUsageLimit`，默认开）；写在托管设置或项目设置里的这个开关 sideby 看不到。Codex 和 Grok 从不等。
 - **交给谁。** `policy: "order"` 按你写的列表（账号或短命令，可以跨家族）；不写时选本家族余量最多的账号，再补其他家族的 API 账号。一条链里每个账号只用一次，跳过已满和未登录的账号（已经到你设的 `threshold` 的也跳过），也跳过不同组织的账号（先比 organization，没有就比 email 域名），除非它写在 `crossOrganization` 里。和旧账号是同一登录的账号一律跳过，`order` 里写了也跳过：它们是同一份额度。
 - **同一家族。** 只开 `auto` 时，会交给 API 账号（任何家族），以及你写进 `order` 的其他家族账号。同一家厂商的两个账号之间接力（cc001 → cc002）还要写 `"sameFamily": true`。厂商可能认为这是在绕过用量限制并处理账号，风险由你承担。
 - **接力之前。** 有 10 秒倒计时（`countdownSeconds`）；按回车留下，sideby 会在原账号里续接刚才的会话。
@@ -314,6 +314,12 @@ headless 运行（`claude -p`、`codex exec`、`grok -p`）、带 `--remote` 的
 ## 开机启动
 
 `sideby autostart on` 让面板在你登录后自动在后台启动，打开时就是最新额度。它不打开窗口，也不启动任何宿主。它先显示要写的文件（`~/Library/LaunchAgents/dev.sideby.panel.plist`）和 `launchctl` 命令；加 `--yes` 再跑一次就开启，`sideby autostart off --yes` 撤销。`sideby autostart` 告诉你是否开着、是否还指向你正在用的 sideby；`sideby update` 会让它跟着指向新版本。目前只支持 macOS。面板设置里有同一个开关，也可以让你的 AI 帮你开。
+
+## 状态栏额度
+
+在 macOS 上运行 `sideby menubar on`（或在面板「设置」里打开**在状态栏显示额度**），状态栏就会多一个 sideby 小人。各工具额度都充足时只显示小人；某个工具连最合适的账号都用到 60% 以上时，旁边出现工具名和百分比（橙色，85% 起变红），不用打开面板也能一眼看出还能不能继续干活。点开它，第一行写着用得最多的是哪个账号，下面是每个账号的额度条，点任一账号直接在终端启动，或打开面板；运行 `sideby menubar off` 即可隐藏。在任何地方按 ⌥⌘S 打开菜单，再按一次关上；`sideby config set menubar.hotkey cmd+shift+0` 可以换成别的快捷键，设成 `off` 就关闭。看不到的话，是状态栏满了或图标在刘海后面：按住 ⌘ 拖动图标腾出位置，macOS 会记住位置。开启前先显示要写的文件（`~/Library/LaunchAgents/dev.sideby.menubar.plist`），加 `--yes` 才生效。
+
+<img alt="sideby 状态栏下拉菜单：各工具、各账号的额度条" src="../assets/menubar.zh-CN.png" width="468">
 
 其他设置也都有命令：`sideby config get` 列出全部设置和当前值，`sideby config set panel.theme dark` 改一项（先显示改动）。
 

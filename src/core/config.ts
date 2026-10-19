@@ -90,7 +90,15 @@ const HandoffSchema = Type.Object(
       }),
     ),
     prepareAt: Percent('Quota Pressure at which the session starts keeping a Handoff Brief (default 80).'),
-    threshold: Percent('Quota Pressure at which the Handoff begins (default 95).'),
+    threshold: Percent(
+      'Quota Pressure at which the Handoff begins (default 95). With `adaptive`, a window uses it until the run has measured a turn of it.',
+    ),
+    adaptive: Type.Optional(
+      Type.Boolean({
+        description:
+          'Hand over by each window’s own pace: when it has less room left than 1.5 times its largest recent turn, between `prepareAt` and 99 (default true; ADR-0032). False uses `threshold` for every window.',
+      }),
+    ),
     waitIfResetWithinMinutes: Type.Optional(
       Type.Integer({
         minimum: 0,
@@ -142,6 +150,7 @@ export interface HandoffSettings {
   sameFamily: boolean
   prepareAt: number
   threshold: number
+  adaptive: boolean
   waitIfResetWithinMinutes: number
   countdownSeconds: number
   crossOrganization: string[]
@@ -168,6 +177,20 @@ export const ConfigSchema = Type.Object(
           ),
         },
         { additionalProperties: false, description: 'How the Panel looks (spec §3.29).' },
+      ),
+    ),
+    menubar: Type.Optional(
+      Type.Object(
+        {
+          hotkey: Type.Optional(
+            Type.String({
+              pattern: '^(off|((ctrl|opt|cmd|shift)\\+)+[a-z0-9])$',
+              description:
+                'The shortcut that opens the menu bar item from anywhere, such as `opt+cmd+s` (default), or `off`.',
+            }),
+          ),
+        },
+        { additionalProperties: false, description: 'The Menu Bar Item on macOS (spec §3.31).' },
       ),
     ),
     terminal: Type.Optional(
@@ -355,6 +378,7 @@ export function handoffSettings(config: Config): HandoffSettings {
     sameFamily: h.sameFamily ?? false,
     prepareAt: h.prepareAt ?? 80,
     threshold: h.threshold ?? 95,
+    adaptive: h.adaptive ?? true,
     waitIfResetWithinMinutes: h.waitIfResetWithinMinutes ?? 30,
     countdownSeconds: h.countdownSeconds ?? 10,
     crossOrganization: [...(h.crossOrganization ?? [])],

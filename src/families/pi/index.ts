@@ -50,6 +50,7 @@ export const piFamily: FamilyDef = {
   secretVar: 'ANTHROPIC_API_KEY',
   // `-p` is one non-interactive prompt (pi 1.3.0 --help, 2026-10-17).
   probe: { args: ['-p', 'Reply with OK'] },
+  settingsFile: 'settings.json',
   sharedItems: [
     { path: 'AGENTS.md', mode: 'link' },
     { path: 'auth.json', mode: 'info', credential: true },

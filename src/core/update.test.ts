@@ -1,7 +1,8 @@
 // Update Check, Update Notice, Install Method and Auto Update (spec §3.23, ADR-0021). The registry, the install
 // command and the machine are replaced through bindUpdateDeps; nothing here reaches the network.
 import assert from 'node:assert/strict'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdir, readFile, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
@@ -68,10 +69,12 @@ interface Machine {
   restarts: number[]
   appRefreshes: number
   autostartRefreshes: number
+  /** The commands whose login item was refreshed, in order. */
+  loginItems: string[]
 }
 
 function machine(h: FakeHome, over: Partial<UpdateDeps> & { latest?: string | Error } = {}): Machine {
-  const m: Machine = { execs: [], restarts: [], appRefreshes: 0, autostartRefreshes: 0 }
+  const m: Machine = { execs: [], restarts: [], appRefreshes: 0, autostartRefreshes: 0, loginItems: [] }
   const reg = registry(over.latest ?? NEXT_MINOR)
   unbind = bindUpdateDeps({
     fetch: reg.fetch,
@@ -91,8 +94,9 @@ function machine(h: FakeHome, over: Partial<UpdateDeps> & { latest?: string | Er
       m.appRefreshes++
       return true
     },
-    refreshAutostart: async () => {
+    refreshAutostart: async (_env, command = 'autostart') => {
       m.autostartRefreshes++
+      m.loginItems.push(command)
       return true
     },
     ...over,
@@ -360,6 +364,93 @@ describe('Update and Auto Update', () => {
       assert.equal(m.execs.length, 0)
     })
   })
+  it('leaves the skill to the new code in the background for the Panel, so its answer comes before a reload', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.agents/skills/sideby/SKILL.md', skill(CURRENT))
+      const started: string[] = []
+      const m = machine(h, {
+        startDetached: async (file, args) => {
+          started.push([file, ...args].join(' '))
+          return true
+        },
+      })
+      const plan = await planUpdate(resolvePaths(h.env), envWithChecks(h))
+      const r = await applyUpdate(resolvePaths(h.env), plan, h.env, { skillSync: 'background' })
+      assert.deepEqual(
+        m.execs.map((e) => e.file),
+        ['npm'],
+      )
+      assert.deepEqual([r.ok, r.skillUpdated, r.skillSyncStarted], [true, undefined, true])
+      assert.deepEqual(started, ['sideby update --skill --yes'])
+      // The lock is free by then, so the started `sideby update --skill --yes` can take it.
+      assert.equal(existsSync(join(resolvePaths(h.env).stateDir, 'update-install.lock')), false)
+      // A failed install starts nothing.
+      unbind?.()
+      machine(h, {
+        exec: async () => ({ code: 1, output: '' }),
+        startDetached: async (file, args) => {
+          started.push([file, ...args].join(' '))
+          return true
+        },
+      })
+      const failed = await applyUpdate(resolvePaths(h.env), plan, h.env, { skillSync: 'background' })
+      assert.deepEqual([failed.ok, failed.skillSyncStarted], [false, undefined])
+      assert.equal(started.length, 1)
+    })
+  })
+  it('restarts the background Panel last, after the app, the login item and the skill (after-install.ts)', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.agents/skills/sideby/SKILL.md', skill(CURRENT))
+      await h.write(
+        'Library/LaunchAgents/dev.sideby.panel.plist',
+        '<!-- Written by `sideby autostart`: … -->\n',
+        0o644,
+      )
+      const lock = join(resolvePaths(h.env).stateDir, 'update-install.lock')
+      for (const skillSync of ['wait', 'background'] as const) {
+        const calls: string[] = []
+        unbind?.()
+        machine(h, {
+          exec: async (file) => {
+            calls.push(`${file}${existsSync(lock) ? ' (locked)' : ''}`)
+            return { code: 0, output: '' }
+          },
+          appInstalled: async () => true,
+          refreshApp: async () => {
+            calls.push('app')
+            return true
+          },
+          refreshAutostart: async () => {
+            calls.push('autostart')
+            return true
+          },
+          startDetached: async (file, args) => {
+            calls.push(`${[file, ...args].join(' ')}${existsSync(lock) ? ' (locked)' : ''}`)
+            return true
+          },
+          restartPanel: async () => {
+            calls.push('panel')
+            return true
+          },
+        })
+        const plan = await planUpdate(resolvePaths(h.env), envWithChecks(h))
+        const r = await applyUpdate(resolvePaths(h.env), plan, h.env, {
+          skillSync,
+          panelPort: async () => 17420,
+        })
+        assert.equal(r.ok, true)
+        assert.deepEqual(
+          calls,
+          skillSync === 'wait'
+            ? // In place, the skill keeps the lock: one install at a time.
+              ['npm (locked)', 'app', 'autostart', 'npx (locked)', 'panel']
+            : // On its own, it starts once the lock is free, since the new process takes it itself.
+              ['npm (locked)', 'app', 'autostart', 'sideby update --skill --yes', 'panel'],
+        )
+        assert.deepEqual([r.restartedPanel, r.refreshedApp, r.refreshedAutostart], [true, true, true])
+      }
+    })
+  })
   it('reports a failed skill update without failing the Update', async () => {
     await withFakeHome(async (h) => {
       await h.write('.agents/skills/sideby/SKILL.md', skill(CURRENT))
@@ -415,6 +506,15 @@ describe('Update and Auto Update', () => {
       )
       const r = await applyUpdate(resolvePaths(h.env), plan, h.env)
       assert.deepEqual([r.refreshedAutostart, m.autostartRefreshes], [true, 1])
+      // The menu bar item's login item (spec §3.31) is refreshed too, only where it exists, and not reported.
+      await h.write(
+        'Library/LaunchAgents/dev.sideby.menubar.plist',
+        '<!-- Written by `sideby menubar`: … -->\n',
+        0o644,
+      )
+      const both = await applyUpdate(resolvePaths(h.env), plan, h.env)
+      assert.equal(both.refreshedAutostart, true)
+      assert.deepEqual(m.loginItems, ['autostart', 'autostart', 'menubar'])
     })
   })
   it('keeps a successful Update when refreshing the desktop app fails', async () => {
@@ -587,6 +687,15 @@ describe('hardening round 1', () => {
       release()
       assert.equal((await first).ok, true)
       assert.equal(m.execs.length, 1)
+      // A lock its live pid stopped touching (a Portal worker thread ended mid-install) is taken over.
+      unbind?.()
+      machine(h, { alive: (pid) => pid === process.pid })
+      const lock = join(paths.stateDir, 'update-install.lock')
+      await writeFile(lock, `${process.pid} ${Date.now()}`)
+      assert.equal((await applyUpdate(paths, plan, h.env)).busy, true)
+      const old = new Date(Date.now() - 3 * 60 * 1000)
+      await utimes(lock, old, old)
+      assert.equal((await applyUpdate(paths, plan, h.env)).ok, true)
       // A lock left by a process that ended is taken over.
       await writeFile(join(paths.stateDir, 'update-install.lock'), `999999 ${Date.now()}`)
       unbind?.()

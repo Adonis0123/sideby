@@ -20,6 +20,7 @@ import {
 import { type CreateResult, createAccount } from './core/create.ts'
 import { bindDesktopDeps, checkAppData, type DesktopDeps } from './core/desktop-app.ts'
 import { applyFixes, type DoctorReport, runDoctor } from './core/doctor.ts'
+import { hostSettingsFile } from './core/edit-settings.ts'
 import { UserError } from './core/errors.ts'
 import { type HandoffPlan, planHandoff } from './core/handoff.ts'
 import { handoffFindings } from './core/handoff-doctor.ts'
@@ -158,6 +159,8 @@ export interface FamilyInfo {
   plugin: string
   /** The Family can estimate a Compaction Threshold (spec §3.18). */
   tuning: boolean
+  /** The Host's settings file that `sideby edit` opens (spec §3.30), relative to the account directory. */
+  settingsFile?: string
 }
 
 /** One Shared Item as `sideby families` reports it (spec §3.16). */
@@ -660,6 +663,7 @@ export async function createRuntime(
             ...(broken ? { brokenBin: broken } : {}),
             plugin: loaded.familyOwner.get(f.id) ?? 'unknown',
             tuning: Boolean(f.readTuning),
+            ...(hostSettingsFile(f) ? { settingsFile: hostSettingsFile(f) } : {}),
           }
         }),
       )
@@ -756,7 +760,7 @@ export async function createRuntime(
         // of that Family keeps its skill warning.
         skillVersion: packageVersion(),
         // Desktop App data folders sideby made for an Account (spec §3.20).
-        extraChecks: (a: Account) => checkAppData(loaded.plugins, paths.home, a),
+        extraChecks: (a: Account) => checkAppData(loaded.plugins, paths.home, a, Boolean(o.force)),
       }
       // Auto Handoff warnings (spec §3.17) join the general Findings; they never fail Doctor.
       const all = await accounts()

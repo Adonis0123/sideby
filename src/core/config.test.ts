@@ -27,6 +27,7 @@ describe('handoff settings', () => {
       sameFamily: false,
       prepareAt: 80,
       threshold: 95,
+      adaptive: true,
       waitIfResetWithinMinutes: 30,
       countdownSeconds: 10,
       crossOrganization: [],

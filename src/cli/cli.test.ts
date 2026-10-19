@@ -1586,6 +1586,37 @@ describe('autostart (spec §3.29)', () => {
   })
 })
 
+describe('menubar (spec §3.31)', () => {
+  it('reports its state, shows the change before --yes, and prints what the menu shows', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}')
+      const status = checkSchema('menubar', (await sideby(h, ['menubar', '--json'])).out)
+      assert.deepEqual([status.state, status.supported], ['off', process.platform === 'darwin'])
+      const shown = await sideby(h, ['menubar', 'on', '--json'])
+      if (process.platform === 'darwin') {
+        assert.equal(shown.code, 10)
+        const plan = checkSchema('menubar', shown.out)
+        assert.equal((plan.programArguments as string[])[0], '/usr/bin/osascript')
+        assert.match((await sideby(h, ['menubar', 'on'])).out, /dev\.sideby\.menubar\.plist.*--yes/s)
+      } else assert.equal(shown.code, 1)
+      // Nothing is written before --yes.
+      await assert.rejects(readFile(h.path('Library/LaunchAgents/dev.sideby.menubar.plist')))
+      const snap = checkSchema(
+        'menubar-snapshot',
+        (await sideby(h, ['menubar', 'snapshot', '--json', '--lang', 'zh'])).out,
+      ) as { lang: string; sections: { rows: { ref: string }[] }[] }
+      assert.equal(snap.lang, 'zh')
+      assert.deepEqual(
+        snap.sections.map((x) => x.rows.map((r) => r.ref)),
+        [['claude:main']],
+      )
+      assert.equal((await sideby(h, ['menubar', 'maybe'])).code, 2)
+      assert.equal((await sideby(h, ['menubar', '--yes'])).code, 2)
+      assert.equal((await sideby(h, ['menubar', 'start'])).code, 2)
+    })
+  })
+})
+
 describe('_notice on --json outputs (spec §3.23)', () => {
   it('carries a newer version from the cache and an outdated skill, on results and errors, and not when turned off', async () => {
     await withFakeHome(async (h) => {
@@ -1860,6 +1891,29 @@ describe('sideby desktop (spec §3.20)', () => {
   })
 })
 
+describe('sideby edit (spec §3.30)', () => {
+  it('prints where the settings file is with --path and says what to do when it is missing, opening nothing', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}\n')
+      await h.write('.claude-empty/CLAUDE.md', '# rules\n')
+      assert.equal((await sideby(h, ['edit'])).code, 2)
+      const path = await sideby(h, ['edit', 'claude:main', '--path', '--json'])
+      assert.equal(path.code, 0)
+      const r = checkSchema('edit', path.out)
+      assert.equal(r.opened, false)
+      assert.equal(r.path, h.path('.claude/settings.json'))
+      assert.equal(
+        (await sideby(h, ['edit', 'claude:main', '--path'])).out.trim(),
+        h.path('.claude/settings.json'),
+      )
+      const missing = await sideby(h, ['edit', 'claude:empty', '--json'])
+      assert.equal(missing.code, 1)
+      assert.equal(checkSchema('error', missing.out).code, 'settings-missing')
+      assert.match((await sideby(h, ['edit', '--help'])).out, /sideby edit <account> \[--path\]/)
+    })
+  })
+})
+
 describe('sideby update (spec §3.23)', () => {
   /** A registry on localhost answering `latest`, so the test never leaves the machine. */
   async function fakeRegistry(latest: string) {
@@ -1905,6 +1959,40 @@ describe('sideby update (spec §3.23)', () => {
       } finally {
         await newer.close()
       }
+    })
+  })
+
+  it('--skill updates only the installed skill, even with a newer sideby out, and asks no registry', async () => {
+    await withFakeHome(async (h) => {
+      // Checked just now, so no Update Check starts: the last check knows of a newer sideby.
+      const now = new Date().toISOString()
+      await h.write(
+        '.local/state/sideby/update.json',
+        JSON.stringify({ checkedAt: now, triedAt: now, latest: '99.0.0' }),
+      )
+      await h.write('.agents/skills/sideby/SKILL.md', '---\nname: sideby\nmetadata:\n  version: 0.0.1\n---\n')
+      await fakeHost(h, 'npx')
+      await fakeHost(h, 'npm')
+      // A registry that cannot be reached: --skill never asks it.
+      const env = { SIDEBY_UPDATE_REGISTRY: 'http://127.0.0.1:9' }
+      const preview = await sideby(h, ['update', '--skill', '--json'], env)
+      assert.equal(preview.code, 10, preview.err)
+      assert.equal(checkSchema('update', preview.out).updated, false)
+      assert.deepEqual(await readHostLog(h, 'npx'), [])
+      const r = await sideby(h, ['update', '--skill', '--yes', '--json'], env)
+      assert.equal(r.code, 0, r.err)
+      const data = checkSchema('update', r.out)
+      assert.deepEqual(
+        [data.available, data.latest, data.updated, data.skillUpdated],
+        [true, '99.0.0', false, true],
+      )
+      assert.deepEqual(
+        (await readHostLog(h, 'npx')).map((x) => x.argv),
+        [['-y', 'skills', 'update', 'sideby', '-g', '-y']],
+      )
+      assert.deepEqual(await readHostLog(h, 'npm'), [], 'the CLI is never installed')
+      const text = await sideby(h, ['update', '--skill', '--yes'], env)
+      assert.match(text.out, /99\.0\.0 is available; updating sideby itself is separate: `sideby update`/)
     })
   })
 

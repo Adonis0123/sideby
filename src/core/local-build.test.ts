@@ -1,6 +1,7 @@
 // Switching between a Local Build and the npm package (ADR-0024). npm and the registry are replaced through
 // bindUpdateDeps; nothing here installs anything or reaches the network.
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { lstat, mkdir, readFile, readlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, it } from 'node:test'
@@ -90,7 +91,7 @@ describe('Local Build switch', () => {
       assert.equal(await versionAt(globalPkg(d)), '0.15.0')
       assert.deepEqual(
         ran,
-        ['sideby update --yes'],
+        ['sideby update --skill --yes'],
         'restoring installs nothing; the npm code brings the skill along',
       )
     })
@@ -152,7 +153,43 @@ describe('Local Build switch', () => {
       await linkGlobal(d)
       const r = await switchLocal(resolvePaths(h.env), d, 'npm', h.env, { skillSync: 'background' })
       assert.deepEqual([r.ok, r.skillSyncStarted, r.skillSynced], [true, true, undefined])
-      assert.deepEqual(ran, ['detached: sideby update --yes'])
+      assert.deepEqual(ran, ['detached: sideby update --skill --yes'])
+    })
+  })
+
+  it('starts the skill once the lock is free and restarts the background Panel last (after-install.ts)', async () => {
+    await withFakeHome(async (h) => {
+      const d = dirsOf(h)
+      const paths = resolvePaths(h.env)
+      const lock = join(paths.stateDir, 'update-install.lock')
+      const locked = () => (existsSync(lock) ? ' (locked)' : '')
+      for (const skillSync of ['wait', 'background'] as const) {
+        const ran = machine('0.15.0')
+        bindUpdateDeps({
+          exec: async (file, args) => {
+            ran.push(`${[file, ...args].join(' ')}${locked()}`)
+            return { code: 0, output: '' }
+          },
+          startDetached: async (file, args) => {
+            ran.push(`detached: ${[file, ...args].join(' ')}${locked()}`)
+            return true
+          },
+          restartPanel: async () => {
+            ran.push('panel')
+            return true
+          },
+        })
+        await pkgAt(globalPkg(d), '0.15.0')
+        await pkgAt(pkgDir(d), '0.15.0', localBuild)
+        await linkGlobal(d)
+        const r = await switchLocal(paths, d, 'npm', h.env, { skillSync, panelPort: async () => 17420 })
+        assert.equal(r.ok, true)
+        assert.deepEqual(ran, [
+          skillSync === 'wait' ? 'sideby update --skill --yes' : 'detached: sideby update --skill --yes',
+          'panel',
+        ])
+        unbind?.()
+      }
     })
   })
 
@@ -165,7 +202,7 @@ describe('Local Build switch', () => {
       await linkGlobal(d)
       const r = await switchLocal(resolvePaths(h.env), d, 'npm', h.env)
       assert.equal(r.ok, true)
-      assert.deepEqual(ran, ['npm install -g sideby@0.16.0', 'sideby update --yes'])
+      assert.deepEqual(ran, ['npm install -g sideby@0.16.0', 'sideby update --skill --yes'])
     })
   })
 

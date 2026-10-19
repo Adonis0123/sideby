@@ -261,3 +261,9 @@ export const FAVICON_SVG = (() => {
     `${keep.map(shapeSvg).join('')}<g stroke="none">${eyes}</g>${above.map(shapeSvg).join('')}</g></g></svg>`
   )
 })()
+
+/**
+ * The Menu Bar Item's icon (spec §3.31): the favicon's small cut of Sai in colour, 18 pt square. It keeps its colours
+ * in light and dark mode, as the brand's tab icons do; the body's dark outline keeps it visible on both.
+ */
+export const MENUBAR_ICON_SVG = FAVICON_SVG.replace('<svg ', '<svg width="18" height="18" ')
