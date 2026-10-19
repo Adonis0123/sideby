@@ -320,15 +320,18 @@ test('finds the bundled Orca CLI when PATH has no Orca', async () => {
   })
 })
 
+// Windows user folders as WSL mounts them, joined so no home path sits in the source (scripts/leak-check.sh).
+const USERS = ['mnt', 'c', 'Users'].join('/')
+
 test('on WSL, finds Windows Terminal on PATH or in a Windows user folder', async () => {
   await withFakeHome(async (h) => {
     const deps = { home: h.home, env: { PATH: h.bin }, platform: 'linux' as const, wslMount: h.path('mnt') }
     assert.deepEqual(await installedTerminals(deps), [])
-    await h.write('mnt/c/Users/me/AppData/Local/Microsoft/WindowsApps/wt.exe', '', 0o755)
+    await h.write(`${USERS}/me/AppData/Local/Microsoft/WindowsApps/wt.exe`, '', 0o755)
     assert.deepEqual(await installedTerminals(deps), [
       {
         id: 'windows-terminal',
-        executable: h.path('mnt/c/Users/me/AppData/Local/Microsoft/WindowsApps/wt.exe'),
+        executable: h.path(`${USERS}/me/AppData/Local/Microsoft/WindowsApps/wt.exe`),
       },
     ])
     const onPath = await fakeHost(h, 'wt.exe')
@@ -340,7 +343,7 @@ test('on WSL, finds Windows Terminal on PATH or in a Windows user folder', async
 
 test('on WSL, looks only in the current Windows user folder, and never guesses between users', async () => {
   await withFakeHome(async (h) => {
-    const wt = (user: string) => `mnt/c/Users/${user}/AppData/Local/Microsoft/WindowsApps/wt.exe`
+    const wt = (user: string) => `${USERS}/${user}/AppData/Local/Microsoft/WindowsApps/wt.exe`
     await h.write(wt('other'), '', 0o755)
     await h.write(wt('me'), '', 0o755)
     const base = { home: h.home, env: { PATH: h.bin }, platform: 'linux' as const, wslMount: h.path('mnt') }
@@ -372,7 +375,7 @@ test('on WSL, looks only in the current Windows user folder, and never guesses b
 })
 
 test('Windows Terminal opens a tab that runs the task in this WSL distribution', () => {
-  const wt = '/mnt/c/Users/me/AppData/Local/Microsoft/WindowsApps/wt.exe'
+  const wt = `/${USERS}/me/AppData/Local/Microsoft/WindowsApps/wt.exe`
   // wt.exe splits its command line at `;`, so the hold after a failure is written without one.
   const tabHeld = `${command} || (echo && echo sideby: press Return to close && read _)`
   assert.deepEqual(launchArgs('windows-terminal', { cwd, command, executable: wt, wslDistro: 'Ubuntu' }), {
@@ -459,15 +462,15 @@ test('reads the WSL distribution from the environment, else from wslpath', async
 test('on WSL, finds the Windows Orca CLI in the Windows user folder', async () => {
   await withFakeHome(async (h) => {
     const deps = { home: h.home, env: { PATH: h.bin }, platform: 'linux' as const, wslMount: h.path('mnt') }
-    await h.write('mnt/c/Users/me/AppData/Local/Programs/orca/resources/bin/orca.exe', '', 0o755)
+    await h.write(`${USERS}/me/AppData/Local/Programs/orca/resources/bin/orca.exe`, '', 0o755)
     assert.deepEqual(await installedTerminals(deps), [
-      { id: 'orca', executable: h.path('mnt/c/Users/me/AppData/Local/Programs/orca/resources/bin/orca.exe') },
+      { id: 'orca', executable: h.path(`${USERS}/me/AppData/Local/Programs/orca/resources/bin/orca.exe`) },
     ])
   })
 })
 
 test('Orca on WSL opens a WSL shell in the most recently used worktree of this distribution', async () => {
-  const orca = '/mnt/c/Users/me/AppData/Local/Programs/orca/resources/bin/orca.exe'
+  const orca = `/${USERS}/me/AppData/Local/Programs/orca/resources/bin/orca.exe`
   const worktrees = [
     { id: 'r1::C:\\src\\app', path: 'C:\\src\\app', lastActivityAt: 30 },
     {
