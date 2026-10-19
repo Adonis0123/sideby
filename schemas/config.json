@@ -31,6 +31,18 @@
       "additionalProperties": false,
       "description": "How the Panel looks (spec §3.29)."
     },
+    "menubar": {
+      "type": "object",
+      "properties": {
+        "hotkey": {
+          "type": "string",
+          "pattern": "^(off|((ctrl|opt|cmd|shift)\\+)+[a-z0-9])$",
+          "description": "The shortcut that opens the menu bar item from anywhere, such as `opt+cmd+s` (default), or `off`."
+        }
+      },
+      "additionalProperties": false,
+      "description": "The Menu Bar Item on macOS (spec §3.31)."
+    },
     "terminal": {
       "type": "object",
       "properties": {

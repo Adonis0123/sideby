@@ -73,6 +73,7 @@ cc-switch 自己的说明是：切换时把配置写进宿主正在用的文件�
 | 你想 | 命令 | 说明 |
 |---|---|---|
 | 在面板里把事情交给你自己的 AI：配账号、修问题、支持新工具 | 面板的「让 AI 帮我」，或 `sideby ask` | [让 AI 帮我](docs/guide/panel.zh-CN.md#让-ai-帮我) |
+| 在 macOS 状态栏一眼看到额度 | 面板的「设置 › 启动」，或 `sideby menubar on` | [状态栏额度](docs/guide/usage.zh-CN.md#状态栏额度) |
 | 登录电脑后面板就在后台准备好 | 面板的「设置 › 启动」，或 `sideby autostart on` | [开机启动](docs/guide/usage.zh-CN.md#开机启动) |
 | 加一个 API key 账号（DeepSeek、网关等） | `sideby new claude deepseek --api` | [API 账号](docs/guide/usage.zh-CN.md#api-账号) |
 | 找出并修复账号之间的配置漂移 | `sideby doctor --fix` | [体检](docs/guide/usage.zh-CN.md#体检doctor) |

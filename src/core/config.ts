@@ -179,6 +179,20 @@ export const ConfigSchema = Type.Object(
         { additionalProperties: false, description: 'How the Panel looks (spec §3.29).' },
       ),
     ),
+    menubar: Type.Optional(
+      Type.Object(
+        {
+          hotkey: Type.Optional(
+            Type.String({
+              pattern: '^(off|((ctrl|opt|cmd|shift)\\+)+[a-z0-9])$',
+              description:
+                'The shortcut that opens the menu bar item from anywhere, such as `opt+cmd+s` (default), or `off`.',
+            }),
+          ),
+        },
+        { additionalProperties: false, description: 'The Menu Bar Item on macOS (spec §3.31).' },
+      ),
+    ),
     terminal: Type.Optional(
       Type.Object(
         {

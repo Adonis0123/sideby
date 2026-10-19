@@ -160,6 +160,7 @@ const MAIN = String.raw`
     if (raw.hideEmail === true) p.hideEmail = true
     if (typeof raw.ahHintAt === 'number') p.ahHintAt = raw.ahHintAt
     if (raw.rcHide === true) p.rcHide = true
+    if (raw.mbHintDone === true) p.mbHintDone = true
     if (raw.cfgDone === true) p.cfgDone = true
     if (typeof raw.family === 'string') p.family = raw.family
     if (raw.collapsed && typeof raw.collapsed === 'object')
@@ -3624,7 +3625,9 @@ const MAIN = String.raw`
     const look = []
     if (secs.includes('lang')) look.push(seg(t('set.lang'), [['en', 'English'], ['zh', '中文']], lang, setLang))
     if (secs.includes('theme')) look.push(seg(t('set.theme'), CHOICES.theme.map((v) => [v, t('set.theme.' + v)]), viewPrefs().theme, setTheme))
-    const start = [autostartRow()]
+    const start = [autostartRow('autostart')]
+    // The menu bar switch shows only where it works (macOS); while its state loads it waits, unseen.
+    if (li.menubar.status && li.menubar.status.supported) start.push(autostartRow('menubar'))
     if (!BOOT.readOnly) start.push(link(t('term.title'), '', '', openTerminals, true))
     const acct = []
     // The arrange mode (spec §3.25) has a place here too, where people look for "how do I change this".
@@ -3678,7 +3681,7 @@ const MAIN = String.raw`
   }
   // Taller than the window, the popover scrolls inside and ends with "More settings…", the same groups in a dialog.
   function settingsPop() {
-    if (!as.status && !as.loading && !as.error) loadAutostart()
+    loadAutostart()
     return [...settingsBody(() => closeMenu()),
       h('button', { class: 'menu-item set-more', type: 'button', hidden: true, onclick: () => { closeMenu(); openSettingsDialog() } }, h('span', { class: 'menu-label' }, t('set.more')), icon('chevron'))]
   }
@@ -3690,7 +3693,7 @@ const MAIN = String.raw`
     more.hidden = !(el.scrollHeight > el.clientHeight + 1)
   }
   function openSettingsDialog() {
-    if (!as.status && !as.loading) loadAutostart()
+    loadAutostart()
     showDialog('settings')
     renderSettingsDialog()
   }
@@ -3704,85 +3707,105 @@ const MAIN = String.raw`
     if (dlg.kind === 'settings') renderSettingsDialog()
   }
 
-  // ---------- start at login (spec §3.29, ADR-0029) ----------
-  // The switch reads its state when the settings open; moving it shows the file and what will run, and only the
-  // confirmation writes. A read-only Panel shows the state only.
-  const as = { status: null, loading: false, error: null, want: null, plan: null, planning: false, planError: null, busy: false }
-  async function loadAutostart() {
-    as.loading = true
-    try { as.status = await api('/api/autostart'); as.error = null } catch (e) { as.error = e }
-    as.loading = false
-    refreshSettings()
+  // ---------- start at login (spec §3.29, ADR-0029) and the Menu Bar Item (spec §3.31, ADR-0034) ----------
+  // Each switch reads its state when the settings open; moving it shows the file and what will run, and only the
+  // confirmation writes. A read-only Panel shows the state only. mb.* words override as.* for the menu bar.
+  const liState = () => ({ status: null, loading: false, error: null, want: null, plan: null, planning: false, planError: null, busy: false })
+  const li = { autostart: liState(), menubar: liState() }
+  let liKind = 'autostart'
+  function lt(k, key, vars) {
+    const own = (k === 'menubar' ? 'mb.' : 'as.') + key
+    return t(Object.hasOwn(MESSAGES.en, own) ? own : 'as.' + key, vars)
   }
-  function autostartRow() {
-    const s = as.status
+  function loadAutostart() {
+    // A failed read is not retried here: the settings re-render after every read, so a retry would loop.
+    for (const k of Object.keys(li)) if (!li[k].status && !li[k].loading && !li[k].error) loadLoginItem(k)
+  }
+  async function loadLoginItem(k) {
+    const st = li[k]
+    st.loading = true
+    try { st.status = await api('/api/' + k); st.error = null } catch (e) { st.error = e }
+    st.loading = false
+    refreshSettings()
+    if (k === 'menubar') renderAll()
+  }
+  function autostartRow(k) {
+    const st = li[k]
+    const s = st.status
     const n = autostartNote(s, BOOT.readOnly)
-    const label = t('as.label')
-    const hint = [as.error ? t('as.failed', { msg: as.error.message }) : t(n.key)]
-    if (n.action === 'fix') hint.push(' ', h('button', { class: 'link-btn small', type: 'button', onclick: () => autostartAsk(true) }, t('as.fix')))
-    if (s && s.state === 'foreign') hint.push(' ', h('button', { class: 'link-btn small', type: 'button', title: s.path, onclick: () => copyText(s.path) }, t('as.copyPath')))
+    const label = lt(k, 'label')
+    const hint = [st.error ? lt(k, 'failed', { msg: st.error.message }) : lt(k, n.key.slice(3))]
+    if (n.action === 'fix') hint.push(' ', h('button', { class: 'link-btn small', type: 'button', onclick: () => autostartAsk(true, k) }, lt(k, 'fix')))
+    if (s && s.state === 'foreign') hint.push(' ', h('button', { class: 'link-btn small', type: 'button', title: s.path, onclick: () => copyText(s.path) }, lt(k, 'copyPath')))
     let ctl = null
-    if (!s) ctl = as.loading ? spinner() : null
+    if (!s) ctl = st.loading ? spinner() : null
     else if (n.toggle) ctl = h('div', { class: 'seg', role: 'group', 'aria-label': label }, [[true, t('ah.on')], [false, t('ah.off')]].map(([v, text]) =>
-      h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === n.on), onclick: () => { if (v !== n.on) autostartAsk(v) } }, text)))
+      h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === n.on), onclick: () => { if (v !== n.on) autostartAsk(v, k) } }, text)))
     else if (s.supported && s.state !== 'foreign') ctl = h('span', { class: 'chip chip-sm' + (n.on ? ' chip-ok' : '') }, n.on ? t('ah.on') : t('ah.off'))
     return h('div', { class: 'set-row set-check' },
       h('div', { class: 'set-text' }, h('span', { class: 'set-label' }, label), h('span', { class: 'set-hint' }, hint)), ctl)
   }
-  async function autostartAsk(on) {
+  async function autostartAsk(on, k) {
     if (menu.kind === 'settings') closeMenu()
-    as.want = on
-    as.plan = null
-    as.planError = null
-    as.planning = true
+    liKind = k
+    const st = li[k]
+    st.want = on
+    st.plan = null
+    st.planError = null
+    st.planning = true
     showDialog('autostart')
     renderAutostart()
-    try { as.plan = (await api('/api/autostart', { on })).plan } catch (e) { as.planError = e }
-    as.planning = false
-    if (dlg.kind === 'autostart') renderAutostart()
+    try { st.plan = (await api('/api/' + k, { on })).plan } catch (e) { st.planError = e }
+    st.planning = false
+    if (dlg.kind === 'autostart' && liKind === k) renderAutostart()
   }
   function renderAutostart() {
-    const p = as.plan
-    const on = as.want
+    const k = liKind
+    const st = li[k]
+    const p = st.plan
+    const on = st.want
     const body = []
-    if (as.planning) body.push(h('p', { class: 'muted' }, spinner(), ' ', t('as.planning')))
-    else if (as.planError) body.push(errorNote(as.planError, () => autostartAsk(on)))
+    if (st.planning) body.push(h('p', { class: 'muted' }, spinner(), ' ', lt(k, 'planning')))
+    else if (st.planError) body.push(errorNote(st.planError, () => autostartAsk(on, k)))
     else if (p && p.blocked) {
       const own = 'as.block.' + p.blocked.code
       body.push(h('p', { class: 'note note-fail' }, Object.hasOwn(MESSAGES.en, own) ? t(own) : p.blocked.message))
       if (['npx-cache', 'temp-dir', 'unsafe-path'].includes(p.blocked.code)) body.push(codeCopy('npm i -g sideby'))
       if (p.blocked.code === 'foreign') body.push(codeCopy(p.path))
-    } else if (p && !p.changed) body.push(h('p', null, t(on ? 'as.alreadyOn' : 'as.alreadyOff')))
+    } else if (p && !p.changed) body.push(h('p', null, lt(k, on ? 'alreadyOn' : 'alreadyOff')))
     else if (p && on) {
-      body.push(h('p', null, t('as.writes')), h('code', { class: 'as-code' }, p.path))
-      body.push(h('p', null, t('as.runs')), h('code', { class: 'as-code' }, (p.programArguments || []).join(' ')))
-      body.push(h('p', { class: 'muted small' }, t('as.noWindow')))
+      body.push(h('p', null, lt(k, 'writes')), h('code', { class: 'as-code' }, p.path))
+      body.push(h('p', null, lt(k, 'runs')), h('code', { class: 'as-code' }, (p.programArguments || []).join(' ')))
+      body.push(h('p', { class: 'muted small' }, lt(k, 'noWindow')))
     } else if (p) {
-      body.push(h('p', null, t('as.removes')), h('code', { class: 'as-code' }, p.path))
-      body.push(h('p', { class: 'muted small' }, t('as.offNote')))
+      body.push(h('p', null, lt(k, 'removes')), h('code', { class: 'as-code' }, p.path))
+      body.push(h('p', { class: 'muted small' }, lt(k, 'offNote')))
     }
-    const foot = [h('button', { class: 'btn', type: 'button', disabled: as.busy, onclick: () => dlg.el.close() }, t(p && p.changed && !p.blocked ? 'btn.cancel' : 'btn.close'))]
+    const foot = [h('button', { class: 'btn', type: 'button', disabled: st.busy, onclick: () => dlg.el.close() }, t(p && p.changed && !p.blocked ? 'btn.cancel' : 'btn.close'))]
     if (p && p.changed && !p.blocked)
-      foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: as.busy, 'aria-busy': as.busy ? 'true' : null, onclick: autostartApply }, as.busy ? spinner() : null, t(on ? 'as.turnOn' : 'as.turnOff')))
-    setKids(dlg.el, dialogFrame(t(on ? 'as.onTitle' : 'as.offTitle'), null, body, foot))
+      foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: st.busy, 'aria-busy': st.busy ? 'true' : null, onclick: autostartApply }, st.busy ? spinner() : null, lt(k, on ? 'turnOn' : 'turnOff')))
+    setKids(dlg.el, dialogFrame(lt(k, on ? 'onTitle' : 'offTitle'), null, body, foot))
   }
   async function autostartApply() {
-    const on = as.want
-    as.busy = true
+    const k = liKind
+    const st = li[k]
+    const on = st.want
+    st.busy = true
     dlg.busy = true
     renderAutostart()
     let r = null
-    try { r = await api('/api/autostart', { on, confirm: true, programArguments: as.plan.programArguments || [] }) } catch (e) { as.planError = e }
-    as.busy = false
+    try { r = await api('/api/' + k, { on, confirm: true, programArguments: st.plan.programArguments || [] }) } catch (e) { st.planError = e }
+    st.busy = false
     dlg.busy = false
     if (r && r.applied) {
-      as.status = r.status
+      st.status = r.status
       if (dlg.kind === 'autostart') dlg.el.close()
-      toast(t(on ? 'as.doneOn' : 'as.doneOff') + (on && !r.loaded ? ' ' + t('as.nextLogin') : ''))
+      toast(lt(k, on ? 'doneOn' : 'doneOff') + (on && !r.loaded ? ' ' + lt(k, 'nextLogin') : ''))
       refreshSettings()
+      if (k === 'menubar') renderAll()
       return
     }
-    if (r) { as.plan = r.plan; if (r.changedSince) toast(t('as.changedSince')) }
+    if (r) { st.plan = r.plan; if (r.changedSince) toast(lt(k, 'changedSince')) }
     if (dlg.kind === 'autostart') renderAutostart()
   }
   function setLang(v) {
@@ -3836,7 +3859,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.rc', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.tool']
   function openRc() {
     if (!S.state || !rcSummary()) return
     rc.target = null
@@ -4398,6 +4421,23 @@ const MAIN = String.raw`
   }
 
   // ---------- banners ----------
+  // Offered once on macOS (spec §3.31), when quota shows and the menu bar item is off; "No thanks" is for good.
+  function menubarHint() {
+    if (BOOT.readOnly || prefs.mbHintDone) return null
+    const st = li.menubar
+    if (!st.status) {
+      if (!st.loading && !st.error) loadLoginItem('menubar')
+      return null
+    }
+    if (!st.status.supported || st.status.state !== 'off') return null
+    if (!S.state.accounts.some((a) => a.quota && a.quota.status === 'ok')) return null
+    const done = () => { prefs.mbHintDone = true; savePrefs(); renderBanners() }
+    return h('div', { class: 'banner', role: 'status' },
+      h('div', null, h('b', null, t('mb.hintTitle') + ' '), t('mb.hintBody')),
+      h('div', { class: 'banner-actions' },
+        h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => { done(); autostartAsk(true, 'menubar') } }, t('mb.hintYes')),
+        h('button', { class: 'btn btn-sm', type: 'button', onclick: done }, t('mb.hintNo'))))
+  }
   function renderBanners() {
     const out = []
     if (S.loadError && S.state) out.push(h('div', { class: 'banner banner-fail', role: 'alert' },
@@ -4411,6 +4451,10 @@ const MAIN = String.raw`
         h('div', { class: 'banner-actions' },
           h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => setPage('handoff') }, t('ah.setUp')),
           h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { prefs.ahHintAt = Date.now(); savePrefs(); renderBanners() } }, t('ah.dismiss')))))
+      else {
+        const mb = menubarHint()
+        if (mb) out.push(mb)
+      }
       const rcBanner = remoteControlBanner()
       if (rcBanner) out.push(rcBanner)
       const errs = S.state.pluginErrors

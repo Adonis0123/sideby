@@ -12,7 +12,18 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { cli, demoHome, fail, openChrome, panelLoaded, root, startPanel, track, workDir } from './chrome.ts'
+import {
+  cli,
+  demoHome,
+  fail,
+  openChrome,
+  panelLoaded,
+  QUIET_PANEL,
+  root,
+  startPanel,
+  track,
+  workDir,
+} from './chrome.ts'
 
 const out = join(root, 'docs/assets/demo.gif')
 const FPS = 10
@@ -149,6 +160,7 @@ await page('Emulation.setDeviceMetricsOverride', {
   deviceScaleFactor: 2,
   mobile: false,
 })
+await page('Page.addScriptToEvaluateOnNewDocument', { source: QUIET_PANEL })
 await page('Page.navigate', { url: panelUrl })
 // Token usage moved behind a click (6ea716b); the 7-day quota of claude:work is what the scene zooms into.
 await until(panelLoaded(), 'the Panel to load quota')

@@ -315,6 +315,10 @@ A headless run (`claude -p`, `codex exec`, `grok -p`), Codex with `--remote`, or
 
 `sideby autostart on` makes the panel start in the background when you log in, so it already shows fresh quota when you open it. It opens no window and starts no host. It first shows the file it writes (`~/Library/LaunchAgents/dev.sideby.panel.plist`) and the `launchctl` command; run it again with `--yes` to turn it on, and `sideby autostart off --yes` to undo it. `sideby autostart` says whether it is on, and whether it still points at the sideby you use; `sideby update` keeps it pointing at the new version. macOS only for now. The same switch is in the panel's settings, or ask your AI to do it.
 
+## Quota in the menu bar
+
+On macOS, run `sideby menubar on` (or turn on **Show quota in the menu bar** in the Panel's Settings) to put the sideby buddy in your menu bar. While every tool has quota left it shows just the icon; when even the best account of a tool has used 60% or more, the tool and its percent appear next to it (orange, red from 85%), so you can tell at a glance whether you can keep working. Click it to see every account's quota as small bars, with a first line that says which account is highest, start any account in your terminal, or open the panel; `sideby menubar off` hides it again. Press ⌥⌘S from anywhere to open the menu, and again to close it; `sideby config set menubar.hotkey cmd+shift+0` picks another shortcut and `off` turns it off. If you cannot see it, your menu bar is full or the icon sits under the notch: hold ⌘ and drag icons to make room, and macOS keeps the place. Turning it on first shows the file it writes (`~/Library/LaunchAgents/dev.sideby.menubar.plist`); add `--yes` to do it.
+
 Every other setting has a command too: `sideby config get` lists them with their values, and `sideby config set panel.theme dark` changes one (it shows the change first).
 
 ## Host notes

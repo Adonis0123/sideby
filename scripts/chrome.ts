@@ -213,3 +213,9 @@ export async function openChrome(work: string): Promise<Chrome> {
     },
   }
 }
+
+/**
+ * Run before the Panel loads in a fresh profile: marks the Panel's one-time offers (the menu bar item, spec §3.31) as
+ * answered, so README media show the Panel as people use it day to day.
+ */
+export const QUIET_PANEL = `try { const k = 'sideby.panel.v2'; const p = JSON.parse(localStorage.getItem(k) || '{}'); p.mbHintDone = true; localStorage.setItem(k, JSON.stringify(p)) } catch {}`

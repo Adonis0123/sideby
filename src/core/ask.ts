@@ -64,7 +64,8 @@ export async function pickTaskAccount(
 }
 
 export interface TaskFile {
-  kind: 'prompt' | 'login'
+  /** `run` starts the Host as `sideby run` does, from the Menu Bar Item (spec §3.31). */
+  kind: 'prompt' | 'login' | 'run'
   account: string
   prompt?: string
   cwd: string
@@ -238,7 +239,7 @@ export async function readTask(
       const task = JSON.parse(await handle.readFile('utf8'))
       if (
         !task ||
-        !['prompt', 'login'].includes(task.kind) ||
+        !['prompt', 'login', 'run'].includes(task.kind) ||
         typeof task.account !== 'string' ||
         typeof task.cwd !== 'string' ||
         !isAbsolute(task.cwd) ||
@@ -543,6 +544,12 @@ export async function openPromptTask(
 export async function openLoginInTerminal(rt: Runtime, ref: string) {
   const account = await rt.resolve(ref)
   return openTask(rt, { kind: 'login', account: account.ref, cwd: await taskWorkDir(rt.paths) })
+}
+
+/** Starts an Account in the Preferred Terminal as `sideby run` would, in the HOME folder (spec §3.31). */
+export async function openRunInTerminal(rt: Runtime, ref: string) {
+  const account = await rt.resolve(ref)
+  return openTask(rt, { kind: 'run', account: account.ref, cwd: rt.paths.home })
 }
 
 /**

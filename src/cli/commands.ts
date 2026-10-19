@@ -2033,6 +2033,7 @@ export async function cmdAsk(a: AskArgs, io: Io, runtime?: Runtime): Promise<num
       }
       if (task.kind === 'prompt')
         return await runAccount(rt, task.account, await taskHostArgs(rt, task), io, { aiTask: true })
+      if (task.kind === 'run') return await runAccount(rt, task.account, [], io)
       const prepared = await rt.prepareLaunch(task.account, [], 'login')
       if (prepared.notice) io.err(prepared.notice)
       return await whileRunning(rt, () => runHost(prepared))
@@ -2374,6 +2375,181 @@ export async function cmdAutostart(a: ParsedArgs, io: Io): Promise<number> {
       action === 'on'
         ? 'On: the panel starts in the background at login. Undo: sideby autostart off'
         : 'Off: sideby no longer starts at login.',
+    )
+    if (r.note) io.out(c.dim(r.note))
+  }
+  return 0
+}
+
+/** What the Menu Bar Item lists (spec §3.31): each Family's accounts in Display Order, with its Handoff ranking. */
+async function menubarFamilies(rt: Runtime) {
+  const accounts = displayOrdered(await rt.accounts(), rt)
+  const ids = [...new Set(accounts.map((x) => x.family))]
+  return Promise.all(
+    ids.map(async (id) => {
+      const f = rt.families.get(id)!
+      const plan = f.readQuota || f.fetchQuota ? await rt.handoff(id).catch(() => null) : null
+      const list = await Promise.all(
+        accounts
+          .filter((x) => x.family === id)
+          .map(async (x) => ({
+            ref: x.ref,
+            name: x.name,
+            kind: x.kind,
+            login: x.kind === 'api' ? ('not-needed' as const) : (await rt.status(x)).login,
+            quota: await rt.quota(x),
+            sameLogin: await rt.sameLogin(x),
+          })),
+      )
+      return { id, title: f.title, logo: f.logo ?? null, plan, accounts: list }
+    }),
+  )
+}
+
+/**
+ * `sideby menubar [on|off] [--yes]`, `menubar snapshot` and `menubar start <account>` (spec §3.31, ADR-0034): quota in
+ * the macOS menu bar.
+ */
+export async function cmdMenubar(a: ParsedArgs, io: Io): Promise<number> {
+  const [action, extra] = a.positionals
+  const wantJson = a.flags.has('json')
+  if (action === 'snapshot') {
+    if (extra !== undefined) throw new UsageError('usage: sideby menubar snapshot [--lang en|zh] [--json]')
+    const { menubarHotkey, menubarLang, menubarSnapshot } = await import('../menubar/snapshot.ts')
+    const rt = await createRuntime()
+    const lang = menubarLang(
+      rt.config.panel?.language,
+      (a.flags.get('lang') as string | undefined) ?? rt.env.LANG,
+    )
+    const snap = menubarSnapshot(
+      await menubarFamilies(rt),
+      rt.readContext().now,
+      lang,
+      menubarHotkey(rt.config.menubar?.hotkey),
+    )
+    if (wantJson) json(io, snap)
+    else {
+      io.out(snap.title ? `${snap.title}  ${c.dim(snap.tooltip)}` : snap.tooltip)
+      const line = (r: (typeof snap.sections)[number]['rows'][number], indent: string) =>
+        io.out(
+          `${indent}${r.label}${r.recommended ? ` (${snap.labels.recommended})` : ''}  ${c.dim(r.detail)}`,
+        )
+      for (const s of snap.sections) {
+        io.out(c.bold(s.title))
+        for (const r of s.rows) line(r, '  ')
+        if (s.more) {
+          io.out(`  ${s.more.title}`)
+          for (const r of s.more.rows) line(r, '    ')
+        }
+      }
+    }
+    return 0
+  }
+  if (action === 'start') {
+    if (!extra || a.positionals.length > 2)
+      throw new UsageError('usage: sideby menubar start <account> [--json]')
+    const { openRunInTerminal } = await import('../core/ask.ts')
+    const rt = await createRuntime()
+    const r = await openRunInTerminal(rt, extra)
+    if (wantJson) json(io, r)
+    else io.out(r.opened ? `Opened ${r.terminal} for ${r.account}.` : r.command)
+    if (!r.opened) io.err(r.detail!)
+    return r.opened ? 0 : 1
+  }
+  const { applyAutostart, autostartStatus, planAutostart, refreshAutostart } = await import(
+    '../core/autostart.ts'
+  )
+  const { MENUBAR_AGENT } = await import('../menubar/agent.ts')
+  if (extra !== undefined || (action !== undefined && action !== 'on' && action !== 'off'))
+    throw new UsageError('usage: sideby menubar [on|off] [--yes] [--json]')
+  if (a.flags.has('yes') && !action) throw new UsageError('--yes needs a change: sideby menubar on|off --yes')
+  const home = resolvePaths().home
+  const ctx = { home }
+  if (a.flags.has('refresh')) {
+    // After an update or a local build switch: point an existing agent at this sideby; never create one.
+    const r = await refreshAutostart(ctx, MENUBAR_AGENT)
+    const status = await autostartStatus(ctx, MENUBAR_AGENT)
+    if (wantJson)
+      json(io, {
+        ...status,
+        path: tilde(status.path, home),
+        changed: r.rewritten,
+        ...(r.note ? { note: r.note } : {}),
+      })
+    else io.out(r.rewritten ? 'The menu bar item now runs this sideby.' : (r.note ?? 'Nothing to change.'))
+    return 0
+  }
+  if (!action) {
+    const s = await autostartStatus(ctx, MENUBAR_AGENT)
+    if (wantJson) json(io, { ...s, path: tilde(s.path, home) })
+    else if (!s.supported) io.out('The menu bar item is only available on macOS for now.')
+    else if (s.state === 'off')
+      io.out('Menu bar item: off. Run `sideby menubar on` to show quota in the menu bar.')
+    else if (s.state === 'foreign')
+      io.out(
+        `${tilde(s.path, home)} is not sideby's, so sideby leaves it alone; remove or rename it yourself if it is not needed.`,
+      )
+    else if (s.state === 'stale')
+      io.out(
+        'Menu bar item: points to a sideby or Node that is no longer there. Run `sideby menubar on` to fix it.',
+      )
+    else {
+      io.out('Menu bar item: on.')
+      if (!s.current)
+        io.out(c.dim('It runs another sideby than this one; `sideby menubar on` points it here.'))
+      io.out(c.dim('Turn it off: sideby menubar off'))
+    }
+    return 0
+  }
+  const plan = await planAutostart(ctx, action, MENUBAR_AGENT)
+  if (plan.blocked)
+    throw new UserError(
+      plan.blocked.code === 'unsupported'
+        ? 'The menu bar item is only available on macOS for now.'
+        : plan.blocked.message,
+      { code: plan.blocked.code },
+    )
+  const shown = {
+    ...plan.status,
+    path: tilde(plan.path, home),
+    action,
+    changed: plan.changed,
+    applied: false,
+    ...(plan.content ? { content: plan.content } : {}),
+    ...(plan.programArguments ? { programArguments: plan.programArguments } : {}),
+    commands: plan.commands,
+  }
+  if (!plan.changed) {
+    if (wantJson) json(io, shown)
+    else io.out(action === 'on' ? 'Already on.' : 'Already off.')
+    return 0
+  }
+  const path = tilde(plan.path, home)
+  if (!a.flags.has('yes')) {
+    // The file holds the whole menu bar script, so only its path is printed; `--json` carries the content.
+    if (wantJson) json(io, shown)
+    else
+      io.out(
+        action === 'on'
+          ? `This adds a login item at ${path} that shows your quota in the menu bar and starts at login. Run \`sideby menubar on --yes\` to turn it on.`
+          : `This removes ${path} and hides the menu bar item. Run \`sideby menubar off --yes\` to turn it off.`,
+      )
+    return 10
+  }
+  const r = await applyAutostart(ctx, plan, MENUBAR_AGENT)
+  if (wantJson)
+    json(io, {
+      ...shown,
+      state: r.state,
+      applied: true,
+      loaded: r.loaded,
+      ...(r.note ? { note: r.note } : {}),
+    })
+  else {
+    io.out(
+      action === 'on'
+        ? 'The menu bar item is on and in your menu bar now. To turn it off later, run `sideby menubar off`.'
+        : 'The menu bar item is off. Run `sideby menubar on` to turn it on again.',
     )
     if (r.note) io.out(c.dim(r.note))
   }

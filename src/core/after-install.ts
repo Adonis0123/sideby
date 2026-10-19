@@ -78,8 +78,13 @@ export interface AfterInstallResult {
 
 async function autostartByName(m: UpdateDeps, home: string, env: Env): Promise<boolean | undefined> {
   // Never created here: only a login item `sideby autostart on` wrote is refreshed (ADR-0029).
-  if (!(await m.autostartInstalled(home).catch(() => false))) return undefined
-  return m.refreshAutostart(env).catch(() => false)
+  const panel = (await m.autostartInstalled(home).catch(() => false))
+    ? await m.refreshAutostart(env).catch(() => false)
+    : undefined
+  // The menu bar item's login item records the same Node and entry (ADR-0034); not reported, and never created here.
+  if (await m.autostartInstalled(home, 'menubar').catch(() => false))
+    await m.refreshAutostart(env, 'menubar').catch(() => false)
+  return panel
 }
 
 /** Runs the steps above in their order. Never throws, and a failed step never fails the install before it. */

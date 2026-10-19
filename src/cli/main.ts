@@ -85,6 +85,7 @@ Usage:
   sideby update [--yes]               update sideby to the newest version (shows the command first)
   sideby autostart [on|off] [--yes]   start the panel in the background at login (macOS; shows the
                                       file first)
+  sideby menubar [on|off] [--yes]     show quota in the macOS menu bar; click an account to start it
   sideby config get [<key>]           every setting with its value and meaning, or one setting
   sideby config set <key> <value> [--yes]
                                       change any setting (sideby config set panel.theme dark)
@@ -95,9 +96,9 @@ Usage:
 Options:
   --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, remote-control, handoff,
                 families, plugins, app, desktop, edit, browser, update, local, ask, terminal, key, try,
-                autostart, config)
+                autostart, menubar, config)
   -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, desktop, edit, browser,
-                autostart, config
+                autostart, menubar, config
   -v, --version show the version
 
 An <account> is <family>:<name> (claude:work) or just <name> when it is unique.
@@ -237,6 +238,27 @@ Examples:
   sideby autostart off --yes
 Exit: 0 shown, done or nothing to change; 10 a change was shown and waits for --yes; 1 refused (not macOS, sideby
 in the npx cache or a temporary folder, a file that is not sideby's) or failed; 2 malformed command line.`,
+  menubar: `sideby menubar [on|off] [--yes] [--json]
+sideby menubar snapshot [--lang en|zh] [--json]
+sideby menubar start <account> [--json]
+
+Show quota in the macOS menu bar: a gauge with one percent, how much the account sideby would pick next has used
+in your tightest tool (orange from 60%, red from 85%). Click it for every account's 5-hour and 7-day quota; click
+an account to start it in your preferred terminal. It runs the system's osascript, starts at login and has no Dock
+icon. macOS only for now (a LaunchAgent, ~/Library/LaunchAgents/dev.sideby.menubar.plist).
+
+Without on or off it says whether it is on, off, out of date or blocked by a file that is not sideby's. on and off
+show the file first; --yes does it. snapshot prints what the menu shows (the menu bar item runs it every 2 minutes).
+start opens an account in your preferred terminal, as clicking it does.
+
+Examples:
+  sideby menubar on --yes
+  sideby menubar snapshot --json
+  sideby menubar start claude:work
+  sideby menubar off --yes
+Exit: 0 shown, done or nothing to change; 10 a change was shown and waits for --yes; 1 refused (not macOS, sideby
+in the npx cache or a temporary folder, a file that is not sideby's), failed, or the terminal did not open; 2
+malformed command line.`,
   config: `sideby config get [<key>] [--json]
 sideby config set <key> <value> [--yes] [--json]
 sideby config unset <key> [--yes] [--json]
@@ -312,6 +334,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   key: { flags: ['json'], valued: ['var'] },
   try: { flags: ['json', 'yes'] },
   autostart: { flags: ['json', 'yes', 'refresh'] },
+  menubar: { flags: ['json', 'yes', 'refresh'], valued: ['lang'] },
   config: { flags: ['json', 'yes'] },
   list: { flags: ['json'] },
   pin: { flags: ['json'] },
@@ -603,6 +626,8 @@ async function dispatch(
       return await cmds.cmdLocal(parsed, io)
     case 'autostart':
       return await cmds.cmdAutostart(parsed, io)
+    case 'menubar':
+      return await cmds.cmdMenubar(parsed, io)
     case 'config':
       return await cmds.cmdConfig(parsed, io)
   }

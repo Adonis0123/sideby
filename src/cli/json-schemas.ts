@@ -15,6 +15,34 @@ const Level = Type.Union([Type.Literal('ok'), Type.Literal('warn'), Type.Literal
 const Kind = Type.Union([Type.Literal('subscription'), Type.Literal('api')])
 const Version = Type.Literal(1)
 
+/** `sideby autostart` and `sideby menubar` (ADR-0029, ADR-0034): a LaunchAgent sideby writes. */
+const loginItem = (current: string) =>
+  Type.Object({
+    schemaVersion: Version,
+    supported: Type.Boolean({
+      description: 'False on a system sideby cannot start at login yet; `reason` says so.',
+    }),
+    reason: Type.Optional(Str),
+    state: Type.Union(
+      ['off', 'on', 'stale', 'foreign'].map((k) => Type.Literal(k)),
+      {
+        description:
+          '`stale`: the Node or sideby it starts no longer exists; `foreign`: a file at that path that sideby did not write.',
+      },
+    ),
+    path: Str,
+    programArguments: Type.Optional(Type.Array(Str)),
+    current: Type.Boolean({ description: current }),
+    missing: Type.Optional(Type.Array(Str)),
+    action: Type.Optional(Type.Union([Type.Literal('on'), Type.Literal('off')])),
+    changed: Type.Optional(Type.Boolean()),
+    applied: Type.Optional(Type.Boolean()),
+    content: Type.Optional(Type.String({ description: 'The file `on` writes.' })),
+    commands: Type.Optional(Type.Array(Type.Array(Str))),
+    loaded: Type.Optional(Type.Boolean({ description: 'launchd took the change now.' })),
+    note: Type.Optional(Str),
+  })
+
 const Choice = Type.Object({ model: Type.Optional(Str), effort: Type.Optional(Str) })
 const Shown = Type.Object({
   value: Str,
@@ -413,6 +441,30 @@ const Overview = Type.Object({
       ]),
     }),
   ),
+})
+
+const MenubarLevel = Type.Union(['ok', 'warn', 'fail', 'none'].map((k) => Type.Literal(k)))
+const MenubarBar = Type.Union([
+  Type.Object({ label: Str, percent: Type.Number(), level: MenubarLevel }),
+  Type.Null(),
+])
+const MenubarRow = Type.Object({
+  ref: Str,
+  label: Str,
+  detail: Type.String({ description: 'The whole row as one line of text.' }),
+  level: MenubarLevel,
+  recommended: Type.Boolean({ description: 'The account `sideby next` would pick in this Family.' }),
+  tip: Type.String({ description: 'Hover text: when each window resets, and what a click does.' }),
+  bars: Type.Union([Type.Tuple([MenubarBar, MenubarBar]), Type.Null()], {
+    description:
+      'The shorter window, then the longer one; a single window fills the second. Null without quota.',
+  }),
+  reset: Type.String({
+    description: 'Until the fullest window resets, such as `4d 17h`; empty when nothing is used.',
+  }),
+  note: Type.String({
+    description: 'Text drawn instead of bars, such as `API key`; empty when bars are drawn.',
+  }),
 })
 
 export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
@@ -1185,30 +1237,91 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     families: Type.Array(Str),
     problems: Type.Array(Type.Object({ code: Str, message: Str, fix: Str })),
   }),
-  autostart: Type.Object({
+  autostart: loginItem('The login item starts this sideby with this Node.'),
+  menubar: loginItem('The menu bar item runs this sideby with this Node.'),
+  'menubar-snapshot': Type.Object({
     schemaVersion: Version,
-    supported: Type.Boolean({
-      description: 'False on a system sideby cannot start at login yet; `reason` says so.',
+    title: Type.String({
+      description:
+        'The words next to the icon, such as `Codex 62%`, once the tightest tool reaches 60%; empty otherwise.',
     }),
-    reason: Type.Optional(Str),
-    state: Type.Union(
-      ['off', 'on', 'stale', 'foreign'].map((k) => Type.Literal(k)),
+    level: Type.Union(['ok', 'warn', 'fail', 'none'].map((k) => Type.Literal(k))),
+    tooltip: Str,
+    updatedAt: Type.String({ description: 'When this snapshot was made (ISO).' }),
+    lang: Type.Union([Type.Literal('en'), Type.Literal('zh')]),
+    card: Type.Union(
+      [
+        Type.Object({
+          status: Str,
+          detail: Str,
+          level: Type.Union(['ok', 'warn', 'fail', 'none'].map((k) => Type.Literal(k))),
+        }),
+        Type.Null(),
+      ],
       {
         description:
-          '`stale`: the Node or sideby it starts no longer exists; `foreign`: a file at that path that sideby did not write.',
+          'The card at the top of the menu: a bold status and a line naming the account; null without quota data.',
       },
     ),
-    path: Str,
-    programArguments: Type.Optional(Type.Array(Str)),
-    current: Type.Boolean({ description: 'The login item starts this sideby with this Node.' }),
-    missing: Type.Optional(Type.Array(Str)),
-    action: Type.Optional(Type.Union([Type.Literal('on'), Type.Literal('off')])),
-    changed: Type.Optional(Type.Boolean()),
-    applied: Type.Optional(Type.Boolean()),
-    content: Type.Optional(Type.String({ description: 'The file `on` writes.' })),
-    commands: Type.Optional(Type.Array(Type.Array(Str))),
-    loaded: Type.Optional(Type.Boolean({ description: 'launchd took the change now.' })),
-    note: Type.Optional(Str),
+    hotkey: Type.Union(
+      [Type.Object({ keyCode: Type.Number(), modifiers: Type.Number(), label: Str }), Type.Null()],
+      {
+        description:
+          'The shortcut that opens the menu (config `menubar.hotkey`): a macOS key code and Carbon modifiers.',
+      },
+    ),
+    headline: Type.String({
+      description:
+        'The grey first line of the menu: which account the title belongs to; empty without quota data.',
+    }),
+    sections: Type.Array(
+      Type.Object({
+        family: Str,
+        title: Str,
+        logo: Type.Union([
+          Type.Object({
+            path: Str,
+            fillRule: Type.Optional(Type.String({ enum: ['nonzero', 'evenodd'] })),
+            color: Type.Optional(
+              Type.String({ description: 'Brand colour; without one the mark follows the text colour.' }),
+            ),
+          }),
+          Type.Null(),
+        ]),
+        columns: Type.Tuple([Type.Union([Str, Type.Null()]), Type.Union([Str, Type.Null()])], {
+          description: 'The window names over the two bar columns, such as `5h` and `7d`.',
+        }),
+        rows: Type.Array(MenubarRow, { description: 'The recommended account first, then Display Order.' }),
+        more: Type.Union([Type.Object({ title: Str, rows: Type.Array(MenubarRow) }), Type.Null()], {
+          description: 'API key and signed-out accounts behind one submenu; null when there are none.',
+        }),
+      }),
+      { description: 'One per Family with accounts, in Display Order.' },
+    ),
+    labels: Type.Record(Str, Str, { description: 'Footer words; `{n}` in `updatedMinutes` is minutes.' }),
+  }),
+  'menubar-start': Type.Object({
+    schemaVersion: Version,
+    task: Str,
+    account: Str,
+    terminal: Str,
+    opened: Type.Boolean(),
+    command: Type.String({
+      description: 'The command the terminal runs; paste it into a terminal when `opened` is false.',
+    }),
+    reason: Type.Optional(
+      Type.String({
+        enum: [
+          'not-installed',
+          'automation-denied',
+          'npx-cache',
+          'unsafe-path',
+          'failed',
+          'unsupported-platform',
+        ],
+      }),
+    ),
+    detail: Type.Optional(Type.String({ description: 'What to do next, for a person.' })),
   }),
   'config-get': Type.Object({
     schemaVersion: Version,

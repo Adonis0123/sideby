@@ -110,11 +110,17 @@ export interface UpdateDeps {
   appInstalled: (home: string, env: Env) => Promise<boolean>
   /** Runs `sideby app install --json` from the newly installed code and waits; false when it failed. */
   refreshApp: (env: Env) => Promise<boolean>
-  /** Whether `sideby autostart on` put a login item in this home (its file carries the sideby marker). */
-  autostartInstalled: (home: string) => Promise<boolean>
-  /** Runs `sideby autostart --refresh --json` from the newly installed code and waits; false when it failed. */
-  refreshAutostart: (env: Env) => Promise<boolean>
+  /**
+   * Whether `sideby autostart on` (or `sideby menubar on`, ADR-0034) put its login item in this home (its file carries
+   * the sideby marker).
+   */
+  autostartInstalled: (home: string, command?: LoginItemCommand) => Promise<boolean>
+  /** Runs `sideby <command> --refresh --json` from the newly installed code and waits; false when it failed. */
+  refreshAutostart: (env: Env, command?: LoginItemCommand) => Promise<boolean>
 }
+
+/** The commands whose login item records the sideby it starts. */
+export type LoginItemCommand = 'autostart' | 'menubar'
 
 /** The folder of the sideby package this module belongs to: two levels above src/, three above dist/src/. */
 async function ownPackageDir(): Promise<string> {
@@ -197,14 +203,16 @@ const realDeps: UpdateDeps = {
       child.once('error', () => resolve(false))
       child.once('close', (code) => resolve(code === 0))
     }),
-  autostartInstalled: async (home) => {
+  autostartInstalled: async (home, command = 'autostart') => {
     const { autostartInstalled } = await import('./autostart.ts')
-    return autostartInstalled(home)
+    if (command === 'autostart') return autostartInstalled(home)
+    const { MENUBAR_AGENT } = await import('../menubar/agent.ts')
+    return autostartInstalled(home, MENUBAR_AGENT)
   },
-  refreshAutostart: (env) =>
+  refreshAutostart: (env, command = 'autostart') =>
     new Promise((resolve) => {
       // By name, like refreshApp: the new code records its own Node and entry; it never creates a login item.
-      const child = spawn('sideby', ['autostart', '--refresh', '--json'], {
+      const child = spawn('sideby', [command, '--refresh', '--json'], {
         env: env as NodeJS.ProcessEnv,
         stdio: ['ignore', 'pipe', 'ignore'],
         timeout: 60_000,

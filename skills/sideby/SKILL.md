@@ -45,6 +45,7 @@ Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique
 | Turn quota checks on or off, or refresh fetched quota | `sideby quota check <family> on|off --json`, `sideby quota [family] --refresh --json` | `references/quota.md` |
 | Set the model, effort or Remote Control | `sideby model <ref> --json`, `sideby remote-control --json` | `references/panel.md` |
 | Start sideby at login ("开机启动", "start the panel when I log in") | `sideby autostart --json`, `sideby autostart on --json` (exit 10 first) | `references/panel.md` |
+| Show quota in the macOS menu bar ("状态栏显示额度", "menu bar") | `sideby menubar --json`, `sideby menubar on --json` (exit 10 first), `sideby menubar snapshot --json` | `references/panel.md` |
 | Change the Panel's theme or language, or any other setting ("改成深色", "change any setting") | `sideby config get --json`, `sideby config set <key> <value> --json` (exit 10 first) | `references/panel.md` |
 | Turn Auto Update on or off | `sideby update --auto on|off --json` | `references/update.md` |
 | Switch between a local build of sideby and the release ("切换到正式版", "切回 dev 版本") | `sideby local --json`, `sideby local on|off --json` (exits 10 first) | `references/update.md` |

@@ -73,6 +73,7 @@ cc-switch's docs describe that switch: it writes the live settings file ([README
 | You want to | Run | Guide |
 |---|---|---|
 | Hand a task to your own AI from the panel: set up an account, fix a problem, support a new tool | **Let AI do it** in the panel, or `sideby ask` | [Let AI do it](docs/guide/panel.md#let-ai-do-it) |
+| See quota at a glance in the macOS menu bar | **Settings › Startup** in the panel, or `sideby menubar on` | [Quota in the menu bar](docs/guide/usage.md#quota-in-the-menu-bar) |
 | Have the panel ready in the background whenever you log in | **Settings › Startup** in the panel, or `sideby autostart on` | [Start at login](docs/guide/usage.md#start-at-login) |
 | Add an API key account (DeepSeek, a gateway, …) | `sideby new claude deepseek --api` | [API accounts](docs/guide/usage.md#api-accounts) |
 | Find and fix config drift between accounts | `sideby doctor --fix` | [Doctor](docs/guide/usage.md#doctor) |

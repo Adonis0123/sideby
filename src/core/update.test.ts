@@ -69,10 +69,12 @@ interface Machine {
   restarts: number[]
   appRefreshes: number
   autostartRefreshes: number
+  /** The commands whose login item was refreshed, in order. */
+  loginItems: string[]
 }
 
 function machine(h: FakeHome, over: Partial<UpdateDeps> & { latest?: string | Error } = {}): Machine {
-  const m: Machine = { execs: [], restarts: [], appRefreshes: 0, autostartRefreshes: 0 }
+  const m: Machine = { execs: [], restarts: [], appRefreshes: 0, autostartRefreshes: 0, loginItems: [] }
   const reg = registry(over.latest ?? NEXT_MINOR)
   unbind = bindUpdateDeps({
     fetch: reg.fetch,
@@ -92,8 +94,9 @@ function machine(h: FakeHome, over: Partial<UpdateDeps> & { latest?: string | Er
       m.appRefreshes++
       return true
     },
-    refreshAutostart: async () => {
+    refreshAutostart: async (_env, command = 'autostart') => {
       m.autostartRefreshes++
+      m.loginItems.push(command)
       return true
     },
     ...over,
@@ -503,6 +506,15 @@ describe('Update and Auto Update', () => {
       )
       const r = await applyUpdate(resolvePaths(h.env), plan, h.env)
       assert.deepEqual([r.refreshedAutostart, m.autostartRefreshes], [true, 1])
+      // The menu bar item's login item (spec §3.31) is refreshed too, only where it exists, and not reported.
+      await h.write(
+        'Library/LaunchAgents/dev.sideby.menubar.plist',
+        '<!-- Written by `sideby menubar`: … -->\n',
+        0o644,
+      )
+      const both = await applyUpdate(resolvePaths(h.env), plan, h.env)
+      assert.equal(both.refreshedAutostart, true)
+      assert.deepEqual(m.loginItems, ['autostart', 'autostart', 'menubar'])
     })
   })
   it('keeps a successful Update when refreshing the desktop app fails', async () => {

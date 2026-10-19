@@ -315,6 +315,10 @@ headless 运行（`claude -p`、`codex exec`、`grok -p`）、带 `--remote` 的
 
 `sideby autostart on` 让面板在你登录后自动在后台启动，打开时就是最新额度。它不打开窗口，也不启动任何宿主。它先显示要写的文件（`~/Library/LaunchAgents/dev.sideby.panel.plist`）和 `launchctl` 命令；加 `--yes` 再跑一次就开启，`sideby autostart off --yes` 撤销。`sideby autostart` 告诉你是否开着、是否还指向你正在用的 sideby；`sideby update` 会让它跟着指向新版本。目前只支持 macOS。面板设置里有同一个开关，也可以让你的 AI 帮你开。
 
+## 状态栏额度
+
+在 macOS 上运行 `sideby menubar on`（或在面板「设置」里打开**在状态栏显示额度**），状态栏就会多一个 sideby 小人。各工具额度都充足时只显示小人；某个工具连最合适的账号都用到 60% 以上时，旁边出现工具名和百分比（橙色，85% 起变红），不用打开面板也能一眼看出还能不能继续干活。点开它，第一行写着用得最多的是哪个账号，下面是每个账号的额度条，点任一账号直接在终端启动，或打开面板；运行 `sideby menubar off` 即可隐藏。在任何地方按 ⌥⌘S 打开菜单，再按一次关上；`sideby config set menubar.hotkey cmd+shift+0` 可以换成别的快捷键，设成 `off` 就关闭。看不到的话，是状态栏满了或图标在刘海后面：按住 ⌘ 拖动图标腾出位置，macOS 会记住位置。开启前先显示要写的文件（`~/Library/LaunchAgents/dev.sideby.menubar.plist`），加 `--yes` 才生效。
+
 其他设置也都有命令：`sideby config get` 列出全部设置和当前值，`sideby config set panel.theme dark` 改一项（先显示改动）。
 
 ## 宿主说明

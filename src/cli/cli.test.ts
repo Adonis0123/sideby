@@ -1586,6 +1586,37 @@ describe('autostart (spec §3.29)', () => {
   })
 })
 
+describe('menubar (spec §3.31)', () => {
+  it('reports its state, shows the change before --yes, and prints what the menu shows', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}')
+      const status = checkSchema('menubar', (await sideby(h, ['menubar', '--json'])).out)
+      assert.deepEqual([status.state, status.supported], ['off', process.platform === 'darwin'])
+      const shown = await sideby(h, ['menubar', 'on', '--json'])
+      if (process.platform === 'darwin') {
+        assert.equal(shown.code, 10)
+        const plan = checkSchema('menubar', shown.out)
+        assert.equal((plan.programArguments as string[])[0], '/usr/bin/osascript')
+        assert.match((await sideby(h, ['menubar', 'on'])).out, /dev\.sideby\.menubar\.plist.*--yes/s)
+      } else assert.equal(shown.code, 1)
+      // Nothing is written before --yes.
+      await assert.rejects(readFile(h.path('Library/LaunchAgents/dev.sideby.menubar.plist')))
+      const snap = checkSchema(
+        'menubar-snapshot',
+        (await sideby(h, ['menubar', 'snapshot', '--json', '--lang', 'zh'])).out,
+      ) as { lang: string; sections: { rows: { ref: string }[] }[] }
+      assert.equal(snap.lang, 'zh')
+      assert.deepEqual(
+        snap.sections.map((x) => x.rows.map((r) => r.ref)),
+        [['claude:main']],
+      )
+      assert.equal((await sideby(h, ['menubar', 'maybe'])).code, 2)
+      assert.equal((await sideby(h, ['menubar', '--yes'])).code, 2)
+      assert.equal((await sideby(h, ['menubar', 'start'])).code, 2)
+    })
+  })
+})
+
 describe('_notice on --json outputs (spec §3.23)', () => {
   it('carries a newer version from the cache and an outdated skill, on results and errors, and not when turned off', async () => {
     await withFakeHome(async (h) => {

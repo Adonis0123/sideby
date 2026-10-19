@@ -28,6 +28,8 @@ import {
   type AutostartStatus,
   applyAutostart,
   autostartStatus,
+  type LoginAgent,
+  PANEL_AGENT,
   planAutostart,
 } from '../core/autostart.ts'
 import { FAVICON_SVG, ICON_SVG } from '../core/brand-mark.ts'
@@ -65,6 +67,8 @@ import type { TuneApplyPlan } from '../core/tuning-apply.ts'
 import * as update from '../core/update.ts'
 import { buildId, localBuild, packageVersion } from '../core/version.ts'
 import { HOOK_FAMILIES } from '../handoff/hook.ts'
+import { MENUBAR_AGENT } from '../menubar/agent.ts'
+import { MENUBAR_SCRIPT } from '../menubar/script.ts'
 import type { AccountStatus, DoctorHistory, FamilyInfo, QuotaCheckInfo, Runtime } from '../runtime.ts'
 import type { Account, FamilyDef, FamilyLogo, QuotaResult, QuotaSetupPlan, UsageResult } from '../types.ts'
 import { renderPage } from './page.ts'
@@ -285,14 +289,18 @@ export function bindPanelAutostart(ctx: Partial<AutostartContext>): () => void {
     autostartOverride = before
   }
 }
-const autostartCtx = (rt: Runtime): AutostartContext => ({ home: rt.paths.home, ...autostartOverride })
+const autostartCtx = (rt: Runtime): AutostartContext => ({
+  home: rt.paths.home,
+  env: rt.env,
+  ...autostartOverride,
+})
 
 /**
  * The start-at-login state as the page shows it (spec §3.29): the agent's path and what it starts, with the home
  * folder as `~`, and nothing else of the machine.
  */
 export function autostartView(s: AutostartStatus, home: string) {
-  const t = (p: string) => tildify(p, home)
+  const t = shownArg(home)
   return {
     supported: s.supported,
     ...(s.reason ? { reason: s.reason } : {}),
@@ -304,12 +312,16 @@ export function autostartView(s: AutostartStatus, home: string) {
   }
 }
 
+/** A program argument as the page shows it: the home folder as `~`, and the menu bar script by name only. */
+const shownArg = (home: string) => (a: string) =>
+  a === MENUBAR_SCRIPT ? '(menu bar script)' : tildify(a, home)
+
 function autostartPlanView(p: AutostartPlan, home: string) {
   return {
     action: p.action,
     changed: p.changed,
     path: tildify(p.path, home),
-    ...(p.programArguments ? { programArguments: p.programArguments.map((a) => tildify(a, home)) } : {}),
+    ...(p.programArguments ? { programArguments: p.programArguments.map(shownArg(home)) } : {}),
     ...(p.blocked ? { blocked: p.blocked } : {}),
     status: autostartView(p.status, home),
   }
@@ -797,6 +809,34 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
     queued?: boolean
     run(body: Record<string, unknown>): Promise<unknown>
   }
+  /** The switch of one LaunchAgent sideby writes: the Panel's login item or the Menu Bar Item. */
+  const loginItemRoute = (agent: LoginAgent): Route => ({
+    writes: (body) => body.confirm === true,
+    async run(body) {
+      if (typeof body.on !== 'boolean') throw new HttpError(400, '"on" must be true or false')
+      const rt = await getRuntime()
+      const ctx = autostartCtx(rt)
+      const home = rt.paths.home
+      const plan = await planAutostart(ctx, body.on ? 'on' : 'off', agent)
+      const shown = autostartPlanView(plan, home)
+      if (!optBool(body, 'confirm') || plan.blocked) return { plan: shown, applied: false }
+      const saw = body.programArguments
+      const want = shown.programArguments ?? []
+      if (
+        plan.action === 'on' &&
+        (!Array.isArray(saw) || saw.length !== want.length || saw.some((x, i) => x !== want[i]))
+      )
+        return { plan: shown, applied: false, changedSince: true }
+      const r = await applyAutostart(ctx, plan, agent)
+      return {
+        applied: true,
+        changed: r.changed,
+        loaded: r.loaded,
+        ...(r.note ? { note: r.note.split(home).join('~') } : {}),
+        status: autostartView(await autostartStatus(ctx, agent), home),
+      }
+    },
+  })
   const routes: Record<string, Route> = {
     // AI Tasks (spec §3.28, ADR-0027). The prompt and the account it would use, read only: for the confirm area,
     // the copy fallback and the read-only Panel.
@@ -1292,35 +1332,11 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return { changed: r.changed, panel: r.after ?? {} }
       },
     },
-    // Start at login (spec §3.29, ADR-0029). Without `confirm` the plan: the file and what it starts, nothing is
-    // written. With it, a fresh plan runs only while it starts what the person saw (`programArguments`).
-    '/api/autostart': {
-      writes: (body) => body.confirm === true,
-      async run(body) {
-        if (typeof body.on !== 'boolean') throw new HttpError(400, '"on" must be true or false')
-        const rt = await getRuntime()
-        const ctx = autostartCtx(rt)
-        const home = rt.paths.home
-        const plan = await planAutostart(ctx, body.on ? 'on' : 'off')
-        const shown = autostartPlanView(plan, home)
-        if (!optBool(body, 'confirm') || plan.blocked) return { plan: shown, applied: false }
-        const saw = body.programArguments
-        const want = shown.programArguments ?? []
-        if (
-          plan.action === 'on' &&
-          (!Array.isArray(saw) || saw.length !== want.length || saw.some((x, i) => x !== want[i]))
-        )
-          return { plan: shown, applied: false, changedSince: true }
-        const r = await applyAutostart(ctx, plan)
-        return {
-          applied: true,
-          changed: r.changed,
-          loaded: r.loaded,
-          ...(r.note ? { note: r.note.split(home).join('~') } : {}),
-          status: autostartView(await autostartStatus(ctx), home),
-        }
-      },
-    },
+    // Start at login (spec §3.29, ADR-0029) and the Menu Bar Item (spec §3.31, ADR-0034). Without `confirm` the plan:
+    // the file and what it starts, nothing is written. With it, a fresh plan runs only while it starts what the person
+    // saw (`programArguments`).
+    '/api/autostart': loginItemRoute(PANEL_AGENT),
+    '/api/menubar': loginItemRoute(MENUBAR_AGENT),
     // Undo for the quota setup above; the Runtime turns a teardown that throws into `{ ok: false, message }`.
     '/api/quota/teardown': {
       async run(body) {
@@ -1444,9 +1460,10 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           return true
         }
         // Start at login (spec §3.29): its state only; turning it on or off is the POST of the same path.
-        if (sub === '/api/autostart') {
+        if (sub === '/api/autostart' || sub === '/api/menubar') {
           const rt = await getRuntime()
-          send(res, 200, autostartView(await autostartStatus(autostartCtx(rt)), rt.paths.home))
+          const agent = sub === '/api/menubar' ? MENUBAR_AGENT : PANEL_AGENT
+          send(res, 200, autostartView(await autostartStatus(autostartCtx(rt), agent), rt.paths.home))
           return true
         }
         if (sub === '/api/state') {

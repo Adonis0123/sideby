@@ -103,10 +103,11 @@ async function refreshLoginItem(entry: string): Promise<void> {
   const { resolvePaths } = await import('../src/core/paths.ts')
   const real = await realpath(entry).catch(() => null)
   if (!real) return
-  const r = await refreshAutostart({
-    home: resolvePaths().home,
-    launcher: { node: process.execPath, entry: real },
-  })
+  const ctx = { home: resolvePaths().home, launcher: { node: process.execPath, entry: real } }
+  const { MENUBAR_AGENT } = await import('../src/menubar/agent.ts')
+  const m = await refreshAutostart(ctx, MENUBAR_AGENT)
+  if (m.rewritten) console.log('The menu bar item now runs it too.')
+  const r = await refreshAutostart(ctx)
   if (r.rewritten) console.log('The login item now starts it too.')
   else if (r.note && (r.state === 'on' || r.state === 'stale'))
     console.log(`The login item was not changed: ${r.note}`)

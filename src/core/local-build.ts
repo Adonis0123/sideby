@@ -5,6 +5,7 @@
 import { lstat, mkdir, readFile, readlink, realpath, rename, rm, symlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
+import { MENUBAR_AGENT } from '../menubar/agent.ts'
 import type { Env } from '../types.ts'
 import { afterInstall } from './after-install.ts'
 import { type AutostartContext, refreshAutostart } from './autostart.ts'
@@ -191,11 +192,10 @@ async function refreshLoginItem(
 ): Promise<boolean | undefined> {
   const entry = await realpath(join(globalPkg(d), BIN)).catch(() => null)
   if (!entry) return undefined
-  const r = await refreshAutostart({
-    home: paths.home,
-    launcher: { node: process.execPath, entry },
-    ...ctx,
-  })
+  const agentCtx = { home: paths.home, launcher: { node: process.execPath, entry }, ...ctx }
+  // The menu bar item (ADR-0034) records the same Node and entry; it is reported nowhere, like a failure here.
+  await refreshAutostart(agentCtx, MENUBAR_AGENT)
+  const r = await refreshAutostart(agentCtx)
   return r.state === 'on' || r.state === 'stale' ? r.rewritten : undefined
 }
 
