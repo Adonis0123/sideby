@@ -420,6 +420,31 @@ describe('signals', () => {
     })
   })
 
+  // The Host may run before the line after spawn(): a signal then must already meet sideby's handlers, or its
+  // default action ends sideby (exit by signal, seen on slow CI runners). spawn() reads the env while starting the
+  // Host, so the env records how many handlers were in place at that moment.
+  it('installs its signal handlers before the host starts', async () => {
+    await withFakeHome(async (h) => {
+      await codexMain(h)
+      await fakeHost(h, 'codex')
+      const { runHost } = await import('../core/launch.ts')
+      const { createRuntime } = await import('../runtime.ts')
+      const rt = await createRuntime({ env: h.env })
+      const prepared = await rt.prepareLaunch('codex:main', [], 'run')
+      const before = { term: process.listenerCount('SIGTERM'), int: process.listenerCount('SIGINT') }
+      let atSpawn: { term: number; int: number } | undefined
+      const env = new Proxy(prepared.env, {
+        ownKeys(t) {
+          atSpawn ??= { term: process.listenerCount('SIGTERM'), int: process.listenerCount('SIGINT') }
+          return Reflect.ownKeys(t)
+        },
+      })
+      assert.equal(await runHost({ ...prepared, env }), 0)
+      assert.deepEqual(atSpawn, { term: before.term + 1, int: before.int + 1 })
+      assert.equal(process.listenerCount('SIGTERM'), before.term)
+    })
+  })
+
   it('forwards SIGTERM sent only to sideby, exactly once', async () => {
     await withFakeHome(async (h) => {
       const { child, exited } = await startSleeping(h)

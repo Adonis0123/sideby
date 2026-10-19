@@ -194,26 +194,36 @@ export function runHost(p: HostLaunch): Promise<number> {
 export function spawnHost(p: HostLaunch): { child: ChildProcess; exited: Promise<number> } {
   // OSC 0 sets the terminal's tab and window title; only on a terminal, never into a pipe.
   if (p.title && process.stdout.isTTY) process.stdout.write(`\x1b]0;${p.title}\x07`)
-  const child = spawn(p.bin, p.args, { stdio: 'inherit', env: p.env as NodeJS.ProcessEnv })
+  // The handlers go in before the Host exists: once spawn() returns, the Host may already be running and a signal
+  // can arrive before the next line, and with the default action it would end sideby instead of reaching the Host.
+  // A handler only runs from the event loop, so `child` is always set by then.
+  let child: ChildProcess | undefined
+  const ignore = () => {}
+  const forwarded = new Set<NodeJS.Signals>()
+  const forward = (sig: NodeJS.Signals) => () => {
+    if (!child || forwarded.has(sig) || child.exitCode !== null || child.signalCode !== null) return
+    forwarded.add(sig)
+    child.kill(sig)
+  }
+  const handlers: [NodeJS.Signals, () => void][] = [
+    ['SIGINT', ignore],
+    ['SIGQUIT', ignore],
+    ['SIGTERM', forward('SIGTERM')],
+    ['SIGHUP', forward('SIGHUP')],
+  ]
+  const cleanup = () => {
+    for (const [s, h] of handlers) process.off(s, h)
+  }
+  for (const [s, h] of handlers) process.on(s, h)
+  try {
+    child = spawn(p.bin, p.args, { stdio: 'inherit', env: p.env as NodeJS.ProcessEnv })
+  } catch (err) {
+    cleanup()
+    throw err
+  }
+  const host = child
   const exited = new Promise<number>((resolve) => {
-    const ignore = () => {}
-    const forwarded = new Set<NodeJS.Signals>()
-    const forward = (sig: NodeJS.Signals) => () => {
-      if (forwarded.has(sig) || child.exitCode !== null || child.signalCode !== null) return
-      forwarded.add(sig)
-      child.kill(sig)
-    }
-    const handlers: [NodeJS.Signals, () => void][] = [
-      ['SIGINT', ignore],
-      ['SIGQUIT', ignore],
-      ['SIGTERM', forward('SIGTERM')],
-      ['SIGHUP', forward('SIGHUP')],
-    ]
-    for (const [s, h] of handlers) process.on(s, h)
-    const cleanup = () => {
-      for (const [s, h] of handlers) process.off(s, h)
-    }
-    child.once('error', (err: NodeJS.ErrnoException) => {
+    host.once('error', (err: NodeJS.ErrnoException) => {
       cleanup()
       const msg =
         err.code === 'ENOENT'
@@ -222,11 +232,11 @@ export function spawnHost(p: HostLaunch): { child: ChildProcess; exited: Promise
       process.stderr.write(`sideby: ${msg}\n`)
       resolve(1)
     })
-    child.once('exit', (code, signal) => {
+    host.once('exit', (code, signal) => {
       cleanup()
       if (signal) resolve(128 + (osConstants.signals[signal] ?? 0))
       else resolve(code ?? 1)
     })
   })
-  return { child, exited }
+  return { child: host, exited }
 }
