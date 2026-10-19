@@ -760,7 +760,7 @@ export async function createRuntime(
         // of that Family keeps its skill warning.
         skillVersion: packageVersion(),
         // Desktop App data folders sideby made for an Account (spec §3.20).
-        extraChecks: (a: Account) => checkAppData(loaded.plugins, paths.home, a),
+        extraChecks: (a: Account) => checkAppData(loaded.plugins, paths.home, a, Boolean(o.force)),
       }
       // Auto Handoff warnings (spec §3.17) join the general Findings; they never fail Doctor.
       const all = await accounts()
