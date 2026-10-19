@@ -10,6 +10,8 @@ import { checkTrusted } from './loader.ts'
 
 export const SCRIPT_NAME = 'sideby-before-launch'
 export const SCRIPT_TIMEOUT_MS = 25_000
+/** How long to keep reading stderr after the script exits, for its last lines. */
+const STDERR_DRAIN_MS = 200
 const TAIL_LINES = 20
 
 function tail(text: string): string {
@@ -56,9 +58,19 @@ export const accountScript: Plugin = {
         })
         child.on('exit', (c) => {
           clearTimeout(timer)
-          // A background process the script started (a gateway, say) inherits stderr; stop reading it.
-          child.stderr.destroy()
-          resolve({ code: c, stderr: err, timedOut: false })
+          // What the script wrote last may still be on its way: read until stderr ends, but not for longer than
+          // STDERR_DRAIN_MS, since a background process the script started (a gateway, say) inherits stderr and keeps
+          // it open; then stop reading it.
+          const finish = () => {
+            child.stderr.destroy()
+            resolve({ code: c, stderr: err, timedOut: false })
+          }
+          if (child.stderr.readableEnded) return finish()
+          const drain = setTimeout(finish, STDERR_DRAIN_MS)
+          child.stderr.once('end', () => {
+            clearTimeout(drain)
+            finish()
+          })
         })
       })
       if (timedOut) throw api.abort(`${SCRIPT_NAME} did not finish within ${SCRIPT_TIMEOUT_MS / 1000}s`)

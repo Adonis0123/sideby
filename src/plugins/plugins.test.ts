@@ -117,6 +117,15 @@ describe('account-script', () => {
     })
   })
 
+  it('does not wait for a background process the script left holding stderr', async () => {
+    await withFakeHome(async (h) => {
+      const rt = await prepared(h, '#!/bin/sh\nsleep 3 &\necho started >&2\nexit 0\n')
+      const t0 = Date.now()
+      await rt.prepareLaunch('demo:work', [], 'run')
+      assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`)
+    })
+  })
+
   it('refuses a script others can write or that is not executable', async () => {
     await withFakeHome(async (h) => {
       const rt = await prepared(h, '#!/bin/sh\nexit 0\n', 0o722)
