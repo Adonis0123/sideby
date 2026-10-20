@@ -47,6 +47,8 @@ Avoid: *profile* on its own (Codex already uses it for a config layer that does 
 - **Live Session**: a Session whose Host process is still running. sideby finds it from the Host's own files; where it can only guess (the newest Session of an Account), it says so.
 - **Session Label**: how a Session is shown wherever the user looks (tab title, status line, lists): the Account name, the Host's own title for the Session, and a short id, as in `cc002 · knip cleanup · 61230c3d`. sideby never invents the title.
 - **Session Reference**: one sentence that points another AI at a Session (its Account, Label and where its record is), ready to paste. It is what a copy button copies first.
+- **Run**: a piece of work a local orchestrator (such as the `agent-dispatch` skill) splits across several Sessions, with a Run Board: a static HTML report file in the orchestrator's state folder. sideby never starts or changes one; it only shows which Run a Live Session works for.
+- **Session Index**: the optional file an orchestrator publishes (`agent-dispatch/sessions.json` in its state folder) that maps Session ids to Runs. sideby reads it to show a Run Link: a chip on a Session's row that opens the Run Board (ADR-0041).
 - **Message**: text, and optionally screenshots, that one Session (or the user) sends to a Live Session with `sideby send`. It is kept as a file in sideby's state folder before any delivery, so it is never lost; it is then delivered through the Host's own channel (Claude Code's messages between sessions), read once its id shows in the target's record, or handed to the user as one line to paste.
 
 Avoid: *tab* for a Session (one tab can run several Sessions over time), *inbox* (Claude Code's own word for its native delivery).

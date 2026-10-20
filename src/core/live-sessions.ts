@@ -7,6 +7,7 @@ import type { Account } from '../types.ts'
 import { aliasesByAccount } from './accounts.ts'
 import { aliasArgs, aliasRefs } from './config.ts'
 import { type LiveSessionDeps, processView, systemDeps } from './live-sessions-procs.ts'
+import type { SessionRun } from './run-link.ts'
 
 export type LiveSessionStatus = 'needs-you' | 'busy' | 'idle' | 'unknown'
 
@@ -34,6 +35,8 @@ export interface LiveSession {
   resumeCommand: string
   /** The Session Reference in English, as `sessionCopyText(s, 'reference', 'en')` gives it. */
   reference: string
+  /** The Run of a local orchestrator the Session works for (spec §3.32 step 2b); set by `withRuns`, not the readers. */
+  run?: SessionRun
 }
 
 export interface LiveSessionsResult {

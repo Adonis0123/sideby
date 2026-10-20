@@ -1,6 +1,6 @@
 # Live Sessions: which session each account runs, handing one to another AI, and telling it something
 
-For "which session is cc002 running", "cc002 现在在干嘛", "哪个会话在等我", "copy cc002's session id for another AI", "复制 cc002 的会话给另一个 AI", "告诉 cc002 ……", "把这张截图发给 cc003", "send this to the codex session".
+For "which session is cc002 running", "cc002 现在在干嘛", "cc002 在哪个任务里", "哪个会话在等我", "copy cc002's session id for another AI", "复制 cc002 的会话给另一个 AI", "告诉 cc002 ……", "把这张截图发给 cc003", "send this to the codex session".
 
 ## See them
 
@@ -10,6 +10,8 @@ Run `sideby sessions --json` (or `sideby sessions <account|family> --json` for o
 - `status`: `needs-you` (it waits for a permission or an answer: tell the user first), `busy`, `idle`, or `unknown` where the host does not say. Sessions that need the user come first.
 - `cwd`, `startedAt`, `updatedAt`, `transcript` (the path of its record), `resumeCommand`.
 - `guessed: true` means sideby could not tie a running Codex or pi program to a session and shows that account's newest session instead. Say "probably" when you report it.
+
+- `run` (only some sessions): the Run a local orchestrator such as the `agent-dispatch` skill gave this session, `{ title, laneTitle, role, board, url, others }`. For "cc002 在哪个任务里" / "which run is cc002 working on", answer with `title` (and `laneTitle`, the part it does; `others` lists further Runs it also works for) and give `board`, the Run Board's file on this computer; the user opens it in a browser, or from the chip on the Panel's Sessions page. No `run` means no orchestrator claims the session, not an error.
 
 `problems` lists accounts sideby could not read and what to do; the rest of the list is still right. An empty list means nothing is running: the user starts an account with `sideby run <account>`.
 

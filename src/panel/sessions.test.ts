@@ -159,6 +159,111 @@ describe('panel sessions endpoint', () => {
     })
   })
 
+  it('adds the Run a Session works for and opens its board from the index only, never in a read-only Panel', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const sid = '61230c3d-0000-4000-8000-000000000001'
+      const board = await h.write('.local/state/agent-dispatch/boards/r1.html', '<!doctype html>\n', 0o600)
+      await h.write(
+        '.local/state/agent-dispatch/sessions.json',
+        JSON.stringify({
+          schemaVersion: 1,
+          revision: 3,
+          generatedAt: '2026-10-20T07:00:00Z',
+          sessions: {
+            [sid]: {
+              entries: [
+                {
+                  run: 'r1',
+                  runTitle: 'Run board',
+                  board,
+                  lane: 'D2',
+                  laneTitle: 'sideby link',
+                  role: 'write',
+                  url: `file://${board}#lane-D2`,
+                },
+              ],
+            },
+          },
+        }),
+      )
+      const calls: string[][] = []
+      const exec = async (cmd: string, args: readonly string[]) => {
+        calls.push([cmd, ...args])
+        return { code: 0, stdout: '', stderr: '' }
+      }
+      const runtime = () =>
+        createRuntime({
+          env: h.env,
+          builtins: [asBuiltin(demoPlugin(demoFamily()))],
+          desktop: { platform: 'darwin', exec },
+        })
+      const home = h.env.HOME!
+      const list = async () => ({
+        sessions: [session(home), session(home, { sessionId: 'abc' })],
+        problems: [],
+      })
+      const panel = (readOnly: boolean) =>
+        serve((p) =>
+          createPanelHandler({
+            runtime,
+            allowedHosts: [`127.0.0.1:${p}`],
+            readOnly,
+            ...{ [LIVE_SESSIONS_SOURCE]: { list, copyText: fakeCopy, orca: noOrca } },
+          }),
+        )
+      const ro = await panel(true)
+      try {
+        const good = { origin: `http://127.0.0.1:${ro.port}`, 'x-sideby-token': ro.handler.token }
+        const r = await request(ro.port, '/api/sessions', good)
+        assert.equal(r.status, 200, JSON.stringify(r.body))
+        const sessions = r.body.sessions as PanelSession[]
+        assert.deepEqual(sessions[0]!.run, {
+          title: 'Run board',
+          laneTitle: 'sideby link',
+          role: 'write',
+          board: '~/.local/state/agent-dispatch/boards/r1.html',
+          url: `file://${board}#lane-D2`,
+        })
+        assert.equal(sessions[1]!.run, undefined)
+        // Opening starts a program: a read-only Panel refuses it.
+        assert.equal(
+          (await request(ro.port, '/api/sessions/run', good, 'POST', { sessionId: sid })).status,
+          403,
+        )
+        assert.equal((await request(ro.port, '/api/sessions', { origin: good.origin })).status, 403)
+      } finally {
+        await close(ro.server)
+      }
+      const rw = await panel(false)
+      try {
+        const good = { origin: `http://127.0.0.1:${rw.port}`, 'x-sideby-token': rw.handler.token }
+        // A path from the page is ignored: the board comes from the index.
+        const r = await request(rw.port, '/api/sessions/run', good, 'POST', {
+          sessionId: sid,
+          board: '/etc/hosts',
+        })
+        assert.equal(r.status, 200, JSON.stringify(r.body))
+        assert.deepEqual(calls, [['/usr/bin/open', board]])
+        const none = await request(rw.port, '/api/sessions/run', good, 'POST', { sessionId: 'abc' })
+        assert.notEqual(none.status, 200)
+        assert.equal(none.body.code, 'no-run')
+        assert.equal((await request(rw.port, '/api/sessions/run', good, 'POST', {})).status, 400)
+        assert.equal(
+          (
+            await request(rw.port, '/api/sessions/run', { ...good, 'x-sideby-token': 'nope' }, 'POST', {
+              sessionId: sid,
+            })
+          ).status,
+          403,
+        )
+        assert.equal(calls.length, 1)
+      } finally {
+        await close(rw.server)
+      }
+    })
+  })
+
   it('answers a failed read with an error the page can show', async () => {
     await withFakeHome(async (h) => {
       await seedDemoMain(h.write)

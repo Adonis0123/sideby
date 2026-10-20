@@ -76,6 +76,7 @@ import { listMessages, type MessageReceipt, sendMessage } from '../core/messages
 import { type AccountModel, accountModel, setAccountModel } from '../core/model-choice.ts'
 import { tildify } from '../core/paths.ts'
 import type { RemoteControlGroup } from '../core/remote-control.ts'
+import { openRunBoard, withRuns } from '../core/run-link.ts'
 import { SECRET_VAR_NAME, secretVarFor, setSecret } from '../core/secret-file.ts'
 import { SKILL_INSTALL } from '../core/skill-check.ts'
 import { launchArgs, TERMINALS } from '../core/terminal.ts'
@@ -1268,14 +1269,30 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       async run(body) {
         const lang = body.lang === 'zh' ? 'zh' : 'en'
         const rt = await getRuntime()
-        const { sessions, problems } = await liveSessions(rt)
-        const tabs = await orcaTabs(orcaOf(rt), sessions)
+        const listed = await liveSessions(rt)
         const home = rt.paths.home
+        // The Run each Session works for, only where the Session Index and its board file check out (ADR-0041).
+        const [sessions, tabs] = await Promise.all([
+          withRuns(rt.env, home, listed.sessions),
+          orcaTabs(orcaOf(rt), listed.sessions),
+        ])
+        const problems = listed.problems
         return {
           sessions: sessions.map(
             (s): PanelSession => ({
               ...s,
               ...(s.cwd ? { cwd: tildify(s.cwd, home) } : {}),
+              ...(s.run
+                ? {
+                    run: {
+                      ...s.run,
+                      board: tildify(s.run.board, home),
+                      ...(s.run.others
+                        ? { others: s.run.others.map((o) => ({ ...o, board: tildify(o.board, home) })) }
+                        : {}),
+                    },
+                  }
+                : {}),
               ...(tabs.has(s.sessionId) ? { orca: true as const } : {}),
               copy: {
                 reference: copyText(s, 'reference', lang),
@@ -1311,6 +1328,19 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
     // Session through sendMessage, which keeps the Message as a file before any delivery. The page sends only the
     // Session id. It writes files, so a read-only Panel refuses it (writes defaults to true); it runs beside the
     // write queue because a delivery may wait on the Host.
+    // Opens the Run Board of a Session (spec §3.32 step 2b, ADR-0041). The page sends only the Session id: the board
+    // file is found again here, from the Session Index, and checked again. It starts a program, so a read-only Panel
+    // refuses it (writes defaults to true).
+    '/api/sessions/run': {
+      queued: false,
+      async run(body) {
+        const id = optString(body, 'sessionId')
+        if (!id) throw new HttpError(400, '"sessionId" is required')
+        const rt = await getRuntime()
+        const r = await openRunBoard(rt, id)
+        return { opened: true, board: tildify(r.board, rt.paths.home) }
+      },
+    },
     '/api/sessions/send': {
       queued: false,
       async run(body) {

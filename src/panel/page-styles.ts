@@ -542,6 +542,9 @@ a.btn:hover { text-decoration: none; }
 .sess-unknown .sess-dot { background: transparent; border: 1px solid var(--faint); }
 .sess-cwd { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sess-guessed { cursor: help; }
+.sess-run { flex: 0 1 auto; min-width: 0; max-width: 24em; }
+.sess-run-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sess-run-more { flex: none; font-weight: var(--strong-weight); }
 .sess-age { white-space: nowrap; }
 .sess-actions { display: flex; align-items: center; gap: 4px; }
 .sess-copy { min-width: 8.5em; justify-content: center; transition: background-color .15s, border-color .15s, color .15s; }

@@ -2944,6 +2944,24 @@ const MAIN = String.raw`
       loadSessions()
     }
   }
+  // The Run an orchestrator ties the Session to (spec §3.32 step 2b). A page cannot open a file:// board, so the
+  // server opens it: the page sends only the Session id. Opening starts a program, so a read-only Panel hides it.
+  async function openRunBoard(s) {
+    try { await api('/api/sessions/run', { sessionId: s.sessionId }) } catch (e) {
+      toast(e.message, { kind: 'fail' })
+      loadSessions()
+    }
+  }
+  function runChip(s) {
+    const run = s.run
+    if (!run || !run.title || BOOT.readOnly) return null
+    const others = run.others || []
+    const tip = [run.laneTitle ? t('spage.runTipLane', { lane: run.laneTitle }) : t('spage.runTip')]
+    if (others.length) tip.push(t('spage.runOthers', { runs: others.map((o) => o.title + (o.laneTitle ? ' · ' + o.laneTitle : '')).join('; ') }))
+    return h('button', { class: 'chip chip-btn chip-accent sess-run', type: 'button', 'data-key': 'sess-run-' + s.sessionId, 'data-tip': tip.join(' '), onclick: () => openRunBoard(s) },
+      h('span', { class: 'sess-run-title' }, t('spage.run', { title: run.title })),
+      others.length ? h('span', { class: 'sess-run-more' }, '+' + others.length) : null)
+  }
   function sessionRow(s) {
     const p = sessionLabelParts(s)
     const copied = (sp.copied[s.sessionId] || 0) > Date.now()
@@ -2973,6 +2991,7 @@ const MAIN = String.raw`
           h('span', { class: 'sess-status' }, h('span', { class: 'dot sess-dot', 'aria-hidden': 'true' }), t('spage.status.' + status)),
           chip ? h('span', { class: 'chip chip-sm chip-' + chip.tone + ' sess-msg', title: t('send.chipTip') }, t(chip.key)) : null,
           s.guessed ? h('span', { class: 'chip sess-guessed', tabindex: '0', 'data-tip': t('spage.guessedTip') }, t('spage.guessed')) : null,
+          runChip(s),
           h('span', { class: 'sess-cwd' + (cwd ? ' mono' : ''), title: s.cwd && cwd !== s.cwd ? s.cwd : null }, cwd || t('spage.noCwd')),
           h('span', { class: 'sess-age', 'data-age': s.sessionId }, sessAgeText(s)))),
       h('div', { class: 'sess-actions' }, copyBtn, sendBtn, more))
@@ -2986,7 +3005,7 @@ const MAIN = String.raw`
     const list = d ? sortSessions(d.sessions) : []
     // Everything a row shows except its age, which renderSessionAges keeps current in place.
     const shape = JSON.stringify([lang, !d && !sp.error, sp.error ? sp.error.message : '', d ? d.problems : [],
-      list.map((s) => [s.sessionId, s.account, s.accountLabel, s.family, s.title, s.label, s.status, s.cwd, s.guessed, s.copy, Boolean(s.orca), sp.msgs[s.sessionId] ? sp.msgs[s.sessionId].status : ''])])
+      list.map((s) => [s.sessionId, s.account, s.accountLabel, s.family, s.title, s.label, s.status, s.cwd, s.guessed, s.copy, Boolean(s.orca), s.run || null, sp.msgs[s.sessionId] ? sp.msgs[s.sessionId].status : ''])])
     if (shape === sp.drawn) { sp.pending = false; renderSessionAges(); return }
     if (sessionsMenuOpen()) { sp.pending = true; return }
     sp.pending = false

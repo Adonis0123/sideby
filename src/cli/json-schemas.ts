@@ -1114,6 +1114,42 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
           resumeCommand: Type.String({
             description: 'The command that resumes it in the account that holds it.',
           }),
+          run: Type.Optional(
+            Type.Object(
+              {
+                title: Type.String({ description: "The Run's title." }),
+                laneTitle: Type.Optional(
+                  Type.String({ description: 'The part of the Run this session does.' }),
+                ),
+                role: Type.Optional(
+                  Type.String({
+                    description: 'Its role in the Run, for example coordinator, write or review.',
+                  }),
+                ),
+                board: Type.String({
+                  description: "The Run Board, a static HTML file in the orchestrator's state folder.",
+                }),
+                url: Type.String({
+                  description: '`file://<board>`, with `#lane-<id>` for the part this session does.',
+                }),
+                others: Type.Optional(
+                  Type.Array(
+                    Type.Object({
+                      title: Str,
+                      laneTitle: Type.Optional(Str),
+                      role: Type.Optional(Str),
+                      board: Str,
+                    }),
+                    { description: 'Other Runs the session also works for, after this one (by role).' },
+                  ),
+                ),
+              },
+              {
+                description:
+                  "The Run of a local orchestrator this session works for, from the orchestrator's Session Index (spec §3.32 step 2b); only when the index lists the session and its board file checks out. With several, the first by role (coordinator, write, review, research, other).",
+              },
+            ),
+          ),
         }),
         { description: 'Running sessions, those that need the user first, then by most recent activity.' },
       ),

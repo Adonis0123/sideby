@@ -22,6 +22,8 @@ The **Sessions** tab lists what every account is running right now, one row per 
 
 **Copy for AI** copies a short note another AI can follow: which account, where the session works and where its record is (only paths, never the conversation). The button turns into a check mark for a moment. Its **…** menu copies the session id or the command that resumes the session in its account (for a Claude Code session, `sideby resume claude -- --resume <id>`). When the session runs in an Orca terminal, the same menu has **Go to its Orca tab**, which brings that tab to the front. If the browser does not allow copying, the text shows selected, ready for ⌘C or Ctrl+C. `sideby sessions` lists the same sessions in a terminal, and you can ask your AI, for example "Copy cc002's current session for another AI."
 
+When you split work across sessions with a local orchestrator such as the `agent-dispatch` skill, a session that works for one of its Runs shows a chip **Run: <title>**. Click it to open that Run's board in your browser; hover to see which part of the Run the session does and, after **+N**, the other Runs it also works for. sideby shows it only when the orchestrator lists the session and its board file is in the orchestrator's own folder. A read-only panel leaves it out. You can also ask your AI "Which run is cc002 working on?"
+
 ### Send to a session
 
 **Send to it** on a row opens a small box titled with that session's label. Write what it should do, and add screenshots if they help: paste one with ⌘V or Ctrl+V, drop it on the box, or pick it with **Add screenshot** (images only, up to 5, 20 MB each). ⌘Enter or Ctrl+Enter sends. sideby saves the message as a file first, so it is never lost, then hands it to the session:

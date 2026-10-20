@@ -2450,6 +2450,59 @@ describe('sideby sessions (spec §3.32)', () => {
     })
   })
 
+  it("shows the Run a session works for from the orchestrator's Session Index (ADR-0041)", async () => {
+    await withFakeHome(async (h) => {
+      await claudeSessions(h, true)
+      await fakeMachine(h, [4101, 4102])
+      const board = await h.write('state/ad/boards/r1.html', '<!doctype html>\n', 0o600)
+      const other = await h.write('state/ad/boards/r2.html', '<!doctype html>\n', 0o600)
+      const entry = (b: string, runTitle: string, role: string, lane: string) => ({
+        run: 'r',
+        runTitle,
+        board: b,
+        lane,
+        laneTitle: 'sideby link',
+        role,
+        url: `file://${b}#lane-${lane}`,
+      })
+      await h.write(
+        'state/ad/sessions.json',
+        JSON.stringify({
+          schemaVersion: 1,
+          revision: 1,
+          generatedAt: '2026-10-20T07:00:00Z',
+          sessions: {
+            [ID_A]: {
+              entries: [entry(other, 'Review pass', 'review', 'R'), entry(board, 'Run board', 'write', 'D2')],
+            },
+          },
+        }),
+      )
+      const env = { AGENT_DISPATCH_STATE_DIR: h.path('state/ad') }
+      const human = await sideby(h, ['sessions'], env)
+      assert.equal(human.code, 0, human.err)
+      assert.match(human.out, /RUN/)
+      assert.match(human.out, /knip cleanup · 61230c3d.*Run board \+1/)
+      assert.match(human.out, /Run: Run board {2}~\/state\/ad\/boards\/r1\.html\n/)
+      assert.match(human.out, /Run: Review pass {2}~\/state\/ad\/boards\/r2\.html\n/)
+      const r = await sideby(h, ['sessions', '--json'], env)
+      const data = checkSchema('sessions', r.out)
+      const list = data.sessions as { sessionId: string; run?: unknown }[]
+      assert.deepEqual(list.find((s) => s.sessionId === ID_A)?.run, {
+        title: 'Run board',
+        laneTitle: 'sideby link',
+        role: 'write',
+        board,
+        url: `file://${board}#lane-D2`,
+        others: [{ title: 'Review pass', laneTitle: 'sideby link', role: 'review', board: other }],
+      })
+      assert.equal(list.find((s) => s.sessionId === ID_B)?.run, undefined)
+      // Without the index, nothing changes.
+      const plain = await sideby(h, ['sessions'])
+      assert.doesNotMatch(plain.out, /RUN|Run:/)
+    })
+  })
+
   it('copies one session, lists several instead of guessing, and prints the text without a clipboard', async () => {
     await withFakeHome(async (h) => {
       await claudeSessions(h, true)

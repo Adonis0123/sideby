@@ -3013,13 +3013,15 @@ export async function cmdSessions(a: ParsedArgs, io: Io): Promise<number> {
     )
   const rt = await createRuntime()
   const { listLiveSessions, sessionLabel } = await import('../core/live-sessions.ts')
+  const { withRuns } = await import('../core/run-link.ts')
   const r = await listLiveSessions(rt, first ? { only: first } : {})
+  const sessions = await withRuns(rt.env, rt.paths.home, r.sessions)
   if (a.flags.has('json')) {
-    json(io, { sessions: r.sessions, problems: r.problems })
+    json(io, { sessions, problems: r.problems })
     return 0
   }
   for (const p of r.problems) io.err(c.yellow(`sideby: ${p}`))
-  if (!r.sessions.length) {
+  if (!sessions.length) {
     io.out(
       first
         ? `${first} has no running session now. Start one with \`sideby run <account>\` and it shows up here.`
@@ -3030,14 +3032,25 @@ export async function cmdSessions(a: ParsedArgs, io: Io): Promise<number> {
   const now = rt.readContext().now
   const home = rt.paths.home
   // A long title (often in Chinese, two columns a character) is cut so the table stays readable.
-  const rows = r.sessions.map((s) => [
+  // The RUN column shows only when an orchestrator's Session Index ties a Session to a Run (spec §3.32 step 2b).
+  const anyRun = sessions.some((s) => s.run)
+  const rows = sessions.map((s) => [
     c.bold(sessionLabel(s.accountLabel, truncate(s.title, 40), s.sessionId)),
     s.status === 'needs-you' ? c.yellow(SESSION_STATUS[s.status]!) : SESSION_STATUS[s.status]!,
     s.cwd ? tildify(s.cwd, home) : '',
     s.startedAt ? clock(s.startedAt, now) : '',
+    ...(anyRun
+      ? [s.run ? truncate(s.run.title, 30) + (s.run.others ? ` +${s.run.others.length}` : '') : '']
+      : []),
     s.guessed ? c.dim('newest session (guessed)') : '',
   ])
-  io.out(table(rows, ['SESSION', 'STATUS', 'DIRECTORY', 'STARTED', '']))
+  io.out(table(rows, ['SESSION', 'STATUS', 'DIRECTORY', 'STARTED', ...(anyRun ? ['RUN'] : []), '']))
+  // One line per Run board (each checked one, once), so the user can open it.
+  const boards = new Map<string, string>()
+  for (const s of sessions)
+    for (const r of s.run ? [s.run, ...(s.run.others ?? [])] : [])
+      if (!boards.has(r.board)) boards.set(r.board, r.title)
+  for (const [board, title] of boards) io.out(c.dim(`Run: ${title}  ${tildify(board, home)}`))
   io.out(c.dim('Copy one for another AI: sideby sessions copy <account|session-id>'))
   return 0
 }

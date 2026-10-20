@@ -102,6 +102,62 @@
           "resumeCommand": {
             "type": "string",
             "description": "The command that resumes it in the account that holds it."
+          },
+          "run": {
+            "type": "object",
+            "required": [
+              "title",
+              "board",
+              "url"
+            ],
+            "properties": {
+              "title": {
+                "type": "string",
+                "description": "The Run's title."
+              },
+              "laneTitle": {
+                "type": "string",
+                "description": "The part of the Run this session does."
+              },
+              "role": {
+                "type": "string",
+                "description": "Its role in the Run, for example coordinator, write or review."
+              },
+              "board": {
+                "type": "string",
+                "description": "The Run Board, a static HTML file in the orchestrator's state folder."
+              },
+              "url": {
+                "type": "string",
+                "description": "`file://<board>`, with `#lane-<id>` for the part this session does."
+              },
+              "others": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "title",
+                    "board"
+                  ],
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "laneTitle": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "board": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "description": "Other Runs the session also works for, after this one (by role)."
+              }
+            },
+            "description": "The Run of a local orchestrator this session works for, from the orchestrator's Session Index (spec §3.32 step 2b); only when the index lists the session and its board file checks out. With several, the first by role (coordinator, write, review, research, other)."
           }
         }
       },

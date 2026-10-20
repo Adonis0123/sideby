@@ -84,15 +84,24 @@ export async function editSettings(
   return { ...base, opened: true, command: await openWithDefault(rt, real) }
 }
 
-/** Opens `file` with the system's default program; returns the command, or throws what to do instead. */
-async function openWithDefault(rt: Runtime, file: string): Promise<string[]> {
+/**
+ * Opens `file` with the system's default program (on macOS its default text editor, unless `text` is false);
+ * returns the command, or throws what to do instead.
+ */
+export async function openWithDefault(
+  rt: Runtime,
+  file: string,
+  opts: { text?: boolean } = {},
+): Promise<string[]> {
   const deps = depsFor(rt)
-  const yourself = `open ${file} in your editor yourself`
+  const text = opts.text !== false
+  const yourself = text ? `open ${file} in your editor yourself` : `open ${file} in your browser yourself`
   if (deps.platform === 'darwin') {
-    const r = await deps.exec('/usr/bin/open', ['-t', file])
+    const args = text ? ['-t', file] : [file]
+    const r = await deps.exec('/usr/bin/open', args)
     if (r.code !== 0)
       throw new UserError(`macOS could not open the file; ${yourself}`, { code: 'open-failed' })
-    return ['/usr/bin/open', '-t', file]
+    return ['/usr/bin/open', ...args]
   }
   if (deps.platform === 'linux' && deps.wslMount) {
     const w = await deps.exec('wslpath', ['-w', file])
