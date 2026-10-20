@@ -796,6 +796,8 @@ export const AI_TASK_KINDS = [
   'plugin',
   'terminal',
   'handoff',
+  'menubar',
+  'hotkey',
 ] as const
 export type AiTaskKind = (typeof AI_TASK_KINDS)[number]
 
@@ -943,6 +945,12 @@ export function taskPrompt(
         plugin: '帮我写一个 sideby 插件或 hook。',
         terminal: '帮我让 sideby 能在我用的终端里打开 AI 任务：写一条自定义终端命令。',
         handoff: '帮我调好 sideby 的自动接力：根据我的账号推荐什么时候接力（阈值）和接力的顺序。',
+        menubar: 'sideby 的状态栏额度图标在 macOS 顶栏里看不到，请帮我找出原因并让它显示出来。',
+        hotkey: '帮我给 sideby 的状态栏菜单挑一个单手按着顺手、又没被别的程序占用的快捷键，并替我设好。',
+        pHotkey:
+          '先运行 `sideby menubar hotkey --json` 看现在用的组合。再查本机已经被占的组合：`defaults read com.apple.symbolichotkeys AppleSymbolicHotKeys` 里 enabled 为 1 的系统快捷键，以及 `/Applications` 里装了哪些常用全局快捷键的 App（Raycast、Alfred、ChatGPT、Claude 等），按它们的默认快捷键判断；不要打开它们的配置文件（里面可能有密钥），拿不准就问我。问我习惯用哪只手、平时常按哪些快捷键，然后推荐 2 到 3 个按起来顺手、又没被占的组合（两个键最顺手，比如 ⌥X；必须带 ⌥、⌘ 或 ⌃），说清每个会占掉什么（比如 ⌥X 不能再打出 ≈）。我选定后运行 `sideby menubar hotkey <组合>`，几秒内生效，不用重启；再请我按一下，确认能打开菜单。按了没反应，说明别的 App 先占了，换下一个。不要改系统或别的 App 的快捷键设置。',
+        pMenubar:
+          '先运行 `sideby menubar --json`。`state` 为 `off`：它被关掉了（常见于菜单里的「从状态栏隐藏…」），给我看 `sideby menubar on` 的预览，我同意后加 `--yes`。`state` 为 `on` 但 `loaded` 为 `false`：macOS 没在运行它，`sideby menubar on --yes` 只是重新启动，不改文件。`loaded` 为 `true`：它在运行但被挡住了，依次查：状态栏是否太满或被刘海挡住（按住 ⌘ 拖动图标）；有没有 Ice、Bartender、Hidden Bar 这类菜单栏整理工具把它收起来了（查 `/Applications`，告诉我去它的设置里把 sideby（显示为 osascript）挪出来）；macOS 26 及以上要在「系统设置 › 菜单栏」里允许 osascript（`sideby menubar --json` 里的快捷键 `hotkey.label` 可以在任何地方打开菜单，用来确认它在运行）。不要结束或重启任何不是 sideby 的进程。',
         cHandoff: '自动接力现在的设置（来自 `sideby handoff status --json`）：',
         pHandoff:
           '先运行 `sideby handoff status --json` 和 `sideby quota --json`，看清每个账号的额度来源和用量。只用 `sideby handoff enable …` 或 `sideby config set handoff.<键> <值>` 改设置；先不加 `--yes` 给我看预览，我同意后再加 `--yes`。没有额度数据的账号排在顺序后面，并告诉我怎么让它显示额度。',
@@ -992,6 +1000,13 @@ export function taskPrompt(
         terminal: 'Help sideby open AI Tasks in the terminal I use: write a custom terminal command.',
         handoff:
           "Help me tune sideby's Auto Handoff: from my accounts, recommend when to hand over (the threshold) and in what order.",
+        menubar: "I can't see sideby's quota icon in the macOS menu bar. Find out why and make it show.",
+        hotkey:
+          "Pick a shortcut for sideby's menu bar menu that is easy to press with one hand and that nothing else uses, and set it for me.",
+        pHotkey:
+          'Run `sideby menubar hotkey --json` first to see the current shortcut. Then find the combinations already taken on this Mac: the system shortcuts with enabled 1 in `defaults read com.apple.symbolichotkeys AppleSymbolicHotKeys`, and the apps in /Applications that usually hold a global shortcut (Raycast, Alfred, ChatGPT, Claude and the like), judged by their default shortcuts; do not open their config files (they may hold keys), and ask me when unsure. Ask which hand I use and which shortcuts I press often, then recommend 2 or 3 combinations that are easy to press and free (two keys are easiest, such as ⌥X; each needs ⌥, ⌘ or ⌃), and say what each takes away (⌥X no longer types ≈). Once I pick one, run `sideby menubar hotkey <keys>`: it works within seconds, with no restart; then ask me to press it and check the menu opens. If nothing happens another app took it first, so try the next. Never change the shortcuts of macOS or another app.',
+        pMenubar:
+          'Run `sideby menubar --json` first. `state` is `off`: it was turned off (often with "Hide from Menu Bar…" in its menu); show me the preview of `sideby menubar on`, and add `--yes` after I agree. `state` is `on` with `loaded: false`: macOS is not running it; `sideby menubar on --yes` only starts it again and changes no file. `loaded: true`: it runs but is hidden; check in turn whether the menu bar is too full or the notch covers it (hold ⌘ and drag icons), whether a menu bar organizer such as Ice, Bartender or Hidden Bar tucked it away (look in /Applications, and tell me where in its settings to move sideby, shown as osascript, out), and, on macOS 26 and later, whether osascript is allowed under System Settings › Menu Bar. The shortcut in `hotkey.label` opens the menu from anywhere, which shows it is running. Never end or restart a process that is not sideby\'s.',
         cHandoff: 'Auto Handoff now (from `sideby handoff status --json`):',
         pHandoff:
           'Run `sideby handoff status --json` and `sideby quota --json` first to see where each account gets its quota and how much is used. Change settings only with `sideby handoff enable …` or `sideby config set handoff.<key> <value>`; show me the preview without `--yes` first, and add `--yes` only after I agree. Put accounts without quota data last in the order, and tell me how to make them show it.',
@@ -1152,15 +1167,54 @@ export function panelMigration(
  * The line under the start-at-login switch (spec §3.29) as a message key, whether it is on, whether the switch can
  * be moved, and the action beside it: `fix` turns it on again so it starts this sideby. Read-only: no switch, no action.
  */
+/**
+ * A key press in the Panel's shortcut recorder as config `menubar.hotkey` writes it (`ctrl+opt+s`), or null while only
+ * modifiers are held or the key is not a letter or digit. Reads `code`, not `key`: on a Mac ⌥S types "ß".
+ */
+export function hotkeyFromKey(e: {
+  code: string
+  ctrlKey: boolean
+  altKey: boolean
+  shiftKey: boolean
+  metaKey: boolean
+}): string | null {
+  const m = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(e.code)
+  if (!m) return null
+  const mods = [e.ctrlKey && 'ctrl', e.altKey && 'opt', e.shiftKey && 'shift', e.metaKey && 'cmd'].filter(
+    Boolean,
+  )
+  if (!mods.length) return null
+  return [...mods, (m[1] || m[2])!.toLowerCase()].join('+')
+}
+
+/**
+ * Whether a key press in the shortcut recorder is only a modifier being held (`wait`: the letter is still to come) or
+ * a key the menu bar shortcut cannot use (`unsupported`: an arrow, F-key, Space and the like), so the recorder can say
+ * so at once instead of looking stuck. A letter or digit is neither (see `hotkeyFromKey`).
+ */
+export function hotkeyPressKind(code: string): 'key' | 'wait' | 'unsupported' {
+  if (/^(?:Key[A-Z]|Digit[0-9])$/.test(code)) return 'key'
+  if (/^(?:Meta|Control|Alt|Shift|OS|CapsLock|Fn)/.test(code) || code === '') return 'wait'
+  return 'unsupported'
+}
+
 export function autostartNote(
-  s: { supported: boolean; state: string; current: boolean } | null,
+  s: { supported: boolean; state: string; current: boolean; loaded?: boolean } | null,
   readOnly: boolean,
 ): { key: string; on: boolean; toggle: boolean; action: 'fix' | null } {
   if (!s) return { key: 'as.checking', on: false, toggle: false, action: null }
   if (!s.supported) return { key: 'as.unsupported', on: false, toggle: false, action: null }
   if (s.state === 'foreign') return { key: 'as.foreign', on: false, toggle: false, action: null }
   const on = s.state === 'on' || s.state === 'stale'
-  const fix = s.state === 'stale' ? 'as.stale' : on && !s.current ? 'as.other' : null
+  // Not running comes after stale (that fix starts it too) and before another copy (the icon is what is missing).
+  const fix =
+    s.state === 'stale'
+      ? 'as.stale'
+      : on && s.loaded === false
+        ? 'as.notRunning'
+        : on && !s.current
+          ? 'as.other'
+          : null
   return { key: fix || 'as.hint', on, toggle: !readOnly, action: fix && !readOnly ? 'fix' : null }
 }
 

@@ -2255,12 +2255,23 @@ describe('start at login and settings in config (spec §3.29)', () => {
           hdr,
         )
         assert.deepEqual([on.body.applied, (on.body.status as { state: string }).state], [true, 'on'])
+        // The new state the page takes after the switch keeps the shortcut, so its row stays on screen.
+        assert.equal((on.body.status as { hotkey?: { label: string } }).hotkey?.label, '⌥X')
         assert.match(await readFile(plist, 'utf8'), /Written by `sideby menubar`/)
-        // The Panel's own login item stays off.
+        // The Panel's own login item stays off, and has no shortcut.
         const panelItem = JSON.parse(
           (await request(port, 'GET', '/api/autostart', { host: `127.0.0.1:${port}` })).text,
         )
-        assert.equal(panelItem.state, 'off')
+        assert.deepEqual([panelItem.state, panelItem.hotkey], ['off', undefined])
+        // A new shortcut is told to the running item (no restart); one macOS uses is refused with its code.
+        const set = await post(port, '/api/menubar/hotkey', { keys: 'ctrl+opt+k' }, hdr)
+        assert.deepEqual(
+          [set.status, (set.body.hotkey as { label: string }).label, set.body.nudged],
+          [200, '⌃⌥K', true],
+        )
+        assert.equal(calls.at(-1)?.[0], '/usr/bin/osascript')
+        const refused = await post(port, '/api/menubar/hotkey', { keys: 'cmd+q' }, hdr)
+        assert.deepEqual([refused.status, refused.body.code], [400, 'hotkey.reserved'])
         const gone = await post(port, '/api/menubar', { on: false, confirm: true }, hdr)
         assert.equal(gone.body.applied, true)
         assert.deepEqual(calls.at(-1), ['launchctl', 'bootout', 'gui/501/dev.sideby.menubar'])

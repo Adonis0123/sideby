@@ -37,8 +37,33 @@ const now = Date.now()
 const iso = (msFromNow: number) => new Date(now + msFromNow).toISOString()
 const H = 3_600_000
 
-for (const host of ['claude', 'codex', 'pi'])
+for (const host of ['claude', 'pi'])
   await writeFile(join(bin, host), '#!/bin/sh\necho "demo host"\n', { mode: 0o755 })
+// The official Codex quota protocol, with demo numbers only (ADR-0038).
+await writeFile(
+  join(bin, 'codex'),
+  `#!${process.execPath}
+if (!process.argv.includes('app-server')) { console.log('demo host'); process.exit(0) }
+const team = /codex-team$/.test(process.env.CODEX_HOME || '')
+const limits = {
+  limitId: 'codex', planType: 'plus',
+  primary: { usedPercent: team ? 12 : 38, windowDurationMins: 300, resetsAt: ${Math.round((now + 2.5 * H) / 1000)} },
+  secondary: { usedPercent: team ? 27 : 61, windowDurationMins: 10080, resetsAt: ${Math.round((now + 70 * H) / 1000)} }
+}
+let buf = ''
+process.stdin.on('data', d => {
+  buf += d
+  for (let i; (i = buf.indexOf('\\n')) >= 0; buf = buf.slice(i + 1)) {
+    const req = JSON.parse(buf.slice(0, i))
+    if (req.method === 'initialized') continue
+    const result = req.method === 'initialize' ? { userAgent: 'demo' } : { rateLimits: limits, rateLimitsByLimitId: { codex: limits } }
+    process.stdout.write(JSON.stringify({ id: req.id, result }) + '\\n')
+  }
+})
+process.stdin.on('end', () => process.exit(0))
+`,
+  { mode: 0o755 },
+)
 // Grok answers sideby's quota check (`grok agent --no-leader stdio`, `_x.ai/billing`, spec §3.26) with fake numbers per
 // account, so the Panel shows Grok quota as it does with the real CLI. Nothing here talks to xAI.
 await writeFile(

@@ -224,6 +224,8 @@
                 "detail",
                 "level",
                 "recommended",
+                "observedAt",
+                "stale",
                 "tip",
                 "bars",
                 "reset",
@@ -263,6 +265,21 @@
                 "recommended": {
                   "type": "boolean",
                   "description": "The account `sideby next` would pick in this Family."
+                },
+                "observedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "When the quota was observed, not checked."
+                },
+                "stale": {
+                  "type": "boolean",
+                  "description": "The quota is old, undated, or its last query failed."
                 },
                 "tip": {
                   "type": "string",
@@ -375,7 +392,7 @@
                 },
                 "note": {
                   "type": "string",
-                  "description": "Text drawn instead of bars, such as `API key`; empty when bars are drawn."
+                  "description": "A no-quota explanation, or an old-reading warning beside the bars."
                 }
               }
             },
@@ -403,6 +420,8 @@
                         "detail",
                         "level",
                         "recommended",
+                        "observedAt",
+                        "stale",
                         "tip",
                         "bars",
                         "reset",
@@ -442,6 +461,21 @@
                         "recommended": {
                           "type": "boolean",
                           "description": "The account `sideby next` would pick in this Family."
+                        },
+                        "observedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "When the quota was observed, not checked."
+                        },
+                        "stale": {
+                          "type": "boolean",
+                          "description": "The quota is old, undated, or its last query failed."
                         },
                         "tip": {
                           "type": "string",
@@ -554,7 +588,7 @@
                         },
                         "note": {
                           "type": "string",
-                          "description": "Text drawn instead of bars, such as `API key`; empty when bars are drawn."
+                          "description": "A no-quota explanation, or an old-reading warning beside the bars."
                         }
                       }
                     }

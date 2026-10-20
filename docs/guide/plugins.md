@@ -59,6 +59,8 @@ logo: { path: 'M11.503.131 1.891 5.678…', title: 'Cursor', color: '#000000' } 
 
 Errors always name the plugin. A plugin that fails to load affects only itself; a failing `doctor.check` becomes a fail Finding for that account; a failing `launch.before` stops the launch; a family reader that throws (for example `model`) shows up as one of that account's `problems` in `list`. A `fix()` may write only inside the current account directory, through `api.fs.writeFileAtomic`.
 
+
+`FamilyDef.fetchQuota.localFallbackOnly` is optional (default `false`). Set it when the Host replays cached quota in newer local events: once a successful fetch exists, sideby prefers it over local readings, including across directories of the same login. Failed queries retain the previous reading with `fetchError` and its original observation time.
 ## Add a tool sideby does not support
 
 A Host that sideby does not list can work today as a local Family Plugin. The easiest way is to let your AI do it: choose **Other tool…** in the panel's new-account dialog, or run `sideby ask --task host`. To do it by hand:

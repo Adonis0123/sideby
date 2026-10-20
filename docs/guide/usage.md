@@ -106,7 +106,7 @@ Because Claude Code runs the wrapper on every refresh, `setup` refuses when `sid
 
 `teardown` writes the original back only if the file is still exactly what `setup` wrote. If you changed it since, `teardown` refuses and shows the diff; set `statusLine.command` back to your original command by hand (it is the base64 after `--orig-b64`), or delete `statusLine` if you had none.
 
-Accounts that link `settings.json` to the Main Account (the default) get quota from the same setup. An account with its own `settings.json` shows quota as not enabled until that file's status line is wrapped the same way. Codex quota needs no setup: sideby reads it from local session files.
+Accounts that link `settings.json` to the Main Account (the default) get quota from the same setup. An account with its own `settings.json` shows quota as not enabled until that file's status line is wrapped the same way. Codex quota needs no setup; see [Codex quota](#codex-quota).
 
 ### Two directories, one login
 
@@ -116,7 +116,15 @@ Sometimes two accounts of Claude Code are signed in as the same claude.ai login,
 - marks them: `claude:001 = main` in `sideby list`; in the panel they are one row, marked **2 directories · shared quota**, with the quota and its warning shown once. Open the row to see each directory with its own short command, last use and tokens, and a **Copy start command** button; the row's **⋯** menu has a part for each directory;
 - never hands over between them: `sideby next` run inside a session sideby started skips the other directory of that login, and Auto Handoff skips it too, also when your `order` lists it, and says why.
 
-Usage (tokens) still counts per directory. Nothing is moved or deleted; keep both or remove one yourself. Codex accounts group the same way when they share the email and the ChatGPT workspace: one email can belong to several workspaces, each with its own quota, so sideby also compares which workspace each directory is signed in to. It reads this from the directory's `auth.json` only to compare, never shows or keeps it, and two directories in different workspaces stay apart.
+Usage (tokens) still counts per directory. Nothing is moved or deleted; keep both or remove one yourself. Codex accounts group the same way when they share the email and the ChatGPT workspace: one email can belong to several workspaces, each with its own quota, so sideby also compares which workspace each directory is signed in to. It reads this from the directory's `auth.json` only to compare, never shows or keeps it, and two directories in different workspaces stay apart. Grok Build accounts group the same way when they share the email, the x.ai user and the team, read from `auth.json` the same way.
+
+To give one of them a login of its own, click **Use another account** on its line in the panel, or run `sideby login <account>` (for example `sideby login codex:team`). You cannot do it inside the tool: Codex has no `/login`, and its `/logout` is blocked while a task runs. Your browser usually signs in as the login it already has, so before you approve, sign out of that login in the browser, or open the sign-in link in a private window. sideby says who the directory is signed in as before you start, and afterwards whether it now has its own login or is still the same one. Nothing is signed out first: if you give up halfway, the old login stays.
+
+## Codex quota
+
+sideby asks the official Codex CLI for current quota every 15 minutes, without starting a conversation. **Refresh** in the Panel or menu bar, or `sideby quota codex --refresh --json`, asks again now. Turn checks off with `sideby quota check codex off --json` or the Panel's **Settings › Quota checks**; CI never queries.
+
+Before the first successful query, local session records are a fallback. Once a query succeeds, newer session events cannot overwrite it with cached quota. If a query fails, the last reading remains with its observation time and the reason; update Codex or sign in as prompted. This was verified with Codex CLI 0.163.0.
 
 ## Grok quota
 
@@ -207,11 +215,13 @@ sideby browser --enable        # shows what it reads; add --yes to turn it on
 sideby browser                 # each Chrome browser user and the accounts it signed in to
 sideby browser open cc008      # open claude.ai in the browser user that signed in to it
 sideby browser open grok:main --profile Work
+sideby browser set codex:main "Profile 7"   # that browser user is the one; --auto finds it again
 ```
 
 - sideby reads each browser user's name and the Google account it uses in Chrome, the key names (never the values) claude.ai and chatgpt.com keep in Chrome's Local Storage, and the account id in each Claude and Codex login file, only to compare. It never opens cookies, saved passwords or the Keychain, and never changes Chrome.
-- "Signed in to" means that browser user's data shows a sign-in as that account. It may be left over from before a sign-out, and one browser user can show several accounts.
-- grok.com keeps nothing sideby can compare, so Grok accounts open in a browser user you pick.
+- "Signed in to" means that browser user's data shows a sign-in as that account. Websites keep this data after you sign out, so one account can show up in several browser users. Then sideby keeps only those whose Google account in Chrome is the account's login email; an account found nowhere gets the one browser user whose Google account is its login email.
+- When it still picks the wrong one, click **Change** next to it in the panel (in the account's details), then **This is the one** next to the right browser user. sideby keeps your choice and uses it from then on; it shows **Your choice**, and **Let sideby find it again** undoes it. Only sideby's own config changes, never Chrome.
+- grok.com keeps nothing sideby can compare, so a Grok account is found only by its login email; otherwise choose its browser user yourself.
 - Only Google Chrome, on macOS and in WSL (where sideby uses the Chrome installed on Windows), for now. The websites can change how they store data; when they do, sideby finds nothing and says so.
 
 ## Context tuning
@@ -317,11 +327,13 @@ A headless run (`claude -p`, `codex exec`, `grok -p`), Codex with `--remote`, or
 
 ## Quota in the menu bar
 
-On macOS, run `sideby menubar on` (or turn on **Show quota in the menu bar** in the Panel's Settings) to put the sideby buddy in your menu bar. While every tool has quota left it shows just the icon; when even the best account of a tool has used 60% or more, the tool and its percent appear next to it (orange, red from 85%), so you can tell at a glance whether you can keep working. Click it to see every account's quota as small bars, with a first line that says which account is highest, start any account in your terminal, or open the panel; `sideby menubar off` hides it again. Press ⌥⌘S from anywhere to open the menu, and again to close it; `sideby config set menubar.hotkey cmd+shift+0` picks another shortcut and `off` turns it off. If you cannot see it, your menu bar is full or the icon sits under the notch: hold ⌘ and drag icons to make room, and macOS keeps the place. Turning it on first shows the file it writes (`~/Library/LaunchAgents/dev.sideby.menubar.plist`); add `--yes` to do it.
+On macOS, run `sideby menubar on` (or turn on **Show quota in the menu bar** in the Panel's Settings) to put the sideby buddy in your menu bar. While every tool has quota left it shows just the icon; when even the best account of a tool has used 60% or more, the tool and its percent appear next to it (orange, red from 85%), so you can tell at a glance whether you can keep working. Click it to see every account's quota as small bars, with a first line that says which account is highest, start any account in your terminal, or open the panel; **Hide from Menu Bar…** in the menu (or `sideby menubar off`) hides it again, after asking; turn the switch back on in the Panel, or run `sideby menubar on --yes`, to bring it back. Press ⌥X from anywhere to open the menu, and again to close it. To pick another shortcut, open **Menu bar icon ›** in the Panel's Settings and choose one from the list (Custom… lets you press your own; not sure which, click "Let AI pick one" below it, and AI checks what is taken, recommends a few that are easy with one hand and sets the one you pick), or run `sideby menubar hotkey ctrl+opt+s`; `off` turns it off and `default` goes back to ⌥X. A shortcut needs ⌥, ⌘ or ⌃, and sideby refuses ones macOS uses, such as ⌘Q or ⌥⌘D. macOS does not say when another app uses the same keys; if pressing yours does nothing, pick another. If the switch is on but you cannot see the icon: when the menu bar is full, macOS puts icons behind « (click it to see them), and the Panel says when this happened to sideby's; when the Panel says it is not running, click **Start it again**; otherwise check System Settings › Menu Bar and any menu bar organizer such as Ice or Bartender. Not sure which? Open **Menu bar icon ›** and click **Let AI check it**, or run `sideby ask --task menubar`. Turning it on first shows the file it writes (`~/Library/LaunchAgents/dev.sideby.menubar.plist`); add `--yes` to do it.
 
 <img alt="sideby menu bar dropdown: quota bars per tool and account" src="../assets/menubar.png" width="468">
 
 Every other setting has a command too: `sideby config get` lists them with their values, and `sideby config set panel.theme dark` changes one (it shows the change first).
+
+The menu footer says when sideby last **checked**. Each row keeps the quota observation time in its tooltip. Readings older than one hour, or whose query failed, are grey and marked **older reading**. Repeated checks do not make old data current.
 
 ## Host notes
 
@@ -330,7 +342,7 @@ Tested on 2026-10-05 with the versions below. sideby starts the official binary 
 | Host | Family | Tested version | Sign-in | Quota | Usage (7 days) |
 |---|---|---|---|---|---|
 | Claude Code | `claude` | 2.1.289 | `claude auth login` | status line cache (after `quota setup claude`) | local session records |
-| Codex CLI | `codex` | 0.160.0 | `codex login` | local session files | local session files |
+| Codex CLI | `codex` | 0.163.0 | `codex login` | official CLI; local fallback | local session files |
 | Grok Build | `grok` | 1.0.60 | `grok login` | asked from the `grok` CLI | no public source |
 | pi | `pi` | 1.0.2 | `/login` inside pi | no public source | no public source |
 

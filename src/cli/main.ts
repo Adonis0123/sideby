@@ -78,6 +78,8 @@ Usage:
                                       (read on this computer only; off until you enable it)
   sideby browser open <account> [--profile <name>]
                                       open claude.ai, chatgpt.com or grok.com in that browser user
+  sideby browser set <account> <name> | --auto
+                                      choose that browser user yourself, or let sideby find it again
   sideby app install [--url <url>]    add a sideby app that opens the panel (macOS, Linux)
   sideby app uninstall                remove that app
   sideby shell-init zsh|bash          print shell functions, e.g. eval "$(sideby shell-init zsh)"
@@ -93,6 +95,7 @@ Usage:
   sideby autostart [on|off] [--yes]   start the panel in the background at login (macOS; shows the
                                       file first)
   sideby menubar [on|off] [--yes]     show quota in the macOS menu bar; click an account to start it
+  sideby menubar hotkey [<keys>|off]  show or change the shortcut that opens that menu (⌥X)
   sideby config get [<key>]           every setting with its value and meaning, or one setting
   sideby config set <key> <value> [--yes]
                                       change any setting (sideby config set panel.theme dark)
@@ -123,7 +126,7 @@ Updates: once a day sideby asks the npm registry for its newest version and says
 
 /** `sideby <command> --help` for the commands agents use to set up and repair accounts (spec §3.16). */
 const COMMAND_HELP: Record<string, string> = {
-  ask: 'sideby ask [<text>] [--task free|fix|quota|account|host|plugin|terminal|handoff] [--account <ref>] [--terminal <id>] [--attach <file>]... [--print] [--json]\nsideby ask --run <id> [--state-dir <dir>]\nsideby ask --spec - [--print] --json\nsideby ask --choices --json\nOpen a task in your terminal. --spec reads a Task Spec (one JSON object, at most 1 MB) from stdin, as a Portal sends it; --choices lists the accounts and terminals a task can use. --attach adds an image (PNG, JPEG, GIF, WebP; up to 20 MB) or a video (MP4, MOV, WebM; up to 200 MB), at most 5. --print prints only the prompt. If opening fails, paste the command into a terminal.',
+  ask: 'sideby ask [<text>] [--task free|fix|quota|account|host|plugin|terminal|handoff|menubar|hotkey] [--account <ref>] [--terminal <id>] [--attach <file>]... [--print] [--json]\nsideby ask --run <id> [--state-dir <dir>]\nsideby ask --spec - [--print] --json\nsideby ask --choices --json\nOpen a task in your terminal. --spec reads a Task Spec (one JSON object, at most 1 MB) from stdin, as a Portal sends it; --choices lists the accounts and terminals a task can use. --attach adds an image (PNG, JPEG, GIF, WebP; up to 20 MB) or a video (MP4, MOV, WebM; up to 200 MB), at most 5. --print prints only the prompt. If opening fails, paste the command into a terminal.',
   terminal:
     "sideby terminal [--set <id>|--custom '<program> … {cwd} … {cmd}'|--unset] [--json]\nList terminals or save your preference; --custom saves and selects your own launch command.",
   key: 'sideby key <account> [--var <NAME>] [--json]\nEnter an API key without echo. Run in a terminal or use the Panel key box.',
@@ -254,8 +257,9 @@ Examples:
 Exit: 0 shown, done or nothing to change; 10 a change was shown and waits for --yes; 1 refused (not macOS, sideby
 in the npx cache or a temporary folder, a file that is not sideby's) or failed; 2 malformed command line.`,
   menubar: `sideby menubar [on|off] [--yes] [--json]
-sideby menubar snapshot [--lang en|zh] [--json]
+sideby menubar snapshot [--refresh] [--lang en|zh] [--json]
 sideby menubar start <account> [--json]
+sideby menubar hotkey [<keys>|off|default] [--json]
 
 Show quota in the macOS menu bar: a gauge with one percent, how much the account sideby would pick next has used
 in your tightest tool (orange from 60%, red from 85%). Click it for every account's 5-hour and 7-day quota; click
@@ -264,12 +268,15 @@ icon. macOS only for now (a LaunchAgent, ~/Library/LaunchAgents/dev.sideby.menub
 
 Without on or off it says whether it is on, off, out of date or blocked by a file that is not sideby's. on and off
 show the file first; --yes does it. snapshot prints what the menu shows (the menu bar item runs it every 2 minutes).
-start opens an account in your preferred terminal, as clicking it does.
+start opens an account in your preferred terminal, as clicking it does. hotkey shows or changes the shortcut that
+opens the menu from anywhere (⌥X by default): opt, cmd or ctrl, any of shift, and one letter or digit; off turns
+it off. A running menu bar item takes the new one within seconds, without a restart.
 
 Examples:
   sideby menubar on --yes
   sideby menubar snapshot --json
   sideby menubar start claude:work
+  sideby menubar hotkey ctrl+opt+s
   sideby menubar off --yes
 Exit: 0 shown, done or nothing to change; 10 a change was shown and waits for --yes; 1 refused (not macOS, sideby
 in the npx cache or a temporary folder, a file that is not sideby's), failed, or the terminal did not open; 2
@@ -296,6 +303,8 @@ Exit: 0 shown, saved or nothing to change; 10 a change was shown and waits for -
 does not take, or the file changed meanwhile; 2 malformed command line.`,
   browser: `sideby browser [--enable|--disable] [--yes] [--json]
        sideby browser open <account> [--profile <folder|name>] [--json]
+       sideby browser set <account> <folder|name> [--json]
+       sideby browser set <account> --auto [--json]
 
 Find which Google Chrome browser user signed in to each account's website (claude.ai for claude accounts,
 chatgpt.com for codex accounts), and open the website in that browser user. macOS only for now.
@@ -306,7 +315,11 @@ Codex login file, only to compare. It never opens cookies, saved passwords or th
 It is off until you turn it on: --enable shows what it reads and changes config browser.signIns after --yes.
 
 "Signed in to" means that browser user's data shows a sign-in as that account; it may be left over from before a
-sign-out. grok.com keeps no id to match, so grok accounts can only be opened with --profile.
+sign-out. When several browser users show one account, sideby keeps those whose Google account in Chrome is the
+account's login email. grok.com keeps no id to match, so grok accounts are found only by that email or --profile.
+
+When sideby picks the wrong browser user, set chooses one for the account (saved in config browser.choices; it
+replaces what sideby finds, and open uses it). --auto forgets the choice. Only sideby's config is written.
 
 open uses the one browser user that signed in to the account, or the one --profile names (folder such as
 "Profile 7", or the name Chrome shows). It runs: open -na "Google Chrome" --args --profile-directory=<folder> <url>.
@@ -316,7 +329,8 @@ Examples:
   sideby browser
   sideby browser open cc008
   sideby browser open grok:main --profile Work
-Exit: 0 shown, changed or opened; 1 not macOS, Chrome not installed, no or several browser users to choose from, or
+  sideby browser set codex:main "Profile 7"
+Exit: 0 shown, changed, chosen or opened; 1 not macOS, Chrome not installed, no or several browser users to choose from, or
 Chrome did not open; 10 --enable/--disable without --yes; 2 malformed command line.`,
   families: `sideby families [family] [--json]
 
@@ -349,7 +363,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   key: { flags: ['json'], valued: ['var'] },
   try: { flags: ['json', 'yes'] },
   autostart: { flags: ['json', 'yes', 'refresh'] },
-  menubar: { flags: ['json', 'yes', 'refresh'], valued: ['lang'] },
+  menubar: { flags: ['json', 'yes', 'refresh'], valued: ['lang', 'hotkey', 'hotkey-label', 'icon'] },
   config: { flags: ['json', 'yes'] },
   list: { flags: ['json'] },
   pin: { flags: ['json'] },
@@ -374,7 +388,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   app: { flags: ['json'], valued: ['url'] },
   desktop: { flags: ['json', 'remove', 'yes'] },
   edit: { flags: ['json', 'path'] },
-  browser: { flags: ['json', 'enable', 'disable', 'yes'], valued: ['profile'] },
+  browser: { flags: ['json', 'enable', 'disable', 'yes', 'auto'], valued: ['profile'] },
   'shell-init': { flags: ['write', 'yes', 'undo', 'json'] },
   plugins: { flags: ['json'] },
   families: { flags: ['json'] },

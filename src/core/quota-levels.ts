@@ -11,6 +11,12 @@ export const USAGE_DAYS = 7
 
 export type QuotaLevel = 'ok' | 'warn' | 'fail'
 
+/** Shared by the Panel and menu bar. Self-contained so the Panel can inline it without other module state. */
+export function quotaIsStale(quota: { observedAt: string; fetchError?: string }, now: number): boolean {
+  const at = Date.parse(quota.observedAt)
+  return Boolean(quota.fetchError) || !Number.isFinite(at) || now - at > 3600_000 || at - now > 60_000
+}
+
 export function quotaLevel(usedPercent: number): QuotaLevel {
   if (usedPercent >= QUOTA_FAIL_PERCENT) return 'fail'
   if (usedPercent >= QUOTA_WARN_PERCENT) return 'warn'

@@ -59,6 +59,8 @@ logo: { path: 'M11.503.131 1.891 5.678…', title: 'Cursor', color: '#000000' } 
 
 错误信息里总会标明插件名。加载失败只影响它自己；`doctor.check` 出错会变成该账号的一条 fail Finding；`launch.before` 出错会中止启动；家族的读取函数（例如 `model`）抛错时，会出现在 `list` 里该账号的 `problems` 中。`fix()` 只能写当前账号目录，并且要通过 `api.fs.writeFileAtomic` 写。
 
+
+`FamilyDef.fetchQuota.localFallbackOnly` 可选，默认 `false`。宿主会在新事件里重放缓存额度时设为 `true`：有查询结果后，sideby 优先使用它，同一登录的多个目录也一样。查询失败保留上次读数、原记录时间和 `fetchError`。
 ## 加一个 sideby 还不支持的工具
 
 sideby 没列出的宿主，今天就能以本地 Family 插件的形式用起来。最省事的办法是交给你的 AI：在面板的新建账号对话框里选「其他工具……」，或者运行 `sideby ask --task host`。自己动手的话：

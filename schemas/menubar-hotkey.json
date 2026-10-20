@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/menubar-hotkey.json",
+  "anyOf": [
+    {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "keys",
+        "label",
+        "enabled",
+        "isDefault",
+        "registered"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "keys": {
+          "type": "string",
+          "description": "As config `menubar.hotkey` holds it, or the default: `opt+x`, `off`."
+        },
+        "label": {
+          "type": "string",
+          "description": "As macOS writes it, such as `⌥⌘S`; empty when off."
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "isDefault": {
+          "type": "boolean"
+        },
+        "registered": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether the menu bar item could register it: false means another app or macOS holds it; null when it has not said yet or it is off."
+        },
+        "problem": {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "description": "A value config allows but a new choice would be refused for; it still works."
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "changed",
+        "nudged",
+        "hotkey"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "changed": {
+          "type": "boolean"
+        },
+        "nudged": {
+          "type": "boolean",
+          "description": "A running menu bar item was told (a macOS distributed notification); it takes the new shortcut within seconds, without a restart."
+        },
+        "hotkey": {
+          "type": "object",
+          "required": [
+            "keys",
+            "label",
+            "enabled",
+            "isDefault",
+            "registered"
+          ],
+          "properties": {
+            "keys": {
+              "type": "string",
+              "description": "As config `menubar.hotkey` holds it, or the default: `opt+x`, `off`."
+            },
+            "label": {
+              "type": "string",
+              "description": "As macOS writes it, such as `⌥⌘S`; empty when off."
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "isDefault": {
+              "type": "boolean"
+            },
+            "registered": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Whether the menu bar item could register it: false means another app or macOS holds it; null when it has not said yet or it is off."
+            },
+            "problem": {
+              "type": "object",
+              "required": [
+                "code",
+                "message"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "description": "A value config allows but a new choice would be refused for; it still works."
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -56,7 +56,7 @@ https://github.com/user-attachments/assets/51d9f96f-7723-4410-8c5f-136b2a66a50e
   <img alt="sideby 面板：每个账号的 5h、7d 额度，近 7 天 token 用量和健康状态" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/panel.zh-CN.png" width="1280">
 </picture>
 
-macOS 上，同样的额度也可以常驻状态栏（`sideby menubar on`）：点一下或按 `⌥⌘S` 展开，点任意账号就能在终端里打开。
+macOS 上，同样的额度也可以常驻状态栏（`sideby menubar on`）：点一下或按 `⌥X` 展开，点任意账号就能在终端里打开。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/menubar-dark.zh-CN.png">

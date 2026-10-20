@@ -19,16 +19,32 @@ import { MENUBAR_SCRIPT } from './script.ts'
 const LAUNCHER = { node: '/bin/sh', entry: '/usr/bin/env' }
 const PLIST = 'Library/LaunchAgents/dev.sideby.menubar.plist'
 
+/** The calls that change launchd; `print` only asks. */
+const changes = (calls: string[][]) => calls.filter((c) => c[1] !== 'print')
+
 function ctxFor(home: string, calls: string[][]): AutostartContext {
+  const held = new Set<string>()
   return {
     home,
+    sleep: async () => {},
     env: { PATH: '/opt/fake/bin:/usr/bin', XDG_STATE_HOME: '/fake/state' },
     platform: 'darwin',
     launcher: LAUNCHER,
     uid: 501,
     loginHome: home,
+    // A fake launchctl that remembers what it holds: `print` exits 113 for a job it does not hold.
     exec: async (file, args) => {
       calls.push([file, ...args])
+      const label = (args[1] ?? '').split('/').pop()!
+      if (args[0] === 'print') return { code: held.has(label) ? 0 : 113, output: '' }
+      if (args[0] === 'bootout') held.delete(label)
+      if (args[0] === 'bootstrap')
+        held.add(
+          args[2]!
+            .split('/')
+            .pop()!
+            .replace(/\.plist$/, ''),
+        )
       return { code: 0, output: '' }
     },
   }
@@ -64,7 +80,7 @@ describe('menu bar LaunchAgent', () => {
         LAUNCHER.node,
         LAUNCHER.entry,
       ])
-      assert.deepEqual(calls, [['launchctl', 'bootstrap', 'gui/501', h.path(PLIST)]])
+      assert.deepEqual(changes(calls), [['launchctl', 'bootstrap', 'gui/501', h.path(PLIST)]])
       const status = await autostartStatus(ctx, MENUBAR_AGENT)
       assert.deepEqual([status.state, status.current], ['on', true])
       // The Panel's own login item is a separate file, untouched.
@@ -86,7 +102,7 @@ describe('menu bar LaunchAgent', () => {
       }
       await applyAutostart(watching, await planAutostart(watching, 'off', MENUBAR_AGENT), MENUBAR_AGENT)
       assert.equal(fileAtBootout, false)
-      assert.deepEqual(calls, [['launchctl', 'bootout', 'gui/501/dev.sideby.menubar']])
+      assert.deepEqual(changes(calls), [['launchctl', 'bootout', 'gui/501/dev.sideby.menubar']])
       assert.equal((await autostartStatus(ctx, MENUBAR_AGENT)).state, 'off')
     })
   })
@@ -105,6 +121,12 @@ describe('menu bar LaunchAgent', () => {
           return { code: args[0] === 'print' ? 113 : 0, output: '' }
         },
       }
+      // On, but not running: the status says so, and `on` only loads it again.
+      const s = await autostartStatus(gone, MENUBAR_AGENT)
+      assert.deepEqual([s.state, s.loaded], ['on', false])
+      assert.equal((await autostartStatus(ctx, MENUBAR_AGENT)).loaded, true)
+      // The Panel's login item exits once the Panel runs, so whether launchd holds it says nothing; it is not asked.
+      assert.equal((await autostartStatus(gone, PANEL_AGENT)).loaded, undefined)
       const plan = await planAutostart(gone, 'on', MENUBAR_AGENT)
       assert.equal(plan.changed, true)
       assert.deepEqual(plan.commands, [['launchctl', 'bootstrap', 'gui/501', h.path(PLIST)]])
@@ -117,7 +139,7 @@ describe('menu bar LaunchAgent', () => {
       calls.length = 0
       const demo = { ...gone, loginHome: '/some/other/home' }
       assert.equal((await planAutostart(demo, 'on', MENUBAR_AGENT)).changed, false)
-      assert.deepEqual(calls, [])
+      assert.deepEqual(changes(calls), [])
     })
   })
 
@@ -156,7 +178,7 @@ describe('menu bar LaunchAgent', () => {
 
 describe('menu bar script', () => {
   it('runs only sideby commands and reads only its own snapshot file', () => {
-    const commands = [...MENUBAR_SCRIPT.matchAll(/act\(\[([^\]]*)\]\)|sideby\(\[([^\]]*)\]\)/g)].map(
+    const commands = [...MENUBAR_SCRIPT.matchAll(/act\(\[([^\]]*)\]\)|sideby\(\[([^\]]*)\]/g)].map(
       (m) => (m[1] ?? m[2])!,
     )
     assert.deepEqual(commands.sort(), [
@@ -167,5 +189,15 @@ describe('menu bar script', () => {
     ])
     assert.equal([...MENUBAR_SCRIPT.matchAll(/stringWithContentsOfFile/g)].length, 1)
     assert.doesNotMatch(MENUBAR_SCRIPT, /\/bin\/sh|doShellScript|\$\{/)
+    // JXA hands enum constants such as NSAlertFirstButtonReturn over as strings: never compare them with === or !==.
+    assert.doesNotMatch(MENUBAR_SCRIPT, /[!=]==\s*\$\.NS\w+/)
+    // The key monitor makes AppKit throw inside a modal loop, so every alert lifts it first and puts it back after.
+    const modals = [...MENUBAR_SCRIPT.matchAll(/\.runModal\b/g)].length
+    assert.ok(modals > 0)
+    assert.equal(
+      [...MENUBAR_SCRIPT.matchAll(/pauseKeys\(\);[\s\S]{0,160}?\.runModal;[\s\S]{0,80}?resumeKeys\(\);/g)]
+        .length,
+      modals,
+    )
   })
 })

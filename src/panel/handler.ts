@@ -38,6 +38,7 @@ import {
   type BrowserReport,
   browserReport,
   openInBrowser,
+  setBrowserChoice,
   setBrowserSignIns,
 } from '../core/browser-profiles.ts'
 import {
@@ -48,6 +49,7 @@ import {
   editConfigTerminal,
   editConfigUpdate,
   type HandoffSettings,
+  loadConfig,
   type PanelConfig,
 } from '../core/config.ts'
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
@@ -69,6 +71,13 @@ import * as update from '../core/update.ts'
 import { buildId, localBuild, packageVersion } from '../core/version.ts'
 import { HOOK_FAMILIES } from '../handoff/hook.ts'
 import { MENUBAR_AGENT } from '../menubar/agent.ts'
+import {
+  hotkeyView,
+  iconView,
+  openMenuBarSettings,
+  readMenubarState,
+  setMenubarHotkey,
+} from '../menubar/hotkey.ts'
 import { MENUBAR_SCRIPT } from '../menubar/script.ts'
 import type { AccountStatus, DoctorHistory, FamilyInfo, QuotaCheckInfo, Runtime } from '../runtime.ts'
 import type { Account, FamilyDef, FamilyLogo, QuotaResult, QuotaSetupPlan, UsageResult } from '../types.ts'
@@ -299,6 +308,25 @@ export function bindPanelAutostart(ctx: Partial<AutostartContext>): () => void {
     autostartOverride = before
   }
 }
+/**
+ * The menu bar shortcut as config holds it now (read again: the Panel's Runtime may hold an older config), and what
+ * the item last said about its icon.
+ */
+async function menubarExtras(rt: Runtime) {
+  const configured = (await loadConfig(rt.paths.configFile).catch(() => rt.config)).menubar?.hotkey
+  const kept = await readMenubarState(rt.paths.stateDir)
+  return { hotkey: hotkeyView(configured, kept.hotkey ?? null), icon: iconView(kept.icon, new Date()) }
+}
+
+/**
+ * A login item's state as the page shows it; the menu bar item's carries its shortcut too. Every answer that hands the
+ * page a new state goes through here, so turning it on never drops the shortcut row.
+ */
+async function loginItemView(rt: Runtime, agent: LoginAgent) {
+  const view = autostartView(await autostartStatus(autostartCtx(rt), agent), rt.paths.home)
+  return agent === MENUBAR_AGENT && view.supported ? { ...view, ...(await menubarExtras(rt)) } : view
+}
+
 const autostartCtx = (rt: Runtime): AutostartContext => ({
   home: rt.paths.home,
   env: rt.env,
@@ -319,6 +347,7 @@ export function autostartView(s: AutostartStatus, home: string) {
     current: s.current,
     ...(s.programArguments ? { programArguments: s.programArguments.map(t) } : {}),
     ...(s.missing ? { missing: s.missing.map(t) } : {}),
+    ...(s.loaded === undefined ? {} : { loaded: s.loaded }),
   }
 }
 
@@ -333,6 +362,14 @@ function autostartPlanView(p: AutostartPlan, home: string) {
     path: tildify(p.path, home),
     ...(p.programArguments ? { programArguments: p.programArguments.map(shownArg(home)) } : {}),
     ...(p.blocked ? { blocked: p.blocked } : {}),
+    // Only starts the agent again: the file stays as it is (on, current, but launchd let it go).
+    ...(p.action === 'on' &&
+    p.changed &&
+    p.status.state === 'on' &&
+    p.status.current &&
+    p.status.loaded === false
+      ? { restartOnly: true }
+      : {}),
     status: autostartView(p.status, home),
   }
 }
@@ -854,7 +891,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         changed: r.changed,
         loaded: r.loaded,
         ...(r.note ? { note: r.note.split(home).join('~') } : {}),
-        status: autostartView(await autostartStatus(ctx, agent), home),
+        status: await loginItemView(rt, agent),
       }
     },
   })
@@ -1223,6 +1260,18 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return openInBrowser(rt, await rt.resolve(account), profile)
       },
     },
+    // Chooses the Chrome browser user of an Account, or with profile null lets sideby find it again (spec §3.24 "手动指定").
+    // It writes sideby's config only.
+    '/api/browser/choose': {
+      async run(body) {
+        const account = optString(body, 'account')
+        if (!account) throw new HttpError(400, '"account" is required')
+        if (body.profile !== null && typeof body.profile !== 'string')
+          throw new HttpError(400, '"profile" must be a browser user folder or null')
+        const rt = await getRuntime()
+        return setBrowserChoice(rt, await rt.resolve(account), body.profile)
+      },
+    },
     // Opens a Grok Bot window, creating it when the name is new, or brings it to the front (ADR-0019).
     '/api/app-profile/open': {
       async run(body) {
@@ -1414,6 +1463,30 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
     // saw (`programArguments`).
     '/api/autostart': loginItemRoute(PANEL_AGENT),
     '/api/menubar': loginItemRoute(MENUBAR_AGENT),
+    // "Can't see the icon?": System Settings › Menu Bar, where macOS 26 and later ask to allow it.
+    '/api/menubar/settings': {
+      async run() {
+        const rt = await getRuntime()
+        if (!(await openMenuBarSettings(autostartCtx(rt))))
+          throw new UserError('Could not open System Settings; open it yourself and choose Menu Bar')
+        return { opened: true }
+      },
+    },
+    // The shortcut that opens the menu bar item (spec §3.31): `keys` as `sideby menubar hotkey` takes it.
+    '/api/menubar/hotkey': {
+      async run(body) {
+        const keys = optString(body, 'keys')
+        if (!keys) throw new HttpError(400, '"keys" is required, such as "ctrl+opt+s", "off" or "default"')
+        const rt = await getRuntime()
+        const r = await setMenubarHotkey({
+          configFile: rt.paths.configFile,
+          stateDir: rt.paths.stateDir,
+          value: keys,
+          ctx: autostartCtx(rt),
+        })
+        return r
+      },
+    },
     // Undo for the quota setup above; the Runtime turns a teardown that throws into `{ ok: false, message }`.
     '/api/quota/teardown': {
       async run(body) {
@@ -1539,8 +1612,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         // Start at login (spec §3.29): its state only; turning it on or off is the POST of the same path.
         if (sub === '/api/autostart' || sub === '/api/menubar') {
           const rt = await getRuntime()
-          const agent = sub === '/api/menubar' ? MENUBAR_AGENT : PANEL_AGENT
-          send(res, 200, autostartView(await autostartStatus(autostartCtx(rt), agent), rt.paths.home))
+          send(res, 200, await loginItemView(rt, sub === '/api/menubar' ? MENUBAR_AGENT : PANEL_AGENT))
           return true
         }
         if (sub === '/api/state') {

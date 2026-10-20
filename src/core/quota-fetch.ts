@@ -108,21 +108,23 @@ export async function fetchedQuota(
 }
 
 /**
- * What sideby shows from a Family that fetches Quota: the newer of the kept answer and the local reading; else why
- * there is none (`off` is why fetching is off, or null).
+ * What sideby shows from a Family that fetches Quota: the newer reading, or the kept answer when local events can
+ * replay old snapshots (`localFallbackOnly`); else why there is none (`off` is why fetching is off, or null).
  */
 export function shownQuota(
   local: QuotaResult | null,
   kept: QuotaStoreEntry | null,
   off: string | null,
+  localFallbackOnly = false,
 ): QuotaResult {
   const fetched: QuotaResult | null = kept?.quota
     ? { ...kept.quota, fetched: true, ...(kept.error ? { fetchError: kept.error } : {}) }
     : null
   const own = local?.status === 'ok' ? local : null
-  if (fetched && own) return Date.parse(own.observedAt) > Date.parse(fetched.observedAt) ? own : fetched
+  if (fetched && own)
+    return !localFallbackOnly && Date.parse(own.observedAt) > Date.parse(fetched.observedAt) ? own : fetched
   if (fetched) return fetched
-  if (own) return own
+  if (own) return kept?.error ? { ...own, fetchError: kept.error } : own
   if (off) return { status: 'unavailable', reason: 'not-enabled', detail: off }
   if (kept?.error) return { status: 'unavailable', reason: 'fetch-failed', detail: kept.error }
   return local ?? { status: 'unavailable', reason: 'no-session' }

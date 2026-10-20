@@ -1,6 +1,6 @@
 # AI Tasks
 
-An AI Task is a session of the user's own Host that sideby started for them, with a Task Prompt as its first message. The user starts it from the Panel ("Let AI do it", a Finding, a quota cell, the new-account dialog, "Other tool…", "Let AI write a plugin", "Not sure how? Let AI set it up" in the Preferred terminal dialog, "Let AI tune it" on the Auto Handoff page) or with `sideby ask` in a terminal (`--task free|fix|quota|account|host|plugin|terminal|handoff`). The prompt says what to do and gives facts sideby already knows (account refs, Family, Finding codes, the quota reason, the Panel language, the sideby version). How to do it is on this page.
+An AI Task is a session of the user's own Host that sideby started for them, with a Task Prompt as its first message. The user starts it from the Panel ("Let AI do it", a Finding, a quota cell, the new-account dialog, "Other tool…", "Let AI write a plugin", "Not sure how? Let AI set it up" in the Preferred terminal dialog, "Let AI tune it" on the Auto Handoff page) or with `sideby ask` in a terminal (`--task free|fix|quota|account|host|plugin|terminal|handoff|menubar|hotkey`; "Let AI check it" in the Panel's Menu bar icon dialog starts `menubar`, and "Not sure which? Let AI pick one" under its shortcut starts `hotkey`). The prompt says what to do and gives facts sideby already knows (account refs, Family, Finding codes, the quota reason, the Panel language, the sideby version). How to do it is on this page.
 
 You are inside such a session when the first message came from sideby and names a task. Work in the directory the session started in (sideby's own `ai/` folder) unless the user names another one.
 
@@ -124,3 +124,19 @@ Once the task works, ask the user whether they would like to share the improveme
 2. Fork `Adonis0123/sideby`, commit and open a pull request as its `CONTRIBUTING.md` says: one tool per pull request, the Host version and date it was tried with, tried on their own machine, `pnpm check` passing.
 
 Never fork, commit or open a pull request without that yes.
+
+## menubar: the menu bar icon does not show
+
+1. Run `sideby menubar --json`.
+2. `state: "off"`: it was turned off, often with "Hide from Menu Bar…" in its own menu. Show `sideby menubar on --json` (exit 10) and run `sideby menubar on --yes` after the user agrees.
+3. `state: "on"` with `loaded: false`: macOS is not running it (it can happen after an update). `sideby menubar on --yes` only starts it again; the file stays as it is.
+4. `loaded: true`: it runs but is hidden. Check, in turn: a full menu bar or the notch (hold ⌘ and drag icons to make room); a menu bar organizer such as Ice, Bartender or Hidden Bar (look in `/Applications`) that tucked it away, where the user moves it out in that app's settings (it shows as osascript); on macOS 26 and later, osascript not allowed under System Settings › Menu Bar. The shortcut in `hotkey.label` opens the menu from anywhere, which shows it runs.
+5. Never end or restart a process that is not sideby's.
+
+## hotkey: pick a shortcut for the menu bar menu
+
+1. Run `sideby menubar hotkey --json` for the current one.
+2. Find what is taken: the system shortcuts with `enabled = 1` in `defaults read com.apple.symbolichotkeys AppleSymbolicHotKeys` (key code 49 is Space), and the apps in `/Applications` that usually hold a global shortcut (Raycast and Alfred take ⌥Space, ChatGPT ⌥Space, Claude its own), judged by their defaults. Do not open those apps' config files: they may hold keys. Ask when unsure.
+3. Ask which hand the user presses shortcuts with and which ones they use often. Recommend 2 or 3 free combinations, easiest first (two keys, such as ⌥X or ⌥Z; each needs ⌥, ⌘ or ⌃), and say what each takes away (⌥X no longer types ≈).
+4. Set the chosen one with `sideby menubar hotkey <keys>`. A running menu bar item takes it within seconds, with no restart. Ask the user to press it: if the menu does not open, another app took it first, so try the next.
+5. Never change the shortcuts of macOS or another app.

@@ -11,7 +11,13 @@ import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../test
 import { OUTPUT_SCHEMAS } from '../cli/json-schemas.ts'
 import { createRuntime } from '../runtime.ts'
 import type { Env } from '../types.ts'
-import { browserReport, keyHasId, openInBrowser, setBrowserSignIns } from './browser-profiles.ts'
+import {
+  browserReport,
+  keyHasId,
+  openInBrowser,
+  setBrowserChoice,
+  setBrowserSignIns,
+} from './browser-profiles.ts'
 import type { DesktopDeps, ExecResult } from './desktop-app.ts'
 import { UserError } from './errors.ts'
 import { localStorageKeys, snappyDecompress } from './leveldb-keys.ts'
@@ -558,6 +564,127 @@ describe('sideby browser: switch', () => {
       const report = await cli(h, ['browser', '--json'])
       assert.equal(report.code, 0)
       assert.ok(Value.Check(OUTPUT_SCHEMAS.browser!, JSON.parse(report.out)))
+    })
+  })
+})
+
+/** Adds browser users to the seeded Local State: folder → Chrome name and Google account. */
+async function addProfiles(h: FakeHome, more: Record<string, { name: string; user_name?: string }>) {
+  const file = `${CHROME}/Local State`
+  const state = JSON.parse(await readFile(h.path(file), 'utf8'))
+  Object.assign(state.profile.info_cache, more)
+  await h.write(file, JSON.stringify(state))
+}
+
+const signedInTo = async (rt: Awaited<ReturnType<typeof createRuntime>>, ref: string) =>
+  (await browserReport(rt, await rt.accounts())).profiles
+    .filter((p) => p.signIns.includes(ref))
+    .map((p) => p.dir)
+
+describe('sideby browser: Google account (spec §3.24 "按 Google 账号收窄")', () => {
+  it('keeps only the browser users whose Google account is the login email when several show the same login', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      // Profile 3 uses c@example.com in Chrome and also holds codex main's key; Default holds it as well.
+      await addProfiles(h, { 'Profile 3': { name: 'Codex', user_name: 'c@example.com' } })
+      await bin(
+        h,
+        `${CHROME}/Profile 3/Local Storage/leveldb/000003.log`,
+        logFile([{ key: lsKey('https://chatgpt.com', `cache/${CODEX_USER}/ws/models`), value: '1' }]),
+      )
+      const rt = await createRuntime({ env: h.env, desktop: fakeDeps(h).deps })
+      assert.deepEqual(await signedInTo(rt, 'codex:main'), ['Profile 3'])
+    })
+  })
+
+  it('gives an account found nowhere the one browser user whose Google account is its login email', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      await h.write(
+        '.codex-team/auth.json',
+        JSON.stringify({
+          tokens: {
+            id_token: fakeJwt({
+              email: 'team@example.com',
+              'https://api.openai.com/auth': { user_id: 'user-Other1' },
+            }),
+          },
+        }),
+        0o600,
+      )
+      await addProfiles(h, { 'Profile 3': { name: 'Team', user_name: 'Team@Example.com' } })
+      const rt = await createRuntime({ env: h.env, desktop: fakeDeps(h).deps })
+      assert.deepEqual(await signedInTo(rt, 'codex:team'), ['Profile 3'])
+      // Two browser users with that Google account: sideby does not guess.
+      await addProfiles(h, { 'Profile 4': { name: 'Team 2', user_name: 'team@example.com' } })
+      const again = await createRuntime({ env: h.env, desktop: fakeDeps(h).deps })
+      assert.deepEqual(await signedInTo(again, 'codex:team'), [])
+    })
+  })
+})
+
+describe('sideby browser: chosen by the user (spec §3.24 "手动指定")', () => {
+  it('replaces what was found, opens there, and forgets it again', async () => {
+    await withFakeHome(async (h) => {
+      const { rt, fake } = await setup(h)
+      const before = await snapshot(h.home)
+      const codex = await rt.resolve('codex:main')
+      const set = await setBrowserChoice(rt, codex, 'Profile 1')
+      assert.deepEqual(set, { ref: 'codex:main', profile: { dir: 'Profile 1', name: 'Work' }, changed: true })
+      // Only sideby's config changed.
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), ['.config/sideby/config.json'])
+      const fresh = await createRuntime({ env: h.env, desktop: fake.deps })
+      assert.deepEqual(await signedInTo(fresh, 'codex:main'), ['Profile 1'])
+      const r = await browserReport(fresh, await fresh.accounts())
+      assert.deepEqual(r.choices, { 'codex:main': 'Profile 1' })
+      assert.ok(Value.Check(OUTPUT_SCHEMAS.browser!, { schemaVersion: 1, ...r }))
+      const opened = await openInBrowser(fresh, await fresh.resolve('codex:main'))
+      assert.equal(opened.profile.dir, 'Profile 1')
+      // A Grok account, which nothing can match, can be chosen too.
+      await setBrowserChoice(fresh, await fresh.resolve('grok:main'), 'Personal')
+      assert.equal((await openInBrowser(fresh, await fresh.resolve('grok:main'))).profile.dir, 'Default')
+      const auto = await setBrowserChoice(fresh, await fresh.resolve('codex:main'), null)
+      assert.deepEqual(auto, { ref: 'codex:main', profile: null, changed: true })
+      const last = await createRuntime({ env: h.env, desktop: fake.deps })
+      assert.deepEqual(await signedInTo(last, 'codex:main'), ['Default'])
+      assert.deepEqual(last.config.browser?.choices, { 'grok:main': 'Default' })
+    })
+  })
+
+  it('refuses an unknown or ambiguous browser user and an API account, writing nothing', async () => {
+    await withFakeHome(async (h) => {
+      const { rt } = await setup(h)
+      const before = await snapshot(h.home)
+      await refused(setBrowserChoice(rt, await rt.resolve('codex:main'), 'Nobody'), 'profile-unknown')
+      await refused(setBrowserChoice(rt, await rt.resolve('codex:main'), 'Work'), 'profile-ambiguous')
+      await refused(setBrowserChoice(rt, await rt.resolve('claude:deepseek'), 'Default'), 'no-website')
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+    })
+  })
+
+  it('finds the account again when the chosen browser user is gone, and says so', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ browser: { signIns: true, choices: { 'codex:main': 'Profile 9' } } }),
+      )
+      const rt = await createRuntime({ env: h.env, desktop: fakeDeps(h).deps })
+      const r = await browserReport(rt, await rt.accounts())
+      assert.deepEqual(r.choices, {})
+      assert.deepEqual(await signedInTo(rt, 'codex:main'), ['Default'])
+      assert.ok(r.problems.some((p) => p.includes('codex:main') && p.includes('--auto')))
+    })
+  })
+
+  it('`browser set --auto` prints schema-valid JSON', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      const r = await cli(h, ['browser', 'set', 'codex:main', '--auto', '--json'])
+      assert.equal(r.code, 0, r.out)
+      const out = JSON.parse(r.out) as { profile: unknown; changed: boolean }
+      assert.ok(Value.Check(OUTPUT_SCHEMAS['browser-set']!, out))
+      assert.deepEqual([out.profile, out.changed], [null, false])
     })
   })
 })

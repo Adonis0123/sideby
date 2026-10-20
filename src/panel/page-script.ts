@@ -1,5 +1,6 @@
 // The Panel page's inline script. Plain browser JavaScript in a string (no template literals inside, so String.raw
 // keeps it verbatim); the pure helpers from page-logic.ts are prepended so the tested code is the code that runs.
+import { quotaIsStale } from '../core/quota-levels.ts'
 import {
   aiTaskAccounts,
   aliasArgsOf,
@@ -20,6 +21,8 @@ import {
   handoffChangeOf,
   handoffHintAccount,
   handoffTaskFacts,
+  hotkeyFromKey,
+  hotkeyPressKind,
   inDisplayOrder,
   loginClusters,
   loginKey,
@@ -57,6 +60,7 @@ import {
 } from './page-logic.ts'
 
 const LOGIC = [
+  quotaIsStale,
   aiTaskAccounts,
   askBridge,
   askBridged,
@@ -69,6 +73,8 @@ const LOGIC = [
   attentionReasons,
   attentionWhy,
   autostartNote,
+  hotkeyFromKey,
+  hotkeyPressKind,
   cacheHitRate,
   fileSize,
   fixPrompt,
@@ -120,7 +126,6 @@ const MAIN = String.raw`
   const WARN = BOOT.warn
   const FAIL = BOOT.fail
   // Quota data older than this is greyed and marked with its age.
-  const STALE_MS = 60 * 60000
   // Findings listed before the rest fold behind a button.
   const FINDINGS_SHOWN = 5
   const NAME_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
@@ -162,6 +167,7 @@ const MAIN = String.raw`
     if (raw.rcHide === true) p.rcHide = true
     if (raw.mbHintDone === true) p.mbHintDone = true
     if (raw.cfgDone === true) p.cfgDone = true
+    if (typeof raw.setSec === 'string') p.setSec = raw.setSec
     if (typeof raw.family === 'string') p.family = raw.family
     if (raw.collapsed && typeof raw.collapsed === 'object')
       for (const k of Object.keys(raw.collapsed)) if (raw.collapsed[k] === true) p.collapsed[k] = true
@@ -238,6 +244,19 @@ const MAIN = String.raw`
   function setKids(el, kids) {
     el.replaceChildren()
     add(el, kids)
+  }
+  // Re-renders el without the jolt of a rebuild: the focused control keeps focus (matched by data-key), and an element
+  // marked data-enter that was not there before grows in, so a row that appears does not snap the layout open.
+  // A first render (el empty) animates nothing; the container itself has its own entrance.
+  function swapKids(el, kids) {
+    const before = new Set([...el.querySelectorAll('[data-enter]')].map((x) => x.getAttribute('data-enter')))
+    const shown = el.childNodes.length > 0
+    const active = document.activeElement
+    const focusKey = active && el.contains(active) ? active.getAttribute('data-key') : null
+    setKids(el, kids)
+    if (shown && !REDUCED)
+      for (const x of el.querySelectorAll('[data-enter]')) if (!before.has(x.getAttribute('data-enter'))) x.classList.add('enter')
+    if (focusKey) { const again = el.querySelector('[data-key="' + focusKey + '"]'); if (again) again.focus() }
   }
   function add(el, kid) {
     if (kid === null || kid === undefined || kid === false) return
@@ -361,6 +380,7 @@ const MAIN = String.raw`
     folder: 'M3 6h6l2 2h10v11H3z',
     file: 'M14 3H6v18h12V7zM14 3v4h4M9 13h6M9 17h6',
     check: 'M9 12l2 2 4-4M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z',
+    tick: 'M5 12.5l4.5 4.5L19 7.5',
     userPlus: 'M15 19a6 6 0 0 0-12 0M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M16 11h6',
     x: 'M6 6l12 12M18 6L6 18',
     arrowUp: 'M12 19V5M5 12l7-7 7 7',
@@ -509,7 +529,7 @@ const MAIN = String.raw`
         action,
         h('button', { class: 'toast-x', type: 'button', 'aria-label': t('toast.dismiss'), onclick: () => dismiss(item) }, icon('x')))
       item.el.addEventListener('mouseenter', () => clearTimeout(item.timer))
-      item.el.addEventListener('mouseleave', () => { item.timer = setTimeout(() => dismiss(item), 2500) })
+      item.el.addEventListener('mouseleave', () => { if (!item.gone) item.timer = setTimeout(() => dismiss(item), 2500) })
       toasts.push(item)
       $('toasts').append(item.el)
       if (dlg.el && dlg.el.open) raiseToasts()
@@ -518,10 +538,15 @@ const MAIN = String.raw`
     item.timer = setTimeout(() => dismiss(item), ms)
   }
   function dismiss(item) {
+    if (item.gone) return
+    item.gone = true
     clearTimeout(item.timer)
     const i = toasts.indexOf(item)
     if (i >= 0) toasts.splice(i, 1)
-    item.el.remove()
+    if (REDUCED || document.hidden) { item.el.remove(); return }
+    item.el.classList.add('toast-out')
+    item.el.style.setProperty('pointer-events', 'none')
+    setTimeout(() => item.el.remove(), 160)
   }
 
   // ---------- small parts ----------
@@ -564,10 +589,6 @@ const MAIN = String.raw`
     const units = [[1e9, 'B'], [1e6, 'M'], [1e3, 'K']]
     for (const [v, u] of units) if (n >= v) return (n / v).toFixed(n / v >= 100 ? 0 : 1).replace(/\.0$/, '') + u
     return String(Math.round(n))
-  }
-  function isStale(iso, now) {
-    const ts = Date.parse(iso)
-    return Number.isFinite(ts) && now - ts > STALE_MS
   }
 
   function family(id) { return (S.state && S.state.families.find((f) => f.id === id)) || { id, title: id, bin: id, installUrl: '', installed: false } }
@@ -631,7 +652,17 @@ const MAIN = String.raw`
     const body = btn.nextElementSibling
     if (!body) return
     body.parentElement.classList.add('is-open')
-    const r = btn.getBoundingClientRect()
+    placeTip(body, btn.getBoundingClientRect())
+  }
+  function hideTip(btn) { if (btn.parentElement) btn.parentElement.classList.remove('is-open') }
+  document.addEventListener('pointerover', (e) => { const b = e.target.closest && e.target.closest('.tip-btn'); if (b) showTip(b) })
+  document.addEventListener('pointerout', (e) => { const b = e.target.closest && e.target.closest('.tip-btn'); if (b && !b.contains(e.relatedTarget)) hideTip(b) })
+  document.addEventListener('focusin', (e) => { if (e.target.classList && e.target.classList.contains('tip-btn')) showTip(e.target) })
+  document.addEventListener('focusout', (e) => { if (e.target.classList && e.target.classList.contains('tip-btn')) hideTip(e.target) })
+  // An icon button with data-tip shows its text at once on hover and keyboard focus, in the same bubble as a "?"
+  // (a title shows only after a delay, and not on focus). One bubble serves all of them; it never takes a click.
+  let hoverTip = null
+  function placeTip(body, r) {
     const w = body.offsetWidth
     const hgt = body.offsetHeight
     const left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2))
@@ -639,11 +670,22 @@ const MAIN = String.raw`
     body.style.setProperty('left', left + 'px')
     body.style.setProperty('top', top + 'px')
   }
-  function hideTip(btn) { if (btn.parentElement) btn.parentElement.classList.remove('is-open') }
-  document.addEventListener('pointerover', (e) => { const b = e.target.closest && e.target.closest('.tip-btn'); if (b) showTip(b) })
-  document.addEventListener('pointerout', (e) => { const b = e.target.closest && e.target.closest('.tip-btn'); if (b && !b.contains(e.relatedTarget)) hideTip(b) })
-  document.addEventListener('focusin', (e) => { if (e.target.classList && e.target.classList.contains('tip-btn')) showTip(e.target) })
-  document.addEventListener('focusout', (e) => { if (e.target.classList && e.target.classList.contains('tip-btn')) hideTip(e.target) })
+  function showDataTip(el) {
+    const text = el.getAttribute('data-tip')
+    if (!text || el === menu.anchor) return
+    if (!hoverTip) { hoverTip = h('span', { class: 'tip-body tip-float', role: 'tooltip', 'aria-hidden': 'true' }); document.body.append(hoverTip) }
+    hoverTip.textContent = text
+    hoverTip.classList.add('is-shown')
+    placeTip(hoverTip, el.getBoundingClientRect())
+  }
+  function hideDataTip() { if (hoverTip) hoverTip.classList.remove('is-shown') }
+  // Any other target hides it, also after a refresh replaced the button under the pointer.
+  document.addEventListener('pointerover', (e) => { const b = e.target.closest && e.target.closest('[data-tip]'); if (b) showDataTip(b); else hideDataTip() })
+  document.addEventListener('pointerout', (e) => { const b = e.target.closest && e.target.closest('[data-tip]'); if (b && !b.contains(e.relatedTarget)) hideDataTip() })
+  document.addEventListener('focusin', (e) => { if (e.target.matches && e.target.matches('[data-tip]:focus-visible')) showDataTip(e.target) })
+  document.addEventListener('focusout', (e) => { if (e.target.matches && e.target.matches('[data-tip]')) hideDataTip() })
+  document.addEventListener('pointerdown', hideDataTip, true)
+  window.addEventListener('scroll', hideDataTip, true)
 
   // ---------- floating panels: menus and popovers ----------
   // One shared base for everything that floats next to a button: it is placed under (or above) its anchor, kept
@@ -663,7 +705,6 @@ const MAIN = String.raw`
     el.style.setProperty('left', p.left + 'px')
     el.style.setProperty('top', p.top + 'px')
     el.style.setProperty('max-height', p.maxHeight + 'px')
-    if (menu.kind === 'settings') settingsFit()
   }
   function openFloat(anchor, el, kind, align) {
     closeMenu()
@@ -704,11 +745,14 @@ const MAIN = String.raw`
     if (first) first.focus()
   }
   function refreshPopover(kind) {
-    if (menu.el && menu.kind === kind && menu.render) { setKids(menu.el, menu.render()); placeFloat() }
+    if (menu.el && menu.kind === kind && menu.render) { swapKids(menu.el, menu.render()); placeFloat() }
   }
   function closeMenu(restore) {
     if (!menu.el) return
-    menu.el.remove()
+    // It fades out rather than vanishing; it takes no clicks meanwhile, and the next menu does not wait for it.
+    const gone = menu.el
+    if (REDUCED) gone.remove()
+    else { gone.classList.add('float-out'); gone.style.setProperty('pointer-events', 'none'); setTimeout(() => gone.remove(), 120) }
     menu.anchor.setAttribute('aria-expanded', 'false')
     const back = menu.returnTo || menu.anchor
     if (restore && back.isConnected) back.focus()
@@ -838,7 +882,7 @@ const MAIN = String.raw`
   function loginItems(a) {
     return [
       browserFor(a) ? { icon: 'globe', label: t('br.open'), disabled: Boolean(ui.browserRef), run: () => openBrowserDialog(a) } : null,
-      a.kind !== 'api' && !BOOT.readOnly ? { icon: 'terminal', label: t('menu.signIn'), run: () => signIn(a) } : null,
+      a.kind !== 'api' && !BOOT.readOnly ? { icon: 'terminal', label: t(a.login === 'logged-in' ? 'menu.signInAgain' : 'menu.signIn'), run: () => signIn(a) } : null,
       a.kind !== 'api' ? { icon: 'key', label: t('menu.copyLogin'), hint: 'sideby login ' + a.ref, run: () => copyText('sideby login ' + a.ref) } : null,
       keyable(a) ? { icon: 'key', label: t('menu.enterKey'), run: () => openKey(a) } : null,
       a.identity && a.identity.email ? { icon: 'mail', label: t('menu.copyEmail'), hint: emailText(a.identity.email), run: () => copyText(a.identity.email) } : null,
@@ -864,16 +908,37 @@ const MAIN = String.raw`
     openMenu(anchor, items, t('login.label', { names: ms.map((m) => m.name).join(', ') }))
   }
   function loginMoreButton(ms) {
-    const b = h('button', { class: 'icon-btn more', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': t('login.label', { names: ms.map((m) => m.name).join(', ') }), title: t('menu.title') }, icon('more'))
+    const b = h('button', { class: 'icon-btn more', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': t('login.label', { names: ms.map((m) => m.name).join(', ') }), 'data-tip': t('menu.title') }, icon('more'))
     b.addEventListener('click', () => { if (menu.anchor === b) closeMenu(); else loginMenu(ms, b) })
     return b
+  }
+  // Next to the terminal button: open this account's desktop app (spec §3.20), or bring it to the front when it runs.
+  // A Same Login row is one login, so one click is enough: it brings forward a window that already runs, or opens the
+  // directory the row is named after.
+  function deskButton(a, ms) {
+    const can = (ms || [a]).filter((m) => deskItem(m))
+    if (!can.length) return null
+    const m = can.find((x) => x.desktopApp.running) || can[0]
+    const d = m.desktopApp
+    const text = t(d.running ? 'desk.showHint' : 'desk.openHint', { app: d.app, ref: m.ref })
+    return h('button', { class: 'icon-btn row-run row-desk' + (d.running ? ' is-open' : ''), type: 'button', disabled: Boolean(ui.desktopRef), 'aria-label': text, 'data-tip': text, onclick: (e) => { e.stopPropagation(); openDesktop(m) } },
+      can.some((x) => ui.desktopRef === x.ref) ? spinner() : icon('monitor'))
   }
   // The most used action, on the row itself: copy the command that starts this account (its short command when it
   // has one, which is shorter to type).
   function runButton(a) {
     const cmd = (a.aliases || [])[0] || 'sideby run ' + a.ref
     const text = t('row.copyRun', { cmd })
-    return h('button', { class: 'icon-btn row-run', type: 'button', 'aria-label': text, title: text, onclick: (e) => { e.stopPropagation(); copyText(cmd) } }, icon('terminal'))
+    // A copy shows a tick on the button for a moment, where the eye already is.
+    return h('button', { class: 'icon-btn row-run', type: 'button', 'aria-label': text, 'data-tip': text, onclick: (e) => {
+      e.stopPropagation()
+      copyText(cmd)
+      const b = e.currentTarget
+      clearTimeout(b._done)
+      setKids(b, [icon('tick')])
+      b.classList.add('is-done')
+      b._done = setTimeout(() => { b.classList.remove('is-done'); setKids(b, [icon('terminal')]) }, 1200)
+    } }, icon('terminal'))
   }
   // A pinned row (spec §3.25, §3.27) says so with a small muted pin right before its name, and nothing at its end;
   // pinning and unpinning are in the row's menu and in the arrange mode.
@@ -896,7 +961,7 @@ const MAIN = String.raw`
     return { icon: 'pin', label: full ? t('pin.full', { n: PIN_MAX }) : t(on ? 'pin.unpin' : 'pin.pin'), disabled: full, run: () => togglePin(a) }
   }
   function moreButton(a) {
-    const b = h('button', { class: 'icon-btn more', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': t('menu.label', { ref: a.ref }), title: t('menu.title') }, icon('more'))
+    const b = h('button', { class: 'icon-btn more', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': t('menu.label', { ref: a.ref }), 'data-tip': t('menu.title') }, icon('more'))
     b.addEventListener('click', () => { if (menu.anchor === b) closeMenu(); else accountMenu(a, b) })
     return b
   }
@@ -1179,7 +1244,7 @@ const MAIN = String.raw`
     const q = a.quota
     if (!q) return h('div', { class: 'quota' }, h('div', { class: 'q-note' }, '—'))
     if (q.status !== 'ok') return h('div', { class: 'quota' }, quotaNote(a, q))
-    const stale = isStale(q.observedAt, now)
+    const stale = quotaIsStale(q, now)
     const wins = q.windows || []
     // A reading borrowed from another Account of the same login says where it came from (spec §3.21).
     const from = q.from ? t('quota.sharedFrom', { name: refName(q.from), ago: ago(q.observedAt) }) : null
@@ -1195,7 +1260,7 @@ const MAIN = String.raw`
         return w ? meter(w, now, stale, q.observedAt) : noMeter(winTitle(c))
       }) : h('div', { class: 'q-note' }, t('quota.noWindows')),
       // Old numbers keep their colours and say their age once, under the bars.
-      stale && wins.length ? h('div', { class: 'q-asof', title: t('quota.asOf', { ago: ago(q.observedAt) }) }, icon('clock'), t('quota.staleShort', { ago: agoShort(now - Date.parse(q.observedAt)) })) : null)
+      stale && wins.length ? h('div', { class: 'q-asof', title: failed || t('quota.asOf', { ago: ago(q.observedAt) }) }, icon('clock'), q.fetchError ? t('quota.fetchFailed') + ' · ' : '', t('quota.staleShort', { ago: agoShort(now - Date.parse(q.observedAt)) })) : null)
   }
   function usageBlock(a) {
     const u = a.usage
@@ -1309,8 +1374,15 @@ const MAIN = String.raw`
   // The Browser Sign-in as a line of the details: which Chrome browser user signed in to the account's website.
   function browserItem(a) {
     const b = browserButton(a)
-    return b ? h('div', { class: 'rd-item rd-browser' }, h('span', { class: 'rd-label' }, t('row.browser')), b) : null
+    if (!b) return null
+    const chosen = browserChosen(a)
+    return h('div', { class: 'rd-item rd-browser' }, h('span', { class: 'rd-label' }, t('row.browser')),
+      h('div', { class: 'br-line' }, b,
+        chosen ? h('span', { class: 'tag', title: t('br.chosenHint') }, t('br.chosen')) : null,
+        h('button', { class: 'link-btn small', type: 'button', title: t('br.changeHint', { ref: a.ref }), onclick: (e) => { e.stopPropagation(); openBrowserDialog(a) } }, t('br.change'))))
   }
+  // The browser user the person chose for this account themselves (config browser.choices), if any.
+  function browserChosen(a) { const b = browserInfo(); return (b && b.choices && b.choices[a.ref]) || null }
   function subLine(a) {
     const plan = a.quota && a.quota.status === 'ok' && a.quota.plan
     return h('div', { class: 'ident-sub' }, dots([
@@ -1405,9 +1477,26 @@ const MAIN = String.raw`
   }
   function brProfileRow(a, p) {
     const busy = ui.browserRef === a.ref
+    const chosen = browserChosen(a) === p.dir
     return h('li', { class: 'br-row' },
       h('span', null, h('b', null, profileName(p.name)), p.email ? h('span', { class: 'muted small' }, ' · ' + emailText(p.email)) : null, ' ', h('span', { class: 'muted small mono' }, p.dir), p.changedAt ? h('span', { class: 'muted small' }, ' · ' + t('br.changed', { when: ago(p.changedAt) })) : null),
-      h('button', { class: 'btn btn-sm', type: 'button', disabled: Boolean(ui.browserRef), 'aria-busy': busy ? 'true' : null, onclick: () => openBrowser(a, p) }, t('br.openIt')))
+      h('span', { class: 'br-acts' },
+        chosen ? h('span', { class: 'tag', title: t('br.chosenHint') }, t('br.chosen'))
+          : h('button', { class: 'link-btn small', type: 'button', disabled: br.busy, title: t('br.chooseHint', { ref: a.ref }), onclick: () => brChoose(a, p.dir) }, t('br.choose')),
+        h('button', { class: 'btn btn-sm', type: 'button', disabled: Boolean(ui.browserRef), 'aria-busy': busy ? 'true' : null, onclick: () => openBrowser(a, p) }, t('br.openIt'))))
+  }
+  // Remembers the person's own choice for this account, or with null lets sideby find it again; sideby's config only.
+  async function brChoose(a, dir) {
+    br.busy = true
+    br.error = null
+    renderBrowser()
+    try {
+      await api('/api/browser/choose', { account: a.ref, profile: dir })
+      await load({ silent: true })
+      toast(dir ? t('br.chosenDone', { ref: a.ref, name: profileLabel({ dir, name: dir }) }) : t('br.autoDone', { ref: a.ref }))
+    } catch (e) { br.error = e }
+    br.busy = false
+    renderBrowser()
   }
   function renderBrowser() {
     if (!br || dlg.kind !== 'browser') return
@@ -1426,7 +1515,10 @@ const MAIN = String.raw`
       body.push(h('p', { class: 'note' }, t('br.noChrome')))
     } else {
       const others = info.b.profiles.filter((p) => !info.found.includes(p))
-      if (info.found.length) body.push(h('p', { class: 'small' }, t('br.found', { ref: a.ref })), h('ul', { class: 'br-list' }, info.found.map((p) => brProfileRow(a, p))))
+      const chosen = browserChosen(a)
+      body.push(h('p', { class: 'muted small' }, t(chosen ? 'br.chosenIntro' : 'br.chooseIntro', { ref: a.ref })))
+      if (chosen) body.push(h('p', null, h('button', { class: 'btn btn-sm', type: 'button', disabled: br.busy, onclick: () => brChoose(a, null) }, t('br.auto'))))
+      if (info.found.length) body.push(h('p', { class: 'small' }, t(chosen ? 'br.foundChosen' : 'br.found', { ref: a.ref })), h('ul', { class: 'br-list' }, info.found.map((p) => brProfileRow(a, p))))
       else body.push(h('p', { class: 'muted small' }, t(info.b.families.matched.includes(a.family) ? 'br.none' : 'br.noMatch', { ref: a.ref, url })))
       if (others.length) body.push(h('p', { class: 'small' }, t(info.found.length ? 'br.others' : 'br.all')), h('ul', { class: 'br-list' }, others.map((p) => brProfileRow(a, p))))
       body.push(h('p', { class: 'muted small' }, t('br.local')))
@@ -1533,7 +1625,7 @@ const MAIN = String.raw`
     el.dataset.sig = ms ? sig(ms.map(rowSig)) : rowSig(a)
     let detail = rowDetails(el)[0]
     if (open && !detail) {
-      detail = ms ? loginDetail(ms) : rowDetail(a, Boolean(emailLine(a)))
+      detail = ms ? loginDetail(ms) : rowDetail(a)
       const more = el.querySelector(':scope > .row-end')
       el.insertBefore(detail, more ? more.nextSibling : null)
       detail.style.opacity = '0'
@@ -1595,8 +1687,8 @@ const MAIN = String.raw`
       h('div', { class: 'ident' }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a), metaLine(email || subLine(a), a))),
       quotaBlock(a, now, cols),
       lastUsed(a),
-      h('div', { class: 'row-end' }, runButton(a), moreButton(a)),
-      open ? rowDetail(a, Boolean(email)) : null,
+      h('div', { class: 'row-end' }, deskButton(a), runButton(a), moreButton(a)),
+      open ? rowDetail(a) : null,
       notes(a)), (anchor) => accountMenu(a, anchor))
   }
   // What a right-click on el opens (see openContextMenu).
@@ -1634,7 +1726,7 @@ const MAIN = String.raw`
       h('div', { class: 'ident' }, rowToggle(a), badge(a.family, 'sm'), h('div', { class: 'ident-text' }, nameLine(a, ms), metaLine(email || subLine(a), newestOf(ms)))),
       quotaBlock(a, now, cols),
       lastUsed(newestOf(ms)),
-      h('div', { class: 'row-end' }, runButton(a), loginMoreButton(ms)),
+      h('div', { class: 'row-end' }, deskButton(a, ms), runButton(a), loginMoreButton(ms)),
       open ? loginDetail(ms) : null,
       notes(a)), (anchor) => loginMenu(ms, anchor))
   }
@@ -1655,6 +1747,7 @@ const MAIN = String.raw`
           usageBlock(m),
           healthChip(m),
           h('button', { class: 'btn btn-sm', type: 'button', title: run, onclick: () => copyText(run) }, icon('terminal'), t('login.copyRun')),
+          useOtherButton(m),
           moreButton(m)), (anchor) => accountMenu(m, anchor))
       })))
   }
@@ -1662,15 +1755,25 @@ const MAIN = String.raw`
   function sameLoginNote(a) {
     if (!a.sameLogin || !a.sameLogin.length || inLogin(a)) return null
     const names = a.sameLogin.map(refName).join(', ')
-    return h('div', { class: 'rd-note', title: t('acct.sameLoginHint', { names }) }, t('acct.sameLogin', { names }))
+    return h('div', { class: 'rd-note', title: t('acct.sameLoginHint', { names }) }, t('acct.sameLogin', { names }), ' ', useOtherButton(a))
   }
-  function rowDetail(a, withSub) {
+  // Gives one directory of a Same Login a login of its own (spec §3.21 "换个账号登录"): its sign-in, in a terminal.
+  function useOtherButton(a) {
+    return h('button', { class: 'link-btn small ld-other', type: 'button', title: t('login.useOtherHint', { name: a.name }), onclick: (e) => { e.stopPropagation(); signIn(a) } }, t('login.useOther'))
+  }
+  function rowDetail(a) {
     const same = sameLoginNote(a)
-    return h('div', { class: 'row-detail' },
-      withSub || same ? h('div', { class: 'rd-item rd-run' }, h('span', { class: 'rd-label' }, t('row.runs')), withSub ? subLine(a) : null, same) : null,
-      browserItem(a),
-      h('div', { class: 'rd-item rd-usage' }, h('span', { class: 'rd-label' }, t('col.tokens', { n: BOOT.usageDays })), usageBlock(a)),
-      h('div', { class: 'rd-item rd-health' }, h('span', { class: 'rd-label' }, t('col.health')), healthChip(a)))
+    const b = browserInfo()
+    const signIns = Boolean(b && b.enabled && !BOOT.readOnly)
+    // One panel of four cells: how it runs, its Chrome sign-in, tokens, health. Every row has every cell, so the
+    // cells line up down the list; an account without a Chrome sign-in says so with a dash.
+    return h('div', { class: 'row-detail' + (signIns ? '' : ' rd-nobr') },
+      h('div', { class: 'rd-item rd-run' }, h('span', { class: 'rd-label' }, t('row.runs')), h('div', { class: 'rd-val' }, subLine(a)), same),
+      signIns ? browserItem(a) || h('div', { class: 'rd-item rd-browser' }, h('span', { class: 'rd-label' }, t('row.browser')),
+        h('div', { class: 'br-line' }, h('span', { class: 'rd-none' }, '—'),
+          browserFor(a) ? h('button', { class: 'link-btn small', type: 'button', title: t('br.changeHint', { ref: a.ref }), onclick: (e) => { e.stopPropagation(); openBrowserDialog(a) } }, t('br.pick')) : null)) : null,
+      h('div', { class: 'rd-item rd-usage' }, h('span', { class: 'rd-label' }, t('col.tokens', { n: BOOT.usageDays })), h('div', { class: 'rd-val' }, usageBlock(a))),
+      h('div', { class: 'rd-item rd-health' }, h('span', { class: 'rd-label' }, t('col.health')), h('div', { class: 'rd-val' }, healthChip(a))))
   }
   // A card shows everything at once; it has room for it.
   function card(a, now, cols) {
@@ -2444,6 +2547,7 @@ const MAIN = String.raw`
   function showDialog(kind) {
     const el = ensureDialog()
     dlg.kind = kind
+    if (kind !== 'settings') el.classList.remove('dialog-wide')
     if (!el.open) { el.showModal(); raiseToasts() }
   }
 
@@ -3617,23 +3721,54 @@ const MAIN = String.raw`
     refreshSettings()
     if (dlg.kind === 'rc') renderRc()
   }
-  // The popover and the full settings dialog show the same groups (spec §3.29), top to bottom: Appearance, Startup,
-  // Accounts and quota, Let AI help. leave() closes whichever holds them before a link goes elsewhere; a link that
-  // opens a dialog keeps the dialog element open (opens: true), since one dialog element is shared.
-  function settingsGroups(leave) {
-    const secs = settingsSections()
-    const seg = (label, opts, cur, pick) => h('div', { class: 'set-row' }, h('span', { class: 'set-label' }, label),
+  // The settings live in two places (spec §3.29, 2026-10-20). The header popover holds only what people change
+  // often, one click each and no explanations: language, theme, Auto Handoff, asking an AI, and "All settings…".
+  // Everything else is in the settings dialog, one section at a time, picked in a list at its side; each section
+  // explains itself once. leave() closes whichever holds them before a link goes elsewhere; a link that opens a
+  // dialog keeps the dialog element open (opens: true), since one dialog element is shared.
+  function setSeg(label, opts, cur, pick) {
+    return h('div', { class: 'set-row' }, h('span', { class: 'set-label' }, label),
       h('div', { class: 'seg', role: 'group', 'aria-label': label }, opts.map(([v, text]) =>
         h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === cur), onclick: () => pick(v) }, text))))
-    const link = (label, state, cls, run, opens) => h('button', { class: 'menu-item set-link', type: 'button', onclick: () => { leave(opens); run() } },
+  }
+  function setLink(leave, label, state, cls, run, opens, key) {
+    return h('button', { class: 'menu-item set-link', type: 'button', 'data-enter': key || null, onclick: () => { leave(opens); run() } },
       h('span', { class: 'menu-label' }, label), state ? h('span', { class: 'chip chip-sm ' + cls }, state) : null, icon('chevron'))
-    const look = []
-    if (secs.includes('lang')) look.push(seg(t('set.lang'), [['en', 'English'], ['zh', '中文']], lang, setLang))
-    if (secs.includes('theme')) look.push(seg(t('set.theme'), CHOICES.theme.map((v) => [v, t('set.theme.' + v)]), viewPrefs().theme, setTheme))
-    const start = [autostartRow('autostart')]
+  }
+  function lookRows() {
+    const secs = settingsSections()
+    const out = []
+    if (secs.includes('lang')) out.push(setSeg(t('set.lang'), [['en', 'English'], ['zh', '中文']], lang, setLang))
+    if (secs.includes('theme')) out.push(setSeg(t('set.theme'), CHOICES.theme.map((v) => [v, t('set.theme.' + v)]), viewPrefs().theme, setTheme))
+    return out
+  }
+  function ahLink(leave) {
+    if (!settingsSections().includes('ah')) return null
+    const on = ahState().settings.auto
+    return setLink(leave, t('ah.button'), on ? t('ah.on') : t('ah.off'), on ? 'chip-ok' : '', () => setPage('handoff'))
+  }
+  function rcLink(leave) {
+    const sum = rcSummary()
+    return setLink(leave, t('rc.button'), t('rc.state.' + sum), sum === 'on' ? 'chip-warn' : sum === 'off' ? 'chip-ok' : '', openRc, true)
+  }
+  function aiLink(leave) {
+    return setLink(leave, t('ai.title'), t(skillInstalled() ? 'ai.installed' : 'ai.notInstalled'), skillInstalled() ? 'chip-ok' : '', () => openAsk(), true)
+  }
+  // The dialog's sections, in order: General, Menu bar, Accounts, Quota checks, Auto Handoff, Let AI help. Each is
+  // { id, title, items, foot }: foot is the one line that explains the whole section.
+  function settingsGroups(leave) {
+    const secs = settingsSections()
+    const link = (...args) => setLink(leave, ...args)
+    const general = [...lookRows(), autostartRow('autostart')]
+    if (!BOOT.readOnly) general.push(link(t('term.title'), '', '', openTerminals, true))
     // The menu bar switch shows only where it works (macOS); while its state loads it waits, unseen.
-    if (li.menubar.status && li.menubar.status.supported) start.push(autostartRow('menubar'))
-    if (!BOOT.readOnly) start.push(link(t('term.title'), '', '', openTerminals, true))
+    const bar = []
+    if (li.menubar.status && li.menubar.status.supported) {
+      bar.push(autostartRow('menubar'))
+      const mbs = li.menubar.status
+      if ((mbs.state === 'on' || mbs.state === 'stale') && mbs.hotkey)
+        bar.push(link(t('mb.settings'), mbs.hotkey.enabled ? mbs.hotkey.label : t('hk.unset'), mbs.hotkey.registered === false ? 'chip-warn' : '', openMenubarSettings, true, 'mbset'))
+    }
     const acct = []
     // The arrange mode (spec §3.25) has a place here too, where people look for "how do I change this".
     if (secs.includes('order')) {
@@ -3645,71 +3780,72 @@ const MAIN = String.raw`
         if (bar) bar.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'center' })
       }))
     }
-    // Quota checks that ask the Host (spec §3.26): one switch per Family, with what it does in plain words.
+    if (pickFamilies().length) {
+      const names = Object.keys(S.state.pickCommands || {})
+      acct.push(link(t('pk.title'), names.length ? names.join(', ') : t('pk.noneYet'), names.length ? 'chip-ok' : '', () => openPick(null), true))
+    }
+    if (secs.includes('rc')) acct.push(rcLink(leave))
+    // Quota checks that ask the Host (spec §3.26): one switch per Family under one shared explanation.
+    const checks = []
+    let every = 15
     if (secs.includes('checks')) {
       for (const c of S.state.quotaChecks) {
+        every = c.everyMinutes
         const label = t('set.quotaCheck', { host: c.title })
-        acct.push(h('div', { class: 'set-row set-check' },
-          h('div', { class: 'set-text' }, h('span', { class: 'set-label' }, label), h('span', { class: 'set-hint' }, c.blocked ? c.blocked : t('set.quotaCheckHint', { host: c.title, n: c.everyMinutes }))),
+        checks.push(h('div', { class: 'set-row' + (c.blocked ? ' set-check' : '') },
+          h('div', { class: 'set-text' }, h('span', { class: 'set-label' }, c.title), c.blocked ? h('span', { class: 'set-hint' }, c.blocked) : null),
           BOOT.readOnly ? h('span', { class: 'chip chip-sm' + (c.on ? ' chip-ok' : '') }, c.on ? t('ah.on') : t('ah.off'))
             : h('div', { class: 'seg', role: 'group', 'aria-label': label }, [[true, t('ah.on')], [false, t('ah.off')]].map(([v, text]) =>
               h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === c.on), onclick: () => { if (v !== c.on) { leave(false); setCheck(c.family, v) } } }, text)))))
       }
     }
-    if (pickFamilies().length) {
-      const names = Object.keys(S.state.pickCommands || {})
-      acct.push(link(t('pk.title'), names.length ? names.join(', ') : t('pk.noneYet'), names.length ? 'chip-ok' : '', () => openPick(null), true))
-    }
-    if (secs.includes('rc')) {
-      const sum = rcSummary()
-      acct.push(link(t('rc.button'), t('rc.state.' + sum), sum === 'on' ? 'chip-warn' : sum === 'off' ? 'chip-ok' : '', openRc, true))
-    }
-    if (secs.includes('ah')) {
-      const on = ahState().settings.auto
-      acct.push(link(t('ah.button'), on ? t('ah.on') : t('ah.off'), on ? 'chip-ok' : '', () => setPage('handoff')))
-    }
     // Everything here can also be asked of an AI assistant through the sideby skill (spec §3.8).
-    const ai = [
-      link(t('ai.title'), t(skillInstalled() ? 'ai.installed' : 'ai.notInstalled'), skillInstalled() ? 'chip-ok' : '', () => openAsk(), true),
-      link(t('ask.plugin'), '', '', () => openAsk({ task: 'plugin', context: { version: BOOT.version } }), true),
-    ]
+    const ai = [aiLink(leave), link(t('ask.plugin'), '', '', () => openAsk({ task: 'plugin', context: { version: BOOT.version } }), true)]
     return [
-      { title: t('set.g.look'), items: look },
-      { title: t('set.g.start'), items: start },
-      { title: t('set.g.accounts'), items: acct },
-      { title: t('set.g.ai'), items: ai },
+      { id: 'general', title: t('set.g.general'), items: general },
+      { id: 'menubar', title: t('set.g.menubar'), items: bar },
+      { id: 'accounts', title: t('set.g.accounts'), items: acct },
+      { id: 'quota', title: t('set.g.quota'), items: checks, foot: t('set.quotaChecksHint', { n: every }) },
+      { id: 'handoff', title: t('ah.button'), items: [ahLink(leave)].filter(Boolean), foot: t('set.ahHint') },
+      { id: 'ai', title: t('set.g.ai'), items: ai, foot: t('set.aiHint') },
     ].filter((g) => g.items.length)
   }
-  function settingsBody(leave) {
-    const out = []
-    settingsGroups(leave).forEach((g, i) => {
-      if (i) out.push(h('div', { class: 'menu-sep set-sep', role: 'separator' }))
-      out.push(h('div', { class: 'set-group', role: 'group', 'aria-label': g.title }, h('div', { class: 'set-group-title', 'aria-hidden': 'true' }, g.title), g.items))
-    })
-    return out
-  }
-  // Taller than the window, the popover scrolls inside and ends with "More settings…", the same groups in a dialog.
+  // The popover: a few things, no scrolling, then the way to everything else.
   function settingsPop() {
     loadAutostart()
-    return [...settingsBody(() => closeMenu()),
-      h('button', { class: 'menu-item set-more', type: 'button', hidden: true, onclick: () => { closeMenu(); openSettingsDialog() } }, h('span', { class: 'menu-label' }, t('set.more')), icon('chevron'))]
+    const leave = () => closeMenu()
+    const look = lookRows()
+    const quick = [ahLink(leave), rcSummary() === 'on' ? rcLink(leave) : null, aiLink(leave)].filter(Boolean)
+    return [
+      look.length ? h('div', { class: 'set-group' }, look) : null,
+      look.length ? h('div', { class: 'menu-sep set-sep', role: 'separator' }) : null,
+      h('div', { class: 'set-group' }, quick),
+      h('button', { class: 'menu-item set-more', type: 'button', onclick: () => { closeMenu(); openSettingsDialog() } }, h('span', { class: 'menu-label' }, t('set.more')), icon('chevron')),
+    ]
   }
-  function settingsFit() {
-    const el = menu.el
-    const more = el && el.querySelector('.set-more')
-    if (!more) return
-    more.hidden = true
-    more.hidden = !(el.scrollHeight > el.clientHeight + 1)
-  }
-  function openSettingsDialog() {
+  function openSettingsDialog(sec) {
     loadAutostart()
+    if (sec) { prefs.setSec = sec; savePrefs() }
     showDialog('settings')
     renderSettingsDialog()
   }
-  function renderSettingsDialog() {
+  // The dialog opens on the section last looked at; a list at its side (a row of tabs on a narrow screen) picks another.
+  // switched: the user picked another section, so the new one slides in; a refresh redraws it in place.
+  function renderSettingsDialog(switched) {
     const leave = (opens) => { if (!opens && dlg.kind === 'settings') dlg.el.close() }
-    setKids(dlg.el, dialogFrame(t('set.title'), null, h('div', { class: 'set-dialog' }, settingsBody(leave)),
-      [h('button', { class: 'btn', type: 'button', onclick: () => dlg.el.close() }, t('btn.close'))]))
+    const groups = settingsGroups(leave)
+    const cur = groups.find((g) => g.id === prefs.setSec) || groups[0]
+    const nav = h('div', { class: 'set-nav', role: 'tablist', 'aria-label': t('set.title') }, groups.map((g) =>
+      h('button', { class: 'set-tab', type: 'button', role: 'tab', id: 'set-tab-' + g.id, 'aria-selected': String(g === cur), 'aria-controls': 'set-pane', onclick: () => { if (prefs.setSec === g.id || g === cur) return; prefs.setSec = g.id; savePrefs(); renderSettingsDialog(true) } }, g.title)))
+    const pane = h('div', { class: 'set-pane' + (switched ? ' view-in' : ''), id: 'set-pane', role: 'tabpanel', 'aria-labelledby': 'set-tab-' + cur.id },
+      h('h3', { class: 'set-pane-title' }, cur.title),
+      cur.foot ? h('p', { class: 'set-foot' }, cur.foot) : null,
+      h('div', { class: 'set-group' }, cur.items))
+    dlg.el.classList.add('dialog-wide')
+    dlg.onClose = () => dlg.el.classList.remove('dialog-wide')
+    setKids(dlg.el, dialogFrame(t('set.title'), null, h('div', { class: 'set-dialog' }, nav, pane)))
+    // A redraw replaced the list; a section picked from it keeps the focus on its tab.
+    if (switched) { const tab = document.getElementById('set-tab-' + cur.id); if (tab) tab.focus() }
   }
   function refreshSettings() {
     refreshPopover('settings')
@@ -3733,10 +3869,13 @@ const MAIN = String.raw`
   async function loadLoginItem(k) {
     const st = li[k]
     st.loading = true
+    const was = JSON.stringify([st.status, st.error && st.error.message])
     try { st.status = await api('/api/' + k); st.error = null } catch (e) { st.error = e }
     st.loading = false
+    // The same answer again (each open of a dialog reads it anew) redraws nothing: a redraw would close an open list.
+    if (JSON.stringify([st.status, st.error && st.error.message]) === was) return
     refreshSettings()
-    if (k === 'menubar') renderAll()
+    if (k === 'menubar') { renderAll(); if (!hk.recording && !hk.busy) refreshHotkey() }
   }
   function autostartRow(k) {
     const st = li[k]
@@ -3744,16 +3883,172 @@ const MAIN = String.raw`
     const n = autostartNote(s, BOOT.readOnly)
     const label = lt(k, 'label')
     const hint = [st.error ? lt(k, 'failed', { msg: st.error.message }) : lt(k, n.key.slice(3))]
-    if (n.action === 'fix') hint.push(' ', h('button', { class: 'link-btn small', type: 'button', onclick: () => autostartAsk(true, k) }, lt(k, 'fix')))
+    // The menu bar item: how to bring it back once hidden, and why a running one may not show (Rectangle, Stats).
+    if (k === 'menubar' && s && s.supported && !st.error && n.key === 'as.hint') {
+      if (!n.on) hint.push(' ', lt(k, 'hintOff'))
+    }
+    if (n.action === 'fix') hint.push(' ', h('button', { class: 'link-btn small', type: 'button', onclick: () => autostartAsk(true, k) }, lt(k, n.key === 'as.notRunning' ? 'restart' : 'fix')))
     if (s && s.state === 'foreign') hint.push(' ', h('button', { class: 'link-btn small', type: 'button', title: s.path, onclick: () => copyText(s.path) }, lt(k, 'copyPath')))
+    // Running, but macOS tucked the icon behind « (a full menu bar): say where it went, whatever else the row says.
+    if (k === 'menubar' && s && n.on && s.loaded !== false && s.icon && s.icon.visible === false)
+      hint.push(h('span', { class: 'note-warn-line' }, t('mb.iconHidden'), ' ', BOOT.readOnly ? null : h('button', { class: 'link-btn small', type: 'button', onclick: openMenuBarSettings }, t('mb.openSettings'))))
     let ctl = null
     if (!s) ctl = st.loading ? spinner() : null
     else if (n.toggle) ctl = h('div', { class: 'seg', role: 'group', 'aria-label': label }, [[true, t('ah.on')], [false, t('ah.off')]].map(([v, text]) =>
       h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === n.on), onclick: () => { if (v !== n.on) autostartAsk(v, k) } }, text)))
     else if (s.supported && s.state !== 'foreign') ctl = h('span', { class: 'chip chip-sm' + (n.on ? ' chip-ok' : '') }, n.on ? t('ah.on') : t('ah.off'))
-    return h('div', { class: 'set-row set-check' },
+    return h('div', { class: 'set-row set-check', 'data-enter': 'li-' + k },
       h('div', { class: 'set-text' }, h('span', { class: 'set-label' }, label), h('span', { class: 'set-hint' }, hint)), ctl)
   }
+  async function openMenuBarSettings() {
+    try { await api('/api/menubar/settings', {}) } catch (e) { toast(e.message, { kind: 'fail' }) }
+  }
+
+  // The menu bar item's own dialog (spec §3.31): its shortcut, what hides its icon, and the AI Task that checks it.
+  // The settings popover keeps one row for it, like Preferred terminal, so the popover stays one line per setting.
+  function openMenubarSettings() {
+    hk.recording = false
+    hk.error = ''
+    showDialog('mbset')
+    dlg.onClose = () => { hk.recording = false; hk.error = ''; hk.live = ''; hk.undo = ''; hk.mods = false; hk.custom = false }
+    renderMenubarSettings()
+    // What the page read earlier may be old (the CLI, another tab, an update changed it): read it again now.
+    loadLoginItem('menubar')
+  }
+  function renderMenubarSettings() {
+    const s = li.menubar.status
+    const v = s && s.hotkey
+    const body = []
+    if (v) {
+      body.push(h('div', { class: 'set-row set-check' },
+        h('div', { class: 'set-text' }, h('span', { class: 'set-label' }, t('hk.label')),
+          h('span', { class: 'set-hint' }, hk.error ? h('span', { class: 'note-fail-text' }, hk.error)
+            : hk.custom ? t('hk.customHint')
+            : v.registered === false ? h('span', { class: 'note-fail-text' }, t('hk.taken', { key: v.label }))
+            : v.problem ? t('hk.problem', { key: v.label })
+            : v.enabled ? t('hk.hint', { key: v.label })
+            : hk.undo ? [t('hk.savedOff'), ' ', h('button', { class: 'link-btn small', type: 'button', disabled: hk.busy, onclick: () => saveHotkey(hk.undo) }, t('hk.undo'))]
+            : t('hk.hintOff'))),
+        hotkeyPicker(v)))
+      if (hk.custom) body.push(h('div', { class: 'hk-custom', 'data-enter': 'hk-custom' }, hotkeyField(v)))
+      if (!BOOT.readOnly && !hk.custom) body.push(h('p', { class: 'small', 'data-enter': 'hk-ai' }, h('button', { class: 'link-btn small', type: 'button', onclick: () => { dlg.el.close(); openAsk({ task: 'hotkey', context: { version: BOOT.version } }) } }, icon('bot'), ' ', t('hk.askAi'))))
+    }
+    const key = v && v.enabled ? v.label : ''
+    body.push(h('h3', { class: 'mb-help-title' }, t('mb.cantSee')),
+      h('ol', { class: 'set-help' },
+        h('li', null, t('mb.cantSeeOverflow')),
+        h('li', null, t('mb.cantSeeAllow'), ' ', BOOT.readOnly ? null : h('button', { class: 'link-btn small', type: 'button', onclick: openMenuBarSettings }, t('mb.openSettings'))),
+        h('li', null, t('mb.cantSeeOrganizer'))))
+    if (key) body.push(h('p', { class: 'muted small' }, t('mb.cantSeeKey', { key })))
+    const foot = [h('button', { class: 'btn', type: 'button', onclick: () => dlg.el.close() }, t('btn.close'))]
+    if (!BOOT.readOnly) foot.push(h('button', { class: 'btn btn-primary', type: 'button', onclick: () => { dlg.el.close(); openAsk({ task: 'menubar', context: { version: BOOT.version } }) } }, icon('bot'), t('mb.askAi')))
+    swapKids(dlg.el, dialogFrame(t('mb.settings'), null, body, foot))
+    if (hk.recording) focusRecorder()
+  }
+
+  // The shortcut as a choice, not a recording (spec §3.31): a few checked combinations that work, Off, and Custom…,
+  // which opens the recorder. A browser never sees keys another app holds, so recording stays the exception.
+  const HOTKEY_PRESETS = ['opt+x', 'opt+z', 'opt+cmd+s', 'ctrl+opt+s']
+  const HOTKEY_SIGNS = { ctrl: '⌃', opt: '⌥', shift: '⇧', cmd: '⌘' }
+  function hotkeyLabel(keys) {
+    const parts = keys.split('+')
+    const key = parts.pop()
+    return parts.map((p) => HOTKEY_SIGNS[p] || '').join('') + key.toUpperCase()
+  }
+  function hotkeyPicker(v) {
+    const now = hk.custom ? 'custom' : v.enabled ? v.keys : 'off'
+    if (BOOT.readOnly) return h('span', { class: 'chip chip-sm' }, v.enabled ? v.label : t('hk.unset'))
+    const opts = HOTKEY_PRESETS.map((k) => [k, hotkeyLabel(k) + (k === HOTKEY_PRESETS[0] ? t('hk.isDefault') : '')])
+    if (v.enabled && HOTKEY_PRESETS.indexOf(v.keys) < 0) opts.unshift([v.keys, v.label])
+    opts.push(['off', t('hk.offOption')], ['custom', t('hk.custom')])
+    return h('select', { class: 'hk-select', 'data-key': 'hk-select', 'aria-label': t('hk.label'), disabled: hk.busy,
+      onchange: (e) => {
+        const val = e.target.value
+        hk.error = ''
+        if (val === 'custom') { hk.custom = true; hk.recording = true; hk.live = ''; refreshHotkey(); return }
+        hk.custom = false
+        saveHotkey(val)
+      } },
+      opts.map(([val, text]) => h('option', { value: val, selected: val === now }, text)))
+  }
+
+  // The shortcut recorder (spec §3.31), one field as in macOS Keyboard Shortcuts and KeyboardShortcuts: click it and
+  // press the keys, saved at once; Esc cancels, Delete or its ✕ turns the shortcut off (with Undo). Nothing else
+  // appears around it while recording; a refusal is one red line, gone at the next key.
+  // undo: the shortcut before it was turned off, offered in the row itself (a toast is out of reach behind the modal).
+  // mods: modifiers were held while recording and no letter came yet (see recordUp).
+  // custom: the picker's Custom… is open, showing the recorder below it.
+  const hk = { recording: false, busy: false, error: '', live: '', undo: '', mods: false, custom: false }
+  function hotkeyField(v) {
+    const shown = hk.recording ? (hk.live || t('hk.recording')) : v.enabled ? v.label : t('hk.unset')
+    if (BOOT.readOnly) return h('span', { class: 'chip chip-sm' }, shown)
+    const field = h('button', { class: 'hk-rec' + (hk.recording ? ' recording' : '') + (v.registered === false && !hk.recording ? ' taken' : '') + (!v.enabled && !hk.recording ? ' unset' : ''), type: 'button', 'aria-label': t('hk.label') + ': ' + shown, 'aria-pressed': String(hk.recording), disabled: hk.busy,
+      onclick: () => { if (!hk.recording) { hk.recording = true; hk.error = ''; hk.live = ''; refreshHotkey() } },
+      onkeydown: recordKey, onkeyup: recordUp,
+      onblur: () => { if (hk.recording) setTimeout(() => { if (hk.recording && !document.querySelector('.hk-rec:focus')) stopRecording() }, 150) } }, shown)
+    const cancel = h('button', { class: 'link-btn small', type: 'button', onclick: () => { hk.custom = false; stopRecording() } }, t('btn.cancel'))
+    return h('div', { class: 'hk-field' }, field, cancel)
+  }
+  function refreshHotkey() {
+    if (dlg.kind === 'mbset' && dlg.el && dlg.el.open) renderMenubarSettings()
+  }
+  function focusRecorder() { const b = document.querySelector('.hk-rec'); if (b) b.focus() }
+  function stopRecording() { hk.recording = false; hk.live = ''; hk.error = ''; refreshHotkey(); focusRecorder() }
+  // The modifiers held now, as macOS writes them, while the letter is still to come.
+  function hotkeyLive(e) {
+    return (e.ctrlKey ? '⌃' : '') + (e.altKey ? '⌥' : '') + (e.shiftKey ? '⇧' : '') + (e.metaKey ? '⌘' : '')
+  }
+  function recordKey(e) {
+    if (!hk.recording) return
+    const mods = e.ctrlKey || e.altKey || e.shiftKey || e.metaKey
+    // Tab is how a keyboard user leaves: recording stops and focus moves on as usual.
+    if (e.key === 'Tab' && !mods) { hk.recording = false; hk.live = ''; hk.error = ''; refreshHotkey(); return }
+    e.preventDefault()
+    // Esc stops recording only; the next Esc closes the dialog.
+    e.stopPropagation()
+    if (e.key === 'Escape' && !mods) { hk.custom = false; return stopRecording() }
+    if ((e.key === 'Backspace' || e.key === 'Delete') && !mods) return saveHotkey('off')
+    hk.error = ''
+    const keys = hotkeyFromKey(e)
+    // An arrow, an F-key or Space: say at once that only a letter or digit works, rather than seem not to react.
+    if (!keys && hotkeyPressKind(e.code) === 'unsupported') { hk.error = t('hk.err.key'); hk.live = ''; hk.mods = false; refreshHotkey(); return }
+    if (!keys) { hk.live = hotkeyLive(e); hk.mods = Boolean(hk.live); refreshHotkey(); return }
+    hk.mods = false
+    saveHotkey(keys)
+  }
+  // The modifiers came up and no letter reached the page: either none was pressed, or macOS handed the keys to the
+  // app that holds them as its own shortcut (sideby's own included) before the browser saw them. Say both.
+  function recordUp(e) {
+    if (!hk.recording) return
+    hk.live = hotkeyLive(e)
+    if (hk.mods && !hk.live) { hk.mods = false; hk.error = t('hk.err.noKey') }
+    refreshHotkey()
+  }
+  async function saveHotkey(keys) {
+    const before = li.menubar.status && li.menubar.status.hotkey
+    hk.busy = true
+    hk.error = ''
+    refreshHotkey()
+    try {
+      const r = await api('/api/menubar/hotkey', { keys })
+      hk.recording = false
+      hk.custom = false
+      hk.live = ''
+      if (li.menubar.status) li.menubar.status = { ...li.menubar.status, hotkey: r.hotkey }
+      // Off is one click with no question, so the row offers to undo it until something else changes.
+      hk.undo = r.changed && !r.hotkey.enabled && before && before.enabled ? before.keys : ''
+      if (r.changed && r.hotkey.enabled) toast(t('hk.saved', { key: r.hotkey.label }))
+    } catch (e) {
+      const own = 'hk.err.' + (e.code || '')
+      hk.error = Object.hasOwn(MESSAGES.en, own) ? t(own) : e.message
+      hk.live = ''
+    }
+    hk.busy = false
+    refreshHotkey()
+    refreshSettings()
+    if (hk.recording) focusRecorder()
+  }
+
   async function autostartAsk(on, k) {
     if (menu.kind === 'settings') closeMenu()
     liKind = k
@@ -3782,18 +4077,22 @@ const MAIN = String.raw`
       if (['npx-cache', 'temp-dir', 'unsafe-path'].includes(p.blocked.code)) body.push(codeCopy('npm i -g sideby'))
       if (p.blocked.code === 'foreign') body.push(codeCopy(p.path))
     } else if (p && !p.changed) body.push(h('p', null, lt(k, on ? 'alreadyOn' : 'alreadyOff')))
+    else if (p && on && p.restartOnly) body.push(h('p', null, lt(k, 'restartBody')))
+    // What happens, in one sentence; the file and the command it runs sit behind Details, for whoever wants them.
     else if (p && on) {
-      body.push(h('p', null, lt(k, 'writes')), h('code', { class: 'as-code' }, p.path))
-      body.push(h('p', null, lt(k, 'runs')), h('code', { class: 'as-code' }, (p.programArguments || []).join(' ')))
-      body.push(h('p', { class: 'muted small' }, lt(k, 'noWindow')))
+      body.push(h('p', null, lt(k, 'noWindow')))
+      body.push(h('details', { class: 'as-details' }, h('summary', null, t('as.details')),
+        h('p', null, lt(k, 'writes')), h('code', { class: 'as-code' }, p.path),
+        h('p', null, lt(k, 'runs')), h('code', { class: 'as-code' }, (p.programArguments || []).join(' '))))
     } else if (p) {
-      body.push(h('p', null, lt(k, 'removes')), h('code', { class: 'as-code' }, p.path))
-      body.push(h('p', { class: 'muted small' }, lt(k, 'offNote')))
+      body.push(h('p', null, lt(k, 'offNote')))
+      body.push(h('details', { class: 'as-details' }, h('summary', null, t('as.details')),
+        h('p', null, lt(k, 'removes')), h('code', { class: 'as-code' }, p.path)))
     }
     const foot = [h('button', { class: 'btn', type: 'button', disabled: st.busy, onclick: () => dlg.el.close() }, t(p && p.changed && !p.blocked ? 'btn.cancel' : 'btn.close'))]
     if (p && p.changed && !p.blocked)
-      foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: st.busy, 'aria-busy': st.busy ? 'true' : null, onclick: autostartApply }, st.busy ? spinner() : null, lt(k, on ? 'turnOn' : 'turnOff')))
-    setKids(dlg.el, dialogFrame(lt(k, on ? 'onTitle' : 'offTitle'), null, body, foot))
+      foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: st.busy, 'aria-busy': st.busy ? 'true' : null, onclick: autostartApply }, st.busy ? spinner() : null, lt(k, p.restartOnly ? 'restart' : on ? 'turnOn' : 'turnOff')))
+    setKids(dlg.el, dialogFrame(lt(k, p && p.restartOnly ? 'restartTitle' : on ? 'onTitle' : 'offTitle'), null, body, foot))
   }
   async function autostartApply() {
     const k = liKind
@@ -3807,9 +4106,11 @@ const MAIN = String.raw`
     st.busy = false
     dlg.busy = false
     if (r && r.applied) {
+      const restarted = st.plan && st.plan.restartOnly
       st.status = r.status
       if (dlg.kind === 'autostart') dlg.el.close()
-      toast(lt(k, on ? 'doneOn' : 'doneOff') + (on && !r.loaded ? ' ' + lt(k, 'nextLogin') : ''))
+      if (restarted) toast(lt(k, r.loaded ? 'doneRestart' : 'restartFailed'), r.loaded ? undefined : { kind: 'fail' })
+      else toast(lt(k, on ? 'doneOn' : 'doneOff') + (on && !r.loaded ? ' ' + lt(k, 'nextLogin') : ''))
       refreshSettings()
       if (k === 'menubar') renderAll()
       return
@@ -3856,6 +4157,7 @@ const MAIN = String.raw`
     else if (dlg.kind === 'key' && ky && ky.step !== 'enter') renderKey()
     else if (dlg.kind === 'terminal' && tm) renderTerminals()
     else if (dlg.kind === 'autostart') renderAutostart()
+    else if (dlg.kind === 'mbset') renderMenubarSettings()
     else if (dlg.kind === 'pick' && pk) renderPick()
   }
   function setTheme(v) {
@@ -3869,7 +4171,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.tool']
   function openRc() {
     if (!S.state || !rcSummary()) return
     rc.target = null
@@ -5129,6 +5431,8 @@ const MAIN = String.raw`
   buildToolbar()
   raiseToasts()
   load({ check: true })
+  // The switches' state is read now, not when Settings opens, so the popover opens at its final size.
+  loadAutostart()
   setInterval(tick, 1000)
   document.addEventListener('visibilitychange', wake)
   window.addEventListener('focus', wake)

@@ -1,6 +1,6 @@
 // What the Menu Bar Item shows (spec §3.31, ADR-0034), computed here so the menu bar script only draws it.
 import type { HandoffPlan } from '../core/handoff.ts'
-import { openWindows, quotaLevel } from '../core/quota-levels.ts'
+import { openWindows, quotaIsStale, quotaLevel } from '../core/quota-levels.ts'
 import type { Account, FamilyLogo, LoginState, QuotaResult } from '../types.ts'
 import { fill, MENUBAR_STRINGS, type MenubarLang, type MenubarStrings } from './strings.ts'
 
@@ -21,6 +21,10 @@ export interface MenubarRow {
   level: MenubarLevel
   /** The account `sideby next` would pick in this Family. */
   recommended: boolean
+  /** When the quota was observed, independently of the menu's check time; null without quota. */
+  observedAt: string | null
+  /** An old or undated reading, or a failed quota query. */
+  stale: boolean
   /** Hover text: when each window resets, and what a click does. */
   tip: string
   /**
@@ -30,7 +34,7 @@ export interface MenubarRow {
   bars: [MenubarBar | null, MenubarBar | null] | null
   /** How long until the fullest window resets, such as `4d 17h`; empty when nothing is used. */
   reset: string
-  /** What stands in for the bars: `API key`, `signed out`, `no quota yet`; empty when bars are drawn. */
+  /** A no-quota explanation, or an old-reading warning beside the bars. */
   note: string
 }
 
@@ -84,6 +88,11 @@ export interface MenubarSnapshot {
     | 'refresh'
     | 'openPanel'
     | 'hide'
+    | 'hideTitle'
+    | 'hideBody'
+    | 'hideYes'
+    | 'cancel'
+    | 'hotkeyTaken'
   >
 }
 
@@ -113,7 +122,7 @@ export interface MenubarHotkey {
   label: string
 }
 
-export const DEFAULT_MENUBAR_HOTKEY = 'opt+cmd+s'
+export const DEFAULT_MENUBAR_HOTKEY = 'opt+x'
 
 // macOS virtual key codes of the ANSI letters and digits (HIToolbox Events.h, kVK_ANSI_*).
 const KEY_CODES: Record<string, number> = {
@@ -162,7 +171,7 @@ const MODIFIERS = [
   ['cmd', 256, '⌘'],
 ] as const
 
-/** Config `menubar.hotkey` (`opt+cmd+s`, `off`) as the script registers it; null for `off` or a bad value. */
+/** Config `menubar.hotkey` (`opt+x`, `off`) as the script registers it; null for `off` or a bad value. */
 export function menubarHotkey(value: string | undefined): MenubarHotkey | null {
   const parts = (value ?? DEFAULT_MENUBAR_HOTKEY).toLowerCase().split('+')
   const key = parts.pop()!
@@ -196,12 +205,24 @@ function row(
 ): MenubarRow {
   const recommended = Boolean(plan?.hasQuota && plan.pick === a.ref)
   const startTip = fill(s.startTip, { account: a.ref })
-  const base = { ref: a.ref, label: a.name, recommended, tip: startTip, bars: null, reset: '' }
+  const base = {
+    ref: a.ref,
+    label: a.name,
+    recommended,
+    tip: startTip,
+    bars: null,
+    reset: '',
+    observedAt: null,
+    stale: false,
+  }
   const noted = (note: string): MenubarRow => ({ ...base, detail: note, note, level: 'none' })
   if (a.kind === 'api') return noted(s.api)
   if (a.login === 'logged-out') return noted(s.signedOut)
   const open = openWindows(a.quota, now)
   if (a.quota.status !== 'ok' || open === null) return noted(s.noData)
+  const observedAt = a.quota.observedAt
+  const at = Date.parse(observedAt)
+  const stale = quotaIsStale(a.quota, now.getTime())
   const windows = a.quota.windows
     .filter((w) => !w.name)
     .sort((x, y) => (x.windowMinutes ?? 0) - (y.windowMinutes ?? 0))
@@ -222,17 +243,26 @@ function row(
   )
   const reset = fullest && fullest.usedPercent > 0 ? untilText(fullest.resetsAt, now, s) : ''
   if (reset) parts.push(fill(s.resets, { time: reset }))
+  if (stale) parts.push(s.olderReading)
   const tips = open
     .filter((w) => w.usedPercent > 0)
     .map((w) => fill(s.resetsTip, { label: w.label, time: untilText(w.resetsAt, now, s) }))
   return {
     ...base,
+    observedAt,
+    stale,
     detail: parts.join(s.sep),
     level: quotaLevel(fullest?.usedPercent ?? 0),
-    tip: [...tips, startTip].join('\n'),
+    tip: [
+      fill(s.observedAt, { time: Number.isFinite(at) ? observedAt : '?' }),
+      ...(stale ? [s.olderReading] : []),
+      ...(a.quota.fetchError ? [a.quota.fetchError] : []),
+      ...tips,
+      startTip,
+    ].join('\n'),
     bars,
     reset,
-    note: '',
+    note: stale ? s.olderReading : '',
   }
 }
 
@@ -336,6 +366,7 @@ export function menubarSnapshot(
     ? { account: worst.ref, tool: worst.tool, p: Math.round(worst.value) }
     : {}
   const low = worst !== null && quotaLevel(worst.value) !== 'ok'
+  const old = sections.some((s) => s.rows.some((r) => r.stale))
   const {
     recommended,
     empty,
@@ -349,22 +380,31 @@ export function menubarSnapshot(
     refresh,
     openPanel,
     hide,
+    hideTitle,
+    hideBody,
+    hideYes,
+    cancel,
+    hotkeyTaken,
   } = s
   return {
     schemaVersion: 1,
     title: low ? fill(s.title, values) : '',
-    level: worst ? quotaLevel(worst.value) : 'none',
+    level: worst && !old ? quotaLevel(worst.value) : 'none',
     tooltip: [
-      worst ? fill(low ? s.tooltipLow : s.tooltipOk, values) : s.tooltipEmpty,
+      old
+        ? `${s.statusOld} · ${s.detailOld}`
+        : worst
+          ? fill(low ? s.tooltipLow : s.tooltipOk, values)
+          : s.tooltipEmpty,
       ...(hotkey ? [fill(s.hotkeyTip, { key: hotkey.label })] : []),
     ].join('\n'),
     hotkey,
-    headline: worst ? fill(low ? s.headlineLow : s.headlineOk, values) : '',
+    headline: worst ? (old ? s.statusOld : fill(low ? s.headlineLow : s.headlineOk, values)) : '',
     card: worst
       ? {
-          status: fill(low ? s.statusLow : s.statusOk, values),
-          detail: fill(low ? s.detailLow : s.detailOk, values),
-          level: quotaLevel(worst.value),
+          status: old ? s.statusOld : fill(low ? s.statusLow : s.statusOk, values),
+          detail: old ? s.detailOld : fill(low ? s.detailLow : s.detailOk, values),
+          level: old ? 'none' : quotaLevel(worst.value),
         }
       : null,
     updatedAt: now.toISOString(),
@@ -383,6 +423,11 @@ export function menubarSnapshot(
       refresh,
       openPanel,
       hide,
+      hideTitle,
+      hideBody,
+      hideYes,
+      cancel,
+      hotkeyTaken,
     },
   }
 }

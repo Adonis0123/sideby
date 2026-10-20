@@ -34,6 +34,7 @@ function quotaWindow(raw: unknown): QuotaWindow | null {
 export function rateLimits(payload: Obj): { windows: QuotaWindow[]; plan?: string } | null {
   const rl = payload.rate_limits
   if (!isObj(rl)) return null
+  if (rl.limit_id !== undefined && rl.limit_id !== 'codex') return null
   const primary = quotaWindow(rl.primary)
   if (!primary) return null
   const windows = [primary]

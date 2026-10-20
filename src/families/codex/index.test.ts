@@ -119,7 +119,7 @@ describe('codex family', () => {
       await seedMain(h)
       const rt = await createRuntime({ env: h.env, builtins })
       const main = await rt.resolve('codex:main')
-      const q = await rt.quota(main)
+      const q = await rt.quota(main, { fetch: 'never' })
       assert.equal(q.status === 'unavailable' && q.reason, 'no-session')
       const u = await rt.usage(main)
       assert.equal(u.status === 'unavailable' && u.reason, 'no-session')

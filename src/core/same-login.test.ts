@@ -59,7 +59,7 @@ describe('isSameLogin', () => {
     assert.equal(isSameLogin(m('claude:main', id), m('claude:key', id, { kind: 'api' })), false)
     assert.equal(isSameLogin(m('claude:main', id), m('codex:main', id)), false)
     assert.equal(isSameLogin(m('codex:main', id), m('codex:001', id)), false, 'codex needs Login Keys')
-    assert.equal(isSameLogin(m('grok:main', id), m('grok:001', id)), false)
+    assert.equal(isSameLogin(m('grok:main', id), m('grok:001', id)), false, 'grok needs Login Keys')
     assert.equal(isSameLogin(m('claude:main', id), m('claude:main', id)), false, 'not with itself')
   })
 })
@@ -97,6 +97,17 @@ describe('sharedQuota', () => {
     const r = readings({ 'claude:main': old, 'claude:001': fresh })
     assert.deepEqual(sharedQuota('claude:main', r, ['claude:001']), { ...fresh, from: 'claude:001' })
     assert.deepEqual(sharedQuota('claude:001', r, ['claude:main']), fresh, 'its own reading has no from')
+  })
+
+  it('keeps a fetched reset ahead of another directory replaying older quota with a new timestamp', () => {
+    const fetched = { ...old, fetched: true }
+    const r = readings({ 'codex:main': fetched, 'codex:work': fresh })
+    assert.deepEqual(sharedQuota('codex:work', r, ['codex:main'], true), {
+      ...fetched,
+      from: 'codex:main',
+    })
+    assert.deepEqual(sharedQuota('codex:main', r, ['codex:work'], true), fetched)
+    assert.deepEqual(sharedQuota('codex:work', r, ['codex:main']), fresh)
   })
 
   it('borrows when the Account has no reading of its own, and keeps its own reason when nobody has one', () => {

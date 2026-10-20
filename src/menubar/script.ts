@@ -11,6 +11,8 @@ export const TICK_SECONDS = 5
 export const STALE_SECONDS = 15 * 60
 /** A snapshot still running after this is ended, so a stuck one cannot stop the refreshes. */
 export const SNAPSHOT_TIMEOUT_SECONDS = 60
+/** The macOS distributed notification that makes a running item read its snapshot again (`nudgeMenubar`). */
+export const MENUBAR_RELOAD = 'dev.sideby.menubar.reload'
 
 export const MENUBAR_SCRIPT = String.raw`
 ObjC.import('Cocoa');
@@ -59,10 +61,15 @@ function run(argv) {
     var t = sideby(args);
     if (t.launchAndReturnError(null)) actions.push(t);
   }
-  function startSnapshot() {
-    if (task) return;
+  var forceNext = false;
+  function startSnapshot(force) {
+    if (task) { if (force) forceNext = true; return; }
+    force = force || forceNext;
+    forceNext = false;
     $.NSFileManager.defaultManager.createFileAtPathContentsAttributes(out, $(), $());
-    var t = sideby(['menubar', 'snapshot', '--json', '--lang', lang]);
+    hotkeyReported = hotkeyReport();
+    iconReported = iconStable;
+    var t = sideby(['menubar', 'snapshot', '--json', '--lang', lang].concat(force ? ['--refresh'] : [], hotkeyReported ? ['--hotkey', hotkeyStatus, '--hotkey-label', hotkeyWant.label] : [], iconReported ? ['--icon', iconReported] : []));
     handle = $.NSFileHandle.fileHandleForWritingAtPath(out);
     t.standardOutput = handle;
     lastStart = now();
@@ -92,17 +99,53 @@ function run(argv) {
   // system-defined event of subtype 6 whose data1 is the key's reference. While the menu is open the key is
   // unregistered, so the press reaches the menu, where a hidden item with the same key closes it.
   var hotkeyWant = null, hotkeyRef = 0, hotkeyBound = false, menuOpen = false, closedAt = 0;
+  // Whether the shortcut could be registered ('ok', 'taken', '' when off), and what the last snapshot was told: the
+  // status with the shortcut it is about, so a report never lands on a shortcut changed since.
+  var hotkeyStatus = '', hotkeyReported = '';
+  function hotkeyReport() { return hotkeyStatus && hotkeyWant ? hotkeyStatus + ' ' + hotkeyWant.label : ''; }
   function bindHotkeyFunctions() {
     if (hotkeyBound) return;
     ObjC.bindFunction('GetApplicationEventTarget', ['void *', []]);
     ObjC.bindFunction('RegisterEventHotKey', ['int', ['unsigned int', 'unsigned int', 'unsigned long long', 'void *', 'unsigned int', 'void *']]);
     ObjC.bindFunction('UnregisterEventHotKey', ['int', ['unsigned long long']]);
-    $.NSEvent.addLocalMonitorForEventsMatchingMaskHandler($.NSEventMaskSystemDefined, function (e) {
+    watchKeys();
+    hotkeyBound = true;
+  }
+  // The bridge hands AppKit a JSValue for whatever the handler returns, never the event, so AppKit throws on every
+  // system-defined event that passes. The main loop swallows that; a modal loop (an NSAlert) throws it out of
+  // runModal. So the monitor is lifted while an alert is up (pauseKeys), and put back after (watchKeys).
+  var monitor = null;
+  function watchKeys() {
+    if (monitor) return;
+    monitor = $.NSEvent.addLocalMonitorForEventsMatchingMaskHandler($.NSEventMaskSystemDefined, function (e) {
       // A press queued while the menu was open arrives just after it closes; it meant "close", not "open again".
       if (e.subtype === 6 && hotkeyRef && Number(e.data1) === hotkeyRef && !menuOpen && now() - closedAt > 0.5) openMenu();
       return e;
     });
-    hotkeyBound = true;
+  }
+  function pauseKeys() {
+    if (monitor) { $.NSEvent.removeMonitor(monitor); monitor = null; }
+    try { unregisterHotkey(); } catch (e) {}
+  }
+  function resumeKeys() {
+    if (!hotkeyBound) return;
+    watchKeys();
+    try { registerHotkey(); } catch (e) {}
+  }
+  // Whether macOS shows the icon now: 'visible', 'hidden' (behind « in a full menu bar, or covered), or '' while the
+  // menu bar itself is hidden (a full-screen app), when nothing can be said. The Panel says where it went.
+  var iconSeen = '', iconStable = '', iconReported = '';
+  function iconNow() {
+    if (!$.NSMenu.menuBarVisible) return '';
+    var w = item.button.window;
+    if (!w || w.isNil()) return '';
+    return Number(w.occlusionState) & Number($.NSWindowOcclusionStateVisible) ? 'visible' : 'hidden';
+  }
+  // Two looks in a row agree before it counts, so a moment of change (a Space switch) is not reported.
+  function lookAtIcon() {
+    var seen = iconNow();
+    if (seen && seen === iconSeen) iconStable = seen;
+    iconSeen = seen;
   }
   // Drops the menu from the icon when it shows; at the pointer when the icon is hidden, such as by a full menu bar or
   // under the notch, where clicking it would do nothing.
@@ -117,7 +160,9 @@ function run(argv) {
     if (hotkeyRef || !hotkeyWant) return;
     var buf = $.NSMutableData.dataWithLength(8);
     // EventHotKeyID { OSType signature 'sdby'; UInt32 id 1 } is passed in one register, the id in the high half.
-    if ($.RegisterEventHotKey(hotkeyWant.keyCode, hotkeyWant.modifiers, 4294967296 + 0x73646279, $.GetApplicationEventTarget(), 0, buf.mutableBytes) !== 0) return;
+    // Not 0: another app or macOS holds the key (eventHotKeyExistsErr); the menu and the Panel say so.
+    if ($.RegisterEventHotKey(hotkeyWant.keyCode, hotkeyWant.modifiers, 4294967296 + 0x73646279, $.GetApplicationEventTarget(), 0, buf.mutableBytes) !== 0) { hotkeyStatus = 'taken'; return; }
+    hotkeyStatus = 'ok';
     // The EventHotKeyRef the call wrote, read back from the buffer as a little-endian number.
     var hex = (ObjC.unwrap(buf.description).match(/0x([0-9a-f]{16})/i) || ['', ''])[1];
     var ref = 0;
@@ -135,6 +180,7 @@ function run(argv) {
       bindHotkeyFunctions();
       unregisterHotkey();
       hotkeyWant = h || null;
+      if (!hotkeyWant) hotkeyStatus = '';
       if (!menuOpen) registerHotkey();
     } catch (e) {}
   }
@@ -227,16 +273,18 @@ function run(argv) {
   }
 
   var GUTTER = $.NSImage.alloc.initWithSize($.NSMakeSize(14, 14));
+  // Where a menu item draws its image and its title (macOS 26 and 27), for the header views that line up with them.
+  var HEAD_X = 15, HEAD_TEXT_X = 34;
 
   // A quota window as a small rounded bar: a soft track, filled as far as it is used, coloured by level.
   var BAR_W = 44, BAR_H = 5;
-  function bar(b) {
+  function bar(b, old) {
     var img = $.NSImage.alloc.initWithSize($.NSMakeSize(BAR_W, BAR_H));
     img.lockFocus;
     hex(dark() ? '#1f2c3a' : '#e4edf4').set;
     $.NSBezierPath.bezierPathWithRoundedRectXRadiusYRadius($.NSMakeRect(0, 0, BAR_W, BAR_H), BAR_H / 2, BAR_H / 2).fill;
     if (b.percent > 0) {
-      (stale() ? $.NSColor.tertiaryLabelColor : hex(BAR[b.level] || BAR.ok)).set;
+      (stale() || old ? $.NSColor.tertiaryLabelColor : hex(BAR[b.level] || BAR.ok)).set;
       var w = Math.max(BAR_H, BAR_W * Math.min(100, b.percent) / 100);
       $.NSBezierPath.bezierPathWithRoundedRectXRadiusYRadius($.NSMakeRect(0, 0, w, BAR_H), BAR_H / 2, BAR_H / 2).fill;
     }
@@ -296,11 +344,11 @@ function run(argv) {
       if (!i && !L.first) return;
       if (!b) { line.appendAttributedString(str('\t\t', plain)); return; }
       line.appendAttributedString(str('\t', plain));
-      line.appendAttributedString(bar(b));
-      var c = stale() ? color('stale') : b.level === 'ok' ? null : color(b.level);
+      line.appendAttributedString(bar(b, r.stale));
+      var c = stale() || r.stale ? color('stale') : b.level === 'ok' ? null : color(b.level);
       line.appendAttributedString(str('\t' + b.percent + '%', attrs(c, L.mono, L.para)));
     });
-    if (r.reset) line.appendAttributedString(str('\t' + r.reset, dim));
+    if (r.stale || r.reset) line.appendAttributedString(str('\t' + (r.stale ? r.note : r.reset), dim));
     return line;
   }
   function accountItem(menu, r, L) {
@@ -321,17 +369,31 @@ function run(argv) {
     }
     return mi;
   }
-  // A tool's header: its mark, its name, and the window names over the bar columns.
+  // A tool's header: its mark, its name, and the window names over the bar columns. A view, not a title: macOS dims
+  // the title of an item that cannot be clicked whatever its colour, which made every tool's name look disabled. The
+  // mark and the text sit where an item's image and title do, so the window names stay over their bars.
   function sectionHeader(menu, s, L) {
-    var mi = add(menu, s.title, null);
     var line = $.NSMutableAttributedString.alloc.init;
     line.appendAttributedString(str(s.title, attrs($.NSColor.labelColor, L.head, L.headPara)));
     var cols = L.first ? s.columns : [s.columns[1]];
-    cols.forEach(function (c) { line.appendAttributedString(str('\t' + (c || ''), attrs($.NSColor.tertiaryLabelColor, L.small, L.headPara))); });
+    cols.forEach(function (c) { line.appendAttributedString(str('\t' + (c || ''), attrs($.NSColor.secondaryLabelColor, L.small, L.headPara))); });
     if (s.rows.some(function (r) { return r.reset; }))
-      line.appendAttributedString(str('\t' + snap.labels.resetsHeader, attrs($.NSColor.tertiaryLabelColor, L.small, L.headPara)));
-    mi.attributedTitle = line;
-    mi.image = logoImage(s.logo) || GUTTER;
+      line.appendAttributedString(str('\t' + snap.labels.resetsHeader, attrs($.NSColor.secondaryLabelColor, L.small, L.headPara)));
+    var W = Math.max(280, L.width), H = 24;
+    var v = $.NSView.alloc.initWithFrame($.NSMakeRect(0, 0, W, H));
+    v.autoresizingMask = $.NSViewWidthSizable;
+    var logo = logoImage(s.logo);
+    if (logo) {
+      var iv = $.NSImageView.imageViewWithImage(logo);
+      iv.frame = $.NSMakeRect(HEAD_X, (H - 14) / 2, 14, 14);
+      v.addSubview(iv);
+    }
+    var text = $.NSTextField.labelWithAttributedString(line);
+    text.frame = $.NSMakeRect(HEAD_TEXT_X, (H - 16) / 2, W - HEAD_TEXT_X - 10, 16);
+    v.addSubview(text);
+    var mi = $.NSMenuItem.alloc.init;
+    mi.view = v;
+    menu.addItem(mi);
   }
   // The card at the top: Sai, a bold status, and a grey line naming the account the status is about.
   function card(menu, c, L) {
@@ -388,7 +450,7 @@ function run(argv) {
           s.more.rows.forEach(function (r) { accountItem(sub, r, L); });
           var mi = add(menu, s.more.title, null);
           mi.image = GUTTER;
-          mi.attributedTitle = str(s.more.title, attrs($.NSColor.secondaryLabelColor, L.font, null));
+          mi.attributedTitle = str(s.more.title, attrs($.NSColor.labelColor, L.font, null));
           mi.enabled = true;
           mi.submenu = sub;
         }
@@ -398,6 +460,8 @@ function run(argv) {
       withImage(add(menu, snap.labels.refresh, 'refresh:', 0, 'r'), 'arrow.clockwise');
       withImage(add(menu, snap.labels.openPanel, 'openPanel:', 0, 'o'), 'macwindow');
       menu.addItem($.NSMenuItem.separatorItem);
+      if (hotkeyStatus === 'taken' && hotkeyWant)
+        withImage(add(menu, snap.labels.hotkeyTaken.replace('{key}', hotkeyWant.label), 'openPanel:'), 'keyboard');
       withImage(add(menu, snap.labels.hide, 'hide:'), 'eye.slash');
     } else {
       footer = withImage(add(menu, footerText(), null), 'clock');
@@ -425,7 +489,9 @@ function run(argv) {
           actions = actions.filter(function (t) { return t.running; });
           if (task && task.running && now() - lastStart > TIMEOUT) task.terminate;
           if (task && !task.running) finishSnapshot();
-          if (!task && now() - lastStart >= SNAPSHOT) startSnapshot();
+          lookAtIcon();
+          // A shortcut that just registered or failed, and an icon that just showed or went, are told at once.
+          if (!task && (forceNext || now() - lastStart >= SNAPSHOT || hotkeyReport() !== hotkeyReported || iconStable !== iconReported)) startSnapshot();
           // The bars are pictures in the colours of the moment; redraw them when light or dark mode changes.
           if (ObjC.unwrap(app.effectiveAppearance.name) !== appearance) build();
           else drawTitle();
@@ -435,12 +501,40 @@ function run(argv) {
       'refresh:': {
         types: ['void', ['id']],
         implementation: function () {
-          // One running already is the refresh asked for; a stuck one is ended by the timeout above.
-          if (!task) { lastStart = 0; startSnapshot(); }
+          // A manual refresh must query the Host, even if an automatic cache read is already running.
+          startSnapshot(true);
+        },
+      },
+      // A setting changed (the shortcut): read the snapshot again now, after one that is running, with no restart.
+      'reload:': {
+        types: ['void', ['id']],
+        implementation: function () {
+          if (!task) { lastStart = 0; startSnapshot(); } else lastStart = 0;
         },
       },
       'openPanel:': { types: ['void', ['id']], implementation: function () { act(['ui', '--background']); } },
-      'hide:': { types: ['void', ['id']], implementation: function () { act(['menubar', 'off', '--yes']); } },
+      'hide:': {
+        types: ['void', ['id']],
+        implementation: function () {
+          // Hiding also stops it starting at login, so it asks first and says how to bring it back.
+          var l = snap ? snap.labels : null;
+          if (l && l.hideTitle) {
+            var alert = $.NSAlert.alloc.init;
+            alert.messageText = l.hideTitle;
+            alert.informativeText = l.hideBody;
+            alert.addButtonWithTitle(l.hideYes);
+            alert.addButtonWithTitle(l.cancel);
+            pauseKeys();
+            app.activateIgnoringOtherApps(true);
+            var answer = alert.runModal;
+            app.deactivate;
+            resumeKeys();
+            // The bridge gives enum constants as strings ("1000") and runModal a number: compare as numbers.
+            if (Number(answer) !== Number($.NSAlertFirstButtonReturn)) return;
+          }
+          act(['menubar', 'off', '--yes']);
+        },
+      },
       'start:': {
         types: ['void', ['id']],
         implementation: function (sender) {
@@ -451,6 +545,8 @@ function run(argv) {
     },
   });
   var target = $.SidebyMenuBar.alloc.init;
+  // Settings changed elsewhere (the Panel, sideby menubar hotkey) arrive as a distributed notification.
+  $.NSDistributedNotificationCenter.defaultCenter.addObserverSelectorNameObject(target, 'reload:', $('${MENUBAR_RELOAD}'), $());
   build();
   startSnapshot();
   $.NSTimer.scheduledTimerWithTimeIntervalTargetSelectorUserInfoRepeats(TICK, target, 'tick:', $(), true);

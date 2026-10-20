@@ -58,6 +58,19 @@ async function rollout(h: FakeHome, account: string, name: string, lines: string
 }
 
 describe('windowLabel', () => {
+  it('does not use a newer model-specific bucket as general Codex quota', async () => {
+    await withFakeHome(async (h) => {
+      const general = event(NOW.toISOString(), { primary: win(12, 10080) })
+      const specific = event(new Date(NOW.getTime() + 1000).toISOString(), { primary: win(99, 300) }).replace(
+        '"limit_id":"codex"',
+        '"limit_id":"codex_other"',
+      )
+      await rollout(h, '.codex', 'buckets', [general, specific])
+      const q = await readCodexQuota(h.path('.codex'))
+      assert.equal(q.status, 'ok')
+      if (q.status === 'ok') assert.equal(q.windows[0]!.usedPercent, 12)
+    })
+  })
   it('names the known windows and keeps others in minutes', () => {
     assert.equal(windowLabel(300), '5h')
     assert.equal(windowLabel(10080), '7d')

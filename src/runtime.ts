@@ -540,7 +540,17 @@ export async function createRuntime(
       Promise.all(list.map(async (a) => [a.ref, await ownQuota(a, mode)] as const)).then((e) => new Map(e)),
       groupsOf(list),
     ])
-    return new Map(list.map((a) => [a.ref, sharedQuota(a.ref, own, groups.get(a.ref) ?? [])]))
+    return new Map(
+      list.map((a) => [
+        a.ref,
+        sharedQuota(
+          a.ref,
+          own,
+          groups.get(a.ref) ?? [],
+          families.get(a.family)?.fetchQuota?.localFallbackOnly,
+        ),
+      ]),
+    )
   }
 
   /** A reader's own `from`, `fetched` and `fetchError` are dropped: only sideby sets them (spec §3.21, §3.26). */
@@ -568,7 +578,7 @@ export async function createRuntime(
       // A signed-out Account has nothing to ask about; its kept answer still shows.
       const ask = off || mode === 'never' || (await loginOf(account)) === 'logged-out' ? 'never' : mode
       const kept = await fetchedQuota(f.fetchQuota, account, readContext(), accountEnv(f, account, env), ask)
-      return shownQuota(local, kept, off)
+      return shownQuota(local, kept, off, f.fetchQuota.localFallbackOnly)
     } finally {
       memos.saveSoon()
     }

@@ -106,7 +106,7 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 
 `teardown` 只在文件仍是 `setup` 写入的样子时才还原。如果之后你改过它，`teardown` 会拒绝并给出 diff，请手动把 `statusLine.command` 改回原命令（就是 `--orig-b64` 后面那段 base64），原来没有 `statusLine` 的就整段删掉。
 
-`settings.json` 链接到主账号的账号（默认如此）共用这一次 setup。自己有一份 `settings.json` 的账号，额度显示为未开启，要等它自己的 status line 也这样包装后才有数据。Codex 的额度不用设置，sideby 直接读本地会话文件。
+`settings.json` 链接到主账号的账号（默认如此）共用这一次 setup。自己有一份 `settings.json` 的账号，额度显示为未开启，要等它自己的 status line 也这样包装后才有数据。Codex 的额度不用设置，见 [Codex 额度](#codex-额度)。
 
 ### 两个目录，同一个登录
 
@@ -116,7 +116,15 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 - 标出来：`sideby list` 里是 `claude:001 = main`；面板里它们合成一行，标着 **2 个目录 · 共用额度**，额度和额度提醒都只显示一次。展开这一行，能看到每个目录各自的短命令、最近使用和 token，以及 **复制启动命令** 按钮；这一行的 **⋯** 菜单里每个目录各有一段；
 - 不在它们之间接力：在 sideby 启动的会话里运行 `sideby next` 时，跳过这个登录的另一个目录；自动接力也跳过它，`order` 里写了也一样，并说明原因。
 
-用量（token）仍按目录分别统计。sideby 不移动、不删除任何目录；两个都留着，或者你自己删掉一个。Codex 账号在 email 和 ChatGPT 工作区（workspace）都相同时，也这样合在一起：同一个 email 可能属于几个工作区，各有各的额度，所以 sideby 还会比较每个目录登录的是哪个工作区。它从目录的 `auth.json` 里读这一项只为比较，从不显示也不保存；工作区不同的两个目录分开显示。
+用量（token）仍按目录分别统计。sideby 不移动、不删除任何目录；两个都留着，或者你自己删掉一个。Codex 账号在 email 和 ChatGPT 工作区（workspace）都相同时，也这样合在一起：同一个 email 可能属于几个工作区，各有各的额度，所以 sideby 还会比较每个目录登录的是哪个工作区。它从目录的 `auth.json` 里读这一项只为比较，从不显示也不保存；工作区不同的两个目录分开显示。Grok Build 账号在 email、x.ai 用户和团队都相同时也这样合在一起，同样从 `auth.json` 读来只做比较。
+
+想给其中一个换成别的账号，在面板里它那一行点 **换个账号登录**，或者运行 `sideby login <account>`（例如 `sideby login codex:team`）。在工具里做不到：Codex 没有 `/login`，任务运行时 `/logout` 也被禁用。浏览器通常会直接用已经登录的账号，所以授权前先在浏览器里退出那个账号，或者把登录链接放到无痕窗口打开。sideby 开始前会说这个目录现在登录的是谁，结束后说它有没有换成自己的登录，还是同一个。它不会先退出原来的登录：中途放弃时旧登录还在。
+
+## Codex 额度
+
+sideby 每 15 分钟向官方 Codex CLI 查询当前额度，不创建会话。面板和状态栏的「刷新」会立即再查一次，也可以运行 `sideby quota codex --refresh --json`。用 `sideby quota check codex off --json` 或面板「设置 › 额度查询」关闭；CI 中不查询。
+
+首次查询成功前，本地会话记录作为备用来源。成功后，即使会话又写出旧额度，也不会覆盖查询结果。查询失败会保留上次读数，显示记录时间和原因；按提示更新 Codex 或登录。已用 Codex CLI 0.163.0 验证。
 
 ## Grok 额度
 
@@ -207,11 +215,13 @@ sideby browser --enable        # 显示会读哪些数据；加 --yes 开启
 sideby browser                 # 每个 Chrome 浏览器用户，以及它登录过的账号
 sideby browser open cc008      # 用登录过 cc008 的浏览器用户打开 claude.ai
 sideby browser open grok:main --profile Work
+sideby browser set codex:main "Profile 7"   # 指定就是这个浏览器用户；--auto 改回自动识别
 ```
 
 - sideby 读取这三样：每个浏览器用户的名字和它在 Chrome 里登录的 Google 账号；claude.ai 和 chatgpt.com 在 Chrome Local Storage 里存的键名（不读内容）；每个 Claude、Codex 登录文件里的账号 ID，只用来比对。它不打开 Cookie、已存密码和钥匙串，也不改 Chrome。
-- "登录过"的意思是：这个浏览器用户的数据里，有以这个账号登录的记录。退出登录后，记录可能还在；一个浏览器用户也可能对应好几个账号。
-- grok.com 没有保存能比对的信息，所以 Grok 账号要你自己选浏览器用户打开。
+- "登录过"的意思是：这个浏览器用户的数据里，有以这个账号登录的记录。网站退出登录后不删这些记录，所以一个账号可能出现在好几个浏览器用户里。这时 sideby 只留下 Chrome 里登录的 Google 账号和这个账号登录邮箱相同的那些；哪个都没找到的账号，配上 Google 账号就是它登录邮箱的那个浏览器用户（只有一个时）。
+- 还是认错时，在面板账号详情里点它旁边的 **更改**，再在正确的浏览器用户旁点 **就是这个**。sideby 记住你的选择，以后都用它，并标上 **你选的**；**改回自动识别** 可以撤销。只改 sideby 自己的配置，不改 Chrome。
+- grok.com 没有保存能比对的信息，所以 Grok 账号只按登录邮箱找；找不到就自己选浏览器用户。
 - 目前只支持 Google Chrome：macOS 上的，以及 WSL 里用的 Windows 上装的那个。网站改变存数据的方式后，sideby 会找不到，并直接告诉你没找到。
 
 ## 上下文调优
@@ -317,11 +327,13 @@ headless 运行（`claude -p`、`codex exec`、`grok -p`）、带 `--remote` 的
 
 ## 状态栏额度
 
-在 macOS 上运行 `sideby menubar on`（或在面板「设置」里打开**在状态栏显示额度**），状态栏就会多一个 sideby 小人。各工具额度都充足时只显示小人；某个工具连最合适的账号都用到 60% 以上时，旁边出现工具名和百分比（橙色，85% 起变红），不用打开面板也能一眼看出还能不能继续干活。点开它，第一行写着用得最多的是哪个账号，下面是每个账号的额度条，点任一账号直接在终端启动，或打开面板；运行 `sideby menubar off` 即可隐藏。在任何地方按 ⌥⌘S 打开菜单，再按一次关上；`sideby config set menubar.hotkey cmd+shift+0` 可以换成别的快捷键，设成 `off` 就关闭。看不到的话，是状态栏满了或图标在刘海后面：按住 ⌘ 拖动图标腾出位置，macOS 会记住位置。开启前先显示要写的文件（`~/Library/LaunchAgents/dev.sideby.menubar.plist`），加 `--yes` 才生效。
+在 macOS 上运行 `sideby menubar on`（或在面板「设置」里打开**在状态栏显示额度**），状态栏就会多一个 sideby 小人。各工具额度都充足时只显示小人；某个工具连最合适的账号都用到 60% 以上时，旁边出现工具名和百分比（橙色，85% 起变红），不用打开面板也能一眼看出还能不能继续干活。点开它，第一行写着用得最多的是哪个账号，下面是每个账号的额度条，点任一账号直接在终端启动，或打开面板；菜单里的**从状态栏隐藏…**（或 `sideby menubar off`）会先确认再隐藏；想找回时，在面板里把开关打开，或运行 `sideby menubar on --yes`。在任何地方按 ⌥X 打开菜单，再按一次关上。想换快捷键，在面板「设置」里打开**状态栏图标 ›**，从下拉里选一个（选「自定义…」可以自己按；不知道选哪个，点下面的「让 AI 帮我挑」，AI 会查哪些组合已被占用，推荐几个单手顺手的再替你设好）；或运行 `sideby menubar hotkey ctrl+opt+s`，`off` 关闭，`default` 用回 ⌥X。快捷键要带 ⌥、⌘ 或 ⌃，sideby 会拒绝 macOS 自己在用的组合，比如 ⌘Q、⌥⌘D。别的 App 用了同一组合时，macOS 不会告诉 sideby；按了没反应就换一个。开关是开的却看不到图标：状态栏放不下时，macOS 会把图标收进顶栏的 «（点它就能看到），sideby 的图标被收进去时面板会直接提示；面板说没在运行时，点**重新启动**；其他情况看「系统设置 › 菜单栏」和 Ice、Bartender 这类整理工具。拿不准是哪种，就打开「状态栏图标 ›」点「让 AI 帮我排查」，或运行 `sideby ask --task menubar`。开启前先显示要写的文件（`~/Library/LaunchAgents/dev.sideby.menubar.plist`），加 `--yes` 才生效。
 
 <img alt="sideby 状态栏下拉菜单：各工具、各账号的额度条" src="../assets/menubar.zh-CN.png" width="468">
 
 其他设置也都有命令：`sideby config get` 列出全部设置和当前值，`sideby config set panel.theme dark` 改一项（先显示改动）。
+
+菜单底部写的是最近「检查」时间。每个账号的悬停说明保留额度记录时间。记录超过一小时或查询失败，额度条变灰并标为「旧数据」。反复检查不会使旧数据变新。
 
 ## 宿主说明
 
@@ -330,7 +342,7 @@ headless 运行（`claude -p`、`codex exec`、`grok -p`）、带 `--remote` 的
 | 宿主 | 家族 | 测试版本 | 登录 | 额度 | 用量（近 7 天） |
 |---|---|---|---|---|---|
 | Claude Code | `claude` | 2.1.289 | `claude auth login` | status line 缓存（先跑 `quota setup claude`） | 本地会话记录 |
-| Codex CLI | `codex` | 0.160.0 | `codex login` | 本地会话文件 | 本地会话文件 |
+| Codex CLI | `codex` | 0.163.0 | `codex login` | 官方 CLI；本地记录备用 | 本地会话文件 |
 | Grok Build | `grok` | 1.0.60 | `grok login` | 由 `grok` 命令行查询 | 没有公开来源 |
 | pi | `pi` | 1.0.2 | 进入 pi 后执行 `/login` | 没有公开来源 | 没有公开来源 |
 

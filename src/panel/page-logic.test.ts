@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { ALIAS_NAME, RESERVED_ALIASES } from '../core/config.ts'
+import { checkHotkey } from '../menubar/hotkey.ts'
 import { MESSAGES } from './i18n.ts'
 import { renderPage } from './page.ts'
 import {
@@ -22,6 +23,8 @@ import {
   handoffChangeOf,
   handoffHintAccount,
   handoffTaskFacts,
+  hotkeyFromKey,
+  hotkeyPressKind,
   inDisplayOrder,
   type LogicAccount,
   loginClusters,
@@ -995,9 +998,9 @@ describe('whole-Panel UX pass (three-way audit, 2026-10-17)', () => {
       return PAGE_SCRIPT.slice(at, PAGE_SCRIPT.indexOf('\n  function ', at + 10))
     }
     // Settings: the general box, a plugin and the terminal choice (the last one only where it can be saved).
-    assert.match(body('settingsGroups'), /link\(t\('ai\.title'\)[^\n]*openAsk\(\)/)
+    assert.match(body('aiLink'), /t\('ai\.title'\)[^\n]*openAsk\(\)/)
     assert.match(body('settingsGroups'), /task: 'plugin'/)
-    assert.match(body('settingsGroups'), /if \(!BOOT\.readOnly\) start\.push\(link\(t\('term\.title'\)/)
+    assert.match(body('settingsGroups'), /if \(!BOOT\.readOnly\) general\.push\(link\(t\('term\.title'\)/)
     // Auto Handoff: Let AI tune it, with the handoff facts (spec §3.29).
     assert.match(body('askHandoff'), /task: 'handoff', context: \{ handoff: handoffTaskFacts\(/)
     assert.match(body('renderHandoffPage'), /onclick: askHandoff/)
@@ -1476,6 +1479,30 @@ describe('settings in config, start at login and Auto Handoff facts (spec §3.29
     assert.deepEqual(panelMigration({}, { theme: 'system', lang: '' }), null)
     assert.deepEqual(panelMigration({ language: 'auto' }, { theme: 'light', lang: 'zh' }), { theme: 'light' })
   })
+  it('turns a key press into config menubar.hotkey, by key position, waiting while only modifiers are held', () => {
+    const k = (
+      code: string,
+      mods: Partial<Record<'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey', boolean>> = {},
+    ) => hotkeyFromKey({ code, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods })
+    // ⌥S types "ß" on a Mac; the position (KeyS) is what the shortcut is.
+    assert.equal(k('KeyS', { altKey: true, metaKey: true }), 'opt+cmd+s')
+    assert.equal(k('Digit0', { ctrlKey: true, shiftKey: true }), 'ctrl+shift+0')
+    assert.equal(k('KeyK'), null)
+    assert.equal(k('MetaLeft', { metaKey: true }), null)
+    assert.equal(k('Space', { ctrlKey: true }), null)
+    // The picker's presets are ones the server accepts, so choosing one never ends in a refusal.
+    const presets = /HOTKEY_PRESETS = \[([^\]]*)\]/
+      .exec(PAGE_SCRIPT)![1]!
+      .match(/'[^']+'/g)!
+      .map((x) => x.slice(1, -1))
+    assert.equal(presets[0], 'opt+x')
+    for (const p of presets) assert.ok(checkHotkey(p).ok, p)
+    // While only modifiers are held it waits; an arrow, F-key or Space is refused at once, not ignored.
+    assert.deepEqual(
+      ['KeyS', 'Digit7', 'MetaLeft', 'AltRight', 'ArrowDown', 'F5', 'Space', 'Enter'].map(hotkeyPressKind),
+      ['key', 'key', 'wait', 'wait', 'unsupported', 'unsupported', 'unsupported', 'unsupported'],
+    )
+  })
   it('explains each start-at-login state with one line and the right action', () => {
     const s = (state: string, current = true, supported = true) => ({ supported, state, current })
     assert.deepEqual(autostartNote(null, false), {
@@ -1509,6 +1536,15 @@ describe('settings in config, start at login and Auto Handoff facts (spec §3.29
       toggle: true,
       action: 'fix',
     })
+    // On, but launchd let it go: the switch still says on, and the action starts it again.
+    assert.deepEqual(autostartNote({ ...s('on', false), loaded: false }, false), {
+      key: 'as.notRunning',
+      on: true,
+      toggle: true,
+      action: 'fix',
+    })
+    assert.deepEqual(autostartNote({ ...s('stale', false), loaded: false }, false).key, 'as.stale')
+    assert.deepEqual(autostartNote({ ...s('on'), loaded: true }, false).key, 'as.hint')
     assert.deepEqual(autostartNote(s('foreign', false), false), {
       key: 'as.foreign',
       on: false,
@@ -1598,6 +1634,13 @@ describe('settings in config, start at login and Auto Handoff facts (spec §3.29
       assert.ok(!p.includes('abcdefghijklmnopqrstu'), 'key-shaped context is removed')
     }
     assert.ok(AI_TASK_KINDS.includes('handoff'))
+    // "Can't see the icon?": the AI starts from the menu bar item's own state, in either language.
+    for (const lang of ['en', 'zh']) {
+      const p = taskPrompt({ task: 'menubar', lang }, stripSecrets)
+      assert.match(p, /sideby menubar --json/)
+      assert.match(p, /sideby menubar on --yes/)
+      assert.match(p, /Bartender/)
+    }
     // Every task but free has its own dialog line and title in both languages, or the dialog shows a raw key.
     for (const k of AI_TASK_KINDS.filter((x) => x !== 'free'))
       for (const key of [`ask.task.${k}`, `ask.title.${k}`])
@@ -1629,18 +1672,27 @@ describe('settings in config, start at login and Auto Handoff facts (spec §3.29
     assert.match(fn('closeMenu'), /const back = menu\.returnTo \|\| menu\.anchor/)
     assert.match(PAGE_SCRIPT, /document\.addEventListener\('contextmenu', onContextMenu\)/)
   })
-  it('groups the settings in the spec order and ends a tall popover with More settings', () => {
+  it('orders the settings sections as the spec says and keeps the popover short', () => {
     const at = PAGE_SCRIPT.indexOf('  function settingsGroups(')
     const groups = PAGE_SCRIPT.slice(at, PAGE_SCRIPT.indexOf('\n  function ', at + 10))
-    const order = ['set.g.look', 'set.g.start', 'set.g.accounts', 'set.g.ai'].map((k) =>
-      groups.indexOf(`t('${k}')`),
-    )
+    const order = [
+      'set.g.general',
+      'set.g.menubar',
+      'set.g.accounts',
+      'set.g.quota',
+      'ah.button',
+      'set.g.ai',
+    ].map((k) => groups.indexOf(`t('${k}')`))
     assert.ok(
       order.every((i, n) => i > 0 && (n === 0 || i > order[n - 1]!)),
       String(order),
     )
-    assert.match(PAGE_SCRIPT, /if \(menu\.kind === 'settings'\) settingsFit\(\)/)
-    assert.match(PAGE_SCRIPT, /class: 'menu-item set-more', type: 'button', hidden: true/)
+    const pop = PAGE_SCRIPT.slice(
+      PAGE_SCRIPT.indexOf('  function settingsPop('),
+      PAGE_SCRIPT.indexOf('  function openSettingsDialog('),
+    )
+    assert.match(pop, /lookRows\(\)[\s\S]*ahLink\(leave\)[\s\S]*aiLink\(leave\)[\s\S]*openSettingsDialog\(\)/)
+    assert.doesNotMatch(pop, /autostartRow|setCheck|quotaChecks/)
   })
 })
 

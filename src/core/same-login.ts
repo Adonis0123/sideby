@@ -2,14 +2,15 @@
 // vendor Quota. Pure: the Runtime gathers each Account's Identity and own Quota reading, this groups and picks.
 import type { Account, AccountIdentity, QuotaResult } from '../types.ts'
 
-/** Families whose Accounts can be a Same Login (ADR-0016, ADR-0028). */
-export const SAME_LOGIN_FAMILIES: ReadonlySet<string> = new Set(['claude', 'codex'])
+/** Families whose Accounts can be a Same Login (ADR-0016, ADR-0028, ADR-0037). */
+export const SAME_LOGIN_FAMILIES: ReadonlySet<string> = new Set(['claude', 'codex', 'grok'])
 
 /**
  * Families whose Identity alone does not tell one Quota apart, so two Accounts also need equal Login Keys. Codex: one
- * email can belong to several ChatGPT workspaces, each with its own Quota (ADR-0028).
+ * email can belong to several ChatGPT workspaces, each with its own Quota (ADR-0028). Grok: one email
+ * can sign in on its own or in an x.ai team (ADR-0037).
  */
-export const LOGIN_KEY_FAMILIES: ReadonlySet<string> = new Set(['codex'])
+export const LOGIN_KEY_FAMILIES: ReadonlySet<string> = new Set(['codex', 'grok'])
 
 export interface LoginMember {
   ref: string
@@ -54,15 +55,18 @@ export function sharedQuota(
   ref: string,
   readings: ReadonlyMap<string, QuotaResult>,
   peers: readonly string[],
+  localFallbackOnly = false,
 ): QuotaResult {
   const own = readings.get(ref) ?? { status: 'unavailable', reason: 'unrecognized' }
-  let best: { ref: string; q: Extract<QuotaResult, { status: 'ok' }>; t: number } | undefined
+  let best: { ref: string; q: Extract<QuotaResult, { status: 'ok' }>; t: number; rank: number } | undefined
   for (const r of [ref, ...peers]) {
     const q = readings.get(r)
     if (q?.status !== 'ok') continue
     const t = Date.parse(q.observedAt)
     if (!Number.isFinite(t)) continue
-    if (!best || t > best.t) best = { ref: r, q, t }
+    // A peer's replayed rollout must not overwrite an authoritative fetch either (ADR-0038).
+    const rank = localFallbackOnly && q.fetched ? 1 : 0
+    if (!best || rank > best.rank || (rank === best.rank && t > best.t)) best = { ref: r, q, t, rank }
   }
   if (!best || best.ref === ref) return own
   const { from: _from, ...reading } = best.q

@@ -7,6 +7,7 @@ import { nestedFileWrittenAt, resumeSubcommandSession } from '../shared/sessions
 import { topLevelTomlString } from '../shared/toml.ts'
 import { codexHandoff } from './handoff.ts'
 import { codexModelChoice } from './model.ts'
+import { codexQuotaFetch } from './quota.ts'
 import { readCodexQuota, readCodexUsage } from './rollout.ts'
 import { readCodexTuning } from './tuning.ts'
 
@@ -84,6 +85,7 @@ export const codexFamily: FamilyDef = {
   modelChoice: codexModelChoice,
   identity: codexIdentity,
   readQuota: (account) => readCodexQuota(account.dir),
+  fetchQuota: codexQuotaFetch,
   readUsage: (account, ctx) => readCodexUsage(account.dir, ctx.now),
   readTuning: readCodexTuning,
   resumedSession: resumeSubcommandSession,

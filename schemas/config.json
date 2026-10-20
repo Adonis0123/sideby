@@ -37,7 +37,7 @@
         "hotkey": {
           "type": "string",
           "pattern": "^(off|((ctrl|opt|cmd|shift)\\+)+[a-z0-9])$",
-          "description": "The shortcut that opens the menu bar item from anywhere, such as `opt+cmd+s` (default), or `off`."
+          "description": "The shortcut that opens the menu bar item from anywhere, such as `opt+x` (default), or `off`."
         }
       },
       "additionalProperties": false,
@@ -339,6 +339,16 @@
         "signIns": {
           "type": "boolean",
           "description": "Look in Google Chrome's local data for which browser user signed in to each Account's website (key names only, never cookies or passwords; nothing leaves this computer). Off by default."
+        },
+        "choices": {
+          "type": "object",
+          "patternProperties": {
+            "^[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*$": {
+              "type": "string",
+              "pattern": "^[\\w .-]{1,64}$"
+            }
+          },
+          "description": "The Chrome browser user (its folder, such as `Profile 7`) the user chose for an Account, by ref. It replaces what sideby found for that Account; set with `sideby browser set` or the Panel."
         }
       },
       "additionalProperties": false,

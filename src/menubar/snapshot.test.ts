@@ -60,6 +60,44 @@ it('carries each Family logo path and brand colour, without its title', () => {
 })
 
 describe('menubarSnapshot', () => {
+  it('dates quota observations independently of repeated successful snapshot checks', () => {
+    const old = { ...quota(59, 68), observedAt: at(-120) }
+    const input = [family('codex', 'Codex', [sub('main', old, 'codex')])]
+    for (const now of [NOW, new Date(NOW.getTime() + 60000)]) {
+      const snap = menubarSnapshot(input, now, 'en')
+      const row = snap.sections[0]!.rows[0]!
+      assert.equal(row.observedAt, at(-120))
+      assert.equal(row.stale, true)
+      assert.match(row.detail, /older reading/)
+      assert.match(row.tip, /2026-10-19T10:00:00.000Z/)
+      assert.equal(row.bars?.[1]?.percent, 68)
+      assert.match(snap.labels.updatedJustNow, /Checked/)
+      assert.equal(snap.card?.status, 'Quota needs refreshing')
+    }
+  })
+
+  it('marks a failed query stale even when the last successful quota is recent', () => {
+    const q = { ...quota(1, 2), fetchError: 'Could not query; refresh to try again' }
+    const row = menubarSnapshot([family('codex', 'Codex', [sub('main', q, 'codex')])], NOW, 'en').sections[0]!
+      .rows[0]!
+    assert.equal(row.stale, true)
+    assert.match(row.tip, /Could not query/)
+    assert.match(row.detail, /older reading/)
+  })
+
+  it('marks unreadable observation times stale and fresh observations current', () => {
+    for (const [observedAt, stale] of [
+      ['invalid', true],
+      [at(120), true],
+      [NOW.toISOString(), false],
+    ] as const) {
+      const q = { ...quota(1, 2), observedAt }
+      const row = menubarSnapshot([family('codex', 'Codex', [sub('main', q, 'codex')])], NOW, 'zh')
+        .sections[0]!.rows[0]!
+      assert.equal(row.stale, stale)
+    }
+  })
+
   it('titles each Family by the account sideby would pick and shows the highest', () => {
     const snap = menubarSnapshot(
       [
@@ -97,7 +135,10 @@ describe('menubarSnapshot', () => {
     ])
     assert.equal(rows[0]!.reset, '2d 4h')
     assert.equal(rows[0]!.note, '')
-    assert.equal(rows[1]!.tip, '5h resets in 2h 5m\n7d resets in 2d 4h\nStart claude:main in your terminal')
+    assert.equal(
+      rows[1]!.tip,
+      'Quota recorded at 2026-10-19T12:00:00.000Z\n5h resets in 2h 5m\n7d resets in 2d 4h\nStart claude:main in your terminal',
+    )
   })
 
   it('shows the fullest of the longer windows when there are three, so a used-up one is not hidden', () => {
@@ -260,8 +301,13 @@ describe('menubarSnapshot', () => {
     assert.equal(snap.card?.status, 'Plenty of quota')
     assert.deepEqual(Object.keys(snap.labels).sort(), [
       'addAccount',
+      'cancel',
       'empty',
       'hide',
+      'hideBody',
+      'hideTitle',
+      'hideYes',
+      'hotkeyTaken',
       'loading',
       'openPanel',
       'recommended',
@@ -276,8 +322,8 @@ describe('menubarSnapshot', () => {
 })
 
 describe('menubarHotkey', () => {
-  it('reads config menubar.hotkey into a key code and Carbon modifiers, with ⌥⌘S by default', () => {
-    assert.deepEqual(menubarHotkey(undefined), { keyCode: 1, modifiers: 2048 + 256, label: '⌥⌘S' })
+  it('reads config menubar.hotkey into a key code and Carbon modifiers, with ⌥X by default', () => {
+    assert.deepEqual(menubarHotkey(undefined), { keyCode: 7, modifiers: 2048, label: '⌥X' })
     assert.deepEqual(menubarHotkey('cmd+shift+0'), { keyCode: 29, modifiers: 512 + 256, label: '⇧⌘0' })
     assert.equal(menubarHotkey('off'), null)
     // No modifier, an unknown key or a repeated or unknown modifier is not a shortcut.
@@ -294,7 +340,7 @@ describe('menubarHotkey', () => {
       h,
     )
     assert.deepEqual(snap.hotkey, h)
-    assert.match(snap.tooltip, /\nPress ⌥⌘S to open this menu from anywhere$/)
+    assert.match(snap.tooltip, /\nPress ⌥X to open this menu from anywhere$/)
     assert.equal(menubarSnapshot([], NOW, 'en').hotkey, null)
   })
 })

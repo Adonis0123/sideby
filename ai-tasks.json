@@ -83,6 +83,34 @@
             { "en": "Use my team account last", "zh": "团队账号放到最后" },
             { "en": "Explain how a handoff works first", "zh": "先讲讲接力是怎么工作的" }
           ]
+        },
+        {
+          "id": "menubar",
+          "native": true,
+          "title": { "en": "Let AI find the menu bar icon", "zh": "让 AI 帮我找图标" },
+          "placeholder": {
+            "en": "Anything to add? For example: I use Bartender",
+            "zh": "想补充什么？比如：我装了 Bartender"
+          },
+          "examples": [
+            { "en": "It disappeared after an update", "zh": "更新之后就不见了" },
+            { "en": "I use a menu bar organizer", "zh": "我用了菜单栏整理工具" },
+            { "en": "The shortcut does nothing either", "zh": "按快捷键也没反应" }
+          ]
+        },
+        {
+          "id": "hotkey",
+          "native": true,
+          "title": { "en": "Let AI pick a shortcut", "zh": "让 AI 帮我挑" },
+          "placeholder": {
+            "en": "Anything to add? For example: I use Raycast",
+            "zh": "想补充什么？比如：我装了 Raycast"
+          },
+          "examples": [
+            { "en": "I press shortcuts with my left hand", "zh": "我习惯左手按快捷键" },
+            { "en": "Nothing happens when I press it", "zh": "按了没反应" },
+            { "en": "Two keys at most", "zh": "最多两个键" }
+          ]
         }
       ]
     }

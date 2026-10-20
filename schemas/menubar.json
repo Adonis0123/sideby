@@ -94,10 +94,83 @@
     },
     "loaded": {
       "type": "boolean",
-      "description": "launchd took the change now."
+      "description": "After a change: launchd took it now. In a status of the menu bar item: launchd holds it now; false means it is on but not running until `sideby menubar on` or the next login."
     },
     "note": {
       "type": "string"
+    },
+    "hotkey": {
+      "type": "object",
+      "required": [
+        "keys",
+        "label",
+        "enabled",
+        "isDefault",
+        "registered"
+      ],
+      "properties": {
+        "keys": {
+          "type": "string",
+          "description": "As config `menubar.hotkey` holds it, or the default: `opt+x`, `off`."
+        },
+        "label": {
+          "type": "string",
+          "description": "As macOS writes it, such as `⌥⌘S`; empty when off."
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "isDefault": {
+          "type": "boolean"
+        },
+        "registered": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether the menu bar item could register it: false means another app or macOS holds it; null when it has not said yet or it is off."
+        },
+        "problem": {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "description": "A value config allows but a new choice would be refused for; it still works."
+        }
+      }
+    },
+    "icon": {
+      "type": "object",
+      "required": [
+        "visible"
+      ],
+      "properties": {
+        "visible": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether macOS shows the menu bar icon right now: false when it sits behind « (the menu bar is full) or is covered; null when the item has not said in the last 15 minutes."
+        }
+      },
+      "description": "Only while the menu bar item is on."
     },
     "_notice": {
       "type": "object",

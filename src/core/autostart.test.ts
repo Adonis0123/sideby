@@ -20,17 +20,32 @@ import {
 const LAUNCHER = { node: '/bin/sh', entry: '/usr/bin/env' }
 const OTHER = { node: '/bin/sh', entry: '/bin/ls' }
 
+/** A fake launchctl that remembers what it holds: `print` exits 113 for a job it does not hold. */
 function recorder() {
   const calls: string[][] = []
+  const held = new Set<string>()
   const exec = async (file: string, args: readonly string[]) => {
     calls.push([file, ...args])
+    const label = (args[1] ?? '').split('/').pop()!
+    if (args[0] === 'print') return { code: held.has(label) ? 0 : 113, output: '' }
+    if (args[0] === 'bootout') held.delete(label)
+    if (args[0] === 'bootstrap')
+      held.add(
+        args[2]!
+          .split('/')
+          .pop()!
+          .replace(/\.plist$/, ''),
+      )
     return { code: 0, output: '' }
   }
-  return { calls, exec }
+  return { calls, exec, held }
 }
+/** The calls that change launchd; `print` only asks. */
+const changes = (calls: string[][]) => calls.filter((c) => c[1] !== 'print')
 
 const ctxFor = (home: string, extra: Partial<AutostartContext> = {}): AutostartContext => ({
   home,
+  sleep: async () => {},
   platform: 'darwin',
   launcher: LAUNCHER,
   uid: 501,
@@ -53,7 +68,7 @@ describe('autostart', () => {
       assert.match(plan.content!, /<key>KeepAlive<\/key>\s*<false\/>/)
       assert.ok(plan.content!.includes(AUTOSTART_MARKER))
       assert.equal(await stat(autostartPath(h.home)).catch(() => null), null)
-      assert.deepEqual(calls, [])
+      assert.deepEqual(changes(calls), [])
     })
   })
 
@@ -73,7 +88,7 @@ describe('autostart', () => {
         '--background',
         '--no-open',
       ])
-      assert.deepEqual(calls, [['launchctl', 'bootstrap', 'gui/501', path]])
+      assert.deepEqual(changes(calls), [['launchctl', 'bootstrap', 'gui/501', path]])
       const s = await autostartStatus(ctx)
       assert.equal(s.state, 'on')
       assert.equal(s.current, true)
@@ -82,7 +97,7 @@ describe('autostart', () => {
       calls.length = 0
       const off = await applyAutostart(ctx, await planAutostart(ctx, 'off'))
       assert.equal(off.state, 'off')
-      assert.deepEqual(calls, [['launchctl', 'bootout', 'gui/501/dev.sideby.panel']])
+      assert.deepEqual(changes(calls), [['launchctl', 'bootout', 'gui/501/dev.sideby.panel']])
       assert.equal(await stat(path).catch(() => null), null)
       assert.equal((await planAutostart(ctx, 'off')).changed, false)
     })
@@ -106,7 +121,7 @@ describe('autostart', () => {
       assert.equal(await readFile(path, 'utf8'), '<plist>mine</plist>\n')
       assert.equal((await refreshAutostart(ctx)).rewritten, false)
       assert.equal(await readFile(path, 'utf8'), '<plist>mine</plist>\n')
-      assert.deepEqual(calls, [])
+      assert.deepEqual(changes(calls), [])
     })
   })
 
@@ -129,7 +144,36 @@ describe('autostart', () => {
       assert.deepEqual(plan.commands[0], ['launchctl', 'bootout', 'gui/501/dev.sideby.panel'])
       await applyAutostart(ctx, plan)
       assert.equal((await autostartStatus(ctx)).state, 'on')
-      assert.equal(calls.length, 2)
+      assert.equal(changes(calls).length, 2)
+    })
+  })
+
+  it('waits until launchd let the old job go before loading the new one, and tries again after error 5', async () => {
+    await withFakeHome(async (h) => {
+      const calls: string[][] = []
+      let afterBootout = -1
+      let failures = 1
+      // launchctl bootout returns while the job is still being torn down: `print` finds it twice more, and the first
+      // bootstrap fails with 5 (Input/output error), as on macOS when it comes too soon.
+      const exec = async (file: string, args: readonly string[]) => {
+        calls.push([file, ...args])
+        if (args[0] === 'bootout') afterBootout = 2
+        if (args[0] === 'print') return { code: afterBootout-- > 0 ? 0 : 113, output: '' }
+        if (args[0] === 'bootstrap' && failures-- > 0) return { code: 5, output: 'Bootstrap failed: 5' }
+        return { code: 0, output: '' }
+      }
+      const first = ctxFor(h.home, { exec, launcher: OTHER })
+      await applyAutostart(first, await planAutostart(first, 'on'))
+      calls.length = 0
+      failures = 1
+      const ctx = ctxFor(h.home, { exec })
+      const r = await applyAutostart(ctx, await planAutostart(ctx, 'on'))
+      assert.equal(r.loaded, true)
+      assert.equal(r.note, undefined)
+      assert.deepEqual(
+        calls.map((c) => c[1]),
+        ['bootout', 'print', 'print', 'print', 'bootstrap', 'print', 'bootstrap'],
+      )
     })
   })
 
@@ -177,7 +221,7 @@ describe('autostart', () => {
       const r = await applyAutostart(ctx, await planAutostart(ctx, 'on'))
       assert.equal(r.loaded, false)
       assert.match(r.note!, /not your login home/)
-      assert.deepEqual(calls, [])
+      assert.deepEqual(changes(calls), [])
     })
   })
 

@@ -96,7 +96,7 @@ async function fileLimits(file: string): Promise<FileLimits> {
 }
 
 /** Parsed `rate_limits` per Account directory; a rollout is read again only after it changed. */
-export const codexQuotaMemo = new FileMemo<FileLimits>({ name: 'codex-quota', version: 1 })
+export const codexQuotaMemo = new FileMemo<FileLimits>({ name: 'codex-quota', version: 2 })
 
 /** Newest well-formed `rate_limits` across the newest rollout files, by event timestamp. */
 export async function readCodexQuota(dir: string): Promise<QuotaResult> {

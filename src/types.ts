@@ -132,7 +132,7 @@ export interface FamilyDef {
   readQuota?(account: Account, ctx: ReadContext): Promise<QuotaResult>
   /**
    * Quota that costs a request, such as asking the Host's own CLI (spec §3.26, ADR-0025). sideby decides when to call
-   * it and keeps its last answer; the newer of that answer and `readQuota`'s is shown.
+   * it and keeps its last answer; the newer of that answer and `readQuota`'s is shown unless `localFallbackOnly`.
    */
   fetchQuota?: QuotaFetch
   readUsage?(account: Account, ctx: ReadContext): Promise<UsageResult>
@@ -275,6 +275,11 @@ export interface QuotaFetch {
   everyMinutes: number
   /** What a fetch does, in one plain sentence, shown next to the setting that turns it off. */
   summary: string
+  /**
+   * Use local readings only until a successful fetch exists (default false). For Hosts that replay cached quota
+   * with new event timestamps, those events must not overwrite a fetched answer (Codex, ADR-0038).
+   */
+  localFallbackOnly?: boolean
   /**
    * The Account's Quota now. An error, or an `unavailable` result, keeps the last good answer on show. Stop when
    * `ctx.signal` aborts (after 20 seconds).

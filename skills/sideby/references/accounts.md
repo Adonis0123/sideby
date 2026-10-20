@@ -19,6 +19,17 @@ Then:
 - **pi**: a `proxy.env` in a pi account only loads provider keys; the account stays a subscription account and still needs `/login`.
 - Afterwards: `sideby doctor <ref> --json` to confirm the new account is healthy, then the user starts it with `sideby run <ref>`.
 
+## Switch an account to another login
+
+Two directories signed in as the same login share one quota (`sameLogin` in `sideby list --json`). To give one its own login:
+
+1. Say which directory is signed in as which email (`identity.email`), and which one they want to change.
+2. Give the user one line to run in their own terminal: `sideby login <ref>` (Claude Code: `! sideby login <ref>`), or tell them to click **Use another account** on that directory in the Panel. It cannot be done inside the tool: Codex has no `/login`, and its `/logout` is blocked while a task runs.
+3. Tell them the browser usually signs in as the login it already has: sign out of it there first, or open the sign-in link in a private window. sideby signs nothing out first, so giving up keeps the old login.
+4. sideby prints the result at the end. Afterwards check `sideby list --json`: the account's `sameLogin` is gone and its `identity.email` is the new one. If it is still the same login, repeat step 3.
+
+A running session of that account keeps its old login until it is restarted.
+
 ## Short commands (aliases)
 
 For an account that already exists: `sideby alias add <short> <ref> --json`.

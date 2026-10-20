@@ -2,7 +2,12 @@ import { StringDecoder } from 'node:string_decoder'
 import { fileURLToPath } from 'node:url'
 import { aliasesByAccount } from '../core/accounts.ts'
 import { listAppProfiles, openAppProfile, parseProfileRef, removeAppProfile } from '../core/app-profiles.ts'
-import { browserReport, openInBrowser, setBrowserSignIns } from '../core/browser-profiles.ts'
+import {
+  browserReport,
+  openInBrowser,
+  setBrowserChoice,
+  setBrowserSignIns,
+} from '../core/browser-profiles.ts'
 import { aliasAccount, aliasArgs, aliasRefs, type DisplayConfig, editConfigUpdate } from '../core/config.ts'
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import type { DoctorReport } from '../core/doctor.ts'
@@ -13,6 +18,7 @@ import { handoffOverview } from '../core/handoff-overview.ts'
 import { explain, type HandoffIo, readyDecision, runWithHandoff } from '../core/handoff-run.ts'
 import { configureHandoff, type HandoffChange, handoffHint, handoffStatus } from '../core/handoff-status.ts'
 import { installHint, runHost } from '../core/launch.ts'
+import { type LoginSnapshot, loginAfterLine, loginBeforeLine } from '../core/login-check.ts'
 import { accountModel, type ModelChange, setAccountModel } from '../core/model-choice.ts'
 import { resolvePaths, tildify } from '../core/paths.ts'
 import { USAGE_DAYS } from '../core/quota-levels.ts'
@@ -510,9 +516,39 @@ export async function cmdRun(a: ParsedArgs, io: Io, command: 'run' | 'login'): P
   if (command === 'run' && rt.pickCommandFamily(ref) !== undefined)
     return runPick(rt, ref, [...extra, ...a.rest], io)
   if (command === 'run') return runAccount(rt, ref, [...extra, ...a.rest], io)
-  const prepared = await rt.prepareLaunch(ref, [...extra, ...a.rest], command)
+  return runLogin(rt, ref, io)
+}
+
+/** Who an Account is signed in as, for `runLogin`; identity fields and Same Login peers only, never a credential. */
+async function loginSnapshot(rt: Runtime, account: Account): Promise<LoginSnapshot> {
+  const s = await rt.status(account)
+  return {
+    login: s.login,
+    ...(s.identity?.email ? { email: s.identity.email } : {}),
+    sameLogin: s.sameLogin ?? [],
+  }
+}
+
+/**
+ * `sideby login` and the Panel's sign-in (spec §3.21 "换个账号登录"): the Host's own sign-in, with a line before on how
+ * to choose another login and a line after on whether the Account now has a login of its own. Exits as the Host does.
+ */
+async function runLogin(rt: Runtime, ref: string, io: Io): Promise<number> {
+  const account = await rt.resolve(ref)
+  // pi signs in inside the app (`login.args` null), so there is no sign-in of its own to compare around.
+  const before = rt.families.get(account.family)?.login.args
+    ? await loginSnapshot(rt, account).catch(() => undefined)
+    : undefined
+  const prepared = await rt.prepareLaunch(account.ref, [], 'login')
   if (prepared.notice) io.err(c.cyan(prepared.notice))
-  return whileRunning(rt, () => runHost(prepared))
+  const hint = before && loginBeforeLine(account.ref, before)
+  if (hint) io.err(c.dim(`sideby: ${hint}`))
+  const code = await whileRunning(rt, () => runHost(prepared))
+  if (!before) return code
+  const after = await loginSnapshot(rt, account).catch(() => undefined)
+  const result = after && loginAfterLine(account.ref, before, after)
+  if (result) io.err((result.ok ? c.green : c.yellow)(`sideby: ${result.line}`))
+  return code
 }
 
 /** A Pick Command (spec §3.13, ADR-0035): start the Account with the most room, else the Main Account, and say which. */
@@ -1944,8 +1980,31 @@ export async function cmdBrowser(a: ParsedArgs, io: Io): Promise<number> {
     else io.out(`${c.green('✓')} opened ${r.url} in Chrome as ${c.bold(r.profile.name)} for ${c.bold(r.ref)}`)
     return 0
   }
+  if (sub === 'set') {
+    const auto = a.flags.has('auto')
+    const [profile, ...more] = extra
+    if (!ref || more.length || a.rest.length || auto === (profile !== undefined))
+      throw new UsageError(
+        'usage: sideby browser set <account> <folder|name> | sideby browser set <account> --auto',
+      )
+    const r = await setBrowserChoice(rt, await rt.resolve(ref), auto ? null : (profile as string))
+    if (a.flags.has('json')) json(io, r)
+    else if (r.profile)
+      io.out(
+        `${c.green('✓')} ${c.bold(r.ref)} now opens in ${c.bold(r.profile.name)} (${r.profile.dir})${r.changed ? '' : '; it already did'}.`,
+      )
+    else
+      io.out(
+        r.changed
+          ? `${c.green('✓')} sideby finds the browser user of ${c.bold(r.ref)} by itself again.`
+          : `Nothing was chosen for ${r.ref}; sideby already finds its browser user by itself.`,
+      )
+    return 0
+  }
   if (sub !== undefined || a.rest.length)
-    throw new UsageError('usage: sideby browser [--enable|--disable] [--yes] | sideby browser open <account>')
+    throw new UsageError(
+      'usage: sideby browser [--enable|--disable] [--yes] | sideby browser open <account> | sideby browser set <account> <folder|name>',
+    )
   const enable = a.flags.has('enable')
   if (enable || a.flags.has('disable')) {
     if (enable && a.flags.has('disable')) throw new UsageError('pass --enable or --disable, not both')
@@ -1993,7 +2052,7 @@ export async function cmdBrowser(a: ParsedArgs, io: Io): Promise<number> {
         p.name,
         p.email ?? c.dim('-'),
         p.dir,
-        p.signIns.join(', ') || c.dim('-'),
+        p.signIns.map((x) => (r.choices[x] ? `${x} (chosen)` : x)).join(', ') || c.dim('-'),
         p.changedAt ? clock(p.changedAt, now) : '-',
       ]),
       ['Browser user', 'Google account', 'Folder', 'Signed in to', 'Changed'],
@@ -2005,10 +2064,13 @@ export async function cmdBrowser(a: ParsedArgs, io: Io): Promise<number> {
   if (missing.length) io.out(c.dim(`\nNo browser user found for: ${missing.map((x) => x.ref).join(', ')}`))
   if (r.families.openOnly.length)
     io.out(
-      c.dim(`${r.families.openOnly.join(', ')}: the website keeps no id to match; open it with --profile.`),
+      c.dim(
+        `${r.families.openOnly.join(', ')}: the website keeps no id to match, so only the login email can find it; choose one with \`sideby browser set\`.`,
+      ),
     )
   io.out(c.dim('\nRead from Chrome on this computer only; a browser user that signed out may still show.'))
   io.out(c.dim('Open one: sideby browser open <account> [--profile <name>]'))
+  io.out(c.dim('Wrong one? sideby browser set <account> <folder|name>; --auto finds it again'))
   return 0
 }
 
@@ -2201,9 +2263,7 @@ export async function cmdAsk(a: AskArgs, io: Io, runtime?: Runtime): Promise<num
         return rt.pickCommandFamily(task.account) !== undefined
           ? await runPick(rt, task.account, [], io)
           : await runAccount(rt, task.account, [], io)
-      const prepared = await rt.prepareLaunch(task.account, [], 'login')
-      if (prepared.notice) io.err(prepared.notice)
-      return await whileRunning(rt, () => runHost(prepared))
+      return await runLogin(rt, task.account, io)
     } finally {
       process.chdir(cwd)
     }
@@ -2581,19 +2641,46 @@ export async function cmdMenubar(a: ParsedArgs, io: Io): Promise<number> {
   const [action, extra] = a.positionals
   const wantJson = a.flags.has('json')
   if (action === 'snapshot') {
-    if (extra !== undefined) throw new UsageError('usage: sideby menubar snapshot [--lang en|zh] [--json]')
+    const reported = a.flags.get('hotkey') as string | undefined
+    const icon = a.flags.get('icon') as string | undefined
+    if (
+      extra !== undefined ||
+      (reported !== undefined && reported !== 'ok' && reported !== 'taken') ||
+      (icon !== undefined && icon !== 'visible' && icon !== 'hidden')
+    )
+      throw new UsageError(
+        'usage: sideby menubar snapshot [--refresh] [--lang en|zh] [--hotkey ok|taken [--hotkey-label <label>]] [--icon visible|hidden] [--json]',
+      )
     const { menubarHotkey, menubarLang, menubarSnapshot } = await import('../menubar/snapshot.ts')
     const rt = await createRuntime()
+    const hotkey = menubarHotkey(rt.config.menubar?.hotkey)
+    // The menu bar script says whether it could register the shortcut; the Panel and `menubar hotkey` show it.
+    // The script says whether macOS shows its icon now; the Panel says where it went when it does not.
+    if (icon) {
+      const { writeMenubarState } = await import('../menubar/hotkey.ts')
+      await writeMenubarState(rt.paths.stateDir, {
+        icon: { visible: icon === 'visible', at: rt.readContext().now.toISOString() },
+      }).catch(() => {})
+    }
+    // The script names the shortcut it registered; config may have changed since, and the Panel then shows nothing.
+    const label = (a.flags.get('hotkey-label') as string | undefined) ?? hotkey?.label
+    if (reported && label) {
+      const { readHotkeyState, writeHotkeyState } = await import('../menubar/hotkey.ts')
+      const before = await readHotkeyState(rt.paths.stateDir)
+      const registered = reported === 'ok'
+      if (before?.label !== label || before.registered !== registered)
+        await writeHotkeyState(rt.paths.stateDir, {
+          label,
+          registered,
+          at: rt.readContext().now.toISOString(),
+        }).catch(() => {})
+    }
     const lang = menubarLang(
       rt.config.panel?.language,
       (a.flags.get('lang') as string | undefined) ?? rt.env.LANG,
     )
-    const snap = menubarSnapshot(
-      await menubarFamilies(rt),
-      rt.readContext().now,
-      lang,
-      menubarHotkey(rt.config.menubar?.hotkey),
-    )
+    if (a.flags.has('refresh')) await rt.refreshQuota()
+    const snap = menubarSnapshot(await menubarFamilies(rt), rt.readContext().now, lang, hotkey)
     if (wantJson) json(io, snap)
     else {
       io.out(snap.title ? `${snap.title}  ${c.dim(snap.tooltip)}` : snap.tooltip)
@@ -2610,6 +2697,51 @@ export async function cmdMenubar(a: ParsedArgs, io: Io): Promise<number> {
         }
       }
     }
+    return 0
+  }
+  if (action === 'hotkey') {
+    if (a.positionals.length > 2)
+      throw new UsageError('usage: sideby menubar hotkey [<keys>|off|default] [--json]')
+    const { hotkeyView, readHotkeyState, setMenubarHotkey } = await import('../menubar/hotkey.ts')
+    const paths = resolvePaths()
+    if (extra === undefined) {
+      const { loadConfig } = await import('../core/config.ts')
+      const v = hotkeyView(
+        (await loadConfig(paths.configFile)).menubar?.hotkey,
+        await readHotkeyState(paths.stateDir),
+      )
+      if (wantJson) json(io, v)
+      else {
+        io.out(
+          !v.enabled
+            ? 'Menu bar shortcut: off.'
+            : `Menu bar shortcut: ${v.label}${v.isDefault ? ' (default)' : ''}${v.registered === false ? ', but macOS did not accept it (something else uses it)' : ''}.`,
+        )
+        if (v.registered === false)
+          io.out(
+            c.dim(
+              'Pick another: sideby menubar hotkey ctrl+opt+s (or free it in System Settings › Keyboard › Keyboard Shortcuts)',
+            ),
+          )
+        if (v.problem) io.out(c.dim(`It works, but a new choice would be refused: ${v.problem.message}.`))
+        io.out(c.dim('Change it: sideby menubar hotkey <keys>|off|default, such as opt+x (one hand)'))
+      }
+      return 0
+    }
+    const r = await setMenubarHotkey({
+      configFile: paths.configFile,
+      stateDir: paths.stateDir,
+      value: extra,
+      ctx: { home: paths.home },
+    })
+    if (wantJson) json(io, r)
+    else if (!r.changed) io.out('Nothing to change.')
+    else
+      io.out(
+        r.hotkey.enabled
+          ? `Menu bar shortcut: ${r.hotkey.label}.${r.nudged ? ' The menu bar item takes it within seconds.' : ''}`
+          : 'Menu bar shortcut turned off.',
+      )
     return 0
   }
   if (action === 'start') {
@@ -2648,7 +2780,18 @@ export async function cmdMenubar(a: ParsedArgs, io: Io): Promise<number> {
   }
   if (!action) {
     const s = await autostartStatus(ctx, MENUBAR_AGENT)
-    if (wantJson) json(io, { ...s, path: tilde(s.path, home) })
+    const { hotkeyView, iconView, readMenubarState } = await import('../menubar/hotkey.ts')
+    const { loadConfig } = await import('../core/config.ts')
+    const paths = resolvePaths()
+    const kept = await readMenubarState(paths.stateDir)
+    const hotkey = hotkeyView((await loadConfig(paths.configFile)).menubar?.hotkey, kept.hotkey ?? null)
+    const icon = iconView(kept.icon, new Date())
+    if (wantJson)
+      json(io, {
+        ...s,
+        path: tilde(s.path, home),
+        ...(s.supported ? { hotkey, ...(s.state === 'on' ? { icon } : {}) } : {}),
+      })
     else if (!s.supported) io.out('The menu bar item is only available on macOS for now.')
     else if (s.state === 'off')
       io.out('Menu bar item: off. Run `sideby menubar on` to show quota in the menu bar.')
@@ -2660,10 +2803,24 @@ export async function cmdMenubar(a: ParsedArgs, io: Io): Promise<number> {
       io.out(
         'Menu bar item: points to a sideby or Node that is no longer there. Run `sideby menubar on` to fix it.',
       )
+    else if (s.loaded === false)
+      io.out(
+        'Menu bar item: on, but not running, so no icon shows. Run `sideby menubar on --yes` to start it again.',
+      )
     else {
       io.out('Menu bar item: on.')
+      if (icon.visible === false)
+        io.out(
+          'Its icon is hidden right now: click « in the menu bar to see it, or set it to always show in System Settings › Menu Bar.',
+        )
       if (!s.current)
         io.out(c.dim('It runs another sideby than this one; `sideby menubar on` points it here.'))
+      if (hotkey.registered === false)
+        io.out(
+          `macOS did not accept its shortcut ${hotkey.label}; pick another with \`sideby menubar hotkey <keys>\`.`,
+        )
+      else if (hotkey.enabled)
+        io.out(c.dim(`Open it from anywhere with ${hotkey.label} (sideby menubar hotkey to change).`))
       io.out(c.dim('Turn it off: sideby menubar off'))
     }
     return 0

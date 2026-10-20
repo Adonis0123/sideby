@@ -15,6 +15,27 @@ const Level = Type.Union([Type.Literal('ok'), Type.Literal('warn'), Type.Literal
 const Kind = Type.Union([Type.Literal('subscription'), Type.Literal('api')])
 const Version = Type.Literal(1)
 
+/** The menu bar shortcut (`sideby menubar hotkey`, spec §3.31). */
+const hotkeyProps = {
+  keys: Type.String({
+    description: 'As config `menubar.hotkey` holds it, or the default: `opt+x`, `off`.',
+  }),
+  label: Type.String({ description: 'As macOS writes it, such as `⌥⌘S`; empty when off.' }),
+  enabled: Type.Boolean(),
+  isDefault: Type.Boolean(),
+  registered: Type.Union([Type.Boolean(), Type.Null()], {
+    description:
+      'Whether the menu bar item could register it: false means another app or macOS holds it; null when it has not said yet or it is off.',
+  }),
+  problem: Type.Optional(
+    Type.Object(
+      { code: Str, message: Str },
+      { description: 'A value config allows but a new choice would be refused for; it still works.' },
+    ),
+  ),
+}
+const MenubarHotkeyView = Type.Object(hotkeyProps)
+
 /** `sideby autostart` and `sideby menubar` (ADR-0029, ADR-0034): a LaunchAgent sideby writes. */
 const loginItem = (current: string) =>
   Type.Object({
@@ -39,8 +60,25 @@ const loginItem = (current: string) =>
     applied: Type.Optional(Type.Boolean()),
     content: Type.Optional(Type.String({ description: 'The file `on` writes.' })),
     commands: Type.Optional(Type.Array(Type.Array(Str))),
-    loaded: Type.Optional(Type.Boolean({ description: 'launchd took the change now.' })),
+    loaded: Type.Optional(
+      Type.Boolean({
+        description:
+          'After a change: launchd took it now. In a status of the menu bar item: launchd holds it now; false means it is on but not running until `sideby menubar on` or the next login.',
+      }),
+    ),
     note: Type.Optional(Str),
+    hotkey: Type.Optional(MenubarHotkeyView),
+    icon: Type.Optional(
+      Type.Object(
+        {
+          visible: Type.Union([Type.Boolean(), Type.Null()], {
+            description:
+              'Whether macOS shows the menu bar icon right now: false when it sits behind « (the menu bar is full) or is covered; null when the item has not said in the last 15 minutes.',
+          }),
+        },
+        { description: 'Only while the menu bar item is on.' },
+      ),
+    ),
   })
 
 const Choice = Type.Object({ model: Type.Optional(Str), effort: Type.Optional(Str) })
@@ -454,6 +492,8 @@ const MenubarRow = Type.Object({
   detail: Type.String({ description: 'The whole row as one line of text.' }),
   level: MenubarLevel,
   recommended: Type.Boolean({ description: 'The account `sideby next` would pick in this Family.' }),
+  observedAt: Type.Union([Str, Type.Null()], { description: 'When the quota was observed, not checked.' }),
+  stale: Type.Boolean({ description: 'The quota is old, undated, or its last query failed.' }),
   tip: Type.String({ description: 'Hover text: when each window resets, and what a click does.' }),
   bars: Type.Union([Type.Tuple([MenubarBar, MenubarBar]), Type.Null()], {
     description:
@@ -463,7 +503,7 @@ const MenubarRow = Type.Object({
     description: 'Until the fullest window resets, such as `4d 17h`; empty when nothing is used.',
   }),
   note: Type.String({
-    description: 'Text drawn instead of bars, such as `API key`; empty when bars are drawn.',
+    description: 'A no-quota explanation, or an old-reading warning beside the bars.',
   }),
 })
 
@@ -1059,7 +1099,7 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
           ),
           signIns: Type.Array(Str, {
             description:
-              "Refs of the accounts this browser user signed in to on the vendor's website, as far as its local data shows; it may be left over from before a sign-out.",
+              "Refs of the accounts this browser user signed in to on the vendor's website, as far as its local data shows; it may be left over from before a sign-out. When several browser users show one account, only those whose Google account is the account's login email are kept; an account found nowhere gets the one browser user whose Google account is its login email. A user's choice replaces all of this.",
           }),
           changedAt: Type.Optional(
             Type.String({ description: 'When its Local Storage last changed (ISO 8601).' }),
@@ -1073,9 +1113,24 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
           description: 'Families that can only be opened in a browser user given with --profile (grok).',
         }),
       }),
+      choices: Type.Record(Str, Str, {
+        description:
+          "Account ref → the folder of the browser user the user chose for it (`sideby browser set`); such an account is in that profile's `signIns` alone. A choice whose folder is gone is left out and named in `problems`.",
+      }),
       problems: Type.Array(Str),
     },
     { title: 'sideby browser --json' },
+  ),
+  'browser-set': Type.Object(
+    {
+      schemaVersion: Version,
+      ref: Str,
+      profile: Type.Union([Type.Object({ dir: Str, name: Str }), Type.Null()], {
+        description: 'The browser user now chosen, or null with --auto (sideby finds it again by itself).',
+      }),
+      changed: Type.Boolean({ description: 'False when config already said so.' }),
+    },
+    { title: 'sideby browser set --json' },
   ),
   'browser-switch': Type.Object(
     {
@@ -1366,6 +1421,18 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     ),
     labels: Type.Record(Str, Str, { description: 'Footer words; `{n}` in `updatedMinutes` is minutes.' }),
   }),
+  'menubar-hotkey': Type.Union([
+    Type.Object({ schemaVersion: Version, ...hotkeyProps }),
+    Type.Object({
+      schemaVersion: Version,
+      changed: Type.Boolean(),
+      nudged: Type.Boolean({
+        description:
+          'A running menu bar item was told (a macOS distributed notification); it takes the new shortcut within seconds, without a restart.',
+      }),
+      hotkey: MenubarHotkeyView,
+    }),
+  ]),
   'menubar-start': Type.Object({
     schemaVersion: Version,
     task: Str,

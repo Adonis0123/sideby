@@ -186,7 +186,7 @@ export const ConfigSchema = Type.Object(
             Type.String({
               pattern: '^(off|((ctrl|opt|cmd|shift)\\+)+[a-z0-9])$',
               description:
-                'The shortcut that opens the menu bar item from anywhere, such as `opt+cmd+s` (default), or `off`.',
+                'The shortcut that opens the menu bar item from anywhere, such as `opt+x` (default), or `off`.',
             }),
           ),
         },
@@ -319,6 +319,16 @@ export const ConfigSchema = Type.Object(
               description:
                 "Look in Google Chrome's local data for which browser user signed in to each Account's website (key names only, never cookies or passwords; nothing leaves this computer). Off by default.",
             }),
+          ),
+          choices: Type.Optional(
+            Type.Record(
+              Type.String({ pattern: '^[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*$' }),
+              Type.String({ pattern: '^[\\w .-]{1,64}$' }),
+              {
+                description:
+                  'The Chrome browser user (its folder, such as `Profile 7`) the user chose for an Account, by ref. It replaces what sideby found for that Account; set with `sideby browser set` or the Panel.',
+              },
+            ),
           ),
         },
         { additionalProperties: false, description: 'Browser Sign-ins (spec §3.24, ADR-0023).' },

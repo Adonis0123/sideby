@@ -18,7 +18,7 @@
 | `sideby shell-init setup [zsh\|bash] [--yes\|--undo]` | 让新终端能用短命令：往 `~/.zshrc` 或 `~/.bashrc` 加一行，先显示再写 | 0；没有 `--yes` 时为 10 |
 | `sideby alias list` | 列出短命令和自动选号命令 | 0 |
 | `sideby resume <family> [-- args]` | 运行宿主；参数按 id 恢复会话时（`claude --resume <id>`、`codex resume <id>`、`grok --resume <id>`），像 `run` 一样启动存有该会话的账号；从没保存过的 Claude 会话，在起过它的账号开新会话；其他情况原样运行宿主 | 宿主的退出码；家族不存在或不支持会话路由（pi）为 1 |
-| `sideby login <acct>` | 用该账号运行家族的登录命令；pi 会直接启动，并提示你输入 `/login` | 宿主的退出码 |
+| `sideby login <acct>` | 用该账号运行家族的登录命令，前后各说一次它登录的是谁（也用来给账号换号）；pi 会直接启动，并提示你输入 `/login` | 宿主的退出码 |
 | `sideby doctor [acct\|family] [--fix] [--force]` | 检查共享项、凭据文件权限和备份残留；`--fix` 修复安全的部分 | 0 没有 fail（允许有 warn）；1 至少一条 fail |
 | `sideby quota [acct]` | 额度和近 7 天用量 | 0 |
 | `sideby quota setup claude [--yes]` | 展示改动；加 `--yes` 才开启 Claude 额度来源 | 只展示改动时为 10；开启后为 0；无法开启或失败为 1 |
@@ -38,6 +38,7 @@
 | `sideby desktop <acct>` | 用这个账号打开 Claude Desktop 或 Codex 应用，和其他账号的窗口同时开着；已经开着就切到前台（macOS） | 0；不是 macOS、这个宿主没有桌面应用、API 账号、应用没装或没能打开为 1 |
 | `sideby browser [--enable\|--disable] [--yes]` | 每个账号的网站在哪个 Chrome 浏览器用户里登录过，只在本机读取；`--enable --yes` 之前不读（macOS；WSL 里读 Windows 上的 Chrome） | 0；`--enable`/`--disable` 不带 `--yes` 为 10 |
 | `sideby browser open <acct> [--profile <名字>]` | 用登录过这个账号的浏览器用户打开 claude.ai、chatgpt.com 或 grok.com，或者用 `--profile` 指定的那个（macOS；WSL 里用 Windows 上的 Chrome） | 0；不是 macOS 或 WSL、没装 Chrome、没有或有多个浏览器用户可选、没能打开为 1 |
+| `sideby browser set <acct> <名字>` / `--auto` | sideby 认错时，自己指定这个账号的 Chrome 浏览器用户（存在 config `browser.choices`）；`--auto` 改回自动识别 | 0；没有这个浏览器用户、同名的有多个、账号没有网站为 1 |
 | `sideby desktop grok-bot:<名字> [--remove [--yes]]` | 按名字打开一个 Grok Bot 窗口，新名字就新建一个未登录的窗口；`--remove` 删掉你建的窗口和它的数据（macOS） | 0；不是 macOS、名字不对、应用没装、窗口开着（`--remove` 时）或没能打开为 1；`--remove` 不带 `--yes` 为 10 |
 | `sideby edit <acct> [--path]` | 用默认编辑器打开这个账号自己的设置文件（`settings.json`、`config.toml`）；`--path` 只输出路径。sideby 不读文件内容 | 0；文件不存在、这个宿主没有设置文件或没能打开为 1 |
 | `sideby app install [--url <url>]` | 添加打开面板（或 `<url>`）的面板应用（macOS、Linux） | 0；平台不支持或目标位置有不是它创建的文件为 1 |
@@ -52,7 +53,7 @@
 | `sideby ask --spec - [--print] --json` | 给 Portal 用（把 sideby 和其他工具做成标签页的页面）：从 stdin 读一个 JSON 对象（最大 1MB），按它开始一个 AI Task。可以是 `{ "specVersion": 1, "prompt": …, "cwd": … }`，Portal 为别的工具写好的提示词（sideby 会再删一次像密钥的文字，并加上附件），也可以是 `{ "specVersion": 1, "native": { "task": …, "text": …, "context": … } }`，sideby 自己的任务，提示词照旧。两种都可以带 `lang`、`account`、`terminal`、`remember`、`files`。`--print` 只返回 `{ prompt, removedSecrets }` | 同 `ask`；内容不合法、超过大小、`cwd` 不是 HOME 里已有的文件夹为 1（`code` 和 `reason` 说明是哪种）；`specVersion` 不认识为 2（请更新 sideby） |
 | `sideby ask --choices --json` | 给 Portal 用：任务现在会用哪个账号（用不了时说明原因）、能用哪些账号、本机装了哪些终端以及会打开哪个 | 0 |
 | `sideby terminal [--set <id>\|--unset]` | 列出支持的终端、本机装了哪些、当前用哪个；`--set` 保存首选终端 | 0；sideby 不认识的终端为 1 |
-| `sideby menubar [on\|off] [--yes]` | 在 macOS 状态栏显示额度：sideby 小人图标；某个工具连下一个要用的账号也用到 60% 时，旁边显示工具名和百分比；点开列出每个账号的额度，点一个账号就在终端里启动它。`menubar snapshot` 打印菜单内容；`menubar start <账号>` 在终端里启动账号。先显示要写的文件 | 0；有变化等 `--yes` 为 10；被拒绝（不是 macOS、sideby 在 npx 缓存或临时目录里、文件不是 sideby 的）为 1 |
+| `sideby menubar [on\|off] [--yes]` | 在 macOS 状态栏显示额度：sideby 小人图标；某个工具连下一个要用的账号也用到 60% 时，旁边显示工具名和百分比；点开列出每个账号的额度，点一个账号就在终端里启动它。`menubar snapshot` 打印菜单内容；`menubar start <账号>` 在终端里启动账号；`menubar hotkey [<组合键>\|off\|default]` 查看或更换打开菜单的快捷键（⌥X）。先显示要写的文件 | 0；有变化等 `--yes` 为 10；被拒绝（不是 macOS、sideby 在 npx 缓存或临时目录里、文件不是 sideby 的）为 1 |
 | `sideby autostart [on\|off] [--yes]` | 登录后在后台启动面板（macOS），不打开窗口；不带 `on`/`off` 时报告开着、关着、过期了，还是被一个不是 sideby 写的文件挡住。先显示要写的文件和 `launchctl` 命令 | 0；有变化等 `--yes` 为 10；被拒绝（不是 macOS、sideby 在 npx 缓存或临时目录里、文件不是 sideby 的）为 1 |
 | `sideby config get [<key>]` / `config set <key> <value> [--yes]` / `config unset <key> [--yes]` | 读或改任意设置，比如 `panel.theme`（`system`、`light`、`dark`）、`panel.language`（`auto`、`en`、`zh`）、`handoff.threshold`；`get` 不带 key 列出每个键、当前值和说明。值能按 JSON 解析就按 JSON，否则当文字。插件自己的配置不在这里读写 | `get` 为 0；`set`/`unset` 有变化等 `--yes` 为 10；不是键或值不对为 1；命令写错为 2 |
 | `sideby key <acct> [--var <NAME>]` | 把 API 密钥输入到这个账号的 `proxy.env`，屏幕上不显示（变量默认是宿主的密钥变量）；其他行原样保留，权限 600。用于 API 账号和 pi | 0；不是 API 账号、不是在终端里输入、写不了为 1 |

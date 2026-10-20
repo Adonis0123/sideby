@@ -7,6 +7,7 @@ import type { AddressInfo } from 'node:net'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { type FakeHome, fakeHost, withFakeHome } from '../../../testing/index.ts'
+import { quotaStoreFile, writeQuotaStore } from '../../core/quota-store.ts'
 import { LOGIN_KEY_FAMILIES, SAME_LOGIN_FAMILIES } from '../../core/same-login.ts'
 import { createPanelHandler, type PanelState } from '../../panel/handler.ts'
 import { createRuntime } from '../../runtime.ts'
@@ -93,6 +94,36 @@ const account = (h: FakeHome, dir: string): Account => ({
   dir: h.path(dir),
   isMain: false,
   kind: 'subscription',
+})
+
+it('shares a fetched reset without letting a peer replay replace it or crossing workspaces', async () => {
+  await withFakeHome(async (h) => {
+    await threeDirs(h)
+    await rollout(h, '.codex-team', 68, 0)
+    await rollout(h, '.codex-other', 44, 0)
+    const rt = await createRuntime({ env: h.env, builtins })
+    await writeQuotaStore(quotaStoreFile(rt.paths.stateDir, 'codex', 'main'), {
+      version: 1,
+      attemptedAt: iso(0),
+      quota: {
+        status: 'ok',
+        observedAt: iso(-0.1),
+        source: 'codex app-server account/rateLimits/read',
+        windows: [{ label: '7d', windowMinutes: 10080, usedPercent: 0, resetsAt: iso(24) }],
+      },
+    })
+    const shared = await rt.quota(await rt.resolve('codex:team'))
+    assert.equal(shared.status, 'ok')
+    if (shared.status === 'ok') {
+      assert.equal(shared.fetched, true)
+      assert.equal(shared.from, 'codex:main')
+      assert.equal(shared.windows[0]!.usedPercent, 0)
+    }
+    const other = await rt.quota(await rt.resolve('codex:other'))
+    if (other.status === 'ok') assert.equal(other.windows[0]!.usedPercent, 44)
+    else assert.fail('the other workspace must retain its own quota')
+    assertNoKey(JSON.stringify({ shared, other }), 'shared quota')
+  })
 })
 
 describe('codexLoginKey', () => {
@@ -235,6 +266,42 @@ describe('codex Same Login (ADR-0028)', () => {
           server.closeAllConnections()
         })
       }
+    })
+  })
+})
+
+describe('sideby login on a Same Login (spec §3.21 "换个账号登录")', () => {
+  /** A fake `codex login` that saves `token` as the Account's login, as the browser sign-in would. */
+  const loginWrites = (h: FakeHome, token: string) =>
+    fakeHost(h, 'codex', {
+      onStart: `fs.writeFileSync(path.join(process.env.CODEX_HOME, 'auth.json'), ${JSON.stringify(
+        JSON.stringify({ tokens: { id_token: token } }),
+      )}, { mode: 0o600 })`,
+    })
+
+  it('says the Account now has a login of its own, and leaks no Login Key', async () => {
+    await withFakeHome(async (h) => {
+      await threeDirs(h)
+      await loginWrites(h, idToken({ chatgpt_account_id: WS_B, chatgpt_user_id: USER }, 'team@example.com'))
+      const r = await sideby(h, ['login', 'codex:team'])
+      assert.equal(r.code, 0, r.err)
+      assert.match(r.err, /codex:team is signed in as codex@example\.com, the same login as codex:main/)
+      assert.match(
+        r.err,
+        /codex:team is signed in as team@example\.com; it no longer shares a quota with codex:main/,
+      )
+      assertNoKey(r.out + r.err, 'login output')
+    })
+  })
+
+  it('warns when the browser signed in as the same login again', async () => {
+    await withFakeHome(async (h) => {
+      await threeDirs(h)
+      await loginWrites(h, idToken({ chatgpt_account_id: WS_A, chatgpt_user_id: USER }))
+      const r = await sideby(h, ['login', 'codex:team'])
+      assert.equal(r.code, 0, r.err)
+      assert.match(r.err, /still signed in as codex@example\.com, the same login as codex:main/)
+      assert.match(r.err, /private window, then run `sideby login codex:team` again/)
     })
   })
 })

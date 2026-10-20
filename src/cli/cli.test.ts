@@ -1778,6 +1778,45 @@ describe('menubar (spec §3.31)', () => {
       assert.equal((await sideby(h, ['menubar', 'start'])).code, 2)
     })
   })
+
+  it('changes the shortcut, refuses one macOS uses, and says when the menu bar item could not register it', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}')
+      const first = checkSchema('menubar-hotkey', (await sideby(h, ['menubar', 'hotkey', '--json'])).out)
+      assert.deepEqual(
+        [first.keys, first.label, first.isDefault, first.registered],
+        ['opt+x', '⌥X', true, null],
+      )
+      const refused = await sideby(h, ['menubar', 'hotkey', 'cmd+q', '--json'])
+      assert.equal(refused.code, 1)
+      assert.equal(JSON.parse(refused.out).code, 'hotkey.reserved')
+      assert.equal(
+        JSON.parse((await sideby(h, ['menubar', 'hotkey', 'shift+k', '--json'])).out).code,
+        'hotkey.needs-modifier',
+      )
+      // Any order and spelling; written the way config keeps it.
+      const set = checkSchema(
+        'menubar-hotkey',
+        (await sideby(h, ['menubar', 'hotkey', 'Cmd+Ctrl+K', '--json'])).out,
+      )
+      assert.deepEqual([set.changed, (set.hotkey as { keys: string }).keys], [true, 'ctrl+cmd+k'])
+      assert.match(await readFile(h.path('.config/sideby/config.json'), 'utf8'), /"hotkey": "ctrl\+cmd\+k"/)
+      // The menu bar script reports that another app holds the key; status and `hotkey` say so.
+      await sideby(h, ['menubar', 'snapshot', '--json', '--hotkey', 'taken'])
+      const taken = checkSchema('menubar-hotkey', (await sideby(h, ['menubar', 'hotkey', '--json'])).out)
+      assert.deepEqual([taken.label, taken.registered], ['⌃⌘K', false])
+      assert.match((await sideby(h, ['menubar', 'hotkey'])).out, /macOS did not accept it/)
+      // A report about a shortcut config no longer holds says nothing about the current one.
+      await sideby(h, ['menubar', 'snapshot', '--json', '--hotkey', 'ok', '--hotkey-label', '⌥⌘S'])
+      const older = checkSchema('menubar-hotkey', (await sideby(h, ['menubar', 'hotkey', '--json'])).out)
+      assert.deepEqual([older.label, older.registered], ['⌃⌘K', null])
+      await sideby(h, ['menubar', 'snapshot', '--json', '--hotkey', 'taken', '--hotkey-label', '⌃⌘K'])
+      // Back to the default removes the key from config.
+      await sideby(h, ['menubar', 'hotkey', 'default'])
+      assert.doesNotMatch(await readFile(h.path('.config/sideby/config.json'), 'utf8'), /hotkey/)
+      assert.equal((await sideby(h, ['menubar', 'snapshot', '--hotkey', 'maybe'])).code, 2)
+    })
+  })
 })
 
 describe('_notice on --json outputs (spec §3.23)', () => {

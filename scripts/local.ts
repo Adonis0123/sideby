@@ -106,7 +106,12 @@ async function refreshLoginItem(entry: string): Promise<void> {
   const ctx = { home: resolvePaths().home, launcher: { node: process.execPath, entry: real } }
   const { MENUBAR_AGENT } = await import('../src/menubar/agent.ts')
   const m = await refreshAutostart(ctx, MENUBAR_AGENT)
-  if (m.rewritten) console.log('The menu bar item now runs it too.')
+  // A rewrite whose load failed leaves the item on but not running; say so, with what to do.
+  if (m.rewritten && !m.note) console.log('The menu bar item now runs it too.')
+  else if (m.note && (m.state === 'on' || m.state === 'stale'))
+    console.log(
+      `The menu bar item may not be running: ${m.note}. Run \`sideby menubar on --yes\` to start it.`,
+    )
   const r = await refreshAutostart(ctx)
   if (r.rewritten) console.log('The login item now starts it too.')
   else if (r.note && (r.state === 'on' || r.state === 'stale'))

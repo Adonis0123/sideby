@@ -9,6 +9,7 @@
     "found",
     "profiles",
     "families",
+    "choices",
     "problems"
   ],
   "properties": {
@@ -55,7 +56,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Refs of the accounts this browser user signed in to on the vendor's website, as far as its local data shows; it may be left over from before a sign-out."
+            "description": "Refs of the accounts this browser user signed in to on the vendor's website, as far as its local data shows; it may be left over from before a sign-out. When several browser users show one account, only those whose Google account is the account's login email are kept; an account found nowhere gets the one browser user whose Google account is its login email. A user's choice replaces all of this."
           },
           "changedAt": {
             "type": "string",
@@ -87,6 +88,15 @@
           "description": "Families that can only be opened in a browser user given with --profile (grok)."
         }
       }
+    },
+    "choices": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "type": "string"
+        }
+      },
+      "description": "Account ref → the folder of the browser user the user chose for it (`sideby browser set`); such an account is in that profile's `signIns` alone. A choice whose folder is gone is left out and named in `problems`."
     },
     "problems": {
       "type": "array",

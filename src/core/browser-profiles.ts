@@ -14,6 +14,7 @@ import type { Account } from '../types.ts'
 import { type BrowserConfig, editConfigBrowser } from './config.ts'
 import { type DesktopDeps, depsFor, findApp } from './desktop-app.ts'
 import { UserError } from './errors.ts'
+import { cleanEmail } from './identity.ts'
 import { localStorageKeys } from './leveldb-keys.ts'
 import { askWindowsDirs, type WindowsDirs } from './windows-dirs.ts'
 
@@ -100,6 +101,11 @@ export interface BrowserReport {
   profiles: BrowserProfile[]
   /** Families whose Accounts can be matched, and those that can only be opened in a profile the user picks. */
   families: { matched: string[]; openOnly: string[] }
+  /**
+   * The browser user the user chose for an Account (config `browser.choices`), ref → folder, only where that folder
+   * still exists; such an Account appears in that profile's `signIns` alone.
+   */
+  choices: Record<string, string>
   /** Problems met while reading, without file contents. */
   problems: string[]
 }
@@ -205,7 +211,7 @@ export async function browserReport(rt: Runtime, accounts: readonly Account[]): 
     matched: fams.filter((f) => websiteDef(f)?.match),
     openOnly: fams.filter((f) => !websiteDef(f)?.match),
   }
-  const base = { enabled, browser: CHROME.title, families }
+  const base = { enabled, browser: CHROME.title, families, choices: {} as Record<string, string> }
   if (!enabled) return { ...base, found: false, profiles: [], problems: [] }
   const problems: string[] = []
   const userData = await userDataFor(rt, depsFor(rt), problems)
@@ -250,8 +256,68 @@ export async function browserReport(rt: Runtime, accounts: readonly Account[]): 
       ...(changedAt ? { changedAt } : {}),
     }
   })
+  await narrowByEmail(rt, list, profiles)
+  const choices = applyChoices(rt, list, profiles, problems)
   profiles.sort((a, b) => (b.changedAt ?? '').localeCompare(a.changedAt ?? '') || a.dir.localeCompare(b.dir))
-  return { ...base, found: true, profiles, problems }
+  return { ...base, choices, found: true, profiles, problems }
+}
+
+/** The login email of an Account, lower case, from its Family's identity reader; undefined on any problem. */
+async function loginEmail(rt: Runtime, account: Account): Promise<string | undefined> {
+  try {
+    return cleanEmail((await rt.families.get(account.family)?.identity?.(account))?.email)?.toLowerCase()
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * A website keeps the keys of every login a browser user ever had, so one Account can show up in several (spec §3.24
+ * "按 Google 账号收窄"). Where some of them use the Account's login email as their Google account in Chrome, only those
+ * are kept. An Account found nowhere gets the one browser user, if exactly one, whose Google account is its login.
+ */
+async function narrowByEmail(rt: Runtime, list: readonly Account[], profiles: BrowserProfile[]) {
+  for (const a of list) {
+    const email = await loginEmail(rt, a)
+    if (!email) continue
+    const same = (p: BrowserProfile) => p.email?.toLowerCase() === email
+    const found = profiles.filter((p) => p.signIns.includes(a.ref))
+    if (found.length > 1 && found.some(same)) {
+      for (const p of found) if (!same(p)) p.signIns = p.signIns.filter((r) => r !== a.ref)
+    } else if (!found.length) {
+      const only = profiles.filter(same)
+      if (only.length === 1) only[0]!.signIns.push(a.ref)
+    }
+  }
+}
+
+/**
+ * The user's own choice (config `browser.choices`) replaces what was found: the Account is in that profile's
+ * `signIns` alone. A choice whose folder is gone is skipped with a problem, and the Account is found as usual.
+ */
+function applyChoices(
+  rt: Runtime,
+  list: readonly Account[],
+  profiles: BrowserProfile[],
+  problems: string[],
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  const chosen = rt.config.browser?.choices ?? {}
+  for (const a of list) {
+    const dir = chosen[a.ref]
+    if (!dir) continue
+    const p = profiles.find((x) => x.dir === dir)
+    if (!p) {
+      problems.push(
+        `the browser user chosen for ${a.ref} (${dir}) is gone; finding it again (\`sideby browser set ${a.ref} --auto\` clears the choice)`,
+      )
+      continue
+    }
+    for (const x of profiles) x.signIns = x.signIns.filter((r) => r !== a.ref)
+    p.signIns.push(a.ref)
+    out[a.ref] = dir
+  }
+  return out
 }
 
 export interface BrowserOpenResult {
@@ -296,26 +362,11 @@ export async function openInBrowser(
     throw new UserError(`${CHROME.title} has no browser users yet; open it once, then try again`, {
       code: 'no-profiles',
     })
-  let pick: ProfileEntry | undefined
-  if (profile) {
-    pick = entries.find((e) => e.dir === profile)
-    if (!pick) {
-      const p = profile.toLowerCase()
-      const byName = entries.filter((e) => e.name.toLowerCase() === p)
-      if (!byName.length) byName.push(...entries.filter((e) => e.email?.toLowerCase() === p))
-      if (byName.length > 1)
-        throw new UserError(
-          `several browser users are named "${profile}"; pass the folder instead: ${byName.map((e) => e.dir).join(', ')}`,
-          { code: 'profile-ambiguous' },
-        )
-      pick = byName[0]
-    }
-    if (!pick)
-      throw new UserError(
-        `no browser user "${profile}"; choose one of: ${entries.map((e) => `${e.name} (${e.dir})`).join(', ')}`,
-        { code: 'profile-unknown' },
-      )
-  } else {
+  let pick: ProfileEntry
+  const chosen = entries.find((e) => e.dir === rt.config.browser?.choices?.[account.ref])
+  if (profile) pick = findProfile(entries, profile)
+  else if (chosen) pick = chosen
+  else {
     const report = rt.config.browser?.signIns === true ? await browserReport(rt, [account]) : undefined
     const found = report?.profiles.filter((p) => p.signIns.includes(account.ref)) ?? []
     if (found.length !== 1) {
@@ -329,11 +380,12 @@ export async function openInBrowser(
       const choices = (found.length ? found : entries).map((e) => `${e.name} (${e.dir})`).join(', ')
       throw new UserError(`${why}; pass --profile with one of: ${choices}`, { code: 'profile-needed' })
     }
-    pick = entries.find((e) => e.dir === found[0]?.dir)
-    if (!pick)
+    const only = entries.find((e) => e.dir === found[0]?.dir)
+    if (!only)
       throw new UserError('that browser user is gone; run `sideby browser` again', {
         code: 'profile-unknown',
       })
+    pick = only
   }
   const [cmd, ...args] = launch.command(`--profile-directory=${pick.dir}`, site.url)
   const r = await deps.exec(cmd as string, args)
@@ -348,6 +400,75 @@ export async function openInBrowser(
     profile: { dir: pick.dir, name: pick.name },
     command: [cmd as string, ...args],
   }
+}
+
+/** The browser user `profile` names: its folder, else its name or Google account, which must be unique. */
+function findProfile(entries: readonly ProfileEntry[], profile: string): ProfileEntry {
+  const byDir = entries.find((e) => e.dir === profile)
+  if (byDir) return byDir
+  const p = profile.toLowerCase()
+  const byName = entries.filter((e) => e.name.toLowerCase() === p)
+  if (!byName.length) byName.push(...entries.filter((e) => e.email?.toLowerCase() === p))
+  if (byName.length > 1)
+    throw new UserError(
+      `several browser users are named "${profile}"; pass the folder instead: ${byName.map((e) => e.dir).join(', ')}`,
+      { code: 'profile-ambiguous' },
+    )
+  if (!byName[0])
+    throw new UserError(
+      `no browser user "${profile}"; choose one of: ${entries.map((e) => `${e.name} (${e.dir})`).join(', ')}`,
+      { code: 'profile-unknown' },
+    )
+  return byName[0]
+}
+
+export interface BrowserChoice {
+  ref: string
+  /** The browser user now chosen, or null when sideby finds it again by itself. */
+  profile: { dir: string; name: string } | null
+  changed: boolean
+}
+
+/**
+ * `sideby browser set` and the Panel (spec §3.24 "手动指定"): remembers which Chrome browser user is an Account's, in
+ * config `browser.choices`, or with `profile` null forgets it so sideby finds it again. Only sideby's config is written.
+ */
+export async function setBrowserChoice(
+  rt: Runtime,
+  account: Account,
+  profile: string | null,
+): Promise<BrowserChoice> {
+  if (!websiteDef(account.family) || account.kind === 'api' || !eligible(rt, [account]).length)
+    throw new UserError(
+      `${account.ref} has no website; only Claude, Codex and Grok subscription accounts have a browser user`,
+      { code: 'no-website' },
+    )
+  let pick: ProfileEntry | undefined
+  if (profile !== null) {
+    const problems: string[] = []
+    const deps = depsFor(rt)
+    const userData =
+      deps.platform === 'darwin' || deps.wslMount ? await userDataFor(rt, deps, problems) : null
+    const entries = userData ? ((await profileEntries(userData, problems)) ?? []) : []
+    if (!entries.length)
+      throw new UserError(
+        `${CHROME.title} has no browser users on this computer yet; open it once, then try again`,
+        {
+          code: 'no-profiles',
+        },
+      )
+    pick = findProfile(entries, profile)
+  }
+  const r = await editConfigBrowser(rt.paths.configFile, (cur) => {
+    const choices = { ...cur.choices }
+    if (pick) choices[account.ref] = pick.dir
+    else delete choices[account.ref]
+    const next: BrowserConfig = { ...cur, choices }
+    if (!Object.keys(choices).length) delete next.choices
+    return next
+  })
+  rt.config.browser = r.after
+  return { ref: account.ref, profile: pick ? { dir: pick.dir, name: pick.name } : null, changed: r.changed }
 }
 
 interface ChromeLauncher {

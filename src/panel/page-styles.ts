@@ -204,8 +204,10 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .login-mark .ic { width: 13px; height: 13px; }
 .login-detail { flex-direction: column; gap: 8px; }
 .login-detail .rd-note { margin: 0; }
+.login-detail > .rd-browser { flex-direction: row; align-items: center; gap: 14px; }
+.login-detail > .rd-browser > .rd-label { flex: none; width: 68px; }
 /* The directories share one set of columns (subgrid), so a wider cell in one line moves every line alike. */
-.login-dirs { display: grid; grid-template-columns: minmax(120px, 1fr) auto var(--l-w) minmax(0, 1.4fr) auto auto auto; column-gap: 14px; border: 1px solid var(--border); border-radius: var(--ctl-radius); background: var(--surface); }
+.login-dirs { display: grid; grid-template-columns: minmax(120px, 1fr) auto var(--l-w) minmax(0, 1.4fr) auto auto auto auto; column-gap: 14px; border: 1px solid var(--border); border-radius: var(--ctl-radius); background: var(--surface); }
 .login-dir { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; padding: 6px 6px 6px 12px; }
 .login-dir > * { justify-self: start; min-width: 0; }
 .login-dir + .login-dir { border-top: 1px solid var(--border); }
@@ -244,12 +246,44 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .row-toggle[aria-expanded=true] .chev { transform: rotate(90deg); }
 .row-toggle[aria-expanded=true]:not(:hover) { background: transparent; color: var(--muted); }
 .fold-hit:hover .row-toggle[aria-expanded=true] { background: var(--hover); color: var(--text); }
-/* The details: ref and model, tokens, Health, side by side under the name. */
-.row-detail { grid-area: detail; display: flex; flex-wrap: wrap; gap: 10px 36px; margin: 10px 0 2px 64px; padding-top: 10px; border-top: 1px dashed var(--border); cursor: default; }
+/* The details under a row's name (a Same Login's after a dashed line). Their left edge is the name's: the open arrow (--ctl-h-sm,
+   less its 14px of negative margins), 10px, the 26px mark, 10px and the pin's 18px. */
+.row-detail { grid-area: detail; display: flex; flex-wrap: wrap; gap: 10px 36px; margin: 10px 0 2px calc(var(--ctl-h-sm) + 50px); padding-top: 10px; border-top: 1px dashed var(--border); cursor: default; }
 .rd-item { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.rd-label { color: var(--faint); font-size: 11.5px; font-weight: var(--strong-weight); }
+/* An open account's details sit in one bordered panel under the name: four cells side by side (how it runs, its web
+   sign-in, tokens, health), each a label above its value, with the same widths in every row. Without browser
+   sign-ins (rd-nobr) there are three. Medium and narrow widths make it two by two; phones put one detail on each line,
+   its label in front. */
+.row-detail:not(.login-detail) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, .7fr); grid-template-areas: "run br use hl"; gap: 0; align-items: stretch; margin-bottom: 4px; padding: 0; border: 1px solid var(--border); border-radius: var(--ctl-radius); background: var(--surface-2); }
+.row-detail.rd-nobr:not(.login-detail) { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, .7fr); grid-template-areas: "run use hl"; }
+.row-detail:not(.login-detail) > .rd-item { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 10px 14px; }
+.row-detail > .rd-run { grid-area: run; } .row-detail > .rd-browser { grid-area: br; }
+.row-detail > .rd-usage { grid-area: use; } .row-detail > .rd-health { grid-area: hl; }
+.row-detail:not(.login-detail) > .rd-item:not(.rd-run) { border-left: 1px solid var(--border); }
+.row-detail .rd-val, .row-detail:not(.login-detail) .br-line { min-width: 0; min-height: 22px; display: flex; align-items: center; gap: 4px 10px; }
+.row-detail:not(.login-detail) .br-line { flex-wrap: nowrap; }
+.row-detail:not(.login-detail) .br-line > * { flex: none; }
+/* A long email shortens itself rather than push "Change" out; its tooltip and the browser dialog have it whole. */
+.row-detail:not(.login-detail) .br-btn { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
+.row-detail:not(.login-detail) .br-btn > .br-ico { vertical-align: -2px; margin-right: 4px; }
+.rd-none { color: var(--faint); }
+.row-detail .usage { gap: 12px; }
+.row-detail .u-text { flex-direction: row; align-items: baseline; gap: 8px; }
+.row-detail .spark { height: 18px; }
+:where(:root[data-width=medium], :root[data-width=narrow]) .row-detail:not(.login-detail) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "run br" "use hl"; }
+:where(:root[data-width=medium], :root[data-width=narrow]) .row-detail.rd-nobr:not(.login-detail) { grid-template-areas: "run run" "use hl"; }
+:where(:root[data-width=medium], :root[data-width=narrow]) .row-detail:not(.login-detail) > :is(.rd-usage, .rd-health) { border-top: 1px solid var(--border); }
+:where(:root[data-width=medium], :root[data-width=narrow]) .row-detail:not(.login-detail) > .rd-usage { border-left: 0; }
+:where(:root[data-width=phone]) .row-detail:not(.login-detail) { grid-template-columns: minmax(0, 1fr); grid-template-areas: "run" "br" "use" "hl"; }
+:where(:root[data-width=phone]) .row-detail.rd-nobr:not(.login-detail) { grid-template-areas: "run" "use" "hl"; }
+:where(:root[data-width=phone]) .row-detail:not(.login-detail) > .rd-item { flex-direction: row; align-items: center; gap: 12px; padding: 8px 12px; }
+:where(:root[data-width=phone]) .row-detail:not(.login-detail) > .rd-item:not(.rd-run) { border-left: 0; border-top: 1px solid var(--border); }
+:where(:root[data-width=phone]) .row-detail:not(.login-detail) > .rd-item > .rd-label { flex: none; width: 96px; }
+:where(:root[data-width=phone]) .row-detail:not(.login-detail) > .rd-item > :not(.rd-label) { flex: 1; }
+:where(:root[data-width=phone]) .row-detail:not(.login-detail) .br-line { flex-wrap: wrap; }
+:where(:root[data-width=phone]) .row-detail:not(.login-detail) .usage { flex-wrap: wrap; row-gap: 2px; }
+.rd-label { color: var(--faint); font-size: 11.5px; font-weight: var(--strong-weight); white-space: nowrap; }
 .rd-note { color: var(--muted); font-size: 12px; }
-.rows .row-detail .usage { justify-content: flex-start; gap: 16px; }
 .row-detail .ident-sub { margin-top: 0; }
 .att-dot { flex: none; }
 .col-head { position: sticky; top: 0; z-index: 2; padding: 7px 10px 7px 16px; border-top: 1px solid var(--border); background: var(--surface); color: var(--faint); font-size: 11.5px; font-weight: var(--strong-weight); line-height: 1.3; white-space: nowrap; }
@@ -268,6 +302,8 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .model-btn:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
 .model-set { color: var(--accent); }
 .md-now { display: flex; flex-direction: column; gap: 4px; }
+.br-line { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+.br-acts { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .br-list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .br-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--ctl-radius); }
 .email-btn:hover { color: var(--text); text-decoration: underline dotted; }
@@ -297,6 +333,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .row-run { width: 28px; height: 28px; color: var(--muted); }
 .row-run .ic { width: 15px; height: 15px; }
 .row-run:hover { color: var(--accent); }
+.row-desk.is-open { color: var(--accent); }
 .card-head > .row-end { display: flex; align-items: center; gap: 2px; margin-left: auto; }
 /* A pinned row's mark (spec §3.25, §3.27): a small muted outline pin right before the name, not a button. */
 .pin-mark { display: inline-flex; flex: none; margin-right: -2px; color: var(--faint); }
@@ -331,6 +368,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 /* Old numbers keep their level's color, paler, so the bar and the number agree. */
 .q-note { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: var(--small); }
 .link-btn { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: var(--strong-weight); cursor: pointer; }
+.link-btn.small { font-size: var(--small); }
 .link-btn:hover:not(:disabled) { text-decoration: underline; }
 .link-btn:disabled { color: var(--faint); cursor: not-allowed; }
 .foot .link-btn { color: inherit; font-weight: inherit; }
@@ -655,13 +693,43 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .set-group-title { color: var(--faint); font-size: 11px; font-weight: var(--strong-weight); letter-spacing: .02em; }
 .popover .set-sep { margin: 0 -14px; }
 .set-hint .link-btn { font-size: 12px; }
+.set-help { margin: 6px 0 0; padding-left: 16px; display: grid; gap: 3px; }
+.note-fail-text { color: var(--fail); }
+.hk-field { flex: none; display: flex; align-items: center; gap: 10px; }
+.hk-select { flex: none; width: auto; min-width: 150px; }
+.hk-custom { display: flex; justify-content: flex-end; margin-top: 8px; }
+.note-warn-line { display: block; margin-top: 4px; color: var(--warn); }
+.hk-rec { min-width: 140px; padding: 6px 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--text); font: 13px/18px var(--mono); text-align: center; cursor: pointer; }
+.hk-rec:hover:not(:disabled) { border-color: var(--accent); }
+.hk-rec:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
+.hk-rec.unset { color: var(--faint); font-family: var(--font); }
+.hk-rec.recording { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); font-family: var(--font); }
+.hk-rec.taken { border-color: var(--fail); color: var(--fail); }
+.mb-help-title { margin: 16px 0 4px; font-size: 13px; font-weight: var(--strong-weight); }
+.as-details { margin-top: 8px; }
+.as-details summary { color: var(--muted); font-size: 12px; cursor: pointer; }
+.as-details[open] summary { margin-bottom: 6px; }
 /* "More settings…" stays at the bottom of a popover that scrolls. */
-.set-more { position: sticky; bottom: -12px; margin: 0 -14px -12px; width: calc(100% + 28px); height: 40px; padding: 0 16px 0 17px; border-top: 1px solid var(--border); border-radius: 0; background: var(--surface); }
-.set-more:hover { background: var(--hover); }
+.set-more { margin: 4px -14px -12px; width: calc(100% + 28px); height: 40px; padding: 0 16px 0 17px; border-top: 1px solid var(--border); border-radius: 0 0 var(--radius) var(--radius); }
 .set-more .ic { margin-left: auto; }
-.set-dialog { display: flex; flex-direction: column; gap: 12px; }
+/* The settings dialog: the sections in a list at the side, one section at a time beside it (spec §3.29). */
+.dialog.dialog-wide { width: min(760px, calc(100vw - 24px)); }
+.set-dialog { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 0 24px; min-height: 380px; }
+.set-nav { display: flex; flex-direction: column; gap: 2px; padding-right: 16px; border-right: 1px solid var(--border); }
+.set-tab { all: unset; box-sizing: border-box; display: flex; align-items: center; min-height: 32px; padding: 6px 10px; border-radius: var(--ctl-radius); color: var(--muted); font-size: 13px; cursor: pointer; }
+.set-tab:hover { background: var(--hover); color: var(--text); }
+.set-tab[aria-selected=true] { background: var(--hover); color: var(--text); font-weight: var(--strong-weight); }
+.set-tab:focus-visible { outline: var(--focus-outline); outline-offset: 1px; }
+.set-pane { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.set-pane-title { margin: 4px 0 0; font-size: 15px; font-weight: var(--strong-weight); }
+.set-foot { margin: -6px 0 4px; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
 .set-dialog .set-hint { max-width: none; }
 .set-dialog .set-link { margin: 0 -10px; width: calc(100% + 20px); }
+:where(:root[data-width=narrow], :root[data-width=phone]) {
+  .set-dialog { grid-template-columns: minmax(0, 1fr); gap: 14px; min-height: 0; }
+  .set-nav { flex-direction: row; overflow-x: auto; padding: 0 0 8px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .set-tab { flex: none; white-space: nowrap; }
+}
 .as-code { display: block; margin: -4px 0 4px; padding: 8px 10px; border-radius: var(--ctl-radius); background: var(--hover); font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
 .set-dot { background: var(--warn-bar); }
 .tip { display: inline-flex; position: relative; vertical-align: middle; }
@@ -669,7 +737,7 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .tip-btn:hover, .tip.is-open .tip-btn { color: var(--text); border-color: var(--muted); }
 .tip-btn:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
 .tip-body { display: none; position: fixed; z-index: 60; width: max-content; max-width: min(280px, calc(100vw - 16px)); padding: 7px 10px; border-radius: 7px; background: var(--text); color: var(--bg); font-size: 12px; font-weight: 400; line-height: 1.45; letter-spacing: 0; box-shadow: var(--float-shadow); pointer-events: none; text-align: left; white-space: normal; }
-.tip.is-open .tip-body { display: block; }
+.tip.is-open .tip-body, .tip-float.is-shown { display: block; }
 .toasts { position: fixed; inset: auto auto 20px 50%; margin: 0; padding: 0; border: 0; background: none; color: inherit; overflow: visible; transform: translateX(-50%); z-index: 50; display: flex; flex-direction: column; align-items: center; gap: 8px; width: max-content; max-width: calc(100vw - 24px); pointer-events: none; }
 .toast { pointer-events: auto; display: flex; align-items: center; gap: 10px; max-width: min(460px, calc(100vw - 24px)); min-height: 40px; padding: 6px 6px 6px 14px; border-radius: calc(var(--ctl-radius) + 2px); background: var(--surface); color: var(--text); border: 1px solid var(--border); box-shadow: var(--float-shadow); font-size: 13px; animation: toast-in .18s ease-out; }
 .toast-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--ok); }
@@ -706,6 +774,17 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 .view-in > * { animation: view-in .22s ease-out both; }
 @keyframes view-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+/* Menus, popovers and dialogs ease in and out instead of appearing at once; a row that appears inside one grows in. */
+.menu { animation: float-in .14s cubic-bezier(.2, .8, .2, 1); transform-origin: top right; }
+.menu.float-out { animation: float-out .12s ease-in forwards; }
+@keyframes float-in { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
+@keyframes float-out { to { opacity: 0; transform: translateY(-2px) scale(.99); } }
+.dialog[open] { animation: dialog-in .18s cubic-bezier(.2, .8, .2, 1); }
+.dialog[open]::backdrop { animation: backdrop-in .18s ease-out; }
+@keyframes dialog-in { from { opacity: 0; transform: translateY(6px) scale(.985); } }
+@keyframes backdrop-in { from { opacity: 0; } }
+.enter { animation: grow-in .2s ease-out both; overflow: hidden; }
+@keyframes grow-in { from { opacity: 0; max-height: 0; } to { opacity: 1; max-height: 160px; } }
 .row.flash { animation: flash-row 2.4s ease-out; }
 .card.flash { animation: flash-card 2.4s ease-out; }
 @keyframes flash-row { from { background: var(--accent-soft); } to { background: transparent; } }
@@ -777,6 +856,7 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .login-dirs { grid-template-columns: minmax(0, 1fr); }
   .login-dir { grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 14px; row-gap: 6px; }
   .login-dir .usage, .login-dir .health { display: none; }
+  .login-dir .ld-other { grid-column: 1 / -1; order: 1; }
   .grid { grid-template-columns: 1fr; }
   .panel { padding: 14px; }
   .dlg-head { padding: 14px 14px 2px; } .dlg-body { padding: 10px 14px 14px; } .dlg-foot { padding: 10px 14px; }
@@ -789,8 +869,32 @@ select:is(:hover, :focus) { --chevron: var(--text); }
    grows or shrinks on the way. */
 ::view-transition-old(*), ::view-transition-new(*) { animation-duration: .26s; height: 100%; object-fit: none; object-position: left top; }
 .vt-width :is(.top-in, .summary, .stat, .section-head, .toolbar, .group-list, .group-head, .row) { view-transition-name: match-element; }
+/* Small motions (2026-10-20): every state change of a control eases over 120 ms, a press shrinks it a little, and what
+   appears or goes away fades. Only opacity and transform move, so nothing reflows. */
+.icon-btn, .seg-btn, .menu-item, .set-tab, .link-btn, .email-btn { transition: background-color .12s, color .12s, border-color .12s, transform .1s; }
+.tag-btn { transition: filter .12s, transform .1s; }
+.btn { transition: background-color .12s, border-color .12s, color .12s, transform .1s; }
+.chip-btn { transition: filter .12s, border-color .12s, transform .1s; }
+:is(.btn, .icon-btn, .seg-btn, .set-tab, .chip-btn):not(.drag-handle):active:not(:disabled) { transform: scale(.97); }
+.set-link .ic { transition: transform .15s; }
+.set-link:hover .ic { transform: translateX(2px); }
+.icon-btn.row-run.is-done { color: var(--ok); }
+.row-run.is-done .ic { animation: pop-in .18s cubic-bezier(.2, .8, .2, 1); }
+@keyframes pop-in { from { opacity: 0; transform: scale(.6); } }
+.tip.is-open .tip-body, .tip-float.is-shown { animation: tip-in .12s ease-out; }
+@keyframes tip-in { from { opacity: 0; transform: translateY(2px); } }
+.toast.toast-out { animation: toast-out .16s ease-in forwards; }
+@keyframes toast-out { to { opacity: 0; transform: translateY(6px); } }
+.set-pane.view-in { animation: view-in .2s ease-out both; }
+.set-pane.view-in > * { animation: none; }
+/* A dialog closes at once (the page takes clicks again) and only its picture fades out: the browser keeps it in the top
+   layer for the transition. Browsers without overlay transitions just close it. */
+.dialog, .dialog::backdrop { transition: opacity .14s ease-in, transform .14s ease-in, overlay .14s ease-in allow-discrete, display .14s ease-in allow-discrete; }
+.dialog:not([open]) { opacity: 0; transform: translateY(4px) scale(.985); pointer-events: none; }
+.dialog:not([open])::backdrop { opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
-  .sk, .spin, .is-spinning svg, .toast, .toast.bump, .view-in > *, .row.flash, .card.flash, .pulse { animation: none; }
-  .bar > span, .chev, .row { transition: none; }
+  .sk, .spin, .is-spinning svg, .toast, .toast.bump, .toast.toast-out, .view-in > *, .set-pane.view-in, .row.flash, .card.flash, .pulse, .menu, .menu.float-out, .dialog[open], .dialog[open]::backdrop, .enter, .tip-body, .tip-float, .row-run.is-done .ic { animation: none; }
+  .bar > span, .chev, .row, .icon-btn, .seg-btn, .menu-item, .set-tab, .link-btn, .tag-btn, .email-btn, .btn, .chip-btn, .set-link .ic, .dialog, .dialog::backdrop { transition: none; }
+  :is(.btn, .icon-btn, .seg-btn, .set-tab, .chip-btn):active:not(:disabled), .set-link:hover .ic, .dialog:not([open]) { transform: none; }
 }
 `

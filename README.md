@@ -56,7 +56,7 @@ https://github.com/user-attachments/assets/d1d7e8dd-1df1-4881-ac88-e468c2dd4a1d
   <img alt="sideby panel: every account's 5h and 7d quota, 7-day token usage and health in one page" src="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/panel.png" width="1280">
 </picture>
 
-On macOS, the same quota sits in the menu bar (`sideby menubar on`): click or press `⌥⌘S` to open it, and click an account to start it in the terminal.
+On macOS, the same quota sits in the menu bar (`sideby menubar on`): click or press `⌥X` to open it, and click an account to start it in the terminal.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Adonis0123/sideby/main/docs/assets/menubar-dark.png">

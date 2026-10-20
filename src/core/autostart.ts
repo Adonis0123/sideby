@@ -57,6 +57,8 @@ export interface AutostartContext {
   loginHome?: string
   /** The environment an agent's `environment` takes its variables from; this process's by default. */
   env?: Env
+  /** Waits between launchctl calls; tests pass one that returns at once. */
+  sleep?: (ms: number) => Promise<void>
 }
 
 export interface AutostartStatus {
@@ -71,6 +73,12 @@ export interface AutostartStatus {
   current: boolean
   /** Recorded paths that no longer exist (state `stale`). */
   missing?: string[]
+  /**
+   * Whether launchd holds the agent now, for an agent that keeps running (`restartOnCrash`) while it is on: false means
+   * the file is there but nothing runs it until the next login, and `sideby <command> on` starts it again. Absent when
+   * launchd cannot be asked (another HOME than the login one).
+   */
+  loaded?: boolean
 }
 
 export interface AutostartPlan {
@@ -100,7 +108,7 @@ export interface AutostartResult {
   note?: string
 }
 
-const defaultExec: AutostartExec = (file, args) =>
+export const defaultExec: AutostartExec = (file, args) =>
   new Promise((resolve) => {
     execFile(file, [...args], { timeout: 15_000 }, (err, stdout, stderr) => {
       const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0
@@ -218,12 +226,14 @@ export async function autostartStatus(
   const launcher = ctx.launcher ?? askLauncher()
   const want = agent.programArguments(launcher)
   const current = args.length === want.length && args.every((a, i) => a === want[i])
+  const loaded = agent.restartOnCrash && !launchctlNote(ctx) ? await agentLoaded(ctx, agent) : undefined
   return {
     ...base,
     state: missing.length ? 'stale' : 'on',
     programArguments: args,
     current,
     ...(missing.length ? { missing } : {}),
+    ...(loaded === undefined ? {} : { loaded }),
   }
 }
 
@@ -308,7 +318,7 @@ export async function planAutostart(
   const same = hash !== null && hash === sha256(content)
   // The file alone does not start it: launchd may have let it go (a `launchctl bootout`, a failed start), and then
   // only loading it again brings it back.
-  const loaded = !same || (await agentLoaded(ctx, agent))
+  const loaded = !same || (status.loaded ?? (await agentLoaded(ctx, agent)))
   return plan({
     changed: !same || !loaded,
     content,
@@ -330,8 +340,24 @@ async function agentLoaded(ctx: AutostartContext, agent: LoginAgent): Promise<bo
   return r === null || r.code === 0
 }
 
+const BOOTSTRAP_RETRIES = 3
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Waits, up to 10 s, until launchd no longer holds the agent: `launchctl bootout` returns while the job is still being
+ * torn down, and a bootstrap then fails. (`bootout --wait` exists on newer macOS but may block for ever.)
+ */
+async function untilUnloaded(ctx: AutostartContext, agent: LoginAgent): Promise<void> {
+  const exec = ctx.exec ?? defaultExec
+  for (let i = 0; i < 50; i++) {
+    const r = await exec('launchctl', ['print', `gui/${uidOf(ctx)}/${agent.label}`]).catch(() => null)
+    if (r?.code !== 0) return
+    await (ctx.sleep ?? sleep)(200)
+  }
+}
+
 /** Whether launchctl may run: only for the login user's own LaunchAgents, never for a demo or test HOME. */
-function launchctlNote(ctx: AutostartContext): string | null {
+export function launchctlNote(ctx: AutostartContext): string | null {
   let login = ctx.loginHome
   if (login === undefined)
     try {
@@ -377,7 +403,10 @@ export async function applyAutostart(
     await run(bootout(ctx, agent))
     return { changed: true, state: 'off', path, loaded: note === null, ...(note ? { note } : {}) }
   }
-  if (plan.status.state !== 'off') await run(bootout(ctx, agent))
+  if (plan.status.state !== 'off') {
+    await run(bootout(ctx, agent))
+    if (!note) await untilUnloaded(ctx, agent)
+  }
   await mkdir(dirname(path), { recursive: true, mode: 0o755 })
   // launchd skips an agent that others can write; 644 is what it expects.
   if (!(await writeIfUnchanged(path, plan.hash, plan.content!, 0o644)))
@@ -387,7 +416,14 @@ export async function applyAutostart(
         code: 'changed',
       },
     )
-  const r = await run(bootstrap(ctx, path))
+  let r = await run(bootstrap(ctx, path))
+  // Error 5 (Input/output error): launchd is still tearing down the job a bootout let go (a bootout returns before it
+  // is done). Wait until it is gone and try again, a few times.
+  for (let i = 0; r && r.code === 5 && i < BOOTSTRAP_RETRIES; i++) {
+    await untilUnloaded(ctx, agent)
+    await (ctx.sleep ?? sleep)(500)
+    r = await run(bootstrap(ctx, path))
+  }
   const result: AutostartResult = {
     changed: true,
     state: 'on',
