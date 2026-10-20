@@ -42,6 +42,9 @@
 | `sideby desktop grok-bot:<名字> [--remove [--yes]]` | 按名字打开一个 Grok Bot 窗口，新名字就新建一个未登录的窗口；`--remove` 删掉你建的窗口和它的数据（macOS） | 0；不是 macOS、名字不对、应用没装、窗口开着（`--remove` 时）或没能打开为 1；`--remove` 不带 `--yes` 为 10 |
 | `sideby sessions [acct\|family]` | 列出每个账号正在运行的会话，一行一个：Session Label（`cc002 · knip cleanup · 61230c3d`，即账号、宿主自己的会话标题、id 前 8 位）、是否需要你处理、工作目录、开始时间；需要你处理的排最前。sideby 对不上运行中程序的 Codex 或 pi 会话，取该账号最新的会话并标为推测。只读，不读凭证 | 0；账号或家族不存在为 1 |
 | `sideby sessions copy <acct\|session-id> [--as reference\|id\|resume] [--lang en\|zh]` | 把一个会话复制给另一个 AI：默认复制 Session Reference（一句话，写明账号、Label 和记录文件路径），也可以复制 id 或恢复命令。用 pbcopy（macOS）、wl-copy 或 xclip（Linux）；都没有时把文字打印出来 | 0；没有这个账号或运行中的会话、或这个账号有几个会话（会列出来，按 id 复制其中一个）为 1 |
+| `sideby send <acct\|session> "<text>" [--image <path>]... [--lang en\|zh]` | 给另一个正在运行的会话传话，可以带截图，也可以只发截图（PNG、JPEG、GIF、WebP，每张不超过 20 MB）。sideby 先把消息（Message）存成文件（mode 600，放在它的状态目录），再送达：Claude Code 会话走 Claude Code 自带的跨会话消息；Codex、Grok Build 和 pi 会把一句话复制到剪贴板，你粘贴到那个 tab。在会话里运行时，消息会写明是哪个会话发的 | 0 已送达或已存好待粘贴；没有这个运行中的会话、有几个会话（会列出来，按 id 发给其中一个）、或文件不是截图为 1 |
+| `sideby messages [--to <acct\|session>] [--limit <n>]` | 你发过的消息，最新的在前，以及每条到了哪一步：已送达、已读（对方记录里出现了它的 id）、需要你粘贴 | 0 |
+| `sideby messages inbound [accept\|undo] [--yes]` | 每个 Claude 账号是否马上显示别的会话发来的消息（`crossSessionInbound`）。不设的话，bypass 权限模式下的会话会把每条消息扣下等你批准，约 5 分钟后丢掉。`accept` 先展示改动，加 `--yes` 才写入，只改这一个键，只改没设或为 `hold` 的文件；`refuse` 和其他值都不动，逐个说明原因；`undo` 原样恢复改之前的值 | 0；有文件改不了、一个都没改、或没有可撤销的为 1；展示了改动、等 `--yes` 为 10 |
 | `sideby edit <acct> [--path]` | 用默认编辑器打开这个账号自己的设置文件（`settings.json`、`config.toml`）；`--path` 只输出路径。sideby 不读文件内容 | 0；文件不存在、这个宿主没有设置文件或没能打开为 1 |
 | `sideby app install [--url <url>]` | 添加打开面板（或 `<url>`）的面板应用（macOS、Linux） | 0；平台不支持或目标位置有不是它创建的文件为 1 |
 | `sideby app uninstall` | 删除 `app install` 创建的文件 | 0；留下了不是它创建的文件为 1 |
@@ -66,5 +69,5 @@
 - 所有命令遇到用法错误（未知选项、缺参数）时退出码为 2；sideby 自身出错（账号不存在、名字不合法、配置读不了）时为 1。
 - `<acct>` 写成 `<family>:<name>`；名字在所有家族里唯一时，只写 `<name>` 也行。有歧义就报错，并列出候选。
 - 退出码 10 表示命令展示了改动、在等你确认：同意的话，加上 `--yes` 再跑一次同一条命令。
-- `list`、`new`、`next`、`alias`、`doctor`、`quota`（包括 `setup` 和 `teardown`）、`tune`、`model`、`remote-control`、`handoff`、`families`、`plugins`、`ask`、`terminal`、`key`、`try`、`autostart`、`menubar`、`config`、`app`、`desktop`、`sessions` 支持 `--json`，输出带 `schemaVersion: 1`，JSON Schema 随包放在 [`schemas/`](../../schemas/)。有新版本或本机装的 skill 版本不对时，输出里还会多一个 `_notice`（sideby skill 让 agent 提一次并主动问要不要帮你更新；设 `SIDEBY_NO_UPDATE_NOTIFIER=1` 就不带）。加了 `--json` 时，出错会输出 `{ "schemaVersion": 1, "error": "…", "code": "…" }`：命令行写错时 `code` 为 `usage`，其他情况是 `no-quota-source` 这样的原因。只新增字段时版本不变；删除、改名或改语义时加 1。
+- `list`、`new`、`next`、`alias`、`doctor`、`quota`（包括 `setup` 和 `teardown`）、`tune`、`model`、`remote-control`、`handoff`、`families`、`plugins`、`ask`、`terminal`、`key`、`try`、`autostart`、`menubar`、`config`、`app`、`desktop`、`sessions`、`send`、`messages` 支持 `--json`，输出带 `schemaVersion: 1`，JSON Schema 随包放在 [`schemas/`](../../schemas/)。有新版本或本机装的 skill 版本不对时，输出里还会多一个 `_notice`（sideby skill 让 agent 提一次并主动问要不要帮你更新；设 `SIDEBY_NO_UPDATE_NOTIFIER=1` 就不带）。加了 `--json` 时，出错会输出 `{ "schemaVersion": 1, "error": "…", "code": "…" }`：命令行写错时 `code` 为 `usage`，其他情况是 `no-quota-source` 这样的原因。只新增字段时版本不变；删除、改名或改语义时加 1。
 - 任何输出、日志和错误信息里都不会出现凭据的值。

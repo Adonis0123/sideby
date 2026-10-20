@@ -59,6 +59,11 @@ export function pickSession(
   target: string,
   sessions: readonly LiveSession[],
   account: { ref: string; label: string } | undefined,
+  /** How the candidates are offered: `sessions copy` (the default) or `send`. */
+  next: { verb: string; command: (id: string) => string } = {
+    verb: 'copy',
+    command: (id) => `sideby sessions copy ${id}`,
+  },
 ): LiveSession {
   const byId = sessions.filter(
     (s) => s.sessionId === target || (target.length >= 8 && s.sessionId.startsWith(target)),
@@ -78,8 +83,8 @@ export function pickSession(
     )
   }
   const who = account && !byId.length ? account.label : target
-  const rows = list.map((s) => `  sideby sessions copy ${shortId(s.sessionId)}    ${s.label}`).join('\n')
-  throw new UserError(`${who} runs ${list.length} sessions now; copy one by its id:\n${rows}`, {
+  const rows = list.map((s) => `  ${next.command(shortId(s.sessionId))}    ${s.label}`).join('\n')
+  throw new UserError(`${who} runs ${list.length} sessions now; ${next.verb} one by its id:\n${rows}`, {
     code: 'several-sessions',
   })
 }

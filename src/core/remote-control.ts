@@ -2,11 +2,16 @@
 // Claude Account's `settings.json`. Accounts that share a file (a link to the Main Account's) form one group and one
 // write. Nothing but that key is ever read out of the file into an output, an error or the undo record; writes go
 // through `writeIfUnchanged`, keep every other key, and never create, replace or retarget a link.
-import { mkdir, readFile, rm, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { rm } from 'node:fs/promises'
 import type { Account, ReadContext } from '../types.ts'
-import { type Json, locate, readObject, render } from './claude-settings-file.ts'
-import { sha256, writeFileAtomic, writeIfUnchanged } from './fs-safe.ts'
+import {
+  keyRecordPath,
+  readKeyRecord,
+  readObject,
+  settingsFileGroups,
+  writeKeyRecord,
+  writeSettingsKey,
+} from './claude-settings-file.ts'
 
 export const RC_KEY = 'remoteControlAtStartup'
 
@@ -51,19 +56,15 @@ function stateOf(v: unknown): RemoteControlState {
   return v === true ? 'on' : v === false ? 'off' : 'default'
 }
 
-function recordPath(ctx: ReadContext, file: string): string {
-  return join(ctx.stateDir, 'remote-control', `${sha256(file).slice(0, 16)}.json`)
-}
+const RECORDS = 'remote-control'
+
+const recordPath = (ctx: ReadContext, file: string) => keyRecordPath(ctx.stateDir, RECORDS, file)
 
 async function readRecord(ctx: ReadContext, file: string): Promise<RemoteControlUndoRecord | null> {
-  try {
-    const r = JSON.parse(await readFile(recordPath(ctx, file), 'utf8')) as Partial<RemoteControlUndoRecord>
-    if (r.file === file && (r.previous === null || typeof r.previous === 'boolean'))
-      return r as RemoteControlUndoRecord
-  } catch {
-    // no record
-  }
-  return null
+  const r = await readKeyRecord(ctx.stateDir, RECORDS, file)
+  return r && (r.previous === null || typeof r.previous === 'boolean')
+    ? (r as unknown as RemoteControlUndoRecord)
+    : null
 }
 
 /** Every Claude Account's setting, grouped by the file it lives in. Writes nothing. */
@@ -71,22 +72,10 @@ export async function remoteControlGroups(
   accounts: readonly Account[],
   ctx: ReadContext,
 ): Promise<RemoteControlGroup[]> {
-  const byFile = new Map<string, RemoteControlGroup>()
-  for (const account of accounts) {
-    if (account.family !== 'claude') continue
-    const where = await locate(account)
-    const have = byFile.get(where.file)
-    if (have) {
-      have.accounts.push(account.ref)
-      continue
-    }
-    const group: RemoteControlGroup = {
-      file: where.file,
-      accounts: [account.ref],
-      state: 'missing',
-      undo: false,
-    }
-    byFile.set(where.file, group)
+  const out: RemoteControlGroup[] = []
+  for (const { file, accounts: refs, where } of await settingsFileGroups(accounts)) {
+    const group: RemoteControlGroup = { file, accounts: refs, state: 'missing', undo: false }
+    out.push(group)
     if (where.broken) {
       group.state = 'blocked'
       group.reason =
@@ -105,7 +94,7 @@ export async function remoteControlGroups(
       }
     }
   }
-  return [...byFile.values()]
+  return out
 }
 
 /** The groups `off` would change: those that are on, or follow a default that may be on. */
@@ -118,20 +107,7 @@ export function groupsToTurnOn(groups: readonly RemoteControlGroup[]): RemoteCon
   return groups.filter((g) => g.state === 'off' || g.state === 'default')
 }
 
-async function writeKey(file: string, change: (obj: Json) => Json, expect: (obj: Json) => string | null) {
-  const read = await readObject(file)
-  if ('error' in read) return `settings.json cannot be changed safely: ${read.error}.`
-  const refused = expect(read.obj)
-  if (refused) return refused
-  const mode = (await stat(file)).mode & 0o777
-  const wrote = await writeIfUnchanged(
-    file,
-    sha256(read.text),
-    render(change({ ...read.obj }), read.text),
-    mode,
-  )
-  return wrote ? null : 'settings.json changed while sideby was writing, so nothing was changed. Try again.'
-}
+const writeKey = writeSettingsKey
 
 /**
  * Sets `remoteControlAtStartup` to `to` in every group that does not hold it yet (a default counts as either),
@@ -178,8 +154,7 @@ export async function setRemoteControl(
       wrote: to,
       at: new Date().toISOString(),
     }
-    await mkdir(join(ctx.stateDir, 'remote-control'), { recursive: true })
-    await writeFileAtomic(recordPath(ctx, g.file), `${JSON.stringify(record, null, 2)}\n`, 0o600)
+    await writeKeyRecord(ctx.stateDir, RECORDS, g.file, record)
     results.push({ file: g.file, accounts: g.accounts, ok: true, message: to ? 'Turned on.' : 'Turned off.' })
   }
   const ok = results.every((r) => r.ok)

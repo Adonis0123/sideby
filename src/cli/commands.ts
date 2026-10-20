@@ -44,7 +44,7 @@ import {
 import { createRuntime, type Runtime, UnknownFamilyError } from '../runtime.ts'
 import type { Account, Finding } from '../types.ts'
 import { type ParsedArgs, UsageError } from './args.ts'
-import { c, clock, compactNumber, quotaText, table, tuningLines, usageText } from './format.ts'
+import { c, clock, compactNumber, quotaText, table, truncate, tuningLines, usageText } from './format.ts'
 
 export interface Io {
   out(s: string): void
@@ -3012,7 +3012,7 @@ export async function cmdSessions(a: ParsedArgs, io: Io): Promise<number> {
       'usage: sideby sessions [<account>|<family>] | sideby sessions copy <account|session-id>',
     )
   const rt = await createRuntime()
-  const { listLiveSessions } = await import('../core/live-sessions.ts')
+  const { listLiveSessions, sessionLabel } = await import('../core/live-sessions.ts')
   const r = await listLiveSessions(rt, first ? { only: first } : {})
   if (a.flags.has('json')) {
     json(io, { sessions: r.sessions, problems: r.problems })
@@ -3029,8 +3029,9 @@ export async function cmdSessions(a: ParsedArgs, io: Io): Promise<number> {
   }
   const now = rt.readContext().now
   const home = rt.paths.home
+  // A long title (often in Chinese, two columns a character) is cut so the table stays readable.
   const rows = r.sessions.map((s) => [
-    c.bold(s.label),
+    c.bold(sessionLabel(s.accountLabel, truncate(s.title, 40), s.sessionId)),
     s.status === 'needs-you' ? c.yellow(SESSION_STATUS[s.status]!) : SESSION_STATUS[s.status]!,
     s.cwd ? tildify(s.cwd, home) : '',
     s.startedAt ? clock(s.startedAt, now) : '',
@@ -3081,4 +3082,194 @@ async function sessionsCopy(a: ParsedArgs, args: string[], io: Io): Promise<numb
     )
   }
   return 0
+}
+
+export interface SendArgs extends ParsedArgs {
+  /** Every `--image` given, in order (main.ts collects them; parseArgs keeps only the last). */
+  images?: string[]
+}
+
+/**
+ * `sideby send <account|session> "<text>" [--image <path>]...` (spec §3.32 step 2, ADR-0040): keeps the Message as a
+ * file, delivers it through the Host's own channel where it has one (Claude Code), else copies the line to paste.
+ */
+export async function cmdSend(a: SendArgs, io: Io): Promise<number> {
+  const [target, ...words] = a.positionals
+  const text = [...words, ...a.rest].join(' ')
+  if (!target || (!text.trim() && !a.images?.length))
+    throw new UsageError('usage: sideby send <account|session> "<text>" [--image <path>]... [--json]')
+  const rt = await createRuntime()
+  const lang = copyLang(a, rt.env)
+  const { sendMessage } = await import('../core/messages.ts')
+  const { copyToClipboard } = await import('../core/live-sessions-copy.ts')
+  const r = await sendMessage(rt, target, { text, images: a.images ?? [], lang })
+  const copied = r.status === 'paste-needed' ? (await copyToClipboard(r.pasteText, rt.env)) !== null : false
+  if (a.flags.has('json')) {
+    json(io, { message: r, copied })
+    return 0
+  }
+  const home = rt.paths.home
+  if (r.status === 'delivered') {
+    io.out(`${c.green('✓')} delivered to ${c.bold(r.to)} (message ${r.id})`)
+    if (r.note) io.out(c.yellow(`  ${r.note}`))
+  } else {
+    io.out(`${c.yellow('●')} kept message ${r.id} for ${c.bold(r.to)}; it needs a paste`)
+    if (r.note) io.out(`  ${r.note}`)
+    io.out(`  Paste this into the tab of ${c.bold(r.to)}${copied ? ' (it is on the clipboard)' : ''}:`)
+    io.out(`  ${r.pasteText}`)
+  }
+  io.out(
+    c.dim(
+      `  Kept at ${tildify(r.file, home)}${r.attachments.length ? ` with ${r.attachments.length} screenshot(s)` : ''}`,
+    ),
+  )
+  return 0
+}
+
+const MESSAGE_STATUS: Record<string, string> = {
+  stored: 'kept',
+  delivered: 'delivered',
+  read: 'read',
+  'paste-needed': 'needs paste',
+}
+
+/**
+ * `sideby messages [--to <account|session>] [--limit <n>]`: the Messages sideby kept and how far each got;
+ * `sideby messages inbound [accept|undo] [--yes]`: whether Claude sessions show them at once.
+ */
+export async function cmdMessages(a: ParsedArgs, io: Io): Promise<number> {
+  const [first, ...more] = a.positionals
+  if (first === 'inbound') return messagesInbound(a, more, io)
+  if (first !== undefined || a.rest.length)
+    throw new UsageError(
+      'usage: sideby messages [--to <account|session>] [--limit <n>] | sideby messages inbound [accept|undo] [--yes]',
+    )
+  const to = a.flags.get('to')
+  const limitFlag = a.flags.get('limit')
+  const limit = limitFlag === undefined ? undefined : Number(limitFlag)
+  if (limit !== undefined && !(Number.isInteger(limit) && limit > 0))
+    throw new UsageError('--limit takes a whole number above 0')
+  const rt = await createRuntime()
+  const { listMessages } = await import('../core/messages.ts')
+  const list = await listMessages(rt, {
+    ...(typeof to === 'string' ? { to } : {}),
+    ...(limit ? { limit } : {}),
+  })
+  if (a.flags.has('json')) {
+    json(io, { messages: list })
+    return 0
+  }
+  if (!list.length) {
+    io.out('No messages yet. Send one with `sideby send <account|session> "<text>"`.')
+    return 0
+  }
+  const now = rt.readContext().now
+  const rows = list.map((m) => [
+    clock(m.sentAt, now),
+    c.bold(m.to),
+    m.status === 'paste-needed' ? c.yellow(MESSAGE_STATUS[m.status]!) : MESSAGE_STATUS[m.status]!,
+    m.id,
+    m.from ?? c.dim('you'),
+  ])
+  io.out(table(rows, ['SENT', 'TO', 'STATUS', 'ID', 'FROM']))
+  return 0
+}
+
+const INBOUND_WORDS: Record<string, string> = {
+  accept: 'accept',
+  hold: 'hold',
+  refuse: 'refuse',
+  default: 'not set',
+  other: 'unknown value',
+  missing: 'no settings',
+  blocked: 'blocked',
+}
+
+async function messagesInbound(a: ParsedArgs, args: string[], io: Io): Promise<number> {
+  const [action, extra] = args
+  if (extra !== undefined || (action !== undefined && action !== 'accept' && action !== 'undo'))
+    throw new UsageError('usage: sideby messages inbound [accept|undo] [--yes] [--json]')
+  const wantJson = a.flags.has('json')
+  const rt = await createRuntime()
+  const home = rt.paths.home
+  const inbound = await import('../core/inbound.ts')
+  const accounts = await rt.accounts()
+  const ctx = rt.readContext()
+  const groups = await inbound.inboundGroups(accounts, ctx)
+  type G = (typeof groups)[number]
+  const show = (gs: G[]) => gs.map((g) => ({ ...g, file: tildify(g.file, home) }))
+  const out = (data: object) => json(io, { action: action ?? 'status', ...data })
+  if (!action) {
+    if (wantJson) {
+      out({ groups: show(groups) })
+      return 0
+    }
+    if (!groups.length) {
+      io.out('No Claude accounts found.')
+      return 0
+    }
+    io.out('Messages from other sessions: whether Claude sessions show them at once')
+    for (const g of groups) {
+      const word = INBOUND_WORDS[g.state]!
+      const paint = g.state === 'accept' ? c.green : g.state === 'blocked' ? c.red : c.yellow
+      io.out(
+        `  ${paint(word)} ${c.bold(g.accounts.join(', '))}  ${c.dim(g.reason ? tilde(g.reason, home) : tildify(g.file, home))}`,
+      )
+    }
+    io.out(
+      c.dim(
+        '  accept: shown at once; hold or not set: a session in bypass permission mode waits for you to approve each one, and drops it after about 5 minutes; refuse: dropped',
+      ),
+    )
+    if (inbound.groupsToAccept(groups).length)
+      io.out(
+        c.cyan(
+          '\nRun `sideby messages inbound accept` so they are shown at once (it shows the change first).',
+        ),
+      )
+    return 0
+  }
+  const todo = action === 'accept' ? inbound.groupsToAccept(groups) : inbound.inboundGroupsToUndo(groups)
+  const apply = () =>
+    action === 'accept' ? inbound.acceptInbound(accounts, ctx) : inbound.undoInbound(accounts, ctx)
+  const verb = action === 'accept' ? 'set it' : 'undo'
+  if (todo.length === 0) {
+    const r = await apply()
+    if (wantJson) out({ applied: false, groups: show(groups), message: r.message })
+    else io.out(tilde(r.message, home))
+    return r.ok ? 0 : 1
+  }
+  if (!a.flags.has('yes')) {
+    if (wantJson) out({ applied: false, groups: show(todo), message: `Run again with --yes to ${verb}.` })
+    else {
+      io.out(
+        action === 'accept'
+          ? 'Show messages from other sessions at once?'
+          : 'Put back the setting sideby replaced?',
+      )
+      for (const g of todo) {
+        const from = g.state === 'default' ? 'not set' : `"${g.state}"`
+        io.out(
+          `  ${tildify(g.file, home)}: crossSessionInbound ${action === 'accept' ? `${from} -> "accept"` : '-> what it was before'}`,
+        )
+        io.out(c.dim(`    used by ${g.accounts.join(', ')}`))
+      }
+      for (const g of inbound.inboundLeftAlone(groups))
+        io.out(c.dim(`  left alone, ${g.accounts.join(', ')}: ${tilde(g.reason ?? '', home)}`))
+      if (action === 'accept')
+        io.out(
+          'A session then shows a message from another session of yours as soon as it arrives, also in bypass permission mode. Only your own sessions on this computer can send one. Undo it with `sideby messages inbound undo`.',
+        )
+      io.out(`Run again with --yes to ${verb}.`)
+    }
+    return 10
+  }
+  const r = await apply()
+  const results = r.results.map((x) => ({ ...x, file: tildify(x.file, home) }))
+  if (wantJson) out({ applied: r.ok, results, message: r.message })
+  else {
+    for (const x of results) io.out(`  ${x.ok ? c.green('ok') : c.red('failed')} ${x.file}: ${x.message}`)
+    io.out(r.message)
+  }
+  return r.ok ? 0 : 1
 }

@@ -34,6 +34,7 @@ import {
   matchesQuery,
   menuPlacement,
   mergeDaily,
+  messageChip,
   newAccountDir,
   nextReset,
   panelFixes,
@@ -50,6 +51,9 @@ import {
   reorder,
   rowBadge,
   runCodeSwap,
+  sendBlock,
+  sendFileProblem,
+  sendResultView,
   sessionAge,
   sessionLabelParts,
   shortCwd,
@@ -1896,5 +1900,88 @@ describe('Sessions page', () => {
     const short = shortCwd(deep, 30)
     assert.equal(short.length, 30)
     assert.ok(short.startsWith('…') && deep.endsWith(short.slice(1)))
+  })
+})
+
+describe('send to a session (spec §3.32 step 2)', () => {
+  it('shows a delivered Message with the bypass note as a hint', () => {
+    assert.deepEqual(sendResultView({ status: 'delivered', pasteText: 'Read /m.md' }, true), {
+      kind: 'done',
+      key: 'send.done',
+      pasteText: 'Read /m.md',
+      reason: '',
+      hint: '',
+      jump: false,
+    })
+    const bypass = sendResultView({ status: 'delivered', note: ' It must approve it first. ' }, false)
+    assert.equal(bypass.hint, 'It must approve it first.')
+    assert.equal(sendResultView({ status: 'read' }, false).key, 'send.read')
+  })
+
+  it('shows the line to paste, why, and the Orca tab only when there is one', () => {
+    const paste = sendResultView(
+      { status: 'paste-needed', pasteText: 'Read /m.md', note: 'Codex cannot receive it.' },
+      true,
+    )
+    assert.deepEqual(paste, {
+      kind: 'paste',
+      key: 'send.paste',
+      pasteText: 'Read /m.md',
+      reason: 'Codex cannot receive it.',
+      hint: '',
+      jump: true,
+    })
+    assert.equal(sendResultView({ status: 'paste-needed', pasteText: 'Read /m.md' }, false).jump, false)
+    assert.equal(sendResultView({ status: 'paste-needed' }, true).jump, false, 'nothing to paste, no jump')
+    assert.equal(sendResultView({ status: 'stored', pasteText: 'Read /m.md' }, true).kind, 'stored')
+  })
+
+  it('maps the latest status to a chip', () => {
+    assert.deepEqual(messageChip('delivered'), { key: 'send.chip.delivered', tone: 'accent' })
+    assert.deepEqual(messageChip('read'), { key: 'send.chip.read', tone: 'ok' })
+    assert.deepEqual(messageChip('paste-needed'), { key: 'send.chip.paste', tone: 'warn' })
+    assert.equal(messageChip('stored'), null)
+    assert.equal(messageChip(undefined), null)
+    for (const lang of ['en', 'zh'] as const)
+      for (const key of [
+        'send.chip.delivered',
+        'send.chip.read',
+        'send.chip.paste',
+        'send.done',
+        'send.paste',
+        'send.stored',
+        'send.read',
+      ])
+        assert.ok(MESSAGES[lang][key], `${key} ${lang}`)
+  })
+
+  it('refuses a file that is not an image, is over 20 MB, or is one too many', () => {
+    const png = { type: 'image/png', size: 1000 }
+    assert.equal(sendFileProblem(png, 0), null)
+    assert.equal(sendFileProblem({ type: 'image/webp', size: 20 * 1024 * 1024 }, 4), null)
+    assert.equal(sendFileProblem(png, 5), 'send.max')
+    assert.equal(sendFileProblem({ type: 'video/mp4', size: 10 }, 0), 'send.notImage')
+    assert.equal(sendFileProblem({ type: 'image/heic', size: 10 }, 0), 'send.notImage')
+    assert.equal(sendFileProblem({ type: '', size: 10 }, 0), 'send.notImage')
+    assert.equal(sendFileProblem({ type: 'image/jpeg', size: 20 * 1024 * 1024 + 1 }, 0), 'send.tooBig')
+  })
+})
+
+describe('send blocked by a failed screenshot (spec §3.32 step 2)', () => {
+  it('lets a message go only when no screenshot failed', () => {
+    assert.equal(sendBlock([]), null)
+    assert.equal(sendBlock([{ name: 'a.png', status: 'ready' }]), null)
+    assert.deepEqual(
+      sendBlock([
+        { name: 'a.png', status: 'ready' },
+        { name: 'b.png', status: 'error' },
+        { name: 'c.png', status: 'error' },
+      ]),
+      { key: 'send.blocked', names: 'b.png, c.png' },
+    )
+    for (const lang of ['en', 'zh'] as const) {
+      assert.ok(MESSAGES[lang]['send.blocked']?.includes('{names}'), lang)
+      assert.ok(MESSAGES[lang]['send.retry'], lang)
+    }
   })
 })

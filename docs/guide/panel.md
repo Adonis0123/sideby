@@ -22,6 +22,16 @@ The **Sessions** tab lists what every account is running right now, one row per 
 
 **Copy for AI** copies a short note another AI can follow: which account, where the session works and where its record is (only paths, never the conversation). The button turns into a check mark for a moment. Its **…** menu copies the session id or the command that resumes the session in its account (for a Claude Code session, `sideby resume claude -- --resume <id>`). When the session runs in an Orca terminal, the same menu has **Go to its Orca tab**, which brings that tab to the front. If the browser does not allow copying, the text shows selected, ready for ⌘C or Ctrl+C. `sideby sessions` lists the same sessions in a terminal, and you can ask your AI, for example "Copy cc002's current session for another AI."
 
+### Send to a session
+
+**Send to it** on a row opens a small box titled with that session's label. Write what it should do, and add screenshots if they help: paste one with ⌘V or Ctrl+V, drop it on the box, or pick it with **Add screenshot** (images only, up to 5, 20 MB each). ⌘Enter or Ctrl+Enter sends. sideby saves the message as a file first, so it is never lost, then hands it to the session:
+
+- **Delivered**: the session got it. When it has read it, the row shows **Read**.
+- **Needs you to paste**: the tool cannot receive messages by itself. The box shows one line to paste into that session's tab, with **Copy this line**, and **Go to its Orca tab** when the session runs in Orca.
+- A yellow note means the session must accept the message first, for example a Claude Code session started with permission checks skipped.
+
+Each row shows where your last message to it is: **Delivered**, **Read** or **Needs you to paste**. A read-only panel hides **Send to it**. `sideby send <account> "<text>" --image <path>` does the same in a terminal, and you can ask your AI, for example "Tell cc002 to run the tests again and send me the result."
+
 ## Who can reach the panel
 
 The panel answers only on `127.0.0.1`, so other computers cannot reach it. A web page from another site cannot read it or act through it either: the panel checks where each request comes from, and every change needs a key that only its own page gets. What it does not do is tell the users of one computer apart. A program run by another user of the same Mac can read what the panel shows (account names, emails, quota and usage, never a credential) and press its buttons. On a computer that is yours alone this changes nothing. On a shared Mac, start the panel with `sideby ui` when you need it, and leave start at login and `sideby ui --background` off.

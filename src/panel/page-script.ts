@@ -30,6 +30,7 @@ import {
   matchesQuery,
   menuPlacement,
   mergeDaily,
+  messageChip,
   newAccountDir,
   nextReset,
   panelFixes,
@@ -46,6 +47,9 @@ import {
   reorder,
   rowBadge,
   runCodeSwap,
+  sendBlock,
+  sendFileProblem,
+  sendResultView,
   sessionAge,
   sessionLabelParts,
   shortCwd,
@@ -94,6 +98,7 @@ const LOGIC = [
   matchesQuery,
   menuPlacement,
   mergeDaily,
+  messageChip,
   newAccountDir,
   nextReset,
   canLeaveLocal,
@@ -111,6 +116,9 @@ const LOGIC = [
   remoteControlTodo,
   reorder,
   rowBadge,
+  sendBlock,
+  sendFileProblem,
+  sendResultView,
   sessionAge,
   sessionLabelParts,
   shortCwd,
@@ -406,6 +414,8 @@ const MAIN = String.raw`
     mail: 'M3 6h18v12H3zM3 7l9 6 9-6',
     globe: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c2.5 2.5 3.8 5.5 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.5-3.8-9S9.5 5.5 12 3z',
     image: 'M3 5h18v14H3zM3 16l5-5 4 4 3-3 6 6M15 9h.01',
+    // Lucide "send" (ISC license)
+    send: 'M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11zM21.854 2.147l-10.94 10.939',
     film: 'M3 5h18v14H3zM7 5v14M17 5v14M3 9h4M3 15h4M17 9h4M17 15h4',
     eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
     eyeOff: 'M3 3l18 18M10.6 5.1A10.8 10.8 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.2M6.6 6.6A17.4 17.4 0 0 0 2 12s3.5 7 10 7a10.4 10.4 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2',
@@ -2858,7 +2868,7 @@ const MAIN = String.raw`
   // that draws the same rows draws nothing; a new one waits while a menu or popover of the page is open, and the
   // focused button keeps focus (swapKids). The "x min ago" texts change in place every second.
   const SESS_MS = 5000
-  const sp = { data: null, lang: null, loading: null, error: null, at: 0, drawn: '', pending: false, copied: {}, opening: false }
+  const sp = { data: null, lang: null, loading: null, error: null, at: 0, drawn: '', pending: false, copied: {}, opening: false, msgs: {} }
   function loadSessions() {
     if (sp.loading) return sp.loading
     sp.loading = readSessions()
@@ -2866,7 +2876,12 @@ const MAIN = String.raw`
   }
   async function readSessions() {
     const asked = lang
-    try { sp.data = await api('/api/sessions', { lang: asked }); sp.lang = asked; sp.error = null } catch (e) { sp.error = e }
+    try {
+      // The chips of the latest Messages come with the list; when they cannot be read the rows keep the last ones.
+      const [data, msgs] = await Promise.all([api('/api/sessions', { lang: asked }), api('/api/sessions/messages', {}).catch(() => null)])
+      sp.data = data; sp.lang = asked; sp.error = null
+      if (msgs && msgs.latest) { sp.msgs = msgs.latest; sendSeen() }
+    } catch (e) { sp.error = e }
     sp.at = Date.now()
     sp.loading = null
     renderSessionsPage()
@@ -2943,6 +2958,9 @@ const MAIN = String.raw`
     const copyBtn = h('button', { class: 'btn btn-sm btn-primary sess-copy' + (copied ? ' is-copied' : ''), type: 'button', 'data-key': 'sess-copy-' + s.sessionId },
       icon(copied ? 'check' : 'copy'), h('span', null, t(copied ? 'spage.copied' : 'spage.copyAi')))
     copyBtn.addEventListener('click', () => copyForAi(copyBtn, s))
+    const sendBtn = BOOT.readOnly ? null : h('button', { class: 'btn btn-sm sess-send', type: 'button', 'data-key': 'sess-send-' + s.sessionId, 'aria-label': t('spage.sendTo', { label: s.label || p.account }), onclick: () => openSend(s) }, icon('send'), h('span', null, t('spage.send')))
+    const msg = sp.msgs[s.sessionId]
+    const chip = messageChip(msg && msg.status)
     const cwd = shortCwd(s.cwd)
     return h('div', { class: 'sess-row sess-' + status, 'data-enter': s.sessionId, 'data-session': s.sessionId },
       badge(s.family, 'sm'),
@@ -2953,10 +2971,11 @@ const MAIN = String.raw`
           h('span', { class: 'mono sess-id' }, p.id)),
         h('div', { class: 'sess-sub muted small' },
           h('span', { class: 'sess-status' }, h('span', { class: 'dot sess-dot', 'aria-hidden': 'true' }), t('spage.status.' + status)),
+          chip ? h('span', { class: 'chip chip-sm chip-' + chip.tone + ' sess-msg', title: t('send.chipTip') }, t(chip.key)) : null,
           s.guessed ? h('span', { class: 'chip sess-guessed', tabindex: '0', 'data-tip': t('spage.guessedTip') }, t('spage.guessed')) : null,
           h('span', { class: 'sess-cwd' + (cwd ? ' mono' : ''), title: s.cwd && cwd !== s.cwd ? s.cwd : null }, cwd || t('spage.noCwd')),
           h('span', { class: 'sess-age', 'data-age': s.sessionId }, sessAgeText(s)))),
-      h('div', { class: 'sess-actions' }, copyBtn, more))
+      h('div', { class: 'sess-actions' }, copyBtn, sendBtn, more))
   }
   function renderSessionsPage() {
     const box = $('sessions-page')
@@ -2967,7 +2986,7 @@ const MAIN = String.raw`
     const list = d ? sortSessions(d.sessions) : []
     // Everything a row shows except its age, which renderSessionAges keeps current in place.
     const shape = JSON.stringify([lang, !d && !sp.error, sp.error ? sp.error.message : '', d ? d.problems : [],
-      list.map((s) => [s.sessionId, s.account, s.accountLabel, s.family, s.title, s.label, s.status, s.cwd, s.guessed, s.copy, Boolean(s.orca)])])
+      list.map((s) => [s.sessionId, s.account, s.accountLabel, s.family, s.title, s.label, s.status, s.cwd, s.guessed, s.copy, Boolean(s.orca), sp.msgs[s.sessionId] ? sp.msgs[s.sessionId].status : ''])])
     if (shape === sp.drawn) { sp.pending = false; renderSessionAges(); return }
     if (sessionsMenuOpen()) { sp.pending = true; return }
     sp.pending = false
@@ -2991,6 +3010,203 @@ const MAIN = String.raw`
     if (sp.pending && !sessionsMenuOpen()) renderSessionsPage()
     else renderSessionAges()
     if (!sp.loading && !conn.lost && Date.now() - sp.at >= SESS_MS) loadSessions()
+  }
+
+  // ---------- send to a session (spec §3.32 step 2) ----------
+  // "Send to it": a few words and up to 5 screenshots for one Live Session. The text box is made once per opening and
+  // kept across every redraw of the dialog, so a language switch keeps what is typed; the Sessions list renewing behind
+  // it never touches the dialog. Screenshots upload at once, images only, so a refusal is named right away.
+  let sd = null
+  const MOD_KEY = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl+'
+  function sendName(s) { const p = sessionLabelParts(s); return p.title ? p.account + ' · ' + p.title : p.account }
+  function openSend(s) {
+    if (BOOT.readOnly) return
+    closeMenu()
+    const text = h('textarea', { id: 'sd-text', class: 'ask-text', rows: '4', maxlength: '8000', placeholder: t('send.ph'), 'aria-label': t('send.textLabel'), 'aria-describedby': 'sd-keys' })
+    text.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendNow() } })
+    text.addEventListener('input', () => { if (sd && sd.empty) { sd.empty = false; renderSend() } })
+    sd = { s, files: [], notes: [], busy: false, empty: false, result: null, error: null, els: { text, files: h('div', { class: 'ask-files-wrap' }) } }
+    showDialog('send')
+    hookDrops()
+    const mine = sd
+    dlg.onClose = () => {
+      mine.files.forEach((f) => { if (f.xhr) f.xhr.abort() })
+      // Screenshots never sent are freed now; the server clears any that are left after a day anyway.
+      const ids = mine.files.filter((f) => f.id && !f.sent).map((f) => f.id)
+      if (ids.length) api('/api/ask/attach/remove', { ids }).catch(() => {})
+      if (sd === mine) sd = null
+    }
+    renderSend()
+    text.focus()
+  }
+  function renderSend() {
+    if (!sd || dlg.kind !== 'send') return
+    const el = dlg.el
+    const name = sendName(sd.s)
+    const focused = document.activeElement === sd.els.text
+    const body = []
+    const foot = []
+    if (sd.result) {
+      body.push(sendResult(name))
+      foot.push(h('button', { class: 'btn', type: 'button', onclick: sendAgain }, t('send.again')))
+      foot.push(h('button', { class: 'btn btn-primary', type: 'button', onclick: () => el.close() }, t('btn.close')))
+    } else {
+      const uploading = sd.files.some((f) => f.status === 'uploading')
+      body.push(h('p', { class: 'muted small' }, t('send.intro')))
+      body.push(h('div', { class: 'field' }, sd.els.text,
+        sd.empty ? h('p', { class: 'field-error', role: 'status' }, t('send.empty')) : h('p', { class: 'small muted', id: 'sd-keys' }, t('send.keys', { keys: MOD_KEY + 'Enter' }))))
+      body.push(sendAttachField())
+      if (sd.error) body.push(errorNote(sd.error, sd.error.retryable ? sendNow : null))
+      foot.push(h('button', { class: 'btn', type: 'button', disabled: sd.busy, onclick: () => el.close() }, t('btn.cancel')))
+      foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: sd.busy, 'aria-busy': sd.busy ? 'true' : null, onclick: sendNow },
+        sd.busy ? spinner() : icon('send'), t(sd.busy ? (uploading ? 'send.waiting' : 'send.sending') : 'send.send')))
+    }
+    setKids(el, dialogFrame(t('send.title', { name }), sd.s.family, body, foot))
+    if (focused) sd.els.text.focus()
+  }
+  function sendAttachField() {
+    const input = h('input', { type: 'file', multiple: true, accept: 'image/png,image/jpeg,image/gif,image/webp', class: 'sr-only', tabindex: '-1', 'aria-hidden': 'true' })
+    input.addEventListener('change', () => { sendAddFiles(Array.from(input.files || [])); input.value = '' })
+    renderSendFiles()
+    return h('div', { class: 'field ask-attach' },
+      h('div', { class: 'ask-attach-row' },
+        h('button', { class: 'btn btn-sm', type: 'button', disabled: sd.busy, onclick: () => input.click() }, icon('image'), t('send.attach')),
+        h('span', { class: 'small muted' }, t('send.attachHint', { keys: MOD_KEY + 'V' })), input),
+      sd.els.files)
+  }
+  function renderSendFiles() {
+    const box = sd && sd.els.files
+    if (!box) return
+    const tiles = sd.files.map((f) => {
+      let face
+      if (f.status === 'uploading') face = h('div', { class: 'ask-file-face' }, spinner())
+      else if (f.status === 'error') face = h('div', { class: 'ask-file-face' }, icon('x'))
+      else if (f.thumb) face = h('img', { class: 'ask-file-img', src: f.thumb, alt: f.name })
+      else face = h('div', { class: 'ask-file-face' }, icon('image'))
+      return h('li', { class: 'ask-file' + (f.status === 'error' ? ' is-error' : ''), 'data-enter': 'sd-' + f.key },
+        face,
+        h('span', { class: 'ask-file-name small', title: f.name }, f.name),
+        h('span', { class: 'small muted' }, fileSize(f.bytes || f.size)),
+        f.status === 'error' && f.file ? h('button', { class: 'icon-btn ask-file-retry', type: 'button', disabled: sd.busy, 'aria-label': t('send.retry', { name: f.name }), 'data-tip': t('send.retry', { name: f.name }), onclick: () => sendRetryFile(f) }, icon('refresh')) : null,
+        h('button', { class: 'icon-btn ask-file-x', type: 'button', disabled: sd.busy, 'aria-label': t('send.remove', { name: f.name }), onclick: () => sendRemoveFile(f) }, icon('x')))
+    })
+    swapKids(box, [
+      tiles.length ? h('ul', { class: 'ask-files', 'aria-label': t('send.attach') }, tiles) : null,
+      sd.files.filter((f) => f.status === 'error').map((f) => h('p', { class: 'field-error' }, f.error)),
+      sd.notes.map((n) => h('p', { class: 'field-error' }, n)),
+    ])
+  }
+  function sendAddFiles(list) {
+    if (!sd || sd.result || sd.busy || !list.length) return
+    sd.notes = []
+    for (const file of list) {
+      const name = file.name || 'image'
+      const why = sendFileProblem(file, sd.files.filter((f) => f.status !== 'error').length)
+      if (why === 'send.max') { sd.notes.push(t(why, { name })); continue }
+      const f = { key: Math.random().toString(36).slice(2), name, size: file.size, bytes: 0, status: why ? 'error' : 'uploading', id: null, thumb: null, error: why ? t(why, { name }) : '', xhr: null, done: null, sent: false }
+      sd.files.push(f)
+      if (!why) f.done = sendUpload(f, file, sd)
+    }
+    renderSendFiles()
+  }
+  // A screenshot whose upload broke (not one refused for its type or size) can go up again as it is.
+  function sendRetryFile(f) {
+    if (!sd || sd.busy || !f.file) return
+    const file = f.file
+    Object.assign(f, { status: 'uploading', error: '', file: null })
+    if (sd.error && sd.error.blocked) sd.error = null
+    f.done = sendUpload(f, file, sd)
+    renderSend()
+  }
+  function sendRemoveFile(f) {
+    if (f.xhr) f.xhr.abort()
+    if (f.id) api('/api/ask/attach/remove', { ids: [f.id] }).catch(() => {})
+    sd.files = sd.files.filter((x) => x !== f)
+    sd.notes = []
+    // The note that held the send back goes once nothing failed is left.
+    if (sd.error && sd.error.blocked && !sendBlock(sd.files)) { sd.error = null; renderSend() } else renderSendFiles()
+  }
+  async function sendUpload(f, file, mine) {
+    const path = '/api/sessions/attach'
+    let r = await askPost(file, () => {}, (x) => { f.xhr = x }, path)
+    if (r.status === 403 && r.data && r.data.code === 'bad-token') {
+      try { await refreshToken(); r = await askPost(file, () => {}, (x) => { f.xhr = x }, path) } catch {}
+    }
+    f.xhr = null
+    if (r.status === -1 || sd !== mine) return
+    if (r.status === 200 && r.data && r.data.id) {
+      f.id = r.data.id
+      f.bytes = r.data.bytes
+      f.thumb = await thumbnail(file)
+      f.status = 'ready'
+    } else {
+      f.status = 'error'
+      f.error = t(r.status === 413 ? 'send.tooBig' : r.status === 415 ? 'send.notImage' : r.status === 507 ? 'send.full' : 'send.failed', { name: f.name })
+      // Kept for "try again" only when sending the same file again can work.
+      if (r.status !== 413 && r.status !== 415) f.file = file
+    }
+    if (sd === mine && dlg.kind === 'send') renderSendFiles()
+  }
+  async function sendNow() {
+    if (!sd || sd.busy || sd.result) return
+    const mine = sd
+    const text = sd.els.text.value.trim()
+    if (!text && !sd.files.length) { sd.empty = true; renderSend(); sd.els.text.focus(); return }
+    sd.busy = true
+    sd.error = null
+    dlg.busy = true
+    renderSend()
+    try {
+      // Send waits for screenshots still uploading, so the message carries every one the person added.
+      const pending = sd.files.filter((f) => f.status === 'uploading' && f.done).map((f) => f.done)
+      if (pending.length) { await Promise.all(pending); if (sd === mine) renderSend() }
+      // A screenshot that failed stops the send: the text and the failed tiles stay for a retry or a removal.
+      const block = sendBlock(mine.files)
+      if (block) throw Object.assign(new Error(t(block.key, { names: block.names })), { blocked: true })
+      const ready = mine.files.filter((f) => f.status === 'ready')
+      if (!text && !ready.length) throw new Error(t('send.empty'))
+      const r = await api('/api/sessions/send', { sessionId: mine.s.sessionId, text, attachments: ready.map((f) => f.id), lang })
+      ready.forEach((f) => { f.sent = true })
+      mine.result = r
+      sp.msgs = Object.assign({}, sp.msgs, { [mine.s.sessionId]: { id: r.message.id, status: r.message.status, sentAt: r.message.sentAt } })
+      renderSessionsPage()
+    } catch (e) { mine.error = e }
+    dlg.busy = false
+    mine.busy = false
+    if (sd === mine) renderSend()
+  }
+  // A newer answer about the Message the dialog shows (it was read) shows there too.
+  function sendSeen() {
+    if (!sd || !sd.result || dlg.kind !== 'send') return
+    const m = sd.result.message
+    const now = sp.msgs[sd.s.sessionId]
+    if (now && now.id === m.id && now.status !== m.status) { m.status = now.status; renderSend() }
+  }
+  function sendResult(name) {
+    const r = sd.result
+    const v = sendResultView(r.message, Boolean(r.orca))
+    const out = []
+    if (v.kind === 'done') out.push(h('div', { class: 'note note-ok', role: 'status' }, icon('tick'), h('span', null, t(v.key, { name }))))
+    else out.push(h('div', { class: 'note' + (v.kind === 'paste' ? ' note-warn' : ''), role: 'status' }, h('b', null, t(v.key, { name })), v.reason ? h('span', { class: 'note-line' }, v.reason) : null))
+    if (v.hint) out.push(h('p', { class: 'note note-warn small' }, v.hint))
+    if (v.kind !== 'done' && v.pasteText) {
+      const copy = h('button', { class: 'btn btn-sm btn-primary', type: 'button' }, icon('copy'), t('send.copyLine'))
+      copy.addEventListener('click', () => sessCopy(copy, v.pasteText, () => toast(t('send.copied', { name }))))
+      out.push(h('div', { class: 'send-line' }, h('code', { class: 'send-line-text' }, v.pasteText),
+        h('div', { class: 'send-line-actions' }, copy,
+          v.jump ? h('button', { class: 'btn btn-sm', type: 'button', onclick: () => jumpToOrca(sd.s) }, icon('link'), t('send.jump')) : null)))
+    }
+    return out
+  }
+  function sendAgain() {
+    if (!sd) return
+    sd.result = null
+    sd.error = null
+    sd.files = []
+    sd.notes = []
+    sd.els.text.value = ''
+    renderSend()
+    sd.els.text.focus()
   }
 
   // New account. The form is built once per opening so typing keeps focus; only its derived parts re-render.
@@ -4332,6 +4548,7 @@ const MAIN = String.raw`
     else if (dlg.kind === 'autostart') renderAutostart()
     else if (dlg.kind === 'mbset') renderMenubarSettings()
     else if (dlg.kind === 'pick' && pk) renderPick()
+    else if (dlg.kind === 'send' && sd) renderSend()
   }
   function setTheme(v) {
     if (CFG) { cfgPanel.theme = v; saveCfg({ theme: v }) } else { prefs.theme = v; savePrefs() }
@@ -4344,7 +4561,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.session', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.session', 'ai.ask.send', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.tool']
   function openRc() {
     if (!S.state || !rcSummary()) return
     rc.target = null
@@ -4408,7 +4625,7 @@ const MAIN = String.raw`
     if (askBridge(BOOT, opts, window)) return
     ak = { task: opts.task || 'free', text: opts.text || '', context: opts.context || null, account: null, accountChanged: false, terminal: null, terminalChanged: false, pick: null, reason: null, terms: null, loading: true, busy: false, result: null, error: null, removed: false, files: [], els: {} }
     showDialog('ask')
-    hookAskDrops()
+    hookDrops()
     const mine = ak
     // Uploads still running when the dialog closes are stopped; the server drops staged files it never received.
     dlg.onClose = () => { mine.files.forEach((f) => { if (f.xhr) f.xhr.abort() }) }
@@ -4464,19 +4681,26 @@ const MAIN = String.raw`
   // data: URL (the CSP allows no blob:); the server decides the type from the first bytes.
   const ATTACH_MAX = 5
   const ATTACH_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm'
-  let askHooked = false
-  function hookAskDrops() {
-    if (askHooked) return
-    askHooked = true
+  let dropsHooked = false
+  // Which open dialog takes pasted or dropped files now: the AI Task's or "Send to it"'s, until it shows its result.
+  function dropTarget() {
+    if (BOOT.readOnly) return null
+    if (dlg.kind === 'ask' && ak && !ak.result) return askAddFiles
+    if (dlg.kind === 'send' && sd && !sd.result) return sendAddFiles
+    return null
+  }
+  function hookDrops() {
+    if (dropsHooked) return
+    dropsHooked = true
     const el = dlg.el
-    const active = () => dlg.kind === 'ask' && ak && !ak.result && !BOOT.readOnly
+    const active = () => Boolean(dropTarget())
     const hasFiles = (e) => e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0
     el.addEventListener('paste', (e) => {
       const files = e.clipboardData ? Array.from(e.clipboardData.files || []) : []
       if (!active() || !files.length) return
       // A file copied in Finder also carries its name as text; only the file is wanted.
       e.preventDefault()
-      askAddFiles(files)
+      dropTarget()(files)
     })
     el.addEventListener('dragover', (e) => {
       if (!active() || !hasFiles(e)) return
@@ -4489,7 +4713,7 @@ const MAIN = String.raw`
       el.classList.remove('drop-on')
       if (!active() || !hasFiles(e)) return
       e.preventDefault()
-      askAddFiles(Array.from(e.dataTransfer.files || []))
+      dropTarget()(Array.from(e.dataTransfer.files || []))
     })
   }
   function askAttachField() {
@@ -4553,11 +4777,11 @@ const MAIN = String.raw`
     ak.attachFull = false
     renderAskFiles()
   }
-  function askPost(file, onProgress, xhrOut) {
+  function askPost(file, onProgress, xhrOut, path) {
     return new Promise((resolve) => {
       const xhr = new XMLHttpRequest()
       xhrOut(xhr)
-      xhr.open('POST', BOOT.basePath + '/api/ask/attach')
+      xhr.open('POST', BOOT.basePath + (path || '/api/ask/attach'))
       xhr.setRequestHeader('x-sideby-token', token)
       xhr.setRequestHeader('content-type', file.type || 'application/octet-stream')
       xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total) }

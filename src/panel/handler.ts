@@ -22,7 +22,14 @@ import {
   terminals,
   tryAccount,
 } from '../core/ask.ts'
-import { MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, removeStaged, stageUpload } from '../core/attachments.ts'
+import {
+  ATTACHMENT_LIMITS,
+  MAX_ATTACHMENTS,
+  MAX_UPLOAD_BYTES,
+  removeStaged,
+  stagedAttachments,
+  stageUpload,
+} from '../core/attachments.ts'
 import {
   type AutostartContext,
   type AutostartPlan,
@@ -65,6 +72,7 @@ import {
   listLiveSessions,
   sessionCopyText,
 } from '../core/live-sessions.ts'
+import { listMessages, type MessageReceipt, sendMessage } from '../core/messages.ts'
 import { type AccountModel, accountModel, setAccountModel } from '../core/model-choice.ts'
 import { tildify } from '../core/paths.ts'
 import type { RemoteControlGroup } from '../core/remote-control.ts'
@@ -145,6 +153,19 @@ export interface LiveSessionsSource {
   copyText?: typeof sessionCopyText
   /** The Orca CLI and process reader; tests pass a fake so they never call the real Orca. */
   orca?: OrcaDeps
+  /** Sends a Message and lists them (spec §3.32 step 2); tests pass fakes so they never reach a real Session. */
+  send?: typeof sendMessage
+  messages?: typeof listMessages
+}
+
+/** The longest text "Send to it" takes; the page's text box has the same limit. */
+export const MAX_MESSAGE_TEXT = 8000
+
+/** The latest Message to one Session, for the status chip on its row. */
+export interface PanelMessageStatus {
+  id: string
+  status: MessageReceipt['status']
+  sentAt: string
 }
 
 /** A Live Session as the Sessions page gets it: the working directory with `~`, and the three texts it can copy. */
@@ -854,6 +875,38 @@ function opened<T extends { opened: boolean; reason?: string }>(r: T): T & { aut
 
 /** The AI Task upload route; its body is a file, not a JSON object, so it sits outside the route table. */
 const ATTACH_ROUTE = '/api/ask/attach'
+/** The "Send to it" screenshot upload (spec §3.32 step 2): images only, each at most the image limit. */
+const SEND_ATTACH_ROUTE = '/api/sessions/attach'
+const IMAGE_ONLY = 'Only images can be sent to a session: add a PNG, JPEG, GIF or WebP screenshot.'
+const IMAGE_TOO_BIG = `This image is over ${ATTACHMENT_LIMITS.image / 1024 / 1024} MB; send a smaller screenshot.`
+
+/** Stops a stream once it passes `max` bytes, so a file that is no image cannot run on to the larger video limit. */
+async function* capped(source: AsyncIterable<Uint8Array>, max: number, message: string) {
+  let n = 0
+  for await (const chunk of source) {
+    n += chunk.length
+    if (n > max) throw new HttpError(413, message)
+    yield chunk
+  }
+}
+
+/** The ids of staged uploads a request lists, checked as `/api/ask` checks them. */
+function uploadIds(body: Record<string, unknown>): string[] {
+  const ids = body.attachments
+  if (ids === undefined) return []
+  if (
+    !Array.isArray(ids) ||
+    ids.length > MAX_ATTACHMENTS ||
+    !ids.every((u) => typeof u === 'string' && /^[a-f0-9]{16}$/.test(u))
+  )
+    throw new HttpError(400, `"attachments" must list at most ${MAX_ATTACHMENTS} upload ids`)
+  return ids as string[]
+}
+
+/** A Message as the Panel returns it: its files with `~`. */
+function messageView(m: MessageReceipt, home: string): MessageReceipt {
+  return { ...m, file: tildify(m.file, home), attachments: m.attachments.map((a) => tildify(a, home)) }
+}
 
 /** Runs write requests one at a time; a few may wait, the rest are told to retry. */
 function writeQueue() {
@@ -889,6 +942,8 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   const liveSessions = sessionsSource?.list ?? listLiveSessions
   const copyText = sessionsSource?.copyText ?? sessionCopyText
   const orcaOf = (rt: Runtime) => sessionsSource?.orca ?? systemOrca(rt.env)
+  const sendTo = sessionsSource?.send ?? sendMessage
+  const messages = sessionsSource?.messages ?? listMessages
 
   // Every route declares whether a request writes files. `writes` defaults to true, so a route that forgets
   // to declare it is refused by a read-only Panel instead of slipping through.
@@ -1252,6 +1307,54 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return { switched: true }
       },
     },
+    // "Send to it" (spec §3.32 step 2): text and the screenshots staged through SEND_ATTACH_ROUTE go to one Live
+    // Session through sendMessage, which keeps the Message as a file before any delivery. The page sends only the
+    // Session id. It writes files, so a read-only Panel refuses it (writes defaults to true); it runs beside the
+    // write queue because a delivery may wait on the Host.
+    '/api/sessions/send': {
+      queued: false,
+      async run(body) {
+        const id = optString(body, 'sessionId')
+        if (!id) throw new HttpError(400, '"sessionId" is required')
+        if (body.text !== undefined && typeof body.text !== 'string')
+          throw new HttpError(400, '"text" must be text')
+        const text = ((body.text as string | undefined) ?? '').trim()
+        if (text.length > MAX_MESSAGE_TEXT)
+          throw new HttpError(400, `The message is over ${MAX_MESSAGE_TEXT} characters; shorten it.`)
+        const ids = uploadIds(body)
+        if (!text && !ids.length) throw new HttpError(400, 'Write a message or add a screenshot first.')
+        const lang = body.lang === 'zh' ? 'zh' : 'en'
+        const rt = await getRuntime()
+        const images = ids.length ? await stagedAttachments(rt.paths, ids) : []
+        if (images.some((f) => f.kind !== 'image')) throw new HttpError(415, IMAGE_ONLY)
+        const session = (await liveSessions(rt)).sessions.find((s) => s.sessionId === id)
+        if (!session) throw new HttpError(404, 'This session is no longer running; refresh the list.')
+        const receipt = await sendTo(rt, id, { text, images: images.map((f) => f.path), lang })
+        // The Message has its own copies now; the staged ones would only wait a day to be cleared.
+        await removeStaged(rt.paths, ids).catch(() => 0)
+        // Only a Message the user pastes needs the way to the target's tab.
+        const tabs =
+          receipt.status === 'paste-needed'
+            ? await orcaTabs(orcaOf(rt), [session])
+            : new Map<string, string>()
+        return {
+          message: messageView(receipt, rt.paths.home),
+          ...(tabs.has(id) ? { orca: true as const } : {}),
+        }
+      },
+    },
+    // The latest Message to each Session, for the chips on the Sessions page; polled with the list, read only.
+    '/api/sessions/messages': {
+      writes: () => false,
+      queued: false,
+      async run() {
+        const latest: Record<string, PanelMessageStatus> = {}
+        // Newest first: the first one met for a Session is its latest.
+        for (const m of await messages(await getRuntime(), { limit: 200 }))
+          latest[m.toSessionId] ??= { id: m.id, status: m.status, sentAt: m.sentAt }
+        return { latest }
+      },
+    },
     // Auto Handoff (spec §3.17): readiness reads only; configure shows the config change unless `confirm`.
     '/api/handoff/status': {
       writes: () => false,
@@ -1599,6 +1702,38 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
     }
   }
 
+  // A "Send to it" screenshot: staged like an AI Task attachment, but only an image is kept, and the stream stops at
+  // the image limit whatever the file turns out to be.
+  const receiveImage = async (req: IncomingMessage) => {
+    const max = ATTACHMENT_LIMITS.image
+    const declared = Number(req.headers['content-length'])
+    if (Number.isFinite(declared) && declared > max) throw new HttpError(413, IMAGE_TOO_BIG)
+    const rt = await getRuntime()
+    let staged: Awaited<ReturnType<typeof stageUpload>>
+    try {
+      staged = await stageUpload(
+        rt.paths,
+        capped(req.iterator({ destroyOnReturn: false }), max, IMAGE_TOO_BIG),
+      )
+    } catch (err) {
+      const code = (err as UserError).code
+      if (code === 'attachment-too-large') throw new HttpError(413, IMAGE_TOO_BIG)
+      if (code === 'attachment-type') throw new HttpError(415, IMAGE_ONLY)
+      if (code === 'attachment-quota') throw new HttpError(507, (err as Error).message, code)
+      throw err
+    }
+    if (staged.kind !== 'image') {
+      await removeStaged(rt.paths, [staged.id])
+      throw new HttpError(415, IMAGE_ONLY)
+    }
+    return { id: staged.id, kind: staged.kind, bytes: staged.bytes }
+  }
+  // Routes whose body is a file rather than a JSON object.
+  const uploads: Record<string, (req: IncomingMessage) => Promise<unknown>> = {
+    [ATTACH_ROUTE]: receiveAttachment,
+    [SEND_ATTACH_ROUTE]: receiveImage,
+  }
+
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<boolean> => {
     let pathname: string
     try {
@@ -1697,13 +1832,14 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           send(res, 200, await buildState(await getRuntime(), { version, build, readOnly, updates }))
           return true
         }
-        if (Object.hasOwn(routes, sub) || sub === ATTACH_ROUTE) throw new HttpError(405, 'use POST')
+        if (Object.hasOwn(routes, sub) || Object.hasOwn(uploads, sub)) throw new HttpError(405, 'use POST')
         throw new HttpError(404, 'not found')
       }
 
       if (method !== 'POST') throw new HttpError(405, 'method not allowed')
       const route = Object.hasOwn(routes, sub) ? routes[sub] : undefined
-      if (!route && sub !== ATTACH_ROUTE) throw new HttpError(404, 'not found')
+      const upload = Object.hasOwn(uploads, sub) ? uploads[sub] : undefined
+      if (!route && !upload) throw new HttpError(404, 'not found')
       const origin = req.headers.origin
       if (!origin || origin.toLowerCase() !== `http://${host}`) throw new HttpError(403, 'origin not allowed')
       const given = req.headers['x-sideby-token']
@@ -1712,7 +1848,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       if (!route) {
         // An upload writes a file: a read-only Panel refuses it before reading a byte.
         if (readOnly) throw new HttpError(403, 'this panel is read-only')
-        send(res, 200, await receiveAttachment(req))
+        send(res, 200, await upload!(req))
         return true
       }
       const body = (await readBody(req)) as Record<string, unknown>
@@ -1728,7 +1864,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       if (err instanceof HttpError) {
         const body = err.code ? { error: err.message, code: err.code } : { error: err.message }
         // A refused body (too big, or an upload stopped early) is left unread: close the connection after answering.
-        const unread = err.status === 413 || (sub === ATTACH_ROUTE && !req.readableEnded)
+        const unread = err.status === 413 || (Object.hasOwn(uploads, sub) && !req.readableEnded)
         send(res, err.status, body, unread ? { connection: 'close' } : {})
         if (unread) req.resume()
       } else if (err instanceof UserError) {

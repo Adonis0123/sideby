@@ -549,6 +549,14 @@ a.btn:hover { text-decoration: none; }
 .sess-copy .ic { width: 14px; height: 14px; }
 .sess-copy-text { display: block; width: 100%; box-sizing: border-box; margin-top: 8px; padding: 8px; border: 1px solid var(--border); border-radius: var(--ctl-radius); background: var(--surface-2); color: var(--text); resize: none; }
 .pop-sess-copy { width: min(440px, calc(100vw - 16px)); }
+.sess-send .ic { width: 14px; height: 14px; }
+.sess-msg { flex: none; }
+/* "Send to it" (spec §3.32 step 2): the result and the line the user pastes into the target. */
+.note-ok { background: var(--ok-soft); color: var(--ok); }
+.note-ok .ic { flex: none; width: 16px; height: 16px; }
+.send-line { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: var(--ctl-radius); background: var(--surface-2); }
+.send-line-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; color: var(--text); }
+.send-line-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .ah-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end; }
 .tune-model { border: 1px solid var(--border); border-radius: calc(var(--radius) - 4px); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 .tune-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
@@ -621,6 +629,7 @@ textarea::placeholder { color: var(--faint); }
 .ask-file-face { display: grid; place-items: center; align-content: center; gap: 2px; background: var(--surface-2); color: var(--muted); }
 .ask-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ask-file-x { position: absolute; top: 2px; right: 2px; width: 22px; height: 22px; background: var(--surface); }
+.ask-file-retry { position: absolute; top: 2px; right: 26px; width: 22px; height: 22px; background: var(--surface); }
 .dialog.drop-on { outline: 2px dashed var(--focus); outline-offset: -6px; }
 .ask-pick {display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
 .ask-setup .link-btn { display: inline-flex; align-items: center; gap: 6px; }

@@ -507,6 +507,32 @@ const MenubarRow = Type.Object({
   }),
 })
 
+const MessageReceipt = Type.Object({
+  id: Type.String({
+    description: 'Short id, also in the delivered text, so the target record shows when it was read.',
+  }),
+  to: Type.String({ description: "The target session's Session Label." }),
+  toSessionId: Str,
+  toAccount: Type.String({ description: 'The account ref that holds the target session.' }),
+  from: Type.Optional(
+    Type.String({ description: 'The Session Label of the session that sent it, when sideby could tell.' }),
+  ),
+  status: Type.Union(
+    ['stored', 'delivered', 'read', 'paste-needed'].map((k) => Type.Literal(k)),
+    {
+      description:
+        "stored: kept as a file only; delivered: the host's own channel took it; read: it shows in the target's record; paste-needed: the user pastes pasteText into the target.",
+    },
+  ),
+  file: Type.String({ description: "The Message file (mode 600) in sideby's state folder." }),
+  attachments: Type.Array(Str, { description: 'Screenshots copied next to the Message file.' }),
+  pasteText: Type.String({ description: 'One line that tells the target AI to read the Message file.' }),
+  note: Type.Optional(
+    Type.String({ description: 'Why a paste is needed, or that the target must approve it (bypass mode).' }),
+  ),
+  sentAt: Str,
+})
+
 export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
   pin: PinResult,
   unpin: PinResult,
@@ -1110,6 +1136,58 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       label: Type.String({ description: 'The Session Label of the session copied.' }),
     },
     { title: 'sideby sessions copy --json' },
+  ),
+  send: Type.Object(
+    {
+      schemaVersion: Version,
+      message: MessageReceipt,
+      copied: Type.Boolean({
+        description:
+          'Whether pasteText went onto the clipboard; only tried when status is paste-needed, false otherwise.',
+      }),
+    },
+    { title: 'sideby send --json' },
+  ),
+  messages: Type.Object(
+    {
+      schemaVersion: Version,
+      messages: Type.Array(MessageReceipt, {
+        description: 'Messages sideby kept, newest first (20 unless --limit says otherwise).',
+      }),
+    },
+    { title: 'sideby messages --json' },
+  ),
+  'messages-inbound': Type.Object(
+    {
+      schemaVersion: Version,
+      action: Type.Union([Type.Literal('status'), Type.Literal('accept'), Type.Literal('undo')]),
+      applied: Type.Optional(Type.Boolean({ description: 'True once the change was written (or undone).' })),
+      groups: Type.Optional(
+        Type.Array(
+          Type.Object({
+            file: Str,
+            accounts: Type.Array(Str, { description: 'Claude accounts whose settings.json is this file.' }),
+            state: Type.Union(
+              ['accept', 'hold', 'refuse', 'default', 'other', 'missing', 'blocked'].map((k) =>
+                Type.Literal(k),
+              ),
+              {
+                description:
+                  'crossSessionInbound is accept, hold or refuse; default: not set (bypass sessions hold messages); other: a value sideby does not know; missing: no settings.json; blocked: cannot be changed safely (see reason).',
+              },
+            ),
+            reason: Type.Optional(Str),
+            undo: Type.Boolean({ description: 'sideby set it here and can put the earlier value back.' }),
+          }),
+          { description: 'For status, every file; for a preview, the files that would change.' },
+        ),
+      ),
+      results: Type.Optional(
+        Type.Array(Type.Object({ file: Str, accounts: Type.Array(Str), ok: Type.Boolean(), message: Str })),
+      ),
+      message: Type.Optional(Str),
+    },
+    { title: 'sideby messages inbound [accept|undo] --json' },
   ),
   edit: Type.Object(
     {

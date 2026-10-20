@@ -76,6 +76,13 @@ Usage:
   sideby sessions copy <account|session-id> [--as reference|id|resume]
                                       copy one for another AI: a reference to its record (default),
                                       its id or its resume command
+  sideby send <account|session> "<text>" [--image <path>]...
+                                      tell another session something (a screenshot too): Claude
+                                      sessions get it at once, others through a line you paste
+  sideby messages [--to <account|session>]
+                                      the messages you sent and whether each was delivered or read
+  sideby messages inbound [accept|undo] [--yes]
+                                      whether Claude sessions show messages from other sessions at once
   sideby edit <account> [--path]      open the account's own settings file (settings.json,
                                       config.toml) in your editor
   sideby browser [--enable [--yes]]   which Chrome browser user signed in to each account's website
@@ -109,10 +116,10 @@ Usage:
 
 Options:
   --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, remote-control, handoff,
-                families, plugins, app, desktop, sessions, edit, browser, update, local, ask, terminal, key, try,
-                autostart, menubar, config)
+                families, plugins, app, desktop, sessions, send, messages, edit, browser, update, local, ask,
+                terminal, key, try, autostart, menubar, config)
   -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, desktop, edit, browser,
-                autostart, menubar, config, sessions
+                autostart, menubar, config, sessions, send, messages
   -v, --version show the version
 
 An <account> is <family>:<name> (claude:work) or just <name> when it is unique.
@@ -248,6 +255,43 @@ Examples:
   sideby sessions copy cc002
   sideby sessions copy 61230c3d --as resume
 Exit: 0 listed or copied; 1 no such account or running session, or several to choose from; 2 malformed command line.`,
+  send: `sideby send <account|session> "<text>" [--image <path>]... [--lang en|zh] [--json]
+
+Tell another running session something, with screenshots if you like. <account> is a short command or ref whose
+account runs one session now; <session> is a session id or its first 8 characters (see \`sideby sessions\`).
+sideby first keeps the message as a file in its state folder (mode 600), with each screenshot copied next to it.
+Then a Claude Code session gets it at once through Claude Code's own messages between sessions, with a first line
+naming who sent it and one line per screenshot path. Codex, Grok Build and pi have no channel sideby can deliver to
+yet: sideby copies one line to the clipboard ("Read the message sideby kept for you at <file> ...") and says which
+tab to paste it into. A Claude session in bypass permission mode holds the message until you approve it in its
+terminal (about 5 minutes); \`sideby messages inbound accept\` makes it show them at once.
+Screenshots: PNG, JPEG, GIF or WebP, up to 20 MB each. Run it inside a session and the message names that session as
+the sender. --lang chooses the language of the line to paste (default: your locale).
+
+Examples:
+  sideby send cc002 "the tests pass now, go ahead and release"
+  sideby send 61230c3d "this is the error I see" --image ~/Desktop/shot.png
+  sideby send codex:team "read the plan in docs/plan.md" --json
+Exit: 0 delivered or kept for pasting; 1 no such running session, several to choose from, or a screenshot sideby
+refuses; 2 malformed command line.`,
+  messages: `sideby messages [--to <account|session>] [--limit <n>] [--json]
+       sideby messages inbound [accept|undo] [--yes] [--json]
+
+List the messages you sent with \`sideby send\`, newest first: to which session, and how far each got (delivered,
+read once it shows in the target's record, or needs paste).
+
+inbound shows, for each Claude account, its crossSessionInbound setting: accept shows a message from another session
+at once; hold, or no setting in a session in bypass permission mode, waits for you to approve it and drops it after
+about 5 minutes; refuse drops it. accept shows the change to each settings.json (only that key) and writes it with
+--yes; a file shared by several accounts is written once, a "refuse" or any other value is left alone and named. undo puts
+back exactly what was there, while the key still holds what sideby wrote.
+
+Examples:
+  sideby messages
+  sideby messages --to cc002 --json
+  sideby messages inbound accept --yes
+Exit: 0 listed or changed; 1 a file could not be changed or nothing was changed; 10 a change was shown and waits for --yes; 2 malformed
+command line.`,
   edit: `sideby edit <account> [--path] [--json]
 
 Open the account's own settings file in your editor: settings.json for claude and pi accounts, config.toml for codex
@@ -411,6 +455,8 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   app: { flags: ['json'], valued: ['url'] },
   desktop: { flags: ['json', 'remove', 'yes'] },
   sessions: { flags: ['json'], valued: ['as', 'lang'] },
+  send: { flags: ['json'], valued: ['image', 'lang'] },
+  messages: { flags: ['json', 'yes'], valued: ['to', 'limit'] },
   edit: { flags: ['json', 'path'] },
   browser: { flags: ['json', 'enable', 'disable', 'yes', 'auto'], valued: ['profile'] },
   'shell-init': { flags: ['write', 'yes', 'undo', 'json'] },
@@ -587,6 +633,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     // parseArgs keeps the last value of an option; `ask --attach` may be given several times.
     if (cmd === 'ask') (parsed as import('./commands.ts').AskArgs).attach = repeatedValues(own, 'attach')
+    if (cmd === 'send') (parsed as import('./commands.ts').SendArgs).images = repeatedValues(own, 'image')
     const cmds = await import('./commands.ts')
     if (wantsJson && noticeAllowed(cmd, parsed)) {
       notice = await jsonNoticeFor()
@@ -668,6 +715,10 @@ async function dispatch(
       return await cmds.cmdDesktop(parsed, io)
     case 'sessions':
       return await cmds.cmdSessions(parsed, io)
+    case 'send':
+      return await cmds.cmdSend(parsed, io)
+    case 'messages':
+      return await cmds.cmdMessages(parsed, io)
     case 'edit':
       return await cmds.cmdEdit(parsed, io)
     case 'browser':

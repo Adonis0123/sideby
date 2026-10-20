@@ -28,6 +28,7 @@ import { type HandoffPlan, planHandoff } from './core/handoff.ts'
 import { handoffFindings } from './core/handoff-doctor.ts'
 import { type HandoffDecision, type SelectCandidate, selectNext } from './core/handoff-select.ts'
 import { identityOf } from './core/identity.ts'
+import { inboundFindings } from './core/inbound.ts'
 import {
   type DoctorHistory,
   type DoctorScope,
@@ -775,6 +776,11 @@ export async function createRuntime(
     },
     async doctorWithHistory(o = {}) {
       let list = await accounts()
+      const byAccount = aliasesByAccount(aliasRefs(config.aliases), list)
+      const startArgs = (a: Account) => [
+        config.accounts?.[a.ref]?.args ?? [],
+        ...(byAccount.get(a.ref) ?? []).map((n) => aliasArgs(config.aliases?.[n])),
+      ]
       let fams: ReadonlyMap<string, FamilyDef> = families
       let scope: DoctorScope = { kind: 'all' }
       if (o.target) {
@@ -799,7 +805,11 @@ export async function createRuntime(
         // of that Family keeps its skill warning.
         skillVersion: packageVersion(),
         // Desktop App data folders sideby made for an Account (spec §3.20).
-        extraChecks: (a: Account) => checkAppData(loaded.plugins, paths.home, a, Boolean(o.force)),
+        extraChecks: async (a: Account) => [
+          ...(await checkAppData(loaded.plugins, paths.home, a, Boolean(o.force))),
+          // Messages held in bypass permission mode (spec §3.32 step 2): the arguments the Account starts with.
+          ...(await inboundFindings(a, startArgs(a))),
+        ],
       }
       // Auto Handoff warnings (spec §3.17) join the general Findings; they never fail Doctor.
       const all = await accounts()

@@ -1,6 +1,6 @@
-# Live Sessions: which session each account runs, and handing one to another AI
+# Live Sessions: which session each account runs, handing one to another AI, and telling it something
 
-For "which session is cc002 running", "cc002 现在在干嘛", "哪个会话在等我", "copy cc002's session id for another AI", "复制 cc002 的会话给另一个 AI".
+For "which session is cc002 running", "cc002 现在在干嘛", "哪个会话在等我", "copy cc002's session id for another AI", "复制 cc002 的会话给另一个 AI", "告诉 cc002 ……", "把这张截图发给 cc003", "send this to the codex session".
 
 ## See them
 
@@ -25,6 +25,24 @@ Run `sideby sessions copy <account|session-id> --json` yourself. It puts the tex
 When `copied` is false there is no clipboard program (pbcopy on macOS, wl-copy or xclip on Linux): give the user `text` to paste. When an account runs several sessions, the command exits 1 with code `several-sessions` and lists them: ask which one, or pick by what the user said, then run it again with that id.
 
 When you are the other AI and get a Session Reference, read the record it names for the context; do not copy files between accounts.
+
+## Tell a session something (Messages)
+
+When the user asks you to tell another session something ("告诉 cc002 测试过了，可以发版", "send this screenshot to cc003"), run `sideby send <account|session> "<text>" --json` yourself; add `--image <path>` once per screenshot (PNG, JPEG, GIF or WebP, up to 20 MB); a screenshot alone, without text, is fine. `<account>` works when that account runs one session now; otherwise use the session id or its first 8 characters from `sideby sessions --json`. Write the text the way the user meant it, addressed to the other AI; do not paste your whole conversation, point at files by path.
+
+sideby keeps the Message first as a file (`message.file`, mode 600, screenshots copied next to it), then:
+
+- `status: "delivered"`: a Claude Code session got it at once through Claude Code's own messages between sessions. Its first line names the sender (the session you run in, found by sideby) or "the user via sideby", then the text, then one `Screenshot: <path>` line per screenshot. Tell the user it was delivered.
+- `status: "paste-needed"`: Codex, Grok Build and pi have no channel sideby can deliver to yet (or the Claude session could not be reached; `note` says why in plain words). `pasteText` is one line telling the other AI to read the Message file; `copied: true` means it is on the clipboard. Tell the user to paste it into the tab of `message.to`.
+- A `note` saying the session "holds messages from other sessions": that Claude session runs in bypass permission mode, so it waits for the user to approve the message in its terminal and drops it after about 5 minutes. Tell the user, and offer `sideby messages inbound accept` (below).
+
+`sideby messages --json` lists what was sent, newest first; `status: "read"` means the Message id shows in the target's record (it took it in). `--to <account|session>` narrows it.
+
+When you are the receiving AI and see "sideby message <id> from …" or "Read the message sideby kept for you at <file>", read that file and the screenshots it lists, then act on it as a request from the user.
+
+### Let Claude sessions show messages at once
+
+Run `sideby messages inbound --json`: per Claude settings file (accounts linked to one file share it), `state` is `accept`, `hold`, `refuse`, `default` (not set: a bypass-mode session holds messages), `other`, `missing` or `blocked`. `sideby messages inbound accept --json` shows the change (exit 10, `applied: false`): only the top-level `crossSessionInbound` becomes `"accept"` where it is not set or `hold`. Show it to the user; after they agree, run it again with `--yes`. A `refuse` or any other value the user set is left alone and named with the reason (if nothing changes, it exits 1 and says so): tell them, and change it only if they ask. `sideby messages inbound undo --yes` puts back what sideby replaced. Running sessions pick it up when restarted. `sideby doctor` warns (`messages.inbound-held`) for an account that starts in bypass mode while it holds messages.
 
 ## Tab titles
 

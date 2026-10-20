@@ -15,15 +15,55 @@ export const c = {
 
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g')
 
+/** Whether a code point takes two terminal columns (East Asian Wide and Fullwidth, and emoji). */
+function isWide(cp: number): boolean {
+  return (
+    (cp >= 0x1100 && cp <= 0x115f) ||
+    (cp >= 0x2e80 && cp <= 0x303e) ||
+    (cp >= 0x3041 && cp <= 0x33ff) ||
+    (cp >= 0x3400 && cp <= 0x4dbf) ||
+    (cp >= 0x4e00 && cp <= 0x9fff) ||
+    (cp >= 0xa000 && cp <= 0xa4cf) ||
+    (cp >= 0xac00 && cp <= 0xd7a3) ||
+    (cp >= 0xf900 && cp <= 0xfaff) ||
+    (cp >= 0xfe30 && cp <= 0xfe4f) ||
+    (cp >= 0xff00 && cp <= 0xff60) ||
+    (cp >= 0xffe0 && cp <= 0xffe6) ||
+    (cp >= 0x1f300 && cp <= 0x1f64f) ||
+    (cp >= 0x1f900 && cp <= 0x1f9ff) ||
+    (cp >= 0x20000 && cp <= 0x3fffd)
+  )
+}
+
+/** How many terminal columns `s` takes, colours left out. */
+export function displayWidth(s: string): number {
+  let w = 0
+  for (const ch of s.replace(ANSI, '')) w += isWide(ch.codePointAt(0)!) ? 2 : 1
+  return w
+}
+
+/** `s` cut to at most `max` columns, ending in `…` when cut. */
+export function truncate(s: string, max: number): string {
+  if (displayWidth(s) <= max) return s
+  let out = ''
+  let w = 0
+  for (const ch of s) {
+    const cw = isWide(ch.codePointAt(0)!) ? 2 : 1
+    if (w + cw > max - 1) break
+    out += ch
+    w += cw
+  }
+  return `${out}…`
+}
+
 export function table(rows: string[][], header: string[]): string {
-  const strip = (s: string) => s.replace(ANSI, '')
   const all = [header, ...rows]
-  const widths = header.map((_, i) => Math.max(...all.map((r) => strip(r[i] ?? '').length)))
+  const widths = header.map((_, i) => Math.max(...all.map((r) => displayWidth(r[i] ?? ''))))
   return all
     .map((r, ri) =>
       r
         .map((cell, i) => {
-          const pad = ' '.repeat(widths[i]! - strip(cell).length)
+          const pad = ' '.repeat(widths[i]! - displayWidth(cell))
           return (ri === 0 ? c.dim(cell) : cell) + (i < r.length - 1 ? pad : '')
         })
         .join('  ')

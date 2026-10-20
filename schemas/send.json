@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/send.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "message",
+    "copied"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "message": {
+      "type": "object",
+      "required": [
+        "id",
+        "to",
+        "toSessionId",
+        "toAccount",
+        "status",
+        "file",
+        "attachments",
+        "pasteText",
+        "sentAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Short id, also in the delivered text, so the target record shows when it was read."
+        },
+        "to": {
+          "type": "string",
+          "description": "The target session's Session Label."
+        },
+        "toSessionId": {
+          "type": "string"
+        },
+        "toAccount": {
+          "type": "string",
+          "description": "The account ref that holds the target session."
+        },
+        "from": {
+          "type": "string",
+          "description": "The Session Label of the session that sent it, when sideby could tell."
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "stored"
+            },
+            {
+              "type": "string",
+              "const": "delivered"
+            },
+            {
+              "type": "string",
+              "const": "read"
+            },
+            {
+              "type": "string",
+              "const": "paste-needed"
+            }
+          ],
+          "description": "stored: kept as a file only; delivered: the host's own channel took it; read: it shows in the target's record; paste-needed: the user pastes pasteText into the target."
+        },
+        "file": {
+          "type": "string",
+          "description": "The Message file (mode 600) in sideby's state folder."
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Screenshots copied next to the Message file."
+        },
+        "pasteText": {
+          "type": "string",
+          "description": "One line that tells the target AI to read the Message file."
+        },
+        "note": {
+          "type": "string",
+          "description": "Why a paste is needed, or that the target must approve it (bypass mode)."
+        },
+        "sentAt": {
+          "type": "string"
+        }
+      }
+    },
+    "copied": {
+      "type": "boolean",
+      "description": "Whether pasteText went onto the clipboard; only tried when status is paste-needed, false otherwise."
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby send --json"
+}

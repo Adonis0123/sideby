@@ -2503,3 +2503,209 @@ describe('sideby sessions (spec §3.32)', () => {
     })
   })
 })
+
+describe('sideby send and messages (spec §3.32 step 2)', () => {
+  const ID_A = '61230c3d-1111-4111-8111-111111111111'
+  const ID_G = '01a14d11-4444-4444-8444-444444444444'
+  const PROC_START = 'Tue Oct 20 02:14:43 2026'
+  const script = (body: string) => `#!${process.execPath}\n${body}\n`
+
+  /** cc002 runs one Claude session whose message socket a server in this test serves; grok:main runs one too. */
+  async function setUp(h: FakeHome, settings = '{}') {
+    const { createServer } = await import('node:net')
+    const tmp = join(h.home, '..', 'tmp')
+    await mkdir(join(tmp, 'cc-socks'), { recursive: true, mode: 0o700 })
+    await chmod(join(tmp, 'cc-socks'), 0o700)
+    const sock = join(tmp, 'cc-socks', '4101.sock')
+    const got: string[] = []
+    const server = createServer((c) => {
+      let d = ''
+      c.on('data', (x) => (d += x)).on('end', () => got.push(d))
+    })
+    await new Promise<void>((r) => server.listen(sock, r))
+    await h.write('.claude/settings.json', '{}')
+    await h.write('.claude-work/settings.json', settings)
+    await h.write('.config/sideby/config.json', JSON.stringify({ aliases: { cc002: 'claude:work' } }))
+    await h.write(
+      '.claude-work/sessions/4101.json',
+      JSON.stringify({
+        pid: 4101,
+        sessionId: ID_A,
+        name: 'knip cleanup',
+        cwd: '/work/repo',
+        status: 'idle',
+        procStart: PROC_START,
+        messagingSocketPath: sock,
+      }),
+    )
+    await h.mkdir('.grok/skills')
+    await h.write(
+      '.grok/active_sessions.json',
+      JSON.stringify([
+        { session_id: ID_G, pid: 555, pid_start: Date.UTC(2026, 9, 20, 2, 14, 43) * 1000, cwd: '/work/g' },
+      ]),
+    )
+    const lines = `4101 1 ${PROC_START} claude\n555 1 ${PROC_START} grok\n`
+    await writeFile(join(h.bin, 'ps'), script(`process.stdout.write(${JSON.stringify(lines)})`), {
+      mode: 0o755,
+    })
+    const clip = join(h.bin, 'clip.txt')
+    for (const name of ['pbcopy', 'wl-copy', 'xclip'])
+      await writeFile(
+        join(h.bin, name),
+        script(
+          `let d='';process.stdin.on('data',(c)=>d+=c).on('end',()=>require('node:fs').writeFileSync(${JSON.stringify(clip)},d))`,
+        ),
+        { mode: 0o755 },
+      )
+    return { env: { TMPDIR: tmp }, got, clip, close: () => new Promise<void>((r) => server.close(() => r())) }
+  }
+
+  it('delivers to a Claude session, asks for a paste elsewhere, and lists both', async () => {
+    await withFakeHome(async (h) => {
+      const m = await setUp(h, '{"crossSessionInbound":"accept"}')
+      try {
+        const human = await sideby(h, ['send', 'cc002', 'the tests pass now'], m.env)
+        assert.equal(human.code, 0, human.err)
+        assert.match(
+          human.out,
+          /^✓ delivered to cc002 · knip cleanup · 61230c3d \(message [0-9a-f]{8}\)\n {2}Kept at ~\/\.local\/state\/sideby\/messages\//,
+        )
+        assert.equal(m.got.length, 1)
+        assert.match(
+          JSON.parse(m.got[0]!).message.content,
+          /^sideby message [0-9a-f]{8} from the user via sideby\nthe tests pass now$/,
+        )
+
+        const g = await sideby(h, ['send', 'grok:main', 'read', 'the plan', '--json'], m.env)
+        assert.equal(g.code, 0, g.err)
+        const data = checkSchema('send', g.out)
+        const msg = data.message as { status: string; pasteText: string; note: string; id: string }
+        assert.equal(msg.status, 'paste-needed')
+        assert.equal(data.copied, true)
+        assert.equal(await readFile(m.clip, 'utf8'), msg.pasteText)
+        assert.match(msg.note, /Grok Build has no channel sideby can deliver to yet/)
+        const gh = await sideby(h, ['send', 'grok:main', 'again'], m.env)
+        assert.match(
+          gh.out,
+          /needs a paste\n {2}Grok Build has no channel .*\n {2}Paste this into the tab of grok:main · g · 01a14d11 \(it is on the clipboard\):\n {2}Read the message sideby kept for you at /,
+        )
+
+        const list = checkSchema('messages', (await sideby(h, ['messages', '--json'])).out)
+        assert.deepEqual(
+          (list.messages as { status: string }[]).map((x) => x.status),
+          ['paste-needed', 'paste-needed', 'delivered'],
+        )
+        const to = checkSchema('messages', (await sideby(h, ['messages', '--to', 'cc002', '--json'])).out)
+        assert.equal((to.messages as unknown[]).length, 1)
+        const table = await sideby(h, ['messages'])
+        assert.match(table.out.split('\n')[0]!, /^SENT\s+TO\s+STATUS\s+ID\s+FROM$/)
+        assert.match(table.out, /needs paste/)
+
+        const shot = await h.write('notes.txt', 'text')
+        const bad = await sideby(h, ['send', 'cc002', 'look', '--image', shot], m.env)
+        assert.equal(bad.code, 1)
+        assert.match(bad.err, /notes\.txt is not a PNG, JPEG, GIF or WebP image/)
+        assert.equal((await sideby(h, ['send', 'cc002'])).code, 2)
+        const none = await sideby(h, ['send', 'nobody', 'x', '--json'], m.env)
+        assert.equal(JSON.parse(none.out).code, 'no-session')
+      } finally {
+        await m.close()
+      }
+      const empty = await withFakeHome(async (e) => (await sideby(e, ['messages'])).out)
+      assert.match(empty, /No messages yet\. Send one with `sideby send <account\|session> "<text>"`\./)
+    })
+  })
+
+  it('shows and sets crossSessionInbound with a preview, --yes and undo', async () => {
+    await withFakeHome(async (h) => {
+      const m = await setUp(h, '{"model":"x"}')
+      await m.close()
+      const status = await sideby(h, ['messages', 'inbound'])
+      assert.equal(status.code, 0, status.err)
+      assert.match(status.out, /not set claude:main/)
+      assert.match(status.out, /Run `sideby messages inbound accept`/)
+      const before = await snapshot(h.home)
+      const preview = await sideby(h, ['messages', 'inbound', 'accept'])
+      assert.equal(preview.code, 10)
+      assert.match(preview.out, /~\/\.claude-work\/settings\.json: crossSessionInbound not set -> "accept"/)
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+      const j = checkSchema(
+        'messages-inbound',
+        (await sideby(h, ['messages', 'inbound', 'accept', '--json'])).out,
+      )
+      assert.equal(j.applied, false)
+      const done = await sideby(h, ['messages', 'inbound', 'accept', '--yes', '--json'])
+      assert.equal(done.code, 0, done.out)
+      assert.equal(checkSchema('messages-inbound', done.out).applied, true)
+      assert.deepEqual(JSON.parse(await readFile(h.path('.claude-work/settings.json'), 'utf8')), {
+        model: 'x',
+        crossSessionInbound: 'accept',
+      })
+      const undo = await sideby(h, ['messages', 'inbound', 'undo', '--yes'])
+      assert.equal(undo.code, 0, undo.out)
+      assert.deepEqual(JSON.parse(await readFile(h.path('.claude-work/settings.json'), 'utf8')), {
+        model: 'x',
+      })
+      assert.equal((await sideby(h, ['messages', 'inbound', 'maybe'])).code, 2)
+    })
+  })
+
+  it('sends a screenshot alone, and says nothing changed when every account refuses', async () => {
+    await withFakeHome(async (h) => {
+      const m = await setUp(h, '{"crossSessionInbound":"refuse"}')
+      try {
+        const shot = h.path('shot.png')
+        await writeFile(shot, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]))
+        const r = await sideby(h, ['send', 'cc002', '--image', shot, '--json'], m.env)
+        assert.equal(r.code, 0, r.out)
+        assert.equal(checkSchema('send', r.out).copied, true)
+      } finally {
+        await m.close()
+      }
+      await h.write('.claude/settings.json', '{"crossSessionInbound":"refuse"}')
+      const a = await sideby(h, ['messages', 'inbound', 'accept', '--yes'])
+      assert.equal(a.code, 1)
+      assert.match(a.out, /^Nothing was changed\. claude:main: you set it to refuse/)
+    })
+  })
+
+  it('lines up the sessions table by display width and cuts long titles', async () => {
+    await withFakeHome(async (h) => {
+      const m = await setUp(h)
+      await m.close()
+      await h.write(
+        '.claude-work/sessions/4101.json',
+        JSON.stringify({
+          pid: 4101,
+          sessionId: ID_A,
+          name: '修复会话标题对齐问题',
+          cwd: '/work/repo',
+          status: 'idle',
+          procStart: PROC_START,
+        }),
+      )
+      await writeFile(
+        h.path('.grok/active_sessions.json'),
+        JSON.stringify([
+          {
+            session_id: ID_G,
+            pid: 555,
+            pid_start: Date.UTC(2026, 9, 20, 2, 14, 43) * 1000,
+            cwd: `/work/${'a-very-long-directory-name-'.repeat(3)}`,
+          },
+        ]),
+      )
+      const r = await sideby(h, ['sessions'])
+      assert.equal(r.code, 0, r.err)
+      const rows = r.out.split('\n').filter((l) => / {2}(idle|—|running)/.test(l))
+      assert.equal(rows.length, 2)
+      // The status column starts at the same terminal column on both rows (a Chinese character takes two).
+      const { displayWidth } = await import('./format.ts')
+      const col = (l: string) => displayWidth(l.slice(0, l.search(/ {2}(idle|—|running)/)))
+      assert.equal(col(rows[0]!), col(rows[1]!))
+      assert.ok(r.out.includes('…'), 'a long title is cut')
+      assert.ok(r.out.includes('修复会话标题对齐问题'))
+    })
+  })
+})

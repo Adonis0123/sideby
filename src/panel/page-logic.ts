@@ -675,6 +675,89 @@ export function sessionLabelParts(s: LogicSession): { account: string; title: st
   }
 }
 
+/** What "Send to it" needs of a Message receipt (spec §3.32 step 2); the full shape is `MessageReceipt` in core/messages.ts. */
+export interface LogicMessage {
+  status: string
+  pasteText?: string
+  note?: string
+}
+
+/**
+ * What the "Send to it" dialog shows after a send: `done` (the Host took it; `hint` is a note such as "the target must
+ * approve it", shown as a yellow hint), `paste` (the user pastes `pasteText`; `reason` says why, `jump` offers the
+ * target's Orca tab) or `stored` (kept as a file only; `pasteText` for reference). `key` is the headline's message key.
+ */
+export function sendResultView(
+  m: LogicMessage,
+  orca: boolean,
+): {
+  kind: 'done' | 'paste' | 'stored'
+  key: string
+  pasteText: string
+  reason: string
+  hint: string
+  jump: boolean
+} {
+  const pasteText = m.pasteText || ''
+  const note = (m.note || '').trim()
+  if (m.status === 'delivered' || m.status === 'read')
+    return {
+      kind: 'done',
+      key: m.status === 'read' ? 'send.read' : 'send.done',
+      pasteText,
+      reason: '',
+      hint: note,
+      jump: false,
+    }
+  if (m.status === 'paste-needed')
+    return {
+      kind: 'paste',
+      key: 'send.paste',
+      pasteText,
+      reason: note,
+      hint: '',
+      jump: Boolean(orca && pasteText),
+    }
+  return { kind: 'stored', key: 'send.stored', pasteText, reason: note, hint: '', jump: false }
+}
+
+/** The chip a Sessions row shows for the latest Message to it, or null when there is none worth showing. */
+export function messageChip(
+  status: string | undefined,
+): { key: string; tone: 'ok' | 'warn' | 'accent' } | null {
+  if (status === 'delivered') return { key: 'send.chip.delivered', tone: 'accent' }
+  if (status === 'read') return { key: 'send.chip.read', tone: 'ok' }
+  if (status === 'paste-needed') return { key: 'send.chip.paste', tone: 'warn' }
+  return null
+}
+
+/**
+ * Whether "Send to it" must wait: any screenshot that failed (refused, or its upload broke) stops the send, so a
+ * message never goes without a picture the user added. `names` lists them for the note; null lets it go.
+ */
+export function sendBlock(
+  files: readonly { name: string; status: string }[],
+): { key: 'send.blocked'; names: string } | null {
+  const failed = files.filter((f) => f.status === 'error').map((f) => f.name)
+  return failed.length ? { key: 'send.blocked', names: failed.join(', ') } : null
+}
+
+/**
+ * Why "Send to it" refuses a file before uploading it, as a message key, or null when it may go: images only (PNG,
+ * JPEG, GIF, WebP), at most 20 MB each, at most 5. `kept` is how many the dialog already holds. The server checks all
+ * three again; this only says it sooner.
+ */
+export function sendFileProblem(
+  file: { type?: string; size: number },
+  kept: number,
+): 'send.max' | 'send.notImage' | 'send.tooBig' | null {
+  if (kept >= 5) return 'send.max'
+  if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.type || ''))
+    return 'send.notImage'
+  if (file.size > 20 * 1024 * 1024) return 'send.tooBig'
+  return null
+}
+
 /**
  * A working directory short enough for one row: whole when it fits in `max` characters, else its root (`~` or the
  * first folder) and its last two folders around an ellipsis, else only the end. Empty when there is none.

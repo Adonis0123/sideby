@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/messages-inbound.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "action"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "action": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "status"
+        },
+        {
+          "type": "string",
+          "const": "accept"
+        },
+        {
+          "type": "string",
+          "const": "undo"
+        }
+      ]
+    },
+    "applied": {
+      "type": "boolean",
+      "description": "True once the change was written (or undone)."
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "file",
+          "accounts",
+          "state",
+          "undo"
+        ],
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Claude accounts whose settings.json is this file."
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "accept"
+              },
+              {
+                "type": "string",
+                "const": "hold"
+              },
+              {
+                "type": "string",
+                "const": "refuse"
+              },
+              {
+                "type": "string",
+                "const": "default"
+              },
+              {
+                "type": "string",
+                "const": "other"
+              },
+              {
+                "type": "string",
+                "const": "missing"
+              },
+              {
+                "type": "string",
+                "const": "blocked"
+              }
+            ],
+            "description": "crossSessionInbound is accept, hold or refuse; default: not set (bypass sessions hold messages); other: a value sideby does not know; missing: no settings.json; blocked: cannot be changed safely (see reason)."
+          },
+          "reason": {
+            "type": "string"
+          },
+          "undo": {
+            "type": "boolean",
+            "description": "sideby set it here and can put the earlier value back."
+          }
+        }
+      },
+      "description": "For status, every file; for a preview, the files that would change."
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "file",
+          "accounts",
+          "ok",
+          "message"
+        ],
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "message": {
+      "type": "string"
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby messages inbound [accept|undo] --json"
+}
