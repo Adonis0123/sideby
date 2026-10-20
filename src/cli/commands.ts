@@ -3253,8 +3253,24 @@ async function messagesInbound(a: ParsedArgs, args: string[], io: Io): Promise<n
     return r.ok ? 0 : 1
   }
   if (!a.flags.has('yes')) {
-    if (wantJson) out({ applied: false, groups: show(todo), message: `Run again with --yes to ${verb}.` })
-    else {
+    if (wantJson) {
+      // The same facts as the text preview: the key and value each file gets, and what is left alone and why.
+      const preview =
+        action === 'accept'
+          ? show(todo).map((g) => ({
+              ...g,
+              change: {
+                key: inbound.INBOUND_KEY,
+                from: g.state === 'default' ? null : g.state,
+                to: 'accept',
+              },
+            }))
+          : show(todo)
+      const leftAlone = inbound
+        .inboundLeftAlone(groups)
+        .map((g) => ({ ...g, file: tildify(g.file, home), reason: tilde(g.reason ?? '', home) }))
+      out({ applied: false, groups: preview, leftAlone, message: `Run again with --yes to ${verb}.` })
+    } else {
       io.out(
         action === 'accept'
           ? 'Show messages from other sessions at once?'

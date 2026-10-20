@@ -1214,8 +1214,33 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
             ),
             reason: Type.Optional(Str),
             undo: Type.Boolean({ description: 'sideby set it here and can put the earlier value back.' }),
+            change: Type.Optional(
+              Type.Object(
+                {
+                  key: Type.Literal('crossSessionInbound'),
+                  from: Type.Union([Str, Type.Null()], { description: 'Its value now; null: not set.' }),
+                  to: Type.Literal('accept'),
+                },
+                { description: 'In an accept preview: the one key this file gets and its new value.' },
+              ),
+            ),
           }),
           { description: 'For status, every file; for a preview, the files that would change.' },
+        ),
+      ),
+      leftAlone: Type.Optional(
+        Type.Array(
+          Type.Object({
+            file: Str,
+            accounts: Type.Array(Str),
+            state: Str,
+            reason: Type.Optional(Str),
+            undo: Type.Boolean(),
+          }),
+          {
+            description:
+              'In a preview: the files accept never changes (refuse, an unknown value, blocked, no settings.json), each with its reason.',
+          },
         ),
       ),
       results: Type.Optional(

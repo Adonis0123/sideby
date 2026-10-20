@@ -2688,6 +2688,11 @@ describe('sideby send and messages (spec §3.32 step 2)', () => {
         (await sideby(h, ['messages', 'inbound', 'accept', '--json'])).out,
       )
       assert.equal(j.applied, false)
+      const groups = j.groups as { file: string; change?: unknown }[]
+      assert.ok(groups.some((g) => g.file === '~/.claude-work/settings.json'))
+      for (const g of groups)
+        assert.deepEqual(g.change, { key: 'crossSessionInbound', from: null, to: 'accept' })
+      assert.deepEqual(j.leftAlone, [])
       const done = await sideby(h, ['messages', 'inbound', 'accept', '--yes', '--json'])
       assert.equal(done.code, 0, done.out)
       assert.equal(checkSchema('messages-inbound', done.out).applied, true)
@@ -2720,6 +2725,20 @@ describe('sideby send and messages (spec §3.32 step 2)', () => {
       const a = await sideby(h, ['messages', 'inbound', 'accept', '--yes'])
       assert.equal(a.code, 1)
       assert.match(a.out, /^Nothing was changed\. claude:main: you set it to refuse/)
+      await h.write('.claude-work/settings.json', '{"crossSessionInbound":"hold"}')
+      const p = await sideby(h, ['messages', 'inbound', 'accept', '--json'])
+      assert.equal(p.code, 10, p.out)
+      const j = checkSchema('messages-inbound', p.out)
+      assert.deepEqual(
+        (j.groups as { change?: unknown }[]).map((g) => g.change),
+        [{ key: 'crossSessionInbound', from: 'hold', to: 'accept' }],
+      )
+      const left = j.leftAlone as { accounts: string[]; state: string; reason: string }[]
+      assert.deepEqual(
+        left.map((g) => [g.accounts, g.state]),
+        [[['claude:main'], 'refuse']],
+      )
+      assert.match(left[0]!.reason, /you set it to refuse/)
     })
   })
 

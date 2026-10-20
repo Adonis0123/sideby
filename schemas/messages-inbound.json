@@ -91,10 +91,73 @@
           "undo": {
             "type": "boolean",
             "description": "sideby set it here and can put the earlier value back."
+          },
+          "change": {
+            "type": "object",
+            "required": [
+              "key",
+              "from",
+              "to"
+            ],
+            "properties": {
+              "key": {
+                "type": "string",
+                "const": "crossSessionInbound"
+              },
+              "from": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Its value now; null: not set."
+              },
+              "to": {
+                "type": "string",
+                "const": "accept"
+              }
+            },
+            "description": "In an accept preview: the one key this file gets and its new value."
           }
         }
       },
       "description": "For status, every file; for a preview, the files that would change."
+    },
+    "leftAlone": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "file",
+          "accounts",
+          "state",
+          "undo"
+        ],
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "state": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "undo": {
+            "type": "boolean"
+          }
+        }
+      },
+      "description": "In a preview: the files accept never changes (refuse, an unknown value, blocked, no settings.json), each with its reason."
     },
     "results": {
       "type": "array",
