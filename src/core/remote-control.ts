@@ -109,6 +109,26 @@ export function groupsToTurnOn(groups: readonly RemoteControlGroup[]): RemoteCon
 
 const writeKey = writeSettingsKey
 
+/** What `on`, `off` or `undo` says when no file needs it: always `ok: false`, so the CLI exits 1. */
+export function remoteControlNothingToDo(
+  action: 'on' | 'off' | 'undo',
+  groups: readonly RemoteControlGroup[],
+): RemoteControlChange {
+  if (action === 'undo') return { ok: false, results: [], message: 'There is nothing from sideby to undo.' }
+  if (!groups.length)
+    return { ok: false, results: [], message: 'No Claude accounts found, so nothing was changed.' }
+  const stuck = groups.find((g) => g.state === 'blocked' || (action === 'on' && g.state === 'missing'))
+  return {
+    ok: false,
+    results: [],
+    message: stuck
+      ? `Nothing was changed: ${stuck.reason}`
+      : action === 'on'
+        ? 'Remote Control already starts by itself (already on, nothing changed).'
+        : 'Remote Control already does not start by itself (already off, nothing changed).',
+  }
+}
+
 /**
  * Sets `remoteControlAtStartup` to `to` in every group that does not hold it yet (a default counts as either),
  * remembering each old value for undo.
@@ -120,18 +140,7 @@ export async function setRemoteControl(
 ): Promise<RemoteControlChange> {
   const groups = await remoteControlGroups(accounts, ctx)
   const todo = to ? groupsToTurnOn(groups) : groupsToTurnOff(groups)
-  if (todo.length === 0) {
-    const stuck = groups.find((g) => g.state === 'blocked' || (to && g.state === 'missing'))
-    return stuck
-      ? { ok: false, results: [], message: `Nothing was changed: ${stuck.reason}` }
-      : {
-          ok: true,
-          results: [],
-          message: to
-            ? 'Remote Control already starts by itself; nothing changed.'
-            : 'Remote Control already does not start by itself; nothing changed.',
-        }
-  }
+  if (todo.length === 0) return remoteControlNothingToDo(to ? 'on' : 'off', groups)
   const results: RemoteControlChange['results'] = []
   for (const g of todo) {
     let previous: boolean | null = null
@@ -188,7 +197,7 @@ export async function undoRemoteControlOff(
   ctx: ReadContext,
 ): Promise<RemoteControlChange> {
   const todo = groupsToUndo(await remoteControlGroups(accounts, ctx))
-  if (todo.length === 0) return { ok: false, results: [], message: 'There is nothing from sideby to undo.' }
+  if (todo.length === 0) return remoteControlNothingToDo('undo', [])
   const results: RemoteControlChange['results'] = []
   for (const g of todo) {
     const record = await readRecord(ctx, g.file)

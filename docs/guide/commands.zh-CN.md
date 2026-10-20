@@ -26,7 +26,7 @@
 | `sideby tune [acct\|family]` | 用最近 7 天的会话估算每个模型最省的自动压缩阈值（Claude 给推荐值，Codex 只观测）；只读 | 0；账号或家族不存在为 1；多给参数为 2 |
 | `sideby model <acct> [<model>\|default] [--effort <level>\|default] [--yes]` | 显示这个账号启动时用的模型和 effort 及各自来源；给出改动时先展示，加 `--yes` 才保存（Claude、Codex） | 0；等待 `--yes` 为 10；值不合法或是 API 账号为 1 |
 | `sideby tune apply <acct> [tokens] [--yes]` / `sideby tune undo <acct> [--yes]` | 把建议的自动压缩大小（或你给的大小，如 `120k`）用在一个 Claude 账号上，或恢复原值。只写该账号 `settings.json` 里的一个键；不加 `--yes` 只展示改动 | 只展示改动时为 10；完成为 0；被拦下、没有可撤销的、没有建议为 1；命令行有误为 2 |
-| `sideby remote-control [on\|off\|undo] [--yes]` | 显示每个 Claude 设置文件会不会自动打开 Remote Control；`off` 把开着或没设置的都改成 `remoteControlAtStartup: false`，`on` 把关着或没设置的都改成 `true`，`undo` 恢复原来的值（都先展示改动） | 只展示改动时 10；完成或无需改动 0；改不了、失败或没有可撤销的 1 |
+| `sideby remote-control [on\|off\|undo] [--yes]` | 显示每个 Claude 设置文件会不会自动打开 Remote Control；`off` 把开着或没设置的都改成 `remoteControlAtStartup: false`，`on` 把关着或没设置的都改成 `true`，`undo` 恢复原来的值（都先展示改动） | 只展示改动时 10；完成 0；无需改动、改不了、失败或没有可撤销的 1 |
 | `sideby handoff status` | 按家族列出本机启用自动接力还差什么，以及接下来要运行的命令 | 0 |
 | `sideby handoff enable [--same-family] [--order <family>=<acct,…>] [--threshold n] [--prepare-at n] [--yes]` | 展示 config 改动；加 `--yes` 才开启（其他设置保留），并列出还要做的步骤 | 只展示改动时为 10；写入后或已是这样为 0；`--order` 里有找不到的账号为 1 |
 | `sideby handoff disable [--yes]` | 关闭，其他设置保留 | 只展示改动时为 10；写入后或本来就关着为 0 |
@@ -42,6 +42,7 @@
 | `sideby desktop grok-bot:<名字> [--remove [--yes]]` | 按名字打开一个 Grok Bot 窗口，新名字就新建一个未登录的窗口；`--remove` 删掉你建的窗口和它的数据（macOS） | 0；不是 macOS、名字不对、应用没装、窗口开着（`--remove` 时）或没能打开为 1；`--remove` 不带 `--yes` 为 10 |
 | `sideby sessions [acct\|family]` | 列出每个账号正在运行的会话，一行一个：Session Label（`cc002 · knip cleanup · 61230c3d`，即账号、宿主自己的会话标题、id 前 8 位）、是否需要你处理、工作目录、开始时间；需要你处理的排最前。sideby 对不上运行中程序的 Codex 或 pi 会话，取该账号最新的会话并标为推测。本机的编排工具（如 `agent-dispatch` skill）发布了会话属于哪个任务（Run）时，多一列 `RUN`，表下每个任务一行，给出它的看板文件。只读，不读凭证 | 0；账号或家族不存在为 1 |
 | `sideby sessions copy <acct\|session-id> [--as reference\|id\|resume] [--lang en\|zh]` | 把一个会话复制给另一个 AI：默认复制 Session Reference（一句话，写明账号、Label 和记录文件路径），也可以复制 id 或恢复命令。用 pbcopy（macOS）、wl-copy 或 xclip（Linux）；都没有时把文字打印出来 | 0；没有这个账号或运行中的会话、或这个账号有几个会话（会列出来，按 id 复制其中一个）为 1 |
+| `sideby sessions open-run <acct\|session-id>` | 用系统默认程序打开会话所在任务的报告（Run Board），和面板会话页上的任务标签一样。选会话的规则同 `sessions copy`；只打开编排工具会话索引里写的看板，打开前再检查一次 | 0；没有这个运行中的会话、有几个会话（会列出来）、会话不在任务里、或报告变了或没打开为 1 |
 | `sideby send <acct\|session> "<text>" [--image <path>]... [--lang en\|zh]` | 给另一个正在运行的会话传话，可以带截图，也可以只发截图（PNG、JPEG、GIF、WebP，每张不超过 20 MB）。sideby 先把消息（Message）存成文件（mode 600，放在它的状态目录），再送达：Claude Code 会话走 Claude Code 自带的跨会话消息；Codex、Grok Build 和 pi 会把一句话复制到剪贴板，你粘贴到那个 tab。在会话里运行时，消息会写明是哪个会话发的 | 0 已送达或已存好待粘贴；没有这个运行中的会话、有几个会话（会列出来，按 id 发给其中一个）、或文件不是截图为 1 |
 | `sideby messages [--to <acct\|session>] [--limit <n>]` | 你发过的消息，最新的在前，以及每条到了哪一步：已送达、已读（对方记录里出现了它的 id）、需要你粘贴 | 0 |
 | `sideby messages inbound [accept\|undo] [--yes]` | 每个 Claude 账号是否马上显示别的会话发来的消息（`crossSessionInbound`）。不设的话，bypass 权限模式下的会话会把每条消息扣下等你批准，约 5 分钟后丢掉。`accept` 先展示改动，加 `--yes` 才写入，只改这一个键，只改没设或为 `hold` 的文件；`refuse` 和其他值都不动，逐个说明原因；`undo` 原样恢复改之前的值 | 0；有文件改不了、一个都没改、或没有可撤销的为 1；展示了改动、等 `--yes` 为 10 |

@@ -28,6 +28,7 @@ import {
   groupsToUndo,
   type RemoteControlGroup,
   type RemoteControlState,
+  remoteControlNothingToDo,
 } from '../core/remote-control.ts'
 import { SHELLS, type Shell, type ShellInitWrite } from '../core/shell-init.ts'
 import type { TuneApplyPlan } from '../core/tuning-apply.ts'
@@ -846,7 +847,7 @@ function rcGroupLine(g: RemoteControlGroup, home: string): string {
  * `sideby remote-control [on|off|undo] [--yes] [--json]` (spec §3.22, ADR-0017): whether Claude sessions connect to
  * claude.ai by themselves, and turning that on or off for every Account (a preview with exit 10 until --yes).
  */
-export async function cmdRemoteControl(a: ParsedArgs, io: Io): Promise<number> {
+export async function cmdRemoteControl(a: ParsedArgs, io: Io, runtime?: Runtime): Promise<number> {
   const [action, extra] = a.positionals
   if (
     extra !== undefined ||
@@ -854,7 +855,7 @@ export async function cmdRemoteControl(a: ParsedArgs, io: Io): Promise<number> {
   )
     throw new UsageError('usage: sideby remote-control [on|off|undo] [--yes] [--json]')
   const wantJson = a.flags.has('json')
-  const rt = await createRuntime()
+  const rt = runtime ?? (await createRuntime())
   const home = rt.paths.home
   const show = (gs: RemoteControlGroup[]) => gs.map((g) => ({ ...g, file: tildify(g.file, home) }))
   const out = (data: object) => json(io, { action: action ?? 'status', ...data })
@@ -895,10 +896,11 @@ export async function cmdRemoteControl(a: ParsedArgs, io: Io): Promise<number> {
         : groupsToUndo(groups)
   const verb = action === 'off' ? 'turn it off' : action === 'on' ? 'turn it on' : 'undo'
   if (todo.length === 0) {
-    const r = await apply()
+    // Only what was read: writing here would act on a file the user never saw in a preview.
+    const r = remoteControlNothingToDo(action, groups)
     if (wantJson) out({ applied: false, groups: show(groups), message: r.message })
     else io.out(tilde(r.message, home))
-    return r.ok ? 0 : 1
+    return 1
   }
   if (!a.flags.has('yes')) {
     if (wantJson)
@@ -3002,16 +3004,18 @@ function copyLang(a: ParsedArgs, env: Record<string, string | undefined>): 'en' 
 
 /**
  * `sideby sessions [<account>|<family>]`: the Live Sessions of every Account (spec §3.32);
- * `sideby sessions copy <account|session-id> [--as reference|id|resume]` copies one of them for another AI.
+ * `sideby sessions copy <account|session-id> [--as reference|id|resume]` copies one of them for another AI;
+ * `sideby sessions open-run <account|session-id>` opens the Run Board of one (spec §3.32 step 2b).
  */
-export async function cmdSessions(a: ParsedArgs, io: Io): Promise<number> {
+export async function cmdSessions(a: ParsedArgs, io: Io, runtime?: Runtime): Promise<number> {
   const [first, ...more] = a.positionals
-  if (first === 'copy') return sessionsCopy(a, more, io)
+  if (first === 'copy') return sessionsCopy(a, more, io, runtime)
+  if (first === 'open-run') return sessionsOpenRun(a, more, io, runtime)
   if (more.length || a.rest.length)
     throw new UsageError(
-      'usage: sideby sessions [<account>|<family>] | sideby sessions copy <account|session-id>',
+      'usage: sideby sessions [<account>|<family>] | sideby sessions copy <account|session-id> | sideby sessions open-run <account|session-id>',
     )
-  const rt = await createRuntime()
+  const rt = runtime ?? (await createRuntime())
   const { listLiveSessions, sessionLabel } = await import('../core/live-sessions.ts')
   const { withRuns } = await import('../core/run-link.ts')
   const r = await listLiveSessions(rt, first ? { only: first } : {})
@@ -3051,31 +3055,54 @@ export async function cmdSessions(a: ParsedArgs, io: Io): Promise<number> {
     for (const r of s.run ? [s.run, ...(s.run.others ?? [])] : [])
       if (!boards.has(r.board)) boards.set(r.board, r.title)
   for (const [board, title] of boards) io.out(c.dim(`Run: ${title}  ${tildify(board, home)}`))
+  if (boards.size) io.out(c.dim('Open its run report: sideby sessions open-run <account|session-id>'))
   io.out(c.dim('Copy one for another AI: sideby sessions copy <account|session-id>'))
   return 0
 }
 
-async function sessionsCopy(a: ParsedArgs, args: string[], io: Io): Promise<number> {
+/** Prints the listing's problems to stderr unless the output is JSON. */
+const listedProblems =
+  (a: ParsedArgs, io: Io) =>
+  (l: { problems: string[] }): void => {
+    if (!a.flags.has('json')) for (const p of l.problems) io.err(c.yellow(`sideby: ${p}`))
+  }
+
+async function sessionsOpenRun(a: ParsedArgs, args: string[], io: Io, runtime?: Runtime): Promise<number> {
+  const [target, ...extra] = args
+  if (!target || extra.length || a.rest.length)
+    throw new UsageError('usage: sideby sessions open-run <account|session-id>')
+  const rt = runtime ?? (await createRuntime())
+  const { selectSession } = await import('../core/session-select.ts')
+  const { openRunBoard } = await import('../core/run-link.ts')
+  const { session: s } = await selectSession(rt, target, {
+    next: { verb: 'open the run report of', command: (id) => `sideby sessions open-run ${id}` },
+    onListed: listedProblems(a, io),
+  })
+  // The same checks and opener as the Panel's "Open run report": the board comes only from the Session Index.
+  const r = await openRunBoard(rt, s.sessionId)
+  const board = tildify(r.board, rt.paths.home)
+  if (a.flags.has('json')) {
+    json(io, { opened: true, board, sessionId: s.sessionId, label: s.label })
+    return 0
+  }
+  io.out(`${c.green('✓')} opened the run report of ${c.bold(s.label)}`)
+  io.out(c.dim(`  ${board}`))
+  return 0
+}
+
+async function sessionsCopy(a: ParsedArgs, args: string[], io: Io, runtime?: Runtime): Promise<number> {
   const [target, ...extra] = args
   if (!target || extra.length || a.rest.length)
     throw new UsageError('usage: sideby sessions copy <account|session-id> [--as reference|id|resume]')
   const as = (a.flags.get('as') ?? 'reference') as string
   if (as !== 'reference' && as !== 'id' && as !== 'resume')
     throw new UsageError('--as takes reference, id or resume')
-  const rt = await createRuntime()
+  const rt = runtime ?? (await createRuntime())
   const lang = copyLang(a, rt.env)
-  const { listLiveSessions, sessionCopyText } = await import('../core/live-sessions.ts')
-  const { copyToClipboard, pickSession } = await import('../core/live-sessions-copy.ts')
-  const r = await listLiveSessions(rt)
-  let account: { ref: string; label: string } | undefined
-  try {
-    const acc = await rt.resolve(target)
-    account = { ref: acc.ref, label: target }
-  } catch {
-    // not an Account: a session id
-  }
-  for (const p of r.problems) if (!a.flags.has('json')) io.err(c.yellow(`sideby: ${p}`))
-  const s = pickSession(target, r.sessions, account)
+  const { sessionCopyText } = await import('../core/live-sessions.ts')
+  const { copyToClipboard } = await import('../core/live-sessions-copy.ts')
+  const { selectSession } = await import('../core/session-select.ts')
+  const { session: s } = await selectSession(rt, target, { onListed: listedProblems(a, io) })
   const text = sessionCopyText(s, as, lang)
   const program = await copyToClipboard(text, rt.env)
   if (a.flags.has('json')) {
@@ -3150,9 +3177,9 @@ const MESSAGE_STATUS: Record<string, string> = {
  * `sideby messages [--to <account|session>] [--limit <n>]`: the Messages sideby kept and how far each got;
  * `sideby messages inbound [accept|undo] [--yes]`: whether Claude sessions show them at once.
  */
-export async function cmdMessages(a: ParsedArgs, io: Io): Promise<number> {
+export async function cmdMessages(a: ParsedArgs, io: Io, runtime?: Runtime): Promise<number> {
   const [first, ...more] = a.positionals
-  if (first === 'inbound') return messagesInbound(a, more, io)
+  if (first === 'inbound') return messagesInbound(a, more, io, runtime)
   if (first !== undefined || a.rest.length)
     throw new UsageError(
       'usage: sideby messages [--to <account|session>] [--limit <n>] | sideby messages inbound [accept|undo] [--yes]',
@@ -3162,7 +3189,7 @@ export async function cmdMessages(a: ParsedArgs, io: Io): Promise<number> {
   const limit = limitFlag === undefined ? undefined : Number(limitFlag)
   if (limit !== undefined && !(Number.isInteger(limit) && limit > 0))
     throw new UsageError('--limit takes a whole number above 0')
-  const rt = await createRuntime()
+  const rt = runtime ?? (await createRuntime())
   const { listMessages } = await import('../core/messages.ts')
   const list = await listMessages(rt, {
     ...(typeof to === 'string' ? { to } : {}),
@@ -3198,12 +3225,12 @@ const INBOUND_WORDS: Record<string, string> = {
   blocked: 'blocked',
 }
 
-async function messagesInbound(a: ParsedArgs, args: string[], io: Io): Promise<number> {
+async function messagesInbound(a: ParsedArgs, args: string[], io: Io, runtime?: Runtime): Promise<number> {
   const [action, extra] = args
   if (extra !== undefined || (action !== undefined && action !== 'accept' && action !== 'undo'))
     throw new UsageError('usage: sideby messages inbound [accept|undo] [--yes] [--json]')
   const wantJson = a.flags.has('json')
-  const rt = await createRuntime()
+  const rt = runtime ?? (await createRuntime())
   const home = rt.paths.home
   const inbound = await import('../core/inbound.ts')
   const accounts = await rt.accounts()
@@ -3247,10 +3274,11 @@ async function messagesInbound(a: ParsedArgs, args: string[], io: Io): Promise<n
     action === 'accept' ? inbound.acceptInbound(accounts, ctx) : inbound.undoInbound(accounts, ctx)
   const verb = action === 'accept' ? 'set it' : 'undo'
   if (todo.length === 0) {
-    const r = await apply()
+    // Only from what was read: a run without --yes never writes, even if a file changed since (exit 1).
+    const r = inbound.inboundNothingToDo(action, groups)
     if (wantJson) out({ applied: false, groups: show(groups), message: r.message })
     else io.out(tilde(r.message, home))
-    return r.ok ? 0 : 1
+    return 1
   }
   if (!a.flags.has('yes')) {
     if (wantJson) {

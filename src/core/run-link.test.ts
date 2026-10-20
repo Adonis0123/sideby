@@ -109,7 +109,7 @@ describe('run links', () => {
       const b1 = await board(h, 'r 1.html')
       const b2 = await board(h, 'r2.html')
       await h.write(
-        `${STATE}/sessions.json`,
+        `${STATE}/session-index.json`,
         index({
           [SID]: [
             entry(b2, { runTitle: 'Second', role: 'review' }, 'R'),
@@ -161,12 +161,12 @@ describe('run links', () => {
         missing: entry(h.path(`${STATE}/boards/gone.html`)),
       }
       await h.write(
-        `${STATE}/sessions.json`,
+        `${STATE}/session-index.json`,
         index(Object.fromEntries(Object.entries(cases).map(([k, v]) => [k, [v]]))),
       )
       assert.deepEqual([...(await runsForSessions(h.env, h.home, Object.keys(cases))).keys()], [])
       // The same good entry passes, and fails for another owner.
-      await h.write(`${STATE}/sessions.json`, index({ [SID]: [entry(good)] }))
+      await h.write(`${STATE}/session-index.json`, index({ [SID]: [entry(good)] }))
       assert.equal((await runsForSessions(h.env, h.home, [SID])).size, 1)
       const uid = process.getuid!()
       assert.equal((await runsForSessions(h.env, h.home, [SID], uid + 1)).size, 0)
@@ -176,7 +176,7 @@ describe('run links', () => {
   it('shows nothing without an index, a boards folder, or a usable index file', async () => {
     await withFakeHome(async (h) => {
       assert.equal((await runsForSessions(h.env, h.home, [SID])).size, 0)
-      const file = `${STATE}/sessions.json`
+      const file = `${STATE}/session-index.json`
       // No boards folder at all.
       await h.write(file, index({ [SID]: [entry(h.path(`${STATE}/boards/r1.html`))] }))
       assert.equal((await runsForSessions(h.env, h.home, [SID])).size, 0)
@@ -208,7 +208,7 @@ describe('run links', () => {
     await withFakeHome(async (h) => {
       const good = await board(h)
       await chmod(good, 0o600)
-      await h.write(`${STATE}/sessions.json`, index({ [SID]: [entry(good)] }))
+      await h.write(`${STATE}/session-index.json`, index({ [SID]: [entry(good)] }))
       const calls: { cmd: string; args: string[] }[] = []
       const exec = async (cmd: string, args: readonly string[]): Promise<ExecResult> => {
         calls.push({ cmd, args: [...args] })

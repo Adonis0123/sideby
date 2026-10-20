@@ -127,22 +127,32 @@ export function inboundGroupsToUndo(groups: readonly InboundGroup[]): InboundGro
   return groups.filter((g) => g.undo)
 }
 
+/**
+ * What `accept` or `undo` says when `groups` leave it nothing to do. Pure: the preview path uses it, so a run without
+ * `--yes` never writes, even when a file changes after this read. A run that changes nothing is not `ok` (exit 1).
+ */
+export function inboundNothingToDo(
+  action: 'accept' | 'undo',
+  groups: readonly InboundGroup[],
+): InboundChange {
+  if (action === 'undo') return { ok: false, results: [], message: 'There is nothing from sideby to undo.' }
+  if (!groups.length)
+    return { ok: false, results: [], message: 'No Claude accounts found, so nothing was changed.' }
+  const left = leftAloneLines(groups)
+  return {
+    ok: false,
+    results: [],
+    message: left.length
+      ? `Nothing was changed. ${left.join('. ')}.`
+      : 'Claude sessions already show Messages from other sessions at once (already accept, nothing changed).',
+  }
+}
+
 /** Sets `crossSessionInbound` to `accept` in every group `groupsToAccept` names, remembering each old value. */
 export async function acceptInbound(accounts: readonly Account[], ctx: ReadContext): Promise<InboundChange> {
   const groups = await inboundGroups(accounts, ctx)
   const todo = groupsToAccept(groups)
-  if (todo.length === 0) {
-    if (!groups.length)
-      return { ok: false, results: [], message: 'No Claude accounts found, so nothing was changed.' }
-    const left = leftAloneLines(groups)
-    return left.length
-      ? { ok: false, results: [], message: `Nothing was changed. ${left.join('. ')}.` }
-      : {
-          ok: true,
-          results: [],
-          message: 'Claude sessions already show Messages from other sessions at once; nothing changed.',
-        }
-  }
+  if (todo.length === 0) return inboundNothingToDo('accept', groups)
   const results: InboundChange['results'] = []
   for (const g of todo) {
     let before: Pick<UndoRecord, 'hadKey' | 'previous'> = { hadKey: false }
@@ -183,8 +193,9 @@ export async function acceptInbound(accounts: readonly Account[], ctx: ReadConte
 
 /** Puts back what each file had before `acceptInbound`, only while the key still holds what sideby wrote. */
 export async function undoInbound(accounts: readonly Account[], ctx: ReadContext): Promise<InboundChange> {
-  const todo = inboundGroupsToUndo(await inboundGroups(accounts, ctx))
-  if (todo.length === 0) return { ok: false, results: [], message: 'There is nothing from sideby to undo.' }
+  const groups = await inboundGroups(accounts, ctx)
+  const todo = inboundGroupsToUndo(groups)
+  if (todo.length === 0) return inboundNothingToDo('undo', groups)
   const results: InboundChange['results'] = []
   for (const g of todo) {
     const record = await readRecord(ctx, g.file)

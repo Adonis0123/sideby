@@ -1897,7 +1897,8 @@ describe('remote-control (spec §3.22)', () => {
         model: 'sonnet',
         remoteControlAtStartup: true,
       })
-      assert.equal((await sideby(h, ['remote-control', 'on', '--yes'])).code, 0)
+      // Already on: nothing to change, exit 1 (spec §3.22).
+      assert.equal((await sideby(h, ['remote-control', 'on', '--yes'])).code, 1)
     })
   })
 })
@@ -2466,7 +2467,7 @@ describe('sideby sessions (spec §3.32)', () => {
         url: `file://${b}#lane-${lane}`,
       })
       await h.write(
-        'state/ad/sessions.json',
+        'state/ad/session-index.json',
         JSON.stringify({
           schemaVersion: 1,
           revision: 1,

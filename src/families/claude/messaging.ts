@@ -3,11 +3,11 @@
 // under `cc-socks` in the system temp directory); one JSON line written to it reaches that session as "Another
 // Claude session sent a message". sideby writes there only after the checks below, sends no token, and never opens
 // the `<pid>.<hash>.key` files next to the record.
-import { open, readFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
-import { basename, dirname, isAbsolute, join } from 'node:path'
-import { lstatOrNull, realpathOrNull, statOrNull } from '../../core/fs-safe.ts'
-import { type ProcessView, parseLstart, sameStart } from '../../core/live-sessions-procs.ts'
+import { basename, dirname, isAbsolute } from 'node:path'
+import { lstatOrNull, realpathOrNull } from '../../core/fs-safe.ts'
+import type { ProcessView } from '../../core/live-sessions-procs.ts'
+import { readSessionRecord, recordRunsOn, sessionRecordPath, tailLinesWith } from './session-files.ts'
 
 /** How long sideby waits for a session's socket to accept the Message. */
 export const DELIVER_TIMEOUT_MS = 3_000
@@ -19,18 +19,10 @@ export async function claudeSocketOf(
   sessionId: string,
   procs: ProcessView,
 ): Promise<{ path: string } | { problem: string }> {
-  let rec: Record<string, unknown>
-  try {
-    const parsed: unknown = JSON.parse(await readFile(join(accountDir, 'sessions', `${pid}.json`), 'utf8'))
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object')
-    rec = parsed as Record<string, unknown>
-  } catch {
-    return { problem: 'its session record could not be read' }
-  }
+  const rec = await readSessionRecord(sessionRecordPath(accountDir, pid))
+  if (!rec) return { problem: 'its session record could not be read' }
   if (rec.sessionId !== sessionId) return { problem: 'the process now runs another session' }
-  const proc = await procs.get(pid)
-  const started = parseLstart(typeof rec.procStart === 'string' ? rec.procStart : '')
-  if (!proc || Number.isNaN(started) || !sameStart(proc, started)) return { problem: 'the session has ended' }
+  if (!recordRunsOn(rec, await procs.get(pid))) return { problem: 'the session has ended' }
   const path = rec.messagingSocketPath
   if (typeof path !== 'string' || !path)
     return {
@@ -158,25 +150,6 @@ export function argsBypass(args: readonly string[]): boolean {
       a === '--permission-mode=bypassPermissions' ||
       (a === '--permission-mode' && args[i + 1] === 'bypassPermissions'),
   )
-}
-
-const TAIL_BYTES = 256 * 1024
-
-/** The lines of the last `TAIL_BYTES` of a file that contain `needle` (the first, maybe cut, line is dropped). */
-export async function tailLinesWith(file: string, needle: string): Promise<string[]> {
-  const st = await statOrNull(file)
-  if (!st?.isFile()) return []
-  const fh = await open(file, 'r')
-  try {
-    const len = Math.min(st.size, TAIL_BYTES)
-    const buf = Buffer.alloc(len)
-    await fh.read(buf, 0, len, st.size - len)
-    const lines = buf.toString('utf8').split('\n')
-    if (len < st.size) lines.shift()
-    return lines.filter((l) => l.includes(needle))
-  } finally {
-    await fh.close()
-  }
 }
 
 /**

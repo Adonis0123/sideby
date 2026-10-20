@@ -2,12 +2,13 @@
 // endpoints, behind the Panel's usual checks. sendMessage and listMessages are replaced, so no test reaches a Session.
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
+import { chmod, mkdir, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { asBuiltin, demoFamily, demoPlugin, seedDemoMain } from '../../testing/demo.ts'
-import { type FakeHome, withFakeHome } from '../../testing/index.ts'
+import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
 import { UserError } from '../core/errors.ts'
 import type { LiveSession } from '../core/live-sessions.ts'
 import type { MessageReceipt, SendOptions } from '../core/messages.ts'
@@ -408,11 +409,43 @@ describe('panel "Send to it"', () => {
     })
   })
 
+  it('computes a read status in a read-only Panel without writing the receipt', async () => {
+    await withFakeHome(async (h) => {
+      const dir = join(h.path('.local/state/sideby/messages'), SID)
+      await mkdir(dir, { recursive: true, mode: 0o700 })
+      await chmod(join(dir, '..'), 0o700)
+      await chmod(dir, 0o700)
+      const transcript = h.path('t.jsonl')
+      await writeFile(transcript, '{"m":"sideby message 0a1b2c3d"}\n')
+      const stem = '2026-10-20T10-00-00Z-0a1b2c3d'
+      await writeFile(join(dir, `${stem}.md`), 'x\n')
+      await writeFile(
+        join(dir, `${stem}.json`),
+        JSON.stringify({
+          ...receipt(h.env.HOME!, { id: '0a1b2c3d', file: join(dir, `${stem}.md`) }),
+          transcript,
+        }),
+      )
+      const before = await snapshot(h.path('.local/state/sideby/messages'))
+      const ro = await panel(h, {}, true)
+      try {
+        const r = await request(ro.port, '/api/sessions/messages', ro.good)
+        assert.equal(r.status, 200, JSON.stringify(r.body))
+        assert.deepEqual(r.body.latest, {
+          [SID]: { id: '0a1b2c3d', status: 'read', sentAt: '2026-10-20T10:00:00.000Z' },
+        })
+        assert.deepEqual(diffSnapshots(before, await snapshot(h.path('.local/state/sideby/messages'))), [])
+      } finally {
+        await close(ro.server)
+      }
+    })
+  })
+
   it('lists the latest Message to each Session for the chips', async () => {
     await withFakeHome(async (h) => {
       const home = h.env.HOME!
       let asked: unknown
-      const messages = async (_rt: Runtime, opts?: { to?: string; limit?: number }) => {
+      const messages = async (_rt: Runtime, opts?: { to?: string; limit?: number; persist?: boolean }) => {
         asked = opts
         return [
           receipt(home, { id: 'new', status: 'read', sentAt: '2026-10-20T10:05:00.000Z' }),
@@ -424,7 +457,7 @@ describe('panel "Send to it"', () => {
       try {
         const r = await request(port, '/api/sessions/messages', good)
         assert.equal(r.status, 200, JSON.stringify(r.body))
-        assert.deepEqual(asked, { limit: 200 })
+        assert.deepEqual(asked, { limit: 200, persist: true })
         assert.deepEqual(r.body.latest, {
           [SID]: { id: 'new', status: 'read', sentAt: '2026-10-20T10:05:00.000Z' },
           abc: { id: 'other', status: 'paste-needed', sentAt: '2026-10-20T10:00:00.000Z' },

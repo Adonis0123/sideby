@@ -3,6 +3,7 @@
 // that keeps the connection open, failures after the Message is kept, and receipts that are not sideby's.
 import assert from 'node:assert/strict'
 import fsp from 'node:fs/promises'
+import { syncBuiltinESMExports } from 'node:module'
 import { createServer, type Server, type Socket } from 'node:net'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
@@ -299,6 +300,34 @@ describe('after the Message is kept', () => {
       }
       assert.deepEqual(s.got, [])
       await s.close()
+    })
+  })
+
+  it('hands back the paste line when the first receipt cannot be written after the Message is kept', async () => {
+    await withFakeHome(async (h) => {
+      const procs = await machine(h, join(h.home, '..', 'tmp', 'cc-socks', 'none.sock'))
+      const rt = await createRuntime({ env: h.env })
+      const messages = h.path('.local/state/sideby/messages')
+      const orig = fsp.rename
+      let failed = 0
+      fsp.rename = (async (from: Parameters<typeof orig>[0], to: Parameters<typeof orig>[1]) => {
+        if (String(to).startsWith(messages) && String(to).endsWith('.json') && !failed++)
+          throw Object.assign(new Error('no space left'), { code: 'ENOSPC' })
+        return orig(from, to)
+      }) as typeof orig
+      syncBuiltinESMExports()
+      let r: Awaited<ReturnType<typeof sendMessage>>
+      try {
+        r = await sendMessage(rt, 'cc002', { text: 'kept anyway' }, with_(procs, h.path('tmp')))
+      } finally {
+        fsp.rename = orig
+        syncBuiltinESMExports()
+      }
+      assert.equal(failed, 1)
+      assert.equal(r.status, 'paste-needed')
+      assert.match(r.note!, /ENOSPC/)
+      assert.match(r.pasteText, /sideby message [0-9a-f]{8}/)
+      assert.match(await fsp.readFile(r.file, 'utf8'), /kept anyway/)
     })
   })
 

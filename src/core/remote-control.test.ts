@@ -99,7 +99,8 @@ describe('Remote Control off by default', () => {
         ],
       )
       const again = await turnRemoteControlOff(all, ctx(h))
-      assert.deepEqual([again.ok, again.results.length], [true, 0])
+      assert.deepEqual([again.ok, again.results.length], [false, 0])
+      assert.match(again.message, /already off, nothing changed/)
     })
   })
 

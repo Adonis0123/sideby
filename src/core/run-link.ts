@@ -45,7 +45,7 @@ export function dispatchStateDir(env: Env, home: string): string {
 }
 
 export const sessionIndexPath = (env: Env, home: string): string =>
-  join(dispatchStateDir(env, home), 'sessions.json')
+  join(dispatchStateDir(env, home), 'session-index.json')
 
 // Titles come from another program: one line, no control characters, a sane length.
 function text(value: unknown): string | undefined {

@@ -1159,6 +1159,18 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     },
     { title: 'sideby sessions --json' },
   ),
+  'sessions-open-run': Type.Object(
+    {
+      schemaVersion: Version,
+      opened: Type.Literal(true, {
+        description: 'The Run Board was handed to the default program; a failure is an error instead.',
+      }),
+      board: Type.String({ description: 'The Run Board file opened, with the home folder as ~.' }),
+      sessionId: Str,
+      label: Type.String({ description: 'The Session Label of the session whose run report was opened.' }),
+    },
+    { title: 'sideby sessions open-run --json' },
+  ),
   'sessions-copy': Type.Object(
     {
       schemaVersion: Version,

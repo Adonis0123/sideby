@@ -25,7 +25,7 @@ To change them, run `sideby model claude:work opus --effort high --json`; `defau
 
 `sideby remote-control --json` returns `action` and `groups`: each has `file`, `accounts`, `state`, `undo` and optional `reason`. `state` is `on`, `default`, `off`, `missing` or `blocked`.
 
-Use `sideby remote-control off --json`, `on --json` or `undo --json`. Exit 10 shows the affected groups and waits for `--yes`; confirm before applying. A result has `applied`, optional `results` (`file`, `accounts`, `ok`, `message`) and optional `message`. Only turn it on when asked. Changes affect new sessions; running sessions remain connected until restarted. Undo restores the earlier value only while the key still holds what sideby wrote.
+Use `sideby remote-control off --json`, `on --json` or `undo --json`. Exit 10 shows the affected groups and waits for `--yes`; confirm before applying. Exit 1 with `applied: false` and a message such as "already off, nothing changed" means no file needed it: tell the user, do not retry. A result has `applied`, optional `results` (`file`, `accounts`, `ok`, `message`) and optional `message`. Only turn it on when asked. Changes affect new sessions; running sessions remain connected until restarted. Undo restores the earlier value only while the key still holds what sideby wrote.
 
 ## Theme, language and any other setting
 

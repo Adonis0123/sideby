@@ -18,9 +18,9 @@ import {
   sessionCopyText,
   sortSessions,
 } from './live-sessions.ts'
-import { pickSession } from './live-sessions-copy.ts'
 import { type LiveSessionDeps, type ProcessInfo, parseLstart, parsePs } from './live-sessions-procs.ts'
 import { sessionTitleOf, watchSessionTitle } from './live-sessions-title.ts'
+import { pickSession } from './session-select.ts'
 
 const START = Date.UTC(2026, 9, 20, 2, 14, 43)
 const PROC_START = 'Tue Oct 20 02:14:43 2026'

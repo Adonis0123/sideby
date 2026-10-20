@@ -13,16 +13,15 @@ import {
   messageLine,
   sessionBypass,
   socketChanged,
-  tailLinesWith,
   writeToSocket,
 } from '../families/claude/messaging.ts'
+import { tailLinesWith } from '../families/claude/session-files.ts'
 import type { Runtime } from '../runtime.ts'
 import type { Account } from '../types.ts'
 import { UserError } from './errors.ts'
 import { writeFileAtomic } from './fs-safe.ts'
 import { inboundOf } from './inbound.ts'
-import { type LiveSession, listLiveSessions } from './live-sessions.ts'
-import { pickSession } from './live-sessions-copy.ts'
+import type { LiveSession } from './live-sessions.ts'
 import {
   hostArgs,
   type LiveSessionDeps,
@@ -30,6 +29,7 @@ import {
   processView,
   systemDeps,
 } from './live-sessions-procs.ts'
+import { selectSession } from './session-select.ts'
 
 /** stored: kept as a file only; delivered: the Host's channel accepted it; read: the target Session shows it; paste-needed: the user must paste `pasteText` into the target. */
 export type MessageStatus = 'stored' | 'delivered' | 'read' | 'paste-needed'
@@ -318,16 +318,9 @@ async function sendOpened(
 ): Promise<MessageReceipt> {
   const { text, lang } = opts
   const procDeps = deps.procs ?? systemDeps(rt.env)
-  const listed = await listLiveSessions(rt, {}, procDeps)
-  let account: { ref: string; label: string } | undefined
-  try {
-    account = { ref: (await rt.resolve(target)).ref, label: target }
-  } catch {
-    // not an Account: a session id
-  }
-  const to = pickSession(target, listed.sessions, account, {
-    verb: 'send to',
-    command: (id) => `sideby send ${id} "<text>"`,
+  const { session: to, listed } = await selectSession(rt, target, {
+    next: { verb: 'send to', command: (id) => `sideby send ${id} "<text>"` },
+    deps: procDeps,
   })
   let from: LiveSession | undefined
   if (opts.fromSessionId) from = listed.sessions.find((s) => s.sessionId === opts.fromSessionId)
@@ -371,9 +364,16 @@ async function sendOpened(
     ...(to.transcript ? { transcript: to.transcript } : {}),
   }
   await writeFileAtomic(file, messageFile(receipt, text), 0o600)
-  await saveReceipt(receipt)
 
   // From here on the Message is safe: whatever goes wrong, the user gets the line to paste.
+  try {
+    await saveReceipt(receipt)
+  } catch (err) {
+    // Without a receipt sideby could not follow it later, so it does not deliver it; the Message file is kept.
+    receipt.status = 'paste-needed'
+    receipt.note = `sideby kept the message but could not record it (${(err as NodeJS.ErrnoException).code ?? (err as Error).message}), so it did not deliver it; paste the line into its tab`
+    return publicReceipt(receipt)
+  }
   let result: { status: MessageStatus; note?: string }
   try {
     const acct = (await rt.accounts()).find((a) => a.ref === to.account)
@@ -490,10 +490,13 @@ function validReceipt(raw: unknown, dir: string, path: string): Stored | null {
   return r as unknown as Stored
 }
 
-/** Messages sideby kept, newest first, with their current status (re-checks `delivered` for `read`). */
+/**
+ * Messages sideby kept, newest first, with their current status (re-checks `delivered` for `read`). A `read` found
+ * is saved into the receipt unless `persist` is false (a read-only Panel only computes it).
+ */
 export async function listMessages(
   rt: Runtime,
-  opts: { to?: string; limit?: number } = {},
+  opts: { to?: string; limit?: number; persist?: boolean } = {},
 ): Promise<MessageReceipt[]> {
   const stateDir = rt.readContext().stateDir
   const root = await messageFolder(stateDir, [], false)
@@ -542,7 +545,7 @@ export async function listMessages(
     const seen = await tailLinesWith(r.transcript, `sideby message ${r.id}`).catch(() => [])
     if (seen.length) {
       r.status = 'read'
-      await saveReceipt(r, path).catch(() => {})
+      if (opts.persist !== false) await saveReceipt(r, path).catch(() => {})
     }
   }
   return list.map(({ r }) => publicReceipt(r))

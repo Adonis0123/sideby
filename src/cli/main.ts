@@ -76,6 +76,8 @@ Usage:
   sideby sessions copy <account|session-id> [--as reference|id|resume]
                                       copy one for another AI: a reference to its record (default),
                                       its id or its resume command
+  sideby sessions open-run <account|session-id>
+                                      open the run report of the dispatched task that session works for
   sideby send <account|session> "<text>" [--image <path>]...
                                       tell another session something (a screenshot too): Claude
                                       sessions get it at once, others through a line you paste
@@ -238,6 +240,7 @@ Exit: 0 opened, brought to the front or removed; 1 not macOS, no desktop app for
 installed, a bad window name, or the app did not open; 10 --remove without --yes; 2 malformed command line.`,
   sessions: `sideby sessions [<account>|<family>] [--json]
        sideby sessions copy <account|session-id> [--as reference|id|resume] [--lang en|zh] [--json]
+       sideby sessions open-run <account|session-id> [--json]
 
 List the sessions every account runs now (Claude Code, Codex, Grok Build, pi): each row shows the Session Label
 (account · the host's own title · first 8 of the id), whether it needs you, its directory and when it started.
@@ -249,12 +252,17 @@ by default a Session Reference, one sentence that points another AI at the sessi
 id, --as resume the command that resumes it. The reference follows your locale; --lang chooses.
 When an account runs several sessions, copy lists them: copy one by its id.
 
+open-run opens the run report (Run Board) of the task a session works for, when a local orchestrator such as the
+agent-dispatch skill says so, with the default program. It picks the session the way copy does.
+
 Examples:
   sideby sessions
   sideby sessions cc002 --json
   sideby sessions copy cc002
   sideby sessions copy 61230c3d --as resume
-Exit: 0 listed or copied; 1 no such account or running session, or several to choose from; 2 malformed command line.`,
+  sideby sessions open-run cc002
+Exit: 0 listed, copied or opened; 1 no such account or running session, several to choose from, or the session is
+in no run (or its report changed or did not open); 2 malformed command line.`,
   send: `sideby send <account|session> "<text>" [--image <path>]... [--lang en|zh] [--json]
 
 Tell another running session something, with screenshots if you like. <account> is a short command or ref whose

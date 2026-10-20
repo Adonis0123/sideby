@@ -1380,7 +1380,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       async run() {
         const latest: Record<string, PanelMessageStatus> = {}
         // Newest first: the first one met for a Session is its latest.
-        for (const m of await messages(await getRuntime(), { limit: 200 }))
+        for (const m of await messages(await getRuntime(), { limit: 200, persist: !readOnly }))
           latest[m.toSessionId] ??= { id: m.id, status: m.status, sentAt: m.sentAt }
         return { latest }
       },

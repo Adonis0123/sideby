@@ -113,8 +113,11 @@ describe('sideby messages inbound', () => {
     await withFakeHome(async (h) => {
       await h.write('.claude/settings.json', '{"crossSessionInbound":"accept"}')
       const r = await acceptInbound([acct(h, 'main')], ctx(h))
-      assert.equal(r.ok, true)
-      assert.match(r.message, /already show Messages from other sessions at once; nothing changed/)
+      assert.equal(r.ok, false)
+      assert.match(
+        r.message,
+        /already show Messages from other sessions at once \(already accept, nothing changed\)/,
+      )
       await h.write('.claude/settings.json', '[1]')
       const bad = await acceptInbound([acct(h, 'main')], ctx(h))
       assert.equal(bad.ok, false)

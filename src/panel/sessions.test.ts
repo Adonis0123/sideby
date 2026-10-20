@@ -165,7 +165,7 @@ describe('panel sessions endpoint', () => {
       const sid = '61230c3d-0000-4000-8000-000000000001'
       const board = await h.write('.local/state/agent-dispatch/boards/r1.html', '<!doctype html>\n', 0o600)
       await h.write(
-        '.local/state/agent-dispatch/sessions.json',
+        '.local/state/agent-dispatch/session-index.json',
         JSON.stringify({
           schemaVersion: 1,
           revision: 3,
