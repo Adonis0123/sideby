@@ -132,6 +132,7 @@ export function renderPage(opts: PageOptions): string {
   <section id="summary" class="summary" aria-busy="true">${SKELETON_STAT.repeat(4)}</section>
   <section id="handoff-page" class="block" aria-labelledby="h-handoff" hidden></section>
   <section id="tuning-page" class="block" aria-labelledby="h-tuning" hidden></section>
+  <section id="sessions-page" class="block" aria-labelledby="h-sessions" hidden></section>
   <section id="accounts-page" class="block" aria-labelledby="h-accounts">
     <div class="section-head acct-head"><h2 id="h-accounts"><span data-i18n="acct.title">Accounts</span><span id="acct-count" class="muted small"></span></h2><span id="updated" class="muted small" role="status">Loading…</span></div>
     <div id="toolbar" class="toolbar" hidden></div>

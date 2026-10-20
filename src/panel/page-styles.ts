@@ -522,6 +522,33 @@ a.btn:hover { text-decoration: none; }
 .hp-rows li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .hp-rows li:last-child { border-bottom: 0; }
 #handoff-page > * + * { margin-top: 12px; }
+/* Sessions page (spec §3.32): one row per Live Session; a Session that needs the user gets the warning tint. */
+#sessions-page > * + * { margin-top: 12px; }
+.sess-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 12px; padding: 11px 10px 11px 16px; border-top: 1px solid var(--border); transition: background-color .15s; }
+.sess-row:first-child { border-top: 0; border-radius: var(--radius) var(--radius) 0 0; }
+.sess-row:last-child { border-radius: 0 0 var(--radius) var(--radius); }
+.sess-row:only-child { border-radius: var(--radius); }
+.sess-needs-you { background: var(--warn-soft); }
+.sess-main { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.sess-label { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.sess-label > * { flex: none; }
+.sess-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess-id { color: var(--muted); }
+.sess-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; min-width: 0; }
+.sess-status { display: inline-flex; align-items: center; gap: 6px; }
+.sess-needs-you .sess-status { color: var(--warn); font-weight: var(--strong-weight); }
+.sess-needs-you .sess-dot { background: var(--warn-bar); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn-bar) 25%, transparent); }
+.sess-busy .sess-dot { background: var(--ok-bar); animation: pulse 1.4s ease-in-out infinite; }
+.sess-unknown .sess-dot { background: transparent; border: 1px solid var(--faint); }
+.sess-cwd { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess-guessed { cursor: help; }
+.sess-age { white-space: nowrap; }
+.sess-actions { display: flex; align-items: center; gap: 4px; }
+.sess-copy { min-width: 8.5em; justify-content: center; transition: background-color .15s, border-color .15s, color .15s; }
+.sess-copy.is-copied { background: var(--ok-soft); border-color: transparent; color: var(--ok); }
+.sess-copy .ic { width: 14px; height: 14px; }
+.sess-copy-text { display: block; width: 100%; box-sizing: border-box; margin-top: 8px; padding: 8px; border: 1px solid var(--border); border-radius: var(--ctl-radius); background: var(--surface-2); color: var(--text); resize: none; }
+.pop-sess-copy { width: min(440px, calc(100vw - 16px)); }
 .ah-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end; }
 .tune-model { border: 1px solid var(--border); border-radius: calc(var(--radius) - 4px); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 .tune-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
@@ -853,6 +880,8 @@ select:is(:hover, :focus) { --chevron: var(--text); }
   .stat:nth-child(n) { border-top: 0; }
   .stat:nth-child(4) { border-left: 1px solid var(--border); }
   .row-end .icon-btn { width: 36px; height: 36px; }
+  .sess-row { grid-template-columns: auto minmax(0, 1fr); row-gap: 10px; }
+  .sess-actions { grid-column: 2; }
   .login-dirs { grid-template-columns: minmax(0, 1fr); }
   .login-dir { grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 14px; row-gap: 6px; }
   .login-dir .usage, .login-dir .health { display: none; }
@@ -893,8 +922,8 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .dialog:not([open]) { opacity: 0; transform: translateY(4px) scale(.985); pointer-events: none; }
 .dialog:not([open])::backdrop { opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
-  .sk, .spin, .is-spinning svg, .toast, .toast.bump, .toast.toast-out, .view-in > *, .set-pane.view-in, .row.flash, .card.flash, .pulse, .menu, .menu.float-out, .dialog[open], .dialog[open]::backdrop, .enter, .tip-body, .tip-float, .row-run.is-done .ic { animation: none; }
-  .bar > span, .chev, .row, .icon-btn, .seg-btn, .menu-item, .set-tab, .link-btn, .tag-btn, .email-btn, .btn, .chip-btn, .set-link .ic, .dialog, .dialog::backdrop { transition: none; }
+  .sk, .spin, .is-spinning svg, .toast, .toast.bump, .toast.toast-out, .view-in > *, .set-pane.view-in, .row.flash, .card.flash, .pulse, .sess-busy .sess-dot, .menu, .menu.float-out, .dialog[open], .dialog[open]::backdrop, .enter, .tip-body, .tip-float, .row-run.is-done .ic { animation: none; }
+  .bar > span, .chev, .row, .sess-row, .sess-copy, .icon-btn, .seg-btn, .menu-item, .set-tab, .link-btn, .tag-btn, .email-btn, .btn, .chip-btn, .set-link .ic, .dialog, .dialog::backdrop { transition: none; }
   :is(.btn, .icon-btn, .seg-btn, .set-tab, .chip-btn):active:not(:disabled), .set-link:hover .ic, .dialog:not([open]) { transform: none; }
 }
 `

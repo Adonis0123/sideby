@@ -40,6 +40,8 @@
 | `sideby browser open <acct> [--profile <名字>]` | 用登录过这个账号的浏览器用户打开 claude.ai、chatgpt.com 或 grok.com，或者用 `--profile` 指定的那个（macOS；WSL 里用 Windows 上的 Chrome） | 0；不是 macOS 或 WSL、没装 Chrome、没有或有多个浏览器用户可选、没能打开为 1 |
 | `sideby browser set <acct> <名字>` / `--auto` | sideby 认错时，自己指定这个账号的 Chrome 浏览器用户（存在 config `browser.choices`）；`--auto` 改回自动识别 | 0；没有这个浏览器用户、同名的有多个、账号没有网站为 1 |
 | `sideby desktop grok-bot:<名字> [--remove [--yes]]` | 按名字打开一个 Grok Bot 窗口，新名字就新建一个未登录的窗口；`--remove` 删掉你建的窗口和它的数据（macOS） | 0；不是 macOS、名字不对、应用没装、窗口开着（`--remove` 时）或没能打开为 1；`--remove` 不带 `--yes` 为 10 |
+| `sideby sessions [acct\|family]` | 列出每个账号正在运行的会话，一行一个：Session Label（`cc002 · knip cleanup · 61230c3d`，即账号、宿主自己的会话标题、id 前 8 位）、是否需要你处理、工作目录、开始时间；需要你处理的排最前。sideby 对不上运行中程序的 Codex 或 pi 会话，取该账号最新的会话并标为推测。只读，不读凭证 | 0；账号或家族不存在为 1 |
+| `sideby sessions copy <acct\|session-id> [--as reference\|id\|resume] [--lang en\|zh]` | 把一个会话复制给另一个 AI：默认复制 Session Reference（一句话，写明账号、Label 和记录文件路径），也可以复制 id 或恢复命令。用 pbcopy（macOS）、wl-copy 或 xclip（Linux）；都没有时把文字打印出来 | 0；没有这个账号或运行中的会话、或这个账号有几个会话（会列出来，按 id 复制其中一个）为 1 |
 | `sideby edit <acct> [--path]` | 用默认编辑器打开这个账号自己的设置文件（`settings.json`、`config.toml`）；`--path` 只输出路径。sideby 不读文件内容 | 0；文件不存在、这个宿主没有设置文件或没能打开为 1 |
 | `sideby app install [--url <url>]` | 添加打开面板（或 `<url>`）的面板应用（macOS、Linux） | 0；平台不支持或目标位置有不是它创建的文件为 1 |
 | `sideby app uninstall` | 删除 `app install` 创建的文件 | 0；留下了不是它创建的文件为 1 |
@@ -64,5 +66,5 @@
 - 所有命令遇到用法错误（未知选项、缺参数）时退出码为 2；sideby 自身出错（账号不存在、名字不合法、配置读不了）时为 1。
 - `<acct>` 写成 `<family>:<name>`；名字在所有家族里唯一时，只写 `<name>` 也行。有歧义就报错，并列出候选。
 - 退出码 10 表示命令展示了改动、在等你确认：同意的话，加上 `--yes` 再跑一次同一条命令。
-- `list`、`new`、`next`、`alias`、`doctor`、`quota`（包括 `setup` 和 `teardown`）、`tune`、`model`、`remote-control`、`handoff`、`families`、`plugins`、`ask`、`terminal`、`key`、`try`、`autostart`、`menubar`、`config`、`app`、`desktop` 支持 `--json`，输出带 `schemaVersion: 1`，JSON Schema 随包放在 [`schemas/`](../../schemas/)。有新版本或本机装的 skill 版本不对时，输出里还会多一个 `_notice`（sideby skill 让 agent 提一次并主动问要不要帮你更新；设 `SIDEBY_NO_UPDATE_NOTIFIER=1` 就不带）。加了 `--json` 时，出错会输出 `{ "schemaVersion": 1, "error": "…", "code": "…" }`：命令行写错时 `code` 为 `usage`，其他情况是 `no-quota-source` 这样的原因。只新增字段时版本不变；删除、改名或改语义时加 1。
+- `list`、`new`、`next`、`alias`、`doctor`、`quota`（包括 `setup` 和 `teardown`）、`tune`、`model`、`remote-control`、`handoff`、`families`、`plugins`、`ask`、`terminal`、`key`、`try`、`autostart`、`menubar`、`config`、`app`、`desktop`、`sessions` 支持 `--json`，输出带 `schemaVersion: 1`，JSON Schema 随包放在 [`schemas/`](../../schemas/)。有新版本或本机装的 skill 版本不对时，输出里还会多一个 `_notice`（sideby skill 让 agent 提一次并主动问要不要帮你更新；设 `SIDEBY_NO_UPDATE_NOTIFIER=1` 就不带）。加了 `--json` 时，出错会输出 `{ "schemaVersion": 1, "error": "…", "code": "…" }`：命令行写错时 `code` 为 `usage`，其他情况是 `no-quota-source` 这样的原因。只新增字段时版本不变；删除、改名或改语义时加 1。
 - 任何输出、日志和错误信息里都不会出现凭据的值。

@@ -40,6 +40,7 @@ Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique
 |---|---|---|
 | Install sideby, or set up a new account ("add cc008") | `sideby --version`, `sideby list --json`, `sideby new <family> --next --json` | `references/setup.md` |
 | Show which account a session is (`[cc001]` in the status line or tab title) | `sideby list --json` for the labels | `references/badge.md` |
+| Find which session an account is running now ("cc002 现在在干嘛", "which session is cc002 running", "哪个会话在等我"), or copy one for another AI ("复制 cc002 的会话 id", "copy cc002's session for another AI", "把这个会话交给另一个 AI") | `sideby sessions [<account>\|<family>] --json`, `sideby sessions copy <account\|id> [--as reference\|id\|resume] --json` | `references/sessions.md` |
 | Know what accounts share and what stays separate | `sideby families <family> --json` | `references/sharing.md` |
 | See accounts, health, quota and usage | `sideby list --json`, `sideby doctor --json`, `sideby quota --json` | `references/diagnose.md` |
 | Pin accounts or arrange their Display Order | `sideby order --json`, `sideby pin <ref> --json`, `sideby unpin <ref> --json` | `references/panel.md` |

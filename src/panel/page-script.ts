@@ -46,7 +46,11 @@ import {
   reorder,
   rowBadge,
   runCodeSwap,
+  sessionAge,
+  sessionLabelParts,
+  shortCwd,
   sortAccounts,
+  sortSessions,
   stripSecrets,
   suggestAlias,
   suggestName,
@@ -107,7 +111,11 @@ const LOGIC = [
   remoteControlTodo,
   reorder,
   rowBadge,
+  sessionAge,
+  sessionLabelParts,
+  shortCwd,
   sortAccounts,
+  sortSessions,
   suggestAlias,
   suggestName,
   updatedAge,
@@ -2560,7 +2568,7 @@ const MAIN = String.raw`
   // What each card's size menu shows while the user is choosing, by group id; dropped once a change is made.
   const tuneSel = {}
   const tp = { data: null, loading: false, error: null, at: 0 }
-  function pageFromHash() { return location.hash === '#tuning' ? 'tuning' : location.hash === '#handoff' ? 'handoff' : 'accounts' }
+  function pageFromHash() { return location.hash === '#tuning' ? 'tuning' : location.hash === '#handoff' ? 'handoff' : location.hash === '#sessions' ? 'sessions' : 'accounts' }
   let curPage = pageFromHash()
   function tuneSize(n) { return n === null || n === undefined ? t('tune.hostDefault') : tokens(n) }
   function tuneRedraw() {
@@ -2754,7 +2762,22 @@ const MAIN = String.raw`
 
   // The page: every account that can tune, on a page of its own. The address ending in #tuning opens it.
   function tuningAvailable() { return Boolean(S.state && S.state.families.some((f) => f.tuning)) }
+  // Every move to a page counts, so an answer that comes in late never takes the viewer back to a page they left.
+  let navSeq = 0
   function setPage(next) {
+    const seq = ++navSeq
+    // The Sessions page opens once its first answer is in, at its final size (one read at start usually has it);
+    // meanwhile its tab spins.
+    if (next === 'sessions' && !sp.data && !sp.error) {
+      sp.opening = true
+      renderPageChrome()
+      loadSessions().finally(() => {
+        sp.opening = false
+        if (seq === navSeq) setPage('sessions')
+        else renderPageChrome()
+      })
+      return
+    }
     curPage = next
     try { history.replaceState(null, '', next === 'accounts' ? location.pathname + location.search : '#' + next) } catch {}
     renderPageChrome()
@@ -2764,21 +2787,29 @@ const MAIN = String.raw`
     const nav = $('pages')
     const canTune = tuningAvailable()
     const canHandoff = Boolean(ahState())
-    if (S.state && ((curPage === 'tuning' && !canTune) || (curPage === 'handoff' && !canHandoff))) curPage = 'accounts'
+    const canSessions = Boolean(S.state && S.state.accounts.length)
+    if (S.state && ((curPage === 'tuning' && !canTune) || (curPage === 'handoff' && !canHandoff) || (curPage === 'sessions' && !canSessions))) curPage = 'accounts'
     const tabs = [['accounts', t('page.accounts')]]
+    if (canSessions) tabs.push(['sessions', t('page.sessions')])
     if (canTune) tabs.push(['tuning', t('page.tuning')])
     if (canHandoff) tabs.push(['handoff', t('page.handoff')])
     nav.hidden = tabs.length < 2
     setKids(nav, h('div', { class: 'seg', role: 'presentation' }, tabs.map(([id, label]) =>
-      h('button', { class: 'seg-btn', type: 'button', role: 'tab', 'aria-selected': curPage === id ? 'true' : 'false', onclick: () => setPage(id) }, label))))
+      h('button', { class: 'seg-btn', type: 'button', role: 'tab', 'aria-selected': curPage === id ? 'true' : 'false', 'aria-busy': id === 'sessions' && sp.opening ? 'true' : null, onclick: () => setPage(id) }, id === 'sessions' && sp.opening ? [spinner(), ' '] : null, label))))
     const away = curPage !== 'accounts' && tabs.some(([id]) => id === curPage)
     // With no account yet the empty state is the whole page: no summary, no health check.
     const none = Boolean(S.state && !S.state.accounts.length)
     for (const id of ['summary', 'accounts-page', 'checkup']) $(id).hidden = away || (none && id !== 'accounts-page')
     const onTune = away && curPage === 'tuning'
     const onHandoff = away && curPage === 'handoff'
+    const onSessions = away && curPage === 'sessions'
     $('tuning-page').hidden = !onTune
     $('handoff-page').hidden = !onHandoff
+    $('sessions-page').hidden = !onSessions
+    if (onSessions) {
+      if (!sp.data && !sp.error) loadSessions()
+      renderSessionsPage()
+    }
     if (onTune) {
       if (!tp.data && !tp.loading && !tp.error) loadTuningPage()
       else renderTuningPage()
@@ -2819,7 +2850,148 @@ const MAIN = String.raw`
     }
     setKids(box, kids)
   }
-  window.addEventListener('hashchange', () => { curPage = pageFromHash(); renderPageChrome() })
+  window.addEventListener('hashchange', () => { navSeq++; curPage = pageFromHash(); renderPageChrome() })
+
+  // ---------- sessions (spec §3.32, ADR-0039) ----------
+  // What every Account is running now, one row per Live Session, with "Copy for AI" and a menu for the id and the resume
+  // command. Read once at start so the page opens at its final size, then every SESS_MS while it shows. An answer
+  // that draws the same rows draws nothing; a new one waits while a menu or popover of the page is open, and the
+  // focused button keeps focus (swapKids). The "x min ago" texts change in place every second.
+  const SESS_MS = 5000
+  const sp = { data: null, lang: null, loading: null, error: null, at: 0, drawn: '', pending: false, copied: {}, opening: false }
+  function loadSessions() {
+    if (sp.loading) return sp.loading
+    sp.loading = readSessions()
+    return sp.loading
+  }
+  async function readSessions() {
+    const asked = lang
+    try { sp.data = await api('/api/sessions', { lang: asked }); sp.lang = asked; sp.error = null } catch (e) { sp.error = e }
+    sp.at = Date.now()
+    sp.loading = null
+    renderSessionsPage()
+  }
+  function sessionsMenuOpen() { return Boolean(menu.el && menu.anchor && $('sessions-page').contains(menu.anchor)) }
+  function sessAgeText(s) {
+    const a = sessionAge(s, Date.now())
+    return a ? t(a.key, { n: a.n }) : ''
+  }
+  function renderSessionAges() {
+    if (!sp.data || $('sessions-page').hidden) return
+    const byId = {}
+    for (const s of sp.data.sessions) byId[s.sessionId] = s
+    for (const el of $('sessions-page').querySelectorAll('[data-age]')) {
+      const s = byId[el.getAttribute('data-age')]
+      const text = s ? sessAgeText(s) : ''
+      if (el.textContent !== text) el.textContent = text
+    }
+  }
+  // Copies, then says so where the click was; a browser that refuses gets the text selected in a popover to copy by hand.
+  async function sessCopy(anchor, text, done) {
+    let ok = true
+    try { await navigator.clipboard.writeText(text) } catch {
+      const ta = h('textarea', { css: { position: 'fixed', opacity: '0' } })
+      ta.value = text
+      document.body.append(ta)
+      ta.select()
+      try { ok = document.execCommand('copy') } catch { ok = false }
+      ta.remove()
+    }
+    if (ok) { done(); return }
+    const keys = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘C' : 'Ctrl+C'
+    openPopover(anchor, 'sess-copy', t('spage.copyFailTitle'), () => {
+      const area = h('textarea', { class: 'sess-copy-text mono', readonly: true, rows: '4', 'aria-label': t('spage.copyFailTitle') })
+      area.value = text
+      setTimeout(() => { if (area.isConnected) { area.focus(); area.select() } }, 0)
+      return [h('p', { class: 'small' }, t('spage.copyFail', { keys })), area]
+    })
+  }
+  function copyForAi(btn, s) {
+    sessCopy(btn, s.copy.reference, () => {
+      sp.copied[s.sessionId] = Date.now() + 2000
+      btn.classList.add('is-copied')
+      btn.replaceChildren(icon('check'), h('span', null, t('spage.copied')))
+      toast(t('spage.copiedToast'), { key: 'sess-copy' })
+      // The row may have been drawn again meanwhile: put back whichever button stands for this Session now.
+      setTimeout(() => {
+        delete sp.copied[s.sessionId]
+        const now = document.querySelector('[data-key="sess-copy-' + s.sessionId + '"]')
+        if (!now) return
+        now.classList.remove('is-copied')
+        now.replaceChildren(icon('copy'), h('span', null, t('spage.copyAi')))
+      }, 2000)
+    })
+  }
+  // Orca brings the tab forward itself; only a refusal needs words here.
+  async function jumpToOrca(s) {
+    try { await api('/api/sessions/orca', { sessionId: s.sessionId }) } catch (e) {
+      toast(e.message, { kind: 'fail' })
+      loadSessions()
+    }
+  }
+  function sessionRow(s) {
+    const p = sessionLabelParts(s)
+    const copied = (sp.copied[s.sessionId] || 0) > Date.now()
+    const status = ['needs-you', 'busy', 'idle'].includes(s.status) ? s.status : 'unknown'
+    const more = h('button', { class: 'icon-btn more', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'data-key': 'sess-more-' + s.sessionId, 'aria-label': t('spage.more', { label: s.label || p.account }), 'data-tip': t('menu.title') }, icon('more'))
+    more.addEventListener('click', () => openMenu(more, [
+      s.orca && !BOOT.readOnly ? { icon: 'link', label: t('spage.jump'), run: () => jumpToOrca(s) } : null,
+      s.orca && !BOOT.readOnly ? '-' : null,
+      { icon: 'copy', label: t('spage.copyId'), hint: p.id, run: () => sessCopy(more, s.copy.id, () => toast(t('toast.copied', { text: p.id }))) },
+      { icon: 'terminal', label: t('spage.copyResume'), run: () => sessCopy(more, s.copy.resume, () => toast(t('toast.copied', { text: s.copy.resume }))) },
+    ], t('spage.more', { label: s.label || p.account })))
+    const copyBtn = h('button', { class: 'btn btn-sm btn-primary sess-copy' + (copied ? ' is-copied' : ''), type: 'button', 'data-key': 'sess-copy-' + s.sessionId },
+      icon(copied ? 'check' : 'copy'), h('span', null, t(copied ? 'spage.copied' : 'spage.copyAi')))
+    copyBtn.addEventListener('click', () => copyForAi(copyBtn, s))
+    const cwd = shortCwd(s.cwd)
+    return h('div', { class: 'sess-row sess-' + status, 'data-enter': s.sessionId, 'data-session': s.sessionId },
+      badge(s.family, 'sm'),
+      h('div', { class: 'sess-main' },
+        h('div', { class: 'sess-label' },
+          h('b', null, p.account),
+          p.title ? h('span', { class: 'sess-title' }, p.title) : null,
+          h('span', { class: 'mono sess-id' }, p.id)),
+        h('div', { class: 'sess-sub muted small' },
+          h('span', { class: 'sess-status' }, h('span', { class: 'dot sess-dot', 'aria-hidden': 'true' }), t('spage.status.' + status)),
+          s.guessed ? h('span', { class: 'chip sess-guessed', tabindex: '0', 'data-tip': t('spage.guessedTip') }, t('spage.guessed')) : null,
+          h('span', { class: 'sess-cwd' + (cwd ? ' mono' : ''), title: s.cwd && cwd !== s.cwd ? s.cwd : null }, cwd || t('spage.noCwd')),
+          h('span', { class: 'sess-age', 'data-age': s.sessionId }, sessAgeText(s)))),
+      h('div', { class: 'sess-actions' }, copyBtn, more))
+  }
+  function renderSessionsPage() {
+    const box = $('sessions-page')
+    if (box.hidden) return
+    // The copy texts come in the Panel's language: a switch reads them again.
+    if (sp.data && sp.lang !== lang && !sp.loading) { loadSessions(); return }
+    const d = sp.data
+    const list = d ? sortSessions(d.sessions) : []
+    // Everything a row shows except its age, which renderSessionAges keeps current in place.
+    const shape = JSON.stringify([lang, !d && !sp.error, sp.error ? sp.error.message : '', d ? d.problems : [],
+      list.map((s) => [s.sessionId, s.account, s.accountLabel, s.family, s.title, s.label, s.status, s.cwd, s.guessed, s.copy, Boolean(s.orca)])])
+    if (shape === sp.drawn) { sp.pending = false; renderSessionAges(); return }
+    if (sessionsMenuOpen()) { sp.pending = true; return }
+    sp.pending = false
+    sp.drawn = shape
+    // No Refresh of its own: the list renews itself every few seconds, and the header's Refresh reads it too.
+    const kids = [h('div', { class: 'section-head' }, h('h2', { id: 'h-sessions' }, t('spage.title')))]
+    kids.push(h('p', { class: 'muted small' }, t('spage.intro')))
+    if (sp.error) kids.push(errorNote(sp.error, () => loadSessions()))
+    if (!d && !sp.error) kids.push(h('div', { class: 'group-list sess-list', 'aria-busy': 'true' }, [0, 1, 2].map(() => h('div', { class: 'sk-row' }, h('span', { class: 'sk sk-badge' }), h('span', { class: 'sk sk-title' }), h('span', { class: 'sk sk-bar' })))))
+    if (d && !list.length && !sp.error) kids.push(h('div', { class: 'empty empty-sm sess-empty' }, h('p', null, t('spage.empty'))))
+    if (list.length) kids.push(h('div', { class: 'group-list sess-list', role: 'list' }, list.map((s) => { const r = sessionRow(s); r.setAttribute('role', 'listitem'); return r })))
+    if (d) for (const problem of d.problems) kids.push(h('p', { class: 'note note-warn small' }, t('spage.problem', { problem })))
+    // The example names an Account that is on the list, the one at the top; with none, it asks in general.
+    const example = list.length ? t('spage.askOne', { name: sessionLabelParts(list[0]).account }) : t('spage.askAny')
+    kids.push(h('p', { class: 'muted small sess-ask' }, t('spage.askHint', { example })))
+    swapKids(box, kids)
+  }
+  // While the page shows: a new answer every SESS_MS, a held one once its menu closed, and the ages every second.
+  function sessionsTick() {
+    if (curPage !== 'sessions' || $('sessions-page').hidden || document.visibilityState !== 'visible') return
+    if (sp.pending && !sessionsMenuOpen()) renderSessionsPage()
+    else renderSessionAges()
+    if (!sp.loading && !conn.lost && Date.now() - sp.at >= SESS_MS) loadSessions()
+  }
 
   // New account. The form is built once per opening so typing keeps focus; only its derived parts re-render.
   let nf = null
@@ -3686,6 +3858,7 @@ const MAIN = String.raw`
       btn.disabled = false
     }
     load({ check: true, announce: true })
+    if (curPage === 'sessions') loadSessions()
   }
   function checkOf(fam) { return S.state && (S.state.quotaChecks || []).find((c) => c.family === fam) }
   async function setCheck(fam, on) {
@@ -4171,7 +4344,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.session', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.tool']
   function openRc() {
     if (!S.state || !rcSummary()) return
     rc.target = null
@@ -5009,6 +5182,7 @@ const MAIN = String.raw`
   function tick() {
     renderUpdated()
     reloadForNewBuild()
+    sessionsTick()
     if (document.visibilityState !== 'visible' || !S.state) return
     if (S.pending && !S.loading && !uiBusy()) { S.pending = false; renderAll() }
     const now = Date.now()
@@ -5433,6 +5607,8 @@ const MAIN = String.raw`
   load({ check: true })
   // The switches' state is read now, not when Settings opens, so the popover opens at its final size.
   loadAutostart()
+  // The sessions too, so the Sessions page opens with its rows already there.
+  loadSessions()
   setInterval(tick, 1000)
   document.addEventListener('visibilitychange', wake)
   window.addEventListener('focus', wake)

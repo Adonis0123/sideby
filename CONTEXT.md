@@ -41,6 +41,16 @@ Avoid: *profile* on its own (Codex already uses it for a config layer that does 
 - **Shell-init file**: a file named in the config `shellInitFile` that sideby keeps equal to the `sideby shell-init` output, for shells that source it instead of running `eval`.
 - **Resume Routing**: with config `resumeRouting`, a shell function with the Host's own name sends a bare resume by session id (`claude --resume <id>`, as terminal managers type it) to the Account that holds the session, through `sideby resume`. A Claude session that was started but never saved opens as a new session in the Account that started it (ADR-0009). It never copies sessions (ADR-0007).
 
+## Sessions
+
+- **Session**: one conversation of a Host in one Account, known by the Host's session id. It stays in the Account that started it.
+- **Live Session**: a Session whose Host process is still running. sideby finds it from the Host's own files; where it can only guess (the newest Session of an Account), it says so.
+- **Session Label**: how a Session is shown wherever the user looks (tab title, status line, lists): the Account name, the Host's own title for the Session, and a short id, as in `cc002 · knip cleanup · 61230c3d`. sideby never invents the title.
+- **Session Reference**: one sentence that points another AI at a Session (its Account, Label and where its record is), ready to paste. It is what a copy button copies first.
+- **Message**: text, and optionally screenshots, that one Session sends to another. It is kept as a file before any delivery, so it is never lost; it is then delivered, read, or handed to the user to paste.
+
+Avoid: *tab* for a Session (one tab can run several Sessions over time), *inbox* (Claude Code's own word for its native delivery).
+
 ## Health
 
 - **Doctor**: the check that reads every Account and reports Findings.

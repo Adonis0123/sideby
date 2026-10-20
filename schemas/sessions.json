@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/sessions.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "sessions",
+    "problems"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "sessions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "account",
+          "accountLabel",
+          "family",
+          "sessionId",
+          "title",
+          "label",
+          "status",
+          "guessed",
+          "reference",
+          "resumeCommand"
+        ],
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "The Account ref, for example `claude:002`."
+          },
+          "accountLabel": {
+            "type": "string",
+            "description": "The account's short name: its short command when it has one (`cc002`), else its ref."
+          },
+          "family": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "The host's own session id."
+          },
+          "title": {
+            "type": "string",
+            "description": "The host's own title for the session, or its working directory name when the host gives none; may be empty."
+          },
+          "label": {
+            "type": "string",
+            "description": "The Session Label: `<accountLabel> · <title> · <first 8 of sessionId>`."
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "needs-you"
+              },
+              {
+                "type": "string",
+                "const": "busy"
+              },
+              {
+                "type": "string",
+                "const": "idle"
+              },
+              {
+                "type": "string",
+                "const": "unknown"
+              }
+            ],
+            "description": "`needs-you`: it waits for the user (a permission or a question); `unknown` where the host does not say."
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "pid": {
+            "type": "integer",
+            "description": "The host process running it."
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "Its most recent activity."
+          },
+          "guessed": {
+            "type": "boolean",
+            "description": "True when sideby could not tie a running program to the session and took the account's newest one (Codex, pi)."
+          },
+          "transcript": {
+            "type": "string",
+            "description": "Path of the session's record."
+          },
+          "reference": {
+            "type": "string",
+            "description": "The Session Reference in English: one sentence that points another AI at the session and its record."
+          },
+          "resumeCommand": {
+            "type": "string",
+            "description": "The command that resumes it in the account that holds it."
+          }
+        }
+      },
+      "description": "Running sessions, those that need the user first, then by most recent activity."
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "An account or family that could not be read, and what to do; never aborts the listing."
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby sessions --json"
+}

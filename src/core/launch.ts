@@ -20,7 +20,17 @@ export interface PreparedLaunch {
 }
 
 /** What `runHost` needs: a prepared Account launch, or the Host run unchanged (`sideby resume`). */
-export type HostLaunch = Pick<PreparedLaunch, 'family' | 'bin' | 'args' | 'env' | 'title'>
+export type HostLaunch = Pick<PreparedLaunch, 'family' | 'bin' | 'args' | 'env' | 'title'> & {
+  /** The Account the Host runs as, when sideby chose one: its Live Session can then grow the title (spec §3.32). */
+  account?: Account
+}
+
+/**
+ * Whether the title `[cc002]` should grow into the Session Label as the Host runs (spec §3.32): only with config
+ * `accountTitle`, for a known Account, and on a terminal.
+ */
+export const watchesTitle = (p: HostLaunch, isTTY: boolean | undefined): boolean =>
+  Boolean(p.title && p.account && isTTY)
 
 /** Finds an executable on PATH; returns null when the Host is not installed. */
 export async function which(bin: string, env: Env): Promise<string | null> {
@@ -211,7 +221,11 @@ export function spawnHost(p: HostLaunch): { child: ChildProcess; exited: Promise
     ['SIGTERM', forward('SIGTERM')],
     ['SIGHUP', forward('SIGHUP')],
   ]
+  let ended = false
+  let stopTitle: (() => void) | undefined
   const cleanup = () => {
+    ended = true
+    stopTitle?.()
     for (const [s, h] of handlers) process.off(s, h)
   }
   for (const [s, h] of handlers) process.on(s, h)
@@ -222,6 +236,19 @@ export function spawnHost(p: HostLaunch): { child: ChildProcess; exited: Promise
     throw err
   }
   const host = child
+  if (watchesTitle(p, process.stdout.isTTY) && host.pid !== undefined) {
+    const watch = { account: p.account!, accountLabel: p.env.SIDEBY_LABEL || p.account!.ref, pid: host.pid }
+    // Loaded only here, so a Launch without the title pays nothing for it.
+    import('./live-sessions-title.ts')
+      .then((m) => {
+        if (ended) return
+        stopTitle = m.watchSessionTitle({
+          ...watch,
+          write: (t) => process.stdout.write(`\x1b]0;${t}\x07`),
+        })
+      })
+      .catch(() => {})
+  }
   const exited = new Promise<number>((resolve) => {
     host.once('error', (err: NodeJS.ErrnoException) => {
       cleanup()

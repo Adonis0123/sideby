@@ -27,6 +27,7 @@ import {
   hotkeyPressKind,
   inDisplayOrder,
   type LogicAccount,
+  type LogicSession,
   loginClusters,
   loginKey,
   maskEmail,
@@ -49,7 +50,11 @@ import {
   reorder,
   rowBadge,
   runCodeSwap,
+  sessionAge,
+  sessionLabelParts,
+  shortCwd,
   sortAccounts,
+  sortSessions,
   stripSecrets,
   suggestAlias,
   suggestName,
@@ -1812,5 +1817,84 @@ describe('foldSkips', () => {
   it('leaves the row alone for controls, tooltips and anything in the open details', () => {
     for (const where of ['button', 'a', 'input', '.tip', '.row-detail'])
       assert.equal(foldSkips(at(where)), true, where)
+  })
+})
+
+describe('Sessions page', () => {
+  const now = Date.parse('2026-10-20T12:00:00Z')
+  const s = (sessionId: string, over: Partial<LogicSession> = {}): LogicSession => ({
+    account: 'claude:002',
+    accountLabel: 'cc002',
+    sessionId,
+    title: 'knip cleanup',
+    label: `cc002 · knip cleanup · ${sessionId.slice(0, 8)}`,
+    status: 'busy',
+    cwd: '~/code/app',
+    ...over,
+  })
+
+  it('puts a Session that needs the user first, then the most recent, then by label', () => {
+    const list = [
+      s('aaaaaaaa1', { updatedAt: '2026-10-20T11:50:00Z' }),
+      s('bbbbbbbb2', { status: 'idle', updatedAt: '2026-10-20T11:59:00Z' }),
+      s('cccccccc3', { status: 'needs-you', updatedAt: '2026-10-20T10:00:00Z' }),
+      s('dddddddd4', { startedAt: '2026-10-20T11:55:00Z' }),
+      s('eeeeeeee5', { label: 'a first' }),
+      s('ffffffff6', { label: 'b second' }),
+    ]
+    assert.deepEqual(
+      sortSessions(list).map((x) => x.sessionId),
+      ['cccccccc3', 'bbbbbbbb2', 'dddddddd4', 'aaaaaaaa1', 'eeeeeeee5', 'ffffffff6'],
+    )
+    assert.deepEqual(sortSessions([]), [])
+    assert.equal(list[0]!.sessionId, 'aaaaaaaa1', 'leaves the given list alone')
+  })
+
+  it('says how long ago a Session was active, from updatedAt or else startedAt', () => {
+    assert.deepEqual(sessionAge(s('a', { updatedAt: '2026-10-20T11:53:00Z' }), now), {
+      key: 'time.minAgo',
+      n: 7,
+    })
+    assert.deepEqual(sessionAge(s('a', { startedAt: '2026-10-20T09:00:00Z' }), now), {
+      key: 'time.hAgo',
+      n: 3,
+    })
+    assert.deepEqual(sessionAge(s('a', { updatedAt: '2026-10-20T12:00:30Z' }), now), { key: 'time.justNow' })
+    assert.equal(sessionAge(s('a'), now), null)
+    assert.equal(sessionAge(s('a', { updatedAt: 'soon' }), now), null)
+  })
+
+  it('splits the Session Label into account, title and short id', () => {
+    assert.deepEqual(sessionLabelParts(s('61230c3d-0000-4000')), {
+      account: 'cc002',
+      title: 'knip cleanup',
+      id: '61230c3d',
+    })
+    // No title from the Host: the working directory's name, as the Session Label does.
+    assert.deepEqual(sessionLabelParts(s('61230c3d', { title: '', cwd: '~/code/sideby/' })), {
+      account: 'cc002',
+      title: 'sideby',
+      id: '61230c3d',
+    })
+    // No title and no working directory (a guessed Session can have neither), no alias: the ref.
+    assert.deepEqual(
+      sessionLabelParts(s('ab', { title: undefined, cwd: undefined, accountLabel: undefined })),
+      {
+        account: 'claude:002',
+        title: '',
+        id: 'ab',
+      },
+    )
+  })
+
+  it('shortens a long working directory and keeps a short one', () => {
+    assert.equal(shortCwd(undefined), '')
+    assert.equal(shortCwd('~/code/app'), '~/code/app')
+    assert.equal(shortCwd('~/code/clients/example/monorepo/packages/web', 30), '~/…/packages/web')
+    assert.equal(shortCwd('/srv/build/workspaces/team/project/apps/api', 30), '/srv/…/apps/api')
+    const deep = '~/x/a-very-long-folder-name-that-goes-on/another-very-long-folder-name'
+    const short = shortCwd(deep, 30)
+    assert.equal(short.length, 30)
+    assert.ok(short.startsWith('…') && deep.endsWith(short.slice(1)))
   })
 })

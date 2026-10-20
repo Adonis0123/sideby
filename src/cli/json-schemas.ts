@@ -1046,6 +1046,71 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     },
     { title: 'sideby desktop --json' },
   ),
+  sessions: Type.Object(
+    {
+      schemaVersion: Version,
+      sessions: Type.Array(
+        Type.Object({
+          account: Type.String({ description: 'The Account ref, for example `claude:002`.' }),
+          accountLabel: Type.String({
+            description:
+              "The account's short name: its short command when it has one (`cc002`), else its ref.",
+          }),
+          family: Str,
+          sessionId: Type.String({ description: "The host's own session id." }),
+          title: Type.String({
+            description:
+              "The host's own title for the session, or its working directory name when the host gives none; may be empty.",
+          }),
+          label: Type.String({
+            description: 'The Session Label: `<accountLabel> · <title> · <first 8 of sessionId>`.',
+          }),
+          status: Type.Union(
+            ['needs-you', 'busy', 'idle', 'unknown'].map((k) => Type.Literal(k)),
+            {
+              description:
+                '`needs-you`: it waits for the user (a permission or a question); `unknown` where the host does not say.',
+            },
+          ),
+          cwd: Type.Optional(Str),
+          pid: Type.Optional(Type.Integer({ description: 'The host process running it.' })),
+          startedAt: Type.Optional(Str),
+          updatedAt: Type.Optional(Type.String({ description: 'Its most recent activity.' })),
+          guessed: Type.Boolean({
+            description:
+              "True when sideby could not tie a running program to the session and took the account's newest one (Codex, pi).",
+          }),
+          transcript: Type.Optional(Type.String({ description: "Path of the session's record." })),
+          reference: Type.String({
+            description:
+              'The Session Reference in English: one sentence that points another AI at the session and its record.',
+          }),
+          resumeCommand: Type.String({
+            description: 'The command that resumes it in the account that holds it.',
+          }),
+        }),
+        { description: 'Running sessions, those that need the user first, then by most recent activity.' },
+      ),
+      problems: Type.Array(Str, {
+        description: 'An account or family that could not be read, and what to do; never aborts the listing.',
+      }),
+    },
+    { title: 'sideby sessions --json' },
+  ),
+  'sessions-copy': Type.Object(
+    {
+      schemaVersion: Version,
+      copied: Type.Boolean({
+        description:
+          'Whether the text went onto the clipboard; false when no clipboard program is installed.',
+      }),
+      as: Type.Union([Type.Literal('reference'), Type.Literal('id'), Type.Literal('resume')]),
+      text: Type.String({ description: 'The text copied, also when it could not be.' }),
+      sessionId: Str,
+      label: Type.String({ description: 'The Session Label of the session copied.' }),
+    },
+    { title: 'sideby sessions copy --json' },
+  ),
   edit: Type.Object(
     {
       schemaVersion: Version,

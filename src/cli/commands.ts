@@ -2982,3 +2982,103 @@ export async function cmdConfig(a: ParsedArgs, io: Io): Promise<number> {
   }
   return r.changed && !yes ? 10 : 0
 }
+
+const SESSION_STATUS: Record<string, string> = {
+  'needs-you': 'needs you',
+  busy: 'running',
+  idle: 'idle',
+  unknown: '—',
+}
+
+/** The language of a copied Session Reference: `--lang`, else the user's locale. */
+function copyLang(a: ParsedArgs, env: Record<string, string | undefined>): 'en' | 'zh' {
+  const flag = a.flags.get('lang')
+  if (flag !== undefined) {
+    if (flag !== 'en' && flag !== 'zh') throw new UsageError('--lang takes en or zh')
+    return flag
+  }
+  return /^zh/i.test(env.LC_ALL || env.LC_MESSAGES || env.LANG || '') ? 'zh' : 'en'
+}
+
+/**
+ * `sideby sessions [<account>|<family>]`: the Live Sessions of every Account (spec §3.32);
+ * `sideby sessions copy <account|session-id> [--as reference|id|resume]` copies one of them for another AI.
+ */
+export async function cmdSessions(a: ParsedArgs, io: Io): Promise<number> {
+  const [first, ...more] = a.positionals
+  if (first === 'copy') return sessionsCopy(a, more, io)
+  if (more.length || a.rest.length)
+    throw new UsageError(
+      'usage: sideby sessions [<account>|<family>] | sideby sessions copy <account|session-id>',
+    )
+  const rt = await createRuntime()
+  const { listLiveSessions } = await import('../core/live-sessions.ts')
+  const r = await listLiveSessions(rt, first ? { only: first } : {})
+  if (a.flags.has('json')) {
+    json(io, { sessions: r.sessions, problems: r.problems })
+    return 0
+  }
+  for (const p of r.problems) io.err(c.yellow(`sideby: ${p}`))
+  if (!r.sessions.length) {
+    io.out(
+      first
+        ? `${first} has no running session now. Start one with \`sideby run <account>\` and it shows up here.`
+        : 'No sessions are running now. Start an account with `sideby run <account>` and it shows up here.',
+    )
+    return 0
+  }
+  const now = rt.readContext().now
+  const home = rt.paths.home
+  const rows = r.sessions.map((s) => [
+    c.bold(s.label),
+    s.status === 'needs-you' ? c.yellow(SESSION_STATUS[s.status]!) : SESSION_STATUS[s.status]!,
+    s.cwd ? tildify(s.cwd, home) : '',
+    s.startedAt ? clock(s.startedAt, now) : '',
+    s.guessed ? c.dim('newest session (guessed)') : '',
+  ])
+  io.out(table(rows, ['SESSION', 'STATUS', 'DIRECTORY', 'STARTED', '']))
+  io.out(c.dim('Copy one for another AI: sideby sessions copy <account|session-id>'))
+  return 0
+}
+
+async function sessionsCopy(a: ParsedArgs, args: string[], io: Io): Promise<number> {
+  const [target, ...extra] = args
+  if (!target || extra.length || a.rest.length)
+    throw new UsageError('usage: sideby sessions copy <account|session-id> [--as reference|id|resume]')
+  const as = (a.flags.get('as') ?? 'reference') as string
+  if (as !== 'reference' && as !== 'id' && as !== 'resume')
+    throw new UsageError('--as takes reference, id or resume')
+  const rt = await createRuntime()
+  const lang = copyLang(a, rt.env)
+  const { listLiveSessions, sessionCopyText } = await import('../core/live-sessions.ts')
+  const { copyToClipboard, pickSession } = await import('../core/live-sessions-copy.ts')
+  const r = await listLiveSessions(rt)
+  let account: { ref: string; label: string } | undefined
+  try {
+    const acc = await rt.resolve(target)
+    account = { ref: acc.ref, label: target }
+  } catch {
+    // not an Account: a session id
+  }
+  for (const p of r.problems) if (!a.flags.has('json')) io.err(c.yellow(`sideby: ${p}`))
+  const s = pickSession(target, r.sessions, account)
+  const text = sessionCopyText(s, as, lang)
+  const program = await copyToClipboard(text, rt.env)
+  if (a.flags.has('json')) {
+    json(io, { copied: program !== null, as, text, sessionId: s.sessionId, label: s.label })
+    return 0
+  }
+  const what = as === 'reference' ? 'a reference to' : as === 'id' ? 'the id of' : 'the resume command of'
+  if (program) {
+    io.out(`${c.green('✓')} copied ${what} ${c.bold(s.label)}; paste it into the other AI`)
+    io.out(c.dim(text))
+  } else {
+    io.out(text)
+    io.err(
+      c.yellow(
+        'sideby: no clipboard program found (pbcopy on macOS, wl-copy or xclip on Linux); copy the text above yourself',
+      ),
+    )
+  }
+  return 0
+}

@@ -72,6 +72,10 @@ Usage:
   sideby desktop <account>            open the desktop app (Claude Desktop, the Codex app) as this
                                       account, next to the others (macOS)
   sideby desktop grok-bot:<name>      open a Grok Bot window, a new one for a new name (macOS)
+  sideby sessions [<account>|<family>] which session each account runs now, needing you first
+  sideby sessions copy <account|session-id> [--as reference|id|resume]
+                                      copy one for another AI: a reference to its record (default),
+                                      its id or its resume command
   sideby edit <account> [--path]      open the account's own settings file (settings.json,
                                       config.toml) in your editor
   sideby browser [--enable [--yes]]   which Chrome browser user signed in to each account's website
@@ -105,10 +109,10 @@ Usage:
 
 Options:
   --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, remote-control, handoff,
-                families, plugins, app, desktop, edit, browser, update, local, ask, terminal, key, try,
+                families, plugins, app, desktop, sessions, edit, browser, update, local, ask, terminal, key, try,
                 autostart, menubar, config)
   -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, desktop, edit, browser,
-                autostart, menubar, config
+                autostart, menubar, config, sessions
   -v, --version show the version
 
 An <account> is <family>:<name> (claude:work) or just <name> when it is unique.
@@ -225,6 +229,25 @@ Examples:
   sideby desktop grok-bot:002 --remove --yes
 Exit: 0 opened, brought to the front or removed; 1 not macOS, no desktop app for that host, API account, app not
 installed, a bad window name, or the app did not open; 10 --remove without --yes; 2 malformed command line.`,
+  sessions: `sideby sessions [<account>|<family>] [--json]
+       sideby sessions copy <account|session-id> [--as reference|id|resume] [--lang en|zh] [--json]
+
+List the sessions every account runs now (Claude Code, Codex, Grok Build, pi): each row shows the Session Label
+(account · the host's own title · first 8 of the id), whether it needs you, its directory and when it started.
+Sessions that need you come first. Codex and pi sessions sideby cannot tie to a running program show the account's
+newest session, marked "guessed". Read-only: sideby reads the hosts' session files, never a credential.
+
+copy puts one session on the clipboard (pbcopy on macOS, wl-copy or xclip on Linux; without one it prints the text):
+by default a Session Reference, one sentence that points another AI at the session's record; --as id copies the bare
+id, --as resume the command that resumes it. The reference follows your locale; --lang chooses.
+When an account runs several sessions, copy lists them: copy one by its id.
+
+Examples:
+  sideby sessions
+  sideby sessions cc002 --json
+  sideby sessions copy cc002
+  sideby sessions copy 61230c3d --as resume
+Exit: 0 listed or copied; 1 no such account or running session, or several to choose from; 2 malformed command line.`,
   edit: `sideby edit <account> [--path] [--json]
 
 Open the account's own settings file in your editor: settings.json for claude and pi accounts, config.toml for codex
@@ -387,6 +410,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   ui: { flags: ['no-open', 'background', 'stop', 'serve-detached'], valued: ['port'] },
   app: { flags: ['json'], valued: ['url'] },
   desktop: { flags: ['json', 'remove', 'yes'] },
+  sessions: { flags: ['json'], valued: ['as', 'lang'] },
   edit: { flags: ['json', 'path'] },
   browser: { flags: ['json', 'enable', 'disable', 'yes', 'auto'], valued: ['profile'] },
   'shell-init': { flags: ['write', 'yes', 'undo', 'json'] },
@@ -642,6 +666,8 @@ async function dispatch(
       return await cmds.cmdApp(parsed, io)
     case 'desktop':
       return await cmds.cmdDesktop(parsed, io)
+    case 'sessions':
+      return await cmds.cmdSessions(parsed, io)
     case 'edit':
       return await cmds.cmdEdit(parsed, io)
     case 'browser':

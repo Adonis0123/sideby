@@ -59,6 +59,12 @@ import { planHandoff } from '../core/handoff.ts'
 import { applyHandoffEnable, type EnablePlan, planHandoffEnable } from '../core/handoff-enable.ts'
 import { handoffOverview } from '../core/handoff-overview.ts'
 import { configureHandoff, type HandoffChange, handoffStatus } from '../core/handoff-status.ts'
+import {
+  type LiveSession,
+  type LiveSessionsResult,
+  listLiveSessions,
+  sessionCopyText,
+} from '../core/live-sessions.ts'
 import { type AccountModel, accountModel, setAccountModel } from '../core/model-choice.ts'
 import { tildify } from '../core/paths.ts'
 import type { RemoteControlGroup } from '../core/remote-control.ts'
@@ -81,6 +87,7 @@ import {
 import { MENUBAR_SCRIPT } from '../menubar/script.ts'
 import type { AccountStatus, DoctorHistory, FamilyInfo, QuotaCheckInfo, Runtime } from '../runtime.ts'
 import type { Account, FamilyDef, FamilyLogo, QuotaResult, QuotaSetupPlan, UsageResult } from '../types.ts'
+import { type OrcaDeps, orcaTabs, switchOrcaTab, systemOrca } from './orca.ts'
 import { renderPage } from './page.ts'
 import { AI_TASK_KINDS } from './page-logic.ts'
 import { type PanelTheme, resolveTheme } from './theme.ts'
@@ -125,6 +132,26 @@ export interface PanelHandlerOptions {
    * dialog. Checked when the handler is created: anything else throws a TypeError.
    */
   ask?: { bridge: 'postMessage' }
+}
+
+/**
+ * Internal, for tests and screenshots: a property under this key of the handler options replaces where the Sessions
+ * page reads Live Sessions and their copy texts from (spec §3.32). Not part of the Portal contract (`src/index.ts`
+ * does not export it); it may change without notice.
+ */
+export const LIVE_SESSIONS_SOURCE: unique symbol = Symbol('sideby.panel.liveSessions')
+export interface LiveSessionsSource {
+  list?: (rt: Runtime) => Promise<LiveSessionsResult>
+  copyText?: typeof sessionCopyText
+  /** The Orca CLI and process reader; tests pass a fake so they never call the real Orca. */
+  orca?: OrcaDeps
+}
+
+/** A Live Session as the Sessions page gets it: the working directory with `~`, and the three texts it can copy. */
+export interface PanelSession extends LiveSession {
+  copy: { reference: string; id: string; resume: string }
+  /** True when the Session runs in a live Orca terminal tab the Panel can bring to the front. */
+  orca?: true
 }
 
 function resolveAsk(ask: unknown): { bridge: 'postMessage' } | undefined {
@@ -858,6 +885,10 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   const token = randomBytes(32).toString('base64url')
   const serial = writeQueue()
   const getRuntime = typeof opts.runtime === 'function' ? opts.runtime : async () => opts.runtime as Runtime
+  const sessionsSource = (opts as { [LIVE_SESSIONS_SOURCE]?: LiveSessionsSource })[LIVE_SESSIONS_SOURCE]
+  const liveSessions = sessionsSource?.list ?? listLiveSessions
+  const copyText = sessionsSource?.copyText ?? sessionCopyText
+  const orcaOf = (rt: Runtime) => sessionsSource?.orca ?? systemOrca(rt.env)
 
   // Every route declares whether a request writes files. `writes` defaults to true, so a route that forgets
   // to declare it is refused by a read-only Panel instead of slipping through.
@@ -1172,6 +1203,53 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const r = await rt.remoteControlUndo()
         const home = rt.paths.home
         return { ...r, results: r.results.map((x) => ({ ...x, file: tildify(x.file, home) })) }
+      },
+    },
+    // Sessions (spec §3.32, ADR-0039): what every Account is running now, read only, with the texts its copy buttons
+    // copy in the Panel's language. Polled every few seconds, so it runs beside the write queue.
+    '/api/sessions': {
+      writes: () => false,
+      queued: false,
+      async run(body) {
+        const lang = body.lang === 'zh' ? 'zh' : 'en'
+        const rt = await getRuntime()
+        const { sessions, problems } = await liveSessions(rt)
+        const tabs = await orcaTabs(orcaOf(rt), sessions)
+        const home = rt.paths.home
+        return {
+          sessions: sessions.map(
+            (s): PanelSession => ({
+              ...s,
+              ...(s.cwd ? { cwd: tildify(s.cwd, home) } : {}),
+              ...(tabs.has(s.sessionId) ? { orca: true as const } : {}),
+              copy: {
+                reference: copyText(s, 'reference', lang),
+                id: copyText(s, 'id', lang),
+                resume: copyText(s, 'resume', lang),
+              },
+            }),
+          ),
+          problems: problems.map((p) => p.split(home).join('~')),
+        }
+      },
+    },
+    // Brings the Orca tab a Session runs in to the front (ADR-0039). The page sends only the Session id: the handle is
+    // found again here, from the running process and Orca's own list. It starts a program, so a read-only Panel
+    // refuses it (writes defaults to true).
+    '/api/sessions/orca': {
+      queued: false,
+      async run(body) {
+        const id = optString(body, 'sessionId')
+        if (!id) throw new HttpError(400, '"sessionId" is required')
+        const rt = await getRuntime()
+        const session = (await liveSessions(rt)).sessions.find((s) => s.sessionId === id)
+        if (!session) throw new HttpError(404, 'This session is no longer running; refresh the list.')
+        const orca = orcaOf(rt)
+        const handle = (await orcaTabs(orca, [session])).get(id)
+        if (!handle)
+          throw new HttpError(409, 'This session is not in an Orca tab any more; refresh the list.')
+        await switchOrcaTab(orca, handle)
+        return { switched: true }
       },
     },
     // Auto Handoff (spec §3.17): readiness reads only; configure shows the config change unless `confirm`.

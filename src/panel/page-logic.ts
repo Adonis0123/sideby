@@ -623,6 +623,71 @@ export function updatedAge(ms: number): { key: string; n?: number } {
   return { key: 'time.dAgo', n: Math.floor(h / 24) }
 }
 
+/** What the Sessions page needs of a Live Session (spec §3.32); the full shape is `LiveSession` in core/live-sessions.ts. */
+export interface LogicSession {
+  account: string
+  accountLabel?: string
+  sessionId: string
+  title?: string
+  label?: string
+  status: string
+  cwd?: string
+  startedAt?: string
+  updatedAt?: string
+}
+
+/**
+ * The Sessions page order: a Session that needs the user first, then the most recent activity (`updatedAt`, else
+ * `startedAt`), then the label, so two answers with the same Sessions keep the same order.
+ */
+export function sortSessions<T extends LogicSession>(list: readonly T[]): T[] {
+  const at = (s: T) => {
+    const ts = Date.parse(s.updatedAt || s.startedAt || '')
+    return Number.isFinite(ts) ? ts : 0
+  }
+  const label = (s: T) => s.label || s.sessionId
+  return list
+    .slice()
+    .sort(
+      (a, b) =>
+        (a.status === 'needs-you' ? 0 : 1) - (b.status === 'needs-you' ? 0 : 1) ||
+        at(b) - at(a) ||
+        (label(a) < label(b) ? -1 : label(a) > label(b) ? 1 : 0),
+    )
+}
+
+/** How long ago a Session was last active, as a message key and count; null when it has no time at all. */
+export function sessionAge(s: LogicSession, now: number): { key: string; n?: number } | null {
+  const ts = Date.parse(s.updatedAt || s.startedAt || '')
+  return Number.isFinite(ts) ? updatedAge(Math.max(0, now - ts)) : null
+}
+
+/**
+ * The three parts of a Session Label as the row shows them: the Account's short name (bold), the Host's title (the
+ * working directory's name when the Host gave none) and the first 8 characters of the id (monospace).
+ */
+export function sessionLabelParts(s: LogicSession): { account: string; title: string; id: string } {
+  const dir = (s.cwd || '').replace(/\/+$/, '').split('/').pop() || ''
+  return {
+    account: s.accountLabel || s.account,
+    title: (s.title || '').trim() || dir,
+    id: s.sessionId.slice(0, 8),
+  }
+}
+
+/**
+ * A working directory short enough for one row: whole when it fits in `max` characters, else its root (`~` or the
+ * first folder) and its last two folders around an ellipsis, else only the end. Empty when there is none.
+ */
+export function shortCwd(cwd: string | undefined, max = 44): string {
+  if (!cwd) return ''
+  if (cwd.length <= max) return cwd
+  const parts = cwd.split('/')
+  const head = parts[0] === '' ? `/${parts[1] || ''}` : parts[0]
+  const short = `${head}/…/${parts.slice(-2).join('/')}`
+  return short.length <= max && parts.length > 4 ? short : `…${cwd.slice(-(max - 1))}`
+}
+
 /**
  * The Panel's language: a host `lang` of `en` or `zh` wins; `auto` uses the viewer's saved choice, then the browser
  * language (`zh*` gives Chinese, anything else English).

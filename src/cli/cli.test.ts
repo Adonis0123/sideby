@@ -2378,3 +2378,128 @@ describe('Panel CLI parity', () => {
     })
   })
 })
+
+describe('sideby sessions (spec §3.32)', () => {
+  const ID_A = '61230c3d-1111-4111-8111-111111111111'
+  const ID_B = '0799701d-2222-4222-8222-222222222222'
+  const PROC_START = 'Tue Oct 20 02:14:43 2026'
+
+  /** A fake `ps` that lists the given processes, and fake clipboards that write what they get to `<bin>/clip.txt`. */
+  async function fakeMachine(h: FakeHome, pids: number[], clipboard = true) {
+    const lines = pids.map((p) => `${p} 1 ${PROC_START} claude`).join('\n')
+    const script = (body: string) => `#!${process.execPath}\n${body}\n`
+    await writeFile(join(h.bin, 'ps'), script(`process.stdout.write(${JSON.stringify(`${lines}\n`)})`), {
+      mode: 0o755,
+    })
+    if (!clipboard) return
+    const clip = join(h.bin, 'clip.txt')
+    for (const name of ['pbcopy', 'wl-copy', 'xclip'])
+      await writeFile(
+        join(h.bin, name),
+        script(
+          `let d='';process.stdin.on('data',(c)=>d+=c).on('end',()=>require('node:fs').writeFileSync(${JSON.stringify(clip)},d))`,
+        ),
+        { mode: 0o755 },
+      )
+  }
+
+  async function claudeSessions(h: FakeHome, twoInWork: boolean) {
+    await h.write('.claude/settings.json', '{}')
+    await h.write('.claude-work/settings.json', '{}')
+    await h.write('.config/sideby/config.json', JSON.stringify({ aliases: { cc002: 'claude:work' } }))
+    const rec = (pid: number, sessionId: string, name: string, status: string) =>
+      h.write(
+        `.claude-work/sessions/${pid}.json`,
+        JSON.stringify({
+          pid,
+          sessionId,
+          name,
+          cwd: '/work/repo',
+          status,
+          procStart: PROC_START,
+          updatedAt: 1792462484569,
+        }),
+      )
+    await rec(4101, ID_A, 'knip cleanup', 'blocked')
+    if (twoInWork) await rec(4102, ID_B, 'release notes', 'idle')
+    await h.write(`.claude-work/projects/-work-repo/${ID_A}.jsonl`, '{}\n')
+  }
+
+  it('lists running sessions, needing you first, in text and --json', async () => {
+    await withFakeHome(async (h) => {
+      await claudeSessions(h, true)
+      await fakeMachine(h, [4101, 4102])
+      const human = await sideby(h, ['sessions'])
+      assert.equal(human.code, 0, human.err)
+      const rows = human.out.split('\n')
+      assert.match(rows[1]!, /^cc002 · knip cleanup · 61230c3d\s+needs you\s+\/work\/repo/)
+      assert.match(rows[2]!, /^cc002 · release notes · 0799701d\s+idle/)
+      const r = await sideby(h, ['sessions', 'cc002', '--json'])
+      const data = checkSchema('sessions', r.out)
+      const list = data.sessions as { label: string; reference: string; transcript?: string }[]
+      assert.equal(list.length, 2)
+      assert.match(
+        list[0]!.reference,
+        /^cc002's session 61230c3d \(knip cleanup\), working directory \/work\/repo, record at /,
+      )
+      const empty = await sideby(h, ['sessions', 'claude:main'])
+      assert.match(
+        empty.out,
+        /claude:main has no running session now\. Start one with `sideby run <account>`/,
+      )
+    })
+  })
+
+  it('copies one session, lists several instead of guessing, and prints the text without a clipboard', async () => {
+    await withFakeHome(async (h) => {
+      await claudeSessions(h, true)
+      await fakeMachine(h, [4101, 4102])
+      const several = await sideby(h, ['sessions', 'copy', 'cc002'])
+      assert.equal(several.code, 1)
+      assert.match(
+        several.err,
+        /cc002 runs 2 sessions now; copy one by its id:\n {2}sideby sessions copy 61230c3d/,
+      )
+      const severalJson = await sideby(h, ['sessions', 'copy', 'cc002', '--json'])
+      assert.equal(severalJson.code, 1)
+      assert.equal(JSON.parse(severalJson.out).code, 'several-sessions')
+
+      const id = await sideby(h, ['sessions', 'copy', '61230c3d', '--as', 'id', '--json'])
+      assert.equal(id.code, 0, id.err)
+      const data = checkSchema('sessions-copy', id.out)
+      assert.deepEqual([data.copied, data.as, data.text], [true, 'id', ID_A])
+      assert.equal(await readFile(join(h.bin, 'clip.txt'), 'utf8'), ID_A)
+
+      const zh = await sideby(h, ['sessions', 'copy', ID_A, '--lang', 'zh'])
+      assert.equal(zh.code, 0, zh.err)
+      assert.match(zh.out, /copied a reference to cc002 · knip cleanup · 61230c3d/)
+      assert.match(
+        await readFile(join(h.bin, 'clip.txt'), 'utf8'),
+        /^cc002 的会话 61230c3d（knip cleanup），工作目录 \/work\/repo/,
+      )
+      const bad = await sideby(h, ['sessions', 'copy', ID_A, '--as', 'path'])
+      assert.equal(bad.code, 2)
+    })
+    await withFakeHome(async (h) => {
+      await claudeSessions(h, false)
+      await fakeMachine(h, [4101], false)
+      // Only the fake bin: no pbcopy, wl-copy or xclip anywhere on PATH.
+      const env = { PATH: h.bin }
+      const r = await sideby(h, ['sessions', 'copy', 'cc002', '--as', 'resume'], env)
+      assert.equal(r.code, 0, r.err)
+      assert.equal(r.out.trim(), `sideby resume claude -- --resume ${ID_A}`)
+      assert.match(r.err, /no clipboard program found .*copy the text above yourself/)
+      const j = checkSchema(
+        'sessions-copy',
+        (await sideby(h, ['sessions', 'copy', 'cc002', '--json'], env)).out,
+      )
+      assert.equal(j.copied, false)
+      const none = await sideby(h, ['sessions', 'copy', 'claude:main'], env)
+      assert.equal(none.code, 1)
+      assert.match(
+        none.err,
+        /claude:main has no running session now; start one with `sideby run claude:main`/,
+      )
+    })
+  })
+})
