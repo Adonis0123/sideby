@@ -3,6 +3,8 @@
 // references to module scope or to each other except through parameters, and only type annotations as
 // TypeScript (they are stripped by Node and by the build, leaving plain JavaScript).
 
+import type { HandoffSettings } from '../core/config.ts'
+
 /** The parts of a PanelAccount the helpers read. */
 export interface LogicAccount {
   family: string
@@ -71,6 +73,22 @@ export function windowState(
   const pct = passed ? 0 : raw
   const level = passed ? 'reset' : pct >= fail ? 'fail' : pct >= warn ? 'warn' : 'ok'
   return { pct, passed, level }
+}
+
+/**
+ * The window that binds first among those sharing one column (a model group with a 5-hour and a weekly limit, as
+ * Antigravity CLI reports): the most used as the page draws it, the first on a tie. Undefined for none.
+ */
+export function bindingWindow<W extends { usedPercent: number; resetsAt: string }>(
+  list: W[],
+  now: number,
+  warn: number,
+  fail: number,
+): W | undefined {
+  let best: W | undefined
+  for (const w of list)
+    if (!best || windowState(w, now, warn, fail).pct > windowState(best, now, warn, fail).pct) best = w
+  return best
 }
 
 /**
@@ -934,15 +952,8 @@ export function handoffHintAccount(
   return best
 }
 
-export interface HandoffSettingsView {
-  auto: boolean
-  sameFamily: boolean
-  prepareAt: number
-  threshold: number
-  waitIfResetWithinMinutes: number
-  countdownSeconds: number
-  families: Record<string, { policy: string; order: string[] }>
-}
+/** The settings `/api/handoff/*` sends, as `sideby handoff --json` prints them. */
+export type HandoffSettingsView = HandoffSettings
 
 export interface HandoffForm {
   auto: boolean
@@ -952,6 +963,8 @@ export interface HandoffForm {
   wait: number
   countdown: number
   orders: Record<string, { policy: string; order: string[] }>
+  /** Left out: unchanged. */
+  crossOrganization?: string[]
 }
 
 /** What the Panel's Auto Handoff form changed, as the `change` /api/handoff/configure takes; {} when nothing. */
@@ -972,6 +985,8 @@ export function handoffChangeOf(s: HandoffSettingsView, f: HandoffForm): Record<
     if (want.join('\n') !== have.join('\n')) orders.push({ family, order: want.slice() })
   }
   if (orders.length) c.orders = orders
+  if (f.crossOrganization && f.crossOrganization.join('\n') !== s.crossOrganization.join('\n'))
+    c.crossOrganization = f.crossOrganization.slice()
   return c
 }
 
@@ -989,14 +1004,6 @@ export function remoteControlSummary(
   if (reach.some((g) => g.state === 'on')) return 'on'
   if (reach.some((g) => g.state === 'default')) return 'default'
   return 'off'
-}
-
-/**
- * The groups that turning Remote Control `to` on or off changes (spec §3.22): those that do not hold it yet, a
- * default counting as either. A file that is missing or cannot be read is never changed.
- */
-export function remoteControlTodo<G extends { state: string }>(groups: readonly G[], to: 'on' | 'off'): G[] {
-  return groups.filter((g) => g.state === 'default' || g.state === (to === 'on' ? 'off' : 'on'))
 }
 
 /**
@@ -1867,4 +1874,35 @@ export function histFilters(raw: unknown): HistFilters {
     category: str(o.category),
     scripts: o.scripts === true,
   }
+}
+
+/**
+ * Saves one Auto Handoff change from the Handoff page (spec §3.17 "接力规则"): every change applies at once, and
+ * the toast offers the undo the server read from the config as it was. Undoing offers no undo of its own.
+ */
+export async function saveHandoffChange(
+  post: (path: string, body: object) => Promise<{ undo?: Record<string, unknown> }>,
+  change: Record<string, unknown>,
+  opts: { noUndo?: boolean } = {},
+): Promise<{ undo: Record<string, unknown> | null }> {
+  const r = await post('/api/handoff/configure', { change, confirm: true })
+  return { undo: opts.noUndo || !r.undo ? null : r.undo }
+}
+
+/**
+ * What the Handoff page shows after confirming the plan that turns Auto Handoff on (ADR-0013): the plan again when
+ * it changed since it was shown (unless nothing is left to do) or is blocked, the first step that failed, or done.
+ */
+export function enableOutcome<
+  P extends { alreadyOn?: boolean; blocked?: unknown },
+  S extends { ok: boolean },
+>(r: {
+  changed?: boolean
+  plan: P
+  results: S[]
+}): { kind: 'changed' | 'blocked'; plan: P } | { kind: 'failed'; step: S; plan: P } | { kind: 'done' } {
+  if (r.changed && !r.plan.alreadyOn) return { kind: 'changed', plan: r.plan }
+  if (r.plan.blocked) return { kind: 'blocked', plan: r.plan }
+  const bad = r.results.find((x) => !x.ok)
+  return bad ? { kind: 'failed', step: bad, plan: r.plan } : { kind: 'done' }
 }

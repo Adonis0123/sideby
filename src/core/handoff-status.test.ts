@@ -6,7 +6,8 @@ import { type FakeHome, withFakeHome } from '../../testing/index.ts'
 import { claudePlugin } from '../families/claude/index.ts'
 import { writeQuotaCache } from '../families/claude/quota-cache.ts'
 import { createRuntime } from '../runtime.ts'
-import { handoffHint } from './handoff-status.ts'
+import type { Account } from '../types.ts'
+import { checkHandoffRefs, handoffHint, handoffUndo } from './handoff-status.ts'
 
 const builtins = [claudePlugin].map((plugin) => ({
   plugin,
@@ -58,5 +59,71 @@ describe('lineDiff', () => {
       '  {\n-   "auto": false,\n+   "auto": true,\n    "threshold": 95\n  }',
     )
     assert.equal(lineDiff('{}', '{\n  "auto": true\n}'), '- {}\n+ {\n+   "auto": true\n+ }')
+  })
+})
+
+describe('handoffUndo', () => {
+  it('removes a setting that was not there instead of writing its default', () => {
+    // An absent `api` means the question is still open (ADR-0046); undoing an answer must reopen it.
+    assert.deepEqual(handoffUndo({ auto: true }, { api: false }), { api: null })
+    assert.deepEqual(handoffUndo(undefined, { threshold: 90, familyOrder: ['codex'] }), {
+      threshold: null,
+      familyOrder: [],
+    })
+  })
+
+  it('puts back the values a change replaced', () => {
+    const before = {
+      api: true,
+      familyOrder: ['codex'],
+      families: { claude: { policy: 'order' as const, order: ['cc002'] } },
+    }
+    assert.deepEqual(handoffUndo(before, { api: false, familyOrder: ['grok', 'codex'] }), {
+      api: true,
+      familyOrder: ['codex'],
+    })
+    assert.deepEqual(
+      handoffUndo(before, {
+        orders: [
+          { family: 'claude', order: [] },
+          { family: 'codex', order: ['codex:team'] },
+        ],
+      }),
+      {
+        orders: [
+          { family: 'claude', order: ['cc002'] },
+          { family: 'codex', order: [] },
+        ],
+      },
+    )
+  })
+})
+
+describe('checkHandoffRefs', () => {
+  const refs = {
+    families: ['claude'],
+    accounts: [{ ref: 'claude:main', name: 'main', family: 'claude' } as Account],
+    aliases: { cc: 'claude:main' },
+  }
+
+  it('accepts Accounts and short commands, and refuses unknown names and Families', () => {
+    checkHandoffRefs(refs, {}, { crossOrganization: ['cc', 'claude:main'] })
+    assert.throws(
+      () => checkHandoffRefs(refs, {}, { crossOrganization: ['ghost'] }),
+      /ghost is not an account/,
+    )
+    assert.throws(() => checkHandoffRefs(refs, {}, { familyOrder: ['nope'] }), /unknown family "nope"/)
+    assert.throws(
+      () => checkHandoffRefs(refs, {}, { families: { nope: { policy: 'order', order: ['claude:main'] } } }),
+      /unknown family "nope"/,
+    )
+  })
+
+  it('lets an unrelated change through when an old name has gone away', () => {
+    const before = {
+      crossOrganization: ['ghost'],
+      families: { claude: { policy: 'order' as const, order: ['gone'] } },
+    }
+    checkHandoffRefs(refs, before, { ...before, threshold: 90 })
   })
 })

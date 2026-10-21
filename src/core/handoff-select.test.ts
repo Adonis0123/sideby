@@ -147,26 +147,138 @@ describe('selectNext', () => {
     assert.deepEqual(r, pick('claude:007'))
   })
 
-  it('leaves out the same Family unless sameFamily is on, then adds other Families’ API accounts', () => {
+  it('suggests a setting only when it would bring in an account that can take over', () => {
+    const candidates = [
+      acct('claude:002', { installed: false }),
+      acct('claude:003', { receive: false }),
+      acct('codex:work', { kind: 'api', installed: false }),
+    ]
+    assert.deepEqual(
+      selectNext({ origin, candidates, settings: settings({ auto: true }), aliases: {}, used: [], now: NOW }),
+      { kind: 'none', reason: 'no account may take over' },
+    )
+  })
+
+  it('leaves out the same Family unless sameFamily is on, and API accounts unless api is on (ADR-0046)', () => {
     const candidates = [acct('claude:002'), acct('codex:work', { kind: 'api' })]
     const base = { origin, candidates, aliases: {}, used: [], now: NOW }
-    assert.deepEqual(selectNext({ ...base, settings: settings({ auto: true }) }), pick('codex:work'))
+    assert.deepEqual(selectNext({ ...base, settings: settings({ auto: true }) }), {
+      kind: 'none',
+      reason:
+        'no account may take over; not allowed now: accounts of the same AI (`handoff.sameFamily`), API accounts (`handoff.api`)',
+    })
+    assert.deepEqual(
+      selectNext({ ...base, settings: settings({ auto: true, api: true }) }),
+      pick('codex:work'),
+    )
     assert.deepEqual(
       selectNext({ ...base, settings: settings({ auto: true, sameFamily: true }) }),
       pick('claude:002'),
     )
   })
 
-  it('lets a same-Family API account take over without sameFamily', () => {
+  it('lets a same-Family API account take over without sameFamily once api is on', () => {
     const r = selectNext({
       origin,
       candidates: [acct('claude:002'), acct('claude:deepseek', { kind: 'api' })],
-      settings: settings({ auto: true }),
+      settings: settings({ auto: true, api: true }),
       aliases: {},
       used: [],
       now: NOW,
     })
     assert.deepEqual(r, pick('claude:deepseek'))
+  })
+
+  it('takes an API account only after every subscription, the own Family’s API account first', () => {
+    const r = selectNext({
+      origin,
+      candidates: [
+        acct('codex:api', { kind: 'api' }),
+        acct('claude:deepseek', { kind: 'api' }),
+        acct('claude:002', { quota: quota(90) }),
+        acct('codex:main', { quota: quota(30) }),
+      ],
+      settings: settings({ auto: true, sameFamily: true, otherFamilies: true, api: true }),
+      aliases: {},
+      used: [],
+      now: NOW,
+    })
+    assert.deepEqual(r, pick('codex:main'))
+    const none = selectNext({
+      origin,
+      candidates: [
+        acct('codex:api', { kind: 'api' }),
+        acct('claude:deepseek', { kind: 'api' }),
+        acct('codex:main', { quota: quota(90) }),
+      ],
+      settings: settings({ auto: true, otherFamilies: true, api: true }),
+      aliases: {},
+      used: [],
+      now: NOW,
+    })
+    assert.deepEqual(none, pick('claude:deepseek'))
+  })
+
+  it('hands over to other Families only with otherFamilies, in familyOrder', () => {
+    const candidates = [acct('codex:main', { quota: quota(20) }), acct('grok:main', { quota: quota(5) })]
+    const base = { origin, candidates, aliases: {}, used: [], now: NOW }
+    assert.equal(selectNext({ ...base, settings: settings({ auto: true }) }).kind, 'none')
+    // Without an order, Families come as the candidates do; each Family's own ranking still applies.
+    assert.deepEqual(
+      selectNext({ ...base, settings: settings({ auto: true, otherFamilies: true }) }),
+      pick('codex:main'),
+    )
+    assert.deepEqual(
+      selectNext({ ...base, settings: settings({ auto: true, otherFamilies: true, familyOrder: ['grok'] }) }),
+      pick('grok:main'),
+    )
+    // The own Family comes first when sameFamily is on.
+    assert.deepEqual(
+      selectNext({
+        ...base,
+        candidates: [...candidates, acct('claude:002', { quota: quota(50) })],
+        settings: settings({ auto: true, sameFamily: true, otherFamilies: true, familyOrder: ['grok'] }),
+      }),
+      pick('claude:002'),
+    )
+  })
+
+  it('skips an Account at or above the Takeover Limit, which follows the threshold', () => {
+    const candidates = [acct('claude:002', { quota: quota(86) }), acct('claude:003', { quota: quota(60) })]
+    const base = { origin, candidates, aliases: {}, used: [], now: NOW }
+    // Threshold 95: the limit is 85, so 86% is full.
+    assert.deepEqual(
+      selectNext({ ...base, settings: settings({ auto: true, sameFamily: true }) }),
+      pick('claude:003'),
+    )
+    // Threshold 70: the limit is 60, so 60% is full too and nothing can take over.
+    const r = selectNext({
+      ...base,
+      settings: settings({ auto: true, sameFamily: true, prepareAt: 50, threshold: 70 }),
+    })
+    assert.equal(r.kind, 'none')
+  })
+
+  it('keeps API accounts out of a written Handoff Order unless api is on', () => {
+    const s = {
+      auto: true,
+      families: { claude: { policy: 'order' as const, order: ['codex:api', 'codex:main'] } },
+    }
+    const base = {
+      origin,
+      candidates: [acct('codex:api', { kind: 'api' }), acct('codex:main', { quota: quota(30) })],
+      aliases: {},
+      used: [],
+      now: NOW,
+    }
+    const full = {
+      ...base,
+      candidates: [acct('codex:api', { kind: 'api' }), acct('codex:main', { quota: quota(90) })],
+    }
+    assert.equal(selectNext({ ...full, settings: settings(s) }).kind, 'none')
+    assert.deepEqual(selectNext({ ...full, settings: settings({ ...s, api: true }) }), pick('codex:api'))
+    // Still the last resort: a subscription with room comes first even when the list names the API account first.
+    assert.deepEqual(selectNext({ ...base, settings: settings({ ...s, api: true }) }), pick('codex:main'))
   })
 
   it('treats an Account already at the user’s threshold as full, with its reset time', () => {

@@ -3,12 +3,20 @@
 // error or the undo record, and the write goes through `writeIfUnchanged`. A symlinked `settings.json` (settings
 // shared with the Main Account) is written at the real file it points to, and the plan names every Account that
 // shares it; a link is never created, replaced or retargeted.
-import { mkdir, readFile, rm, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { rm, stat } from 'node:fs/promises'
 import type { Account, ReadContext } from '../types.ts'
-import { isObj, type Json, locate, readObject, render } from './claude-settings-file.ts'
+import {
+  isObj,
+  type Json,
+  keyRecordPath,
+  locate,
+  readKeyRecord,
+  readObject,
+  render,
+  writeKeyRecord,
+} from './claude-settings-file.ts'
 import { UserError } from './errors.ts'
-import { fileHash, sha256, writeFileAtomic, writeIfUnchanged } from './fs-safe.ts'
+import { fileHash, sha256, writeIfUnchanged } from './fs-safe.ts'
 import { MAX_COMPACT_WINDOW, MIN_COMPACT_WINDOW } from './tuning.ts'
 
 export const TUNE_KEY = 'autoCompactWindow'
@@ -72,23 +80,17 @@ function overridesOf(obj: Json): ModelOverride[] {
   return out
 }
 
-function recordPath(ctx: ReadContext, file: string): string {
-  return join(ctx.stateDir, 'tune', `${sha256(file).slice(0, 16)}.json`)
-}
+const RECORDS = 'tune'
+
+const recordPath = (ctx: ReadContext, file: string) => keyRecordPath(ctx.stateDir, RECORDS, file)
 
 async function readRecord(ctx: ReadContext, file: string): Promise<TuneUndoRecord | null> {
-  try {
-    const r = JSON.parse(await readFile(recordPath(ctx, file), 'utf8')) as Partial<TuneUndoRecord>
-    if (
-      r.file === file &&
-      (r.applied === null || typeof r.applied === 'number') &&
-      (r.previous === null || typeof r.previous === 'number')
-    )
-      return r as TuneUndoRecord
-  } catch {
-    // no record
-  }
-  return null
+  const r = await readKeyRecord(ctx.stateDir, RECORDS, file)
+  return r &&
+    (r.applied === null || typeof r.applied === 'number') &&
+    (r.previous === null || typeof r.previous === 'number')
+    ? (r as unknown as TuneUndoRecord)
+    : null
 }
 
 /** What applying `value` to the Account would do. Writes nothing. */
@@ -190,8 +192,7 @@ export async function applyTune(
     created: chained ? earlier.created : plan.creates,
     at: new Date().toISOString(),
   }
-  await mkdir(join(ctx.stateDir, 'tune'), { recursive: true })
-  await writeFileAtomic(recordPath(ctx, plan.file), `${JSON.stringify(record, null, 2)}\n`, 0o600)
+  await writeKeyRecord(ctx.stateDir, RECORDS, plan.file, record)
   return {
     ok: true,
     plan,

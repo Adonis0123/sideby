@@ -31,6 +31,9 @@ describe('handoff settings', () => {
       waitIfResetWithinMinutes: 30,
       countdownSeconds: 10,
       crossOrganization: [],
+      otherFamilies: false,
+      familyOrder: [],
+      api: false,
       families: {},
     })
   })

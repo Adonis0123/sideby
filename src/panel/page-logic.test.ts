@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { ALIAS_NAME, RESERVED_ALIASES } from '../core/config.ts'
+import { remoteControlTodo } from '../core/remote-control.ts'
 import { checkHotkey } from '../menubar/hotkey.ts'
 import { MESSAGES } from './i18n.ts'
 import { renderPage } from './page.ts'
@@ -13,10 +14,12 @@ import {
   attentionReasons,
   attentionWhy,
   autostartNote,
+  bindingWindow,
   cacheHitRate,
   canLeaveLocal,
   categoryOrder,
   codeSwapOutcome,
+  enableOutcome,
   fileSize,
   fixPrompt,
   foldSkips,
@@ -57,10 +60,10 @@ import {
   quotaAskable,
   quotaPressure,
   remoteControlSummary,
-  remoteControlTodo,
   reorder,
   rowBadge,
   runCodeSwap,
+  saveHandoffChange,
   sendBlock,
   sendFileProblem,
   sendResultView,
@@ -128,6 +131,15 @@ describe('page logic', () => {
     assert.equal(windowState(w(85), NOW, 60, 85).level, 'fail')
     assert.deepEqual(windowState(w(97, -1), NOW, 60, 85), { pct: 0, passed: true, level: 'reset' })
     assert.equal(windowState(w(140), NOW, 60, 85).pct, 100)
+  })
+
+  it('shows the limit that binds first when one model group has several', () => {
+    const w = (label: string, u: number, h = 1) => ({ label, usedPercent: u, resetsAt: at(h) })
+    assert.equal(bindingWindow([w('7d', 56), w('5h', 100)], NOW, 60, 85)?.label, '5h')
+    // A limit whose reset passed counts as empty, so the other one binds.
+    assert.equal(bindingWindow([w('7d', 40), w('5h', 100, -1)], NOW, 60, 85)?.label, '7d')
+    assert.equal(bindingWindow([w('5h', 30), w('7d', 30)], NOW, 60, 85)?.label, '5h')
+    assert.equal(bindingWindow([], NOW, 60, 85), undefined)
   })
 
   it('marks a window whose reset passed with the time its data was last seen, and skips it as the next reset', () => {
@@ -808,7 +820,12 @@ describe('Auto Handoff helpers', () => {
       threshold: 95,
       waitIfResetWithinMinutes: 30,
       countdownSeconds: 10,
-      families: { claude: { policy: 'order', order: ['cc002'] } },
+      families: { claude: { policy: 'order' as const, order: ['cc002'] } },
+      adaptive: true,
+      otherFamilies: false,
+      familyOrder: [],
+      api: false,
+      crossOrganization: [],
     }
     const same = {
       auto: false,
@@ -833,6 +850,9 @@ describe('Auto Handoff helpers', () => {
         orders: [{ family: 'claude', order: [] }],
       },
     )
+    assert.deepEqual(handoffChangeOf(s, { ...same, crossOrganization: ['codex:team'] }), {
+      crossOrganization: ['codex:team'],
+    })
   })
 })
 
@@ -2415,5 +2435,35 @@ describe('categoryOrder', () => {
   })
   it('never moves the empty category out of last place', () => {
     assert.deepEqual(categoryOrder(['a', '', 'b'], ['', 'b']), ['b', 'a', ''])
+  })
+})
+
+describe('Handoff page actions', () => {
+  it('saves a change with confirm and offers the undo the server read, but no undo of an undo', async () => {
+    const sent: unknown[] = []
+    const post = async (path: string, body: object) => {
+      sent.push([path, body])
+      return { undo: { threshold: null } }
+    }
+    assert.deepEqual(await saveHandoffChange(post, { threshold: 90 }), { undo: { threshold: null } })
+    assert.deepEqual(sent, [['/api/handoff/configure', { change: { threshold: 90 }, confirm: true }]])
+    assert.deepEqual(await saveHandoffChange(post, { threshold: null }, { noUndo: true }), { undo: null })
+    assert.deepEqual(await saveHandoffChange(async () => ({}), { auto: true }), { undo: null })
+  })
+
+  it('shows a changed or blocked plan again, the first failed step, or done', () => {
+    const plan = { alreadyOn: false }
+    assert.deepEqual(enableOutcome({ changed: true, plan, results: [] }), { kind: 'changed', plan })
+    // A plan that changed only because it is on already counts as done.
+    assert.deepEqual(enableOutcome({ changed: true, plan: { alreadyOn: true }, results: [] }), {
+      kind: 'done',
+    })
+    assert.deepEqual(enableOutcome({ plan: { blocked: 'npx' }, results: [] }).kind, 'blocked')
+    const results = [
+      { ok: true, id: 'a' },
+      { ok: false, id: 'b' },
+    ]
+    assert.deepEqual(enableOutcome({ plan, results }), { kind: 'failed', step: results[1], plan })
+    assert.deepEqual(enableOutcome({ plan, results: [{ ok: true }] }), { kind: 'done' })
   })
 })

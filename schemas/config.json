@@ -248,11 +248,26 @@
       "properties": {
         "auto": {
           "type": "boolean",
-          "description": "Hand a running session to the next account when its Quota runs low: only to other families and API accounts unless `sameFamily` is on. Off by default."
+          "description": "Hand a running session to the next account when its Quota runs low: within the family only with `sameFamily`, to other families only with `otherFamilies`, to API accounts only with `api`. Off by default."
         },
         "sameFamily": {
           "type": "boolean",
           "description": "Also hand off to an account of the same family (cc001 → cc002). The kind vendors are most likely to act on. Off by default."
+        },
+        "otherFamilies": {
+          "type": "boolean",
+          "description": "When no account of the family can take over, let accounts of other families take over, family by family in `familyOrder`. Off by default."
+        },
+        "familyOrder": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Families to try with `otherFamilies`, first to last (for example [\"codex\", \"grok\"]); families left out come after, in the usual order."
+        },
+        "api": {
+          "type": "boolean",
+          "description": "Let API accounts take over as the last resort, when no subscription account can. They are billed per use and sideby does not cap spending. Off by default (ADR-0046)."
         },
         "prepareAt": {
           "type": "integer",

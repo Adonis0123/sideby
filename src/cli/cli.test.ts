@@ -1372,7 +1372,10 @@ describe('setup by an agent (spec §3.16)', () => {
       assert.match(human.out, /sign-in, sessions and history/)
       const unknown = await sideby(h, ['families', 'nope', '--json'])
       assert.equal(unknown.code, 1)
-      assert.match(checkSchema('error', unknown.out).error as string, /available: claude, codex, grok, pi/)
+      assert.match(
+        checkSchema('error', unknown.out).error as string,
+        /available: claude, codex, grok, pi, agy/,
+      )
       assert.equal((await sideby(h, ['families', 'claude', 'codex'])).code, 2)
     })
   })
@@ -1722,6 +1725,30 @@ describe('config get|set|unset (spec §3.29)', () => {
       assert.equal(ok.code, 10)
       assert.equal((await sideby(h, ['config', 'set', 'panel.theme'])).code, 2)
       assert.equal((await sideby(h, ['config', 'frob'])).code, 2)
+    })
+  })
+
+  it('checks handoff names as `sideby handoff` does', async () => {
+    await withFakeHome(async (h) => {
+      await fakeHost(h, 'claude')
+      await h.mkdir('.claude/skills')
+      const order = await sideby(h, [
+        'config',
+        'set',
+        'handoff.families.claude',
+        '{"policy":"order","order":["claude:nope"]}',
+        '--json',
+      ])
+      assert.equal(order.code, 1)
+      assert.equal(checkSchema('error', order.out).code, 'unknown-account')
+      const family = await sideby(h, ['config', 'set', 'handoff.familyOrder', '["nope"]'])
+      assert.equal(family.code, 1)
+      assert.match(family.err, /unknown family "nope"/)
+      const cross = await sideby(h, ['config', 'set', 'handoff.crossOrganization', '["ghost"]'])
+      assert.equal(cross.code, 1)
+      assert.match(cross.err, /ghost is not an account/)
+      const ok = await sideby(h, ['config', 'set', 'handoff.crossOrganization', '["claude:main"]'])
+      assert.equal(ok.code, 10)
     })
   })
 })
@@ -2383,6 +2410,40 @@ describe('Panel CLI parity', () => {
         },
       ])
       assert.doesNotMatch(enabled.out, /must not be returned/)
+
+      // The Handoff Rules (ADR-0046): every rule with the settings that change it, and the new switches.
+      const rules = await sideby(h, ['handoff', 'rules', '--json'])
+      assert.equal(rules.code, 0, rules.out)
+      const view = checkSchema('handoff-rules', rules.out) as {
+        auto: boolean
+        rules: { id: string; settings: string[] }[]
+        apiUndecided: boolean
+      }
+      assert.equal(view.auto, true)
+      assert.equal(view.apiUndecided, false)
+      assert.deepEqual(view.rules.find((r) => r.id === 'api')?.settings, ['api'])
+      const preview = await sideby(h, [
+        'handoff',
+        'enable',
+        '--other-ai',
+        '--ai-order',
+        'codex,claude',
+        '--api',
+        '--json',
+      ])
+      assert.equal(preview.code, 10, preview.out)
+      const shown = checkSchema('handoff-enable', preview.out) as {
+        applied: boolean
+        settings: { otherFamilies: boolean; familyOrder: string[]; api: boolean }
+      }
+      assert.equal(shown.applied, false)
+      assert.deepEqual(
+        [shown.settings.otherFamilies, shown.settings.familyOrder, shown.settings.api],
+        [true, ['codex', 'claude'], true],
+      )
+      const bad = await sideby(h, ['handoff', 'enable', '--ai-order', 'nope', '--json'])
+      assert.notEqual(bad.code, 0)
+      checkSchema('error', bad.out)
     })
   })
 })

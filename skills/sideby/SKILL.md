@@ -34,7 +34,7 @@ Do every step you can yourself. Only browser sign-in, secrets and interactive se
 
 ## What do you want to do
 
-Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique. Families: `claude`, `codex`, `grok`, `pi`.
+Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique. Families: `claude`, `codex`, `grok`, `pi`, `agy` (Antigravity CLI). `agy` is main account only (`mainOnly: true` in `sideby families --json`): agy keeps one Google sign-in per computer, so never offer `sideby new agy`; tell the user sideby supports only `agy:main` for now. Its quota comes from `agy -p /usage` per model group and never picks an account.
 
 | The user wants to | Run | Then read |
 |---|---|---|
@@ -57,6 +57,7 @@ Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique
 | Repair drift or permissions | `sideby doctor [ref] --json`, then `--fix` after they agree | `references/diagnose.md` |
 | Keep working because an account hit its limit | `sideby next <family> --json` | `references/handoff.md` |
 | Turn on Auto Handoff ("自动接力", "自动交接", "hand over when quota runs low"), see what it still needs, hand this session over now, or pick an account with room for a subtask | `sideby handoff status --json`, `sideby handoff enable --json` (exit 10 first), `sideby handoff ready`, `sideby next <family> --json` | `references/handoff.md` |
+| Explain or change the handoff rules ("接力规则", "什么时候换号", "让 Codex 接 Claude", "别用 API 账号接力") | `sideby handoff rules --json`, `sideby config set handoff.<key> <value>` or `sideby handoff enable --other-ai/--api --json` (exit 10 first) | `references/handoff.md` |
 | Sign an account in again or switch it to another login ("换个账号登录", "两个目录登录的是同一个号", "sign claude:work in with another account") | `sideby list --json` (`identity`, `sameLogin`), then give the user `sideby login <ref>` | `references/accounts.md` |
 | Create an account with a given name, an API account, or a short command | `sideby new`, `sideby alias add` | `references/accounts.md` |
 | One command that always starts the account with the most quota left ("加个 cc", "自动挑额度最多的账号启动", "start whichever has room") | `sideby alias add <short> --pick <family> --json` (exit 10 first), `sideby alias list --json` | `references/accounts.md` |

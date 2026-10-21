@@ -15,8 +15,17 @@ import { editSettings } from '../core/edit-settings.ts'
 import { UserError } from '../core/errors.ts'
 import { requestHandoff } from '../core/handoff-chain.ts'
 import { handoffOverview } from '../core/handoff-overview.ts'
+import { type HandoffRule, handoffRulesView } from '../core/handoff-rules.ts'
 import { explain, type HandoffIo, readyDecision, runWithHandoff } from '../core/handoff-run.ts'
-import { configureHandoff, type HandoffChange, handoffHint, handoffStatus } from '../core/handoff-status.ts'
+import type { HandoffDecision } from '../core/handoff-select.ts'
+import {
+  checkHandoffRefs,
+  configureHandoff,
+  type HandoffChange,
+  handoffHint,
+  handoffRefs,
+  handoffStatus,
+} from '../core/handoff-status.ts'
 import type { HistoryQuery, HistoryResult } from '../core/history.ts'
 import { installHint, runHost } from '../core/launch.ts'
 import { type LoginSnapshot, loginAfterLine, loginBeforeLine } from '../core/login-check.ts'
@@ -24,12 +33,11 @@ import { accountModel, type ModelChange, setAccountModel } from '../core/model-c
 import { resolvePaths, tildify } from '../core/paths.ts'
 import { USAGE_DAYS } from '../core/quota-levels.ts'
 import {
-  groupsToTurnOff,
-  groupsToTurnOn,
   groupsToUndo,
   type RemoteControlGroup,
   type RemoteControlState,
   remoteControlNothingToDo,
+  remoteControlTodo,
 } from '../core/remote-control.ts'
 import { SHELLS, type Shell, type ShellInitWrite } from '../core/shell-init.ts'
 import type { TuneApplyPlan } from '../core/tuning-apply.ts'
@@ -879,7 +887,7 @@ export async function cmdRemoteControl(a: ParsedArgs, io: Io, runtime?: Runtime)
         '  on: every session connects; default: Claude Code or your organization decides; off: only when you run /remote-control',
       ),
     )
-    if (groupsToTurnOff(groups).length)
+    if (remoteControlTodo(groups, 'off').length)
       io.out(
         c.cyan(
           '\nRun `sideby remote-control off` so no session connects by itself (it shows the change first).',
@@ -891,9 +899,9 @@ export async function cmdRemoteControl(a: ParsedArgs, io: Io, runtime?: Runtime)
     action === 'off' ? rt.remoteControlOff() : action === 'on' ? rt.remoteControlOn() : rt.remoteControlUndo()
   const todo =
     action === 'off'
-      ? groupsToTurnOff(groups)
+      ? remoteControlTodo(groups, 'off')
       : action === 'on'
-        ? groupsToTurnOn(groups)
+        ? remoteControlTodo(groups, 'on')
         : groupsToUndo(groups)
   const verb = action === 'off' ? 'turn it off' : action === 'on' ? 'turn it on' : 'undo'
   if (todo.length === 0) {
@@ -1199,13 +1207,16 @@ async function cmdHandoffStatus(a: ParsedArgs, io: Io): Promise<number> {
   const rt = await createRuntime()
   const st = await handoffStatus(rt)
   if (a.flags.has('json')) {
-    json(io, { ...st, overview: await handoffOverview(rt) })
+    const overview = await handoffOverview(rt)
+    json(io, { ...st, apiUndecided: (await handoffRulesView(rt, overview)).apiUndecided, overview })
     return 0
   }
   io.out(
     `Auto Handoff: ${st.auto ? c.green('on') : c.yellow('off')} (same family ${st.sameFamily ? 'on' : 'off'}; brief at ${st.prepareAt}%, hand over at ${st.threshold}%)`,
   )
   if (st.sideby.problem) io.out(c.red(`sideby on PATH: ${st.sideby.problem}`))
+  if ((await handoffRulesView(rt)).apiUndecided) io.out(c.yellow(API_UNDECIDED))
+  io.out(c.dim('Every rule in plain words: `sideby handoff rules`.'))
   if (st.families.length)
     io.out(
       `\n${table(
@@ -1229,6 +1240,70 @@ async function cmdHandoffStatus(a: ParsedArgs, io: Io): Promise<number> {
   return 0
 }
 
+/** `sideby handoff rules` (spec §3.17 "接力规则"): every rule in effect, in plain words, and how to change each. */
+async function cmdHandoffRules(a: ParsedArgs, io: Io): Promise<number> {
+  const rt = await createRuntime()
+  const view = await handoffRulesView(rt)
+  if (a.flags.has('json')) {
+    json(io, view)
+    return 0
+  }
+  io.out(
+    `Auto Handoff: ${view.auto ? c.green('on') : c.yellow('off')}${view.auto ? '' : c.dim(' (these rules apply once it is on)')}`,
+  )
+  if (view.apiUndecided) io.out(c.yellow(`\n${API_UNDECIDED}`))
+  io.out('')
+  for (const [i, r] of view.rules.entries()) {
+    io.out(`${String(i + 1).padStart(2)}. ${r.text}`)
+    const change = ruleCommand(r)
+    if (change) io.out(c.dim(`    change: ${change}`))
+  }
+  if (view.takeover.length) {
+    io.out('\nIf a handoff started now:')
+    for (const t of view.takeover) io.out(`  ${t.ref} → ${decisionText(t.decision)}`)
+  }
+  return 0
+}
+
+const API_UNDECIDED =
+  'API accounts no longer take over by default: they are billed per use. Keep them as the last resort with `sideby config set handoff.api true --yes`, or say no with `sideby config set handoff.api false --yes`.'
+
+/** The command that changes a rule, or null for a fixed one. */
+function ruleCommand(r: HandoffRule): string | null {
+  const set = (key: string, v: string) => `sideby config set handoff.${key} ${v} --yes`
+  switch (r.id) {
+    case 'when':
+      return `${set('threshold', '<percent>')}; ${set('prepareAt', '<percent>')}; ${set('adaptive', String(!r.params.adaptive))}`
+    case 'takeover':
+      return `follows the threshold: ${set('threshold', '<percent>')}`
+    case 'wait':
+      return set('waitIfResetWithinMinutes', '<minutes>')
+    case 'sameFamily':
+    case 'otherFamilies':
+    case 'api':
+      return (
+        set(r.id, String(!r.params.on)) +
+        (r.id === 'otherFamilies' ? `; ${set('familyOrder', '\'["codex","grok"]\'')}` : '')
+      )
+    case 'organization':
+      return set('crossOrganization', '\'["<account>"]\'')
+    case 'order':
+      return `sideby handoff enable --order ${r.params.family}=<account,account>`
+    case 'countdown':
+      return set('countdownSeconds', '<seconds>')
+    default:
+      return null
+  }
+}
+
+function decisionText(d: HandoffDecision): string {
+  if (d.kind === 'pick') return d.ref
+  if (d.kind === 'wait') return `waits for the reset at ${new Date(d.until).toLocaleTimeString()}`
+  return d.earliestReset
+    ? `none now (${d.reason}); ${d.earliestReset.ref} is back at ${new Date(d.earliestReset.at).toLocaleTimeString()}`
+    : `none (${d.reason})`
+}
+
 function intFlag(a: ParsedArgs, name: string): number | undefined {
   const v = a.flags.get(name)
   if (v === undefined) return undefined
@@ -1243,6 +1318,11 @@ function switchCommand(sub: 'enable' | 'disable', change: HandoffChange): string
   const parts = [`sideby handoff ${sub}`]
   if (change.sameFamily === true) parts.push('--same-family')
   if (change.sameFamily === false) parts.push('--no-same-family')
+  if (change.otherFamilies === true) parts.push('--other-ai')
+  if (change.otherFamilies === false) parts.push('--no-other-ai')
+  if (change.familyOrder) parts.push(`--ai-order ${change.familyOrder.join(',')}`)
+  if (change.api === true) parts.push('--api')
+  if (change.api === false) parts.push('--no-api')
   for (const o of change.orders ?? []) parts.push(`--order ${o.family}=${o.order.join(',')}`)
   if (change.prepareAt !== undefined) parts.push(`--prepare-at ${change.prepareAt}`)
   if (change.threshold !== undefined) parts.push(`--threshold ${change.threshold}`)
@@ -1258,6 +1338,17 @@ async function cmdHandoffSwitch(a: ParsedArgs, io: Io, sub: 'enable' | 'disable'
   if (sub === 'enable') {
     if (a.flags.has('same-family')) change.sameFamily = true
     if (a.flags.has('no-same-family')) change.sameFamily = false
+    if (a.flags.has('other-ai')) change.otherFamilies = true
+    if (a.flags.has('no-other-ai')) change.otherFamilies = false
+    if (a.flags.has('api')) change.api = true
+    if (a.flags.has('no-api')) change.api = false
+    const aiOrder = a.flags.get('ai-order')
+    if (aiOrder === true) throw new UsageError('--ai-order takes families, for example --ai-order codex,grok')
+    if (typeof aiOrder === 'string')
+      change.familyOrder = aiOrder
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean)
     const order = a.flags.get('order')
     if (typeof order === 'string') {
       const eq = order.indexOf('=')
@@ -1297,6 +1388,12 @@ async function cmdHandoffSwitch(a: ParsedArgs, io: Io, sub: 'enable' | 'disable'
     io.out(`Auto Handoff is already ${sub === 'enable' ? 'set that way' : 'off'}; nothing to change.`)
   else if (!r.applied) {
     io.out(`Change to ${tildify(r.file, rt.paths.home)}:\n\n${r.diff}`)
+    if (sub === 'enable' && r.settings.api)
+      io.out(
+        c.yellow(
+          'API accounts are billed per use and sideby does not cap spending; set a limit in the provider’s console.',
+        ),
+      )
     if (sub === 'enable' && r.settings.sameFamily)
       io.out(
         c.yellow(
@@ -1326,10 +1423,11 @@ export async function cmdHandoff(a: ParsedArgs, io: Io): Promise<number> {
     return runSetup(a, io, rt, 'handoff', sub, familyId, rt.handoffSetup(familyId))
   }
   if (sub === 'status') return cmdHandoffStatus(a, io)
+  if (sub === 'rules') return cmdHandoffRules(a, io)
   if (sub === 'enable' || sub === 'disable') return cmdHandoffSwitch(a, io, sub)
   if (sub !== 'ready')
     throw new UsageError(
-      'usage: sideby handoff status | enable [--same-family] [--order <family>=<acct,…>] [--threshold n] [--prepare-at n] [--yes] | disable [--yes] | ready [--to <account>] [--brief <file>] | setup|teardown <family> [--yes]',
+      'usage: sideby handoff status | rules | enable [--same-family] [--other-ai] [--ai-order <family,…>] [--api] [--order <family>=<acct,…>] [--threshold n] [--prepare-at n] [--yes] | disable [--yes] | ready [--to <account>] [--brief <file>] | setup|teardown <family> [--yes]',
     )
   const flag = a.flags.get('brief')
   const brief = typeof flag === 'string' ? flag : undefined
@@ -2973,10 +3071,14 @@ export async function cmdConfig(a: ParsedArgs, io: Io): Promise<number> {
         : 'usage: sideby config unset <key> [--yes] [--json]',
     )
   const next = sub === 'set' ? cfg.parseConfigValue(value!) : undefined
-  const argsProblem = key.startsWith('accounts') ? modelArgsProblem(await createRuntime()) : undefined
+  const top = key.split('.')[0]
+  const rt = top === 'accounts' || top === 'handoff' ? await createRuntime() : undefined
+  const argsProblem = rt && top === 'accounts' ? modelArgsProblem(rt) : undefined
+  const refs = rt && top === 'handoff' ? await handoffRefs(rt) : undefined
   const r = await cfg.editConfigPath(file, key, next, {
     dryRun: !yes,
     ...(argsProblem ? { argsProblem } : {}),
+    ...(refs ? { checkHandoff: (before, after) => checkHandoffRefs(refs, before, after) } : {}),
   })
   const out = {
     action: sub,

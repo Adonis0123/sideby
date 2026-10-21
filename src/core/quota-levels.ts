@@ -6,6 +6,16 @@ import type { QuotaResult, QuotaWindow } from '../types.ts'
  */
 export const QUOTA_FAIL_PERCENT = 85
 export const QUOTA_WARN_PERCENT = 60
+/**
+ * Takeover Limit (spec §3.17 "接力规则"): an Account more used than this does not take over a Handoff, so the next
+ * Account starts with room to work. It sits this many points below the Handoff Threshold and moves with it.
+ */
+export const TAKEOVER_GAP = 10
+
+export function takeoverLimit(threshold: number): number {
+  return Math.max(1, threshold - TAKEOVER_GAP)
+}
+
 /** Days of Usage every Family reports. */
 export const USAGE_DAYS = 7
 

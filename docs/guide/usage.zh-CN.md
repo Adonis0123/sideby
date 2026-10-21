@@ -29,6 +29,7 @@ EMAIL 是账号登录的身份，取自宿主的登录文件（Claude Code、Cod
 | Codex | `AGENTS.md`、`hooks.json`、`plugins`、`rules`、`skills`；订阅账号的 `config.toml` | — | 登录（`auth.json`）、会话、历史；API 账号的 `config.toml` |
 | Grok Build | `skills`、`installed-plugins` | `hooks`、`hooks-paths`，以及订阅账号的 `config.toml`：Grok 不接受这些位置是链接 | 登录（`auth.json`）、`trusted_folders.toml`（复制一次，之后归账号自己）、会话；API 账号的 `config.toml` |
 | pi | `AGENTS.md` | — | 登录（`auth.json`）、会话和其他一切 |
+| Antigravity CLI | —（只支持主账号） | — | 全部；sideby 只支持主账号 |
 
 - **链接**：在主账号改一次，所有账号都生效。
 - **复制或同步**：主账号的改了之后，`sideby doctor --fix` 把副本对齐。
@@ -282,7 +283,7 @@ sideby next claude -- --model opus  # 宿主参数放在 -- 之后
    claude:main    full        back at 14:30
 ```
 
-- 有窗口到 85% 的账号算用满；已过重置时间的窗口重新按 0% 算。
+- 有窗口超过自动接力阈值减 10（默认 95% 时是 85%）的账号算用满，好让换过去的账号有余量干活；已过重置时间的窗口重新按 0% 算。
 - 还没有额度数据的账号排在有余量的账号后面。API 账号按次花钱，加 `--include-api` 才参与。
 - 全部用满时什么都不启动，并告诉你哪个账号最先恢复。所有账号都还没有额度数据时也不启动，因为那样的推荐只是猜测：先开启额度（`sideby quota setup claude`），或用 `sideby run` 自己选。
 - 新账号会开一个新会话，因为每个账号各存各的会话。可以先让旧会话写一份简短的接力说明，再贴进新会话。
@@ -293,22 +294,26 @@ sideby 只推荐，账号由你启动；除非你打开下面的自动接力，�
 
 ## 自动接力（Auto Handoff）
 
-默认关闭。最简单的开启方式是面板里的 **自动接力** 页面：点 **一键开启**，看清 sideby 要改的东西（它自己的设置、Claude 的额度显示、Grok 的钩子），确认一次即可。之后页面会显示每个账号的任务接下来交给谁、最近的接力记录，缺哪一步也能在页面里补全。同一个工具的账号之间只有勾选了才会互相切换（页面上写明了风险）。在终端里用 `sideby handoff enable`（先展示 config 改动，加 `--yes` 才写入）；`sideby handoff status` 按家族列出还缺什么，以及每一项要运行的命令。功能关闭时，如果某个账号的额度过了阈值，会话结束后 sideby 每天最多提示一次；面板也会显示一条带 **去设置** 的提示。
+默认关闭。最简单的开启方式是面板里的 **自动接力** 页面：点 **一键开启**，看清 sideby 要改的东西（它自己的设置、Claude 的额度显示、Grok 的钩子），确认一次即可。之后页面会显示每个账号的任务接下来交给谁、最近的接力记录，缺哪一步也能在页面里补全。**接力规则** 一栏用大白话列出每条规则，开着还是关着，每条后面是它的开关：同一工具的账号之间切换、换到其他 AI 工具以及先后顺序、让 API 账号接手。改动立刻保存，确认的提示里有 **撤销**。在终端里用 `sideby handoff enable`（先展示 config 改动，加 `--yes` 才写入）；`sideby handoff status` 按家族列出还缺什么，以及每一项要运行的命令。功能关闭时，如果某个账号的额度过了阈值，会话结束后 sideby 每天最多提示一次；面板也会显示一条带 **去设置** 的提示。
 
 打开后，sideby 启动的会话（`sideby run`、短命令或 `sideby next`）在额度快用完时，会把任务交给下一个账号：旧会话写好接力说明（Brief），sideby 结束它，下一个账号在同一个终端里开一个新会话，从接力说明接着做。
 
 ```sh
 sideby handoff status
+sideby handoff rules                        # 用大白话列出每条规则，以及现在每个账号会交给谁
 sideby handoff enable --order claude=codex001,cc002 --yes
 sideby handoff enable --same-family --yes   # 也允许 cc001 → cc002；先读下面的风险
+sideby handoff enable --other-ai --ai-order claude,codex --yes   # Claude 用满后换 Codex
+sideby handoff enable --api --yes           # API 账号最后接手；按次计费
 sideby handoff disable --yes
 ```
 
 这些设置都存在 config 文件的 `handoff` 下（见[配置](configuration.zh-CN.md)的 schema）。
 
 - **什么时候。** 最满的窗口到 80%（`prepareAt`）时，会话被要求开始写接力说明并随时更新；某个窗口快用完时，它做完当前一步、更新接力说明、结束这一轮。「快用完」按窗口分别判断（`adaptive`，默认开）：会话跑完一轮后，某个窗口剩下的额度不够最近单轮最大用量的 1.5 倍时就接力，范围在 `prepareAt` 到 99% 之间。5 小时窗口里轻活能用到 97–99% 左右，重活会早一些接力；每周窗口一般在 98–99%。还没跑完一轮时，以及 `adaptive: false` 时，每个窗口都在 95%（`threshold`）接力。提示和终端会写明是哪个窗口，例如「weekly (7d) quota is at 98%, back at Sun 20:00」，不会把每周额度误当成 5 小时额度。接力说明最后一行写 `<!-- handoff brief complete -->` 才算写完；否则会再要求一次，还没写完时 sideby 保留已写的部分，再补上从会话记录里找到的内容。满了的窗口 30 分钟内就重置时（`waitIfResetWithinMinutes`），sideby 选择等待，不接力：会话保留完整上下文，额度恢复后 Claude Code 自己接着做。额度到 95% 时会话里会显示一行说明，真撞到上限时再发一个桌面通知（支持 OSC 9 或 777 的终端，如 iTerm2、WezTerm、Ghostty）。想立刻换号，就在会话里输入 `! sideby handoff ready`：`!` 让命令不经过模型直接运行，额度用完时模型没法回话。只有会话能自己续上时 sideby 才等：Claude Code 要开着「Continue automatically at usage limit」（账号 `settings.json` 里的 `autoContinueAtUsageLimit`，默认开）；写在托管设置或项目设置里的这个开关 sideby 看不到。Codex 和 Grok 从不等。
-- **交给谁。** `policy: "order"` 按你写的列表（账号或短命令，可以跨家族）；不写时选本家族余量最多的账号，再补其他家族的 API 账号。一条链里每个账号只用一次，跳过已满和未登录的账号（已经到你设的 `threshold` 的也跳过），也跳过不同组织的账号（先比 organization，没有就比 email 域名），除非它写在 `crossOrganization` 里。和旧账号是同一登录的账号一律跳过，`order` 里写了也跳过：它们是同一份额度。
-- **同一家族。** 只开 `auto` 时，会交给 API 账号（任何家族），以及你写进 `order` 的其他家族账号。同一家厂商的两个账号之间接力（cc001 → cc002）还要写 `"sameFamily": true`。厂商可能认为这是在绕过用量限制并处理账号，风险由你承担。
+- **交给谁。** `policy: "order"` 按你写的列表（账号或短命令，可以跨家族）；不写时选本家族余量最多的账号；开了 `otherFamilies` 再按 `familyOrder` 换其他工具（每个工具里余量多的在前）；开了 `api` 最后才是 API 账号。一条链里每个账号只用一次，跳过已满和未登录的账号（用量超过 `threshold` 减 10 的也跳过，默认 95% 时是 85%），也跳过不同组织的账号（先比 organization，没有就比 email 域名），除非它写在 `crossOrganization` 里。和旧账号是同一登录的账号一律跳过，`order` 里写了也跳过：它们是同一份额度。
+- **谁可以接手。** 只开 `auto` 时，只交给你写进 `order` 的其他工具的账号。同一家厂商的两个账号之间接力（cc001 → cc002）还要写 `"sameFamily": true`。厂商可能认为这是在绕过用量限制并处理账号，风险由你承担。`"otherFamilies": true` 让本工具没有能接手的账号时，按 `familyOrder` 换其他 AI 工具。`"api": true` 让 API 账号最后接手；它们按次计费，sideby 不限制花费，请在服务商后台设上限。0.22 之前不用这个设置 API 账号也会接手；如果你开着自动接力又有 API 账号，面板和 `sideby handoff status` 会问你一次：不让它们接手，还是让它们接手。没有账号能接手时，sideby 会说开哪个设置就能有。
+- **额度窗口。** 工具给出的每个窗口都算（5 小时、每周、计费周期），最满的那个说了算；没有日额度。所有窗口用同一个阈值。
 - **接力之前。** 有 10 秒倒计时（`countdownSeconds`）；按回车留下，sideby 会在原账号里续接刚才的会话。
 - **手动接力。** 在这类会话里运行 `sideby handoff ready`（或让 agent 运行），可以加 `--brief <file>` 用你自己的接力工具写的说明；这一轮结束后下一个账号启动。自动接力不会回到这条链用过的账号；要把任务交回去（比如第一个账号额度恢复了），运行 `sideby handoff ready --to <account>`。
 - **接力说明。** 放在 `~/.local/state/sideby/handoffs/<chain>/`，权限 600，不写进你的仓库；sideby 补上分支、未提交的文件和 diff 统计，从不 commit 或 stash。新会话拿到的是文件路径，不是正文。旧会话没来得及写时，sideby 从会话记录里拼一份，并注明可能不完整。
@@ -346,6 +351,7 @@ headless 运行（`claude -p`、`codex exec`、`grok -p`）、带 `--remote` 的
 | Codex CLI | `codex` | 0.163.0 | `codex login` | 官方 CLI；本地记录备用 | 本地会话文件 |
 | Grok Build | `grok` | 1.0.60 | `grok login` | 由 `grok` 命令行查询 | 没有公开来源 |
 | pi | `pi` | 1.0.2 | 进入 pi 后执行 `/login` | 没有公开来源 | 没有公开来源 |
+| Antigravity CLI | `agy` | 1.4.4（2026-10-21） | 在 `agy` 里用 Google 登录 | 由 `agy` 命令行查询 | 没有公开来源 |
 
 用量由 sideby 自己从 Claude Code 的 `projects/**/*.jsonl` 和 Codex 的 `sessions/**/rollout-*.jsonl` 统计，不需要 ccusage。Grok Build 的额度来自它的命令行，没有用量来源；pi 两者都没有。API 账号只显示用量，不显示额度。宿主没装时，`list` 照常列出它的账号并标注「宿主未安装」，`run` 会告诉你去哪里安装。
 
@@ -354,3 +360,4 @@ headless 运行（`claude -p`、`codex exec`、`grok -p`）、带 `--remote` 的
 - **codex**：非 main 账号默认加 `-c cli_auth_credentials_store="file"`，让每个账号的登录存在自己的 `auth.json` 里；你的参数里已经有这个键时不加。
 - **grok**：Grok 的沙箱不允许某些路径是 symlink，所以 `hooks`、`hooks-paths` 用复制而不是链接，`trusted_folders.toml` 和 `config.toml` 是账号自己的文件。doctor 发现问题时会引用宿主的原话。
 - **pi**：账号目录多一层（`~/.pi-<name>/agent`）。`proxy.env` 只用来加载 provider key，不会让 pi 账号变成 API 账号。
+- **agy**（Antigravity CLI）：只支持主账号。agy 把数据放在 `~/.gemini/antigravity-cli`，把 Google 登录放在系统钥匙串里，两者都没有办法挪开，所以第二个账号没法和第一个同时开；`sideby new agy …` 会说明原因，不写任何文件。sideby 用 `agy -p /usage --output-format json` 查额度，最多每 15 分钟一次，不会开启模型对话。每个限额只管一个模型组，所以额度按组显示，不用来挑账号。sideby 从不读取登录信息，登录状态显示为未知；额度查询发现没登录时，会提示运行 `sideby login agy:main`。

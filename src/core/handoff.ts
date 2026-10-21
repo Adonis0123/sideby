@@ -56,7 +56,7 @@ const ORDER: Record<HandoffState, number> = { ready: 0, unknown: 1, api: 2, full
 /** A full Account without a readable reset time sorts after every one that has one. */
 const resetTime = (e: HandoffEntry) => (e.resetsAt ? Date.parse(e.resetsAt) : Number.POSITIVE_INFINITY)
 
-function entry(c: HandoffCandidate, now: Date): HandoffEntry {
+function entry(c: HandoffCandidate, now: Date, fullAt: number): HandoffEntry {
   const pressure = quotaPressure(c.quota, now)
   const base = {
     ref: c.ref,
@@ -68,13 +68,13 @@ function entry(c: HandoffCandidate, now: Date): HandoffEntry {
   if (c.kind === 'api') return { ...base, state: 'api' }
   if (c.login === 'logged-out') return { ...base, state: 'logged-out' }
   if (pressure === null) return { ...base, state: 'unknown' }
-  if (pressure < QUOTA_FAIL_PERCENT) return { ...base, state: 'ready' }
+  if (pressure < fullAt) return { ...base, state: 'ready' }
   // Usable again only when every full window has reset: the latest of their reset times.
   let last: number | undefined
   if (c.quota.status === 'ok')
     for (const w of c.quota.windows) {
       const t = Date.parse(w.resetsAt)
-      if (w.usedPercent >= QUOTA_FAIL_PERCENT && !windowReset(w.resetsAt, now) && Number.isFinite(t))
+      if (w.usedPercent >= fullAt && !windowReset(w.resetsAt, now) && Number.isFinite(t))
         last = Math.max(last ?? t, t)
     }
   return { ...base, state: 'full', ...(last === undefined ? {} : { resetsAt: new Date(last).toISOString() }) }
@@ -84,8 +84,10 @@ export function planHandoff(
   family: string,
   candidates: readonly HandoffCandidate[],
   now: Date,
-  opts: { includeApi?: boolean; from?: string } = {},
+  /** `fullAt`: the Takeover Limit, at or above which an Account is full (default 85, the limit at threshold 95). */
+  opts: { includeApi?: boolean; from?: string; fullAt?: number } = {},
 ): HandoffPlan {
+  const fullAt = opts.fullAt ?? QUOTA_FAIL_PERCENT
   const current = opts.from ? candidates.find((c) => c.ref === opts.from) : undefined
   const byRef = new Map(candidates.map((c) => [c.ref, c]))
   const tie = (a: HandoffEntry, b: HandoffEntry) => {
@@ -95,7 +97,7 @@ export function planHandoff(
   }
   const accounts = candidates
     .map((c) => {
-      const e = entry(c, now)
+      const e = entry(c, now, fullAt)
       return current?.sameLogin?.includes(c.ref) ? { ...e, sameLoginAs: current.ref } : e
     })
     .sort(

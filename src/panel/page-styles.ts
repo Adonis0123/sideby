@@ -547,15 +547,44 @@ a.btn:hover { text-decoration: none; }
 .rc-row { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 2px; }
 .rc-row code { word-break: break-all; }
 .banner-actions { display: flex; gap: 8px; flex: none; }
-.hp-how { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.hp-rules { list-style: none; margin: 0; padding: 0; counter-reset: hp-rule; display: flex; flex-direction: column; }
+.hp-rules > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.hp-rules > li:last-child { border-bottom: 0; }
+.hp-rule-text::before { counter-increment: hp-rule; content: counter(hp-rule) '. '; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hp-rule-ctl { display: flex; align-items: center; gap: 8px; justify-self: end; }
+.hp-rule-ctl:empty { display: none; }
+.hp-rule-below { grid-column: 1 / -1; margin-top: 8px; }
+.hp-rule-sub { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.hp-rules .seg { height: var(--ctl-h-sm); }
+.hp-rules .seg-btn[aria-pressed=true] { background: var(--accent-soft); color: var(--accent); }
+.hp-on-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.hp-on-row > p { margin: 0; }
+.hp-ai-order { margin: 0; }
+.hp-ai-order li .title-logo { min-width: 150px; }
+.ah-cross { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px 12px; }
+.ah-fam > summary { cursor: pointer; }
 .hp-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .hp-steps li { display: flex; gap: 8px; }
 .hp-steps li::before { content: '•'; color: var(--muted); }
 .hp-steps li > div { flex: 1; min-width: 0; }
 .hp-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.hp-rows li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.hp-rows li { display: grid; grid-template-columns: minmax(0, 16rem) 7rem minmax(0, 1fr); align-items: center; column-gap: 14px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .hp-rows li:last-child { border-bottom: 0; }
+.hp-rows .num { font-variant-numeric: tabular-nums; }
+.hp-rows li > .num { text-align: end; }
+.hp-recent li { grid-template-columns: minmax(0, 1fr) max-content minmax(0, 12rem); }
+.hp-recent li > .num { white-space: nowrap; }
 #handoff-page > * + * { margin-top: 12px; }
+#handoff-page > h3 { margin-top: 28px; }
+#handoff-page > h3 + * { margin-top: 8px; }
+:where(:root[data-width=narrow], :root[data-width=phone]) {
+  .hp-rows li { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; }
+  .hp-rows li > :last-child { grid-column: 1 / -1; }
+  .hp-rules > li { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
+  .hp-rule-ctl { justify-self: start; }
+  .hp-rule-sub { justify-content: flex-start; }
+  .hp-rows li > .num { text-align: start; }
+}
 /* Sessions page (spec §3.32): one row per Live Session; a Session that needs the user gets the warning tint. */
 #sessions-page > * + * { margin-top: 12px; }
 .sess-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 12px; padding: 11px 10px 11px 16px; border-top: 1px solid var(--border); transition: background-color .15s; }
@@ -990,7 +1019,7 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .hist-group { display: flex; flex-direction: column; gap: 4px; }
 .hist-group + .hist-group { margin-top: 10px; }
 .hist-group.is-folded + .hist-group.is-folded { margin-top: 0; }
-.hist-ghead { display: flex; align-items: center; min-width: 0; }
+.hist-ghead { display: flex; align-items: center; min-width: 0; padding-left: 14px; }
 .hist-gtoggle { max-width: 100%; padding: 3px 8px 3px 2px; font-size: var(--small); font-weight: var(--strong-weight); }
 .hist-gtitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hist-gtoggle .spin { width: 12px; height: 12px; }
@@ -1015,7 +1044,7 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 /* Inner scroll boxes get a thin bar in the theme's colours; the side list shows it only while the pointer is on it. */
 :is(.hist-side, .hv-msgs, .diff, .dlg-body, .menu) { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 .hist-side:not(:hover, :focus-within) { scrollbar-color: transparent transparent; }
-.hist-side-h { margin: 0 0 2px 10px; font-size: 11.5px; font-weight: var(--strong-weight); color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.hist-side-h { margin: 0 0 2px 10px; font-size: var(--small); font-weight: 400; color: var(--muted); }
 .hist-projs { display: flex; flex-direction: column; gap: 1px; }
 .hist-proj { display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 10px; border: 0; border-radius: var(--ctl-radius); background: transparent; color: var(--muted); font: inherit; font-size: var(--small); text-align: left; cursor: pointer; transition: background-color .12s, color .12s; }
 .hist-proj:hover { background: var(--hover); color: var(--text); }
@@ -1057,7 +1086,7 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .hist-mi-wrap { display: flex; flex-wrap: wrap; align-items: center; row-gap: 2px; margin-left: -14px; }
 .hist-mi { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; }
 .hist-mi::before { content: '·'; flex: none; width: 14px; text-align: center; opacity: .7; }
-.hist-meta b { color: var(--text); font-weight: var(--strong-weight); }
+.hist-meta b { color: var(--text); font-weight: 500; }
 .hist-pname, .hist-branch { min-width: 0; max-width: 18em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hist-age { white-space: nowrap; }
 .hist-snip { color: var(--muted); font-size: var(--small); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
@@ -1115,7 +1144,8 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 :where(:root[data-width=narrow], :root[data-width=phone]) .hist-grid { grid-template-columns: minmax(0, 1fr); }
 :where(:root[data-width=narrow], :root[data-width=phone]) .hist-side { position: static; max-height: none; flex-direction: row; align-items: center; overflow-x: auto; }
 :where(:root[data-width=narrow], :root[data-width=phone]) .hist-side-h { display: none; }
-:where(:root[data-width=narrow], :root[data-width=phone]) .hist-projs { flex-direction: row; gap: 4px; }
+:where(:root[data-width=narrow], :root[data-width=phone]) .hist-projs { flex-direction: row; align-items: center; gap: 4px; }
+:where(:root[data-width=narrow], :root[data-width=phone]) .hist-catbody > .hist-catps { flex-direction: row; overflow: visible; }
 :where(:root[data-width=narrow], :root[data-width=phone]) .hist-proj { width: auto; flex: none; max-width: 16em; }
 :where(:root[data-width=narrow], :root[data-width=phone]) :is(.hist-catgrp, .hist-catps) { flex-direction: row; display: flex; gap: 4px; margin-top: 0; }
 :where(:root[data-width=narrow], :root[data-width=phone]) .hist-catps .hist-proj { padding-left: 10px; }
@@ -1154,9 +1184,76 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .dialog.dialog-top { margin-top: min(12vh, 96px); max-height: calc(100vh - min(12vh, 96px) - 24px); }
 .dialog:not([open]) { opacity: 0; transform: translateY(4px) scale(.985); pointer-events: none; }
 .dialog:not([open])::backdrop { opacity: 0; }
+/* Page tabs (2026-10-21): underline tabs across the content width, as GitHub and Vercel draw them. The selected page
+   is in full text color with its mark in the accent and a 2px accent line under it; the others are muted. Each label
+   reserves its bold width, so picking a tab never moves the ones after it. */
+.pages { margin: 2px 0 22px; }
+.tabs { display: flex; align-items: flex-end; gap: 2px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+.tab { position: relative; isolation: isolate; display: inline-flex; align-items: center; gap: 7px; flex: none; height: 44px; padding: 0 12px; border: 0; background: none; color: var(--muted); font: inherit; font-size: var(--font-size); font-weight: 500; white-space: nowrap; cursor: pointer; transition: color .12s; }
+.tab::before { content: ""; position: absolute; inset: 6px 2px 7px; z-index: -1; border-radius: var(--ctl-radius); background: var(--hover); opacity: 0; transition: opacity .12s; }
+.tab:hover { color: var(--text); }
+.tab:hover::before { opacity: 1; }
+.tab .ic { width: 16px; height: 16px; color: var(--faint); transition: color .12s; }
+.tab:hover .ic { color: var(--muted); }
+.tab-label { display: inline-grid; }
+.tab-label::after { content: attr(data-label); height: 0; overflow: hidden; visibility: hidden; font-weight: var(--strong-weight); }
+.tab[aria-selected=true] { color: var(--text); font-weight: var(--strong-weight); }
+.tab[aria-selected=true] .ic { color: var(--accent); }
+.tab[aria-selected=true]::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: 0; height: 2px; border-radius: 2px 2px 0 0; background: var(--accent); animation: tab-line .22s cubic-bezier(.16, 1, .3, 1); }
+@keyframes tab-line { from { opacity: 0; transform: scaleX(.3); } }
+.tab:focus-visible { outline: var(--focus-outline); outline-offset: -5px; border-radius: var(--ctl-radius); }
+.tab-count { min-width: 20px; padding: 0 6px; border-radius: var(--chip-radius); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border); color: var(--muted); font-size: 11.5px; font-weight: 500; line-height: 18px; text-align: center; }
+.tab[aria-selected=true] .tab-count { background: var(--accent-soft); box-shadow: none; color: var(--accent); }
+.tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok-bar); box-shadow: 0 0 0 3px var(--ok-soft); }
+.tab .seg-badge { margin-left: 0; }
+.tab .spin { width: 16px; height: 16px; }
+
+/* Pages other than Accounts open the same way: a title with its actions on the right, one line saying what the page
+   is for, then the content in surfaces. A section inside a page has a small heading with more room above than below. */
+.page > .section-head { margin-bottom: 4px; min-height: var(--ctl-h); }
+.page > .section-head h2 { font-size: 18px; letter-spacing: -0.015em; }
+.page > .section-head + p { margin-bottom: 18px; max-width: 860px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.page-sec { margin: 28px 0 10px; font-size: 13.5px; font-weight: var(--heading-weight); color: var(--text); }
+.page-sec-head { display: flex; flex-direction: column; gap: 2px; margin: 28px 0 10px; }
+.page-sec-head .page-sec { margin: 0; }
+
+/* Auto Handoff's status card: its mark, on or off in words, what that means, and the one action that changes it. On,
+   it takes a green edge and tint, so the state reads before the words. */
+.hp-status { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 18px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); transition: background-color .2s, border-color .2s; }
+.hp-status-ic { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 11px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border); color: var(--muted); }
+.hp-status-ic .ic { width: 20px; height: 20px; }
+.hp-status-text { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.hp-status-text b { font-size: var(--large); font-weight: var(--heading-weight); }
+.hp-status-text p { font-size: 13px; line-height: 1.55; }
+.hp-status.is-on { border-color: color-mix(in srgb, var(--ok-bar) 40%, var(--border)); background: color-mix(in srgb, var(--ok-soft) 55%, var(--surface)); }
+.hp-status.is-on .hp-status-ic { background: var(--ok-soft); box-shadow: none; color: var(--ok); }
+.hp-status + :not(.page-sec-head, .page-sec) { margin-top: 12px; }
+.page .hp-rules, .page .hp-rows { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.page .hp-rules > li { padding: 12px 16px; min-height: 52px; }
+.page .hp-rows li { padding: 11px 16px; }
+.hp-rule-text::before { color: var(--faint); }
+:where(:root[data-width=narrow], :root[data-width=phone]) .hp-status { grid-template-columns: auto minmax(0, 1fr); }
+:where(:root[data-width=narrow], :root[data-width=phone]) .hp-status > .btn { grid-column: 1 / -1; justify-self: start; }
+
+/* Context tuning on its page: one surface per settings file. Now, the suggestion and what it saves are one strip like
+   the Accounts summary; the per-account details sit in the card's foot. */
+.tg-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tg-stats { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); background: var(--surface-2); border: 1px solid var(--border); border-radius: calc(var(--radius) - 4px); overflow: hidden; }
+.tg-stat { min-width: 0; padding: 12px 16px; border-left: 1px solid var(--border); }
+.tg-stat:first-child { border-left: 0; }
+.tg-stats .tune-num { font-size: 24px; font-weight: var(--heading-weight); letter-spacing: -0.02em; line-height: 1.35; white-space: nowrap; }
+#tuning-page .tune-acct { gap: 0; margin: 0 0 16px; overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+#tuning-page .tune-group { gap: 12px; padding: 18px 20px; border: 0; border-radius: 0; }
+#tuning-page .tune-acct > .tune-details { margin: 0; padding: 11px 20px; border-top: 1px solid var(--border); background: var(--surface-2); }
+#tuning-page .tune-acct > .tune-details:first-child { border-top: 0; }
+#tuning-page .tune-acct > .tune-details[open] > summary { margin-bottom: 6px; }
+:where(:root[data-width=phone]) .tg-stats { grid-auto-flow: row; }
+:where(:root[data-width=phone]) .tg-stat { border-left: 0; border-top: 1px solid var(--border); }
+:where(:root[data-width=phone]) .tg-stat:first-child { border-top: 0; }
+
 @media (prefers-reduced-motion: reduce) {
-  .sk, .spin, .is-spinning svg, .toast, .toast.bump, .toast.toast-out, .view-in > *, .set-pane.view-in, .row.flash, .sess-row.flash, .sess-msg, .seg-badge, .card.flash, .pulse, .sess-busy .sess-dot, .menu, .menu.float-out, .dialog[open], .dialog[open]::backdrop, .enter, .fade-in, .hist-list.swap-in, .tip-body, .tip-float, .row-run.is-done .ic { animation: none; }
-  .bar > span, .chev, .row, .sess-row, .sess-copy, .hist-row, .hist-cont, .hist-proj, .hist-catbody, .hist-opt, .hist-list, .icon-btn, .seg-btn, .menu-item, .set-tab, .link-btn, .tag-btn, .email-btn, .btn, .chip-btn, .set-link .ic, .dialog, .dialog[open], .dialog::backdrop { transition: none; }
+  .sk, .spin, .is-spinning svg, .toast, .toast.bump, .toast.toast-out, .view-in > *, .set-pane.view-in, .row.flash, .sess-row.flash, .sess-msg, .seg-badge, .card.flash, .pulse, .sess-busy .sess-dot, .menu, .menu.float-out, .dialog[open], .dialog[open]::backdrop, .enter, .fade-in, .hist-list.swap-in, .tip-body, .tip-float, .row-run.is-done .ic, .tab[aria-selected=true]::after { animation: none; }
+  .bar > span, .chev, .row, .sess-row, .sess-copy, .hist-row, .hist-cont, .hist-proj, .hist-catbody, .hist-opt, .hist-list, .icon-btn, .seg-btn, .menu-item, .set-tab, .link-btn, .tag-btn, .email-btn, .btn, .chip-btn, .set-link .ic, .dialog, .dialog[open], .dialog::backdrop, .tab, .tab::before, .tab .ic, .hp-status { transition: none; }
   :is(.btn, .icon-btn, .seg-btn, .set-tab, .chip-btn):active:not(:disabled), .set-link:hover .ic, .dialog:not([open]) { transform: none; }
 }
 `

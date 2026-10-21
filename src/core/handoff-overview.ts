@@ -63,10 +63,14 @@ export async function readRecentHandoffs(stateDir: string, limit = RECENT): Prom
   return out.sort((a, b) => Date.parse(b.at) - Date.parse(a.at)).slice(0, limit)
 }
 
-export async function handoffOverview(rt: Runtime): Promise<HandoffOverview> {
+/** `always`: also while Auto Handoff is off, to show what turning it on would do (the Handoff Rules). */
+export async function handoffOverview(
+  rt: Runtime,
+  opts: { always?: boolean } = {},
+): Promise<HandoffOverview> {
   const settings = rt.handoffSettings()
   const recent = await readRecentHandoffs(rt.paths.stateDir)
-  if (!settings.auto) return { settings, takeover: [], recent }
+  if (!settings.auto && !opts.always) return { settings, takeover: [], recent }
   const starters = new Set(
     [...rt.families.values()]
       .filter((f) => f.handoff?.starts.length && HOOK_FAMILIES.includes(f.id))

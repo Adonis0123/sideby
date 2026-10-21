@@ -65,9 +65,11 @@ import { UserError } from '../core/errors.ts'
 import { planHandoff } from '../core/handoff.ts'
 import { applyHandoffEnable, type EnablePlan, planHandoffEnable } from '../core/handoff-enable.ts'
 import { handoffOverview } from '../core/handoff-overview.ts'
+import { apiUndecided, handoffRulesView } from '../core/handoff-rules.ts'
 import { configureHandoff, type HandoffChange, handoffStatus } from '../core/handoff-status.ts'
 import {
   acceptInbound,
+  groupsToAccept,
   type InboundGroup,
   inboundGroups,
   undoInbound,
@@ -84,7 +86,7 @@ import {
 import { listMessages, type MessageReceipt, sendMessage } from '../core/messages.ts'
 import { type AccountModel, accountModel, setAccountModel } from '../core/model-choice.ts'
 import { tildify } from '../core/paths.ts'
-import type { RemoteControlGroup } from '../core/remote-control.ts'
+import { type RemoteControlGroup, remoteControlTodo } from '../core/remote-control.ts'
 import { openRunBoard, withRuns } from '../core/run-link.ts'
 import { SECRET_VAR_NAME, secretVarFor, setSecret } from '../core/secret-file.ts'
 import { SKILL_INSTALL } from '../core/skill-check.ts'
@@ -357,7 +359,7 @@ export interface PanelState {
    */
   handoff?: Record<string, string>
   /** Auto Handoff settings (spec §3.17) and the Families that can start one; readiness comes from /api/handoff/status. */
-  autoHandoff: { settings: HandoffSettings; starters: string[] }
+  autoHandoff: { settings: HandoffSettings; starters: string[]; apiUndecided: boolean }
   /** Claude settings files grouped as `sideby remote-control` shows them (spec §3.22); absent without Claude Accounts. */
   remoteControl?: RemoteControlView[]
   /** Grok Bot windows (ADR-0019), data folders shown as `~/…`; absent when there are none to show. */
@@ -946,6 +948,7 @@ async function buildState(
       starters: [...rt.families.values()]
         .filter((f) => f.handoff?.starts.length && HOOK_FAMILIES.includes(f.id))
         .map((f) => f.id),
+      apiUndecided: apiUndecided(rt, accounts.filter((a) => a.kind === 'api').length),
     },
     ...(upd ? { update: upd } : {}),
     ...(showBrowser ? { browser } : {}),
@@ -984,13 +987,37 @@ function displayBody(body: Record<string, unknown>): DisplayConfig | undefined {
   return out
 }
 
-/** The `change` of a /api/handoff/configure body, with every field checked; unknown fields are refused. */
+/**
+ * The `change` of a /api/handoff/configure body, with every field checked; unknown fields are refused. Null for a
+ * single setting removes it, as the `undo` of an earlier answer asks.
+ */
+const HANDOFF_SINGLE_KEYS = new Set([
+  'auto',
+  'sameFamily',
+  'otherFamilies',
+  'api',
+  'adaptive',
+  'prepareAt',
+  'threshold',
+  'waitIfResetWithinMinutes',
+  'countdownSeconds',
+])
+
 function handoffChange(body: Record<string, unknown>): HandoffChange {
   const c = body.change
   if (!c || typeof c !== 'object' || Array.isArray(c)) throw new HttpError(400, '"change" must be an object')
   const out: HandoffChange = {}
   for (const [k, v] of Object.entries(c)) {
-    if (k === 'auto' || k === 'sameFamily') {
+    if (v === null && k !== 'familyOrder' && k !== 'crossOrganization' && k !== 'orders') {
+      if (!HANDOFF_SINGLE_KEYS.has(k)) throw new HttpError(400, `unknown setting "${k}"`)
+      ;(out as Record<string, unknown>)[k] = null
+    } else if (
+      k === 'auto' ||
+      k === 'sameFamily' ||
+      k === 'otherFamilies' ||
+      k === 'api' ||
+      k === 'adaptive'
+    ) {
       if (typeof v !== 'boolean') throw new HttpError(400, `"${k}" must be true or false`)
       out[k] = v
     } else if (
@@ -1001,6 +1028,10 @@ function handoffChange(body: Record<string, unknown>): HandoffChange {
     ) {
       if (!Number.isInteger(v) || (v as number) < 0) throw new HttpError(400, `"${k}" must be a whole number`)
       out[k] = v as number
+    } else if (k === 'familyOrder' || k === 'crossOrganization') {
+      if (!Array.isArray(v) || !v.every((n) => typeof n === 'string'))
+        throw new HttpError(400, `"${k}" must be a list of names`)
+      out[k] = [...v]
     } else if (k === 'orders') {
       if (
         !Array.isArray(v) ||
@@ -1200,6 +1231,32 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
     queued?: boolean
     run(body: Record<string, unknown>): Promise<unknown>
   }
+  /**
+   * A change of one key in Claude's settings files that the page showed file by file before the user confirmed
+   * (Remote Control, spec §3.22; receiving Messages, ADR-0045). Without `confirm` it writes nothing and names the
+   * files; with it, `files` must be exactly the files the page showed, or nothing is written and `changedSince` says
+   * so, because a file the user never saw in the preview must not change. Undo passes no `todo`: it only puts back
+   * what sideby wrote, and its toast runs before the page has read the new state.
+   */
+  const previewedChange = (change: {
+    todo?: (rt: Runtime) => Promise<readonly { file: string }[]>
+    apply: (rt: Runtime) => Promise<{ ok: boolean; message: string; results: { file: string }[] }>
+  }): Route => ({
+    writes: (body) => body.confirm === true,
+    async run(body) {
+      const rt = await getRuntime()
+      const home = rt.paths.home
+      const files = change.todo ? (await change.todo(rt)).map((g) => tildify(g.file, home)) : undefined
+      if (!optBool(body, 'confirm')) return { applied: false, ...(files ? { files } : {}) }
+      if (files) {
+        const saw = body.files
+        const same = Array.isArray(saw) && saw.length === files.length && files.every((f) => saw.includes(f))
+        if (!same) return { applied: false, changedSince: true, files }
+      }
+      const r = await change.apply(rt)
+      return { ...r, applied: true, results: r.results.map((x) => ({ ...x, file: tildify(x.file, home) })) }
+    },
+  })
   /** The switch of one LaunchAgent sideby writes: the Panel's login item or the Menu Bar Item. */
   const loginItemRoute = (agent: LoginAgent): Route => ({
     writes: (body) => body.confirm === true,
@@ -1482,31 +1539,16 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       },
     },
     // Remote Control at startup (spec §3.22, ADR-0017): writes `remoteControlAtStartup` (false for off, true for on)
-    // into each Claude settings file that does not hold it yet; the page shows the files first, from the state.
-    '/api/remote-control/off': {
-      async run() {
-        const rt = await getRuntime()
-        const r = await rt.remoteControlOff()
-        const home = rt.paths.home
-        return { ...r, results: r.results.map((x) => ({ ...x, file: tildify(x.file, home) })) }
-      },
-    },
-    '/api/remote-control/on': {
-      async run() {
-        const rt = await getRuntime()
-        const r = await rt.remoteControlOn()
-        const home = rt.paths.home
-        return { ...r, results: r.results.map((x) => ({ ...x, file: tildify(x.file, home) })) }
-      },
-    },
-    '/api/remote-control/undo': {
-      async run() {
-        const rt = await getRuntime()
-        const r = await rt.remoteControlUndo()
-        const home = rt.paths.home
-        return { ...r, results: r.results.map((x) => ({ ...x, file: tildify(x.file, home) })) }
-      },
-    },
+    // into each Claude settings file that does not hold it yet, only the files the page showed (`previewedChange`).
+    '/api/remote-control/off': previewedChange({
+      todo: async (rt) => remoteControlTodo(await rt.remoteControl(), 'off'),
+      apply: (rt) => rt.remoteControlOff(),
+    }),
+    '/api/remote-control/on': previewedChange({
+      todo: async (rt) => remoteControlTodo(await rt.remoteControl(), 'on'),
+      apply: (rt) => rt.remoteControlOn(),
+    }),
+    '/api/remote-control/undo': previewedChange({ apply: (rt) => rt.remoteControlUndo() }),
     // Sessions (spec §3.32, ADR-0039): what every Account is running now, read only, with the texts its copy buttons
     // copy in the Panel's language. Polled every few seconds, so it runs beside the write queue.
     '/api/sessions': {
@@ -1810,22 +1852,13 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         }
       },
     },
-    '/api/messages/inbound/accept': {
-      async run() {
-        const rt = await getRuntime()
-        const r = await acceptInbound(await rt.accounts(), rt.readContext())
-        const home = rt.paths.home
-        return { ...r, results: r.results.map((x) => ({ ...x, file: tildify(x.file, home) })) }
-      },
-    },
-    '/api/messages/inbound/undo': {
-      async run() {
-        const rt = await getRuntime()
-        const r = await undoInbound(await rt.accounts(), rt.readContext())
-        const home = rt.paths.home
-        return { ...r, results: r.results.map((x) => ({ ...x, file: tildify(x.file, home) })) }
-      },
-    },
+    '/api/messages/inbound/accept': previewedChange({
+      todo: async (rt) => groupsToAccept(await inboundGroups(await rt.accounts(), rt.readContext())),
+      apply: async (rt) => acceptInbound(await rt.accounts(), rt.readContext()),
+    }),
+    '/api/messages/inbound/undo': previewedChange({
+      apply: async (rt) => undoInbound(await rt.accounts(), rt.readContext()),
+    }),
     // Auto Handoff (spec §3.17): readiness reads only; configure shows the config change unless `confirm`.
     '/api/handoff/status': {
       writes: () => false,
@@ -1953,7 +1986,11 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
     '/api/handoff/overview': {
       writes: () => false,
       async run() {
-        return handoffOverview(await getRuntime())
+        const rt = await getRuntime()
+        // The Handoff Rules and where work would go now, also while it is off (spec §3.17 "接力规则").
+        const overview = await handoffOverview(rt, { always: true })
+        const { rules, apiUndecided } = await handoffRulesView(rt, overview)
+        return { ...overview, rules, apiUndecided }
       },
     },
     // Turning it on in one step (ADR-0013): without `confirm` only the plan; with it, every step in order.

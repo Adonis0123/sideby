@@ -12,7 +12,7 @@ Use this when the user says an account hit its 5-hour or weekly limit ("usage li
    | `ready` | Subscription account with room; `pressure` is its fullest live window in percent | Yes, lowest `pressure` first |
    | `unknown` | No quota data yet (no session since quota was turned on, or Claude quota is off) | Yes, after `ready` |
    | `api` | API account, pay per use | Only with `--include-api` |
-   | `full` | A live window is at 85% or more; `resetsAt` is when it is usable again | No |
+   | `full` | A live window is more than 10 points below the Auto Handoff threshold (85% with the default 95%); `resetsAt` is when it is usable again | No |
    | `logged-out` | Needs `sideby login <ref>` | No |
 
    Each entry's `observedAt` says when its quota was recorded (`quotaFrom` when it was read from another account of the same login). An entry with `sameLoginAs` is signed in as the same login as the account you run in: it shares that quota and is never picked. If `hasQuota` is `false`, no account has quota data: the pick is only a guess, so say so and suggest turning quota on (see the routing table in SKILL.md) or letting the user choose.
@@ -48,12 +48,16 @@ With config `"handoff": { "auto": true }`, a session sideby started hands its ta
 ### Turning it on for the user
 
 1. Run `sideby handoff status --json`. Read `auto`, `sideby` (is the `sideby` on PATH able to run the hook), each family's `starts`, `ready`, `problems` and `notes`, and `nextSteps`.
-2. Tell the user what Auto Handoff does, that it is off by default, and the risk: hand-over between two subscriptions of one vendor (`--same-family`, cc001 → cc002) is the kind vendors may act on. Add `--same-family` only when the user asks for it. Ask which accounts each family should hand over to if they care about the order (`--order claude=codex001,cc002`; accounts or short commands, any family).
+2. Tell the user what Auto Handoff does, that it is off by default, and the risk: hand-over between two subscriptions of one vendor (`--same-family`, cc001 → cc002) is the kind vendors may act on. Add `--same-family` only when the user asks for it. Other AI tools take over only with `--other-ai` (order with `--ai-order claude,codex`), and API accounts only with `--api`: they are billed per request and sideby does not cap spending, so say so and add `--api` only when the user asks. Ask which accounts each family should hand over to if they care about the order (`--order claude=codex001,cc002`; accounts or short commands, any family).
 3. Run `sideby handoff enable [flags] --json`. Exit 10 means the config change was shown: show the user `diff`, ask, and only after a clear yes run the same command with `--yes`. It writes only the `handoff` key of the config and returns `nextSteps`.
 4. Work through `nextSteps` in order. `sideby quota setup claude` and `sideby handoff setup grok` also exit 10 first: ask before adding `--yes`. `npm i -g sideby` installs or upgrades sideby on PATH; ask first. Codex needs the user to trust sideby's hooks once per account (`/hooks` in Codex); you cannot do that for them.
 5. Run `sideby handoff status --json` again and report which families are `ready`.
 
 To turn it off: `sideby handoff disable --json`, then `--yes` after the user agrees; the other settings stay. The panel's **Auto Handoff** page does all of this in one click (turn on, with one confirmation; turn off) and shows where each account's work goes next; for a user who is not in a terminal, point them there instead of walking through the commands.
+
+### Explaining or changing the rules
+
+When the user asks what the rules are, when it switches, who takes over, or whether API accounts or other AIs are used ("接力规则", "什么时候换号", "会不会用 API 账号"), run `sideby handoff rules --json` and relay each entry of `rules` in plain words (`text` is the English sentence; `params` has the numbers), then `takeover`: where each account's work would go now. Each rule's `settings` names the `handoff` keys that change it; change one with `sideby config set handoff.<key> <value>` (exit 10 shows it, `--yes` after the user agrees) or the matching `handoff enable` flag. When `apiUndecided` is true, the user had Auto Handoff on with API accounts before they became opt-in: ask once whether API accounts may take over, then set `handoff.api` to `true` or `false`. When a decision is `none`, its `reason` names the setting that would allow an account; offer it, do not turn it on unasked.
 
 ## Picking an account for a subtask
 
@@ -66,7 +70,7 @@ Before you delegate work to another account (for example a review in a headless 
 
 ## Settings and overview
 
-`sideby handoff enable --threshold 95 --prepare-at 80 --wait-minutes 30 --countdown 10 --json` previews the settings. `--threshold` is the quota percentage to hand over, `--prepare-at` the percentage to prepare the Brief, `--wait-minutes` the longest reset wait, and `--countdown` the seconds before handing over. Read the validated `settings` and `diff`; on exit 10, show the change and confirm before repeating with `--yes`. Keep the user's chosen `--same-family` and `--order` options in the confirmed command.
+`sideby handoff enable --threshold 95 --prepare-at 80 --wait-minutes 30 --countdown 10 --json` previews the settings. `--threshold` is the quota percentage to hand over, `--prepare-at` the percentage to prepare the Brief, `--wait-minutes` the longest reset wait, and `--countdown` the seconds before handing over. Read the validated `settings` and `diff`; on exit 10, show the change and confirm before repeating with `--yes`. Keep the user's chosen `--same-family`, `--other-ai`, `--ai-order`, `--api` and `--order` options in the confirmed command.
 
 `sideby handoff status --json` also includes `overview`: `settings`, `takeover` (each account's `ref`, `family`, `starts`, `decision`) and `recent` (the last hand-overs' `from`, `to`, `at`, `trigger`, `briefSource`). A decision is `pick` with `ref`, `wait` with `until`, or `none` with `reason`; optional `skipped` and `earliestReset` explain exclusions and resets. An empty takeover list while Auto Handoff is off is expected. No Brief text is returned.
 

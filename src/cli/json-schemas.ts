@@ -1,7 +1,7 @@
 // JSON Schemas for every `--json` output. Additive changes keep schemaVersion 1; removals, renames or
 // meaning changes bump it (spec §3.9). `pnpm schemas` writes these to schemas/*.json.
 import { type TSchema, Type } from 'typebox'
-import { ConfigSchema } from '../core/config.ts'
+import { ConfigSchema, HandoffSettingsSchema } from '../core/config.ts'
 
 const Str = Type.String()
 /** Why sideby cannot do something itself (spec §3.23); `reason` keeps the English text. */
@@ -438,40 +438,27 @@ const PinResult = Type.Object({
   display: Display,
 })
 const Skipped = Type.Optional(Type.Array(Type.Object({ ref: Str, reason: Str })))
-const Overview = Type.Object({
-  settings: Type.Object({
-    auto: Type.Boolean(),
-    sameFamily: Type.Boolean(),
-    prepareAt: Type.Number(),
-    threshold: Type.Number(),
-    waitIfResetWithinMinutes: Type.Number(),
-    countdownSeconds: Type.Number(),
-    crossOrganization: Type.Array(Str),
-    families: Type.Record(
-      Str,
+const HandoffSettingsOut = HandoffSettingsSchema
+const Takeover = Type.Array(
+  Type.Object({
+    ref: Str,
+    family: Str,
+    starts: Type.Array(Type.Union([Type.Literal('quota'), Type.Literal('limit')])),
+    decision: Type.Union([
+      Type.Object({ kind: Type.Literal('pick'), ref: Str, skipped: Skipped }),
+      Type.Object({ kind: Type.Literal('wait'), until: Str }),
       Type.Object({
-        policy: Type.Union([Type.Literal('pressure'), Type.Literal('order')]),
-        order: Type.Array(Str),
+        kind: Type.Literal('none'),
+        reason: Str,
+        earliestReset: Type.Optional(Type.Object({ ref: Str, at: Str })),
+        skipped: Skipped,
       }),
-    ),
+    ]),
   }),
-  takeover: Type.Array(
-    Type.Object({
-      ref: Str,
-      family: Str,
-      starts: Type.Array(Type.Union([Type.Literal('quota'), Type.Literal('limit')])),
-      decision: Type.Union([
-        Type.Object({ kind: Type.Literal('pick'), ref: Str, skipped: Skipped }),
-        Type.Object({ kind: Type.Literal('wait'), until: Str }),
-        Type.Object({
-          kind: Type.Literal('none'),
-          reason: Str,
-          earliestReset: Type.Optional(Type.Object({ ref: Str, at: Str })),
-          skipped: Skipped,
-        }),
-      ]),
-    }),
-  ),
+)
+const Overview = Type.Object({
+  settings: HandoffSettingsOut,
+  takeover: Takeover,
   recent: Type.Array(
     Type.Object({
       from: Str,
@@ -951,6 +938,12 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     {
       schemaVersion: Version,
       overview: Type.Optional(Overview),
+      apiUndecided: Type.Optional(
+        Type.Boolean({
+          description:
+            'Auto Handoff was on with API accounts before they became opt-in (ADR-0046): ask the user once whether they may take over, then set handoff.api.',
+        }),
+      ),
       auto: Type.Boolean(),
       sameFamily: Type.Boolean(),
       prepareAt: Type.Number(),
@@ -983,27 +976,51 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
           applied: Type.Boolean(),
           file: Str,
           diff: Str,
-          settings: Type.Object({
-            auto: Type.Boolean(),
-            sameFamily: Type.Boolean(),
-            prepareAt: Type.Number(),
-            threshold: Type.Number(),
-            waitIfResetWithinMinutes: Type.Number(),
-            countdownSeconds: Type.Number(),
-            crossOrganization: Type.Array(Str),
-            families: Type.Record(
-              Str,
-              Type.Object({
-                policy: Type.Union([Type.Literal('pressure'), Type.Literal('order')]),
-                order: Type.Array(Str),
-              }),
-            ),
-          }),
+          settings: HandoffSettingsOut,
           nextSteps: Type.Array(Str),
         },
         { title: `sideby handoff ${sub} --json` },
       ),
     ]),
+  ),
+  'handoff-rules': Type.Object(
+    {
+      schemaVersion: Version,
+      auto: Type.Boolean(),
+      rules: Type.Array(
+        Type.Object({
+          id: Type.Union(
+            (
+              [
+                'when',
+                'windows',
+                'takeover',
+                'wait',
+                'sameFamily',
+                'otherFamilies',
+                'api',
+                'organization',
+                'order',
+                'countdown',
+              ] as const
+            ).map((id) => Type.Literal(id)),
+          ),
+          params: Type.Record(Str, Type.Unknown(), {
+            description: 'What the sentence needs, such as numbers.',
+          }),
+          settings: Type.Array(Str, {
+            description: 'The `handoff` config keys that change it; empty when fixed.',
+          }),
+          text: Type.String({ description: 'The rule in plain English.' }),
+        }),
+      ),
+      apiUndecided: Type.Boolean({
+        description:
+          'Auto Handoff was on with API accounts before they became opt-in (ADR-0046): ask the user once, then set handoff.api.',
+      }),
+      takeover: Takeover,
+    },
+    { title: 'sideby handoff rules --json' },
   ),
   'handoff-ready': Type.Object(
     {

@@ -44,7 +44,7 @@ Fill in every `TODO` from the tool's own docs or `--help`, and run `sideby plugi
 
 To make it a built-in family, follow **Adding a family** in [`AGENTS.md`](AGENTS.md#adding-a-family), one tool per pull request:
 
-1. Confirm the Host can isolate its config directory with an environment variable, and record the tested version.
+1. Confirm the Host can isolate its config directory with an environment variable, and record the tested version. A Host that cannot may still join as a Main-only Family (main account only, ADR-0047).
 2. Write the family row in spec §3.4 (hijack variables, shared items and share modes, sign-in command, and a login-state rule that reads no credential values).
 3. Add `src/families/<id>/index.ts`, a logo, and an entry in `BUILTIN_PLUGINS`.
 4. Add a fake-home test for discovery, launch environment, and every shared item's check and fix.

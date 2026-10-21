@@ -677,6 +677,40 @@ describe('panel through the Runtime (hardening round 1)', () => {
       }
     })
   })
+
+  it('marks a Main-only Family and refuses to create another of its Accounts (ADR-0047)', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const { selectVar: _s, ...rest } = demoFamily()
+      const single = demoPlugin({ ...rest, mainOnly: true, layout: { main: '.demo' } })
+      const { server, port, handler } = await serve((port) =>
+        createPanelHandler({
+          runtime: () => createRuntime({ env: h.env, builtins: [asBuiltin(single)] }),
+          allowedHosts: [`127.0.0.1:${port}`],
+        }),
+      )
+      try {
+        const hdr = { origin: `http://127.0.0.1:${port}`, 'x-sideby-token': handler.token }
+        const state = JSON.parse(
+          (await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text,
+        ) as { families: { id: string; mainOnly?: boolean }[]; accounts: { ref: string }[] }
+        assert.equal(state.families.find((f) => f.id === 'demo')?.mainOnly, true)
+        assert.deepEqual(
+          state.accounts.map((a) => a.ref),
+          ['demo:main'],
+        )
+        for (const api of [false, true]) {
+          const r = await post(port, '/api/accounts', { family: 'demo', name: 'work', api }, hdr)
+          assert.equal(r.status, 400)
+          assert.equal((r.body as { code?: string }).code, 'family-main-only')
+        }
+        const { lstat } = await import('node:fs/promises')
+        await assert.rejects(lstat(h.path('.demo-work')))
+      } finally {
+        await close(server)
+      }
+    })
+  })
 })
 
 describe('panel health (hardening round 3)', () => {
@@ -1345,6 +1379,33 @@ describe('Auto Handoff in the Panel (spec §3.17)', () => {
           sameFamily: true,
           families: { claude: { policy: 'order', order: ['claude:002'] } },
         })
+        // The Handoff Rules' switches (ADR-0046) save the same way, and the overview carries the rules.
+        const rules = { otherFamilies: true, familyOrder: ['claude'], api: false, crossOrganization: [] }
+        const set = (await post(port, '/api/handoff/configure', { change: rules, confirm: true }, hdr))
+          .body as {
+          applied: boolean
+          undo: Record<string, unknown>
+        }
+        assert.equal(set.applied, true)
+        // The undo comes from the config as it was: settings that were not there are removed, not set to defaults.
+        assert.deepEqual(set.undo, { otherFamilies: null, api: null, familyOrder: [], crossOrganization: [] })
+        const handoff = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8')).handoff
+        assert.deepEqual([handoff.otherFamilies, handoff.familyOrder, handoff.api], [true, ['claude'], false])
+        await post(port, '/api/handoff/configure', { change: set.undo, confirm: true }, hdr)
+        const undone = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8')).handoff
+        assert.deepEqual(
+          [undone.otherFamilies, undone.familyOrder, undone.api],
+          [undefined, undefined, undefined],
+        )
+        await post(port, '/api/handoff/configure', { change: rules, confirm: true }, hdr)
+        const overview = (await post(port, '/api/handoff/overview', {}, hdr)).body as {
+          rules: { id: string; params: Record<string, unknown> }[]
+          apiUndecided: boolean
+        }
+        assert.equal(overview.rules.find((r) => r.id === 'otherFamilies')?.params.on, true)
+        assert.equal(overview.apiUndecided, false)
+        for (const bad of [{ otherFamilies: 'yes' }, { familyOrder: ['nope'] }, { api: 1 }])
+          assert.equal((await post(port, '/api/handoff/configure', { change: bad }, hdr)).status, 400)
         assert.equal(
           (await post(port, '/api/handoff/configure', { change: { rotate: true } }, hdr)).status,
           400,
@@ -1550,9 +1611,9 @@ describe('turning Remote Control off in the Panel (spec §3.22)', () => {
           origin: `http://127.0.0.1:${ro.port}`,
           'x-sideby-token': ro.handler.token,
         }
-        assert.equal((await post(ro.port, '/api/remote-control/off', {}, hdr)).status, 403)
-        assert.equal((await post(ro.port, '/api/remote-control/on', {}, hdr)).status, 403)
-        assert.equal((await post(ro.port, '/api/remote-control/undo', {}, hdr)).status, 403)
+        assert.equal((await post(ro.port, '/api/remote-control/off', { confirm: true }, hdr)).status, 403)
+        assert.equal((await post(ro.port, '/api/remote-control/on', { confirm: true }, hdr)).status, 403)
+        assert.equal((await post(ro.port, '/api/remote-control/undo', { confirm: true }, hdr)).status, 403)
         assert.equal((await settings()).remoteControlAtStartup, true)
       } finally {
         await close(ro.server)
@@ -1572,17 +1633,44 @@ describe('turning Remote Control off in the Panel (spec §3.22)', () => {
           origin: `http://127.0.0.1:${port}`,
           'x-sideby-token': handler.token,
         }
-        const off = await post(port, '/api/remote-control/off', {}, hdr)
+        const preview = await post(port, '/api/remote-control/off', {}, hdr)
+        assert.deepEqual(preview.body, { applied: false, files: ['~/.claude/settings.json'] })
+        assert.equal(
+          (await post(port, '/api/remote-control/off', { confirm: true, files: [] }, hdr)).body.changedSince,
+          true,
+        )
+        assert.equal((await settings()).remoteControlAtStartup, true)
+        const off = await post(
+          port,
+          '/api/remote-control/off',
+          { confirm: true, files: ['~/.claude/settings.json'] },
+          hdr,
+        )
         assert.equal(off.body.ok, true)
         assert.deepEqual(await settings(), { theme: 'dark', remoteControlAtStartup: false })
         const after = JSON.parse(
           (await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text,
         )
         assert.equal(after.remoteControl[0].undo, true)
-        assert.equal((await post(port, '/api/remote-control/undo', {}, hdr)).body.ok, true)
+        assert.equal((await post(port, '/api/remote-control/undo', { confirm: true }, hdr)).body.ok, true)
         assert.deepEqual(await settings(), { theme: 'dark', remoteControlAtStartup: true })
-        await post(port, '/api/remote-control/off', {}, hdr)
-        assert.equal((await post(port, '/api/remote-control/on', {}, hdr)).body.ok, true)
+        await post(
+          port,
+          '/api/remote-control/off',
+          { confirm: true, files: ['~/.claude/settings.json'] },
+          hdr,
+        )
+        assert.equal(
+          (
+            await post(
+              port,
+              '/api/remote-control/on',
+              { confirm: true, files: ['~/.claude/settings.json'] },
+              hdr,
+            )
+          ).body.ok,
+          true,
+        )
         assert.deepEqual(await settings(), { theme: 'dark', remoteControlAtStartup: true })
       } finally {
         await close(server)

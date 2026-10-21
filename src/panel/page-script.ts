@@ -1,6 +1,8 @@
 // The Panel page's inline script. Plain browser JavaScript in a string (no template literals inside, so String.raw
 // keeps it verbatim); the pure helpers from page-logic.ts are prepended so the tested code is the code that runs.
+import { groupsToAccept } from '../core/inbound.ts'
 import { quotaIsStale } from '../core/quota-levels.ts'
+import { remoteControlTodo } from '../core/remote-control.ts'
 import {
   aiTaskAccounts,
   aliasArgsOf,
@@ -11,10 +13,12 @@ import {
   attentionReasons,
   attentionWhy,
   autostartNote,
+  bindingWindow,
   cacheHitRate,
   canLeaveLocal,
   categoryOrder,
   codeSwapOutcome,
+  enableOutcome,
   fileSize,
   fixPrompt,
   foldSkips,
@@ -53,10 +57,10 @@ import {
   quotaAskable,
   quotaPressure,
   remoteControlSummary,
-  remoteControlTodo,
   reorder,
   rowBadge,
   runCodeSwap,
+  saveHandoffChange,
   sendBlock,
   sendFileProblem,
   sendResultView,
@@ -134,6 +138,9 @@ const LOGIC = [
   quotaPressure,
   remoteControlSummary,
   remoteControlTodo,
+  groupsToAccept,
+  saveHandoffChange,
+  enableOutcome,
   reorder,
   rowBadge,
   sendBlock,
@@ -157,6 +164,7 @@ const LOGIC = [
   widthFollower,
   widthTier,
   windowState,
+  bindingWindow,
   withPinned,
 ]
   .map((fn) => fn.toString())
@@ -459,6 +467,9 @@ const MAIN = String.raw`
     grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
     list: 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01',
     sliders: 'M4 7h10M18 7h2M4 17h4M12 17h8M16 5v4M10 15v4',
+    // Lucide "users" and "message-square" (ISC license)
+    users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+    messages: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
     clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2',
     mail: 'M3 6h18v12H3zM3 7l9 6 9-6',
     globe: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c2.5 2.5 3.8 5.5 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.5-3.8-9S9.5 5.5 12 3z',
@@ -671,6 +682,7 @@ const MAIN = String.raw`
   function famTitle(a) { return a.familyTitle || family(a.family).title }
   // The email as the page shows it: masked everywhere while "Hide emails" is on (copying still gives the real one).
   function emailText(email) { return prefs.hideEmail ? maskEmail(email) : email }
+  let logoWashes = 0
   // A Family's mark: the logo its FamilyDef sets (checked by the loader), or its initials on a color derived from the id.
   // size: '' (cards), 'sm' (rows, groups, dialogs) or 'xs' (inside a chip; no initials fallback there).
   function badge(id, size) {
@@ -680,10 +692,36 @@ const MAIN = String.raw`
       const svg = document.createElementNS(SVG_NS, 'svg')
       svg.setAttribute('viewBox', '0 0 24 24')
       svg.setAttribute('focusable', 'false')
-      const path = document.createElementNS(SVG_NS, 'path')
-      path.setAttribute('d', logo.path)
-      if (logo.fillRule) path.setAttribute('fill-rule', logo.fillRule)
-      svg.append(path)
+      const shape = (fill) => {
+        const path = document.createElementNS(SVG_NS, 'path')
+        path.setAttribute('d', logo.path)
+        if (logo.fillRule) path.setAttribute('fill-rule', logo.fillRule)
+        if (fill) path.setAttribute('fill', fill)
+        return path
+      }
+      svg.append(shape(null))
+      // A multicoloured mark: each wash is the shape again, filled with a gradient that fades out (ids unique per page).
+      if (Array.isArray(logo.gradients) && logo.gradients.length) {
+        const defs = document.createElementNS(SVG_NS, 'defs')
+        svg.prepend(defs)
+        for (const g of logo.gradients) {
+          const id = 'logo-wash-' + (++logoWashes)
+          const lg = document.createElementNS(SVG_NS, 'linearGradient')
+          lg.setAttribute('id', id)
+          lg.setAttribute('gradientUnits', 'userSpaceOnUse')
+          lg.setAttribute('x1', String(g.from[0])); lg.setAttribute('y1', String(g.from[1]))
+          lg.setAttribute('x2', String(g.to[0])); lg.setAttribute('y2', String(g.to[1]))
+          for (const [offset, opacity] of [['0', '1'], ['1', '0']]) {
+            const stop = document.createElementNS(SVG_NS, 'stop')
+            stop.setAttribute('offset', offset)
+            stop.setAttribute('stop-color', g.color)
+            stop.setAttribute('stop-opacity', opacity)
+            lg.append(stop)
+          }
+          defs.append(lg)
+          svg.append(shape('url(#' + id + ')'))
+        }
+      }
       return h('span', { class: cls + ' badge-logo', css: logo.color ? { color: logo.color } : null, title: logo.title || family(id).title, 'aria-hidden': 'true' }, svg)
     }
     if (size === 'xs') return null
@@ -997,7 +1035,8 @@ const MAIN = String.raw`
       a.identity && a.identity.email ? { icon: 'mail', label: t('menu.copyEmail'), hint: emailText(a.identity.email), run: () => copyText(a.identity.email) } : null,
     ]
   }
-  function likeItem(a) { return BOOT.readOnly ? null : { icon: 'userPlus', label: t('menu.like'), run: () => openCreate({ family: a.family, api: a.kind === 'api' }) } }
+  // A Main-only Family (ADR-0047) has no other Account to create.
+  function likeItem(a) { return BOOT.readOnly || family(a.family).mainOnly ? null : { icon: 'userPlus', label: t('menu.like'), run: () => openCreate({ family: a.family, api: a.kind === 'api' }) } }
   // Grouped by what the user wants to do: open, copy, manage. A Same Login row (ADR-0026) passes its other
   // directories: the menu is the one of the directory the row is named after, and each other directory is one item
   // that opens its own actions in the same menu, so the shared actions appear once.
@@ -1324,18 +1363,20 @@ const MAIN = String.raw`
   }
   // A window's cell: percent and countdown on one line, the bar under them. The label shows where no column
   // header does (cards, narrow screens).
-  function meter(w, now, stale, observedAt) {
+  function meter(w, now, stale, observedAt, withLength) {
     const st = windowState(w, now, WARN, FAIL)
     const passed = passedWindow(w, observedAt, now)
     const left = prefs.quota === 'left'
     const shown = left ? 100 - st.pct : st.pct
     const asOf = stale ? t('quota.asOf', { ago: ago(observedAt) }) : ''
     const reset = passed ? t('quota.resetShort') : t('quota.resetsIn', { d: formatDuration(Date.parse(w.resetsAt) - now, lang) })
-    const title = [passed ? t('quota.resetNoData', { date: day(passed.since) }) : t('quota.resetsAt', { at: clock(w.resetsAt) }), asOf].filter(Boolean).join(' · ')
+    // The wide list's column says only the model group, so the hover names which of its limits this is.
+    const title = [withLength ? winTitle(w.label) : '', passed ? t('quota.resetNoData', { date: day(passed.since) }) : t('quota.resetsAt', { at: clock(w.resetsAt) }), asOf].filter(Boolean).join(' · ')
     return h('div', { class: 'meter lvl-' + st.level + (stale || passed ? ' lvl-stale' : ''), title },
       h('div', { class: 'm-top' },
         // Cards show the short window name ("5 小时"); the list and its column titles keep the full one.
-        h('span', { class: 'm-label' }, h('span', { class: 'm-full' }, winTitle(winKey(w))), h('span', { class: 'm-short' }, winShort(winKey(w)))),
+        // withLength: the group has other limits too, so name which one this is ("Gemini Models · 5-hour").
+        h('span', { class: 'm-label' }, h('span', { class: 'm-full' }, winTitle(winKey(w)) + (withLength ? ' · ' + winTitle(w.label) : '')), h('span', { class: 'm-short' }, winShort(winKey(w)) + (withLength ? ' · ' + winShort(w.label) : ''))),
         h('span', { class: 'm-pct' }, shown + '%', h('span', { class: 'm-unit' }, ' ' + t(left ? 'quota.unitLeft' : 'quota.unitUsed')),
           null),
         h('span', { class: 'm-reset' + (passed ? ' m-passed' : '') }, Number.isFinite(Date.parse(w.resetsAt)) || passed ? reset : '?')),
@@ -1386,8 +1427,10 @@ const MAIN = String.raw`
     // widest Family's, for the wide list's shared columns).
     return h('div', { class: 'quota' + (stale ? ' is-stale' : ''), title, css: wins.length ? { '--qr': String(cols.length) } : null },
       wins.length ? cols.map((c) => {
-        const w = wins.find((x) => winKey(x) === c)
-        return w ? meter(w, now, stale, q.observedAt) : noMeter(winTitle(c), winShort(c))
+        // A model group with several limits (Antigravity's 5-hour and weekly) shows the one that binds first.
+        const same = wins.filter((x) => winKey(x) === c)
+        const w = bindingWindow(same, now, WARN, FAIL)
+        return w ? meter(w, now, stale, q.observedAt, same.length > 1) : noMeter(winTitle(c), winShort(c))
       }) : h('div', { class: 'q-note' }, t('quota.noWindows')),
       // Old numbers keep their colours and say their age once, under the bars.
       stale && wins.length ? h('div', { class: 'q-asof', title: failed || t('quota.asOf', { ago: ago(q.observedAt) }) }, icon('clock'), q.fetchError ? t('quota.fetchFailed') + ' · ' : '', t('quota.staleShort', { ago: agoShort(now - Date.parse(q.observedAt)) })) : null)
@@ -2854,11 +2897,14 @@ const MAIN = String.raw`
     const mine = useUi && useUi.gid === g.id
     const busy = mine && (useUi.step === 'asking' || useUi.step === 'busy')
     const asking = mine && (useUi.step === 'confirm' || busy)
-    const rows = [h('p', { class: 'small' }, g.members.length > 1 ? t('tune.groupShared', { list: g.members.join(', ') }) : h('b', { class: 'mono' }, g.members[0]))]
-    rows.push(h('div', { class: 'tune-vals' },
-      h('div', null, h('span', { class: 'muted small' }, t('tune.now')), h('div', { class: 'tune-num' }, g.current === null ? defaultSize(claudeModels(entries)) : tuneSize(g.current))),
-      pick ? h('div', null, h('span', { class: 'muted small' }, t('tune.best')), h('div', { class: 'tune-num tune-best' }, tokens(pick.threshold))) : null))
-    if (pick && pick.savedPercent !== null) rows.push(h('p', { class: 'small' }, t('tune.saved', { n: Math.round(pick.savedPercent) })))
+    const rows = [h('div', { class: 'tg-head' }, badge(entries[0] ? entries[0].family : 'claude', 'sm'),
+      h('p', { class: 'small' }, g.members.length > 1 ? t('tune.groupShared', { list: g.members.join(', ') }) : h('b', { class: 'mono' }, g.members[0])))]
+    // Now, the suggestion and what it saves read as one strip, like the Accounts summary.
+    const saved = pick && pick.savedPercent !== null ? Math.round(pick.savedPercent) : null
+    rows.push(h('div', { class: 'tg-stats' },
+      h('div', { class: 'tg-stat' }, h('span', { class: 'stat-label' }, t('tune.now')), h('div', { class: 'tune-num' }, g.current === null ? defaultSize(claudeModels(entries)) : tuneSize(g.current))),
+      pick ? h('div', { class: 'tg-stat' }, h('span', { class: 'stat-label' }, t('tune.best')), h('div', { class: 'tune-num tune-best' }, tokens(pick.threshold))) : null,
+      saved !== null ? h('div', { class: 'tg-stat', title: t('tune.saved', { n: saved }) }, h('span', { class: 'stat-label' }, t('tune.savedLabel')), h('div', { class: 'tune-num' }, t('tune.savedValue', { n: saved }))) : null))
     if (pick) rows.push(h('p', { class: 'muted small' }, t('tune.basis', { model: pick.model, ref: pick.ref })))
     if (pick) {
       const seen = entries.find((e) => e.ref === pick.ref)
@@ -2993,9 +3039,21 @@ const MAIN = String.raw`
     if (canTune) tabs.push(['tuning', t('page.tuning')])
     if (canHandoff) tabs.push(['handoff', t('page.handoff')])
     nav.hidden = tabs.length < 2
-    setKids(nav, h('div', { class: 'seg', role: 'presentation' }, tabs.map(([id, label]) =>
-      h('button', { class: 'seg-btn', type: 'button', role: 'tab', 'aria-selected': curPage === id ? 'true' : 'false', 'aria-busy': id === 'sessions' && sp.opening ? 'true' : null, onclick: () => setPage(id) }, id === 'sessions' && sp.opening ? [spinner(), ' '] : null, label,
-        id === 'sessions' && pasteCount() ? h('span', { class: 'seg-badge', 'data-tip': t('msgn.badge', { n: pasteCount() }), 'aria-label': t('msgn.badge', { n: pasteCount() }) }, String(pasteCount())) : null))))
+    // Underline tabs: each page has its mark, the Accounts tab its count and Auto Handoff a dot while it is on.
+    const tabIcon = { accounts: 'users', sessions: 'messages', tuning: 'sliders', handoff: 'swap' }
+    const nAccounts = S.state ? S.state.accounts.length : 0
+    const handoffOn = Boolean(ahState() && ahState().settings.auto)
+    // Redrawn only when something on it changes, so a refresh never replays the underline.
+    const navShape = JSON.stringify([lang, curPage, tabs, nAccounts, handoffOn, sp.opening, pasteCount()])
+    if (nav._drawn !== navShape) {
+    nav._drawn = navShape
+    swapKids(nav, [h('div', { class: 'tabs', role: 'presentation' }, tabs.map(([id, label]) =>
+      h('button', { class: 'tab', type: 'button', role: 'tab', 'data-key': 'tab:' + id, 'aria-selected': curPage === id ? 'true' : 'false', 'aria-busy': id === 'sessions' && sp.opening ? 'true' : null, onclick: () => setPage(id) },
+        id === 'sessions' && sp.opening ? spinner() : icon(tabIcon[id]), h('span', { class: 'tab-label', 'data-label': label }, label),
+        id === 'accounts' && nAccounts ? h('span', { class: 'tab-count' }, String(nAccounts)) : null,
+        id === 'handoff' && handoffOn ? h('span', { class: 'tab-dot', 'aria-label': t('ah.on') }) : null,
+        id === 'sessions' && pasteCount() ? h('span', { class: 'seg-badge', 'data-tip': t('msgn.badge', { n: pasteCount() }), 'aria-label': t('msgn.badge', { n: pasteCount() }) }, String(pasteCount())) : null)))])
+    }
     const away = curPage !== 'accounts' && tabs.some(([id]) => id === curPage)
     // With no account yet the empty state is the whole page: no summary, no health check.
     const none = Boolean(S.state && !S.state.accounts.length)
@@ -3105,7 +3163,7 @@ const MAIN = String.raw`
     return ib.loading
   }
   function inboundGroups() { return (ib.data && ib.data.groups) || [] }
-  function inboundTodo() { return inboundGroups().filter((g) => g.state === 'default' || g.state === 'hold') }
+  function inboundTodo() { return groupsToAccept(inboundGroups()) }
   function inboundWaiting() { return inboundGroups().filter((g) => g.waits).flatMap((g) => g.accounts).map(shortRef) }
   function inboundShape() { return inboundGroups().length > 0 }
   const refList = (refs) => refs.join(lang === 'zh' ? '、' : ', ')
@@ -3172,8 +3230,8 @@ const MAIN = String.raw`
         return h('li', { class: 'rc-row' },
           h('div', null, h('code', null, g.file), ' ', h('span', { class: 'chip chip-sm' + (tone ? ' chip-' + tone : '') }, t(key))),
           h('div', { class: 'muted small' }, t('rc.usedBy', { refs: refList(g.accounts.map(shortRef)) })),
-          g.reason ? h('div', { class: 'muted small' }, g.reason) : null,
-          !BOOT.readOnly && todo.includes(g) ? h('div', { class: 'small rc-change' }, t('inb.change', { from: g.state === 'hold' ? '"hold"' : t('inb.notSet') })) : null)
+          g.reason ? h('div', { class: 'muted small' }, g.why ? t('settings.why.' + g.why) : g.reason) : null,
+          !BOOT.readOnly && todo.includes(g) ? h('div', { class: 'small rc-change' }, keyChange('crossSessionInbound', g.state === 'hold' ? '"hold"' : null, '"accept"')) : null)
       })))
       if (BOOT.readOnly) body.push(h('p', { class: 'small' }, t('inb.readOnly')))
       else if (todo.length) body.push(h('p', { class: 'small muted' }, t('inb.confirmNote')))
@@ -3191,8 +3249,9 @@ const MAIN = String.raw`
   async function inboundAccept() {
     inboundBusy(true)
     try {
-      const r = await api('/api/messages/inbound/accept', {})
-      if (r.ok) {
+      const r = await api('/api/messages/inbound/accept', { confirm: true, files: inboundTodo().map((g) => g.file) })
+      if (r.changedSince) toast(t('as.changedSince'), { kind: 'fail' })
+      else if (r.ok) {
         if (dlg.kind === 'inbound' && dlg.el.open) dlg.el.close()
         toast(t('inb.done'), { kind: 'ok', key: 'inb', action: { label: t('toast.undo'), run: inboundUndo }, duration: 12000 })
       } else toast(t('inb.failed', { msg: r.message }), { kind: 'fail' })
@@ -3203,7 +3262,7 @@ const MAIN = String.raw`
   async function inboundUndo() {
     inboundBusy(true)
     try {
-      const r = await api('/api/messages/inbound/undo', {})
+      const r = await api('/api/messages/inbound/undo', { confirm: true })
       if (r.ok && dlg.kind === 'inbound' && dlg.el.open) dlg.el.close()
       toast(r.ok ? t('inb.undone') : r.message, { kind: r.ok ? 'ok' : 'fail', key: 'inb' })
     } catch (e) { toast(t('toast.undoFailed', { msg: e.message }), { kind: 'fail' }) }
@@ -4144,7 +4203,7 @@ const MAIN = String.raw`
     open.addEventListener('click', () => openHistoryView(s, open))
     const more = h('button', { class: 'icon-btn more', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'data-key': 'hist-more-' + k, 'aria-label': t('hist.more', { title }), 'data-tip': t('menu.title') }, icon('more'))
     more.addEventListener('click', () => historyMenu(more, s))
-    const view = h('button', { class: 'btn btn-sm hist-view', type: 'button', 'data-key': 'hist-view-' + k, 'aria-label': t('hist.openLabel', { title }) }, icon('eye'), h('span', null, t('hist.viewShort')))
+    const view = h('button', { class: 'icon-btn hist-view', type: 'button', 'data-key': 'hist-view-' + k, 'aria-label': t('hist.openLabel', { title }), 'data-tip': t('hist.viewShort') }, icon('eye'))
     view.addEventListener('click', () => openHistoryView(s, view))
     const cont = h('button', { class: 'btn btn-sm hist-cont', type: 'button', 'data-key': 'hist-cont-' + k, 'aria-label': t('hist.continueFor', { title }), 'data-tip': t(s.cwdGone ? 'hist.continueGoneTip' : 'hist.continueTip') }, icon('terminal'), h('span', null, t('hist.continueShort')))
     cont.addEventListener('click', () => copyContinue(cont, s))
@@ -4615,6 +4674,7 @@ const MAIN = String.raw`
   // New account. The form is built once per opening so typing keeps focus; only its derived parts re-render.
   let nf = null
   function familyStatus(f) {
+    if (f.mainOnly) return 'main-only'
     const hasMain = S.state && S.state.accounts.some((a) => a.family === f.id && a.isMain)
     if (hasMain) return 'ready'
     return f.installed ? 'no-main' : 'missing'
@@ -4622,7 +4682,7 @@ const MAIN = String.raw`
   function openCreate(prefill) {
     if (BOOT.readOnly || !S.state) return
     const fams = S.state.families.slice().sort((x, y) => {
-      const rank = (f) => ({ ready: 0, 'no-main': 1, missing: 2 })[familyStatus(f)]
+      const rank = (f) => ({ ready: 0, 'no-main': 1, missing: 2, 'main-only': 3 })[familyStatus(f)]
       return rank(x) - rank(y)
     })
     const ready = fams.filter((f) => familyStatus(f) === 'ready')
@@ -4702,7 +4762,7 @@ const MAIN = String.raw`
         renderPreview()
       })
       const n = S.state.accounts.filter((a) => a.family === f.id).length
-      const sub = st === 'ready' ? tn('nf.accounts', n) : st === 'no-main' ? tx('nf.runOnce', { bin: h('code', null, f.bin) }) : t(f.brokenBin ? 'nf.broken' : 'nf.notInstalled')
+      const sub = st === 'ready' ? tn('nf.accounts', n) : st === 'main-only' ? t('nf.mainOnly') : st === 'no-main' ? tx('nf.runOnce', { bin: h('code', null, f.bin) }) : t(f.brokenBin ? 'nf.broken' : 'nf.notInstalled')
       return h('label', { class: 'fam-card' + (st === 'ready' ? '' : ' is-off') }, input, badge(f.id, 'sm'),
         h('span', { class: 'fam-text' }, h('span', { class: 'fam-title' }, f.title), h('span', { class: 'fam-sub' }, sub)))
     })
@@ -4934,7 +4994,7 @@ const MAIN = String.raw`
       const cur = s.families[f]
       orders[f] = { policy: cur && cur.policy === 'order' ? 'order' : 'pressure', order: cur ? cur.order.slice() : [] }
     }
-    return { auto: s.auto, sameFamily: s.sameFamily, prepareAt: s.prepareAt, threshold: s.threshold, wait: s.waitIfResetWithinMinutes, countdown: s.countdownSeconds, orders }
+    return { auto: s.auto, sameFamily: s.sameFamily, prepareAt: s.prepareAt, threshold: s.threshold, wait: s.waitIfResetWithinMinutes, countdown: s.countdownSeconds, orders, crossOrganization: s.crossOrganization.slice() }
   }
   // "Let AI tune it" (spec §3.29): the AI gets the facts of sideby handoff status --json, as far as the page has them.
   function askHandoff() {
@@ -4943,11 +5003,14 @@ const MAIN = String.raw`
     const status = ah && ah.status ? ah.status : null
     openAsk({ task: 'handoff', context: { handoff: handoffTaskFacts(st.settings, st.starters, S.state.accounts, Date.now(), status), version: BOOT.version } })
   }
-  async function openHandoff() {
+  // focus: the field a rule's "Change…" is about, so the dialog opens at it.
+  async function openHandoff(focus) {
     if (!ahState()) return
     ah = { form: handoffForm(), loading: true }
     showDialog('handoff')
     renderHandoff()
+    const field = typeof focus === 'string' ? document.getElementById('ah-' + focus) : null
+    if (field) field.focus()
     await loadHandoffStatus()
   }
   async function loadHandoffStatus() {
@@ -5011,6 +5074,24 @@ const MAIN = String.raw`
     } else kids.push(h('p', { class: 'muted small' }, t('ah.byQuotaHint')))
     return h('div', { class: 'ah-fam' }, kids)
   }
+  // Accounts that may take over although signed in to another organization (config handoff.crossOrganization).
+  function ahCrossOrganization() {
+    const list = ah.form.crossOrganization
+    const accounts = S.state.accounts.filter((a) => a.kind !== 'api')
+    if (!accounts.length) return null
+    return h('details', { class: 'ah-fam', open: list.length > 0 },
+      h('summary', null, h('b', null, t('ah.crossOrg'))),
+      h('p', { class: 'muted small' }, t('ah.crossOrgHint')),
+      h('div', { class: 'ah-cross' }, accounts.map((a) => {
+        const input = h('input', { type: 'checkbox', disabled: BOOT.readOnly })
+        input.checked = list.includes(a.ref) || (a.aliases || []).some((n) => list.includes(n))
+        input.addEventListener('change', () => ahEdit((f) => {
+          f.crossOrganization = f.crossOrganization.filter((r) => r !== a.ref && !(a.aliases || []).includes(r))
+          if (input.checked) f.crossOrganization.push(a.ref)
+        }))
+        return h('label', { class: 'check' }, input, h('span', { class: 'title-logo' }, badge(a.family, 'sm'), h('span', { class: 'mono' }, accountLabel(a.ref))))
+      })))
+  }
   function ahReadiness() {
     if (ah.loading) return h('p', { class: 'muted' }, spinner(), ' ', t('ah.checking'))
     if (ah.error) return errorNote(ah.error, loadHandoffStatus)
@@ -5043,6 +5124,7 @@ const MAIN = String.raw`
       ahNumber('countdown', t('ah.countdown'), 0, 60)))
     if (f.prepareAt >= f.threshold) body.push(h('p', { class: 'note note-warn' }, t('ah.badLevels')))
     for (const fam of st.starters) body.push(ahFamily(fam))
+    body.push(ahCrossOrganization())
     // The result of Review or Apply sits right under the form, where the button that made it is.
     if (ah.applyError) body.push(errorNote(ah.applyError, null))
     if (ah.saved) body.push(h('p', { class: 'note' }, t('ah.saved', { file: ah.saved })))
@@ -5082,6 +5164,8 @@ const MAIN = String.raw`
       ah.preview = null
       toast(r.settings.auto ? t('toast.ahOn') : t('toast.ahOff'))
       await load({ silent: true })
+      // The Handoff Rules behind the dialog show the new settings too.
+      if (curPage === 'handoff') loadHandoffPage()
       if (ahState()) ah.form = handoffForm()
       ah.loading = true
       ah.status = null
@@ -5217,7 +5301,7 @@ const MAIN = String.raw`
   // ---------- the Auto Handoff page ----------
   // Off: one sentence and one button. On: where each account's work would go next, the last hand-overs and what is
   // still missing. Turning on is one plan shown first (hp.preview) and one confirmation; no commands to copy.
-  const hp = { data: null, plan: null, loading: false, error: null, preview: null, previewing: false, applying: false, failed: null, changed: false, sameFamily: false, sameTouched: false, busyOff: false, askSame: false }
+  const hp = { data: null, plan: null, loading: false, error: null, preview: null, previewing: false, applying: false, failed: null, changed: false, busyOff: false, askSame: false, askApi: false }
   async function loadHandoffPage() {
     // One read at a time: a second refresh while one runs would end its spinner early.
     if (hp.loading) return
@@ -5233,8 +5317,8 @@ const MAIN = String.raw`
     hp.loading = false
     renderHandoffPage()
   }
-  // Off, the box on this page decides; on, "finish setting up" keeps whatever is set.
-  function hpBody() { return ahState().settings.auto ? {} : { sameFamily: hp.sameFamily } }
+  // The Handoff Rules on this page write each setting as it is switched, so turning on keeps whatever is set.
+  function hpBody() { return {} }
   async function hpPreview() {
     hp.previewing = true
     hp.failed = null
@@ -5250,11 +5334,10 @@ const MAIN = String.raw`
     renderHandoffPage()
     try {
       const r = await api('/api/handoff/enable', Object.assign(hpBody(), { confirm: true, expect: hp.preview && hp.preview.key }))
-      const bad = r.results.find((x) => !x.ok)
-      // A plan that changed since it was shown is shown again; one with nothing left to do means it is already on.
-      hp.changed = Boolean(r.changed) && !r.plan.alreadyOn
-      if (hp.changed || r.plan.blocked) hp.preview = r.plan
-      else if (bad) hp.failed = { step: bad, plan: r.plan }
+      const out = enableOutcome(r)
+      hp.changed = out.kind === 'changed'
+      if (out.kind === 'changed' || out.kind === 'blocked') hp.preview = out.plan
+      else if (out.kind === 'failed') hp.failed = { step: out.step, plan: out.plan }
       else { hp.preview = null; toast(t('toast.ahOn')) }
       await load({ silent: true })
       await loadHandoffPage()
@@ -5262,14 +5345,16 @@ const MAIN = String.raw`
     hp.applying = false
     renderHandoffPage()
   }
-  async function hpChange(change, message) {
+  // Every change on this page applies at once and its toast carries the undo (spec §3.17 "接力规则").
+  async function hpChange(change, message, opts) {
     hp.busyOff = true
     renderHandoffPage()
     try {
-      await api('/api/handoff/configure', { change, confirm: true })
+      const { undo } = await saveHandoffChange(api, change, opts)
       hp.preview = null
       hp.askSame = false
-      toast(message)
+      hp.askApi = false
+      toast(message, undo ? { action: { label: t('toast.undo'), run: () => hpChange(undo, t('hp.undone'), { noUndo: true }) }, duration: 12000 } : undefined)
       await load({ silent: true })
       await loadHandoffPage()
     } catch (e) { hp.failed = { error: e } }
@@ -5309,15 +5394,9 @@ const MAIN = String.raw`
     return h('p', { class: 'note note-fail', role: 'alert' }, t('hp.stepFailed', { step: hpStepTitle(f.step), why: f.step.message || '' }) + ' ' + t('hp.tryAgain'))
   }
   function hpDecision(d, starts) {
-    const thr = ahState().settings.threshold
-    if (d.kind === 'pick') return starts.includes('quota') ? t('hp.goesTo', { to: accountLabel(d.ref), p: thr }) : t('hp.goesToLimit', { to: accountLabel(d.ref) })
+    if (d.kind === 'pick') return starts.includes('quota') ? t('hp.goesTo', { to: accountLabel(d.ref) }) : t('hp.goesToLimit', { to: accountLabel(d.ref) })
     if (d.kind === 'wait') return t('hp.waits', { at: clock(d.until) })
     return d.earliestReset ? t('hp.noneBack', { ref: accountLabel(d.earliestReset.ref), at: clock(d.earliestReset.at) }) : t('hp.none')
-  }
-  // The one case where reaching the threshold does not switch (spec §3.17 "选号" 1); none when waiting is off.
-  function hpWaitRule(st) {
-    const w = st.settings.waitIfResetWithinMinutes
-    return w > 0 ? ' ' + t('hp.waitRule', { w }) : null
   }
   function hpRows(d) {
     if (!d.takeover.length) return h('p', { class: 'muted small' }, t('hp.noAccounts'))
@@ -5325,23 +5404,106 @@ const MAIN = String.raw`
       const a = S.state.accounts.find((x) => x.ref === r.ref)
       const p = a ? quotaPressure(a, Date.now()) : -1
       return h('li', null,
-        h('span', { class: 'title-logo' }, badge(r.family, 'sm'), h('b', { class: 'mono' }, accountLabel(r.ref))),
-        h('span', { class: 'muted' }, p >= 0 ? t('hp.used', { p: Math.round(p) }) : t('hp.noQuota')),
-        h('span', null, hpDecision(r.decision, r.starts)))
+        h('span', { class: 'title-logo' }, badge(r.family, 'sm'), h('span', { class: 'mono' }, accountLabel(r.ref))),
+        h('span', { class: 'muted num' }, p >= 0 ? t('hp.used', { p: Math.round(p) }) : t('hp.noQuota')),
+        h('span', { class: r.decision.kind === 'none' ? 'muted' : null }, hpDecision(r.decision, r.starts)))
     }))
   }
   function hpRecent(d) {
     if (!d.recent.length) return h('p', { class: 'muted small' }, t('hp.noneYet'))
-    return h('ul', { class: 'hp-rows' }, d.recent.map((r) => h('li', null,
+    return h('ul', { class: 'hp-rows hp-recent' }, d.recent.map((r) => h('li', null,
       h('span', { class: 'mono' }, accountLabel(r.from) + ' → ' + accountLabel(r.to)),
-      h('span', { class: 'muted' }, clock(r.at) + ' · ' + ago(r.at)),
+      h('span', { class: 'muted num' }, clock(r.at) + ' · ' + ago(r.at)),
       h('span', { class: 'muted' }, r.trigger ? t('hp.why.' + r.trigger) : ''))))
   }
-  function hpSameFamilyBox(checked, onchange) {
-    const input = h('input', { type: 'checkbox', disabled: BOOT.readOnly || hp.busyOff || hp.applying })
-    input.checked = checked
-    input.addEventListener('change', () => onchange(input.checked))
-    return h('div', { class: 'check-row' }, h('label', { class: 'check' }, input, h('span', null, h('b', null, t('hp.sameFamily')), h('span', { class: 'muted small' }, t('ah.sameFamilyWarn')))))
+  // ---- Handoff Rules (spec §3.17 "接力规则"): every rule in effect, each next to the switch that changes it ----
+  function hpRuleText(r) {
+    const p = r.params
+    const thr = ahState().settings.threshold
+    switch (r.id) {
+      case 'when': return p.adaptive ? t('hp.rule.whenAdaptive', { prepare: p.prepareAt, p: p.threshold, max: p.max }) : t('hp.rule.when', { prepare: p.prepareAt, p: p.threshold })
+      case 'windows': return t('hp.rule.windows')
+      case 'takeover': return t('hp.rule.takeover', { limit: p.limit, p: thr })
+      case 'wait': return p.minutes > 0 ? t('hp.rule.wait', { w: p.minutes }) : t('hp.rule.noWait')
+      case 'sameFamily': return t(p.on ? 'hp.rule.sameOn' : 'hp.rule.sameOff')
+      case 'otherFamilies': return p.on ? t('hp.rule.otherOn') : t('hp.rule.otherOff')
+      case 'api': return t(p.on ? 'hp.rule.apiOn' : 'hp.rule.apiOff')
+      case 'organization': return p.allowed.length ? t('hp.rule.orgExcept', { refs: p.allowed.map(accountLabel).join(', ') }) : t('hp.rule.org')
+      case 'order': return t('hp.rule.order', { host: family(p.family).title, order: p.order.map(accountLabel).join(' → ') })
+      case 'countdown': return p.seconds > 0 ? t('hp.rule.countdown', { s: p.seconds }) : t('hp.rule.noCountdown')
+    }
+    return r.text
+  }
+  // An on/off pair like Remote Control's; onPick(true|false) runs only when the side changes.
+  function hpSwitch(key, label, on, onPick) {
+    return h('div', { class: 'seg', role: 'group', 'aria-label': label }, [true, false].map((v) =>
+      h('button', { class: 'seg-btn', type: 'button', 'data-key': key + ':' + v, disabled: BOOT.readOnly || hp.busyOff, 'aria-pressed': String(on === v), onclick: () => { if (on !== v) onPick(v) } }, t(v ? 'hp.on' : 'hp.off'))))
+  }
+  function hpEditBtn(key) {
+    const field = { when: 'prepareAt', wait: 'wait', countdown: 'countdown' }[key]
+    return h('button', { class: 'link-btn', type: 'button', 'data-key': 'edit:' + key, onclick: () => openHandoff(field) }, t('hp.edit'))
+  }
+  function hpConfirm(key, warn, cancel, confirmLabel, run) {
+    return h('div', { class: 'ah-fam hp-confirm', 'data-enter': key },
+      h('p', { class: 'note note-warn' }, warn),
+      h('div', { class: 'row-actions' },
+        h('button', { class: 'btn btn-sm', type: 'button', disabled: hp.busyOff, onclick: cancel }, t('btn.cancel')),
+        h('button', { class: 'btn btn-sm btn-primary', type: 'button', 'data-key': 'confirm:' + key, disabled: BOOT.readOnly || hp.busyOff, onclick: run }, confirmLabel)))
+  }
+  // The AIs in the order they take over; ↑↓ write familyOrder at once.
+  function hpAiOrder(order) {
+    const move = (i, d) => { const l = order.slice(); const x = l[i]; l[i] = l[i + d]; l[i + d] = x; hpChange({ familyOrder: l }, t('hp.aiOrderSaved')) }
+    return h('ol', { class: 'ah-order hp-ai-order' }, order.map((f, i) => h('li', null,
+      h('span', { class: 'title-logo' }, badge(f, 'sm'), (i + 1) + '. ' + family(f).title),
+      h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'up:' + f, disabled: BOOT.readOnly || hp.busyOff || i === 0, 'aria-label': t('ah.up'), onclick: () => move(i, -1) }, '↑'),
+      h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'down:' + f, disabled: BOOT.readOnly || hp.busyOff || i === order.length - 1, 'aria-label': t('ah.down'), onclick: () => move(i, 1) }, '↓'))))
+  }
+  // ctl sits right of the rule's text; below takes the full width under it (a sub-switch, a confirmation, the AI order).
+  function hpRuleControls(r) {
+    const p = r.params
+    switch (r.id) {
+      case 'when': return { ctl: [hpEditBtn('when')], below: [h('div', { class: 'hp-rule-sub' }, h('span', { class: 'muted small' }, t('hp.adaptive')),
+        hpSwitch('adaptive', t('hp.adaptive'), p.adaptive, (v) => hpChange({ adaptive: v }, t(v ? 'hp.adaptiveOn' : 'hp.adaptiveOff'))))] }
+      case 'wait': case 'countdown': case 'order': case 'organization': return { ctl: [hpEditBtn(r.id)], below: [] }
+      case 'sameFamily': return { ctl: [hpSwitch('same', t('hp.sameFamily'), p.on, (v) => {
+        if (v) { hp.askSame = true; renderHandoffPage() } else hpChange({ sameFamily: false }, t('hp.sameOff'))
+      })], below: [hp.askSame && !p.on ? hpConfirm('same', t('ah.sameFamilyWarn'), () => { hp.askSame = false; renderHandoffPage() }, t('hp.sameConfirm'), () => hpChange({ sameFamily: true }, t('hp.sameOn'))) : null] }
+      case 'otherFamilies': return { ctl: [hpSwitch('other', t('hp.otherFamilies'), p.on, (v) => hpChange({ otherFamilies: v }, t(v ? 'hp.otherOn' : 'hp.otherOff')))],
+        below: [p.on && p.order.length > 1 ? hpAiOrder(p.order) : null] }
+      case 'api': return { ctl: [hpSwitch('api', t('hp.api'), p.on, (v) => {
+        if (v) { hp.askApi = true; renderHandoffPage() } else hpChange({ api: false }, t('hp.apiOff'))
+      })], below: [!p.accounts ? h('p', { class: 'muted small' }, t('hp.noApi')) : null,
+        hp.askApi && !p.on ? hpConfirm('api', t('hp.apiWarn'), () => { hp.askApi = false; renderHandoffPage() }, t('hp.apiConfirm'), () => hpChange({ api: true }, t('hp.apiOn'))) : null] }
+    }
+    return { ctl: [], below: [] }
+  }
+  function hpRules(d) {
+    if (!d || !d.rules) return null
+    return [h('div', { class: 'page-sec-head' }, h('h3', { class: 'page-sec' }, t('hp.rules')),
+      h('p', { class: 'muted small' }, t('hp.rulesNote'))),
+      h('ol', { class: 'hp-rules' }, d.rules.map((r) => {
+        const c = hpRuleControls(r)
+        return h('li', { 'data-rule': r.id },
+          h('div', { class: 'hp-rule-text' }, hpRuleText(r)),
+          h('div', { class: 'hp-rule-ctl' }, c.ctl),
+          ...c.below.filter(Boolean).map((el) => h('div', { class: 'hp-rule-below' }, el)))
+      }))]
+  }
+  // When no account could take over anywhere, say which switch opens the way instead of leaving a dead end.
+  function hpNoneHint(d) {
+    if (!d.takeover.length || d.takeover.some((r) => r.decision.kind !== 'none')) return null
+    const st = ahState().settings
+    return st.sameFamily && st.otherFamilies ? null : h('p', { class: 'note', 'data-enter': 'none-hint' }, t('hp.noneAll'))
+  }
+  // Up to ADR-0046 API accounts took over by themselves; this asks once, where Auto Handoff is on.
+  function hpApiBanner() {
+    const st = ahState()
+    if (!st || !st.apiUndecided || BOOT.readOnly) return null
+    return h('div', { class: 'banner banner-warn', role: 'status', 'data-enter': 'api-banner' },
+      h('div', null, h('b', null, t('hp.apiAskTitle') + ' '), t('hp.apiAskBody')),
+      h('div', { class: 'banner-actions' },
+        h('button', { class: 'btn btn-sm btn-primary', type: 'button', disabled: hp.busyOff, onclick: () => hpChange({ api: false }, t('hp.apiKeptOff')) }, t('hp.apiKeepOff')),
+        h('button', { class: 'btn btn-sm', type: 'button', disabled: hp.busyOff, onclick: () => hpChange({ api: true }, t('hp.apiOn')) }, t('hp.apiKeepOn'))))
   }
   function renderHandoffPage() {
     const box = $('handoff-page')
@@ -5352,34 +5514,36 @@ const MAIN = String.raw`
       h('h2', { id: 'h-handoff' }, t('hp.title')),
       h('div', { class: 'row-actions' },
         h('button', { class: 'btn btn-sm', type: 'button', onclick: askHandoff }, icon('bot'), t('ask.title.handoff')),
-        h('button', { class: 'btn btn-sm', type: 'button', onclick: openHandoff }, t('hp.advanced')),
+        h('button', { class: 'link-btn small', type: 'button', onclick: () => openHandoff() }, t('hp.advanced')),
         hp.loading ? spinner() : null))]
     const on = st.settings.auto
     if (hp.loading && !hp.data) kids.push(h('p', { class: 'muted' }, spinner(), ' ', t('hp.loading')))
     if (hp.error) kids.push(errorNote(hp.error, loadHandoffPage))
     if (BOOT.readOnly) kids.push(h('p', { class: 'note' }, t('banner.readOnly')))
+    const d = hp.data
+    // One status card on top: whether it is on, what that means, and the one action that changes it.
+    const status = (text, action) => h('div', { class: 'hp-status' + (on ? ' is-on' : '') },
+      h('span', { class: 'hp-status-ic' }, icon('swap')),
+      h('div', { class: 'hp-status-text' }, h('b', null, on ? t('hp.statusOn') : t('hp.statusOff')), h('p', { class: 'muted' }, text)),
+      action)
     if (!on) {
-      kids.push(h('p', null, t('hp.intro')))
-      kids.push(h('ol', { class: 'hp-how' }, h('li', null, t('hp.how1')), h('li', null, t('hp.how2', { p: st.settings.threshold }), hpWaitRule(st)), h('li', null, t('hp.how3', { s: st.settings.countdownSeconds }))))
-      if (!S.state.accounts.some((a) => a.kind !== 'api' && st.starters.includes(a.family))) kids.push(h('p', { class: 'note' }, t('hp.noStarters')))
-      else {
-        if (!hp.preview) {
-          // Until the person touches the box it shows what is set now, so turning on again keeps an earlier choice.
-          if (!hp.sameTouched) hp.sameFamily = st.settings.sameFamily
-          kids.push(hpSameFamilyBox(hp.sameFamily, (v) => { hp.sameFamily = v; hp.sameTouched = true }))
-          kids.push(h('div', { class: 'row-actions' }, h('button', { class: 'btn btn-primary', type: 'button', disabled: BOOT.readOnly || hp.previewing, 'aria-busy': hp.previewing ? 'true' : null, onclick: hpPreview }, hp.previewing ? spinner() : null, t('hp.turnOn'))))
-        } else kids.push(hpPreviewCard())
-      }
+      const starters = S.state.accounts.some((a) => a.kind !== 'api' && st.starters.includes(a.family))
+      kids.push(status(t('hp.intro'), starters && !hp.preview ? h('button', { class: 'btn btn-primary', type: 'button', 'data-key': 'turn-on', disabled: BOOT.readOnly || hp.previewing, 'aria-busy': hp.previewing ? 'true' : null, onclick: hpPreview }, hp.previewing ? spinner() : null, t('hp.turnOn')) : null))
+      if (!starters) kids.push(h('p', { class: 'note' }, t('hp.noStarters')))
+      else if (hp.preview) kids.push(hpPreviewCard())
+      kids.push(hpRules(d))
+      if (d && d.takeover.length) kids.push(h('h3', { class: 'page-sec' }, t('hp.takeoverIf')), hpRows(d), hpNoneHint(d))
     } else {
-      kids.push(h('p', null, h('span', { class: 'chip chip-ok' }, t('ah.on')), ' ', t('hp.onNote', { p: st.settings.threshold }), hpWaitRule(st)))
-      const d = hp.data
+      kids.push(status(t('hp.onNote'),
+        h('button', { class: 'btn', type: 'button', 'data-key': 'turn-off', disabled: BOOT.readOnly || hp.busyOff, onclick: () => hpChange({ auto: false }, t('toast.ahOff')) }, t('hp.turnOff'))))
       if (d) {
-        kids.push(h('h3', { class: 'small' }, t('hp.takeover')), hpRows(d))
-        kids.push(h('h3', { class: 'small' }, t('hp.recent')), hpRecent(d))
+        kids.push(h('h3', { class: 'page-sec' }, t('hp.takeover')), hpRows(d), hpNoneHint(d))
+        kids.push(...(hpRules(d) || []))
+        kids.push(h('h3', { class: 'page-sec' }, t('hp.recent')), hpRecent(d))
       }
       const plan = hp.plan
       if (plan && (plan.blocked || plan.steps.length)) {
-        kids.push(h('h3', { class: 'small' }, t('hp.missing')))
+        kids.push(h('h3', { class: 'page-sec' }, t('hp.missing')))
         if (!hp.preview) {
           if (plan.blocked) kids.push(h('p', { class: 'note note-fail' }, t('hp.blocked', { why: plan.blocked })), codeCopy('npm i -g sideby'))
           else {
@@ -5389,18 +5553,9 @@ const MAIN = String.raw`
         } else kids.push(hpPreviewCard())
       } else if (plan) kids.push(...hpManual(plan))
       kids.push(h('p', { class: 'muted small' }, t('hp.onlySideby')))
-      kids.push(hpSameFamilyBox(st.settings.sameFamily, (v) => {
-        if (v) { hp.askSame = true; renderHandoffPage() } else { hp.askSame = false; hpChange({ sameFamily: false }, t('hp.sameOff')) }
-      }))
-      if (hp.askSame && !st.settings.sameFamily) kids.push(h('div', { class: 'ah-fam' },
-        h('p', { class: 'note note-warn' }, t('ah.sameFamilyWarn')),
-        h('div', { class: 'row-actions' },
-          h('button', { class: 'btn', type: 'button', disabled: hp.busyOff, onclick: () => { hp.askSame = false; renderHandoffPage() } }, t('btn.cancel')),
-          h('button', { class: 'btn btn-primary', type: 'button', disabled: BOOT.readOnly || hp.busyOff, onclick: () => { hp.askSame = false; hpChange({ sameFamily: true }, t('hp.sameOn')) } }, t('hp.sameConfirm')))))
-      kids.push(h('div', { class: 'row-actions' }, h('button', { class: 'btn', type: 'button', disabled: BOOT.readOnly || hp.busyOff, onclick: () => hpChange({ auto: false }, t('toast.ahOff')) }, hp.busyOff ? spinner() : null, t('hp.turnOff'))))
     }
     kids.push(hpFailed())
-    setKids(box, kids)
+    swapKids(box, kids)
   }
 
   // ---------- Remote Control (spec §3.22) ----------
@@ -5409,13 +5564,18 @@ const MAIN = String.raw`
   // target: the side the dialog's switch was moved to, waiting for its confirmation; null while nothing is chosen.
   const rc = { confirm: false, busy: false, target: null }
   const shortRef = (ref) => ref.replace(/^claude:/, '')
+  // One settings key's change: the key and literal values in the code font, "not set" in words.
+  function keyChange(key, from, to) {
+    const val = (v) => (v === null ? t('rc.notSet') : h('code', null, v))
+    return h('span', { class: 'key-change' }, h('code', null, key), ' ', val(from), ' → ', val(to))
+  }
   function remoteControlBanner() {
     const groups = S.state.remoteControl || []
     // API Accounts never sign in to claude.ai, so Remote Control cannot reach their sessions.
     const api = new Set(S.state.accounts.filter((a) => a.kind === 'api').map((a) => a.ref))
     const refs = groups.filter((g) => g.state === 'on').flatMap((g) => g.accounts).filter((r) => !api.has(r)).map(shortRef)
     if (!refs.length || prefs.rcHide) return null
-    const todo = groups.filter((g) => g.state === 'on' || g.state === 'default')
+    const todo = remoteControlTodo(groups, 'off')
     const text = h('div', null, h('b', null, t('rc.title') + ' '), tn('rc.body', refs.length, { refs: refs.join(', ') }))
     if (BOOT.readOnly) return h('div', { class: 'banner banner-warn', role: 'status' }, h('div', null, text, ' ', t('rc.readOnly')))
     if (!rc.confirm)
@@ -5424,8 +5584,14 @@ const MAIN = String.raw`
           h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => { rc.confirm = true; renderBanners() } }, t('rc.turnOff')),
           h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { prefs.rcHide = true; savePrefs(); renderBanners(); toast(t('rc.hidden')) } }, t('rc.keep'))))
     const lines = todo.map((g) => h('li', null, h('code', null, g.file), ' ',
-      t('rc.change', { from: g.state === 'on' ? 'true' : t('rc.notSet'), to: 'false' }), ' ',
+      keyChange('remoteControlAtStartup', g.state === 'on' ? 'true' : null, 'false'), ' ',
       h('span', { class: 'muted' }, t('rc.usedBy', { refs: g.accounts.map(shortRef).join(', ') }))))
+    // Files sideby cannot change stay listed, as in the dialog, so "all" never hides one.
+    for (const g of groups.filter((g) => g.state === 'blocked' || g.state === 'missing'))
+      lines.push(h('li', null, h('code', null, g.file), ' ',
+        h('span', { class: 'chip chip-sm' + (g.state === 'blocked' ? ' chip-fail' : '') }, t('rc.state.' + g.state)), ' ',
+        h('span', { class: 'muted' }, t('rc.usedBy', { refs: g.accounts.map(shortRef).join(', ') })),
+        g.reason ? h('div', { class: 'muted small' }, t('rc.skipped') + (g.why ? t('settings.why.' + g.why) : g.reason)) : null))
     return h('div', { class: 'banner banner-warn', role: 'status' },
       h('div', null, h('b', null, t('rc.confirmTitle')), h('ul', null, lines), h('div', { class: 'small' }, t('rc.confirmNote'))),
       h('div', { class: 'banner-actions' },
@@ -5438,8 +5604,10 @@ const MAIN = String.raw`
     if (dlg.kind === 'rc') renderRc()
     const fail = to === 'on' ? 'rc.failedOn' : 'rc.failed'
     try {
-      const r = await api('/api/remote-control/' + to, {})
-      if (r.ok) {
+      const files = remoteControlTodo(S.state.remoteControl || [], to).map((g) => g.file)
+      const r = await api('/api/remote-control/' + to, { confirm: true, files })
+      if (r.changedSince) toast(t('as.changedSince'), { kind: 'fail' })
+      else if (r.ok) {
         // Show the new state now; the reload that follows confirms it.
         const changed = new Set(remoteControlTodo(S.state.remoteControl || [], to).map((g) => g.file))
         S.state.remoteControl = (S.state.remoteControl || []).map((g) => changed.has(g.file) ? { ...g, state: to, undo: true } : g)
@@ -5456,7 +5624,7 @@ const MAIN = String.raw`
   }
   async function remoteControlUndo() {
     try {
-      const r = await api('/api/remote-control/undo', {})
+      const r = await api('/api/remote-control/undo', { confirm: true })
       toast(r.ok ? t('rc.undone') : r.message, { kind: r.ok ? 'ok' : 'fail' })
     } catch (e) { toast(t('toast.undoFailed', { msg: e.message }), { kind: 'fail' }) }
     await load({ silent: true })
@@ -5970,7 +6138,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.tool']
   function openRc() {
     if (!S.state || !rcSummary()) return
     rc.target = null
@@ -5989,12 +6157,12 @@ const MAIN = String.raw`
     const sw = h('div', { class: 'set-row rc-switch' }, h('span', null, t('rc.switch')),
       h('div', { class: 'seg', role: 'group', 'aria-label': t('rc.switch') }, ['on', 'off'].map((v) =>
         h('button', { class: 'seg-btn', type: 'button', disabled: BOOT.readOnly || rc.busy, 'aria-pressed': String((to || sum) === v), onclick: () => pick(v) }, t('rc.state.' + v)))))
-    const fromOf = (g) => g.state === 'on' ? 'true' : g.state === 'off' ? 'false' : t('rc.notSet')
+    const fromOf = (g) => g.state === 'on' ? 'true' : g.state === 'off' ? 'false' : null
     const rows = groups.map((g) => h('li', { class: 'rc-row' },
       h('div', null, h('code', null, g.file), ' ', h('span', { class: 'chip chip-sm ' + (g.state === 'on' ? 'chip-warn' : g.state === 'off' ? 'chip-ok' : g.state === 'blocked' ? 'chip-fail' : '') }, t('rc.state.' + g.state))),
       h('div', { class: 'muted small' }, t('rc.usedBy', { refs: g.accounts.map(shortRef).join(', ') })),
-      g.reason ? h('div', { class: 'muted small' }, g.reason) : null,
-      changing.has(g.file) ? h('div', { class: 'small rc-change' }, t('rc.change', { from: fromOf(g), to: to === 'on' ? 'true' : 'false' })) : null))
+      g.reason ? h('div', { class: 'muted small' }, g.why ? t('settings.why.' + g.why) : g.reason) : null,
+      changing.has(g.file) ? h('div', { class: 'small rc-change' }, keyChange('remoteControlAtStartup', fromOf(g), to === 'on' ? 'true' : 'false')) : null))
     const body = [h('p', { class: 'small' }, t('rc.explain')), sw, h('ul', { class: 'rc-list' }, rows)]
     if (to === 'on') body.push(h('div', { class: 'note note-warn small' }, t('rc.onWarn')))
     else if (to === 'off') body.push(h('p', { class: 'small muted' }, t('rc.confirmNote')))
@@ -6750,6 +6918,9 @@ const MAIN = String.raw`
         const mb = curPage === 'accounts' ? menubarHint() : null
         if (mb) out.push(mb)
       }
+      // On every page until answered: whether API accounts may still take over (ADR-0046).
+      const apiBanner = hpApiBanner()
+      if (apiBanner) out.push(apiBanner)
       const rcBanner = remoteControlBanner()
       if (rcBanner) out.push(rcBanner)
       const inbBanner = inboundBanner()

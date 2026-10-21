@@ -3,7 +3,15 @@
 import { join } from 'node:path'
 import { HOOK_FAMILIES } from '../handoff/hook.ts'
 import type { Runtime } from '../runtime.ts'
-import { editConfigHandoff, type HandoffConfig, type HandoffSettings, handoffSettings } from './config.ts'
+import type { Account } from '../types.ts'
+import { resolveRef } from './accounts.ts'
+import {
+  aliasRefs,
+  editConfigHandoff,
+  type HandoffConfig,
+  type HandoffSettings,
+  handoffSettings,
+} from './config.ts'
 import { UserError } from './errors.ts'
 import { ensureChainDir, readJsonFile, writeJsonFile } from './handoff-chain.ts'
 import { hookEntryWorks } from './handoff-run.ts'
@@ -130,15 +138,55 @@ export async function handoffStatus(rt: Runtime): Promise<HandoffStatus> {
 }
 
 /** One `handoff` change; fields left out keep their value. The Panel and the CLI send the same shape. */
+/** A `handoff` change; for a single setting, null removes the key so the default applies again. */
 export interface HandoffChange {
-  auto?: boolean
-  sameFamily?: boolean
-  prepareAt?: number
-  threshold?: number
-  waitIfResetWithinMinutes?: number
-  countdownSeconds?: number
+  auto?: boolean | null
+  sameFamily?: boolean | null
+  otherFamilies?: boolean | null
+  /** Families `otherFamilies` tries, first to last. */
+  familyOrder?: string[]
+  /** Null leaves the question open again (ADR-0046). */
+  api?: boolean | null
+  adaptive?: boolean | null
+  /** Accounts that may take over across organizations; an empty list removes the key. */
+  crossOrganization?: string[]
+  prepareAt?: number | null
+  threshold?: number | null
+  waitIfResetWithinMinutes?: number | null
+  countdownSeconds?: number | null
   /** Handoff Orders by Family; an empty list sends that Family back to ranking by quota. */
   orders?: { family: string; order: string[] }[]
+}
+
+const SINGLE_KEYS = [
+  'auto',
+  'sameFamily',
+  'otherFamilies',
+  'api',
+  'adaptive',
+  'prepareAt',
+  'threshold',
+  'waitIfResetWithinMinutes',
+  'countdownSeconds',
+] as const
+
+/**
+ * The change that puts back what `change` replaced, read from the config as it was: a key that was not there comes
+ * back as null (or an empty list), so undoing removes it instead of writing its default.
+ */
+export function handoffUndo(before: HandoffConfig | undefined, change: HandoffChange): HandoffChange {
+  const b = before ?? {}
+  const undo: HandoffChange = {}
+  for (const k of SINGLE_KEYS)
+    if (change[k] !== undefined) (undo as Record<string, unknown>)[k] = b[k] === undefined ? null : b[k]
+  for (const k of ['familyOrder', 'crossOrganization'] as const)
+    if (change[k] !== undefined) undo[k] = [...(b[k] ?? [])]
+  if (change.orders?.length)
+    undo.orders = change.orders.map(({ family }) => {
+      const cur = b.families?.[family]
+      return { family, order: cur?.policy === 'order' ? [...(cur.order ?? [])] : [] }
+    })
+  return undo
 }
 
 /** A line diff of two small texts: unchanged lines start with two spaces, removed with `- `, added with `+ `. */
@@ -170,6 +218,61 @@ export function lineDiff(before: string, after: string): string {
   return out.join('\n')
 }
 
+/** What `checkHandoffRefs` resolves names against: the Families, the Accounts and the short commands. */
+export interface HandoffRefs {
+  families: readonly string[]
+  accounts: readonly Account[]
+  aliases: Readonly<Record<string, string>>
+}
+
+export async function handoffRefs(rt: Runtime): Promise<HandoffRefs> {
+  return {
+    families: [...rt.families.keys()],
+    accounts: await rt.accounts(),
+    aliases: aliasRefs(rt.config.aliases),
+  }
+}
+
+const unknownFamily = (families: Iterable<string>, family: string) =>
+  new UserError(`unknown family "${family}"; available: ${[...families].join(', ')}`)
+
+/**
+ * Refuses a `handoff` setting that names a Family or an Account that does not exist: a Family's Handoff Order,
+ * `familyOrder` and `crossOrganization`, each checked only when it changed from `before`, so an old name that has
+ * since gone away does not block an unrelated change. The Panel, `sideby handoff` and `sideby config set` all use it.
+ */
+export function checkHandoffRefs(
+  refs: HandoffRefs,
+  before: HandoffConfig | undefined,
+  after: HandoffConfig | undefined,
+): void {
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+  const missing: string[] = []
+  const check = (names: readonly string[]) => {
+    for (const name of names)
+      try {
+        resolveRef(name, refs.accounts, refs.aliases)
+      } catch {
+        if (!missing.includes(name)) missing.push(name)
+      }
+  }
+  for (const [family, entry] of Object.entries(after?.families ?? {})) {
+    if (same(entry, before?.families?.[family])) continue
+    if (!refs.families.includes(family)) throw unknownFamily(refs.families, family)
+    check(entry.order ?? [])
+  }
+  if (!same(after?.familyOrder, before?.familyOrder))
+    for (const f of after?.familyOrder ?? [])
+      if (!refs.families.includes(f)) throw unknownFamily(refs.families, f)
+  if (!same(after?.crossOrganization, before?.crossOrganization)) check(after?.crossOrganization ?? [])
+  if (!missing.length) return
+  const known = [...refs.accounts.map((a) => a.ref), ...Object.keys(refs.aliases)]
+  throw new UserError(
+    `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not an account or short command; use one of: ${known.join(', ')}`,
+    { code: 'unknown-account' },
+  )
+}
+
 const pretty = (v: unknown) => JSON.stringify(v ?? {}, null, 2)
 
 /**
@@ -180,30 +283,29 @@ export async function configureHandoff(
   rt: Runtime,
   change: HandoffChange,
   opts: { apply: boolean },
-): Promise<{ changed: boolean; applied: boolean; file: string; diff: string; settings: HandoffSettings }> {
-  const known = [...(await rt.accounts()).map((a) => a.ref), ...Object.keys(rt.config.aliases ?? {})]
-  for (const { family, order } of change.orders ?? []) {
-    if (!rt.families.has(family))
-      throw new UserError(`unknown family "${family}"; available: ${[...rt.families.keys()].join(', ')}`)
-    const missing: string[] = []
-    for (const name of order) await rt.resolve(name).catch(() => missing.push(name))
-    if (missing.length)
-      throw new UserError(
-        `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not an account or short command; use one of: ${known.join(', ')}`,
-        { code: 'unknown-account' },
-      )
-  }
+): Promise<{
+  changed: boolean
+  applied: boolean
+  file: string
+  diff: string
+  settings: HandoffSettings
+  /** The change that puts the old settings back. */
+  undo: HandoffChange
+}> {
+  for (const { family } of change.orders ?? [])
+    if (!rt.families.has(family)) throw unknownFamily(rt.families.keys(), family)
+  const refs = await handoffRefs(rt)
   const edit = (current: HandoffConfig): HandoffConfig => {
     const next: HandoffConfig = { ...current }
-    for (const k of [
-      'auto',
-      'sameFamily',
-      'prepareAt',
-      'threshold',
-      'waitIfResetWithinMinutes',
-      'countdownSeconds',
-    ] as const)
-      if (change[k] !== undefined) (next as Record<string, unknown>)[k] = change[k]
+    for (const k of ['familyOrder', 'crossOrganization'] as const) {
+      const v = change[k]
+      if (v === undefined) continue
+      if (v.length) next[k] = [...v]
+      else delete next[k]
+    }
+    for (const k of SINGLE_KEYS)
+      if (change[k] === null) delete next[k]
+      else if (change[k] !== undefined) (next as Record<string, unknown>)[k] = change[k]
     if (change.orders?.length) {
       const families = { ...(current.families ?? {}) }
       for (const { family, order } of change.orders)
@@ -211,6 +313,7 @@ export async function configureHandoff(
         else delete families[family]
       next.families = families
     }
+    checkHandoffRefs(refs, current, next)
     return next
   }
   const file = rt.paths.configFile
@@ -223,6 +326,7 @@ export async function configureHandoff(
       ? `--- ${join('sideby', 'config.json')} (handoff)\n${lineDiff(pretty(r.before), pretty(r.after))}\n`
       : '',
     settings: handoffSettings({ handoff: r.after }),
+    undo: handoffUndo(r.before, change),
   }
 }
 

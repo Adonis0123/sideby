@@ -1,0 +1,302 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/handoff-rules.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "auto",
+    "rules",
+    "apiUndecided",
+    "takeover"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "auto": {
+      "type": "boolean"
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "params",
+          "settings",
+          "text"
+        ],
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "when"
+              },
+              {
+                "type": "string",
+                "const": "windows"
+              },
+              {
+                "type": "string",
+                "const": "takeover"
+              },
+              {
+                "type": "string",
+                "const": "wait"
+              },
+              {
+                "type": "string",
+                "const": "sameFamily"
+              },
+              {
+                "type": "string",
+                "const": "otherFamilies"
+              },
+              {
+                "type": "string",
+                "const": "api"
+              },
+              {
+                "type": "string",
+                "const": "organization"
+              },
+              {
+                "type": "string",
+                "const": "order"
+              },
+              {
+                "type": "string",
+                "const": "countdown"
+              }
+            ]
+          },
+          "params": {
+            "type": "object",
+            "patternProperties": {
+              "^.*$": {}
+            },
+            "description": "What the sentence needs, such as numbers."
+          },
+          "settings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The `handoff` config keys that change it; empty when fixed."
+          },
+          "text": {
+            "type": "string",
+            "description": "The rule in plain English."
+          }
+        }
+      }
+    },
+    "apiUndecided": {
+      "type": "boolean",
+      "description": "Auto Handoff was on with API accounts before they became opt-in (ADR-0046): ask the user once, then set handoff.api."
+    },
+    "takeover": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "ref",
+          "family",
+          "starts",
+          "decision"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "family": {
+            "type": "string"
+          },
+          "starts": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "quota"
+                },
+                {
+                  "type": "string",
+                  "const": "limit"
+                }
+              ]
+            }
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "ref"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "pick"
+                  },
+                  "ref": {
+                    "type": "string"
+                  },
+                  "skipped": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "ref",
+                        "reason"
+                      ],
+                      "properties": {
+                        "ref": {
+                          "type": "string"
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "until"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "wait"
+                  },
+                  "until": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "reason"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "none"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "earliestReset": {
+                    "type": "object",
+                    "required": [
+                      "ref",
+                      "at"
+                    ],
+                    "properties": {
+                      "ref": {
+                        "type": "string"
+                      },
+                      "at": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "skipped": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "ref",
+                        "reason"
+                      ],
+                      "properties": {
+                        "ref": {
+                          "type": "string"
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby handoff rules --json"
+}

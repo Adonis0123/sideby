@@ -30,8 +30,12 @@
           "required": [
             "auto",
             "sameFamily",
+            "otherFamilies",
+            "familyOrder",
+            "api",
             "prepareAt",
             "threshold",
+            "adaptive",
             "waitIfResetWithinMinutes",
             "countdownSeconds",
             "crossOrganization",
@@ -44,11 +48,29 @@
             "sameFamily": {
               "type": "boolean"
             },
+            "otherFamilies": {
+              "type": "boolean",
+              "description": "Other AIs may take over when this one has no account that can (ADR-0046)."
+            },
+            "familyOrder": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The order other AIs are tried in."
+            },
+            "api": {
+              "type": "boolean",
+              "description": "API accounts may take over, last; billed per use (ADR-0046)."
+            },
             "prepareAt": {
               "type": "number"
             },
             "threshold": {
               "type": "number"
+            },
+            "adaptive": {
+              "type": "boolean"
             },
             "waitIfResetWithinMinutes": {
               "type": "number"
@@ -297,6 +319,10 @@
           }
         }
       }
+    },
+    "apiUndecided": {
+      "type": "boolean",
+      "description": "Auto Handoff was on with API accounts before they became opt-in (ADR-0046): ask the user once whether they may take over, then set handoff.api."
     },
     "auto": {
       "type": "boolean"

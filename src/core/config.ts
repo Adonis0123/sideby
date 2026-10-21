@@ -80,13 +80,31 @@ const HandoffSchema = Type.Object(
     auto: Type.Optional(
       Type.Boolean({
         description:
-          'Hand a running session to the next account when its Quota runs low: only to other families and API accounts unless `sameFamily` is on. Off by default.',
+          'Hand a running session to the next account when its Quota runs low: within the family only with `sameFamily`, to other families only with `otherFamilies`, to API accounts only with `api`. Off by default.',
       }),
     ),
     sameFamily: Type.Optional(
       Type.Boolean({
         description:
           'Also hand off to an account of the same family (cc001 → cc002). The kind vendors are most likely to act on. Off by default.',
+      }),
+    ),
+    otherFamilies: Type.Optional(
+      Type.Boolean({
+        description:
+          'When no account of the family can take over, let accounts of other families take over, family by family in `familyOrder`. Off by default.',
+      }),
+    ),
+    familyOrder: Type.Optional(
+      Type.Array(Type.String(), {
+        description:
+          'Families to try with `otherFamilies`, first to last (for example ["codex", "grok"]); families left out come after, in the usual order.',
+      }),
+    ),
+    api: Type.Optional(
+      Type.Boolean({
+        description:
+          'Let API accounts take over as the last resort, when no subscription account can. They are billed per use and sideby does not cap spending. Off by default (ADR-0046).',
       }),
     ),
     prepareAt: Percent('Quota Pressure at which the session starts keeping a Handoff Brief (default 80).'),
@@ -145,17 +163,34 @@ const HandoffSchema = Type.Object(
   { additionalProperties: false },
 )
 
-export interface HandoffSettings {
-  auto: boolean
-  sameFamily: boolean
-  prepareAt: number
-  threshold: number
-  adaptive: boolean
-  waitIfResetWithinMinutes: number
-  countdownSeconds: number
-  crossOrganization: string[]
-  families: Record<string, { policy: 'pressure' | 'order'; order: string[] }>
-}
+/**
+ * The `handoff` settings with every default filled in (`handoffSettings`). One schema for the type, the `--json`
+ * outputs that carry it and the Panel page.
+ */
+export const HandoffSettingsSchema = Type.Object({
+  auto: Type.Boolean(),
+  sameFamily: Type.Boolean(),
+  otherFamilies: Type.Boolean({
+    description: 'Other AIs may take over when this one has no account that can (ADR-0046).',
+  }),
+  familyOrder: Type.Array(Type.String(), { description: 'The order other AIs are tried in.' }),
+  api: Type.Boolean({ description: 'API accounts may take over, last; billed per use (ADR-0046).' }),
+  prepareAt: Type.Number(),
+  threshold: Type.Number(),
+  adaptive: Type.Boolean(),
+  waitIfResetWithinMinutes: Type.Number(),
+  countdownSeconds: Type.Number(),
+  crossOrganization: Type.Array(Type.String()),
+  families: Type.Record(
+    Type.String(),
+    Type.Object({
+      policy: Type.Union([Type.Literal('pressure'), Type.Literal('order')]),
+      order: Type.Array(Type.String()),
+    }),
+  ),
+})
+
+export type HandoffSettings = Static<typeof HandoffSettingsSchema>
 
 export const ConfigSchema = Type.Object(
   {
@@ -421,6 +456,9 @@ export function handoffSettings(config: Config): HandoffSettings {
   return {
     auto: h.auto ?? false,
     sameFamily: h.sameFamily ?? false,
+    otherFamilies: h.otherFamilies ?? false,
+    familyOrder: [...(h.familyOrder ?? [])],
+    api: h.api ?? false,
     prepareAt: h.prepareAt ?? 80,
     threshold: h.threshold ?? 95,
     adaptive: h.adaptive ?? true,
@@ -1015,14 +1053,20 @@ export interface ConfigChange {
 /**
  * `sideby config set|unset` (spec §3.29): sets `key` to `value`, or removes it when `value` is undefined (and parents
  * left empty with it). The whole result must match the schema; `accounts.<ref>.args` takes only what `argsProblem`
- * accepts (the model and effort arguments, as `sideby model`), and without `argsProblem` it is refused. Written as
+ * accepts (the model and effort arguments, as `sideby model`), and without `argsProblem` it is refused; a
+ * `handoff` change passes `checkHandoff`, the same check the Panel and `sideby handoff` use. Written as
  * every other config change (see `editConfigKey`); `dryRun` shows the change without writing.
  */
 export async function editConfigPath(
   file: string,
   key: string,
   value: unknown,
-  opts: { dryRun?: boolean; argsProblem?: (ref: string, args: string[]) => string | null } = {},
+  opts: {
+    dryRun?: boolean
+    argsProblem?: (ref: string, args: string[]) => string | null
+    /** Throws when a changed `handoff` setting names a Family or Account that does not exist. */
+    checkHandoff?: (before: HandoffConfig | undefined, after: HandoffConfig | undefined) => void
+  } = {},
 ): Promise<ConfigChange> {
   const path = configKeyPath(key)
   if (path[0] === 'plugins' && value !== undefined && typeof value !== 'boolean')
@@ -1041,6 +1085,8 @@ export async function editConfigPath(
           result as AccountsConfig | undefined,
           opts.argsProblem,
         )
+      if (top === 'handoff')
+        opts.checkHandoff?.(current as HandoffConfig | undefined, result as HandoffConfig | undefined)
       return result
     },
     opts,

@@ -3,7 +3,7 @@
 import type { Account, AccountIdentity, LoginState, QuotaResult } from '../types.ts'
 import type { HandoffSettings } from './config.ts'
 import { type HandoffEntry, planHandoff } from './handoff.ts'
-import { windowReset } from './quota-levels.ts'
+import { takeoverLimit, windowReset } from './quota-levels.ts'
 
 export interface SelectCandidate {
   ref: string
@@ -77,22 +77,18 @@ function waitUntil(
 }
 
 /**
- * One candidate's §3.13 state; API accounts are pickable here, as the last resort. An Account already at the user's
- * threshold counts as full even below §3.13's 85%, or it would hand over again on its first tool call.
+ * One candidate's §3.13 state; API accounts are pickable here, as the last resort. An Account at or above the
+ * Takeover Limit counts as full, so the next Account starts with room to work (spec §3.17 "接力规则").
  */
 function stateOf(c: SelectCandidate, s: HandoffSettings, now: Date): HandoffEntry {
-  const e = planHandoff(c.family, [c], now, { includeApi: true }).accounts[0]!
-  if (e.state !== 'ready' || e.pressure === null || e.pressure < s.threshold || c.quota.status !== 'ok')
-    return e
-  const resets = c.quota.windows
-    .filter((w) => w.usedPercent >= s.threshold && !windowReset(w.resetsAt, now))
-    .map((w) => Date.parse(w.resetsAt))
-    .filter(Number.isFinite)
-  return {
-    ...e,
-    state: 'full',
-    ...(resets.length ? { resetsAt: new Date(Math.max(...resets)).toISOString() } : {}),
-  }
+  return planHandoff(c.family, [c], now, { includeApi: true, fullAt: takeoverLimit(s.threshold) })
+    .accounts[0]!
+}
+
+/** Families in the order `otherFamilies` tries them: `familyOrder` first, then the rest as the candidates come. */
+function familiesInOrder(s: HandoffSettings, candidates: readonly SelectCandidate[]): string[] {
+  const seen = [...new Set(candidates.map((c) => c.family))]
+  return [...new Set([...s.familyOrder.filter((f) => seen.includes(f)), ...seen])]
 }
 
 export function selectNext(input: {
@@ -129,16 +125,27 @@ export function selectNext(input: {
   const used = new Set([origin.ref, ...input.used])
   const family = s.families[origin.family]
 
+  const fullAt = takeoverLimit(s.threshold)
+  const rank = (fam: string) =>
+    planHandoff(
+      fam,
+      input.candidates.filter((c) => c.family === fam),
+      now,
+      { includeApi: true, fullAt },
+    ).accounts.map((e) => byRef.get(e.ref)!)
   let list: SelectCandidate[]
   if (family?.policy === 'order') {
     list = family.order.map(refOf).flatMap((r) => (byRef.has(r) ? [byRef.get(r)!] : []))
   } else {
-    // The Family by §3.13's ranking, then other Families' API accounts.
-    const own = input.candidates.filter((c) => c.family === origin.family)
-    const ranked = planHandoff(origin.family, own, now, { includeApi: true }).accounts.map(
-      (e) => byRef.get(e.ref)!,
-    )
-    list = [...ranked, ...input.candidates.filter((c) => c.family !== origin.family && c.kind === 'api')]
+    // The Family by §3.13's ranking; with `otherFamilies`, every other Family's subscriptions the same way, Family by
+    // Family; API accounts last, the origin's Family first (spec §3.17 "接力规则").
+    const families = familiesInOrder(s, input.candidates).filter((f) => f !== origin.family)
+    const ranked = [origin.family, ...families].map((f) => ({ f, list: rank(f) }))
+    list = [
+      ...ranked[0]!.list.filter((c) => c.kind !== 'api'),
+      ...(s.otherFamilies ? ranked.slice(1).flatMap((r) => r.list.filter((c) => c.kind !== 'api')) : []),
+      ...ranked.flatMap((r) => r.list.filter((c) => c.kind === 'api')),
+    ]
   }
 
   // The same login shares the origin's Quota, so taking over there gains nothing (spec §3.21).
@@ -147,14 +154,15 @@ export function selectNext(input: {
     .filter((c) => sameLogin.has(c.ref))
     .map((c) => ({ ref: c.ref, reason: `same login as ${origin.ref}, so it shares the same quota` }))
   const withSkipped = skipped.length ? { skipped } : {}
+  // Could take over if the settings allowed it: another login, its Host installed and able to receive.
+  const couldTake = (c: SelectCandidate) =>
+    !sameLogin.has(c.ref) && !used.has(c.ref) && c.installed && c.receive
   const eligible = list.filter(
     (c) =>
-      !sameLogin.has(c.ref) &&
-      !used.has(c.ref) &&
-      c.installed &&
-      c.receive &&
-      // An API account pays per request, so it gets past no vendor's limit: sameFamily does not apply to it.
-      (s.sameFamily || c.family !== origin.family || c.kind === 'api') &&
+      couldTake(c) &&
+      // An API account pays per request, so it gets past no vendor's limit: sameFamily does not apply to it, but it
+      // takes over only when the user allowed paying for it (`api`, ADR-0046).
+      (c.kind === 'api' ? s.api : s.sameFamily || c.family !== origin.family) &&
       (allowed.has(c.ref) || sameOrganization(origin.identity, c.identity)),
   )
   const states = eligible.map((c) => ({ c, e: stateOf(c, s, now) }))
@@ -166,11 +174,26 @@ export function selectNext(input: {
   const full = states
     .filter(({ e }) => e.state === 'full' && e.resetsAt)
     .sort((a, b) => Date.parse(a.e.resetsAt!) - Date.parse(b.e.resetsAt!))[0]
+  // Say what the user could allow, so "none" is never a dead end; only settings that would bring in an account
+  // that can really take over.
+  const notAllowed = [
+    !s.sameFamily &&
+    list.some((c) => c.family === origin.family && c.kind !== 'api' && c.ref !== origin.ref && couldTake(c))
+      ? 'accounts of the same AI (`handoff.sameFamily`)'
+      : null,
+    !s.otherFamilies &&
+    family?.policy !== 'order' &&
+    input.candidates.some((c) => c.family !== origin.family && c.kind !== 'api' && couldTake(c))
+      ? 'other AIs (`handoff.otherFamilies`)'
+      : null,
+    !s.api && list.some((c) => c.kind === 'api' && couldTake(c)) ? 'API accounts (`handoff.api`)' : null,
+  ].filter(Boolean)
+  const why = eligible.length
+    ? 'every account that may take over is full or signed out'
+    : 'no account may take over'
   return {
     kind: 'none',
-    reason: eligible.length
-      ? 'every account that may take over is full or signed out'
-      : 'no account may take over',
+    reason: notAllowed.length ? `${why}; not allowed now: ${notAllowed.join(', ')}` : why,
     ...(full ? { earliestReset: { ref: full.c.ref, at: full.e.resetsAt! } } : {}),
     ...withSkipped,
   }

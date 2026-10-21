@@ -534,13 +534,33 @@ describe('panel "Receiving messages" (ADR-0045)', () => {
         // A read-only Panel shows the list but changes nothing.
         assert.equal((await request(ro.port, '/api/messages/inbound', good(ro))).status, 200)
         for (const path of ['/api/messages/inbound/accept', '/api/messages/inbound/undo'])
-          assert.equal((await request(ro.port, path, good(ro))).status, 403, `${path} read-only`)
+          assert.equal(
+            (await request(ro.port, path, good(ro), { confirm: true })).status,
+            403,
+            `${path} read-only`,
+          )
         assert.equal(
           JSON.parse(await readFile(h.path('.claude-002/settings.json'), 'utf8')).crossSessionInbound,
           'hold',
         )
 
-        const accepted = await request(rw.port, '/api/messages/inbound/accept', good(rw))
+        // The preview names the files; a confirmation with another list writes nothing.
+        const preview = await request(rw.port, '/api/messages/inbound/accept', good(rw))
+        const files = preview.body.files as string[]
+        assert.deepEqual(files, ['~/.claude/settings.json', '~/.claude-002/settings.json'])
+        const stale = await request(rw.port, '/api/messages/inbound/accept', good(rw), {
+          confirm: true,
+          files: files.slice(1),
+        })
+        assert.deepEqual([stale.body.applied, stale.body.changedSince], [false, true])
+        assert.equal(
+          JSON.parse(await readFile(h.path('.claude-002/settings.json'), 'utf8')).crossSessionInbound,
+          'hold',
+        )
+        const accepted = await request(rw.port, '/api/messages/inbound/accept', good(rw), {
+          confirm: true,
+          files,
+        })
         assert.equal(accepted.body.ok, true)
         assert.ok(!JSON.stringify(accepted.body).includes(h.env.HOME!), 'files are shown under ~')
         assert.equal(
@@ -551,7 +571,10 @@ describe('panel "Receiving messages" (ADR-0045)', () => {
           waits: boolean
         }[]
         assert.ok(after.every((g) => !g.waits))
-        assert.equal((await request(rw.port, '/api/messages/inbound/undo', good(rw))).body.ok, true)
+        assert.equal(
+          (await request(rw.port, '/api/messages/inbound/undo', good(rw), { confirm: true })).body.ok,
+          true,
+        )
         assert.equal(
           JSON.parse(await readFile(h.path('.claude-002/settings.json'), 'utf8')).crossSessionInbound,
           'hold',

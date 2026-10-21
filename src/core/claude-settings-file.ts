@@ -1,7 +1,7 @@
 // One Claude Account's `settings.json`, as the writers of a single key use it (tune apply, ADR-0012; Remote Control,
 // ADR-0017; Cross-session inbound, ADR-0040): where it really lives, a safe read, rendering it back with the file's
-// own indentation, the write of one key and its undo record.
-import { mkdir, readFile, stat } from 'node:fs/promises'
+// own indentation, the write of one key and its undo record, and `settingsKey`, the write-and-undo of one key.
+import { mkdir, readFile, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Account } from '../types.ts'
 import { lstatOrNull, realpathOrNull, sha256, writeFileAtomic, writeIfUnchanged } from './fs-safe.ts'
@@ -123,4 +123,152 @@ export async function readKeyRecord(stateDir: string, dir: string, file: string)
   } catch {
     return null
   }
+}
+
+/** What sideby keeps to undo one key it wrote: whether the key was there, its exact value then, and what it wrote. */
+export interface KeyUndo {
+  file: string
+  hadKey: boolean
+  previous?: unknown
+  wrote: unknown
+  at: string
+}
+
+/** One line per settings file a change was meant for. */
+export interface KeyResult {
+  file: string
+  accounts: string[]
+  ok: boolean
+  message: string
+}
+
+/**
+ * One top-level key of Claude's settings files that sideby writes for the user and can undo (Remote Control,
+ * ADR-0017; Cross-session inbound, ADR-0040). Each write goes through `writeSettingsKey` and leaves an undo record in
+ * `<state>/<records>/`; undo puts the old value back (or removes the key) only while it still holds what sideby
+ * wrote. `legacyWrote` reads a record from before `wrote` was kept as one that wrote that value.
+ */
+export function settingsKey(key: string, records: string, opts: { legacyWrote?: unknown } = {}) {
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+  const readRecord = async (stateDir: string, file: string): Promise<KeyUndo | null> => {
+    const r = await readKeyRecord(stateDir, records, file)
+    if (!r) return null
+    const wrote = 'wrote' in r ? r.wrote : opts.legacyWrote
+    if (wrote === undefined) return null
+    // Records from before `hadKey` kept null for a key that was not there.
+    const hadKey = typeof r.hadKey === 'boolean' ? r.hadKey : r.previous !== null && r.previous !== undefined
+    return { file, hadKey, ...(hadKey ? { previous: r.previous } : {}), wrote, at: String(r.at ?? '') }
+  }
+  return {
+    key,
+    /** Whether sideby wrote `obj`'s key in `file` and it still holds that, so undo can put it back. */
+    async undoable(stateDir: string, file: string, obj: Json): Promise<boolean> {
+      const record = await readRecord(stateDir, file)
+      return record !== null && same(obj[key], record.wrote)
+    },
+    /**
+     * Sets the key to `to` in each group, remembering the old value. `expect` gets the value in the file right before
+     * the write and refuses with a message when the change no longer fits it.
+     */
+    async set(
+      stateDir: string,
+      groups: readonly { file: string; accounts: string[] }[],
+      to: unknown,
+      expect: (current: unknown) => string | null,
+      done: string,
+    ): Promise<KeyResult[]> {
+      const results: KeyResult[] = []
+      for (const g of groups) {
+        let before: Pick<KeyUndo, 'hadKey' | 'previous'> = { hadKey: false }
+        const failed = await writeSettingsKey(
+          g.file,
+          (obj) => {
+            before = key in obj ? { hadKey: true, previous: obj[key] } : { hadKey: false }
+            obj[key] = to
+            return obj
+          },
+          (obj) => expect(obj[key]),
+        )
+        if (!failed) {
+          const record: KeyUndo = { file: g.file, ...before, wrote: to, at: new Date().toISOString() }
+          await writeKeyRecord(stateDir, records, g.file, record)
+        }
+        results.push({ file: g.file, accounts: g.accounts, ok: !failed, message: failed ?? done })
+      }
+      return results
+    },
+    /** Puts back what each group had before `set`, only while the key still holds what sideby wrote. */
+    async undo(
+      stateDir: string,
+      groups: readonly { file: string; accounts: string[] }[],
+    ): Promise<KeyResult[]> {
+      const results: KeyResult[] = []
+      for (const g of groups) {
+        const record = await readRecord(stateDir, g.file)
+        if (!record) continue
+        const failed = await writeSettingsKey(
+          g.file,
+          (obj) => {
+            if (record.hadKey) obj[key] = record.previous
+            else delete obj[key]
+            return obj
+          },
+          (obj) =>
+            same(obj[key], record.wrote)
+              ? null
+              : 'The setting was changed after sideby set it, so it was left alone.',
+        )
+        if (!failed) await rm(keyRecordPath(stateDir, records, g.file), { force: true })
+        results.push({ file: g.file, accounts: g.accounts, ok: !failed, message: failed ?? 'Put back.' })
+      }
+      return results
+    },
+  }
+}
+
+/** Why a settings file cannot be read for a change: none there, a link to nothing, or not a safe JSON object. */
+export type SettingsProblem = 'no-settings' | 'broken-link' | 'unsafe'
+
+const NO_SETTINGS =
+  'this account has no settings.json; run `sideby doctor --fix` so it shares the main one, then try again'
+
+/**
+ * Every Claude Account's settings file, grouped as `settingsFileGroups` does, with the parsed object, or the problem
+ * and a reason that says what to do (the Panel words it from `why`).
+ */
+export async function readSettingsGroups(
+  accounts: readonly Account[],
+): Promise<
+  (
+    | { file: string; accounts: string[]; obj: Json }
+    | { file: string; accounts: string[]; why: SettingsProblem; reason: string }
+  )[]
+> {
+  const out = []
+  for (const { file, accounts: refs, where } of await settingsFileGroups(accounts)) {
+    if (where.broken)
+      out.push({
+        file,
+        accounts: refs,
+        why: 'broken-link' as const,
+        reason:
+          'settings.json is a link to a file that does not exist; run `sideby doctor` to see how to fix it',
+      })
+    else if (!where.exists)
+      out.push({ file, accounts: refs, why: 'no-settings' as const, reason: NO_SETTINGS })
+    else {
+      const read = await readObject(where.file)
+      out.push(
+        'error' in read
+          ? {
+              file,
+              accounts: refs,
+              why: 'unsafe' as const,
+              reason: `settings.json cannot be changed safely: ${read.error}. Fix or move the file, then try again`,
+            }
+          : { file, accounts: refs, obj: read.obj },
+      )
+    }
+  }
+  return out
 }

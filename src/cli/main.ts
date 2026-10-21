@@ -58,8 +58,11 @@ Usage:
                                       whether Claude sessions connect to claude.ai by themselves;
                                       off stops that for every account (shows the change first)
   sideby handoff status               what Auto Handoff still needs on this machine
+  sideby handoff rules                every rule that decides when it hands over and to whom,
+                                      and where each account's work would go now
   sideby handoff enable [--yes]       turn it on (shows the config change first); --same-family,
-                                      --order claude=codex001,cc002, --threshold n, --prepare-at n
+                                      --order claude=codex001,cc002, --threshold n, --prepare-at n,
+                                      --other-ai [--ai-order codex,grok], --api (billed per use)
   sideby handoff disable [--yes]      turn it off, keeping the other settings
   sideby handoff ready [--brief <f>]  inside a session sideby started with Auto Handoff: hand over to
                                       the next account when this turn ends (config \`handoff\`);
@@ -496,8 +499,8 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   model: { flags: ['json', 'yes'], valued: ['effort'] },
   'remote-control': { flags: ['json', 'yes'] },
   handoff: {
-    flags: ['json', 'yes', 'same-family', 'no-same-family'],
-    valued: ['brief', 'to', 'order', 'prepare-at', 'threshold', 'wait-minutes', 'countdown'],
+    flags: ['json', 'yes', 'same-family', 'no-same-family', 'other-ai', 'no-other-ai', 'api', 'no-api'],
+    valued: ['brief', 'to', 'order', 'ai-order', 'prepare-at', 'threshold', 'wait-minutes', 'countdown'],
   },
   ui: { flags: ['no-open', 'background', 'stop', 'serve-detached'], valued: ['port'] },
   app: { flags: ['json'], valued: ['url'] },

@@ -57,6 +57,7 @@ import { type Paths, resolvePaths } from './core/paths.ts'
 import { choosePick, type PickChoice, suggestPickName } from './core/pick-commands.ts'
 import { categoryReader, type ProjectCategories } from './core/project-categories.ts'
 import { fetchedQuota, type QuotaFetchMode, quotaCheckOff, shownQuota } from './core/quota-fetch.ts'
+import { takeoverLimit } from './core/quota-levels.ts'
 import {
   type RemoteControlChange,
   type RemoteControlGroup,
@@ -1284,7 +1285,9 @@ export async function createRuntime(
       // The current Account: the one sideby started this process from, when it belongs to this Family.
       const current = env.SIDEBY_ACCOUNT
       const from = current && list.some((a) => a.ref === current) ? current : undefined
-      return planHandoff(f.id, candidates, readContext().now, { ...o, ...(from ? { from } : {}) })
+      // The Takeover Limit follows the user's Handoff Threshold, so `sideby next` and Auto Handoff agree on "full".
+      const fullAt = takeoverLimit(handoffSettings(config).threshold)
+      return planHandoff(f.id, candidates, readContext().now, { ...o, fullAt, ...(from ? { from } : {}) })
     },
     handoffSettings: () => handoffSettings(config),
     async handoffDecision(origin, used, opts = {}) {
