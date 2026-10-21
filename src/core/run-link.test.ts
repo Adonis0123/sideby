@@ -235,8 +235,9 @@ describe('run links', () => {
       const st = await lstat(good)
       const id = { dev: st.dev, ino: st.ino }
       assert.equal(await stillTheBoard(good, check, id), true)
-      // Swapped for a link to a file outside the boards folder.
-      await rm(good)
+      // Swapped for a link to a file outside the boards folder. The old file is moved aside rather than removed,
+      // so the next file cannot reuse its inode number (Linux hands a freed one out at once).
+      await rename(good, `${good}-old`)
       await symlink(outside, good)
       assert.equal(await stillTheBoard(good, check, id), false)
       // Swapped for another regular file of the same name.
