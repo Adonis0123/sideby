@@ -89,7 +89,8 @@ describe('the socket is checked again at delivery', () => {
       const a = await serve(h, 's')
       const checked = await checkSocket(a.path, { tempRoots: [a.root], uid: process.getuid?.() })
       assert.ok('identity' in checked)
-      await a.close()
+      // Keep the old socket file so its inode is not freed: Linux hands a freed inode number to the next file at once.
+      await fsp.rename(a.path, `${a.path}-old`)
       const b = await serve(h, 's')
       await assert.rejects(
         writeToSocket(b.path, messageLine('x'), 1000, () => socketChanged(b.path, checked.identity)),
@@ -108,12 +109,14 @@ describe('the socket is checked again at delivery', () => {
       assert.deepEqual(d.got, [])
       await b.close()
       await d.close()
+      await a.close()
     })
   })
 
   it('turns a swap between check and write into a paste, and re-checks that the session still runs', async () => {
     await withFakeHome(async (h) => {
       let s = await serve(h, '4102')
+      const first = s
       const procs = await machine(h, s.path)
       const rt = await createRuntime({ env: h.env })
       const r = await sendMessage(
@@ -122,7 +125,8 @@ describe('the socket is checked again at delivery', () => {
         { text: 'x' },
         with_(procs, s.root, {
           write: async (p, line, ms, verify) => {
-            await s.close()
+            // Moved aside rather than closed, so the new socket cannot reuse its inode number (Linux).
+            await fsp.rename(first.path, `${first.path}-old`)
             s = await serve(h, '4102')
             return writeToSocket(p, line, ms, verify)
           },
@@ -135,6 +139,7 @@ describe('the socket is checked again at delivery', () => {
       )
       assert.deepEqual(s.got, [])
       await s.close()
+      await first.close()
     })
     await withFakeHome(async (h) => {
       const s = await serve(h, '4102')
