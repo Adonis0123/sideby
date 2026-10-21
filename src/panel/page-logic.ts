@@ -190,6 +190,18 @@ export function inDisplayOrder<T>(
 }
 
 /**
+ * The categories of the History side list in the order the user dragged them to: the saved ones first, then the
+ * others in the order `seen` gives (latest Session first). The empty category (Projects without one) stays last.
+ */
+export function categoryOrder(seen: readonly string[], saved: readonly string[]): string[] {
+  const has = new Set(seen)
+  const out: string[] = []
+  for (const c of [...saved, ...seen]) if (c && has.has(c) && !out.includes(c)) out.push(c)
+  if (has.has('')) out.push('')
+  return out
+}
+
+/**
  * The Display Order after a drag (spec §3.25). `all` is every key of the list in the current Display Order, hidden
  * ones included; `shown` is what the screen showed, in its order, as units (one key, or a Same Login group that moves
  * as one). The unit at `from` moves to `to`; the shown keys then fill the places shown keys held in `all`, so keys a

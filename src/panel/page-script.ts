@@ -13,6 +13,7 @@ import {
   autostartNote,
   cacheHitRate,
   canLeaveLocal,
+  categoryOrder,
   codeSwapOutcome,
   fileSize,
   fixPrompt,
@@ -96,6 +97,7 @@ const LOGIC = [
   hotkeyFromKey,
   hotkeyPressKind,
   cacheHitRate,
+  categoryOrder,
   fileSize,
   fixPrompt,
   foldSkips,
@@ -228,6 +230,8 @@ const MAIN = String.raw`
         const keys = raw.histFold[g] && typeof raw.histFold[g] === 'object' ? Object.keys(raw.histFold[g]).filter((k) => raw.histFold[g][k] === true).slice(0, HIST_FOLD_MAX) : []
         if (keys.length) { p.histFold[g] = {}; for (const k of keys) p.histFold[g][k] = true }
       }
+    // The categories of the side list, in the order the user dragged them to.
+    p.histCatOrder = Array.isArray(raw.histCatOrder) ? raw.histCatOrder.filter((c) => typeof c === 'string' && c).slice(0, HIST_FOLD_MAX) : []
     // The categories folded in the side list.
     p.histCatFold = {}
     if (raw.histCatFold && typeof raw.histCatFold === 'object')
@@ -3758,7 +3762,7 @@ const MAIN = String.raw`
     e.search = h('label', { class: 'search hist-search' }, icon('search', 'search-ic'), e.q)
     e.head = h('div', { class: 'section-head' })
     e.intro = h('p', { class: 'muted small' })
-    e.side = h('nav', { class: 'hist-side' })
+    e.side = h('nav', { class: 'hist-side', ondragover: onCatDragOver, ondrop: onCatDrop })
     e.status = h('div', { class: 'hist-status' })
     e.list = h('div', { class: 'hist-list' })
     e.tail = h('div', { class: 'hist-tail' })
@@ -3869,7 +3873,7 @@ const MAIN = String.raw`
     if (!e || !e.root.isConnected) return
     const list = hs.projects
     const shown = list && list.map((p) => [p.project, p.name, p.sessions, p.gone, p.category])
-    drawIf(e.side, JSON.stringify([lang, hs.project, hs.category, shown, hs.cats, hs.projError ? hs.projError.message : '']), () => {
+    drawIf(e.side, JSON.stringify([lang, hs.project, hs.category, shown, hs.cats, prefs.histCatOrder, hs.projError ? hs.projError.message : '']), () => {
       const total = list ? list.reduce((n, p) => n + p.sessions, 0) : 0
       const item = (project, name, count, gone, tip) => h('button', { class: 'hist-proj', type: 'button', 'data-key': 'hist-p-' + project, 'aria-pressed': hs.project === project && !(project === '' && hs.category) ? 'true' : 'false', title: tip || null, onclick: () => pickProject(project) },
         h('span', { class: 'hist-proj-name' }, name),
@@ -3880,11 +3884,12 @@ const MAIN = String.raw`
       const proj = (p) => item(p.project, p.name, p.sessions, p.gone, p.project + (p.gone ? ' · ' + t('hist.gone') : ''))
       const all = item('', t('hist.allProjects'), total)
       if (!hs.cats) return [h('h3', { class: 'hist-side-h' }, t('hist.projects')), h('div', { class: 'hist-projs' }, all, list.map(proj))]
-      // With a plugin's categories: each category heads its Projects, in the order of their latest Session; a
-      // category heading filters to all of its Projects. Projects without one come last.
+      // With a plugin's categories: each category heads its Projects, in the order the user dragged them to, else
+      // of their latest Session; a category heading folds them. Projects without one come last.
       const cats = new Map()
       for (const p of list) { const c = p.category || ''; if (!cats.has(c)) cats.set(c, []); cats.get(c).push(p) }
-      const order = [...cats.keys()].filter(Boolean).concat(cats.has('') ? [''] : [])
+      const order = categoryOrder([...cats.keys()], prefs.histCatOrder)
+      hs.catNames = order.filter(Boolean)
       return [h('h3', { class: 'hist-side-h' }, groupName('category')), h('div', { class: 'hist-projs' }, all,
         order.map((c) => {
           const ps = cats.get(c)
@@ -3892,19 +3897,71 @@ const MAIN = String.raw`
           const name = c || t('hist.noCategory')
           const folded = Boolean(prefs.histCatFold[c])
           const bodyId = 'hcat-' + order.indexOf(c)
-          const chev = h('button', { class: 'hist-catfold', type: 'button', 'data-key': 'hist-cf-' + c, 'aria-expanded': String(!folded), 'aria-controls': bodyId,
-            'aria-label': t('group.toggle', { title: name, count: String(n), action: t(folded ? 'hist.unfoldOne' : 'hist.fold') }) }, icon('chevron', 'chev'))
-          const pick = c
-            ? h('button', { class: 'hist-proj hist-cat', type: 'button', 'data-key': 'hist-c-' + c, 'aria-pressed': hs.category === c ? 'true' : 'false', onclick: () => pickCategory(c) },
-              h('span', { class: 'hist-proj-name' }, c), h('span', { class: 'hist-proj-n' }, String(n)))
-            : h('span', { class: 'hist-cat hist-cat-none' }, h('span', { class: 'hist-proj-name' }, name), h('span', { class: 'hist-proj-n' }, String(n)))
-          const grp = h('div', { class: 'hist-catgrp' + (folded ? ' is-folded' : ''), role: 'group', 'aria-label': name },
-            h('div', { class: 'hist-cathead' }, chev, pick),
+          // The whole heading folds the category, so a click anywhere on it opens or closes its Projects.
+          // A named category also moves: dragged, or with Alt and the arrow keys. Projects without one stay last.
+          const head = h('button', { class: 'hist-proj hist-cat', type: 'button', 'data-key': 'hist-cf-' + c, 'aria-expanded': String(!folded), 'aria-controls': bodyId,
+            'aria-label': t('group.toggle', { title: name, count: String(n), action: t(folded ? 'hist.unfoldOne' : 'hist.fold') }),
+            draggable: c ? 'true' : null, title: c ? t('hist.catMove') : null,
+            ondragstart: c ? (ev) => {
+              hs.catDrag = { from: hs.catNames.indexOf(c), to: null }
+              ev.dataTransfer.effectAllowed = 'move'
+              try { ev.dataTransfer.setData('text/plain', c) } catch {}
+              requestAnimationFrame(() => grp.classList.add('is-dragging'))
+            } : null,
+            ondragend: c ? () => endCatDrag() : null,
+            onkeydown: c ? (ev) => {
+              const step = { ArrowUp: -1, ArrowDown: 1 }[ev.key]
+              if (!ev.altKey || !step) return
+              ev.preventDefault()
+              const from = hs.catNames.indexOf(c)
+              moveCategory(from, Math.max(0, Math.min(hs.catNames.length - 1, from + step)), c)
+            } : null },
+            icon('chevron', 'chev'), h('span', { class: 'hist-proj-name' }, name), h('span', { class: 'hist-proj-n' }, String(n)))
+          const grp = h('div', { class: 'hist-catgrp' + (folded ? ' is-folded' : ''), role: 'group', 'aria-label': name, 'data-cat': c },
+            h('div', { class: 'hist-cathead' }, head),
             h('div', { class: 'hist-catbody', id: bodyId }, h('div', { class: 'hist-catps' }, ps.map(proj))))
-          chev.addEventListener('click', () => foldCategory(c, grp, chev, name, n))
+          head.addEventListener('click', () => foldCategory(c, grp, head, name, n))
           return grp
         }))]
     })
+  }
+  // Dragging a category over the side list marks where it would land: before the category under the pointer, or after
+  // it past its middle. Projects without a category stay last, so nothing lands after them.
+  function onCatDragOver(ev) {
+    const d = hs.catDrag
+    const grp = d && ev.target.closest && ev.target.closest('.hist-catgrp[data-cat]')
+    if (!grp) return
+    ev.preventDefault()
+    ev.dataTransfer.dropEffect = 'move'
+    const c = grp.getAttribute('data-cat')
+    const r = grp.getBoundingClientRect()
+    const after = c !== '' && ev.clientY > r.top + r.height / 2
+    const at = (c === '' ? hs.catNames.length : hs.catNames.indexOf(c)) + (after ? 1 : 0)
+    clearDropMarks()
+    grp.classList.add(after ? 'drop-after' : 'drop-before')
+    // Dropped after itself means one place earlier once it is taken out.
+    d.to = Math.min(hs.catNames.length - 1, at > d.from ? at - 1 : at)
+  }
+  function onCatDrop(ev) {
+    const d = hs.catDrag
+    if (!d || d.to === null) return
+    ev.preventDefault()
+    endCatDrag()
+    moveCategory(d.from, d.to)
+  }
+  function endCatDrag() {
+    hs.catDrag = null
+    clearDropMarks()
+    for (const el of document.querySelectorAll('.hist-catgrp.is-dragging')) el.classList.remove('is-dragging')
+  }
+  // The new order is kept in this browser, with the other preferences; the focus follows a category moved by keys.
+  function moveCategory(from, to, focus) {
+    if (from < 0 || from === to) return
+    prefs.histCatOrder = reorder(hs.catNames, hs.catNames.map((c) => [c]), from, to).slice(0, HIST_FOLD_MAX)
+    savePrefs()
+    renderHistorySide()
+    const el = focus && hs.els && hs.els.side.querySelector('[data-key="' + CSS.escape('hist-cf-' + focus) + '"]')
+    if (el) el.focus()
   }
   // A category in the side list folds in place (CSS eases its height); the list is not drawn again for it.
   function foldCategory(c, grp, chev, name, n) {
@@ -3922,13 +3979,6 @@ const MAIN = String.raw`
     if (hs.project === p && !hs.category) return
     hs.project = p
     hs.category = ''
-    renderHistorySide()
-    historyChanged(false)
-  }
-  function pickCategory(c) {
-    if (hs.category === c) return
-    hs.category = c
-    hs.project = ''
     renderHistorySide()
     historyChanged(false)
   }
