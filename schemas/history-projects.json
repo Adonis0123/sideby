@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/history-projects.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "projects"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "project",
+          "name",
+          "sessions",
+          "updatedAt"
+        ],
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "The Project path; empty for sessions without a folder."
+          },
+          "name": {
+            "type": "string"
+          },
+          "sessions": {
+            "type": "integer",
+            "description": "Top-level sessions, Script Sessions not counted."
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "gone": {
+            "type": "boolean",
+            "description": "True when every session ran in a folder that is gone."
+          },
+          "category": {
+            "type": "string",
+            "description": "Its Project Category, when a plugin sorts Projects into them."
+          }
+        }
+      },
+      "description": "Most recent activity first."
+    },
+    "categories": {
+      "type": "object",
+      "required": [
+        "label",
+        "from"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "What the categories are called on screen; \"Category\" when the plugin gives none."
+        },
+        "from": {
+          "type": "string",
+          "description": "The plugin that sorts Projects into them."
+        }
+      },
+      "description": "Set when a plugin sorts Projects into Project Categories (ADR-0044)."
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby history projects --json"
+}

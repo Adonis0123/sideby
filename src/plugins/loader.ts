@@ -7,11 +7,13 @@ import { expandUserPath } from '../core/paths.ts'
 import type {
   FamilyDef,
   FamilyLogo,
+  FamilyWebsite,
   HookEvent,
   HookFilter,
   HookHandler,
   Plugin,
   PluginApi,
+  ProjectCategoriesDef,
 } from '../types.ts'
 import { HOOK_TIMEOUT_MS, HookAbort, type HookBus } from './bus.ts'
 
@@ -51,6 +53,8 @@ export interface LoadResult {
   errors: PluginLoadError[]
   families: Map<string, FamilyDef>
   familyOwner: Map<string, string>
+  /** The first Plugin's Project Categories, and who registered it. */
+  categories?: { def: ProjectCategoriesDef; owner: string }
 }
 
 /** Rejects plugin files other users could have written: plugins run with the user's full permissions. */
@@ -108,6 +112,36 @@ export function logoProblem(logo: unknown): string | null {
   return null
 }
 
+// The url reaches `open` and, on WSL, `cmd.exe /c start`, so it holds no character a shell gives meaning to.
+const WEBSITE_URL_RE =
+  /^https:\/\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?:\/[A-Za-z0-9._~/-]*)?$/
+const WEBSITE_ORIGIN_RE = /^https:\/\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/
+
+/** Why a Family website is unusable, or null when it is fine. */
+export function websiteProblem(website: unknown): string | null {
+  if (typeof website !== 'object' || website === null || Array.isArray(website))
+    return 'website must be an object'
+  const { url, match } = website as Record<string, unknown>
+  if (typeof url !== 'string' || url.length > 200 || !WEBSITE_URL_RE.test(url))
+    return 'website.url must be an https address such as https://example.com, with no query or fragment'
+  if (match === undefined) return null
+  if (typeof match !== 'object' || match === null || Array.isArray(match))
+    return 'website.match must be { origin, signInId }'
+  const { origin, signInId } = match as Record<string, unknown>
+  if (typeof origin !== 'string' || !WEBSITE_ORIGIN_RE.test(origin))
+    return 'website.match.origin must be an https origin such as https://example.com, with no path'
+  if (typeof signInId !== 'function') return 'website.match.signInId must be a function'
+  return null
+}
+
+/** Only the known website fields. */
+function cleanWebsite(website: FamilyWebsite): FamilyWebsite {
+  return {
+    url: website.url,
+    ...(website.match ? { match: { origin: website.match.origin, signInId: website.match.signInId } } : {}),
+  }
+}
+
 /** Only the known logo fields, so nothing else a Plugin put on the object reaches the Panel. */
 function cleanLogo(logo: FamilyLogo): FamilyLogo {
   return {
@@ -138,7 +172,24 @@ async function register(
   const stagedFamilies: FamilyDef[] = []
   const stagedHooks: (() => void)[] = []
   const stagedErrors: string[] = []
+  let stagedCategories: ProjectCategoriesDef | undefined
   const api: PluginApi = {
+    projectCategories(def: ProjectCategoriesDef) {
+      if (!def || typeof def.categoriesOf !== 'function')
+        throw new Error('projectCategories needs a categoriesOf(projects) function')
+      if (result.categories || stagedCategories) {
+        stagedErrors.push(
+          `project categories already come from ${result.categories?.owner ?? plugin.name}; this one is not used`,
+        )
+        return
+      }
+      stagedCategories = {
+        categoriesOf: def.categoriesOf,
+        ...(typeof def.label === 'string' && def.label.trim()
+          ? { label: def.label.trim().slice(0, 40) }
+          : {}),
+      }
+    },
     family(def: FamilyDef) {
       // The id becomes part of account refs and shell function names.
       if (!/^[a-z][a-z0-9-]{0,31}$/.test(def.id))
@@ -148,19 +199,37 @@ async function register(
       const owner = result.familyOwner.get(def.id)
       if (owner) throw new Error(`family ${def.id} is already provided by ${owner}`)
       if (stagedFamilies.some((f) => f.id === def.id)) throw new Error(`family ${def.id} is registered twice`)
-      // A bad logo costs only the logo: the Family still loads and the Panel shows its initials.
+      // A bad logo or website costs only that field: the Family still loads.
+      let clean: FamilyDef = def
       if (def.logo !== undefined) {
         const problem = logoProblem(def.logo)
         if (problem) {
           stagedErrors.push(`family ${def.id}: ${problem}; showing its initials instead`)
-          const { logo: _dropped, ...rest } = def
-          stagedFamilies.push(rest)
-          return
-        }
-        stagedFamilies.push({ ...def, logo: cleanLogo(def.logo) })
-        return
+          const { logo: _dropped, ...rest } = clean
+          clean = rest
+        } else clean = { ...clean, logo: cleanLogo(def.logo) }
       }
-      stagedFamilies.push(def)
+      if (def.website !== undefined) {
+        const problem = websiteProblem(def.website)
+        if (problem) {
+          stagedErrors.push(`family ${def.id}: ${problem}; it has no "Open in browser" until this is fixed`)
+          const { website: _dropped, ...rest } = clean
+          clean = rest
+        } else clean = { ...clean, website: cleanWebsite(def.website) }
+      }
+      if (def.history !== undefined) {
+        const h = def.history as unknown as Record<string, unknown> | null
+        const need = ['list', 'parse', 'messages', 'resumeArgs'].filter((k) => typeof h?.[k] !== 'function')
+        const opt = ['toolText', 'titles'].filter((k) => h?.[k] !== undefined && typeof h[k] !== 'function')
+        if (need.length || opt.length) {
+          stagedErrors.push(
+            `family ${def.id}: history needs ${[...need, ...opt].join(', ')} as functions; it has no Session History until this is fixed`,
+          )
+          const { history: _dropped, ...rest } = clean
+          clean = rest
+        }
+      }
+      stagedFamilies.push(clean)
     },
     on<E extends HookEvent>(event: E, a: HookFilter | HookHandler<E>, b?: HookHandler<E>) {
       const [filter, handler] = typeof a === 'function' ? [{}, a] : [a, b!]
@@ -183,6 +252,7 @@ async function register(
     result.familyOwner.set(def.id, plugin.name)
   }
   for (const add of stagedHooks) add()
+  if (stagedCategories) result.categories = { def: stagedCategories, owner: plugin.name }
   for (const message of stagedErrors) result.errors.push({ where: plugin.name, message })
   return stagedFamilies.map((f) => f.id)
 }

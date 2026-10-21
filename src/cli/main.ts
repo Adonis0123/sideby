@@ -78,6 +78,11 @@ Usage:
                                       its id or its resume command
   sideby sessions open-run <account|session-id>
                                       open the run report of the dispatched task that session works for
+  sideby history [<words>...]          find any past session of any account, by project, AI, time
+                                      or what was said (--project, --family, --account, --since,
+                                      --tools also searches tool output)
+  sideby history show <id>            read one session; history projects lists the projects
+  sideby history index [--clear]      the local search index: how far it is built, or delete it
   sideby send <account|session> "<text>" [--image <path>]...
                                       tell another session something (a screenshot too): Claude
                                       sessions get it at once, others through a line you paste
@@ -118,10 +123,10 @@ Usage:
 
 Options:
   --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, remote-control, handoff,
-                families, plugins, app, desktop, sessions, send, messages, edit, browser, update, local, ask,
+                families, plugins, app, desktop, sessions, history, send, messages, edit, browser, update, local, ask,
                 terminal, key, try, autostart, menubar, config)
   -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, desktop, edit, browser,
-                autostart, menubar, config, sessions, send, messages
+                autostart, menubar, config, sessions, history, send, messages
   -v, --version show the version
 
 An <account> is <family>:<name> (claude:work) or just <name> when it is unique.
@@ -263,6 +268,40 @@ Examples:
   sideby sessions open-run cc002
 Exit: 0 listed, copied or opened; 1 no such account or running session, several to choose from, or the session is
 in no run (or its report changed or did not open); 2 malformed command line.`,
+  history: `sideby history [<words>...] [--project <path|name>] [--category <name>] [--family <id>]
+                [--account <account>] [--since today|7d|30d|all] [--group project|category|account|family|day|none]
+                [--scripts] [--tools] [--limit <n>] [--offset <n>] [--json]
+       sideby history show <session-id> [--account <account>] [--before <n>] [--limit <n>] [--json]
+       sideby history projects [--family <id>] [--account <account>] [--since <s>] [--scripts] [--json]
+       sideby history index [--clear] [--json]
+
+Find any past session of any account (Claude Code, Codex, Grok Build, pi), grouped by Project: the git repository it
+ran in, with worktrees and subfolders folded into it. Each row shows when it was last active, the account, its title
+(the name you gave it, else the host's title, else your first prompt), the project, the branch and its id; with words,
+a snippet of where they matched. Every word must match, in the title, project, branch, account, your prompts or the
+replies; one- and two-character words work too, and "two words" in double quotes match as one phrase. Results come
+best match first, newer ones ahead. --project takes a project's name or any folder in it (. for the current one).
+--group lists the sessions under a heading per project, category, account, AI or day; --category keeps one category
+when a plugin sorts projects into categories. --limit (at most 500, default 30) and --offset page through the list.
+
+sideby keeps a local search index (the History Index) of each session's title, project, your prompts and the replies,
+never tool output, in its state folder (mode 600). The first run builds it (it shows progress); later runs read only
+changed files. When the index fills fewer rows than --limit, --tools also reads the session files in scope for tool
+output, keeping nothing (the total then counts those matches too; they get foundIn "tools" in --json, and
+toolOutputMore says more matched than the page holds). Script and SDK sessions are hidden unless --scripts. config history.index false turns the index off and deletes it; index --clear deletes it.
+
+show prints one session read-only, the newest 200 messages (--before goes further back), tool calls as one line each.
+Its last line is the command that continues it where it was (continueCommand in --json): it goes to its folder
+and resumes it in the account that holds it. Read-only: sideby reads the hosts' session files, never a credential, and writes nothing there.
+To search for the words show, projects or index, put them after --.
+
+Examples:
+  sideby history login page
+  sideby history --project . --since 7d
+  sideby history "fix login" --group day
+  sideby history 登录 --family claude --json
+  sideby history show 61230c3d
+Exit: 0 listed; 1 no such session, project or account, or several sessions match the id; 2 malformed command line.`,
   send: `sideby send <account|session> "<text>" [--image <path>]... [--lang en|zh] [--json]
 
 Tell another running session something, with screenshots if you like. <account> is a short command or ref whose
@@ -382,16 +421,17 @@ does not take, or the file changed meanwhile; 2 malformed command line.`,
        sideby browser set <account> --auto [--json]
 
 Find which Google Chrome browser user signed in to each account's website (claude.ai for claude accounts,
-chatgpt.com for codex accounts), and open the website in that browser user. macOS only for now.
+chatgpt.com for codex accounts, the website a plugin family declares), and open the website in that browser user.
+macOS and WSL only for now.
 
 Everything is read on this computer and sent nowhere. sideby reads each browser user's name, the key names (never
-the values) claude.ai and chatgpt.com keep in that browser user's Local Storage, and the account id in each Claude and
-Codex login file, only to compare. It never opens cookies, saved passwords or the Keychain, and never changes Chrome.
+the values) claude.ai, chatgpt.com, grok.com and plugin websites keep in that browser user's Local Storage, and the account id
+in each Claude, Codex, Grok or plugin login file, only to compare. It never opens cookies, saved passwords or the Keychain, and never changes Chrome.
 It is off until you turn it on: --enable shows what it reads and changes config browser.signIns after --yes.
 
 "Signed in to" means that browser user's data shows a sign-in as that account; it may be left over from before a
 sign-out. When several browser users show one account, sideby keeps those whose Google account in Chrome is the
-account's login email. grok.com keeps no id to match, so grok accounts are found only by that email or --profile.
+account's login email. An account found nowhere gets the one browser user whose Google account is its login email.
 
 When sideby picks the wrong browser user, set chooses one for the account (saved in config browser.choices; it
 replaces what sideby finds, and open uses it). --auto forgets the choice. Only sideby's config is written.
@@ -463,6 +503,10 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   app: { flags: ['json'], valued: ['url'] },
   desktop: { flags: ['json', 'remove', 'yes'] },
   sessions: { flags: ['json'], valued: ['as', 'lang'] },
+  history: {
+    flags: ['json', 'scripts', 'tools', 'clear'],
+    valued: ['project', 'category', 'group', 'family', 'account', 'since', 'limit', 'offset', 'before'],
+  },
   send: { flags: ['json'], valued: ['image', 'lang'] },
   messages: { flags: ['json', 'yes'], valued: ['to', 'limit'] },
   edit: { flags: ['json', 'path'] },
@@ -723,6 +767,8 @@ async function dispatch(
       return await cmds.cmdDesktop(parsed, io)
     case 'sessions':
       return await cmds.cmdSessions(parsed, io)
+    case 'history':
+      return await cmds.cmdHistory(parsed, io)
     case 'send':
       return await cmds.cmdSend(parsed, io)
     case 'messages':

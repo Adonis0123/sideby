@@ -50,11 +50,112 @@ export interface FamilyLogo {
   fillRule?: 'nonzero' | 'evenodd'
 }
 
+/**
+ * A Family's vendor website, for Browser Sign-ins (spec §3.24, ADR-0043): "Open in browser" opens `url` in a Chrome
+ * browser user. sideby checks it when the Plugin registers; an invalid one is dropped with a plugin error.
+ */
+export interface FamilyWebsite {
+  /** An https address such as `https://cursor.com`: letters, digits and `.-_~/` only, no query or fragment. */
+  url: string
+  /**
+   * How sideby finds the browser user signed in to an Account by itself. Without it the user picks one; a browser
+   * user whose Google account is the Account's login email is still found.
+   */
+  match?: {
+    /** The website origin whose Local Storage key names may hold the id, such as `https://cursor.com`. */
+    origin: string
+    /**
+     * The id the website puts in its Local Storage key names for this Account (8 characters or more), read from the
+     * Host's login file. It is compared in memory only: never shown, returned, logged or cached. Return undefined
+     * when there is none; a throw becomes an entry in the Browser Report's problems.
+     */
+    signInId(account: Account): Promise<string | undefined>
+  }
+}
+
+/** One record file that holds one Session. */
+export interface HistoryFile {
+  path: string
+  /** Changes whenever what `parse` reads changes (size, mtime and inode of the files it reads). */
+  sig: string
+  /** Last change of the file, ms; the newest files are read first. */
+  mtimeMs: number
+  /** The Session id of the Session that started this one (a Claude subagent), when the file layout says so. */
+  parent?: string
+}
+
+/** Where a Session Title came from: the user's own name, the Host's title, or the first prompt. */
+export type TitleSource = 'user' | 'host' | 'prompt' | 'none'
+
+/** A Session as a Family reads it from its record, before sideby adds the Account, Project and commands. */
+export interface ParsedSession {
+  sessionId: string
+  cwd?: string
+  /** The repository root the Host recorded, used when `cwd` no longer exists (Grok's `git_root_dir`). */
+  gitRoot?: string
+  title?: string
+  titleFrom: TitleSource
+  branch?: string
+  model?: string
+  startedAt?: string
+  updatedAt?: string
+  /** Prompts plus replies. */
+  messages: number
+  /** A Script Session: started by a script, an SDK or another agent. */
+  script: boolean
+  parent?: string
+  /** What the person typed, injected context cut out. */
+  prompts: string[]
+  /** The text of the model's replies; never tool calls, tool output or reasoning. */
+  replies: string[]
+  /** True when the Session had more text than is kept for search (`SESSION_TEXT_MAX`). */
+  cut?: boolean
+}
+
+/** One entry of a Session as `sideby history show` and the Panel's viewer show it. */
+export interface HistoryMessage {
+  role: 'user' | 'assistant' | 'tool'
+  text: string
+  at?: string
+  /** For `tool`: the tool's name. Its input and output are never shown. */
+  tool?: string
+}
+
+/**
+ * A plugin Family's Session History reader (spec §3.33, ADR-0044). It reads the Host's own session records
+ * read-only: never a credential file, and `parse` returns only what the person typed and the model's replies, never
+ * tool calls, tool output, injected context or reasoning, because sideby keeps that text in its History Index.
+ */
+export interface FamilyHistory {
+  /**
+   * The Account's record files, one per Session. A missing sessions folder is no Session; another error throws and
+   * is named for the Account. `sig` must change whenever what `parse` reads changes.
+   */
+  list(account: Account, problems: string[]): Promise<HistoryFile[]>
+  /** The Session in one file; undefined when it holds no Session (no id, nothing said). */
+  parse(file: HistoryFile, account: Account): Promise<ParsedSession | undefined>
+  /** The Session's messages in order, for reading it. A tool entry gives the tool's name only. */
+  messages(path: string): AsyncIterable<HistoryMessage>
+  /** The text of the Session's tool calls and results, read only while someone searches tool output. */
+  toolText?(path: string): AsyncIterable<string>
+  /** Titles the Host keeps apart from the record, by Session id. */
+  titles?(account: Account): Promise<Map<string, string>>
+  /** The Host arguments that resume a Session, for example `['--resume', id]`. */
+  resumeArgs(sessionId: string): string[]
+}
+
 export interface FamilyDef {
   id: string
   title: string
   /** Mark shown on the Panel's cards, lists and the Tool select; without one the Panel shows the id's initials. */
   logo?: FamilyLogo
+  /** The vendor website "Open in browser" goes to (spec §3.24). Built-in Families have theirs set by sideby. */
+  website?: FamilyWebsite
+  /**
+   * How sideby reads this Host's past Sessions for Session History (spec §3.33, ADR-0044). Without it the Family's
+   * Accounts are listed as having no history sideby can read.
+   */
+  history?: FamilyHistory
   /** Host executable looked up on PATH. */
   bin: string
   installUrl: string
@@ -521,8 +622,24 @@ export interface PluginFs {
   writeFileAtomic(path: string, data: string | Uint8Array, mode?: number): Promise<void>
 }
 
+/**
+ * Sorts Projects into Project Categories for Session History (spec §3.33): the Panel can group Sessions by them and
+ * nest Projects under them. Only the first Plugin that registers one is used.
+ */
+export interface ProjectCategoriesDef {
+  /** What the categories are called on screen, for example "Workspace"; "Category" when left out. */
+  label?: string
+  /**
+   * The category of each Project path it knows, asked for many paths at once; leave a path out when it has none.
+   * Answers are kept for about a minute, and one that takes longer than 3 s counts as failed.
+   */
+  categoriesOf(projects: string[]): Record<string, string> | Promise<Record<string, string>>
+}
+
 export interface PluginApi {
   family(def: FamilyDef): void
+  /** Registers this Plugin's Project Categories; see ProjectCategoriesDef. */
+  projectCategories(def: ProjectCategoriesDef): void
   on<E extends HookEvent>(event: E, handler: HookHandler<E>): void
   on<E extends HookEvent>(event: E, filter: HookFilter, handler: HookHandler<E>): void
   /**

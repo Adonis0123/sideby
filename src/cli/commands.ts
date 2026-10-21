@@ -17,6 +17,7 @@ import { requestHandoff } from '../core/handoff-chain.ts'
 import { handoffOverview } from '../core/handoff-overview.ts'
 import { explain, type HandoffIo, readyDecision, runWithHandoff } from '../core/handoff-run.ts'
 import { configureHandoff, type HandoffChange, handoffHint, handoffStatus } from '../core/handoff-status.ts'
+import type { HistoryQuery, HistoryResult } from '../core/history.ts'
 import { installHint, runHost } from '../core/launch.ts'
 import { type LoginSnapshot, loginAfterLine, loginBeforeLine } from '../core/login-check.ts'
 import { accountModel, type ModelChange, setAccountModel } from '../core/model-choice.ts'
@@ -1434,7 +1435,9 @@ export async function cmdPlugins(a: ParsedArgs, io: Io): Promise<number> {
           c.bold(p.name),
           p.version,
           p.source === 'builtin' ? 'built-in' : tildify(p.source, rt.paths.home),
-          p.families.join(', ') || c.dim('hooks'),
+          [...p.families, ...(p.name === rt.projectCategoriesFrom ? ['project categories'] : [])].join(
+            ', ',
+          ) || c.dim('hooks'),
         ]),
         ['PLUGIN', 'VERSION', 'SOURCE', 'PROVIDES'],
       ),
@@ -3124,6 +3127,377 @@ async function sessionsCopy(a: ParsedArgs, args: string[], io: Io, runtime?: Run
   return 0
 }
 
+const HISTORY_USAGE =
+  'usage: sideby history [<words>...] [--project <p>] [--family <id>] [--account <a>] [--since today|7d|30d|all] [--category <c>] [--group project|category|account|family|day|none] [--scripts] [--tools] [--limit <n>] [--offset <n>] | sideby history show <id> [--account <a>] | sideby history projects [--family <id>] [--account <a>] [--since <s>] [--scripts] | sideby history index [--clear]'
+
+function positiveInt(a: ParsedArgs, name: string): number | undefined {
+  const v = a.flags.get(name)
+  if (v === undefined) return undefined
+  const n = Number(v)
+  if (!Number.isInteger(n) || n < 1) throw new UsageError(`--${name} takes a whole number of 1 or more`)
+  return n
+}
+
+/** Prints how far the first build of the History Index is, on stderr, while `work` runs. */
+async function withIndexProgress<T>(rt: Runtime, io: Io, quiet: boolean, work: Promise<T>): Promise<T> {
+  const { historyBuilt, historyIndexInfo } = await import('../core/history.ts')
+  if (quiet || historyBuilt(rt) || !process.stderr.isTTY) return work
+  const timer = setInterval(() => {
+    historyIndexInfo(rt)
+      .then((i) => {
+        if (i.progress.total)
+          io.err(c.dim(`Building the History Index: ${i.progress.done}/${i.progress.total} files…`))
+      })
+      .catch(() => {})
+  }, 2_000)
+  try {
+    return await work
+  } finally {
+    clearInterval(timer)
+  }
+}
+
+/**
+ * `sideby history [<words>...]` (spec §3.33, ADR-0042): every Session of every Account, newest or best match first;
+ * `history show <id>` reads one, `history projects` lists Projects, `history index [--clear]` shows or deletes the
+ * History Index.
+ */
+const HISTORY_FLAGS = {
+  search: [
+    'json',
+    'project',
+    'category',
+    'group',
+    'family',
+    'account',
+    'since',
+    'scripts',
+    'tools',
+    'limit',
+    'offset',
+  ],
+  show: ['json', 'account', 'before', 'limit'],
+  projects: ['json', 'family', 'account', 'since', 'scripts'],
+  index: ['json', 'clear'],
+} as const
+
+/** The filters `history` and `history projects` share, from their flags. */
+function historyFilters(a: ParsedArgs): Pick<HistoryQuery, 'family' | 'account' | 'since' | 'scripts'> {
+  const since = a.flags.get('since') as string | undefined
+  if (since !== undefined && !['today', '7d', '30d', 'all'].includes(since))
+    throw new UsageError('--since takes today, 7d, 30d or all')
+  return {
+    ...(a.flags.has('family') ? { family: a.flags.get('family') as string } : {}),
+    ...(a.flags.has('account') ? { account: a.flags.get('account') as string } : {}),
+    ...(since ? { since: since as 'today' | '7d' | '30d' | 'all' } : {}),
+    ...(a.flags.has('scripts') ? { scripts: true } : {}),
+  }
+}
+
+export async function cmdHistory(a: ParsedArgs, io: Io): Promise<number> {
+  const [first, ...more] = a.positionals
+  const sub = first === 'show' || first === 'projects' || first === 'index' ? first : 'search'
+  const allowed: readonly string[] = HISTORY_FLAGS[sub]
+  const extra = [...a.flags.keys()].find((f) => !allowed.includes(f))
+  if (extra)
+    throw new UsageError(
+      `${sub === 'search' ? 'sideby history' : `sideby history ${sub}`} does not take --${extra}. ${HISTORY_USAGE}`,
+    )
+  if (first === 'show') return historyShowCmd(a, more, io)
+  if (first === 'projects' || first === 'index') {
+    if (more.length || a.rest.length) throw new UsageError(HISTORY_USAGE)
+    return first === 'projects' ? historyProjectsCmd(a, io) : historyIndexCmd(a, io)
+  }
+  const words = [...a.positionals, ...a.rest].join(' ')
+  const limit = positiveInt(a, 'limit') ?? 30
+  if (limit > HISTORY_PAGE_MAX)
+    throw new UsageError(`--limit is at most ${HISTORY_PAGE_MAX}; page on with --offset ${HISTORY_PAGE_MAX}`)
+  const offset = a.flags.has('offset') ? Number(a.flags.get('offset')) : 0
+  if (!Number.isInteger(offset) || offset < 0)
+    throw new UsageError('--offset takes a whole number of 0 or more')
+  const asJson = a.flags.has('json')
+  const filters = historyFilters(a)
+  const rt = await createRuntime()
+  const { scanToolOutput, searchHistory } = await import('../core/history.ts')
+  const { listLiveSessions, liveKey } = await import('../core/live-sessions.ts')
+  const group = a.flags.get('group') as string | undefined
+  if (group !== undefined && !['project', 'category', 'account', 'family', 'day', 'none'].includes(group))
+    throw new UsageError('--group takes project, category, account, family, day or none')
+  if (group && group !== 'none' && a.flags.has('tools'))
+    throw new UsageError('--tools lists its finds ungrouped; leave out --group to use it')
+  const query: HistoryQuery = {
+    q: words,
+    limit,
+    ...(offset ? { offset } : {}),
+    ...(a.flags.has('project') ? { project: a.flags.get('project') as string } : {}),
+    ...(a.flags.has('category') ? { category: a.flags.get('category') as string } : {}),
+    ...(group ? { group: group as HistoryQuery['group'] } : {}),
+    ...filters,
+  }
+  const [live, r] = await Promise.all([
+    listLiveSessions(rt, { deadlineMs: 3_000 }).catch(() => ({ sessions: [], problems: [] })),
+    withIndexProgress(rt, io, asJson, searchHistory(rt, query, { wait: true })),
+  ])
+  // The live list is read alongside the search, not before it, so the mark is set here rather than in the query.
+  const running = new Set(live.sessions.map((s) => liveKey(s.account, s.sessionId)))
+  for (const s of r.sessions) s.live = running.has(liveKey(s.account, s.sessionId))
+  let toolHits = 0
+  let toolsMore = false
+  // Tool output is read only to fill a page the index left short; a full page needs none of it. It is searched as
+  // the records are now and not paged, so the first page that is short gets its finds and later pages none.
+  if (
+    a.flags.has('tools') &&
+    words.trim() &&
+    r.sessions.length < limit &&
+    offset + r.sessions.length >= r.total
+  ) {
+    const skip = new Set(r.sessions.map((s) => liveKey(s.account, s.sessionId)))
+    for await (const hit of scanToolOutput(rt, query, { skip, live: running })) {
+      if (r.sessions.length >= limit) {
+        toolsMore = true
+        break
+      }
+      r.sessions.push({ ...hit.session, foundIn: 'tools' })
+      toolHits++
+    }
+    r.total += toolHits
+  }
+  if (asJson) {
+    json(io, {
+      sessions: r.sessions,
+      total: r.total,
+      ...(r.groups ? { groups: r.groups } : {}),
+      ...(r.categories ? { categories: r.categories } : {}),
+      ...(toolsMore ? { toolOutputMore: true } : {}),
+      index: { state: r.state, progress: r.progress },
+      sources: r.sources,
+      problems: r.problems,
+    })
+    return 0
+  }
+  for (const p of r.problems) io.err(c.yellow(`sideby: ${p}`))
+  if (!r.sessions.length) {
+    io.out(historyEmptyHint(r, query, a.flags.has('tools'), (await rt.accounts()).length > 0))
+    return 0
+  }
+  const now = rt.readContext().now
+  const home = rt.paths.home
+  const rows = r.sessions.map((s) => [
+    s.updatedAt ? clock(s.updatedAt, now) : '',
+    s.accountLabel,
+    c.bold(truncate(s.title || '(no title)', 50)) +
+      (s.live ? c.green(' ●') : '') +
+      (s.children ? c.dim(` +${s.children}`) : ''),
+    truncate(s.projectName ? s.projectName : tildify(s.cwd, home), 24) + (s.cwdGone ? c.dim(' (gone)') : ''),
+    s.branch ? truncate(s.branch, 20) : '',
+    c.dim(s.sessionId.slice(0, 8)),
+  ])
+  // A snippet goes on its own line under its row, so it does not widen the table; a group header goes above the
+  // first row of its group.
+  const lines = table(rows, ['UPDATED', 'ACCOUNT', 'SESSION', 'PROJECT', 'BRANCH', 'ID']).split('\n')
+  const headers = new Map((r.groups ?? []).map((g) => [g.key, g]))
+  io.out(
+    [
+      lines[0],
+      ...r.sessions.flatMap((s, i) => {
+        const g =
+          s.group !== undefined && s.group !== r.sessions[i - 1]?.group ? headers.get(s.group) : undefined
+        return [
+          ...(g ? [c.bold(`${g.label} (${g.sessions})`)] : []),
+          lines[i + 1] ?? '',
+          ...(s.snippet ? [c.dim(`    ${truncate(s.snippet, 100)}`)] : []),
+        ]
+      }),
+    ].join('\n'),
+  )
+  const legend = [
+    r.sessions.some((s) => s.live) ? `${c.green('●')} running now` : '',
+    r.sessions.some((s) => s.children) ? '+n subagents it started' : '',
+  ].filter(Boolean)
+  if (legend.length) io.out(c.dim(legend.join('; ')))
+  const shown = r.sessions.length
+  const next = offset + shown
+  if (r.total > next)
+    io.out(
+      c.dim(
+        `Sessions ${offset + 1}-${next} of ${r.total}; --offset ${next} shows the next ${Math.min(limit, r.total - next)}.`,
+      ),
+    )
+  else if (offset) io.out(c.dim(`Sessions ${offset + 1}-${next} of ${r.total}.`))
+  if (toolsMore)
+    io.out(
+      c.dim(
+        `More sessions match in tool output; --limit ${Math.min(limit * 2, HISTORY_PAGE_MAX)} shows more of them.`,
+      ),
+    )
+  if (r.state === 'building')
+    io.out(
+      c.dim(
+        `The History Index is still being built (${r.progress.done}/${r.progress.total} files); run again for the rest.`,
+      ),
+    )
+  if (toolHits) io.out(c.dim(`${toolHits} found only in tool output.`))
+  io.out(c.dim('Read one, and get the command that continues it in its folder: sideby history show <id>'))
+  return 0
+}
+
+/** The most Sessions one `sideby history` page lists. */
+const HISTORY_PAGE_MAX = 500
+
+/** What to try when a search lists nothing, by what the search was narrowed by. */
+function historyEmptyHint(r: HistoryResult, q: HistoryQuery, tools: boolean, hasAccounts: boolean): string {
+  if (!r.sources.some((s) => s.sessions)) {
+    if (r.state === 'building') return 'The search index is still being built; run this again in a moment.'
+    return hasAccounts
+      ? 'No session records yet. Start an account with `sideby run <account>`, chat a little, and it shows up here.'
+      : 'No accounts yet. Add one with `sideby new <family>` (see `sideby families`), then start it with `sideby run`.'
+  }
+  if (q.offset) return `No sessions after the first ${q.offset}; leave out --offset to see the first page.`
+  const narrowed = [
+    q.project !== undefined ? '--project' : '',
+    q.category !== undefined ? '--category' : '',
+    q.family ? '--family' : '',
+    q.account ? '--account' : '',
+  ].filter(Boolean)
+  const tries = [
+    q.since && q.since !== 'all' ? '--since all' : '',
+    narrowed.length ? `without ${narrowed.join(', ')}` : '',
+    q.q?.trim() ? 'fewer or shorter words' : '',
+    q.q?.trim() && !tools ? '--tools to search tool output too' : '',
+  ].filter(Boolean)
+  const words = q.q?.trim() ?? ''
+  // Words the user already quoted as a phrase are shown as they typed them.
+  return `Nothing found${words ? ` for ${words.startsWith('"') ? words : `"${words}"`}` : ''}.${tries.length ? ` Try ${tries.join('; ')}.` : ''}`
+}
+
+async function historyShowCmd(a: ParsedArgs, args: string[], io: Io): Promise<number> {
+  const [id, ...extra] = args
+  if (!id || extra.length || a.rest.length)
+    throw new UsageError(
+      'usage: sideby history show <session-id> [--account <a>] [--before <n>] [--limit <n>]',
+    )
+  const rt = await createRuntime()
+  const { historyShow } = await import('../core/history.ts')
+  const before = positiveInt(a, 'before')
+  const limit = positiveInt(a, 'limit')
+  const r = await historyShow(rt, id, {
+    ...(a.flags.has('account') ? { account: a.flags.get('account') as string } : {}),
+    ...(before !== undefined ? { before } : {}),
+    ...(limit !== undefined ? { limit } : {}),
+  })
+  if (a.flags.has('json')) {
+    json(io, r as unknown as Record<string, unknown>)
+    return 0
+  }
+  const s = r.session
+  const home = rt.paths.home
+  io.out(c.bold(s.title || '(no title)'))
+  io.out(
+    c.dim(
+      [s.accountLabel, s.projectName, s.branch, s.updatedAt ? clock(s.updatedAt, rt.readContext().now) : '']
+        .filter(Boolean)
+        .join(' · '),
+    ),
+  )
+  if (s.cwd) io.out(c.dim(`${tildify(s.cwd, home)}${s.cwdGone ? ' (folder no longer exists)' : ''}`))
+  if (r.before) io.out(c.dim(`Earlier messages: sideby history show ${s.sessionId} --before ${r.before}`))
+  io.out('')
+  for (const m of r.messages) {
+    if (m.role === 'tool') io.out(c.dim(`  · ${m.tool ?? m.text}`))
+    else if (m.role === 'user') io.out(`${c.bold(c.green('›'))} ${m.text}\n`)
+    else io.out(`${c.bold('‹')} ${m.text}\n`)
+  }
+  io.out(c.dim(`Continue it: ${s.continueCommand}`))
+  return 0
+}
+
+async function historyProjectsCmd(a: ParsedArgs, io: Io): Promise<number> {
+  const filters = historyFilters(a)
+  const rt = await createRuntime()
+  const { historyProjects } = await import('../core/history.ts')
+  const asJson = a.flags.has('json')
+  const r = await withIndexProgress(rt, io, asJson, historyProjects(rt, filters, { wait: true }))
+  if (asJson) {
+    json(io, {
+      projects: r.projects,
+      ...(r.categories ? { categories: r.categories } : {}),
+      ...(r.problems ? { problems: r.problems } : {}),
+    })
+    return 0
+  }
+  for (const p of r.problems ?? []) io.err(c.yellow(`sideby: ${p}`))
+  if (!r.projects.length) {
+    io.out(
+      'No session records yet. Start an account with `sideby run <account>`, chat a little, and it shows up here.',
+    )
+    return 0
+  }
+  const now = rt.readContext().now
+  io.out(
+    table(
+      r.projects.map((p) => [
+        c.bold(p.name || '(no folder)'),
+        ...(r.categories ? [p.category ?? ''] : []),
+        String(p.sessions),
+        p.updatedAt ? clock(p.updatedAt, now) : '',
+        tildify(p.project, rt.paths.home) + (p.gone ? c.dim(' (gone)') : ''),
+      ]),
+      [
+        'PROJECT',
+        ...(r.categories ? [(r.categories.label || 'Category').toUpperCase()] : []),
+        'SESSIONS',
+        'UPDATED',
+        'PATH',
+      ],
+    ),
+  )
+  io.out(
+    c.dim(
+      `Sessions of one: sideby history --project <name>${r.categories ? '; of a category: --category <name>' : ''}`,
+    ),
+  )
+  return 0
+}
+
+async function historyIndexCmd(a: ParsedArgs, io: Io): Promise<number> {
+  const rt = await createRuntime()
+  const { historyIndexInfo } = await import('../core/history.ts')
+  const clear = a.flags.has('clear')
+  const asJson = a.flags.has('json')
+  const r = await withIndexProgress(
+    rt,
+    io,
+    asJson,
+    historyIndexInfo(rt, { clear, wait: !clear, rebuild: !clear }),
+  )
+  if (asJson) {
+    json(io, r as unknown as Record<string, unknown>)
+    return 0
+  }
+  if (clear)
+    io.out(
+      r.cleared
+        ? `${c.green('✓')} deleted the History Index; it is built again from the hosts' files the next time you look`
+        : 'There was no History Index to delete.',
+    )
+  if (!r.enabled)
+    io.out('The History Index is off (config history.index false): searches look at titles and folders only.')
+  else if (!clear) {
+    io.out(`${tildify(r.path, rt.paths.home)}  ${(r.bytes / 1e6).toFixed(1)} MB`)
+    io.out(
+      r.state === 'building'
+        ? `Building: ${r.progress.done}/${r.progress.total} files read`
+        : `${r.sessions} sessions from ${r.files} files`,
+    )
+  }
+  if (!clear)
+    for (const s of r.sources)
+      io.out(
+        `  ${s.accountLabel.padEnd(14)} ${String(s.sessions).padStart(5)} sessions${s.failed ? c.yellow(`, ${s.failed} unreadable`) : ''}${s.note ? c.dim(`  ${s.note}`) : ''}`,
+      )
+  return 0
+}
+
 export interface SendArgs extends ParsedArgs {
   /** Every `--image` given, in order (main.ts collects them; parseArgs keeps only the last). */
   images?: string[]
@@ -3152,6 +3526,8 @@ export async function cmdSend(a: SendArgs, io: Io): Promise<number> {
   if (r.status === 'delivered') {
     io.out(`${c.green('✓')} delivered to ${c.bold(r.to)} (message ${r.id})`)
     if (r.note) io.out(c.yellow(`  ${r.note}`))
+    if (r.needsApproval)
+      io.out(`  To receive messages without approving each one: ${c.bold('sideby messages inbound accept')}`)
   } else {
     io.out(`${c.yellow('●')} kept message ${r.id} for ${c.bold(r.to)}; it needs a paste`)
     if (r.note) io.out(`  ${r.note}`)
@@ -3207,11 +3583,31 @@ export async function cmdMessages(a: ParsedArgs, io: Io, runtime?: Runtime): Pro
   const rows = list.map((m) => [
     clock(m.sentAt, now),
     c.bold(m.to),
-    m.status === 'paste-needed' ? c.yellow(MESSAGE_STATUS[m.status]!) : MESSAGE_STATUS[m.status]!,
+    m.status === 'paste-needed'
+      ? c.yellow(MESSAGE_STATUS[m.status]!)
+      : m.needsApproval
+        ? c.yellow('waits for approval')
+        : MESSAGE_STATUS[m.status]!,
     m.id,
     m.from ?? c.dim('you'),
   ])
   io.out(table(rows, ['SENT', 'TO', 'STATUS', 'ID', 'FROM']))
+  // A session whose latest Message waits for a paste gets the line to paste and why, newest first.
+  const seen = new Set<string>()
+  const waiting = list.filter(
+    (m) => !seen.has(m.toSessionId) && seen.add(m.toSessionId) && m.status === 'paste-needed',
+  )
+  for (const m of waiting.slice(0, 5)) {
+    io.out('')
+    io.out(`${c.yellow('Paste this line into')} ${c.bold(m.to)}${m.note ? c.dim(` (${m.note})`) : ''}:`)
+    io.out(`  ${m.pasteText}`)
+  }
+  if (list.some((m) => m.needsApproval)) {
+    io.out('')
+    io.out(
+      `${c.yellow('Some messages wait for approval')} in the target's terminal and are dropped after about 5 minutes. To receive them directly: ${c.bold('sideby messages inbound accept')}`,
+    )
+  }
   return 0
 }
 

@@ -332,6 +332,179 @@ if (variant !== 'empty') {
   await write(`.codex/sessions/${day}/rollout-demo-1.jsonl`, rollout(0.4 * H, 38, 61))
   await write(`.codex-team/sessions/${day}/rollout-demo-2.jsonl`, rollout(3 * H, 12, 27))
 
+  // Session History (spec §3.33): a few past conversations in two projects, one of them in a folder that is gone.
+  // Codex's rollout sits days back, so the quota above still comes from today's files.
+  const shop = join(home, 'code/shop')
+  await mkdir(join(shop, '.git'), { recursive: true })
+  await mkdir(join(shop, 'web'), { recursive: true })
+  await mkdir(join(home, 'code/blog'), { recursive: true })
+  const D = 24 * H
+  const lines = (recs: object[]) => `${recs.map((r) => JSON.stringify(r)).join('\n')}\n`
+  const claudeTalk = (
+    sid: string,
+    cwd: string,
+    branch: string,
+    startAgo: number,
+    turns: [string, string][],
+  ) =>
+    lines(
+      turns.flatMap(([q, a], i) => [
+        {
+          type: 'user',
+          sessionId: sid,
+          cwd,
+          gitBranch: branch,
+          entrypoint: 'cli',
+          timestamp: iso(-startAgo + i * 240_000),
+          message: { role: 'user', content: q },
+        },
+        {
+          type: 'assistant',
+          sessionId: sid,
+          timestamp: iso(-startAgo + i * 240_000 + 60_000),
+          message: { model: 'claude-opus-5-5', content: [{ type: 'text', text: a }] },
+        },
+      ]),
+    )
+  await write(
+    '.claude/projects/-code-shop/4c1d101f-0000-4000-8000-000000000101.jsonl',
+    claudeTalk('4c1d101f-0000-4000-8000-000000000101', shop, 'feat/login', 6 * D, [
+      [
+        'Redesign the login page: one column, bigger buttons, and show the error under the field.',
+        'Done. The form is one column, buttons are 44 px tall, and errors show under each field.',
+      ],
+      [
+        'Also remember the email after a failed sign-in.',
+        'The email field now keeps its value after a failed sign-in.',
+      ],
+    ]),
+  )
+  await write(
+    '.claude/projects/-code-shop/4c1d102f-0000-4000-8000-000000000102.jsonl',
+    claudeTalk('4c1d102f-0000-4000-8000-000000000102', join(shop, 'web'), 'main', 0.5 * H, [
+      [
+        'Why does checkout take 3 seconds on the first load?',
+        'The product images are not cached. I added a cache header and lazy loading below the fold.',
+      ],
+    ]),
+  )
+  await write(
+    '.claude-work/projects/-code-blog/4c1d103f-0000-4000-8000-000000000103.jsonl',
+    claudeTalk('4c1d103f-0000-4000-8000-000000000103', join(home, 'code/blog'), 'main', 2 * D, [
+      ['Write an RSS feed for the blog.', 'Added /feed.xml with the 20 newest posts.'],
+    ]),
+  )
+  await write(
+    '.claude/projects/-code-old-app/4c1d104f-0000-4000-8000-000000000104.jsonl',
+    claudeTalk('4c1d104f-0000-4000-8000-000000000104', join(home, 'code/old-app'), 'main', 40 * D, [
+      ['Move the old app to the new API.', 'All calls now use /v2; the old client is removed.'],
+    ]),
+  )
+  await write(
+    `.pi/agent/sessions/--code-blog--/2026-demo_4c1d401f-0000-4000-8000-000000000401.jsonl`,
+    lines([
+      {
+        type: 'session',
+        id: '4c1d401f-0000-4000-8000-000000000401',
+        cwd: join(home, 'code/blog'),
+        timestamp: iso(-9 * D),
+      },
+      {
+        type: 'message',
+        timestamp: iso(-9 * D + 60_000),
+        message: { role: 'user', content: [{ type: 'text', text: 'Fix the broken links in old posts.' }] },
+      },
+      {
+        type: 'message',
+        timestamp: iso(-9 * D + 120_000),
+        message: {
+          role: 'assistant',
+          model: 'pi-demo',
+          content: [
+            {
+              type: 'text',
+              text: 'Fixed 12 links; 3 pages no longer exist, so those links now point to the archive.',
+            },
+          ],
+        },
+      },
+    ]),
+  )
+  const codexDay = new Date(now - 3 * D).toISOString().slice(0, 10).replace(/-/g, '/')
+  const codexAt = (i: number) => iso(-3 * D + i * 60_000)
+  await write(
+    `.codex/sessions/${codexDay}/rollout-demo-history-4c1d201f-0000-4000-8000-000000000201.jsonl`,
+    lines([
+      {
+        timestamp: codexAt(0),
+        type: 'session_meta',
+        payload: {
+          id: '4c1d201f-0000-4000-8000-000000000201',
+          cwd: shop,
+          source: 'cli',
+          originator: 'codex_cli_rs',
+          git: { branch: 'fix/cart' },
+        },
+      },
+      { timestamp: codexAt(0), type: 'turn_context', payload: { model: 'gpt-demo' } },
+      {
+        timestamp: codexAt(1),
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: 'The cart total is wrong when a coupon and free shipping are both used.',
+            },
+          ],
+        },
+      },
+      {
+        timestamp: codexAt(2),
+        type: 'response_item',
+        payload: { type: 'function_call', name: 'shell', arguments: '{}' },
+      },
+      {
+        timestamp: codexAt(3),
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'assistant',
+          content: [
+            {
+              type: 'output_text',
+              text: 'Fixed: the coupon was applied after shipping. Added a test for both together.',
+            },
+          ],
+        },
+      },
+    ]),
+  )
+  await write(
+    `.grok/sessions/${encodeURIComponent(join(home, 'code/blog'))}/4c1d301f-0000-4000-8000-000000000301/summary.json`,
+    JSON.stringify({
+      generated_title: 'Dark mode for the blog',
+      git_root_dir: join(home, 'code/blog'),
+      head_branch: 'main',
+      current_model_id: 'grok-code',
+      created_at: iso(-26 * H),
+      last_active_at: iso(-25 * H),
+    }),
+  )
+  await write(
+    `.grok/sessions/${encodeURIComponent(join(home, 'code/blog'))}/4c1d301f-0000-4000-8000-000000000301/chat_history.jsonl`,
+    lines([
+      { type: 'user', timestamp: iso(-26 * H), content: 'Add a dark mode that follows the system setting.' },
+      {
+        type: 'assistant',
+        timestamp: iso(-25 * H),
+        content: 'Added prefers-color-scheme styles and a toggle in the header.',
+      },
+    ]),
+  )
+
   // Claude quota as the status line wrapper would have cached it.
   const cache = (five: number, seven: number, at: number) =>
     JSON.stringify({

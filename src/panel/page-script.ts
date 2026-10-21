@@ -17,10 +17,15 @@ import {
   fileSize,
   fixPrompt,
   foldSkips,
+  foldToolCalls,
   formatDuration,
   handoffChangeOf,
   handoffHintAccount,
   handoffTaskFacts,
+  highlightParts,
+  histFilters,
+  historyEmpty,
+  historyWhen,
   hotkeyFromKey,
   hotkeyPressKind,
   inDisplayOrder,
@@ -28,9 +33,13 @@ import {
   loginKey,
   maskEmail,
   matchesQuery,
+  mdBlocks,
+  mdInline,
   menuPlacement,
   mergeDaily,
+  mergeUsage,
   messageChip,
+  messageNews,
   newAccountDir,
   nextReset,
   panelFixes,
@@ -53,12 +62,15 @@ import {
   sessionAge,
   sessionLabelParts,
   shortCwd,
+  shortSessionLabel,
   sortAccounts,
   sortSessions,
+  steadyOrder,
   stripSecrets,
   suggestAlias,
   suggestName,
   switchFailure,
+  tailInView,
   taskFindings,
   updatedAge,
   widthFollower,
@@ -88,6 +100,10 @@ const LOGIC = [
   fixPrompt,
   foldSkips,
   formatDuration,
+  foldToolCalls,
+  highlightParts,
+  historyEmpty,
+  historyWhen,
   handoffChangeOf,
   handoffHintAccount,
   handoffTaskFacts,
@@ -98,7 +114,9 @@ const LOGIC = [
   matchesQuery,
   menuPlacement,
   mergeDaily,
+  mergeUsage,
   messageChip,
+  messageNews,
   newAccountDir,
   nextReset,
   canLeaveLocal,
@@ -122,10 +140,16 @@ const LOGIC = [
   sessionAge,
   sessionLabelParts,
   shortCwd,
+  shortSessionLabel,
   sortAccounts,
   sortSessions,
+  steadyOrder,
+  histFilters,
+  mdBlocks,
+  mdInline,
   suggestAlias,
   suggestName,
+  tailInView,
   updatedAge,
   pinnedIn,
   widthFollower,
@@ -146,11 +170,15 @@ const MAIN = String.raw`
   const FINDINGS_SHOWN = 5
   const NAME_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
   const SVG_NS = 'http://www.w3.org/2000/svg'
-  const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  // Follows the system setting live, so turning on "Reduce motion" with the page open stops the scripted motion too.
+  const REDUCED_MQ = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null
+  let REDUCED = Boolean(REDUCED_MQ && REDUCED_MQ.matches)
+  if (REDUCED_MQ && REDUCED_MQ.addEventListener) REDUCED_MQ.addEventListener('change', (e) => { REDUCED = e.matches })
   // Auto refresh: the state reloads every AUTO_MS while the page is visible, and every FAST_MS for FAST_FOR_MS after
   // quota is turned on, so the first numbers show up soon after a status line reports them.
   const AUTO_MS = 20000
   const FAST_MS = 5000
+  const PENDING_MS = 1500
   const FAST_FOR_MS = 3 * 60000
   // After the layout follows a width into another band, how long the width must hold still before a later crossing
   // in the same gesture is applied (page-logic.ts, widthFollower).
@@ -164,13 +192,15 @@ const MAIN = String.raw`
     silent: false, lastTry: 0, pending: false, fastUntil: 0, fastFamily: null,
   }
   // View state that is not saved: the search text, the attention filter, the Health check filter.
-  const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, desktopRef: null, browserRef: null, appBusy: null, appRemove: null, appNew: null, highlight: null, fade: true, loginRefs: new Map(), order: { families: [], units: {} }, drag: null, arrange: null }
+  const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, desktopRef: null, browserRef: null, appBusy: null, appRemove: null, copied: null, appNew: null, highlight: null, fade: true, loginRefs: new Map(), order: { families: [], units: {} }, drag: null, arrange: null }
   const $ = (id) => document.getElementById(id)
 
   // ---------- preferences ----------
   // Kept in localStorage, which can be missing or throw (private windows, blocked storage): every access is guarded
   // and the defaults apply.
   const PREFS_KEY = 'sideby.panel.v2'
+  const HIST_GROUPS = ['project', 'category', 'day', 'account', 'family', 'none']
+  const HIST_FOLD_MAX = 200
   const CHOICES = { view: ['list', 'cards'], sort: ['pressure', 'name', 'recent', 'manual'], quota: ['used', 'left'], theme: ['system', 'light', 'dark'], lang: ['en', 'zh'] }
   const prefs = loadPrefs()
   function loadPrefs() {
@@ -181,6 +211,7 @@ const MAIN = String.raw`
     if (raw.hideEmail === true) p.hideEmail = true
     if (typeof raw.ahHintAt === 'number') p.ahHintAt = raw.ahHintAt
     if (raw.rcHide === true) p.rcHide = true
+    if (raw.inbHide === true) p.inbHide = true
     if (raw.mbHintDone === true) p.mbHintDone = true
     if (raw.cfgDone === true) p.cfgDone = true
     if (typeof raw.setSec === 'string') p.setSec = raw.setSec
@@ -189,6 +220,18 @@ const MAIN = String.raw`
       for (const k of Object.keys(raw.collapsed)) if (raw.collapsed[k] === true) p.collapsed[k] = true
     if (raw.open && typeof raw.open === 'object')
       for (const k of Object.keys(raw.open)) if (raw.open[k] === true) p.open[k] = true
+    // History: how the list is grouped, and per grouping the groups the user folded.
+    if (HIST_GROUPS.includes(raw.histGroup)) p.histGroup = raw.histGroup
+    p.histFold = {}
+    if (raw.histFold && typeof raw.histFold === 'object')
+      for (const g of HIST_GROUPS) {
+        const keys = raw.histFold[g] && typeof raw.histFold[g] === 'object' ? Object.keys(raw.histFold[g]).filter((k) => raw.histFold[g][k] === true).slice(0, HIST_FOLD_MAX) : []
+        if (keys.length) { p.histFold[g] = {}; for (const k of keys) p.histFold[g][k] = true }
+      }
+    // The categories folded in the side list.
+    p.histCatFold = {}
+    if (raw.histCatFold && typeof raw.histCatFold === 'object')
+      for (const k of Object.keys(raw.histCatFold).filter((k) => raw.histCatFold[k] === true).slice(0, HIST_FOLD_MAX)) p.histCatFold[k] = true
     return p
   }
   function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)) } catch {} }
@@ -212,6 +255,7 @@ const MAIN = String.raw`
     if (vars) s = s.replace(/\{(\w+)\}/g, (m, k) => (Object.hasOwn(vars, k) ? String(vars[k]) : m))
     return s
   }
+  function colon() { return t('punct.colon') }
   function tn(key, n, vars) { return t(key + (n === 1 ? '.one' : '.other'), Object.assign({ n }, vars)) }
   // A message whose placeholders are nodes, such as a code span inside a sentence.
   function tx(key, vars) {
@@ -272,7 +316,7 @@ const MAIN = String.raw`
     setKids(el, kids)
     if (shown && !REDUCED)
       for (const x of el.querySelectorAll('[data-enter]')) if (!before.has(x.getAttribute('data-enter'))) x.classList.add('enter')
-    if (focusKey) { const again = el.querySelector('[data-key="' + focusKey + '"]'); if (again) again.focus() }
+    if (focusKey) { const again = el.querySelector('[data-key="' + CSS.escape(focusKey) + '"]'); if (again) again.focus() }
   }
   function add(el, kid) {
     if (kid === null || kid === undefined || kid === false) return
@@ -382,6 +426,7 @@ const MAIN = String.raw`
     refresh: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7',
     search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4.2-4.2',
     chevron: 'M9 6l6 6-6 6',
+    chevronLeft: 'M15 6l-6 6 6 6',
     more: 'M5 12h.01M12 12h.01M19 12h.01',
     grip: 'M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01',
     plus: 'M12 5v14M5 12h14',
@@ -418,6 +463,7 @@ const MAIN = String.raw`
     send: 'M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11zM21.854 2.147l-10.94 10.939',
     film: 'M3 5h18v14H3zM7 5v14M17 5v14M3 9h4M3 15h4M17 9h4M17 15h4',
     eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+    alert: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 8v5M12 16h.01',
     eyeOff: 'M3 3l18 18M10.6 5.1A10.8 10.8 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.2M6.6 6.6A17.4 17.4 0 0 0 2 12s3.5 7 10 7a10.4 10.4 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2',
   }
   function icon(name, cls) {
@@ -539,20 +585,23 @@ const MAIN = String.raw`
       void item.el.offsetWidth
       item.el.classList.add('bump')
     } else {
-      item = { text, ms, key: opts.key || null }
+      // "keep": a toast that asks the user to act; three newer ones push out the others first.
+      item = { text, ms, key: opts.key || null, keep: Boolean(opts.keep) }
       const action = opts.action ? h('button', { class: 'toast-action', type: 'button', onclick: () => { dismiss(item); opts.action.run() } }, opts.action.label) : null
       item.el = h('div', { class: 'toast toast-' + kind, role: kind === 'fail' ? 'alert' : null },
         h('span', { class: 'toast-dot', 'aria-hidden': 'true' }),
         h('span', { class: 'toast-text' }, text),
         action,
         h('button', { class: 'toast-x', type: 'button', 'aria-label': t('toast.dismiss'), onclick: () => dismiss(item) }, icon('x')))
-      item.el.addEventListener('mouseenter', () => clearTimeout(item.timer))
-      item.el.addEventListener('mouseleave', () => { if (!item.gone) item.timer = setTimeout(() => dismiss(item), 2500) })
+      // Hovering holds the toast; leaving gives back the time it had left, and at least 2.5 s to move away.
+      item.el.addEventListener('mouseenter', () => { clearTimeout(item.timer); item.left = Math.max(0, item.until - Date.now()) })
+      item.el.addEventListener('mouseleave', () => { if (!item.gone) { item.until = Date.now() + Math.max(2500, item.left || 0); item.timer = setTimeout(() => dismiss(item), item.until - Date.now()) } })
       toasts.push(item)
       $('toasts').append(item.el)
       if (dlg.el && dlg.el.open) raiseToasts()
-      while (toasts.length > 3) dismiss(toasts[0])
+      while (toasts.length > 3) dismiss(toasts.find((x) => !x.keep && x !== item) || toasts[0])
     }
+    item.until = Date.now() + ms
     item.timer = setTimeout(() => dismiss(item), ms)
   }
   function dismiss(item) {
@@ -562,9 +611,14 @@ const MAIN = String.raw`
     const i = toasts.indexOf(item)
     if (i >= 0) toasts.splice(i, 1)
     if (REDUCED || document.hidden) { item.el.remove(); return }
+    // It folds away as it fades, so the toasts beside it slide into place instead of jumping.
+    item.el.style.height = item.el.getBoundingClientRect().height + 'px'
     item.el.classList.add('toast-out')
     item.el.style.setProperty('pointer-events', 'none')
-    setTimeout(() => item.el.remove(), 160)
+    // Removed once the fold has played, even when the browser starts it late; the timer covers one that never ends.
+    const done = () => item.el.remove()
+    item.el.addEventListener('animationend', (e) => { if (e.animationName === 'toast-out') done() })
+    setTimeout(done, 1000)
   }
 
   // ---------- small parts ----------
@@ -740,14 +794,42 @@ const MAIN = String.raw`
       if (end) e.preventDefault()
     }, { passive: false })
   }
+  // An item with sub (a list of items) shows that list in the same menu, with a way back, so a long group such as
+  // the copy commands takes one line until it is wanted.
+  function menuKids(el, items, from) {
+    return items.filter(Boolean).map((it) => it === '-' ? h('div', { class: 'menu-sep', role: 'separator' })
+      : it.header ? h('div', { class: 'menu-head', role: 'presentation' }, it.header)
+      : h('button', { class: 'menu-item' + (it.back ? ' menu-back' : it.sub ? ' menu-sub' : ''), type: 'button', role: 'menuitem', tabindex: '-1', disabled: it.disabled, 'aria-haspopup': it.sub && !it.back ? 'true' : null, 'data-from': it === from ? '' : null, onclick: () => {
+        if (it.sub) {
+          // Back lands on the item that opened the list; a list opens on its first item.
+          swapKids(el, menuKids(el, it.sub, it.back ? it.from : null))
+          el.scrollTop = 0
+          placeFloat()
+          menuScrollHint(el)
+          const next = el.querySelector('[data-from]') || el.querySelector('.menu-item:not(:disabled)')
+          if (next) next.focus()
+          return
+        }
+        closeMenu(true)
+        it.run()
+      } },
+      icon(it.icon), h('span', { class: 'menu-label' }, it.label), it.hint ? h('code', { class: 'menu-hint', title: it.hint }, it.hint.length > 24 ? '…' + it.hint.slice(-23) : it.hint) : null, it.sub && !it.back ? icon('chevron') : null))
+  }
+  // A menu taller than its room fades at the edge that has more, so it is plain that it scrolls.
+  function menuScrollHint(el) {
+    const set = () => {
+      el.classList.toggle('more-below', el.scrollTop + el.clientHeight < el.scrollHeight - 1)
+      el.classList.toggle('more-above', el.scrollTop > 1)
+    }
+    set()
+    if (!el._hint) { el._hint = true; el.addEventListener('scroll', set, { passive: true }) }
+  }
   function openMenu(anchor, items, label) {
-    const el = h('div', { class: 'menu', role: 'menu', 'aria-label': label },
-      items.filter(Boolean).map((it) => it === '-' ? h('div', { class: 'menu-sep', role: 'separator' })
-        : it.header ? h('div', { class: 'menu-head', role: 'presentation' }, it.header)
-        : h('button', { class: 'menu-item', type: 'button', role: 'menuitem', tabindex: '-1', disabled: it.disabled, onclick: () => { closeMenu(true); it.run() } },
-          icon(it.icon), h('span', { class: 'menu-label' }, it.label), it.hint ? h('code', { class: 'menu-hint', title: it.hint }, it.hint.length > 24 ? '…' + it.hint.slice(-23) : it.hint) : null)))
+    const el = h('div', { class: 'menu', role: 'menu', 'aria-label': label })
+    setKids(el, menuKids(el, items, null))
     el.addEventListener('keydown', menuKeys)
     openFloat(anchor, el, 'menu', 'end')
+    menuScrollHint(el)
     const first = el.querySelector('.menu-item:not(:disabled)')
     if (first) first.focus()
   }
@@ -759,7 +841,8 @@ const MAIN = String.raw`
     setKids(el, render())
     openFloat(anchor, el, kind, align)
     menu.render = render
-    const first = el.querySelector('button:not(:disabled), a[href]')
+    // A list of choices opens on the one in use, as a native menu does.
+    const first = el.querySelector('button[aria-pressed="true"]:not(:disabled)') || el.querySelector('button:not(:disabled), a[href]')
     if (first) first.focus()
   }
   function refreshPopover(kind) {
@@ -781,14 +864,15 @@ const MAIN = String.raw`
     menu.render = null
     menu.returnTo = null
   }
-  // Right-click on an account row or card (spec §3.27) opens the row's "…" menu at the pointer; the ContextMenu key
+  // Right-click on an account row or card, or a Session row (spec §3.27) opens the row's "…" menu at the pointer; the ContextMenu key
   // and Shift+F10 open it at the focused element in the row. Inputs, links, buttons and selected text keep the
   // browser's own menu. Each row carries its opener as el.sidebyMenu(anchor).
   let kbMenuAt = 0
   function menuTarget(node) {
-    let el = node && node.closest ? node.closest('.row, .card, .login-dir') : null
-    while (el && !el.sidebyMenu) el = el.parentElement ? el.parentElement.closest('.row, .card, .login-dir') : null
-    return el && $('accounts').contains(el) ? el : null
+    const rows = '.row, .card, .login-dir, .hist-row, .sess-row'
+    let el = node && node.closest ? node.closest(rows) : null
+    while (el && !el.sidebyMenu) el = el.parentElement ? el.parentElement.closest(rows) : null
+    return el && ($('accounts').contains(el) || $('sessions-page').contains(el)) ? el : null
   }
   function openContextMenu(target, x, y, back) {
     const pt = h('span', { class: 'ctx-anchor', 'aria-hidden': 'true', css: { left: x + 'px', top: y + 'px' } })
@@ -831,6 +915,9 @@ const MAIN = String.raw`
     else if (e.key === 'ArrowUp') go(items[(i - 1 + items.length) % items.length])
     else if (e.key === 'Home') go(items[0])
     else if (e.key === 'End') go(items[items.length - 1])
+    // In a sub list, Left and Escape go back; on an item that opens one, Right opens it.
+    else if ((e.key === 'ArrowLeft' || e.key === 'Escape') && menu.el.querySelector('.menu-back')) menu.el.querySelector('.menu-back').click()
+    else if (e.key === 'ArrowRight' && document.activeElement && document.activeElement.classList.contains('menu-sub')) document.activeElement.click()
     else if (e.key === 'Escape') closeMenu(true)
     else if (e.key === 'Tab') { closeMenu(true); return }
     else return
@@ -907,24 +994,34 @@ const MAIN = String.raw`
     ]
   }
   function likeItem(a) { return BOOT.readOnly ? null : { icon: 'userPlus', label: t('menu.like'), run: () => openCreate({ family: a.family, api: a.kind === 'api' }) } }
-  // Grouped by what the user wants to do: open, copy, manage.
-  function accountMenu(a, anchor) {
+  // Grouped by what the user wants to do: open, copy, manage. A Same Login row (ADR-0026) passes its other
+  // directories: the menu is the one of the directory the row is named after, and each other directory is one item
+  // that opens its own actions in the same menu, so the shared actions appear once.
+  function accountMenu(a, anchor, others) {
     const [browser, signInItem, login, key, email] = loginItems(a)
     const opens = [deskItem(a), browser].filter(Boolean)
-    const copies = dirCopies(a)
+    // Up to six copy commands: past two they fold into "Copy…", which opens them in the same menu, with "Back".
+    // The start command stays one click away (a phone has it only here); the other copies fold when there are many.
+    const [run, ...more] = [...dirCopies(a), login, email].filter(Boolean)
+    const back = { icon: 'chevronLeft', label: t('menu.back'), back: true, sub: null, from: null }
+    const fold = more.length > 2 ? { icon: 'copy', label: t('menu.copyMore'), hint: String(more.length), sub: [back, '-', { header: t('menu.groupCopy') }, ...more] } : null
+    back.from = fold
+    const dirs = (others || []).map((m) => {
+      const up = { icon: 'chevronLeft', label: t('menu.back'), back: true, sub: null, from: null }
+      const item = { icon: 'folder', label: m.name, hint: (m.aliases || [])[0], sub: [up, '-', { header: m.name + ((m.aliases || []).length ? ' · ' + m.aliases[0] : '') }, ...dirItems(m), ...dirTools(m)] }
+      up.from = item
+      return { up, item }
+    })
     const items = [pinItem(a),
       opens.length ? '-' : null, opens.length ? { header: t('menu.groupOpen') } : null, ...opens,
-      '-', { header: t('menu.groupCopy') }, ...copies, login, email,
-      '-', { header: t('menu.groupManage') }, signInItem, key, ...dirTools(a), likeItem(a)]
-    openMenu(anchor, items, t('menu.label', { ref: a.ref }))
+      '-', { header: t('menu.groupCopy') }, run, ...(fold ? [fold] : more),
+      '-', { header: t('menu.groupManage') }, signInItem, key, ...dirTools(a), likeItem(a),
+      ...(dirs.length ? ['-', { header: t('menu.groupOtherDirs') }, ...dirs.map((d) => d.item)] : [])]
+    back.sub = items
+    for (const d of dirs) d.up.sub = items
+    openMenu(anchor, items, others ? t('login.label', { names: [a, ...others].map((m) => m.name).join(', ') }) : t('menu.label', { ref: a.ref }))
   }
-  // A Same Login row (ADR-0026): pin first, then a section per directory, then what the login shares.
-  function loginMenu(ms, anchor) {
-    const items = [pinItem(ms[0])]
-    for (const m of ms) items.push('-', { header: m.name + ((m.aliases || []).length ? ' · ' + m.aliases[0] : '') }, ...dirItems(m), ...dirTools(m))
-    items.push('-', ...loginItems(ms[0]), likeItem(ms[0]))
-    openMenu(anchor, items, t('login.label', { names: ms.map((m) => m.name).join(', ') }))
-  }
+  function loginMenu(ms, anchor) { accountMenu(ms[0], anchor, ms.slice(1)) }
   function loginMoreButton(ms) {
     const b = h('button', { class: 'icon-btn more', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': t('login.label', { names: ms.map((m) => m.name).join(', ') }), 'data-tip': t('menu.title') }, icon('more'))
     b.addEventListener('click', () => { if (menu.anchor === b) closeMenu(); else loginMenu(ms, b) })
@@ -946,18 +1043,24 @@ const MAIN = String.raw`
   // has one, which is shorter to type).
   function runButton(a) {
     const cmd = (a.aliases || [])[0] || 'sideby run ' + a.ref
+    // Without its tool the command would not start: the button says so and points at installing it instead.
+    if (a.hostInstalled === false) {
+      const why = t('row.installFirst', { host: famTitle(a) })
+      return h('button', { class: 'icon-btn row-run is-off', type: 'button', 'aria-disabled': 'true', 'aria-label': why, 'data-tip': why, onclick: (e) => { e.stopPropagation(); toast(why, { kind: 'info' }) } }, icon('terminal'))
+    }
     const text = t('row.copyRun', { cmd })
-    // A copy shows a tick on the button for a moment, where the eye already is.
-    return h('button', { class: 'icon-btn row-run', type: 'button', 'aria-label': text, 'data-tip': text, onclick: (e) => {
+    const done = ui.copied === a.ref
+    // A copy shows a tick on the button for a moment, where the eye already is; it lives in ui, so a refresh keeps it.
+    return h('button', { class: 'icon-btn row-run' + (done ? ' is-done' : ''), type: 'button', 'aria-label': text, 'data-tip': text, onclick: (e) => {
       e.stopPropagation()
       copyText(cmd)
-      const b = e.currentTarget
-      clearTimeout(b._done)
-      setKids(b, [icon('tick')])
-      b.classList.add('is-done')
-      b._done = setTimeout(() => { b.classList.remove('is-done'); setKids(b, [icon('terminal')]) }, 1200)
-    } }, icon('terminal'))
+      clearTimeout(ui.copiedTimer)
+      ui.copied = a.ref
+      renderAccounts()
+      ui.copiedTimer = setTimeout(() => { ui.copied = null; renderAccounts() }, 1200)
+    } }, icon(done ? 'tick' : 'terminal'))
   }
+
   // A pinned row (spec §3.25, §3.27) says so with a small muted pin right before its name, and nothing at its end;
   // pinning and unpinning are in the row's menu and in the arrange mode.
   function pinMark(a) {
@@ -1071,7 +1174,7 @@ const MAIN = String.raw`
         const date = new Date(d.date + 'T12:00:00')
         const day = Number.isFinite(date.getTime()) ? date.toLocaleDateString(locale(), { weekday: 'short', month: 'numeric', day: 'numeric' }) : d.date
         // Every day keeps its slot; an empty day shows only a short stub on the baseline, so it reads as a gap in time.
-        return h('i', { class: (i === daily.length - 1 ? 'today' : '') + (v ? '' : ' zero') || null, title: day + ': ' + tokens(v) },
+        return h('i', { class: (i === daily.length - 1 ? 'today' : '') + (v ? '' : ' zero') || null, title: day + colon() + tokens(v) },
           h('b', { css: { height: v && max ? Math.max(10, Math.round((v / max) * 100)) + '%' : null } }))
       }))
   }
@@ -1079,7 +1182,8 @@ const MAIN = String.raw`
     const box = $('summary')
     if (!S.state) { if (S.loadError) box.hidden = true; return }
     const list = S.state.accounts
-    box.hidden = !list.length
+    // Another page keeps it hidden: a refresh while there must not push that page down (renderPageChrome shows it).
+    box.hidden = !list.length || curPage !== 'accounts'
     box.removeAttribute('aria-busy')
     if (!list.length) return
     const now = Date.now()
@@ -1204,6 +1308,7 @@ const MAIN = String.raw`
   function winKey(w) { return w.name || w.label }
   // The words for a window in labels (5-hour, weekly) instead of 5h and 7d; other labels as they are.
   function winTitle(k) { return k === '5h' || k === '7d' ? t('win.' + k) : k }
+  function winShort(k) { return k === '5h' || k === '7d' ? t('win.' + k + '.short') : k }
   // One group's columns: the windows its accounts report, shortest first; 5h and 7d when none reports any yet.
   function quotaColumns(list) {
     const mins = {}
@@ -1225,16 +1330,17 @@ const MAIN = String.raw`
     const title = [passed ? t('quota.resetNoData', { date: day(passed.since) }) : t('quota.resetsAt', { at: clock(w.resetsAt) }), asOf].filter(Boolean).join(' · ')
     return h('div', { class: 'meter lvl-' + st.level + (stale || passed ? ' lvl-stale' : ''), title },
       h('div', { class: 'm-top' },
-        h('span', { class: 'm-label' }, winTitle(winKey(w))),
+        // Cards show the short window name ("5 小时"); the list and its column titles keep the full one.
+        h('span', { class: 'm-label' }, h('span', { class: 'm-full' }, winTitle(winKey(w))), h('span', { class: 'm-short' }, winShort(winKey(w)))),
         h('span', { class: 'm-pct' }, shown + '%', h('span', { class: 'm-unit' }, ' ' + t(left ? 'quota.unitLeft' : 'quota.unitUsed')),
           null),
         h('span', { class: 'm-reset' + (passed ? ' m-passed' : '') }, Number.isFinite(Date.parse(w.resetsAt)) || passed ? reset : '?')),
       h('div', { class: 'bar', role: 'meter', 'aria-label': t(left ? 'quota.meterLeft' : 'quota.meterUsed', { label: winTitle(winKey(w)) }), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(shown), 'aria-valuetext': t(left ? 'quota.pctLeft' : 'quota.pctUsed', { n: shown }) }, h('span', { css: { width: shown + '%' } })))
   }
   // A column whose window this account does not report right now, such as a 5h window that has not started.
-  function noMeter(label) {
+  function noMeter(label, short) {
     return h('div', { class: 'meter meter-none', title: t('quota.missing', { label }) },
-      h('div', { class: 'm-top' }, h('span', { class: 'm-label' }, label), h('span', { class: 'm-none', 'aria-label': t('quota.missing', { label }) }, '—')))
+      h('div', { class: 'm-top' }, h('span', { class: 'm-label' }, h('span', { class: 'm-full' }, label), h('span', { class: 'm-short' }, short || label)), h('span', { class: 'm-none', 'aria-label': t('quota.missing', { label }) }, '—')))
   }
   function quotaNote(a, q) {
     const setup = setupFor(a.family)
@@ -1259,6 +1365,8 @@ const MAIN = String.raw`
     return h('button', { class: 'link-btn small q-ask', type: 'button', onclick: (e) => { e.stopPropagation(); openAsk({ task: 'quota', context: { account: a.ref, family: a.family, quotaReason: q.reason + (q.detail ? ': ' + q.detail : ''), version: BOOT.version } }) } }, t('ask.quotaWhy'))
   }
   function quotaBlock(a, now, cols) {
+    // Still reading (a slow plugin or Host): say so where its numbers will appear; the page asks again soon.
+    if (a.pending) return h('div', { class: 'quota' }, h('div', { class: 'q-note' }, spinner(), t('acct.reading', { host: famTitle(a) })))
     const q = a.quota
     if (!q) return h('div', { class: 'quota' }, h('div', { class: 'q-note' }, '—'))
     if (q.status !== 'ok') return h('div', { class: 'quota' }, quotaNote(a, q))
@@ -1275,7 +1383,7 @@ const MAIN = String.raw`
     return h('div', { class: 'quota' + (stale ? ' is-stale' : ''), title, css: wins.length ? { '--qr': String(cols.length) } : null },
       wins.length ? cols.map((c) => {
         const w = wins.find((x) => winKey(x) === c)
-        return w ? meter(w, now, stale, q.observedAt) : noMeter(winTitle(c))
+        return w ? meter(w, now, stale, q.observedAt) : noMeter(winTitle(c), winShort(c))
       }) : h('div', { class: 'q-note' }, t('quota.noWindows')),
       // Old numbers keep their colours and say their age once, under the bars.
       stale && wins.length ? h('div', { class: 'q-asof', title: failed || t('quota.asOf', { ago: ago(q.observedAt) }) }, icon('clock'), q.fetchError ? t('quota.fetchFailed') + ' · ' : '', t('quota.staleShort', { ago: agoShort(now - Date.parse(q.observedAt)) })) : null)
@@ -1288,6 +1396,13 @@ const MAIN = String.raw`
       return h('div', { class: 'usage' }, h('span', { class: 'u-note', title: u.detail || null }, t(key, { n: BOOT.usageDays })))
     }
     const rate = cacheHitRate(u)
+    // A tool whose records name sessions but not tokens (Cursor CLI): say how many, not "0 tokens".
+    if (!u.totalTokens && u.sessions > 0) {
+      return h('div', { class: 'usage', title: t('usage.noTokens', { days: u.days, sessions: u.sessions }) },
+        h('div', { class: 'u-text' },
+          h('span', { class: 'u-num' }, tn('usage.sessions', u.sessions)),
+          h('div', { class: 'u-sub' }, t('usage.noTokenCounts'))))
+    }
     const detail = t('usage.detail', { days: u.days, sessions: u.sessions, input: tokens(u.inputTokens), output: tokens(u.outputTokens), cache: tokens(u.cacheReadTokens + u.cacheWriteTokens) })
     return h('div', { class: 'usage', title: detail },
       h('div', { class: 'u-text' },
@@ -1330,7 +1445,10 @@ const MAIN = String.raw`
     const lvl = reason === 'health-fail' ? 'fail' : 'warn'
     const why = whyOf(subject, Date.now())
     const word = reason === 'health-fail' ? t('att.fix') : reason === 'quota-high' ? t('att.quota') : t('att.check')
-    return h('span', { class: 'tag tag-' + lvl + ' att-tag', title: why, 'aria-label': why }, h('span', { class: 'dot dot-' + lvl, 'aria-hidden': 'true' }), word)
+    const dot = h('span', { class: 'dot dot-' + lvl, 'aria-hidden': 'true' })
+    // A health label opens the account's findings, as the health chip of the details does.
+    if (reason !== 'quota-high') return h('button', { class: 'tag tag-' + lvl + ' tag-btn att-tag', type: 'button', title: why + '\n' + t('health.filterHint'), 'aria-label': why, onclick: (e) => { e.stopPropagation(); filterHealth(subject.ref) } }, dot, word)
+    return h('span', { class: 'tag tag-' + lvl + ' att-tag', title: why, 'aria-label': why }, dot, word)
   }
   // The word a directory inside a Same Login's details shows when it needs a fix or a look.
   function attentionDot(a) {
@@ -1367,11 +1485,13 @@ const MAIN = String.raw`
     return h('span', { class: 'login-mark', role: 'img', title: text, 'aria-label': text }, icon('link'))
   }
   // members: the directories of a Same Login shown as this one row (spec §3.21).
-  function nameLine(a, members) {
+  // opts.linked: the directories a card marks as one login without speaking for them (its badge stays its own).
+  function nameLine(a, members, opts) {
+    const o = opts || {}
     return h('div', { class: 'ident-name' },
       pinSlot(a),
       h('span', { class: 'name', title: a.name }, a.name),
-      loginMark(members),
+      loginMark(o.linked || members),
       aliasText(a),
       statusBadge(a, members))
   }
@@ -1427,7 +1547,7 @@ const MAIN = String.raw`
   }
   // Browser Sign-ins (spec §3.24): which Chrome browser user signed in to the account's website, read on this
   // computer only. Off: the button explains what turning it on reads. On: it names the browser user, and opens it.
-  const BR_URL = { claude: 'claude.ai', codex: 'chatgpt.com', grok: 'grok.com' }
+  const siteOf = (b, family) => String((b.sites && b.sites[family]) || '').replace(/^https:\/\//, '').replace(/\/$/, '')
   function browserInfo() { return S.state && S.state.browser }
   function browserFor(a) {
     const b = browserInfo()
@@ -1453,8 +1573,8 @@ const MAIN = String.raw`
     const first = info.found[0]
     if (!first) return null
     const label = t(info.found.length > 1 ? 'br.signedInMore' : 'br.signedIn', { name: profileLabel(first), n: info.found.length })
-    return h('button', { class: 'email-btn br-btn', type: 'button', disabled: busy, title: t('br.hint', { url: BR_URL[a.family], ref: a.ref }), 'aria-label': 'Chrome ' + label + ' (' + a.ref + ')', onclick: (e) => { e.stopPropagation(); if (info.found.length === 1) openBrowser(a, first); else openBrowserDialog(a) } },
-      busy ? spinner() : icon('globe', 'br-ico'), label)
+    return h('button', { class: 'email-btn br-btn', type: 'button', disabled: busy, title: t('br.hint', { url: siteOf(info.b, a.family), ref: a.ref }), 'aria-label': 'Chrome ' + label + ' (' + a.ref + ')', onclick: (e) => { e.stopPropagation(); if (info.found.length === 1) openBrowser(a, first); else openBrowserDialog(a) } },
+      busy ? spinner() : icon('globe', 'br-ico'), h('span', { class: 'br-name' }, label))
   }
   async function openBrowser(a, p) {
     if (ui.browserRef) return
@@ -1521,7 +1641,7 @@ const MAIN = String.raw`
     const a = S.state && S.state.accounts.find((x) => x.ref === br.ref)
     const info = a && browserFor(a)
     if (!info) { dlg.el.close(); return }
-    const url = BR_URL[a.family]
+    const url = siteOf(info.b, a.family)
     const body = []
     const foot = [h('button', { class: 'btn', type: 'button', disabled: br.busy, onclick: () => dlg.el.close() }, t('btn.close'))]
     if (!info.b.enabled) {
@@ -1559,13 +1679,22 @@ const MAIN = String.raw`
   function notes(a) {
     const fam = family(a.family)
     const out = []
-    if (a.error) out.push(h('div', { class: 'note note-fail' }, h('b', null, t('acct.readError')), ' ', h('span', null, a.error)))
+    // A read error says why and what to do next: its reason is on screen, the settings file opens from here when the
+    // reason names it, and an AI can fix it.
+    if (a.error) {
+      const item = settingsItem(a)
+      const file = item && a.error.includes(family(a.family).settingsFile) ? item : null
+      out.push(h('div', { class: 'note note-fail note-read' },
+        h('b', null, t('acct.readError')), h('span', { class: 'mono small read-why' }, a.error), h('span', null, t('acct.readErrorNext')),
+        file ? h('button', { class: 'link-btn small', type: 'button', title: file.hint, onclick: (e) => { e.stopPropagation(); file.run() } }, file.label) : null,
+        BOOT.readOnly ? null : h('button', { class: 'link-btn small', type: 'button', onclick: (e) => { e.stopPropagation(); openAsk({ text: t('acct.readErrorAsk', { ref: a.ref, error: a.error }) }) } }, t('acct.readErrorAi'))))
+    }
     if (a.hostInstalled === false) out.push(h('div', { class: 'note note-warn' }, hostNote(fam)))
     return out.length ? h('div', { class: 'row-notes' }, out) : null
   }
   // What a row or card shows depends on more than the account (health, view preferences, language); the
   // fingerprint covers what its click handlers use.
-  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref, ui.browserRef === a.ref, browserFor(a), prefs.hideEmail, isOpen(a), loginLead(a), isPinned(a)]) }
+  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref, ui.browserRef === a.ref, ui.copied === a.ref, browserFor(a), prefs.hideEmail, isOpen(a), loginLead(a), isPinned(a)]) }
   // Whether the row sits in a login group (spec §3.21): its first row then shows the quota for all of them.
   function inLogin(a) { return ui.loginRefs.has(a.ref) }
   // The group's first row, which shows the quota for all of them.
@@ -1795,15 +1924,49 @@ const MAIN = String.raw`
   }
   // A card shows everything at once; it has room for it.
   function card(a, now, cols) {
+    // A Same Login shows as a link mark after the name (its note and "Use another account" are in the menu).
+    const peers = a.sameLogin && a.sameLogin.length ? [a, ...a.sameLogin.map((r) => ({ name: refName(r) }))] : null
     return withMenu(h('article', { class: 'card' + (a.error ? ' card-error' : ''), 'data-ref': a.ref, 'data-key': a.ref, 'data-sig': rowSig(a), 'aria-label': a.ref },
-      h('header', { class: 'card-head' },
-        badge(a.family, 'sm'),
-        h('div', { class: 'ident-text' }, nameLine(a), emailLine(a), subLine(a), sameLoginNote(a)),
-        h('div', { class: 'row-end' }, moreButton(a))),
+      h('header', { class: 'card-head' }, badge(a.family, 'sm'), nameLine(a, null, { linked: peers }), h('div', { class: 'row-end' }, moreButton(a))),
+      // The last use follows who it is, as in the medium list; a card without one shows nothing there.
+      h('div', { class: 'card-id' }, h('div', { class: 'ident-meta' }, emailLine(a) || subLine(a), a.usage && a.usage.status === 'ok' && a.usage.lastActivityAt ? lastUsed(a, 'last-inline') : null), emailLine(a) ? subLine(a) : null),
       notes(a),
-      browserItem(a),
       quotaBlock(a, now, cols),
-      h('footer', { class: 'card-foot' }, usageBlock(a), h('div', { class: 'card-side' }, lastUsed(a), healthChip(a)))), (anchor) => accountMenu(a, anchor))
+      cardBrowser(a),
+      // Tokens on the left, the row's own buttons on the right. A health problem shows in the label after the name
+      // (it opens the same filter), so the foot does not say it again.
+      h('footer', { class: 'card-foot' }, usageBlock(a), h('div', { class: 'card-side' }, deskButton(a), runButton(a)))), (anchor) => accountMenu(a, anchor))
+  }
+  // A Same Login as one card (spec §3.21), as the list shows it as one row: named after its first directory, the
+  // other directories listed under who it is, one quota, the tokens of all of them, one menu for all of them.
+  function loginCard(members, now, cols) {
+    const ms = loginMembers(members)
+    const a = ms[0]
+    const newest = newestOf(ms)
+    const email = emailLine(a)
+    const usage = Object.assign({}, a, { usage: mergeUsage(ms.map((m) => m.usage)) })
+    return withMenu(h('article', { class: 'card card-login' + (a.error ? ' card-error' : ''), 'data-ref': a.ref, 'data-key': loginKey(ms.map((m) => m.ref)), 'data-sig': sig(ms.map(rowSig)), 'aria-label': t('login.label', { names: ms.map((m) => m.name).join(', ') }) },
+      h('header', { class: 'card-head' }, badge(a.family, 'sm'), nameLine(a, ms), h('div', { class: 'row-end' }, loginMoreButton(ms))),
+      h('div', { class: 'card-id' },
+        h('div', { class: 'ident-meta' }, email || subLine(a), newest.usage && newest.usage.status === 'ok' && newest.usage.lastActivityAt ? lastUsed(newest, 'last-inline') : null),
+        email ? subLine(a) : null,
+        h('div', { class: 'card-dirs', title: t('login.explain') }, h('span', { class: 'cd-label' }, t('login.also')),
+          ms.slice(1).map((m) => h('span', { class: 'tag tag-dir', title: 'sideby run ' + m.ref }, m.name, (m.aliases || [])[0] ? h('span', { class: 'alias' }, (m.aliases || [])[0]) : null)))),
+      notes(a),
+      quotaBlock(a, now, cols),
+      cardBrowser(a),
+      h('footer', { class: 'card-foot' }, usageBlock(usage), h('div', { class: 'card-side' }, deskButton(a, ms), runButton(a)))), (anchor) => loginMenu(ms, anchor))
+  }
+  // A card's Chrome sign-in: one line, the browser user as a link that opens the website, then Change.
+  function cardBrowser(a) {
+    const b = browserInfo()
+    if (!b || !b.enabled || BOOT.readOnly || !browserFor(a)) return null
+    const btn = browserButton(a)
+    const chosen = browserChosen(a)
+    return h('div', { class: 'card-br', title: t('row.browser') },
+      btn || h('span', { class: 'br-none' }, icon('globe', 'br-ico'), h('span', null, '—')),
+      chosen ? h('span', { class: 'tag', title: t('br.chosenHint') }, t('br.chosen')) : null,
+      h('button', { class: 'link-btn small', type: 'button', title: t('br.changeHint', { ref: a.ref }), onclick: (e) => { e.stopPropagation(); openBrowserDialog(a) } }, t(btn ? 'br.change' : 'br.pick')))
   }
   // The list's column titles, once per group under its header. Screen readers get each cell's own label instead.
   function colHead(cols, list) {
@@ -1833,7 +1996,7 @@ const MAIN = String.raw`
       const label = a.name + ' · ' + whyOf(a, now)
       return h('button', { class: 'tag tag-warn tag-btn', type: 'button', title: t('group.attentionShow', { name: a.name }), onclick: () => flashRow(a.ref) }, label)
     }
-    const list = needing.map((a) => a.name + ': ' + whyOf(a, now)).join('\n')
+    const list = needing.map((a) => a.name + colon() + whyOf(a, now)).join('\n')
     return h('button', { class: 'tag tag-warn tag-btn', type: 'button', title: list, 'aria-pressed': String(ui.attention), onclick: () => { ui.attention = !ui.attention; renderSummary(); renderAccounts() } }, tn('group.attention', needing.length))
   }
   // ---------- Grok Bot windows (ADR-0019) ----------
@@ -1863,11 +2026,13 @@ const MAIN = String.raw`
         h('button', { class: 'btn btn-sm btn-danger', type: 'button', disabled: busy, onclick: () => removeApp(p) }, t(busy ? 'app.removing' : 'app.removeYes')),
         h('button', { class: 'btn btn-sm btn-ghost', type: 'button', disabled: busy, onclick: () => { ui.appRemove = null; renderAccounts() } }, t('btn.cancel')))
       : h('div', { class: 'row-actions app-actions' },
-        h('button', { class: 'btn btn-sm' + (p.running ? '' : ' btn-primary'), type: 'button', disabled: Boolean(ui.appBusy), title: t(p.running ? 'app.showHint' : 'app.openHint', { app: p.app, ref: p.ref }), 'aria-label': t(p.running ? 'app.show' : 'app.openBtn') + ' (' + p.ref + ')', onclick: () => openApp(p.ref) },
-          busy ? t('desk.opening', { app: p.app }) : t(p.running ? 'app.show' : 'app.openBtn')),
+        // The same screen button as an account's row end: open the window, or bring it to the front.
+        h('button', { class: 'icon-btn row-run row-desk' + (p.running ? ' is-open' : ''), type: 'button', disabled: Boolean(ui.appBusy), 'data-tip': t(p.running ? 'app.showHint' : 'app.openHint', { app: p.app, ref: p.ref }), 'aria-label': (busy ? t('desk.opening', { app: p.app }) : t(p.running ? 'app.show' : 'app.openBtn')) + ' (' + p.ref + ')', 'aria-busy': busy ? 'true' : null, onclick: () => openApp(p.ref) },
+          busy ? spinner() : icon('monitor')),
         p.isMain ? null : h('button', { class: 'btn btn-sm btn-ghost', type: 'button', disabled: p.running || Boolean(ui.appBusy), title: t(p.running ? 'app.removeRunning' : 'app.removeHint', { app: p.app }), 'aria-label': t('app.remove') + ' (' + p.ref + ')', onclick: () => { ui.appRemove = p.ref; renderAccounts() } }, t('app.remove')))
     return h('div', { class: 'app-row', role: 'listitem', 'data-ref': p.ref, 'data-key': p.ref, 'data-sig': sig([p, busy, asking, Boolean(ui.appBusy)]) },
-      h('div', { class: 'ident' }, appBadge(), h('div', { class: 'ident-text' },
+      // A gap where an account row has its open arrow, so the marks and names line up with the accounts above.
+      h('div', { class: 'ident' }, h('span', { class: 'app-gap', 'aria-hidden': 'true' }), appBadge(), h('div', { class: 'ident-text' },
         h('div', { class: 'ident-name' },
           h('span', { class: 'name' }, p.isMain ? t('app.mainName') : p.name),
           p.running ? h('span', { class: 'tag tag-ok' }, h('span', { class: 'dot dot-ok', 'aria-hidden': 'true' }), t('app.isOpen')) : null,
@@ -1998,7 +2163,7 @@ const MAIN = String.raw`
     // The arrange mode shows every group open, as a short list, in either view (spec §3.25).
     const cards = prefs.view === 'cards' && !ui.arrange
     const collapsedNow = collapsed && !ui.arrange
-    if (!cards) ui.order.units[fam] = loginClusters(list).map((x) => Array.isArray(x) ? x.map((a) => a.name) : [x.name])
+    ui.order.units[fam] = loginClusters(list).map((x) => Array.isArray(x) ? x.map((a) => a.name) : [x.name])
     const head = h('div', { class: 'group-head', 'data-key': ui.arrange ? 'head-arrange' : 'head' },
       dragHandle('family', fam, fam, info.title),
       h('button', { class: 'group-toggle', type: 'button', disabled: ui.arrange ? true : undefined, 'aria-expanded': String(!collapsedNow), 'aria-controls': bodyId, title: t(collapsed ? 'group.expand' : 'group.collapse'), 'aria-label': t('group.toggle', { title: info.title, count: list.length === total ? String(total) : list.length + ' / ' + total, action: t(collapsed ? 'group.expand' : 'group.collapse') }), onclick: () => toggleGroup(fam, 'g:' + fam) },
@@ -2015,7 +2180,7 @@ const MAIN = String.raw`
         off && setup && setup.plan.status === 'blocked' ? h('span', { class: 'muted small label-tip' }, t('quota.blocked'), tipRaw(t('quota.blocked'), setup.plan.message)) : null,
         ui.arrange ? null : pickHead(fam)))
     const body = collapsedNow ? null : cards
-      ? h('div', { class: 'grid', id: bodyId, 'data-key': 'cards', 'data-patch': '' }, list.map((a) => card(a, now, cols)))
+      ? h('div', { class: 'grid', id: bodyId, 'data-key': 'cards', 'data-patch': '' }, loginClusters(list).map((x) => Array.isArray(x) ? loginCard(x, now, cols) : card(x, now, cols)))
       : h('div', { class: 'rows', id: bodyId, role: 'list', 'data-key': ui.arrange ? 'rows-arrange' : 'rows', 'data-patch': '' }, loginClusters(list).map((x) => Array.isArray(x) ? loginRow(x, now, cols) : row(x, now, cols)))
     return h('section', { class: 'group' + (cards ? ' group-cards' : ' group-list') + (collapsedNow ? ' is-collapsed' : '') + (ui.arrange ? ' is-arranging' : ''), 'aria-label': info.title, 'data-key': 'g:' + fam, 'data-fam': fam, 'data-patch': '' },
       head, collapsedNow || cards || ui.arrange ? null : colHead(cols, list), body)
@@ -2347,8 +2512,7 @@ const MAIN = String.raw`
     const apps = appGroups()
     if (!shown.length && !apps.length) { patch(box, noMatch()); return }
     ui.loginRefs = new Map()
-    if (prefs.view !== 'cards' || ui.arrange)
-      for (const x of loginClusters(shown)) if (Array.isArray(x)) for (const a of x) ui.loginRefs.set(a.ref, loginMembers(x)[0].ref)
+    for (const x of loginClusters(shown)) if (Array.isArray(x)) for (const a of x) ui.loginRefs.set(a.ref, loginMembers(x)[0].ref)
     // Families in the Display Order (spec §3.25) whatever the sort; each group gets the quota columns it uses.
     // Every group is as wide as the one with the most windows, so the columns after them line up.
     ui.order = { families: [], units: {} }
@@ -2473,6 +2637,7 @@ const MAIN = String.raw`
     // With no account there is nothing to check: the empty state is the only thing to do.
     box.hidden = Boolean(S.state && !S.state.accounts.length)
     if (box.hidden) return
+    if (curPage !== 'accounts') box.hidden = true
     const all = findingsNow()
     const ref = ui.healthRef
     const findings = all && ref ? all.filter((f) => f.account === ref) : all
@@ -2509,7 +2674,7 @@ const MAIN = String.raw`
       const failed = S.fixes.filter((f) => !f.ok)
       out.push(h('div', { class: 'fix-result ' + (failed.length ? 'is-warn' : 'is-ok'), role: 'status' },
         S.fixes.length ? t('fix.result', { ok: S.fixes.length - failed.length, n: S.fixes.length }) : t('fix.nothing'),
-        failed.length ? h('ul', null, failed.map((f) => h('li', null, h('b', null, f.account + ' · ' + f.item + ': '), f.message))) : null))
+        failed.length ? h('ul', null, failed.map((f) => h('li', null, h('b', null, f.account + ' · ' + f.item + colon()), f.message))) : null))
     }
     if (!findings) {
       if (busy || !S.state) out.push(h('span', { class: 'sk sk-line w70' }), h('span', { class: 'sk sk-line w50' }))
@@ -2565,7 +2730,10 @@ const MAIN = String.raw`
   function showDialog(kind) {
     const el = ensureDialog()
     dlg.kind = kind
-    if (kind !== 'settings') el.classList.remove('dialog-wide')
+    // A wide dialog is wide before it opens, so it does not open narrow and then stretch.
+    el.classList.toggle('dialog-wide', kind === 'settings' ? el.classList.contains('dialog-wide') : kind === 'history')
+    // A dialog that grows as the user adds to it (screenshots, its result) keeps its top edge and grows downward.
+    el.classList.toggle('dialog-top', kind === 'send')
     if (!el.open) { el.showModal(); raiseToasts() }
   }
 
@@ -2578,9 +2746,20 @@ const MAIN = String.raw`
   // What each card's size menu shows while the user is choosing, by group id; dropped once a change is made.
   const tuneSel = {}
   const tp = { data: null, loading: false, error: null, at: 0 }
-  function pageFromHash() { return location.hash === '#tuning' ? 'tuning' : location.hash === '#handoff' ? 'handoff' : location.hash === '#sessions' ? 'sessions' : 'accounts' }
+  function pageFromHash() { return location.hash === '#tuning' ? 'tuning' : location.hash === '#handoff' ? 'handoff' : location.hash === '#sessions' || location.hash === '#history' || location.hash === '#live' ? 'sessions' : 'accounts' }
   let curPage = pageFromHash()
   function tuneSize(n) { return n === null || n === undefined ? t('tune.hostDefault') : tokens(n) }
+  // "Default" with the size it means, only where that size is documented: Claude models with a native 1M window
+  // compact at about 967K (families/claude/tuning.ts cites the model documentation), which is below their window.
+  // Elsewhere the effective size is the window itself, an estimate, or what was observed, so it stays "Default".
+  function defaultSize(models) {
+    const sizes = [...new Set(models.filter((m) => m.configured === null && m.effective && m.effective < m.contextWindow).map((m) => m.effective))].sort((x, y) => x - y)
+    if (!sizes.length) return t('tune.hostDefault')
+    return sizes.length === 1 ? t('tune.hostDefaultIs', { size: tokens(sizes[0]) }) : t('tune.hostDefaultRange', { lo: tokens(sizes[0]), hi: tokens(sizes[sizes.length - 1]) })
+  }
+  function claudeModels(entries) {
+    return entries.filter((e) => e.tuning.status === 'ok' && e.ref.startsWith('claude:')).flatMap((e) => e.tuning.models)
+  }
   function tuneRedraw() {
     if (dlg.kind === 'tune') renderTune()
     if (curPage === 'tuning') renderTuningPage()
@@ -2642,8 +2821,8 @@ const MAIN = String.raw`
     return h('div', { class: 'tune-confirm' },
       h('p', { class: 'small' }, h('b', null, t('tune.confirmTitle'))),
       h('ul', { class: 'small' },
-        h('li', null, t('tune.change') + ': ' + tuneSize(plan.current) + ' → ' + tuneSize(plan.next)),
-        h('li', null, t('tune.file') + ': ', h('code', null, plan.file + (plan.creates ? ' ' + t('tune.willCreate') : '')))),
+        h('li', null, t('tune.change') + colon() + tuneSize(plan.current) + ' → ' + tuneSize(plan.next)),
+        h('li', null, t('tune.file') + colon(), h('code', null, plan.file + (plan.creates ? ' ' + t('tune.willCreate') : '')))),
       plan.affected.length > 1 ? h('p', { class: 'note note-warn' }, t('tune.shared', { list: plan.affected.join(', ') })) : null,
       plan.overrides && plan.overrides.length ? h('p', { class: 'note note-warn' }, t('tune.overrides', { list: plan.overrides.map((o) => o.model + ' (' + tokens(o.value) + ')').join(', ') })) : null,
       h('p', { class: 'muted small' }, t('tune.newSessions')),
@@ -2673,7 +2852,7 @@ const MAIN = String.raw`
     const asking = mine && (useUi.step === 'confirm' || busy)
     const rows = [h('p', { class: 'small' }, g.members.length > 1 ? t('tune.groupShared', { list: g.members.join(', ') }) : h('b', { class: 'mono' }, g.members[0]))]
     rows.push(h('div', { class: 'tune-vals' },
-      h('div', null, h('span', { class: 'muted small' }, t('tune.now')), h('div', { class: 'tune-num' }, tuneSize(g.current))),
+      h('div', null, h('span', { class: 'muted small' }, t('tune.now')), h('div', { class: 'tune-num' }, g.current === null ? defaultSize(claudeModels(entries)) : tuneSize(g.current))),
       pick ? h('div', null, h('span', { class: 'muted small' }, t('tune.best')), h('div', { class: 'tune-num tune-best' }, tokens(pick.threshold))) : null))
     if (pick && pick.savedPercent !== null) rows.push(h('p', { class: 'small' }, t('tune.saved', { n: Math.round(pick.savedPercent) })))
     if (pick) rows.push(h('p', { class: 'muted small' }, t('tune.basis', { model: pick.model, ref: pick.ref })))
@@ -2705,10 +2884,10 @@ const MAIN = String.raw`
     return h('div', { class: 'tune-model tune-group' }, rows)
   }
   // What was seen for one model: information only, behind a click.
-  function tuneModel(m, minCalls) {
+  function tuneModel(m, minCalls, claude) {
     const rows = [h('div', { class: 'tune-head' }, h('b', { class: 'mono' }, m.model), h('span', { class: 'muted small' }, t('tune.calls', { n: m.calls })))]
     rows.push(h('div', { class: 'tune-vals' },
-      h('div', null, h('span', { class: 'muted small' }, t('tune.now')), h('div', { class: 'small' }, tuneSize(m.configured))),
+      h('div', null, h('span', { class: 'muted small' }, t('tune.now')), h('div', { class: 'small' }, m.configured === null && claude ? defaultSize([m]) : tuneSize(m.configured))),
       m.suggestion ? h('div', null, h('span', { class: 'muted small' }, t('tune.best')), h('div', { class: 'small' }, tokens(m.suggestion.threshold))) : null))
     if (!m.suggestion) rows.push(h('p', { class: 'muted small' }, t('tune.reason.' + m.reason, { min: minCalls })))
     rows.push(h('p', { class: 'muted small' }, m.compactions.total ? tn('tune.compactions', m.compactions.total, { size: tokens(m.compactions.preTokensP50 || 0) }) : t('tune.noCompactions')))
@@ -2720,7 +2899,7 @@ const MAIN = String.raw`
     for (const e of entries) {
       if (e.tuning.status !== 'ok' || !e.tuning.models.length) continue
       kids.push(h('div', { class: 'tune-acct-head title-logo' }, badge(e.family, 'sm'), h('b', { class: 'mono' }, e.ref)))
-      for (const m of e.tuning.models) kids.push(tuneModel(m, minCalls))
+      for (const m of e.tuning.models) kids.push(tuneModel(m, minCalls, e.ref.startsWith('claude:')))
     }
     return kids.length ? h('details', { class: 'tune-details' }, h('summary', null, label), kids) : null
   }
@@ -2774,30 +2953,36 @@ const MAIN = String.raw`
   function tuningAvailable() { return Boolean(S.state && S.state.families.some((f) => f.tuning)) }
   // Every move to a page counts, so an answer that comes in late never takes the viewer back to a page they left.
   let navSeq = 0
-  function setPage(next) {
+  function setPage(next, ready) {
     const seq = ++navSeq
     // The Sessions page opens once its first answer is in, at its final size (one read at start usually has it);
     // meanwhile its tab spins.
-    if (next === 'sessions' && !sp.data && !sp.error) {
+    const first = hs.mode === 'history' ? !hs.data && !hs.error : !sp.data && !sp.error
+    if (next === 'sessions' && first && !sp.opening && !ready) {
       sp.opening = true
       renderPageChrome()
-      loadSessions().finally(() => {
+      const read = hs.mode === 'history' ? Promise.all([loadHistory(), loadProjects()]) : loadSessions()
+      read.finally(() => {
         sp.opening = false
-        if (seq === navSeq) setPage('sessions')
+        if (seq === navSeq) setPage('sessions', true)
         else renderPageChrome()
       })
       return
     }
+    if (next !== 'sessions') leaveHistory()
     curPage = next
-    try { history.replaceState(null, '', next === 'accounts' ? location.pathname + location.search : '#' + next) } catch {}
+    try { history.replaceState(null, '', next === 'accounts' ? location.pathname + location.search : '#' + (next === 'sessions' && hs.mode === 'live' ? 'live' : next)) } catch {}
     renderPageChrome()
+    renderBanners()
+    if (next === 'sessions' && Date.now() - ib.at >= INB_MS) loadInbound()
   }
   // The page tabs, and which sections show; runs with every render, so a reload or a language switch keeps them.
   function renderPageChrome() {
     const nav = $('pages')
     const canTune = tuningAvailable()
     const canHandoff = Boolean(ahState())
-    const canSessions = Boolean(S.state && S.state.accounts.length)
+    // Always offered, so the tabs do not change when the last account goes; the page has its own empty state.
+    const canSessions = Boolean(S.state)
     if (S.state && ((curPage === 'tuning' && !canTune) || (curPage === 'handoff' && !canHandoff) || (curPage === 'sessions' && !canSessions))) curPage = 'accounts'
     const tabs = [['accounts', t('page.accounts')]]
     if (canSessions) tabs.push(['sessions', t('page.sessions')])
@@ -2805,7 +2990,8 @@ const MAIN = String.raw`
     if (canHandoff) tabs.push(['handoff', t('page.handoff')])
     nav.hidden = tabs.length < 2
     setKids(nav, h('div', { class: 'seg', role: 'presentation' }, tabs.map(([id, label]) =>
-      h('button', { class: 'seg-btn', type: 'button', role: 'tab', 'aria-selected': curPage === id ? 'true' : 'false', 'aria-busy': id === 'sessions' && sp.opening ? 'true' : null, onclick: () => setPage(id) }, id === 'sessions' && sp.opening ? [spinner(), ' '] : null, label))))
+      h('button', { class: 'seg-btn', type: 'button', role: 'tab', 'aria-selected': curPage === id ? 'true' : 'false', 'aria-busy': id === 'sessions' && sp.opening ? 'true' : null, onclick: () => setPage(id) }, id === 'sessions' && sp.opening ? [spinner(), ' '] : null, label,
+        id === 'sessions' && pasteCount() ? h('span', { class: 'seg-badge', 'data-tip': t('msgn.badge', { n: pasteCount() }), 'aria-label': t('msgn.badge', { n: pasteCount() }) }, String(pasteCount())) : null))))
     const away = curPage !== 'accounts' && tabs.some(([id]) => id === curPage)
     // With no account yet the empty state is the whole page: no summary, no health check.
     const none = Boolean(S.state && !S.state.accounts.length)
@@ -2832,6 +3018,8 @@ const MAIN = String.raw`
     }
   }
   async function loadTuningPage() {
+    // One read at a time: a second refresh while one runs would end its spinner early.
+    if (tp.loading) return
     tp.loading = true
     tp.error = null
     renderTuningPage()
@@ -2844,7 +3032,7 @@ const MAIN = String.raw`
     if (box.hidden) return
     const kids = [h('div', { class: 'section-head' },
       h('h2', { id: 'h-tuning' }, t('tpage.title')),
-      h('button', { class: 'btn btn-sm', type: 'button', disabled: tp.loading, onclick: loadTuningPage }, tp.loading ? spinner() : icon('refresh'), t('top.refresh')))]
+      tp.loading ? spinner() : null)]
     kids.push(h('p', { class: 'muted small' }, t('tune.intro', { days: BOOT.usageDays })))
     const d = tp.data
     if (tp.loading && !d) kids.push(h('p', { class: 'muted' }, spinner(), ' ', t('tune.loading')))
@@ -2860,7 +3048,12 @@ const MAIN = String.raw`
     }
     setKids(box, kids)
   }
-  window.addEventListener('hashchange', () => { navSeq++; curPage = pageFromHash(); renderPageChrome() })
+  window.addEventListener('hashchange', () => {
+    navSeq++
+    curPage = pageFromHash()
+    if (curPage === 'sessions') { const m = location.hash === '#live' ? 'live' : 'history'; if (m !== hs.mode) { hs.mode = m; sp.drawn = '' } }
+    renderPageChrome()
+  })
 
   // ---------- sessions (spec §3.32, ADR-0039) ----------
   // What every Account is running now, one row per Live Session, with "Copy for AI" and a menu for the id and the resume
@@ -2868,7 +3061,7 @@ const MAIN = String.raw`
   // that draws the same rows draws nothing; a new one waits while a menu or popover of the page is open, and the
   // focused button keeps focus (swapKids). The "x min ago" texts change in place every second.
   const SESS_MS = 5000
-  const sp = { data: null, lang: null, loading: null, error: null, at: 0, drawn: '', pending: false, copied: {}, opening: false, msgs: {} }
+  const sp = { data: null, lang: null, loading: null, error: null, at: 0, drawn: '', pending: false, copied: {}, opening: false, msgs: {}, order: [] }
   function loadSessions() {
     if (sp.loading) return sp.loading
     sp.loading = readSessions()
@@ -2878,15 +3071,230 @@ const MAIN = String.raw`
     const asked = lang
     try {
       // The chips of the latest Messages come with the list; when they cannot be read the rows keep the last ones.
+      const seq = ++mn.asked
       const [data, msgs] = await Promise.all([api('/api/sessions', { lang: asked }), api('/api/sessions/messages', {}).catch(() => null)])
       sp.data = data; sp.lang = asked; sp.error = null
-      if (msgs && msgs.latest) { sp.msgs = msgs.latest; sendSeen() }
+      if (msgs && msgs.latest) noteMessages(msgs.latest, seq)
+      if (Date.now() - ib.at >= INB_MS) loadInbound()
     } catch (e) { sp.error = e }
     sp.at = Date.now()
     sp.loading = null
     renderSessionsPage()
   }
-  function sessionsMenuOpen() { return Boolean(menu.el && menu.anchor && $('sessions-page').contains(menu.anchor)) }
+  // ---------- receiving Messages (ADR-0045) ----------
+  // Whether each Claude settings file lets its sessions show a Message from another session at once, or holds it for
+  // approval in that terminal (dropped after about 5 minutes). Read with the Sessions list every INB_MS and after a
+  // change. The dialog lists each file, its value now and the change, and only its button writes; the toast carries
+  // the undo.
+  const INB_MS = 60000
+  const ib = { data: null, error: null, loading: null, busy: false, at: 0, bannerEl: undefined }
+  function loadInbound() {
+    if (ib.loading) return ib.loading
+    ib.loading = (async () => {
+      try { ib.data = await api('/api/messages/inbound', {}); ib.error = null } catch (e) { ib.error = e }
+      ib.at = Date.now()
+      ib.loading = null
+      renderBanners()
+      renderSessionsPage()
+      if (dlg.kind === 'inbound' && dlg.el && dlg.el.open) renderInbound()
+    })()
+    return ib.loading
+  }
+  function inboundGroups() { return (ib.data && ib.data.groups) || [] }
+  function inboundTodo() { return inboundGroups().filter((g) => g.state === 'default' || g.state === 'hold') }
+  function inboundWaiting() { return inboundGroups().filter((g) => g.waits).flatMap((g) => g.accounts).map(shortRef) }
+  function inboundShape() { return inboundGroups().length > 0 }
+  const refList = (refs) => refs.join(lang === 'zh' ? '、' : ', ')
+  // Shown above the Sessions page, in both its views. It grows from nothing to its own height when it first
+  // appears and shrinks back when it goes (inboundBannerKept keeps the old one on screen while it leaves).
+  function inboundBanner() {
+    const refs = inboundWaiting()
+    if (curPage !== 'sessions' || !refs.length || prefs.inbHide) return inboundBannerKept()
+    const text = h('div', null, t('inb.banner', { refs: refList(refs) }))
+    const attrs = { class: 'banner banner-warn', role: 'status', 'data-key': 'inb-banner' }
+    if (BOOT.readOnly) return h('div', attrs, text)
+    return h('div', attrs, text,
+      h('div', { class: 'banner-actions' },
+        h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: openInbound }, t('inb.go')),
+        h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { prefs.inbHide = true; savePrefs(); renderBanners(); toast(t('inb.hidden')) } }, t('inb.keep'))))
+  }
+  function inboundBannerKept() {
+    const old = $('banners').querySelector('[data-key="inb-banner"]')
+    if (!old || old.dataset.leaving || matchMedia('(prefers-reduced-motion: reduce)').matches) return null
+    old.dataset.leaving = '1'
+    old.style.pointerEvents = 'none'
+    old.animate(bannerFrames(old).reverse(), { duration: 180, easing: 'ease-in-out', fill: 'forwards' })
+    setTimeout(renderBanners, 180)
+    return old
+  }
+  // From nothing to the banner's measured height, padding, border and margin, so nothing below it jumps.
+  function bannerFrames(el) {
+    const cs = getComputedStyle(el)
+    const full = { height: el.offsetHeight + 'px', paddingTop: cs.paddingTop, paddingBottom: cs.paddingBottom, marginTop: cs.marginTop, marginBottom: cs.marginBottom, borderTopWidth: cs.borderTopWidth, borderBottomWidth: cs.borderBottomWidth, opacity: 1, boxSizing: 'border-box', overflow: 'hidden' }
+    const none = { ...full, height: '0px', paddingTop: '0px', paddingBottom: '0px', marginTop: '0px', marginBottom: '0px', borderTopWidth: '0px', borderBottomWidth: '0px', opacity: 0 }
+    return [none, full]
+  }
+  function growInboundBanner() {
+    const el = $('banners').querySelector('[data-key="inb-banner"]:not([data-leaving])')
+    if (el === ib.bannerEl) return
+    // A banner already there when the page opened just shows; one that arrives later grows in.
+    if (el && ib.bannerEl !== undefined && !matchMedia('(prefers-reduced-motion: reduce)').matches)
+      el.animate(bannerFrames(el), { duration: 180, easing: 'ease-out' })
+    ib.bannerEl = el
+  }
+  // Opens at its final size: the files are read first when they are not in yet.
+  async function openInbound() {
+    if (!ib.data) await loadInbound()
+    showDialog('inbound')
+    renderInbound()
+    if (Date.now() - ib.at >= 5000) loadInbound()
+  }
+  function inboundChip(g) {
+    if (g.state === 'accept') return ['ok', 'inb.state.accept']
+    if (g.state === 'hold') return ['warn', 'inb.state.hold']
+    if (g.state === 'default') return g.waits ? ['warn', 'inb.state.defaultWaits'] : ['', 'inb.state.default']
+    if (g.state === 'refuse') return ['', 'inb.state.refuse']
+    return ['fail', 'inb.state.cannot']
+  }
+  function renderInbound() {
+    const groups = inboundGroups()
+    const todo = inboundTodo()
+    const body = [h('p', { class: 'small' }, t('inb.explain'))]
+    if (!ib.data) body.push(errorNote(ib.error || new Error(t('inb.none')), () => loadInbound()))
+    else if (!groups.length) body.push(h('p', { class: 'muted small' }, t('inb.none')))
+    else {
+      body.push(h('ul', { class: 'rc-list' }, groups.map((g) => {
+        const [tone, key] = inboundChip(g)
+        return h('li', { class: 'rc-row' },
+          h('div', null, h('code', null, g.file), ' ', h('span', { class: 'chip chip-sm' + (tone ? ' chip-' + tone : '') }, t(key))),
+          h('div', { class: 'muted small' }, t('rc.usedBy', { refs: refList(g.accounts.map(shortRef)) })),
+          g.reason ? h('div', { class: 'muted small' }, g.reason) : null,
+          !BOOT.readOnly && todo.includes(g) ? h('div', { class: 'small rc-change' }, t('inb.change', { from: g.state === 'hold' ? '"hold"' : t('inb.notSet') })) : null)
+      })))
+      if (BOOT.readOnly) body.push(h('p', { class: 'small' }, t('inb.readOnly')))
+      else if (todo.length) body.push(h('p', { class: 'small muted' }, t('inb.confirmNote')))
+      else if (groups.every((g) => g.state === 'accept')) body.push(h('p', { class: 'small muted' }, t('inb.allSet')))
+    }
+    const foot = [h('button', { class: 'btn', type: 'button', disabled: ib.busy, onclick: () => dlg.el.close() }, t('btn.close'))]
+    if (!BOOT.readOnly && groups.some((g) => g.undo)) foot.push(h('button', { class: 'btn', type: 'button', disabled: ib.busy, onclick: inboundUndo }, t('inb.undo')))
+    if (!BOOT.readOnly && todo.length) foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: ib.busy, 'aria-busy': ib.busy ? 'true' : null, onclick: inboundAccept }, ib.busy ? spinner() : null, t('inb.accept')))
+    setKids(dlg.el, dialogFrame(t('inb.title'), null, body, foot))
+  }
+  function inboundBusy(v) {
+    ib.busy = v
+    if (dlg.kind === 'inbound' && dlg.el && dlg.el.open) renderInbound()
+  }
+  async function inboundAccept() {
+    inboundBusy(true)
+    try {
+      const r = await api('/api/messages/inbound/accept', {})
+      if (r.ok) {
+        if (dlg.kind === 'inbound' && dlg.el.open) dlg.el.close()
+        toast(t('inb.done'), { kind: 'ok', key: 'inb', action: { label: t('toast.undo'), run: inboundUndo }, duration: 12000 })
+      } else toast(t('inb.failed', { msg: r.message }), { kind: 'fail' })
+    } catch (e) { toast(t('inb.failed', { msg: e.message }), { kind: 'fail' }) }
+    inboundBusy(false)
+    await loadInbound()
+  }
+  async function inboundUndo() {
+    inboundBusy(true)
+    try {
+      const r = await api('/api/messages/inbound/undo', {})
+      if (r.ok && dlg.kind === 'inbound' && dlg.el.open) dlg.el.close()
+      toast(r.ok ? t('inb.undone') : r.message, { kind: r.ok ? 'ok' : 'fail', key: 'inb' })
+    } catch (e) { toast(t('toast.undoFailed', { msg: e.message }), { kind: 'fail' }) }
+    inboundBusy(false)
+    await loadInbound()
+  }
+  // ---------- message notices (spec §3.32) ----------
+  // A Message that reaches a Session, is read there, or waits for a paste shows as a toast on every page, with "Show"
+  // leading to the Sessions page. The Sessions list reads the Messages with every refresh; any other page reads them
+  // every MSG_MS while it shows. The first answer is only the baseline, so opening the Panel announces nothing old.
+  const MSG_MS = 10000
+  // "asked" numbers each reading and "applied" is the newest one used, so an answer that comes back late never
+  // replaces a newer one; "own" holds the ids this Panel sent, never announced.
+  const mn = { base: null, at: 0, loading: false, asked: 0, applied: 0, own: new Set() }
+  // Running Sessions whose latest Message waits for a paste, for the count on the Sessions tab.
+  function pasteCount() {
+    if (!sp.data) return 0
+    return sp.data.sessions.filter((s) => sp.msgs[s.sessionId] && sp.msgs[s.sessionId].status === 'paste-needed').length
+  }
+  function noteMessages(latest, seq) {
+    if (seq < mn.applied) return
+    mn.applied = seq
+    const news = messageNews(mn.base, latest)
+    const count = pasteCount()
+    mn.base = latest
+    mn.at = Date.now()
+    sp.msgs = latest
+    if (pasteCount() !== count) renderPageChrome()
+    sendSeen()
+    // The send dialog already says what happened to the Message it shows.
+    const shown = sd && sd.result && dlg.kind === 'send' && dlg.el && dlg.el.open ? sd.result.message.id : null
+    for (const n of news) {
+      if (n.id === shown || (n.kind === 'new' && mn.own.has(n.id))) continue
+      if (n.kind === 'approve') {
+        // Held until the user approves it in that terminal; the way out is to receive directly from now on.
+        toast(t('msgn.approve', { to: n.to || t('msgn.aSession') }), { kind: 'info', key: 'msg-' + n.sessionId, keep: true, duration: 12000, action: BOOT.readOnly ? null : { label: t('inb.go'), run: openInbound } })
+        continue
+      }
+      const key = n.kind === 'read' ? 'msgn.read' : n.kind === 'paste' ? 'msgn.paste' : n.from ? 'msgn.newFrom' : 'msgn.new'
+      const there = curPage === 'sessions' && hs.mode !== 'history'
+      const line = n.kind === 'paste' ? latest[n.sessionId].pasteText : null
+      toast(t(key, { to: n.to || t('msgn.aSession'), from: n.from }), {
+        kind: n.kind === 'read' ? 'ok' : n.kind === 'paste' ? 'info' : 'accent',
+        key: 'msg-' + n.sessionId,
+        keep: n.kind === 'paste',
+        // Long enough to reach the button; hovering holds it. A paste waits for the user on every page.
+        duration: there && !line ? 0 : 12000,
+        action: line ? { label: t('send.copyLine'), run: () => copyPasteLine(n.sessionId, line) } : there ? null : { label: t('msgn.show'), run: () => showSession(n.sessionId) },
+      })
+    }
+  }
+  // A browser that refuses the clipboard gets the Session's row instead, with the line selected in its popover.
+  function copyPasteLine(sessionId, line) {
+    navigator.clipboard.writeText(line).then(() => toast(t('toast.copied', { text: line })), () => showSession(sessionId, true))
+  }
+  // "Show": the Sessions page, scrolled to the Session's row, which lights up once. A list still loading is
+  // waited for; "paste" also opens the row's paste popover.
+  function showSession(sessionId, paste) {
+    mn.show = { sessionId, paste: Boolean(paste) }
+    if (curPage === 'sessions') setSessMode('live'); else { hs.mode = 'live'; setPage('sessions') }
+    revealSession()
+  }
+  function revealSession() {
+    const want = mn.show
+    if (!want || curPage !== 'sessions' || hs.mode === 'history') return
+    const row = $('sessions-page').querySelector('[data-session="' + CSS.escape(want.sessionId) + '"]')
+    if (!row) { if (sp.data && !sp.loading) mn.show = null; return }
+    mn.show = null
+    row.scrollIntoView({ block: 'center', behavior: REDUCED ? 'auto' : 'smooth' })
+    row.classList.remove('flash')
+    void row.offsetWidth
+    row.classList.add('flash')
+    const chip = want.paste ? row.querySelector('.sess-msg-paste') : null
+    if (chip) chip.click()
+  }
+  // A Message this Panel sent is known before the next reading, so it is not announced as a new one.
+  function ownMessage(sessionId, m) {
+    mn.own.add(m.id)
+    const count = pasteCount()
+    sp.msgs = Object.assign({}, sp.msgs, { [sessionId]: m })
+    if (pasteCount() !== count) renderPageChrome()
+    if (mn.base) mn.base = Object.assign({}, mn.base, { [sessionId]: m })
+  }
+  function messagesTick() {
+    if (document.visibilityState !== 'visible' || !S.state || conn.lost || mn.loading || Date.now() - mn.at < MSG_MS) return
+    // The Sessions list reads them itself.
+    if (curPage === 'sessions' && hs.mode !== 'history' && !$('sessions-page').hidden) return
+    mn.loading = true
+    const seq = ++mn.asked
+    api('/api/sessions/messages', {})
+      .then((r) => { if (r && r.latest) noteMessages(r.latest, seq) })
+      .catch(() => {})
+      .finally(() => { mn.loading = false; mn.at = Date.now() })
+  }
+  function sessionsMenuOpen() { return Boolean(menu.el && menu.anchor && $('sessions-page').contains(menu.returnTo || menu.anchor)) }
   function sessAgeText(s) {
     const a = sessionAge(s, Date.now())
     return a ? t(a.key, { n: a.n }) : ''
@@ -2967,20 +3375,24 @@ const MAIN = String.raw`
     const copied = (sp.copied[s.sessionId] || 0) > Date.now()
     const status = ['needs-you', 'busy', 'idle'].includes(s.status) ? s.status : 'unknown'
     const more = h('button', { class: 'icon-btn more', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'data-key': 'sess-more-' + s.sessionId, 'aria-label': t('spage.more', { label: s.label || p.account }), 'data-tip': t('menu.title') }, icon('more'))
-    more.addEventListener('click', () => openMenu(more, [
+    const liveMenu = (a) => openMenu(a, [
       s.orca && !BOOT.readOnly ? { icon: 'link', label: t('spage.jump'), run: () => jumpToOrca(s) } : null,
       s.orca && !BOOT.readOnly ? '-' : null,
+      { icon: 'copy', label: t('spage.copyAi'), run: () => copyForAi(copyBtn, s) },
+      BOOT.readOnly ? null : { icon: 'send', label: t('spage.send'), run: () => openSend(s) },
+      '-',
       { icon: 'copy', label: t('spage.copyId'), hint: p.id, run: () => sessCopy(more, s.copy.id, () => toast(t('toast.copied', { text: p.id }))) },
       { icon: 'terminal', label: t('spage.copyResume'), run: () => sessCopy(more, s.copy.resume, () => toast(t('toast.copied', { text: s.copy.resume }))) },
-    ], t('spage.more', { label: s.label || p.account })))
+    ], t('spage.more', { label: s.label || p.account }))
+    more.addEventListener('click', () => liveMenu(more))
     const copyBtn = h('button', { class: 'btn btn-sm btn-primary sess-copy' + (copied ? ' is-copied' : ''), type: 'button', 'data-key': 'sess-copy-' + s.sessionId },
       icon(copied ? 'check' : 'copy'), h('span', null, t(copied ? 'spage.copied' : 'spage.copyAi')))
     copyBtn.addEventListener('click', () => copyForAi(copyBtn, s))
     const sendBtn = BOOT.readOnly ? null : h('button', { class: 'btn btn-sm sess-send', type: 'button', 'data-key': 'sess-send-' + s.sessionId, 'aria-label': t('spage.sendTo', { label: s.label || p.account }), onclick: () => openSend(s) }, icon('send'), h('span', null, t('spage.send')))
     const msg = sp.msgs[s.sessionId]
-    const chip = messageChip(msg && msg.status)
+    const chip = messageChip(msg && msg.status, msg && msg.needsApproval)
     const cwd = shortCwd(s.cwd)
-    return h('div', { class: 'sess-row sess-' + status, 'data-enter': s.sessionId, 'data-session': s.sessionId },
+    return withMenu(h('div', { class: 'sess-row sess-' + status, 'data-enter': s.sessionId, 'data-session': s.sessionId },
       badge(s.family, 'sm'),
       h('div', { class: 'sess-main' },
         h('div', { class: 'sess-label' },
@@ -2989,46 +3401,959 @@ const MAIN = String.raw`
           h('span', { class: 'mono sess-id' }, p.id)),
         h('div', { class: 'sess-sub muted small' },
           h('span', { class: 'sess-status' }, h('span', { class: 'dot sess-dot', 'aria-hidden': 'true' }), t('spage.status.' + status)),
-          chip ? h('span', { class: 'chip chip-sm chip-' + chip.tone + ' sess-msg', title: t('send.chipTip') }, t(chip.key)) : null,
+          chip ? msgChip(chip, msg, s) : null,
           s.guessed ? h('span', { class: 'chip sess-guessed', tabindex: '0', 'data-tip': t('spage.guessedTip') }, t('spage.guessed')) : null,
           runChip(s),
           h('span', { class: 'sess-cwd' + (cwd ? ' mono' : ''), title: s.cwd && cwd !== s.cwd ? s.cwd : null }, cwd || t('spage.noCwd')),
           h('span', { class: 'sess-age', 'data-age': s.sessionId }, sessAgeText(s)))),
-      h('div', { class: 'sess-actions' }, copyBtn, sendBtn, more))
+      h('div', { class: 'sess-actions' }, copyBtn, sendBtn, more)), liveMenu)
+  }
+  // The latest Message's state on a row. One that waits for a paste opens what to paste and why, so the line is never
+  // only in the dialog that sent it.
+  function msgChip(chip, msg, s) {
+    const cls = 'chip chip-sm chip-' + chip.tone + ' sess-msg'
+    // Waiting for approval: why, and the way to receive the next ones directly (ADR-0045).
+    if (chip.key === 'send.chip.approve') {
+      const btn = h('button', { class: cls + ' sess-msg-paste', type: 'button', 'aria-haspopup': 'dialog', 'data-key': 'sess-msg-' + s.sessionId }, t(chip.key), icon('chevron'))
+      btn.addEventListener('click', () => openPopover(btn, 'sess-paste', t(chip.key), () => {
+        const go = h('button', { class: 'btn btn-sm btn-primary', type: 'button', disabled: BOOT.readOnly }, t('inb.go'))
+        go.addEventListener('click', () => { closeMenu(false); openInbound() })
+        return [msg.note ? h('p', { class: 'small muted' }, msg.note) : null, h('div', { class: 'pop-actions' }, go)]
+      }))
+      return btn
+    }
+    if (chip.tone !== 'warn' || !msg.pasteText) return h('span', { class: cls, tabindex: '0', 'data-tip': t('send.chipTip') }, t(chip.key))
+    const btn = h('button', { class: cls + ' sess-msg-paste', type: 'button', 'aria-haspopup': 'dialog', 'data-key': 'sess-msg-' + s.sessionId }, t(chip.key), icon('chevron'))
+    btn.addEventListener('click', () => openPopover(btn, 'sess-paste', t('send.chip.paste'), () => {
+      const area = h('textarea', { class: 'sess-copy-text mono', readonly: true, rows: '3', 'aria-label': t('send.copyLine') })
+      area.value = msg.pasteText
+      const copy = h('button', { class: 'btn btn-sm btn-primary', type: 'button' }, icon('copy'), h('span', null, t('send.copyLine')))
+      copy.addEventListener('click', () => sessCopy(copy, msg.pasteText, () => { closeMenu(true); toast(t('toast.copied', { text: msg.pasteText })) }))
+      return [msg.note ? h('p', { class: 'small muted' }, msg.note) : null, area, h('div', { class: 'pop-actions' }, copy)]
+    }))
+    return btn
   }
   function renderSessionsPage() {
     const box = $('sessions-page')
     if (box.hidden) return
+    if (hs.mode === 'history') { renderHistoryPage(); return }
     // The copy texts come in the Panel's language: a switch reads them again.
     if (sp.data && sp.lang !== lang && !sp.loading) { loadSessions(); return }
     const d = sp.data
-    const list = d ? sortSessions(d.sessions) : []
+    // Rows already on screen keep their places; only a Session that needs the user moves up.
+    const list = d ? steadyOrder(sp.order || [], d.sessions) : []
+    sp.order = list.map((s) => s.sessionId)
     // Everything a row shows except its age, which renderSessionAges keeps current in place.
-    const shape = JSON.stringify([lang, !d && !sp.error, sp.error ? sp.error.message : '', d ? d.problems : [],
-      list.map((s) => [s.sessionId, s.account, s.accountLabel, s.family, s.title, s.label, s.status, s.cwd, s.guessed, s.copy, Boolean(s.orca), s.run || null, sp.msgs[s.sessionId] ? sp.msgs[s.sessionId].status : ''])])
-    if (shape === sp.drawn) { sp.pending = false; renderSessionAges(); return }
+    const shape = JSON.stringify([lang, hs.opening, !d && !sp.error, sp.error ? sp.error.message : '', d ? d.problems : [],
+      list.map((s) => [s.sessionId, s.account, s.accountLabel, s.family, s.title, s.label, s.status, s.cwd, s.guessed, s.copy, Boolean(s.orca), s.run || null, sp.msgs[s.sessionId] ? sp.msgs[s.sessionId].status + (sp.msgs[s.sessionId].needsApproval ? '+approve' : '') : '']), inboundShape()])
+    if (shape === sp.drawn) { sp.pending = false; renderSessionAges(); revealSession(); return }
     if (sessionsMenuOpen()) { sp.pending = true; return }
     sp.pending = false
     sp.drawn = shape
     // No Refresh of its own: the list renews itself every few seconds, and the header's Refresh reads it too.
-    const kids = [h('div', { class: 'section-head' }, h('h2', { id: 'h-sessions' }, t('spage.title')))]
+    const kids = [h('div', { class: 'section-head' }, h('h2', { id: 'h-sessions' }, t('spage.title')), modeSeg())]
     kids.push(h('p', { class: 'muted small' }, t('spage.intro')))
     if (sp.error) kids.push(errorNote(sp.error, () => loadSessions()))
     if (!d && !sp.error) kids.push(h('div', { class: 'group-list sess-list', 'aria-busy': 'true' }, [0, 1, 2].map(() => h('div', { class: 'sk-row' }, h('span', { class: 'sk sk-badge' }), h('span', { class: 'sk sk-title' }), h('span', { class: 'sk sk-bar' })))))
-    if (d && !list.length && !sp.error) kids.push(h('div', { class: 'empty empty-sm sess-empty' }, h('p', null, t('spage.empty'))))
+    // With no account yet the way to a session is to add one first.
+    if (d && !list.length && !sp.error) kids.push(h('div', { class: 'empty empty-sm sess-empty' }, S.state && !S.state.accounts.length
+      ? [h('p', null, t('spage.emptyNoAccounts')), BOOT.readOnly ? null : h('button', { class: 'btn btn-primary', type: 'button', onclick: () => openCreate(null) }, icon('plus'), t('empty.create'))]
+      : h('p', null, t('spage.empty'))))
     if (list.length) kids.push(h('div', { class: 'group-list sess-list', role: 'list' }, list.map((s) => { const r = sessionRow(s); r.setAttribute('role', 'listitem'); return r })))
     if (d) for (const problem of d.problems) kids.push(h('p', { class: 'note note-warn small' }, t('spage.problem', { problem })))
     // The example names an Account that is on the list, the one at the top; with none, it asks in general.
     const example = list.length ? t('spage.askOne', { name: sessionLabelParts(list[0]).account }) : t('spage.askAny')
-    kids.push(h('p', { class: 'muted small sess-ask' }, t('spage.askHint', { example })))
+    kids.push(h('p', { class: 'muted small sess-ask' }, t('spage.askHint', { example }),
+      inboundGroups().length ? [' ', h('button', { class: 'link-btn small', type: 'button', onclick: openInbound }, t('inb.link'))] : null))
     swapKids(box, kids)
+    revealSession()
   }
   // While the page shows: a new answer every SESS_MS, a held one once its menu closed, and the ages every second.
   function sessionsTick() {
     if (curPage !== 'sessions' || $('sessions-page').hidden || document.visibilityState !== 'visible') return
+    if (hs.mode === 'history') { historyTick(); return }
     if (sp.pending && !sessionsMenuOpen()) renderSessionsPage()
     else renderSessionAges()
     if (!sp.loading && !conn.lost && Date.now() - sp.at >= SESS_MS) loadSessions()
+  }
+
+  // ---------- session history (spec §3.33, ADR-0042) ----------
+  // Every past Session of every Account, from the History Index the server builds in the background; read the first
+  // time "History" is picked, which waits on its tab until the first answer is in so the view opens at its final
+  // size. The search box and filters are made once and kept, so typing (and an input method) is never interrupted;
+  // each part under them is drawn again only when what it shows changed. A newer request makes older answers be
+  // ignored. While the index is still being built the list renews every HIST_TICK_MS, then every HIST_IDLE_MS.
+  const HIST_PAGE = 50
+  const HIST_TICK_MS = 2000
+  const HIST_IDLE_MS = 30000
+  const HIST_CLIP = 3000
+  const HIST_KEEP = 500
+  // The filters live in this tab's session storage, so a reload keeps them and a new tab starts clean.
+  const HIST_FILTERS_KEY = 'sideby.historyFilters'
+  function savedHistFilters() { try { return histFilters(JSON.parse(sessionStorage.getItem(HIST_FILTERS_KEY) || 'null')) } catch { return histFilters(null) } }
+  function saveHistFilters() {
+    try { sessionStorage.setItem(HIST_FILTERS_KEY, JSON.stringify({ q: hs.q, since: hs.since, family: hs.family, account: hs.account, project: hs.project, category: hs.category, scripts: hs.scripts })) } catch {}
+  }
+  const hs = Object.assign({ mode: location.hash === '#live' ? 'live' : 'history', opening: false, group: prefs.histGroup || 'project', cats: null, tools: false,
+    data: null, error: null, loading: false, more: false, moreFailed: false, seq: 0, at: 0, projects: null, projError: null, projSeq: 0, tool: null, els: null, srcOpen: false, debounce: 0, clearing: false }, savedHistFilters())
+  function histWords() { return hs.q.split(/\s+/).filter(Boolean) }
+  function histParams(extra) {
+    return Object.assign({ q: hs.q, since: hs.since, family: hs.family, account: hs.account || undefined, project: hs.project, category: hs.category || undefined, scripts: hs.scripts, lang }, extra || {})
+  }
+  function histKey() { return JSON.stringify([hs.q, hs.since, hs.family, hs.account, hs.project, hs.category, hs.scripts]) }
+  // The grouping the list is asked for: one picked Project needs no project headers, and the categories only
+  // group when a plugin gives them (a category picked on the side is grouped by its Projects).
+  function histGroupNow() {
+    const g = hs.group
+    if (g === 'category') return hs.category || !hs.cats ? 'project' : 'category'
+    if (g === 'project' && hs.project) return 'none'
+    if ((g === 'family' && histFamilies().length < 2) || (g === 'account' && histAccounts().length < 2)) return 'project'
+    return g
+  }
+  function histFamilies() { return S.state ? S.state.families.filter((f) => S.state.accounts.some((a) => a.family === f.id)) : [] }
+  function histAccounts() { return S.state ? S.state.accounts.filter((a) => !hs.family || a.family === hs.family) : [] }
+  function histFold(by) { return prefs.histFold[by] || (prefs.histFold[by] = {}) }
+  function fullWhen(iso) {
+    const d = new Date(iso)
+    return Number.isFinite(d.getTime()) ? d.toLocaleString(locale(), { dateStyle: 'medium', timeStyle: 'short' }) : ''
+  }
+  function whenText(iso) {
+    const w = historyWhen(iso, Date.now())
+    if (!w) return ''
+    if (w.key !== 'time.on') return t(w.key, { n: w.n })
+    const d = new Date(iso)
+    const date = d.toLocaleDateString(locale(), d.getFullYear() === new Date().getFullYear() ? { month: 'short', day: 'numeric' } : { dateStyle: 'medium' })
+    return t(w.key, { date })
+  }
+  // A snippet that only repeats the title (ellipses and spacing aside) adds nothing under it.
+  function sameText(a, b) {
+    const norm = (x) => String(x || '').replace(/…/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+    return norm(a) === norm(b) || (norm(b).length > 0 && norm(b).startsWith(norm(a)))
+  }
+  function highlighted(text, words) {
+    return words.length ? highlightParts(text, words).map((p) => p.hit ? h('mark', null, p.text) : p.text) : text
+  }
+  // quiet: a renewal the user did not ask for: the list stays as it is (not dimmed, not busy) until the answer.
+  // after: the rows already loaded past an unfolded group, kept when the answer stops short of them (a page has at
+  // most HIST_KEEP rows), so folding or opening a group never drops the groups below it back behind "Show more".
+  // With a key, only once the answer holds all of that group's rows; the rest then follow in the same order.
+  async function loadHistory(more, keep, quiet, after) {
+    if (more && (hs.more || hs.loading || !hs.data)) return
+    const seq = ++hs.seq
+    if (more) hs.more = true
+    else if (quiet) hs.bg = true
+    else hs.loading = true
+    if (!quiet) renderHistoryParts()
+    const offset = more ? hs.data.sessions.length : 0
+    const limit = more ? HIST_PAGE : Math.max(HIST_PAGE, Math.min(HIST_KEEP, keep || 0))
+    try {
+      const by = more ? hs.data._by : histGroupNow()
+      const folded = Object.keys(histFold(by))
+      const r = await api('/api/history', histParams({ offset, limit, group: by, collapsed: by === 'none' || !folded.length ? undefined : folded }))
+      if (seq !== hs.seq) return
+      r._by = by
+      // Sessions that moved up while paging (one was updated) are not shown twice.
+      if (more) {
+        const seen = new Set(hs.data.sessions.map((x) => x.account + '\0' + x.sessionId))
+        r.sessions = hs.data.sessions.concat(r.sessions.filter((x) => !seen.has(x.account + '\0' + x.sessionId)))
+      }
+      if (after && r.groups) {
+        const g = after.key === undefined ? null : r.groups.find((x) => x.key === after.key)
+        if (!g || r.sessions.filter((x) => (x.group || '') === after.key).length >= g.sessions) {
+          const seen = new Set(r.sessions.map((x) => x.account + '\0' + x.sessionId))
+          r.sessions = r.sessions.concat(after.rows.filter((x) => !seen.has(x.account + '\0' + x.sessionId)))
+        }
+      }
+      hs.data = r
+      hs.error = null
+      hs.moreFailed = false
+    } catch (e) {
+      if (seq !== hs.seq) return
+      // A renewal that failed keeps what is shown; the next one tries again.
+      if (quiet) {
+        hs.bg = false
+        hs.at = Date.now()
+        // A group that was opening stays folded, and says why.
+        const opening = hs.data && hs.data.groups ? hs.data.groups.filter((g) => g.opening) : []
+        if (opening.length) {
+          for (const g of opening) { g.opening = false; g.collapsed = true; histFold(hs.data._by)[g.key] = true }
+          savePrefs()
+          toast(e.message, { kind: 'fail' })
+          renderHistoryParts()
+        }
+        return
+      }
+      // A page that failed is not asked again by itself: the button at the end tries again.
+      if (more) { hs.moreFailed = true; toast(e.message, { kind: 'fail' }) } else hs.error = e
+    }
+    hs.loading = false
+    hs.more = false
+    hs.bg = false
+    hs.at = Date.now()
+    renderHistoryParts()
+    const grow = hs.growing
+    if (grow && hs.data && hs.data._by === grow.by && !(hs.data.groups || []).some((x) => x.key === grow.key && (x.collapsed || x.opening))) {
+      hs.growing = null
+      growOpened(grow.by, grow.key)
+    }
+    if (!more && !quiet && hs.tools && hs.q && curPage === 'sessions' && hs.mode === 'history') startToolScan()
+    moreIfTailShows()
+  }
+  async function loadProjects() {
+    const seq = ++hs.projSeq
+    try {
+      const r = await api('/api/history/projects', { since: hs.since, family: hs.family, account: hs.account || undefined, scripts: hs.scripts })
+      if (seq !== hs.projSeq) return
+      hs.projects = r.projects.filter((p) => p.project)
+      const had = Boolean(hs.cats)
+      hs.cats = r.categories || null
+      hs.projError = null
+      // A grouping that waited for the categories asks again once it knows whether there are any.
+      if (had !== Boolean(hs.cats) && hs.group === 'category' && hs.data && hs.data._by !== histGroupNow()) historyChanged(false)
+    } catch (e) { if (seq === hs.projSeq) hs.projError = e }
+    renderHistorySide()
+  }
+  // A filter changed: the list starts again from the top; the projects only follow the filters they depend on.
+  function historyChanged(projectsToo) {
+    stopToolScan()
+    // The next answer replaces the whole list: it fades in at its own height instead of each row growing in.
+    hs.swap = true
+    saveHistFilters()
+    loadHistory()
+    if (projectsToo) loadProjects()
+    if (hs.els) hs.els.main.scrollTop = 0
+  }
+
+  // "Also search tool output" (ADR-0042): the server reads the session files at that moment and keeps nothing.
+  // One scan at a time; a change of words or filters stops it, and so does leaving History.
+  async function startToolScan() {
+    const key = histKey()
+    if (hs.tool && hs.tool.key === key) return
+    stopToolScan()
+    if (!hs.tools || !hs.q) { renderHistoryParts(); return }
+    const skip = hs.data ? hs.data.sessions.map((s) => s.account + '\u0000' + s.sessionId) : []
+    const tool = { key, job: null, hits: [], done: 0, total: 0, finished: false, error: null, timer: 0 }
+    hs.tool = tool
+    renderHistoryParts()
+    try {
+      const r = await api('/api/history/tools', histParams({ skip }))
+      if (hs.tool !== tool) { api('/api/history/tools', { job: r.job, cancel: true }).catch(() => {}); return }
+      tool.job = r.job
+      pollToolScan(tool)
+    } catch (e) {
+      if (hs.tool !== tool) return
+      tool.error = e
+      tool.finished = true
+      renderHistoryParts()
+    }
+  }
+  async function pollToolScan(tool) {
+    if (hs.tool !== tool) return
+    try {
+      const r = await api('/api/history/tools', { job: tool.job, lang })
+      if (hs.tool !== tool) return
+      tool.hits = r.hits
+      tool.done = r.done
+      tool.total = r.total
+      tool.finished = r.finished
+      if (r.error) tool.error = { message: r.error }
+    } catch (e) {
+      if (hs.tool !== tool) return
+      tool.error = e
+      tool.finished = true
+    }
+    renderHistoryParts()
+    if (curPage !== 'sessions' || hs.mode !== 'history') { stopToolScan(); return }
+    if (!tool.finished) tool.timer = setTimeout(() => pollToolScan(tool), 600)
+  }
+  // Leaving History: answers still on their way are dropped, a typed search waiting to start does not start.
+  function leaveHistory() {
+    stopToolScan()
+    clearTimeout(hs.debounce)
+    if (hs.loading || hs.more || hs.bg) { hs.seq++; hs.loading = false; hs.more = false; hs.bg = false }
+    hs.projSeq++
+  }
+  function stopToolScan() {
+    const tool = hs.tool
+    hs.tool = null
+    if (!tool) return
+    clearTimeout(tool.timer)
+    if (tool.job && !tool.finished) api('/api/history/tools', { job: tool.job, cancel: true }).catch(() => {})
+  }
+
+  // History / Running, at the head of the Sessions page; History is the one it opens on.
+  function modeSeg() {
+    return h('div', { class: 'seg sess-mode', role: 'tablist', 'aria-label': t('hist.modeLabel') }, [['history', t('hist.mode.history')], ['live', t('hist.mode.live')]].map(([id, label]) =>
+      h('button', { class: 'seg-btn', type: 'button', role: 'tab', 'data-key': 'sess-mode-' + id, 'aria-selected': hs.mode === id ? 'true' : 'false', 'aria-busy': id === 'history' && hs.opening ? 'true' : null, onclick: () => setSessMode(id) },
+        id === 'history' && hs.opening ? [spinner(), ' '] : null, label)))
+  }
+  function setSessMode(m) {
+    if (hs.mode === m || hs.opening) return
+    if (m === 'history' && !hs.data && !hs.error) {
+      hs.opening = true
+      sp.drawn = ''
+      renderSessionsPage()
+      Promise.all([loadHistory(), loadProjects()]).finally(() => {
+        hs.opening = false
+        sp.drawn = ''
+        if (curPage === 'sessions') setSessMode('history')
+        else renderSessionsPage()
+      })
+      return
+    }
+    hs.mode = m
+    sp.drawn = ''
+    try { history.replaceState(null, '', '#' + (m === 'live' ? 'live' : 'sessions')) } catch {}
+    if (m === 'live') { leaveHistory(); loadSessions() }
+    renderSessionsPage()
+    if (m === 'history' && hs.els) hs.els.q.focus()
+  }
+
+  // The parts made once: the toolbar, the project list and the places the lists are drawn into.
+  function historyEls() {
+    if (hs.els) return hs.els
+    const e = {}
+    e.q = h('input', { type: 'search', class: 'search-input', autocomplete: 'off', spellcheck: 'false', 'data-key': 'hist-q', value: hs.q || null })
+    e.q.addEventListener('input', () => {
+      clearTimeout(hs.debounce)
+      hs.debounce = setTimeout(() => {
+        const q = e.q.value.trim()
+        if (q === hs.q) return
+        hs.q = q
+        historyChanged(false)
+      }, 150)
+    })
+    e.q.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Escape') return
+      ev.preventDefault()
+      if (e.q.value) { e.q.value = ''; clearTimeout(hs.debounce); hs.q = ''; historyChanged(false) } else e.q.blur()
+    })
+    e.since = h('select', { class: 'tb-select' })
+    e.since.addEventListener('change', () => { hs.since = e.since.value; historyChanged(true) })
+    e.family = h('select', { class: 'tb-select' })
+    e.family.addEventListener('change', () => {
+      hs.family = e.family.value
+      // An Account of another AI would match nothing: it is dropped before the lists are asked for again.
+      if (hs.account && S.state && !S.state.accounts.some((a) => a.ref === hs.account && (!hs.family || a.family === hs.family))) hs.account = ''
+      relabelHistory(e)
+      historyChanged(true)
+    })
+    e.account = h('select', { class: 'tb-select' })
+    e.account.addEventListener('change', () => { hs.account = e.account.value; historyChanged(true) })
+    e.tools = h('input', { type: 'checkbox' })
+    e.tools.addEventListener('change', () => {
+      hs.tools = e.tools.checked
+      if (hs.tools) startToolScan()
+      else { stopToolScan(); renderHistoryParts() }
+    })
+    e.scripts = h('input', { type: 'checkbox' })
+    e.scripts.addEventListener('change', () => { hs.scripts = e.scripts.checked; historyChanged(true) })
+    e.toolsText = h('span')
+    e.scriptsText = h('span')
+    e.displayText = h('span')
+    e.display = h('button', { class: 'btn btn-sm hist-display', type: 'button', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', 'data-key': 'hist-display' }, icon('sliders'), e.displayText)
+    e.display.addEventListener('click', () => openPopover(e.display, 'hist-display', t('hist.display'), displayKids, 'end'))
+    e.toolsLabel = h('label', { class: 'hist-check', tabindex: null }, e.tools, e.toolsText)
+    e.scriptsLabel = h('label', { class: 'hist-check' }, e.scripts, e.scriptsText)
+    e.search = h('label', { class: 'search hist-search' }, icon('search', 'search-ic'), e.q)
+    e.head = h('div', { class: 'section-head' })
+    e.intro = h('p', { class: 'muted small' })
+    e.side = h('nav', { class: 'hist-side' })
+    e.status = h('div', { class: 'hist-status' })
+    e.list = h('div', { class: 'hist-list' })
+    e.tail = h('div', { class: 'hist-tail' })
+    e.toolBox = h('div', { class: 'hist-toolbox' })
+    e.sources = h('div', { class: 'hist-sources-box' })
+    e.ask = h('p', { class: 'muted small sess-ask' })
+    e.main = h('div', { class: 'hist-main' }, e.status, e.list, e.tail, e.toolBox)
+    e.root = h('div', { class: 'hist' },
+      h('div', { class: 'toolbar hist-bar' }, e.search, h('div', { class: 'tools' }, e.since, e.family, e.account), h('div', { class: 'hist-checks' }, e.toolsLabel, e.scriptsLabel, e.display)),
+      h('div', { class: 'hist-grid' }, e.side, e.main))
+    // The list loads its next page when its end scrolls into view; the button is there for keyboards.
+    if ('IntersectionObserver' in window) new IntersectionObserver((xs) => { if (xs.some((x) => x.isIntersecting)) moreIfTailShows() }, { rootMargin: '200px' }).observe(e.tail)
+    hs.els = e
+    return e
+  }
+  function hasMore() { return Boolean(hs.data && hs.data.sessions.length < hs.data.total) }
+  function moreIfTailShows() {
+    const e = hs.els
+    if (!e || !hasMore() || hs.loading || hs.more || hs.moreFailed || !e.tail.isConnected) return
+    const box = e.main.getBoundingClientRect()
+    const at = e.tail.getBoundingClientRect()
+    if (tailInView(at.top, box.bottom, window.innerHeight || document.documentElement.clientHeight)) loadHistory(true)
+  }
+  // Texts and choices that follow the Panel's language and the accounts there are; set only when they changed.
+  function relabelHistory(e) {
+    const set = (el, k, v) => { if (el.getAttribute(k) !== v) el.setAttribute(k, v) }
+    set(e.q, 'placeholder', t('hist.searchPh'))
+    set(e.q, 'aria-label', t('hist.search'))
+    set(e.since, 'aria-label', t('hist.since'))
+    set(e.family, 'aria-label', t('hist.family'))
+    set(e.toolsLabel, 'data-tip', t('hist.toolsTip'))
+    set(e.scriptsLabel, 'data-tip', t('hist.scriptsTip'))
+    if (e.toolsText.textContent !== t('hist.tools')) e.toolsText.textContent = t('hist.tools')
+    if (e.scriptsText.textContent !== t('hist.scripts')) e.scriptsText.textContent = t('hist.scripts')
+    const shown = t('hist.display') + (hs.group === 'none' ? '' : colon() + groupName(hs.group))
+    if (e.displayText.textContent !== shown) e.displayText.textContent = shown
+    const sinceKey = lang + hs.since
+    if (e.since._k !== sinceKey) {
+      e.since._k = sinceKey
+      e.since.replaceChildren(...['today', '7d', '30d', 'all'].map((v) => h('option', { value: v }, t('hist.since.' + v, { n: parseInt(v, 10) }))))
+      e.since.value = hs.since
+    }
+    const fams = S.state ? S.state.families.filter((f) => S.state.accounts.some((a) => a.family === f.id)) : []
+    const famKey = lang + fams.map((f) => f.id).join(',')
+    if (e.family._k !== famKey) {
+      e.family._k = famKey
+      e.family.replaceChildren(h('option', { value: '' }, t('hist.allFamilies')), ...fams.map((f) => h('option', { value: f.id }, f.title)))
+      if (hs.family && !fams.some((f) => f.id === hs.family)) hs.family = ''
+      e.family.value = hs.family
+    }
+    e.family.hidden = fams.length < 2 && !hs.family
+    set(e.account, 'aria-label', t('hist.account'))
+    const accts = S.state ? S.state.accounts.filter((a) => !hs.family || a.family === hs.family) : []
+    const acctKey = lang + accts.map((a) => a.ref + ' ' + (a.aliases || [])[0]).join(',')
+    if (e.account._k !== acctKey) {
+      e.account._k = acctKey
+      e.account.replaceChildren(h('option', { value: '' }, t('hist.allAccounts')), ...accts.map((a) => h('option', { value: a.ref }, (a.aliases || [])[0] ? a.aliases[0] + ' · ' + a.ref : a.ref)))
+      if (hs.account && !accts.some((a) => a.ref === hs.account)) hs.account = ''
+      e.account.value = hs.account
+    }
+    e.account.hidden = accts.length < 2 && !hs.account
+    e.tools.checked = hs.tools
+    e.scripts.checked = hs.scripts
+  }
+  // Draws el again only when what it shows changed, so a renewal with the same answer redraws nothing.
+  function drawIf(el, key, kids) {
+    if (el._drawn === key) return
+    el._drawn = key
+    swapKids(el, kids())
+  }
+  // drawIf for a long list: groups and rows that did not change stay the same elements, so folding one group or a
+  // quiet renewal does not rebuild thousands of rows; a row that was not there before grows in.
+  function patchIf(el, key, kids) {
+    if (el._drawn === key) return
+    el._drawn = key
+    const shown = el.childNodes.length > 0
+    const before = new Set([...el.querySelectorAll('[data-enter]')].map((x) => x.getAttribute('data-enter')))
+    for (const x of el.querySelectorAll('.enter')) x.classList.remove('enter')
+    for (const x of el.querySelectorAll('.fade-in')) x.classList.remove('fade-in')
+    patch(el, kids())
+    if (!shown || REDUCED) return
+    const fresh = [...el.querySelectorAll('[data-enter]')].filter((x) => !before.has(x.getAttribute('data-enter')))
+    // A few new rows grow in; a batch fades in at once, since many small motions in a row stutter.
+    for (const x of fresh) x.classList.add(fresh.length > 6 ? 'fade-in' : 'enter')
+  }
+  function renderHistoryPage() {
+    const box = $('sessions-page')
+    const e = historyEls()
+    relabelHistory(e)
+    if (!box.contains(e.root)) {
+      setKids(box, [e.head, e.intro, e.root, e.sources, e.ask])
+      e.head._drawn = null
+    }
+    drawIf(e.head, JSON.stringify([lang, hs.mode, hs.opening]), () => [h('h2', { id: 'h-sessions' }, t('spage.title')), modeSeg()])
+    if (e.intro.textContent !== t('hist.intro')) e.intro.textContent = t('hist.intro')
+    const ask = t('spage.askHint', { example: t('hist.askEx') })
+    if (e.ask.textContent !== ask) e.ask.textContent = ask
+    // With no Account there is nothing to search or filter: only the note saying how to start is shown.
+    const none = Boolean(S.state && !S.state.accounts.length)
+    e.root.classList.toggle('hist-none', none)
+    e.ask.hidden = none
+    if (!hs.data && !hs.loading && !hs.error) { hs.swap = true; loadHistory(); loadProjects() }
+    renderHistorySide()
+    renderHistoryParts()
+  }
+  function renderHistorySide() {
+    const e = hs.els
+    if (!e || !e.root.isConnected) return
+    const list = hs.projects
+    const shown = list && list.map((p) => [p.project, p.name, p.sessions, p.gone, p.category])
+    drawIf(e.side, JSON.stringify([lang, hs.project, hs.category, shown, hs.cats, hs.projError ? hs.projError.message : '']), () => {
+      const total = list ? list.reduce((n, p) => n + p.sessions, 0) : 0
+      const item = (project, name, count, gone, tip) => h('button', { class: 'hist-proj', type: 'button', 'data-key': 'hist-p-' + project, 'aria-pressed': hs.project === project && !(project === '' && hs.category) ? 'true' : 'false', title: tip || null, onclick: () => pickProject(project) },
+        h('span', { class: 'hist-proj-name' }, name),
+        gone ? h('span', { class: 'hist-proj-gone', 'aria-label': t('hist.gone'), title: t('hist.goneTip') }, icon('folder')) : null,
+        h('span', { class: 'hist-proj-n' }, count === null ? '' : String(count)))
+      if (hs.projError) return [h('h3', { class: 'hist-side-h' }, t('hist.projects')), errorNote(hs.projError, loadProjects)]
+      if (!list) return [h('h3', { class: 'hist-side-h' }, t('hist.projects')), [0, 1, 2, 3].map(() => h('span', { class: 'sk sk-title hist-sk' }))]
+      const proj = (p) => item(p.project, p.name, p.sessions, p.gone, p.project + (p.gone ? ' · ' + t('hist.gone') : ''))
+      const all = item('', t('hist.allProjects'), total)
+      if (!hs.cats) return [h('h3', { class: 'hist-side-h' }, t('hist.projects')), h('div', { class: 'hist-projs' }, all, list.map(proj))]
+      // With a plugin's categories: each category heads its Projects, in the order of their latest Session; a
+      // category heading filters to all of its Projects. Projects without one come last.
+      const cats = new Map()
+      for (const p of list) { const c = p.category || ''; if (!cats.has(c)) cats.set(c, []); cats.get(c).push(p) }
+      const order = [...cats.keys()].filter(Boolean).concat(cats.has('') ? [''] : [])
+      return [h('h3', { class: 'hist-side-h' }, groupName('category')), h('div', { class: 'hist-projs' }, all,
+        order.map((c) => {
+          const ps = cats.get(c)
+          const n = ps.reduce((x, p) => x + p.sessions, 0)
+          const name = c || t('hist.noCategory')
+          const folded = Boolean(prefs.histCatFold[c])
+          const bodyId = 'hcat-' + order.indexOf(c)
+          const chev = h('button', { class: 'hist-catfold', type: 'button', 'data-key': 'hist-cf-' + c, 'aria-expanded': String(!folded), 'aria-controls': bodyId,
+            'aria-label': t('group.toggle', { title: name, count: String(n), action: t(folded ? 'hist.unfoldOne' : 'hist.fold') }) }, icon('chevron', 'chev'))
+          const pick = c
+            ? h('button', { class: 'hist-proj hist-cat', type: 'button', 'data-key': 'hist-c-' + c, 'aria-pressed': hs.category === c ? 'true' : 'false', onclick: () => pickCategory(c) },
+              h('span', { class: 'hist-proj-name' }, c), h('span', { class: 'hist-proj-n' }, String(n)))
+            : h('span', { class: 'hist-cat hist-cat-none' }, h('span', { class: 'hist-proj-name' }, name), h('span', { class: 'hist-proj-n' }, String(n)))
+          const grp = h('div', { class: 'hist-catgrp' + (folded ? ' is-folded' : ''), role: 'group', 'aria-label': name },
+            h('div', { class: 'hist-cathead' }, chev, pick),
+            h('div', { class: 'hist-catbody', id: bodyId }, h('div', { class: 'hist-catps' }, ps.map(proj))))
+          chev.addEventListener('click', () => foldCategory(c, grp, chev, name, n))
+          return grp
+        }))]
+    })
+  }
+  // A category in the side list folds in place (CSS eases its height); the list is not drawn again for it.
+  function foldCategory(c, grp, chev, name, n) {
+    const folded = !prefs.histCatFold[c]
+    if (folded) {
+      if (Object.keys(prefs.histCatFold).length >= HIST_FOLD_MAX) delete prefs.histCatFold[Object.keys(prefs.histCatFold)[0]]
+      prefs.histCatFold[c] = true
+    } else delete prefs.histCatFold[c]
+    savePrefs()
+    grp.classList.toggle('is-folded', folded)
+    chev.setAttribute('aria-expanded', String(!folded))
+    chev.setAttribute('aria-label', t('group.toggle', { title: name, count: String(n), action: t(folded ? 'hist.unfoldOne' : 'hist.fold') }))
+  }
+  function pickProject(p) {
+    if (hs.project === p && !hs.category) return
+    hs.project = p
+    hs.category = ''
+    renderHistorySide()
+    historyChanged(false)
+  }
+  function pickCategory(c) {
+    if (hs.category === c) return
+    hs.category = c
+    hs.project = ''
+    renderHistorySide()
+    historyChanged(false)
+  }
+  // ---------- grouping the list ----------
+  // A "Display" popover by the filters picks how the list is grouped; a group folds from its header and stays
+  // folded in this browser. The server pages through the groups in order and counts folded ones without their rows.
+  function groupName(by) {
+    return by === 'category' && hs.cats && hs.cats.label ? hs.cats.label : t('hist.by.' + by)
+  }
+  function groupChoices() {
+    return HIST_GROUPS.filter((g) => (g !== 'category' || hs.cats) && (g !== 'family' || histFamilies().length > 1) && (g !== 'account' || histAccounts().length > 1))
+  }
+  function displayKids() {
+    const fold = histFold(histGroupNow())
+    const folded = Object.keys(fold).length
+    return [
+      h('b', null, t('hist.groupBy')),
+      h('div', { class: 'hist-opts', role: 'group', 'aria-label': t('hist.groupBy') }, groupChoices().map((g) =>
+        h('button', { class: 'hist-opt', type: 'button', 'aria-pressed': String(hs.group === g), 'data-key': 'hist-by-' + g, onclick: () => setHistGroup(g) },
+          h('span', { class: 'hist-opt-ck', 'aria-hidden': 'true' }, hs.group === g ? icon('check') : null),
+          h('span', null, groupName(g))))),
+      hs.cats ? h('p', { class: 'muted small' }, t('hist.catsFrom', { label: groupName('category'), plugin: hs.cats.from })) : null,
+      folded && histGroupNow() !== 'none' ? h('div', { class: 'popover-actions' }, h('button', { class: 'btn btn-sm', type: 'button', onclick: unfoldAll }, t('hist.unfold', { n: folded }))) : null,
+    ]
+  }
+  function setHistGroup(g) {
+    if (hs.group === g) return
+    hs.group = g
+    prefs.histGroup = g
+    savePrefs()
+    refreshPopover('hist-display')
+    if (hs.els) relabelHistory(hs.els)
+    historyChanged(false)
+  }
+  function unfoldAll() {
+    prefs.histFold[histGroupNow()] = {}
+    savePrefs()
+    refreshPopover('hist-display')
+    historyChanged(false)
+  }
+  function groupTitle(by, g) {
+    if (by === 'day') return t('hist.day.' + g.key, { n: g.key === 'week' ? 7 : 30 })
+    if (!g.key) return t(by === 'project' ? 'hist.noProject' : by === 'category' ? 'hist.noCategory' : 'hist.other')
+    return g.label
+  }
+  // The groups as headers over their rows. A group shows once a row of it is loaded; a folded one shows in its
+  // place among them (or at the end once everything is loaded), so paging never shuffles the headers.
+  function historyGroups(d, words) {
+    const by = d._by
+    const rows = new Map()
+    for (const s of d.sessions) { const k = s.group || ''; if (!rows.has(k)) rows.set(k, []); rows.get(k).push(s) }
+    let last = -1
+    d.groups.forEach((g, i) => { if (rows.has(g.key)) last = i })
+    const all = !hasMore()
+    return d.groups.filter((g, i) => rows.has(g.key) || g.opening || (g.collapsed && (all || i < last))).map((g, i) => {
+      const open = !g.collapsed
+      const title = groupTitle(by, g)
+      const bodyId = 'hg-' + i
+      const list = rows.get(g.key) || []
+      const btn = h('button', { class: 'group-toggle hist-gtoggle', type: 'button', 'data-key': 'hist-g-' + by + '-' + g.key, 'aria-expanded': String(open), 'aria-controls': open && list.length ? bodyId : null,
+        'aria-label': t('group.toggle', { title, count: String(g.sessions), action: t(open ? 'hist.fold' : 'hist.unfoldOne') }), title: by === 'project' && g.key ? g.key : null },
+        icon('chevron', 'chev'), by === 'family' && g.key ? badge(g.key, 'sm') : null,
+        h('span', { class: 'hist-gtitle' }, title),
+        g.opening ? spinner() : h('span', { class: 'group-count' }, String(g.sessions)))
+      // patch keeps this button across redraws, so the group is looked up when clicked, never kept from this draw.
+      btn.addEventListener('click', () => {
+        const cur = hs.data && hs.data._by === by && hs.data.groups.find((x) => x.key === g.key)
+        if (cur) toggleHistGroup(by, cur, btn)
+      })
+      return h('section', { class: 'hist-group' + (open ? '' : ' is-folded'), 'data-key': 'hg-' + by + '-' + g.key, 'aria-label': title, 'data-patch': '' },
+        h('div', { class: 'hist-ghead', 'data-key': 'hgh' }, btn),
+        open && list.length ? h('div', { class: 'group-list hist-rows', role: 'list', id: bodyId, 'data-key': 'hgr', 'data-patch': '' }, list.map((s) => historyRow(s, words, by === 'project' || Boolean(hs.project)))) : null)
+    })
+  }
+  // Folding eases the group's rows away and drops them from the list at once; the list is then asked again quietly,
+  // so the next page starts at the right place. Unfolding asks for the group's rows, with a spinner in its header.
+  function toggleHistGroup(by, g, btn) {
+    const d = hs.data
+    if (!d || d._by !== by) return
+    const fold = histFold(by)
+    if (g.collapsed) {
+      delete fold[g.key]
+      savePrefs()
+      g.collapsed = false
+      g.opening = true
+      hs.growing = { by, key: g.key }
+      renderHistoryParts()
+      loadHistory(false, d.sessions.length + g.sessions, true, { key: g.key, rows: d.sessions })
+      return
+    }
+    if (Object.keys(fold).length >= HIST_FOLD_MAX) delete fold[Object.keys(fold)[0]]
+    fold[g.key] = true
+    savePrefs()
+    const done = () => {
+      if (hs.data !== d) return
+      d.sessions = d.sessions.filter((s) => (s.group || '') !== g.key)
+      d.total = Math.max(0, d.total - g.sessions)
+      g.collapsed = true
+      renderHistoryParts()
+      loadHistory(false, d.sessions.length, true, { rows: d.sessions })
+    }
+    const sec = btn.closest('.hist-group')
+    const body = sec && sec.querySelector('.hist-rows')
+    const head = sec && sec.querySelector('.hist-ghead')
+    if (!body || !head || !moving()) { done(); return }
+    btn.setAttribute('aria-expanded', 'false')
+    const from = sec.getBoundingClientRect().height
+    const to = head.getBoundingClientRect().height
+    sec.style.overflow = 'hidden'
+    const a = sec.animate([{ height: from + 'px' }, { height: to + 'px' }], { duration: FOLD_MS, easing: EASE, fill: 'forwards' })
+    body.animate([{ opacity: 1 }, { opacity: 0 }], { duration: FOLD_MS * 0.7, easing: 'ease-out', fill: 'forwards' })
+    a.finished.then(() => {
+      body.remove()
+      a.cancel()
+      sec.style.overflow = ''
+      done()
+    }, () => {})
+  }
+  // An opened group grows from its header to its rows once they are drawn, as one motion; its rows do not grow
+  // in one by one (125 small motions stutter).
+  function growOpened(by, key) {
+    const e = hs.els
+    const sec = e && e.list.querySelector('.hist-group[data-key="' + CSS.escape('hg-' + by + '-' + key) + '"]')
+    const body = sec && sec.querySelector('.hist-rows')
+    const head = sec && sec.querySelector('.hist-ghead')
+    if (!body || !head || !moving()) return
+    for (const x of body.querySelectorAll('.enter')) x.classList.remove('enter')
+    const from = head.getBoundingClientRect().height
+    const to = sec.getBoundingClientRect().height
+    sec.style.overflow = 'hidden'
+    const a = sec.animate([{ height: from + 'px' }, { height: to + 'px' }], { duration: FOLD_MS, easing: EASE })
+    body.animate([{ opacity: 0 }, { opacity: 1 }], { duration: FOLD_MS, easing: 'ease-out' })
+    a.finished.then(() => { sec.style.overflow = '' }, () => {})
+  }
+  // One list for the row's "…" button and its right-click menu (spec §3.27), in the order of how often each is used.
+  // at is the row's own "…" button: a right-click menu opens at a point that is gone once the menu closes.
+  function historyItems(at, s) {
+    return [
+      { icon: 'eye', label: t('hist.open'), run: () => openHistoryView(s, at) },
+      { icon: 'terminal', label: t('hist.continue'), run: () => sessCopy(at, s.continueCommand, () => toast(t('hist.copiedContinue'), { key: 'hist-copy' })) },
+      '-',
+      { icon: 'copy', label: t('spage.copyAi'), run: () => sessCopy(at, s.reference, () => toast(t('spage.copiedToast'))) },
+      { icon: 'copy', label: t('spage.copyId'), hint: s.sessionId.slice(0, 8), run: () => sessCopy(at, s.sessionId, () => toast(t('toast.copied', { text: s.sessionId.slice(0, 8) }))) },
+    ]
+  }
+  function historyMenu(anchor, s, at) {
+    openMenu(anchor, historyItems(at || anchor, s), t('hist.more', { title: s.title || t('hist.untitled') }))
+  }
+  // The button itself says it copied; a toast would only repeat it far from where the user looks.
+  function copyContinue(btn, s) {
+    sessCopy(btn, s.continueCommand, () => {
+      toast(t('hist.copiedContinue'), { key: 'hist-copy' })
+      btn.classList.add('is-copied')
+      setKids(btn, [icon('check'), h('span', null, t('spage.copied'))])
+      setTimeout(() => { btn.classList.remove('is-copied'); setKids(btn, [icon('terminal'), h('span', null, t('hist.continueShort'))]) }, 1500)
+    })
+  }
+  // The project name is left out where the group heading or the picked project already says it (noProject).
+  function historyRow(s, words, noProject) {
+    const title = s.title || t('hist.untitled')
+    const k = s.account + '-' + s.sessionId
+    const open = h('button', { class: 'hist-open', type: 'button', tabindex: '-1', 'data-key': 'hist-open-' + k, 'aria-label': t('hist.openLabel', { title }) }, highlighted(title, words))
+    open.addEventListener('click', () => openHistoryView(s, open))
+    const more = h('button', { class: 'icon-btn more', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'data-key': 'hist-more-' + k, 'aria-label': t('hist.more', { title }), 'data-tip': t('menu.title') }, icon('more'))
+    more.addEventListener('click', () => historyMenu(more, s))
+    const view = h('button', { class: 'btn btn-sm hist-view', type: 'button', 'data-key': 'hist-view-' + k, 'aria-label': t('hist.openLabel', { title }) }, icon('eye'), h('span', null, t('hist.viewShort')))
+    view.addEventListener('click', () => openHistoryView(s, view))
+    const cont = h('button', { class: 'btn btn-sm hist-cont', type: 'button', 'data-key': 'hist-cont-' + k, 'aria-label': t('hist.continueFor', { title }), 'data-tip': t(s.cwdGone ? 'hist.continueGoneTip' : 'hist.continueTip') }, icon('terminal'), h('span', null, t('hist.continueShort')))
+    cont.addEventListener('click', () => copyContinue(cont, s))
+    const row = h('div', { class: 'hist-row' + (s.live ? ' is-live' : ''), role: 'listitem', 'data-key': 'hr-' + k, 'data-sig': sig([s.continueCommand, s.reference, s.cwd, s.updatedAt, Boolean(noProject)]), 'data-enter': 'h-' + k },
+      badge(s.family, 'sm'),
+      h('div', { class: 'hist-body' },
+        h('div', { class: 'hist-line' }, open,
+          s.live ? h('span', { class: 'hist-live', tabindex: '0', 'data-tip': t('hist.liveTip') }, h('span', { class: 'hist-dot', 'aria-hidden': 'true' }), t('hist.live')) : null),
+        h('div', { class: 'hist-meta muted small' }, h('div', { class: 'hist-mi-wrap' }, metaItems([
+          h('b', null, s.accountLabel),
+          s.projectName && !noProject ? h('span', { class: 'hist-pname', title: s.cwd || s.project }, s.projectName) : null,
+          s.cwdGone ? h('span', { class: 'chip chip-sm hist-gone', tabindex: '0', 'data-tip': t('hist.goneTip') }, t('hist.gone')) : null,
+          s.branch ? h('span', { class: 'mono hist-branch' }, s.branch) : null,
+          tn('hist.msgs', s.messages),
+          s.children ? h('span', { class: 'chip chip-sm', tabindex: '0', 'data-tip': t('hist.kidsTip') }, tn('hist.kids', s.children)) : null,
+          s.script ? h('span', { class: 'chip chip-sm' }, t('hist.script')) : null,
+          h('span', { class: 'hist-age', 'data-hage': s.updatedAt, title: fullWhen(s.updatedAt) }, whenText(s.updatedAt)),
+        ]))),
+        s.snippet && !sameText(s.snippet, s.title) ? h('div', { class: 'hist-snip' }, highlighted(s.snippet, words))
+          : s.preview ? h('div', { class: 'hist-snip' }, s.preview) : null),
+      h('div', { class: 'sess-actions' }, view, cont, more))
+    // A click on the row's empty space reads the conversation too; text being selected stays a selection.
+    row.addEventListener('click', (ev) => {
+      if (ev.target.closest('button, a, input, .chip, .hist-live') || String(window.getSelection ? window.getSelection() : '')) return
+      openHistoryView(s, open)
+    })
+    return withMenu(row, (a) => historyMenu(a, s, more))
+  }
+  // Each item carries its own leading dot; the dots of items that start a line fall outside the box and are clipped.
+  function metaItems(parts) {
+    return parts.filter((p) => p !== null && p !== undefined && p !== false && p !== '').map((p) => h('span', { class: 'hist-mi' }, p))
+  }
+  function rowsShape(list) {
+    return list.map((s) => [s.account, s.sessionId, s.title, s.updatedAt, s.messages, s.children, s.live, s.snippet, s.preview, s.projectName, s.cwdGone, s.branch, s.script])
+  }
+  // Everything under the toolbar: the count and index state, the rows, the end of the list, tool output and sources.
+  function renderHistoryParts() {
+    const e = hs.els
+    if (!e || !e.root.isConnected) return
+    // A row's menu stays open: the redraw waits until it closes (historyTick draws it then).
+    if (menu.el && menu.anchor && menu.kind !== 'hist-display' && e.root.contains(menu.returnTo || menu.anchor)) { hs.pending = true; return }
+    hs.pending = false
+    const d = hs.data
+    if (d && d.state !== 'building') hs.indexed = true
+    const words = histWords()
+    e.list.classList.toggle('is-loading', Boolean(hs.loading && d))
+    e.list.classList.toggle('is-long', Boolean(d && d.sessions.length > 60))
+    if (hs.loading && d) { if (!e.list.style.minHeight) e.list.style.minHeight = e.list.offsetHeight + 'px' }
+    else e.list.style.minHeight = ''
+    e.list.setAttribute('aria-busy', hs.loading ? 'true' : 'false')
+    drawIf(e.status, JSON.stringify([lang, d ? [d.sessions.length, d.total, d.state, d.progress, d.problems] : null, hs.error ? hs.error.message : '']), () => {
+      const out = []
+      if (hs.error) out.push(errorNote(hs.error, () => loadHistory()))
+      if (!d) return out
+      if (d.total) out.push(h('p', { class: 'muted small hist-count' }, tn('hist.shown', d.total, { shown: d.sessions.length })))
+      // Only the first build gets the note: a later renewal that reads a few changed files would make the list jump.
+      if (d.state === 'building' && !hs.indexed) out.push(h('p', { class: 'note small hist-building' }, spinner(), ' ', d.progress.total ? t('hist.building', { done: d.progress.done, total: d.progress.total }) : t('hist.buildingStart')))
+      if (d.state === 'off') out.push(h('p', { class: 'note small' }, t('hist.indexOff')))
+      for (const p of d.problems) out.push(h('p', { class: 'note note-warn small' }, p))
+      return out
+    })
+    patchIf(e.list, JSON.stringify([lang, words, d ? rowsShape(d.sessions) : null, d ? [d.total, d.state, d.sources.length, d.sources.reduce((n, x) => n + x.sessions, 0), d._by, d.groups || null, hasMore()] : null, hs.since, hs.tools, hs.project, hs.category, Boolean(hs.error)]), () => {
+      if (!d) return hs.error ? [] : h('div', { class: 'group-list', 'aria-busy': 'true' }, [0, 1, 2, 3, 4].map(() => h('div', { class: 'sk-row' }, h('span', { class: 'sk sk-badge' }), h('span', { class: 'sk sk-title' }), h('span', { class: 'sk sk-bar' }))))
+      const empty = historyEmpty({ q: hs.q, since: hs.since, state: d.state, total: d.total, tools: hs.tools, project: hs.project || hs.category, accounts: d.sources.length, stored: d.sources.reduce((n, x) => n + x.sessions, 0), unreadable: !!hs.family && d.sources.some((x) => x.family === hs.family) && d.sources.filter((x) => x.family === hs.family).every((x) => x.reason === 'unsupported') })
+      // Every match in a folded group: the folded headers are the list.
+      if (empty && !(d.groups && d.groups.length)) return h('div', { class: 'empty empty-sm hist-empty' },
+        h('p', null, t(empty.key, { q: hs.q })),
+        empty.widen || empty.tools || empty.accounts || empty.everywhere ? h('div', { class: 'hist-ways' },
+          empty.everywhere ? h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => pickProject('') }, t('hist.everywhere')) : null,
+          empty.accounts ? h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => { location.hash = '' } }, t('hist.goAccounts')) : null,
+          empty.widen ? h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { hs.since = 'all'; e.since.value = 'all'; historyChanged(true) } }, t('hist.widen')) : null,
+          empty.tools ? h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { hs.tools = true; e.tools.checked = true; startToolScan() } }, t('hist.tools')) : null) : null)
+      if (d.groups && d.groups.length) return historyGroups(d, words)
+      return h('div', { class: 'group-list hist-rows', role: 'list', 'data-key': 'hrows', 'data-patch': '' }, d.sessions.map((s) => historyRow(s, words, Boolean(hs.project))))
+    })
+    if (hs.swap && !hs.loading) {
+      hs.swap = false
+      for (const x of e.list.querySelectorAll('.enter')) x.classList.remove('enter')
+      if (!REDUCED) { e.list.classList.remove('swap-in'); void e.list.offsetWidth; e.list.classList.add('swap-in') }
+    }
+    drawIf(e.tail, JSON.stringify([lang, hasMore(), hs.more, hs.moreFailed, d ? d.total : 0, hs.since]), () => {
+      if (!d || !d.total) return []
+      if (hasMore()) return h('button', { class: 'btn btn-sm hist-more', type: 'button', 'data-key': 'hist-more-page', disabled: hs.more, onclick: () => { hs.moreFailed = false; loadHistory(true) } }, hs.more ? [spinner(), ' '] : null, t(hs.moreFailed ? 'hist.retryMore' : 'hist.loadMore'))
+      const older = hs.since !== 'all' ? h('button', { class: 'btn btn-sm hist-more', type: 'button', onclick: () => { hs.since = 'all'; e.since.value = 'all'; historyChanged(true) } }, t('hist.older')) : null
+      return [d.total > HIST_PAGE ? h('p', { class: 'muted small' }, t('hist.end')) : null, older].filter(Boolean)
+    })
+    const tool = hs.tool
+    drawIf(e.toolBox, JSON.stringify([lang, words, tool ? [tool.key, rowsShape(tool.hits), tool.done, tool.total, tool.finished, tool.error ? tool.error.message : ''] : null, hs.tools, Boolean(hs.q)]), () => {
+      if (!hs.tools) return []
+      if (!hs.q) return h('p', { class: 'muted small' }, t('hist.toolsNeedWords'))
+      if (!tool) return []
+      const head = h('div', { class: 'hist-tool-head' },
+        h('h3', null, t('hist.toolsHead')),
+        tool.finished ? h('span', { class: 'muted small' }, tool.total ? tn('hist.toolsDone', tool.total) : '')
+          : h('span', { class: 'muted small hist-tool-prog' }, spinner(), ' ', tool.total ? t('hist.toolsProgress', { done: tool.done, total: tool.total }) : t('hist.toolsStarting')),
+        tool.finished ? null : h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { stopToolScan(); renderHistoryParts() } }, t('hist.toolsStop')))
+      if (tool.finished && !tool.error && !tool.hits.length) return h('p', { class: 'muted small' }, t('hist.toolsNone'))
+      const out = [head]
+      if (tool.error) out.push(errorNote(tool.error, () => { hs.tool = null; startToolScan() }))
+      if (tool.hits.length) out.push(h('div', { class: 'group-list hist-rows', role: 'list' }, tool.hits.map((s) => historyRow(s, words))))
+      else if (tool.finished && !tool.error) out.push(h('p', { class: 'muted small' }, t('hist.toolsNone')))
+      return out
+    })
+    drawIf(e.sources, JSON.stringify([lang, d ? d.sources : null, hs.clearing]), () => {
+      if (!d || !d.sources.length) return []
+      const sessions = d.sources.reduce((n, x) => n + x.sessions, 0)
+      const details = h('details', { class: 'hist-sources', open: hs.srcOpen },
+        h('summary', null, t('hist.sources'), h('span', { class: 'muted' }, ' · ' + t('hist.sourcesSum', { accounts: d.sources.length, sessions }))),
+        h('table', { class: 'hist-src' },
+          h('thead', null, h('tr', null, h('th', null, t('hist.src.account')), h('th', { class: 'num' }, t('hist.src.sessions')), h('th', null, t('hist.src.note')))),
+          h('tbody', null, d.sources.map((x) => h('tr', null,
+            h('td', null, h('span', { class: 'title-logo' }, badge(x.family, 'sm'), x.accountLabel)),
+            h('td', { class: 'num' }, String(x.sessions)),
+            h('td', { class: 'muted' }, [x.failed ? tn('hist.src.failed', x.failed) : null, x.note ? (x.failed ? ' · ' : '') + (x.reason && x.reason !== 'unreadable' ? t('hist.src.' + x.reason) : x.note) : null]))))),
+        BOOT.readOnly ? null : h('p', { class: 'hist-clear' },
+          h('button', { class: 'btn btn-sm', type: 'button', disabled: hs.clearing, 'data-tip': t('hist.clearTip'), onclick: clearHistoryIndex }, hs.clearing ? [spinner(), ' '] : null, t('hist.clear'))))
+      details.addEventListener('toggle', () => { hs.srcOpen = details.open })
+      return details
+    })
+  }
+  async function clearHistoryIndex() {
+    hs.clearing = true
+    renderHistoryParts()
+    try {
+      await api('/api/history/index', { clear: true })
+      toast(t('hist.cleared'))
+      historyChanged(true)
+    } catch (e) { toast(e.message, { kind: 'fail' }) }
+    hs.clearing = false
+    renderHistoryParts()
+  }
+  // While History shows: the ages every second, and a renewal while the index is built, then now and then.
+  function historyTick() {
+    const e = hs.els
+    if (!e || !e.root.isConnected) return
+    for (const el of e.root.querySelectorAll('[data-hage]')) {
+      const text = whenText(el.getAttribute('data-hage'))
+      if (el.textContent !== text) el.textContent = text
+    }
+    if (hs.pending) renderHistoryParts()
+    const d = hs.data
+    if (!d || hs.loading || hs.more || hs.bg || conn.lost) return
+    const every = d.state === 'building' ? HIST_TICK_MS : HIST_IDLE_MS
+    // Deep in a long list, a renewal would cut what is loaded; the filters and the search still start it again.
+    if (Date.now() - hs.at < every || d.sessions.length > HIST_KEEP) return
+    // The project list follows every renewal: a Session coming back into the time range changes its counts
+    // without changing the total. It redraws only when what it shows changed.
+    Promise.resolve(loadHistory(false, d.sessions.length, true)).then(loadProjects)
+  }
+
+  // ---------- reading one past session ----------
+  // Read only. The newest 200 messages first, older ones on request; a run of tool calls is one line. The dialog
+  // opens once the messages are in, at its final size, scrolled to the end.
+  const hv = { data: null, open: {}, loading: false }
+  async function openHistoryView(s, btn) {
+    if (hv.loading) return
+    hv.loading = true
+    if (btn) { btn.setAttribute('aria-busy', 'true'); btn.prepend(spinner()) }
+    try {
+      hv.data = await api('/api/history/show', { id: s.sessionId, account: s.account, lang })
+    } catch (e) {
+      // A record removed since the list was read: say so plainly and drop it from the list.
+      if (e.code === 'session-gone') { toast(t('hist.gonefile'), { kind: 'fail' }); loadHistory(false, hs.data ? hs.data.sessions.length : 0, true) }
+      else toast(e.message, { kind: 'fail' })
+      return
+    } finally {
+      hv.loading = false
+      if (btn) { btn.removeAttribute('aria-busy'); const sp = btn.querySelector('.spin'); if (sp) sp.remove() }
+    }
+    hv.open = {}
+    ensureDialog()
+    renderHistoryView()
+    showDialog('history')
+    const box = dlg.el.querySelector('.hv-msgs')
+    if (box) box.scrollTop = box.scrollHeight
+  }
+  async function historyEarlier(btn) {
+    const d = hv.data
+    if (!d || d.before === undefined || hv.loading) return
+    hv.loading = true
+    btn.disabled = true
+    try {
+      const r = await api('/api/history/show', {
+        id: d.session.sessionId,
+        account: d.session.account,
+        before: d.before,
+        lang,
+      })
+      const box = dlg.el.querySelector('.hv-msgs')
+      const fromEnd = box ? box.scrollHeight - box.scrollTop : 0
+      hv.data = Object.assign({}, r, { messages: r.messages.concat(d.messages) })
+      if (r.before === undefined) delete hv.data.before
+      renderHistoryView()
+      const again = dlg.el.querySelector('.hv-msgs')
+      if (again) again.scrollTop = again.scrollHeight - fromEnd
+    } catch (e) { toast(e.message, { kind: 'fail' }); btn.disabled = false }
+    hv.loading = false
+  }
+  // Markdown in a reply, built as nodes (never as HTML), so a transcript cannot add markup or scripts to the page.
+  function mdSpans(text) {
+    return mdInline(text).map((x) => x.t === 'text' ? x.text
+      : x.t === 'code' ? h('code', null, x.text)
+      : x.t === 'b' ? h('strong', null, mdSpans(x.text))
+      : x.t === 'i' ? h('em', null, mdSpans(x.text))
+      : h('a', { href: x.href, target: '_blank', rel: 'noopener noreferrer' }, x.text))
+  }
+  function mdNodes(text) {
+    const cell = (tag, c, align) => h(tag, { css: align ? { 'text-align': align } : null }, mdSpans(c))
+    return mdBlocks(text).map((b) => {
+      if (b.type === 'code') return h('pre', { class: 'hv-code' }, h('code', null, b.text))
+      if (b.type === 'h') return h('p', { class: 'hv-h' }, mdSpans(b.text))
+      if (b.type === 'quote') return h('blockquote', null, mdSpans(b.text))
+      if (b.type === 'list') return h(b.ordered ? 'ol' : 'ul', null, b.items.map((it) => h('li', null, mdSpans(it))))
+      if (b.type === 'hr') return h('hr', null)
+      if (b.type === 'table') return h('div', { class: 'hv-table' }, h('table', null,
+        h('thead', null, h('tr', null, b.head.map((c, k) => cell('th', c, b.align[k])))),
+        h('tbody', null, b.rows.map((r) => h('tr', null, r.map((c, k) => cell('td', c, b.align[k])))))))
+      return h('p', null, mdSpans(b.text))
+    })
+  }
+  function messageBlock(m) {
+    if (m.role === 'tools') {
+      const names = [...new Set(m.tools)]
+      const shown = names.slice(0, 6).join(', ') + (names.length > 6 ? ', …' : '')
+      return h('div', { class: 'hv-tools muted small' }, icon('terminal'), h('span', null, t('hv.tools', { tools: shown })))
+    }
+    const long = m.text.length > HIST_CLIP && !hv.open[m.n]
+    const show = long ? m.text.slice(0, HIST_CLIP) + '…' : m.text
+    return h('div', { class: 'hv-msg hv-' + m.role },
+      h('div', { class: 'hv-who small' }, h('b', null, m.role === 'user' ? t('hv.you') : t('hv.ai')), m.at ? h('span', { class: 'muted', title: fullWhen(m.at) }, whenText(m.at)) : null),
+      m.role === 'user' ? h('div', { class: 'hv-text' }, show) : h('div', { class: 'hv-text hv-md' }, mdNodes(show)),
+      long ? h('button', { class: 'btn btn-sm btn-ghost hv-all', type: 'button', onclick: () => { hv.open[m.n] = true; const box = dlg.el.querySelector('.hv-msgs'); const top = box ? box.scrollTop : 0; renderHistoryView(); const again = dlg.el.querySelector('.hv-msgs'); if (again) again.scrollTop = top } }, t('hv.showAll')) : null)
+  }
+  function renderHistoryView() {
+    const d = hv.data
+    const s = d.session
+    const msgs = foldToolCalls(d.messages)
+    const earlier = d.before !== undefined ? h('button', { class: 'btn btn-sm hv-earlier', type: 'button' }, t('hv.earlier')) : null
+    if (earlier) earlier.addEventListener('click', () => historyEarlier(earlier))
+    const body = [
+      h('p', { class: 'muted small hv-meta' }, dots([
+        h('b', null, s.accountLabel),
+        s.projectName ? h('span', { title: s.cwd || s.project }, s.projectName) : null,
+        s.cwdGone ? t('hist.gone') : null,
+        s.branch ? h('span', { class: 'mono' }, s.branch) : null,
+        s.model ? h('span', { class: 'mono' }, s.model) : null,
+        tn('hist.msgs', s.messages),
+        h('span', { title: fullWhen(s.updatedAt) }, whenText(s.updatedAt)),
+      ])),
+      h('div', { class: 'hv-msgs', tabindex: '0', 'aria-label': t('hv.messages') },
+        earlier || h('p', { class: 'muted small hv-start' }, t('hv.firstShown')),
+        msgs.length ? msgs.map(messageBlock) : h('p', { class: 'muted' }, t('hv.empty'))),
+      h('p', { class: 'muted small' }, t('hv.readOnly')),
+    ]
+    const ai = h('button', { class: 'btn', type: 'button' }, icon('copy'), h('span', null, t('spage.copyAi')))
+    ai.addEventListener('click', () => sessCopy(ai, s.reference, () => toast(t('spage.copiedToast'))))
+    const cont = h('button', { class: 'btn btn-primary', type: 'button', 'data-tip': t(s.cwdGone ? 'hist.continueGoneTip' : 'hist.continueTip') }, icon('terminal'), h('span', null, t('hist.continue')))
+    cont.addEventListener('click', () => copyContinue(cont, s))
+    setKids(dlg.el, dialogFrame(s.title || t('hist.untitled'), s.family, body, [ai, cont]))
   }
 
   // ---------- send to a session (spec §3.32 step 2) ----------
@@ -3068,7 +4393,10 @@ const MAIN = String.raw`
     if (sd.result) {
       body.push(sendResult(name))
       foot.push(h('button', { class: 'btn', type: 'button', onclick: sendAgain }, t('send.again')))
-      foot.push(h('button', { class: 'btn btn-primary', type: 'button', onclick: () => el.close() }, t('btn.close')))
+      // When a line waits to be pasted, "Copy this line" is the one primary action.
+      const v = sendResultView(sd.result.message, Boolean(sd.result.orca))
+      const paste = ((v.kind === 'paste' || v.kind === 'stored') && v.pasteText) || (v.kind === 'approve' && !BOOT.readOnly)
+      foot.push(h('button', { class: paste ? 'btn' : 'btn btn-primary', type: 'button', onclick: () => el.close() }, t('btn.close')))
     } else {
       const uploading = sd.files.some((f) => f.status === 'uploading')
       body.push(h('p', { class: 'muted small' }, t('send.intro')))
@@ -3077,7 +4405,7 @@ const MAIN = String.raw`
       body.push(sendAttachField())
       if (sd.error) body.push(errorNote(sd.error, sd.error.retryable ? sendNow : null))
       foot.push(h('button', { class: 'btn', type: 'button', disabled: sd.busy, onclick: () => el.close() }, t('btn.cancel')))
-      foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: sd.busy, 'aria-busy': sd.busy ? 'true' : null, onclick: sendNow },
+      foot.push(h('button', { class: 'btn btn-primary send-go', type: 'button', disabled: sd.busy, 'aria-busy': sd.busy ? 'true' : null, onclick: sendNow },
         sd.busy ? spinner() : icon('send'), t(sd.busy ? (uploading ? 'send.waiting' : 'send.sending') : 'send.send')))
     }
     setKids(el, dialogFrame(t('send.title', { name }), sd.s.family, body, foot))
@@ -3099,7 +4427,7 @@ const MAIN = String.raw`
     const tiles = sd.files.map((f) => {
       let face
       if (f.status === 'uploading') face = h('div', { class: 'ask-file-face' }, spinner())
-      else if (f.status === 'error') face = h('div', { class: 'ask-file-face' }, icon('x'))
+      else if (f.status === 'error') face = h('div', { class: 'ask-file-face' }, icon('alert'))
       else if (f.thumb) face = h('img', { class: 'ask-file-img', src: f.thumb, alt: f.name })
       else face = h('div', { class: 'ask-file-face' }, icon('image'))
       return h('li', { class: 'ask-file' + (f.status === 'error' ? ' is-error' : ''), 'data-enter': 'sd-' + f.key },
@@ -3120,7 +4448,8 @@ const MAIN = String.raw`
     sd.notes = []
     for (const file of list) {
       const name = file.name || 'image'
-      const why = sendFileProblem(file, sd.files.filter((f) => f.status !== 'error').length)
+      // A screenshot whose upload broke still holds its place, as it can go up again.
+      const why = sendFileProblem(file, sd.files.filter((f) => f.status !== 'error' || f.file).length)
       if (why === 'send.max') { sd.notes.push(t(why, { name })); continue }
       const f = { key: Math.random().toString(36).slice(2), name, size: file.size, bytes: 0, status: why ? 'error' : 'uploading', id: null, thumb: null, error: why ? t(why, { name }) : '', xhr: null, done: null, sent: false }
       sd.files.push(f)
@@ -3176,7 +4505,10 @@ const MAIN = String.raw`
     dlg.busy = true
     renderSend()
     try {
-      // Send waits for screenshots still uploading, so the message carries every one the person added.
+      // A screenshot that already failed stops the send at once; then it waits for the ones still uploading, so the
+      // message carries every one the person added, and checks again.
+      const early = sendBlock(mine.files)
+      if (early) throw Object.assign(new Error(t(early.key, { names: early.names })), { blocked: true })
       const pending = sd.files.filter((f) => f.status === 'uploading' && f.done).map((f) => f.done)
       if (pending.length) { await Promise.all(pending); if (sd === mine) renderSend() }
       // A screenshot that failed stops the send: the text and the failed tiles stay for a retry or a removal.
@@ -3187,7 +4519,7 @@ const MAIN = String.raw`
       const r = await api('/api/sessions/send', { sessionId: mine.s.sessionId, text, attachments: ready.map((f) => f.id), lang })
       ready.forEach((f) => { f.sent = true })
       mine.result = r
-      sp.msgs = Object.assign({}, sp.msgs, { [mine.s.sessionId]: { id: r.message.id, status: r.message.status, sentAt: r.message.sentAt } })
+      ownMessage(mine.s.sessionId, { id: r.message.id, status: r.message.status, sentAt: r.message.sentAt, to: r.message.to, ...(r.message.status === 'paste-needed' ? { pasteText: r.message.pasteText } : {}), ...(r.message.note ? { note: r.message.note } : {}) })
       renderSessionsPage()
     } catch (e) { mine.error = e }
     dlg.busy = false
@@ -3199,16 +4531,18 @@ const MAIN = String.raw`
     if (!sd || !sd.result || dlg.kind !== 'send') return
     const m = sd.result.message
     const now = sp.msgs[sd.s.sessionId]
-    if (now && now.id === m.id && now.status !== m.status) { m.status = now.status; renderSend() }
+    if (now && now.id === m.id && (now.status !== m.status || Boolean(now.needsApproval) !== Boolean(m.needsApproval))) { m.status = now.status; m.needsApproval = now.needsApproval; m.note = now.note; renderSend() }
   }
   function sendResult(name) {
     const r = sd.result
     const v = sendResultView(r.message, Boolean(r.orca))
     const out = []
     if (v.kind === 'done') out.push(h('div', { class: 'note note-ok', role: 'status' }, icon('tick'), h('span', null, t(v.key, { name }))))
-    else out.push(h('div', { class: 'note' + (v.kind === 'paste' ? ' note-warn' : ''), role: 'status' }, h('b', null, t(v.key, { name })), v.reason ? h('span', { class: 'note-line' }, v.reason) : null))
+    else out.push(h('div', { class: 'note' + (v.kind === 'paste' || v.kind === 'approve' ? ' note-warn' : ''), role: 'status' }, h('b', null, t(v.key, { name })), v.reason ? h('span', { class: 'note-line' }, v.reason) : null))
     if (v.hint) out.push(h('p', { class: 'note note-warn small' }, v.hint))
-    if (v.kind !== 'done' && v.pasteText) {
+    if (v.kind === 'approve' && !BOOT.readOnly)
+      out.push(h('div', { class: 'pop-actions' }, h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: openInbound }, t('inb.go'))))
+    if ((v.kind === 'paste' || v.kind === 'stored') && v.pasteText) {
       const copy = h('button', { class: 'btn btn-sm btn-primary', type: 'button' }, icon('copy'), t('send.copyLine'))
       copy.addEventListener('click', () => sessCopy(copy, v.pasteText, () => toast(t('send.copied', { name }))))
       out.push(h('div', { class: 'send-line' }, h('code', { class: 'send-line-text' }, v.pasteText),
@@ -3434,8 +4768,8 @@ const MAIN = String.raw`
         ? h('div', { class: 'created-head' }, h('span', { class: 'check-icon', 'aria-hidden': 'true' }, '✓'), h('span', null, tx('nf.created', { ref: h('b', { class: 'mono' }, r.account.ref) })))
         : h('div', { class: 'created-head' }, h('span', { class: 'warn-icon', 'aria-hidden': 'true' }, '!'), h('span', null, tx('nf.createdProblems', { ref: h('b', { class: 'mono' }, r.account.ref) }))),
       failed.length || r.hookErrors.length ? h('div', { class: 'note note-warn' },
-        failed.map((s) => h('span', { class: 'small' }, s.item + ': ' + (s.message || 'failed'))),
-        r.hookErrors.map((e) => h('span', { class: 'small' }, 'plugin ' + e.plugin + ': ' + e.message))) : null,
+        failed.map((s) => h('span', { class: 'small' }, s.item + colon() + (s.message || 'failed'))),
+        r.hookErrors.map((e) => h('span', { class: 'small' }, 'plugin ' + e.plugin + colon() + e.message))) : null,
       r.account.dir ? h('p', { class: 'small' }, h('span', { class: 'muted' }, t('nf.dir') + ' '), h('code', null, r.account.dir)) : null,
       r.alias && r.alias.added ? h('div', { class: 'small created-alias' }, h('span', { class: 'muted' }, t('nf.alias') + ' '), codeCopy(r.alias.name), h('span', { class: 'muted' }, ' ' + t('nf.aliasNewShell'))) : null,
       r.alias && r.alias.added ? shellSetupNote() : null,
@@ -3720,7 +5054,7 @@ const MAIN = String.raw`
     // A value from the last session may differ from what a new session starts with; say both.
     const line = (label, v, key) => {
       if (!v) return null
-      const out = label + ': ' + v.value + ' (' + modelFrom(a, v.from) + ')'
+      const out = label + colon() + v.value + ' (' + modelFrom(a, v.from) + ')'
       const host = mi.host && mi.host[key]
       // 'opus' and 'claude-opus-5-5' name the same model: only a real difference is worth a line.
       return v.from === 'last' && host && !v.value.includes(host)
@@ -3733,7 +5067,7 @@ const MAIN = String.raw`
       mi.settable ? t('md.click') : null,
     ].filter(Boolean).join('\n')
     if (!mi.settable) return h('span', { class: 'mono', title }, text)
-    return h('button', { class: 'mono model-btn' + (mi.model && mi.model.from === 'sideby' ? ' model-set' : ''), type: 'button', title, 'aria-label': t('menu.model') + ' ' + a.ref + ': ' + text, onclick: (e) => { e.stopPropagation(); openModel(a) } }, text)
+    return h('button', { class: 'mono model-btn' + (mi.model && mi.model.from === 'sideby' ? ' model-set' : ''), type: 'button', title, 'aria-label': t('menu.model') + ' ' + a.ref + colon() + text, onclick: (e) => { e.stopPropagation(); openModel(a) } }, text)
   }
   function mdAccount() { return S.state && S.state.accounts.find((x) => x.ref === md.ref) }
   function openModel(a) {
@@ -3812,8 +5146,8 @@ const MAIN = String.raw`
     const body = [h('p', { class: 'muted small' }, t('md.intro', { ref: a.ref, host }))]
     if (BOOT.readOnly) body.push(h('p', { class: 'note' }, t('banner.readOnly')))
     body.push(h('div', { class: 'md-now' },
-      h('div', null, h('span', { class: 'muted' }, t('md.model') + ': '), now('model')),
-      h('div', null, h('span', { class: 'muted' }, t('md.effort') + ': '), now('effort'))))
+      h('div', null, h('span', { class: 'muted' }, t('md.model') + colon()), now('model')),
+      h('div', null, h('span', { class: 'muted' }, t('md.effort') + colon()), now('effort'))))
     body.push(h('div', { class: 'ah-grid' },
       h('label', { class: 'field' }, h('span', null, t('md.model')), f.model, f.list),
       h('label', { class: 'field' }, h('span', null, t('md.effort')), f.effort)))
@@ -3835,6 +5169,8 @@ const MAIN = String.raw`
   // still missing. Turning on is one plan shown first (hp.preview) and one confirmation; no commands to copy.
   const hp = { data: null, plan: null, loading: false, error: null, preview: null, previewing: false, applying: false, failed: null, changed: false, sameFamily: false, sameTouched: false, busyOff: false, askSame: false }
   async function loadHandoffPage() {
+    // One read at a time: a second refresh while one runs would end its spinner early.
+    if (hp.loading) return
     hp.loading = true
     hp.error = null
     renderHandoffPage()
@@ -3900,7 +5236,7 @@ const MAIN = String.raw`
       step.diff ? h('details', { class: 'small' }, h('summary', null, t('hp.showChange')), h('p', { class: 'muted small' }, tx('ah.changes', { file: h('code', null, step.file) })), diffView(step.diff)) : null))))
   }
   function hpManual(plan) {
-    return plan.manual.map((m) => h('p', { class: 'note' }, m.id === 'codex-trust' ? t('hp.manual.codexTrust') : (family(m.family).title + ': ' + (m.message || ''))))
+    return plan.manual.map((m) => h('p', { class: 'note' }, m.id === 'codex-trust' ? t('hp.manual.codexTrust') : (family(m.family).title + colon() + (m.message || ''))))
   }
   function hpPreviewCard() {
     const p = hp.preview
@@ -3967,7 +5303,7 @@ const MAIN = String.raw`
       h('div', { class: 'row-actions' },
         h('button', { class: 'btn btn-sm', type: 'button', onclick: askHandoff }, icon('bot'), t('ask.title.handoff')),
         h('button', { class: 'btn btn-sm', type: 'button', onclick: openHandoff }, t('hp.advanced')),
-        h('button', { class: 'btn btn-sm', type: 'button', disabled: hp.loading, onclick: loadHandoffPage }, hp.loading ? spinner() : icon('refresh'), t('top.refresh'))))]
+        hp.loading ? spinner() : null))]
     const on = st.settings.auto
     if (hp.loading && !hp.data) kids.push(h('p', { class: 'muted' }, spinner(), ' ', t('hp.loading')))
     if (hp.error) kids.push(errorNote(hp.error, loadHandoffPage))
@@ -4093,7 +5429,10 @@ const MAIN = String.raw`
       btn.disabled = false
     }
     load({ check: true, announce: true })
+    // The page in view reads again too, so the pages need no refresh button of their own.
     if (curPage === 'sessions') loadSessions()
+    else if (curPage === 'tuning') loadTuningPage()
+    else if (curPage === 'handoff') loadHandoffPage()
   }
   function checkOf(fam) { return S.state && (S.state.quotaChecks || []).find((c) => c.family === fam) }
   async function setCheck(fam, on) {
@@ -4125,7 +5464,7 @@ const MAIN = String.raw`
     b.hidden = !secs.length
     const warn = secs.includes('rc') && rcSummary() === 'on'
     setKids(b, [icon('gear'), h('span', { class: 'hide-sm' }, t('set.button')), warn ? h('span', { class: 'dot set-dot', 'aria-hidden': 'true' }) : null])
-    b.setAttribute('aria-label', t('set.button') + (warn ? ': ' + t('set.rcOn') : ''))
+    b.setAttribute('aria-label', t('set.button') + (warn ? colon() + t('set.rcOn') : ''))
     refreshSettings()
     if (dlg.kind === 'rc') renderRc()
   }
@@ -4249,8 +5588,8 @@ const MAIN = String.raw`
       h('h3', { class: 'set-pane-title' }, cur.title),
       cur.foot ? h('p', { class: 'set-foot' }, cur.foot) : null,
       h('div', { class: 'set-group' }, cur.items))
+    // It stays wide while it fades out; showDialog drops the width when another dialog takes the element.
     dlg.el.classList.add('dialog-wide')
-    dlg.onClose = () => dlg.el.classList.remove('dialog-wide')
     setKids(dlg.el, dialogFrame(t('set.title'), null, h('div', { class: 'set-dialog' }, nav, pane)))
     // A redraw replaced the list; a section picked from it keeps the focus on its tab.
     if (switched) { const tab = document.getElementById('set-tab-' + cur.id); if (tab) tab.focus() }
@@ -4390,7 +5729,7 @@ const MAIN = String.raw`
   function hotkeyField(v) {
     const shown = hk.recording ? (hk.live || t('hk.recording')) : v.enabled ? v.label : t('hk.unset')
     if (BOOT.readOnly) return h('span', { class: 'chip chip-sm' }, shown)
-    const field = h('button', { class: 'hk-rec' + (hk.recording ? ' recording' : '') + (v.registered === false && !hk.recording ? ' taken' : '') + (!v.enabled && !hk.recording ? ' unset' : ''), type: 'button', 'aria-label': t('hk.label') + ': ' + shown, 'aria-pressed': String(hk.recording), disabled: hk.busy,
+    const field = h('button', { class: 'hk-rec' + (hk.recording ? ' recording' : '') + (v.registered === false && !hk.recording ? ' taken' : '') + (!v.enabled && !hk.recording ? ' unset' : ''), type: 'button', 'aria-label': t('hk.label') + colon() + shown, 'aria-pressed': String(hk.recording), disabled: hk.busy,
       onclick: () => { if (!hk.recording) { hk.recording = true; hk.error = ''; hk.live = ''; refreshHotkey() } },
       onkeydown: recordKey, onkeyup: recordUp,
       onblur: () => { if (hk.recording) setTimeout(() => { if (hk.recording && !document.querySelector('.hk-rec:focus')) stopRecording() }, 150) } }, shown)
@@ -4561,6 +5900,7 @@ const MAIN = String.raw`
     else if (dlg.kind === 'browser') renderBrowser()
     else if (dlg.kind === 'update' && up) renderUpdate()
     else if (dlg.kind === 'rc') renderRc()
+    else if (dlg.kind === 'inbound') renderInbound()
     else if (dlg.kind === 'ask' && ak) { if (ak.els.text) ak.text = ak.els.text.value; renderAsk() }
     else if (dlg.kind === 'key' && ky && ky.step !== 'enter') renderKey()
     else if (dlg.kind === 'terminal' && tm) renderTerminals()
@@ -4580,7 +5920,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.session', 'ai.ask.send', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.tool']
   function openRc() {
     if (!S.state || !rcSummary()) return
     rc.target = null
@@ -4715,7 +6055,10 @@ const MAIN = String.raw`
     const active = () => Boolean(dropTarget())
     const hasFiles = (e) => e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0
     el.addEventListener('paste', (e) => {
-      const files = e.clipboardData ? Array.from(e.clipboardData.files || []) : []
+      const cd = e.clipboardData
+      let files = cd ? Array.from(cd.files || []) : []
+      // Some browsers put a copied screenshot only among the items.
+      if (cd && !files.length) files = Array.from(cd.items || []).filter((i) => i.kind === 'file').map((i) => i.getAsFile()).filter(Boolean)
       if (!active() || !files.length) return
       // A file copied in Finder also carries its name as text; only the file is wanted.
       e.preventDefault()
@@ -5316,7 +6659,9 @@ const MAIN = String.raw`
     if (name) return h('button', { class: 'btn btn-sm', type: 'button', title: t('pk.startTip', { name, host: family(fam).title }), 'aria-label': t('pk.startTip', { name, host: family(fam).title }), onclick: () => startPick(name) }, icon('terminal'), h('span', { class: 'hide-sm' }, pickStartLabel()), h('code', { class: 'mono' }, name))
     const offer = (S.state.pickOffers || {})[fam]
     if (!offer || BOOT.readOnly) return null
-    return h('button', { class: 'link-btn small', type: 'button', onclick: () => openPick(fam) }, offer.name ? [t('pk.offerShort', { name: offer.name }), h('span', { class: 'hide-sm' }, t('pk.offerMore'))] : t('pk.offerNoName'))
+    // Short in the head ("Add cc"); what it does is in its hover text, so several groups do not repeat a sentence.
+    const full = offer.name ? t('pk.offerShort', { name: offer.name }) + t('pk.offerMore') : t('pk.offerNoName')
+    return h('button', { class: 'link-btn small', type: 'button', 'aria-label': full, 'data-tip': full, onclick: () => openPick(fam) }, offer.name ? t('pk.offerShort', { name: offer.name }) : t('pk.offerNoNameShort'))
   }
 
   // ---------- banners ----------
@@ -5351,17 +6696,21 @@ const MAIN = String.raw`
           h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => setPage('handoff') }, t('ah.setUp')),
           h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { prefs.ahHintAt = Date.now(); savePrefs(); renderBanners() } }, t('ah.dismiss')))))
       else {
-        const mb = menubarHint()
+        // About the accounts' quota, so it shows on the Accounts page only.
+        const mb = curPage === 'accounts' ? menubarHint() : null
         if (mb) out.push(mb)
       }
       const rcBanner = remoteControlBanner()
       if (rcBanner) out.push(rcBanner)
+      const inbBanner = inboundBanner()
+      if (inbBanner) out.push(inbBanner)
       const errs = S.state.pluginErrors
       if (errs.length) out.push(h('div', { class: 'banner banner-warn', role: 'status' }, h('div', null,
         h('b', null, tn('banner.plugins', errs.length) + ' '), t('banner.pluginsHint'),
-        h('ul', null, errs.map((e) => h('li', null, h('code', null, e.where), ': ', e.message))))))
+        h('ul', null, errs.map((e) => h('li', null, h('code', null, e.where), colon(), e.message))))))
     }
     patch($('banners'), out)
+    growInboundBanner()
   }
 
   // ---------- loading ----------
@@ -5426,10 +6775,16 @@ const MAIN = String.raw`
     renderUpdated()
     reloadForNewBuild()
     sessionsTick()
+    messagesTick()
     if (document.visibilityState !== 'visible' || !S.state) return
     if (S.pending && !S.loading && !uiBusy()) { S.pending = false; renderAll() }
     const now = Date.now()
-    const every = now < S.fastUntil ? FAST_MS : AUTO_MS
+    // An Account still being read is asked for again soon, so it fills in without waiting for the next round.
+    // For half a minute: the server says "took too long" after a minute, which the normal round then shows.
+    const pending = S.state.accounts.some((a) => a.pending)
+    if (!pending) S.pendingSince = 0
+    else if (!S.pendingSince) S.pendingSince = now
+    const every = pending && now - S.pendingSince < 30_000 ? PENDING_MS : now < S.fastUntil ? FAST_MS : AUTO_MS
     if (!S.loading && !conn.lost && !S.fixing && !S.checking && !dlg.busy && now - S.lastTry >= every) load({ silent: true })
   }
   // Coming back to the page refreshes at once.

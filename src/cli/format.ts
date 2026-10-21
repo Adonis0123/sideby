@@ -124,7 +124,7 @@ export function compactNumber(n: number): string {
 export function usageText(u: UsageResult): string {
   if (u.status === 'unavailable')
     return c.dim(u.reason === 'no-source' ? '—' : u.reason === 'no-session' ? 'none' : u.reason)
-  if (u.totalTokens === 0) return c.dim('none')
+  if (u.totalTokens === 0) return u.sessions > 0 ? `${u.sessions} sessions` : c.dim('none')
   return `${compactNumber(u.totalTokens)} tok / ${u.days}d`
 }
 

@@ -2638,11 +2638,11 @@ describe('sideby send and messages (spec §3.32 step 2)', () => {
         assert.equal(msg.status, 'paste-needed')
         assert.equal(data.copied, true)
         assert.equal(await readFile(m.clip, 'utf8'), msg.pasteText)
-        assert.match(msg.note, /Grok Build has no channel sideby can deliver to yet/)
+        assert.match(msg.note, /Grok Build cannot receive messages directly yet/)
         const gh = await sideby(h, ['send', 'grok:main', 'again'], m.env)
         assert.match(
           gh.out,
-          /needs a paste\n {2}Grok Build has no channel .*\n {2}Paste this into the tab of grok:main · g · 01a14d11 \(it is on the clipboard\):\n {2}Read the message sideby kept for you at /,
+          /needs a paste\n {2}Grok Build cannot receive messages directly .*\n {2}Paste this into the tab of grok:main · g · 01a14d11 \(it is on the clipboard\):\n {2}Read the message sideby kept for you at /,
         )
 
         const list = checkSchema('messages', (await sideby(h, ['messages', '--json'])).out)
@@ -2655,6 +2655,12 @@ describe('sideby send and messages (spec §3.32 step 2)', () => {
         const table = await sideby(h, ['messages'])
         assert.match(table.out.split('\n')[0]!, /^SENT\s+TO\s+STATUS\s+ID\s+FROM$/)
         assert.match(table.out, /needs paste/)
+        // Only the newest Message to grok:main is waiting there, so its line is printed once.
+        assert.equal(table.out.match(/Paste this line into /g)?.length, 1)
+        assert.match(
+          table.out,
+          /Paste this line into grok:main · g · 01a14d11 \(Grok Build cannot receive .*\):\n {2}Read the message sideby kept/,
+        )
 
         const shot = await h.write('notes.txt', 'text')
         const bad = await sideby(h, ['send', 'cc002', 'look', '--image', shot], m.env)

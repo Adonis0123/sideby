@@ -19,6 +19,7 @@ import {
   MAX_BODY_BYTES,
   type PanelAccount,
   type PanelState,
+  readBudget,
 } from './handler.ts'
 import { jsonForScript, pageStyles, renderPage } from './page.ts'
 import { isSidebyPanel, panelOwner, startPanelServer } from './server.ts'
@@ -188,6 +189,125 @@ describe('panel handler security', () => {
         assert.equal(fam.brokenBin, '~/.local/bin/demo')
         assert.equal(state.accounts.find((a) => a.ref === 'demo:main')!.hostInstalled, false)
       } finally {
+        await close(server)
+      }
+    })
+  })
+
+  it('sends a slow account as pending without holding up the others, and fills it in on a later state', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const slow = demoFamily({
+        async model(a) {
+          if (a.name === 'slow') await new Promise((r) => setTimeout(r, 1500))
+          return 'm1'
+        },
+      })
+      const make = () => createRuntime({ env: h.env, builtins: [asBuiltin(demoPlugin(slow))] })
+      await (await make()).createAccount('demo', 'slow')
+      const before = readBudget.ms
+      readBudget.ms = 100
+      const { server, port } = await serve((port) =>
+        createPanelHandler({ runtime: make, allowedHosts: [`127.0.0.1:${port}`] }),
+      )
+      try {
+        const get = async () =>
+          (await (await fetch(`http://127.0.0.1:${port}/api/state`)).json()) as PanelState
+        const t0 = Date.now()
+        const first = await get()
+        assert.ok(Date.now() - t0 < 1200, 'the state does not wait for the slow account')
+        assert.equal(first.accounts.find((a) => a.ref === 'demo:slow')!.pending, true)
+        assert.equal(first.accounts.find((a) => a.ref === 'demo:main')!.pending, undefined)
+        await new Promise((r) => setTimeout(r, 1500))
+        const later = (await get()).accounts.find((a) => a.ref === 'demo:slow')!
+        assert.equal(later.pending, undefined, 'the reads begun for the first state answer the next one')
+        assert.equal(later.model, 'm1')
+      } finally {
+        readBudget.ms = before
+        await close(server)
+      }
+    })
+  })
+
+  it('does not show a read begun before a change once the change is made', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      let calls = 0
+      const slow = demoFamily({
+        async model(a) {
+          if (a.name === 'slow') {
+            calls++
+            await new Promise((r) => setTimeout(r, 300))
+          }
+          return 'm1'
+        },
+      })
+      const make = () => createRuntime({ env: h.env, builtins: [asBuiltin(demoPlugin(slow))] })
+      await (await make()).createAccount('demo', 'slow')
+      const before = { ...readBudget }
+      readBudget.ms = 50
+      const { server, port, handler } = await serve((port) =>
+        createPanelHandler({ runtime: make, allowedHosts: [`127.0.0.1:${port}`] }),
+      )
+      try {
+        const slowOf = async () =>
+          ((await (await fetch(`http://127.0.0.1:${port}/api/state`)).json()) as PanelState).accounts.find(
+            (a) => a.ref === 'demo:slow',
+          )!
+        assert.equal((await slowOf()).pending, true)
+        await new Promise((r) => setTimeout(r, 400))
+        const r = await post(
+          port,
+          '/api/panel/settings',
+          { theme: 'dark' },
+          { origin: `http://127.0.0.1:${port}`, 'x-sideby-token': handler.token },
+        )
+        assert.equal(r.status, 200)
+        // The read finished before the change; the state after it reads the Account again.
+        assert.equal((await slowOf()).pending, true)
+        assert.equal(calls, 2)
+      } finally {
+        Object.assign(readBudget, before)
+        await close(server)
+      }
+    })
+  })
+
+  it('says a read that hangs took too long and reads again', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      let calls = 0
+      const slow = demoFamily({
+        async model(a) {
+          if (a.name === 'slow') {
+            calls++
+            await new Promise((r) => setTimeout(r, 2000))
+          }
+          return 'm1'
+        },
+      })
+      const make = () => createRuntime({ env: h.env, builtins: [asBuiltin(demoPlugin(slow))] })
+      await (await make()).createAccount('demo', 'slow')
+      const before = { ...readBudget }
+      Object.assign(readBudget, { ms: 50, hungMs: 300 })
+      const { server, port } = await serve((port) =>
+        createPanelHandler({ runtime: make, allowedHosts: [`127.0.0.1:${port}`] }),
+      )
+      try {
+        const slowOf = async () =>
+          ((await (await fetch(`http://127.0.0.1:${port}/api/state`)).json()) as PanelState).accounts.find(
+            (a) => a.ref === 'demo:slow',
+          )!
+        assert.equal((await slowOf()).pending, true)
+        assert.equal(calls, 1)
+        await new Promise((r) => setTimeout(r, 400))
+        const hung = await slowOf()
+        assert.equal(hung.pending, undefined)
+        assert.match(hung.error!, /took longer than 0 s|took longer than/)
+        assert.equal((await slowOf()).pending, true, 'the next state starts a new read')
+        assert.equal(calls, 2)
+      } finally {
+        Object.assign(readBudget, before)
         await close(server)
       }
     })

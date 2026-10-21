@@ -1,9 +1,12 @@
 // Claude Code's own cross-session channel (spec §3.32 step 2, ADR-0040; tried with Claude Code 2.1.304 on
-// 2026-10-20). Each running session names a Unix socket in its `<dir>/sessions/<pid>.json` (`messagingSocketPath`,
-// under `cc-socks` in the system temp directory); one JSON line written to it reaches that session as "Another
+// 2026-10-20). Each running session names a Unix socket in its `<dir>/sessions/<pid>.json` (`messagingSocketPath`).
+// Claude Code binds it under `$XDG_RUNTIME_DIR/cc-socks/` where that variable is set (Linux, WSL), else under the
+// system temp directory's `cc-socks/`, and falls back to a per-user `cc-socks-<uid>/` when it cannot accept the shared
+// folder (its docs, "The session's inbox socket"). One JSON line written to it reaches that session as "Another
 // Claude session sent a message". sideby writes there only after the checks below, sends no token, and never opens
 // the `<pid>.<hash>.key` files next to the record.
 import { createConnection } from 'node:net'
+import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute } from 'node:path'
 import { lstatOrNull, realpathOrNull } from '../../core/fs-safe.ts'
 import type { ProcessView } from '../../core/live-sessions-procs.ts'
@@ -20,13 +23,13 @@ export async function claudeSocketOf(
   procs: ProcessView,
 ): Promise<{ path: string } | { problem: string }> {
   const rec = await readSessionRecord(sessionRecordPath(accountDir, pid))
-  if (!rec) return { problem: 'its session record could not be read' }
-  if (rec.sessionId !== sessionId) return { problem: 'the process now runs another session' }
+  if (!rec) return { problem: 'sideby could not read its session info' }
+  if (rec.sessionId !== sessionId) return { problem: 'that terminal is now running a different session' }
   if (!recordRunsOn(rec, await procs.get(pid))) return { problem: 'the session has ended' }
   const path = rec.messagingSocketPath
   if (typeof path !== 'string' || !path)
     return {
-      problem: 'this version of Claude Code names no message socket (Claude Code 2.1.304 or newer has one)',
+      problem: 'this Claude Code version cannot receive messages directly (update to 2.1.304 or newer)',
     }
   return { path }
 }
@@ -42,32 +45,62 @@ export interface SocketIdentity {
 }
 
 /**
- * Checks `path` as a socket sideby may write to: an absolute path whose directory is `cc-socks` right inside one of
- * `tempRoots` (the system temp directories), that directory a real directory of `uid` that no one else can enter, and
- * `path` itself a socket of `uid`, not a link. Returns why not, or what the socket and its folder are on disk.
+ * The folders a Claude Code inbox socket's `cc-socks` directory may sit in: `$XDG_RUNTIME_DIR` when set to an
+ * absolute path (Claude Code's first choice on Linux and WSL), then the system temp directories.
+ */
+export function socketRoots(env: NodeJS.ProcessEnv): string[] {
+  const runtime = env.XDG_RUNTIME_DIR
+  return [...(runtime && isAbsolute(runtime) ? [runtime] : []), tmpdir(), '/tmp']
+}
+
+/**
+ * Whether `name` is a socket folder Claude Code creates: `cc-socks`, or the per-user `cc-socks-<uid>` it falls back to.
+ * A suffix must be this user's id when it is known, so another user's fallback folder is never accepted.
+ */
+export function isSocketFolderName(name: string, uid: number | undefined): boolean {
+  const m = /^cc-socks(?:-(\d+))?$/.exec(name)
+  if (!m) return false
+  return m[1] === undefined || uid === undefined || Number(m[1]) === uid
+}
+
+/**
+ * Checks `path` as a socket sideby may write to: an absolute path whose directory is `cc-socks` (or this user's
+ * `cc-socks-<uid>`) right inside one of `tempRoots` (`socketRoots`), that directory a real directory of `uid` that no
+ * one else can enter, and `path` itself a socket of `uid`, not a link. Returns why not, or what the socket and its
+ * folder are on disk.
  */
 export async function checkSocket(
   path: string,
   o: { tempRoots: readonly string[]; uid: number | undefined },
 ): Promise<{ problem: string } | { identity: SocketIdentity }> {
   const no = (problem: string) => ({ problem })
-  if (!isAbsolute(path)) return no('its socket path is not absolute')
+  if (!isAbsolute(path)) return no('its message channel path is invalid (restart the session to fix it)')
   const dir = dirname(path)
-  if (basename(dir) !== 'cc-socks') return no('its socket is not in a cc-socks folder')
+  if (!isSocketFolderName(basename(dir), o.uid))
+    return no('its message channel is not in a cc-socks folder (restart the session to fix it)')
   const roots = new Set(
     (await Promise.all(o.tempRoots.map((r) => realpathOrNull(r)))).filter((r): r is string => r !== null),
   )
   const parent = await realpathOrNull(dirname(dir))
-  if (!parent || !roots.has(parent)) return no('its socket is not in the system temp folder')
+  if (!parent || !roots.has(parent))
+    return no('its message channel is outside the system temp folder (restart the session to fix it)')
   const d = await lstatOrNull(dir)
-  if (!d?.isDirectory()) return no('its socket folder is not a real folder')
-  if (o.uid !== undefined && d.uid !== o.uid) return no('its socket folder belongs to another user')
-  if (d.mode & 0o077) return no('others can enter its socket folder')
+  if (!d?.isDirectory())
+    return no('its message channel folder is not a real folder (restart the session to fix it)')
+  if (o.uid !== undefined && d.uid !== o.uid)
+    return no('its message channel folder belongs to another user on this computer')
+  if (d.mode & 0o077)
+    return no(
+      'other users on this computer can access its message channel folder (restart the session to fix it)',
+    )
   const s = await lstatOrNull(path)
-  if (!s) return no('its socket does not exist')
-  if (s.isSymbolicLink()) return no('its socket is a link')
-  if (!s.isSocket()) return no('its socket path is not a socket')
-  if (o.uid !== undefined && s.uid !== o.uid) return no('its socket belongs to another user')
+  if (!s) return no('its message channel is gone (the session may have ended)')
+  if (s.isSymbolicLink())
+    return no('its message channel is a symlink instead of a live channel (restart the session to fix it)')
+  if (!s.isSocket())
+    return no('its message channel is not a valid channel file (restart the session to fix it)')
+  if (o.uid !== undefined && s.uid !== o.uid)
+    return no('its message channel belongs to another user on this computer')
   return {
     identity: { dev: s.dev, ino: s.ino, uid: s.uid, dirDev: d.dev, dirIno: d.ino, dirUid: d.uid },
   }
@@ -91,10 +124,10 @@ export async function socketProblem(
 export async function socketChanged(path: string, id: SocketIdentity): Promise<string | null> {
   const d = await lstatOrNull(dirname(path))
   if (!d?.isDirectory() || d.dev !== id.dirDev || d.ino !== id.dirIno || d.uid !== id.dirUid)
-    return 'its socket folder was replaced after sideby checked it'
+    return 'its message channel folder changed while sending (send again)'
   const s = await lstatOrNull(path)
   if (!s?.isSocket() || s.dev !== id.dev || s.ino !== id.ino || s.uid !== id.uid)
-    return 'its socket was replaced after sideby checked it'
+    return 'its message channel changed while sending (send again)'
   return null
 }
 

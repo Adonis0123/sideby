@@ -1,6 +1,12 @@
 // The one service layer the CLI and the Panel share. Frozen contract for v0.1 (plan: 审核修订).
 
-import { type AccountRefError, aliasesByAccount, discoverAccounts, resolveRef } from './core/accounts.ts'
+import {
+  type AccountRefError,
+  aliasesByAccount,
+  discoverAccounts,
+  resolveRef,
+  startArgsOf,
+} from './core/accounts.ts'
 import {
   type AliasValue,
   addConfigAlias,
@@ -49,6 +55,7 @@ import {
 import { memoStore } from './core/memo-store.ts'
 import { type Paths, resolvePaths } from './core/paths.ts'
 import { choosePick, type PickChoice, suggestPickName } from './core/pick-commands.ts'
+import { categoryReader, type ProjectCategories } from './core/project-categories.ts'
 import { fetchedQuota, type QuotaFetchMode, quotaCheckOff, shownQuota } from './core/quota-fetch.ts'
 import {
   type RemoteControlChange,
@@ -87,6 +94,7 @@ import {
   undoTune,
 } from './core/tuning-apply.ts'
 import { packageVersion } from './core/version.ts'
+import { withClaudeMod } from './families/claude/mod.ts'
 import { BUILTIN_PLUGINS } from './families/index.ts'
 import { LOGIN_KEY_READERS } from './families/login-keys.ts'
 import { HookBus } from './plugins/bus.ts'
@@ -249,6 +257,10 @@ export interface Runtime {
   families: ReadonlyMap<string, FamilyDef>
   plugins: readonly LoadedPlugin[]
   pluginErrors: readonly PluginLoadError[]
+  /** The Project Categories a Plugin gives these Projects (spec §3.33), or undefined when no Plugin sorts them. */
+  projectCategories(projects: string[]): Promise<ProjectCategories | undefined>
+  /** The Plugin whose Project Categories are used, if any. */
+  projectCategoriesFrom?: string
   familyInfo(): Promise<FamilyInfo[]>
   /** Every loaded Family with its layout, sign-in, quota support and Shared Items (config extras included). */
   familyDetails(): Promise<FamilyDetail[]>
@@ -464,6 +476,7 @@ export async function createRuntime(
     home: paths.home,
   })
   const families = loaded.families
+  const categories = loaded.categories && categoryReader(loaded.categories.def, loaded.categories.owner)
   const ignore = new Set(config.ignore ?? [])
   const now = opts.now ?? (() => new Date())
 
@@ -686,6 +699,8 @@ export async function createRuntime(
     families,
     plugins: loaded.plugins,
     pluginErrors: loaded.errors,
+    projectCategories: async (projects) => categories?.(projects),
+    ...(loaded.categories ? { projectCategoriesFrom: loaded.categories.owner } : {}),
     async familyInfo() {
       return Promise.all(
         [...families.values()].map(async (f) => {
@@ -776,11 +791,7 @@ export async function createRuntime(
     },
     async doctorWithHistory(o = {}) {
       let list = await accounts()
-      const byAccount = aliasesByAccount(aliasRefs(config.aliases), list)
-      const startArgs = (a: Account) => [
-        config.accounts?.[a.ref]?.args ?? [],
-        ...(byAccount.get(a.ref) ?? []).map((n) => aliasArgs(config.aliases?.[n])),
-      ]
+      const startArgs = startArgsOf(config, list)
       let fams: ReadonlyMap<string, FamilyDef> = families
       let scope: DoctorScope = { kind: 'all' }
       if (o.target) {
@@ -1052,13 +1063,21 @@ export async function createRuntime(
     async prepareLaunch(ref, userArgs, command, opts = {}) {
       const all = await accounts()
       const inputs = launchInputs(ref, all, userArgs, command)
-      return prepareLaunch({
+      const p = await prepareLaunch({
         ...inputs,
         ...(opts.aiTask ? { aiTask: true } : {}),
         label: launchLabel(ref, inputs.account, all),
         baseEnv: env,
         bus,
       })
+      // sideby's Claude Code mod (spec §3.32 step 3): a view only, so it comes after every Plugin's `launch.before`.
+      if (command === 'run' && p.family.id === 'claude' && config.claudeMod !== false)
+        p.args = await withClaudeMod(p.args, {
+          bin: await which(p.bin, p.env),
+          env: p.env,
+          stateDir: paths.stateDir,
+        })
+      return p
     },
     async launchCommand(ref, userArgs, command) {
       const inputs = launchInputs(ref, await accounts(), userArgs, command)

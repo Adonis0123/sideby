@@ -80,6 +80,9 @@ cc-switch's docs describe that switch: it writes the live settings file ([README
 
 | You want to | Run | Guide |
 |---|---|---|
+| Find any past session of any account by what you remember, grouped by project, read it and continue it where it was | **Sessions › History** in the panel, or `sideby history "fix login" --project .` | [History](docs/guide/panel.md#history) |
+| See what every account is running right now and copy one session for another AI | **Sessions › Running** in the panel, or `sideby sessions` | [Sessions](docs/guide/panel.md#sessions) |
+| Send a running session a message, screenshots included | **Send to it** on a running session, or `sideby send claude:work "run the tests"` | [Send to a session](docs/guide/panel.md#send-to-a-session) |
 | Hand a task to your own AI from the panel: set up an account, fix a problem, support a new tool | **Let AI do it** in the panel, or `sideby ask` | [Let AI do it](docs/guide/panel.md#let-ai-do-it) |
 | See quota at a glance in the macOS menu bar | **Settings › Startup** in the panel, or `sideby menubar on` | [Quota in the menu bar](docs/guide/usage.md#quota-in-the-menu-bar) |
 | Have the panel ready in the background whenever you log in | **Settings › Startup** in the panel, or `sideby autostart on` | [Start at login](docs/guide/usage.md#start-at-login) |
@@ -98,7 +101,7 @@ cc-switch's docs describe that switch: it writes the live settings file ([README
 | Keep several Grok Bot windows open, each signed in to its own account (macOS) | `sideby desktop grok-bot:002` (or the panel) | [Grok Bot windows](docs/guide/usage.md#grok-bot-windows) |
 | Open the panel from the Dock or app menu | `sideby app install` | [Panel app](docs/guide/panel.md#panel-app) |
 | Show the panel inside your own local page | `createPanelHandler()` | [Embed the panel](docs/guide/panel.md#embed-the-panel) |
-| Add a Host or a pre-launch check | a local plugin | [Plugins](docs/guide/plugins.md) |
+| Add a Host, a pre-launch check, or your own project categories for History | a local plugin | [Plugins](docs/guide/plugins.md) |
 
 ## Supported hosts
 
@@ -135,8 +138,8 @@ Usage questions and ideas go in [Discussions](https://github.com/Adonis0123/side
 - [Using sideby](docs/guide/usage.md): accounts, API accounts, Doctor, quota, Handoff, Host notes
 - [Commands](docs/guide/commands.md): every command, exit codes and `--json`
 - [Configuration](docs/guide/configuration.md): `config.json`, aliases, shell functions
-- [Panel](docs/guide/panel.md): the panel, panel app and embedding
-- [Plugins](docs/guide/plugins.md): write your own Family or launch hook
+- [Panel](docs/guide/panel.md): the panel, sessions and their history, panel app and embedding
+- [Plugins](docs/guide/plugins.md): write your own Family, launch hook or project categories
 - [FAQ](docs/guide/faq.md): terms of service, data locations, alternatives, uninstall
 - [Changelog](https://github.com/Adonis0123/sideby/releases)
 

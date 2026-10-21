@@ -8,11 +8,10 @@ import type { Account } from '../../types.ts'
 const ID = /^[A-Za-z0-9-]{8,64}$/
 
 /**
- * A hash of `user_id` and `team_id` of the single sign-in entry in `auth.json`, cut to 16 hex characters, only for
- * comparing two Accounts while the Runtime groups a Same Login. A missing or null `team_id` counts as no team. Tokens
- * and every other field are dropped at once. Undefined on any problem: the Account then simply does not group.
+ * `user_id` and `team_id` of the single sign-in entry in `auth.json`; tokens and every other field are dropped at
+ * once. A missing or null `team_id` is ''. Undefined on any problem or an unexpected shape.
  */
-export async function grokLoginKey(account: Account): Promise<string | undefined> {
+export async function grokSignInIds(account: Account): Promise<{ user: string; team: string } | undefined> {
   try {
     const data = JSON.parse(await readFile(join(account.dir, 'auth.json'), 'utf8')) as unknown
     if (typeof data !== 'object' || data === null || Array.isArray(data)) return undefined
@@ -23,8 +22,17 @@ export async function grokLoginKey(account: Account): Promise<string | undefined
     const team = entry?.team_id ?? ''
     if (typeof user !== 'string' || !ID.test(user) || typeof team !== 'string' || (team && !ID.test(team)))
       return undefined
-    return createHash('sha256').update(`grok\0${team}\0${user}`).digest('hex').slice(0, 16)
+    return { user, team }
   } catch {
     return undefined
   }
+}
+
+/**
+ * A hash of `user_id` and `team_id`, cut to 16 hex characters, only for comparing two Accounts while the Runtime
+ * groups a Same Login. Undefined on any problem: the Account then simply does not group.
+ */
+export async function grokLoginKey(account: Account): Promise<string | undefined> {
+  const ids = await grokSignInIds(account)
+  return ids && createHash('sha256').update(`grok\0${ids.team}\0${ids.user}`).digest('hex').slice(0, 16)
 }

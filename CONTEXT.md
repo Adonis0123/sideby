@@ -51,7 +51,13 @@ Avoid: *profile* on its own (Codex already uses it for a config layer that does 
 - **Session Index**: the optional file an orchestrator publishes (`agent-dispatch/session-index.json` in its state folder) that maps Session ids to Runs. sideby reads it to show a Run Link: a chip on a Session's row that opens the Run Board (ADR-0041).
 - **Message**: text, and optionally screenshots, that one Session (or the user) sends to a Live Session with `sideby send`. It is kept as a file in sideby's state folder before any delivery, so it is never lost; it is then delivered through the Host's own channel (Claude Code's messages between sessions), read once its id shows in the target's record, or handed to the user as one line to paste.
 
-Avoid: *tab* for a Session (one tab can run several Sessions over time), *inbox* (Claude Code's own word for its native delivery).
+- **Session History** (the Panel says *History*): every Session of every Account that its Host still keeps on disk, live or not, listed and searched in one place. Its rows are Sessions; a past Session is not a different thing.
+- **Project**: the git repository a Session worked in. A worktree or a subfolder counts as its main repository; a Session outside any repository belongs to its working directory. A Project whose folder is gone still has its Sessions.
+- **Session Title**: what a row of Session History shows first: the name the user gave the Session, else the Host's own title, else the first prompt the user typed (sideby still never invents one).
+- **Script Session**: a Session no person typed into, started by a script, an SDK or another agent (`claude -p`, `codex exec`, a headless Grok run, a subagent). Session History hides them unless asked; a subagent's Session is folded under the Session that started it.
+- **History Index**: sideby's own local copy of each Session's title, Project, prompts and replies (never tool output, never a credential), kept in sideby's state folder so Session History opens and searches at once. It can be turned off and deleted, and is rebuilt from the Hosts' files (ADR-0042).
+
+Avoid: *tab* for a Session (one tab can run several Sessions over time), *inbox* (Claude Code's own word for its native delivery), *workspace* for a Project (Orca and editors use it for an open window), *Session Index* for the History Index (that is the orchestrator's file).
 
 ## Health
 

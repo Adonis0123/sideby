@@ -1,7 +1,7 @@
 // HTTP handler for the local Panel. Mountable under any basePath; standalone and embedded use the same rules.
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { aliasesByAccount } from '../core/accounts.ts'
+import { aliasesByAccount, startArgsOf } from '../core/accounts.ts'
 import {
   type AppProfileStatus,
   listAppProfiles,
@@ -67,9 +67,18 @@ import { applyHandoffEnable, type EnablePlan, planHandoffEnable } from '../core/
 import { handoffOverview } from '../core/handoff-overview.ts'
 import { configureHandoff, type HandoffChange, handoffStatus } from '../core/handoff-status.ts'
 import {
+  acceptInbound,
+  type InboundGroup,
+  inboundGroups,
+  undoInbound,
+  waitingFiles,
+} from '../core/inbound.ts'
+import {
   type LiveSession,
   type LiveSessionsResult,
   listLiveSessions,
+  liveKey,
+  referenceText,
   sessionCopyText,
 } from '../core/live-sessions.ts'
 import { listMessages, type MessageReceipt, sendMessage } from '../core/messages.ts'
@@ -167,6 +176,27 @@ export interface PanelMessageStatus {
   id: string
   status: MessageReceipt['status']
   sentAt: string
+  /** The target's Session Label, and the sender's when sideby could tell it, for the Panel's message notices. */
+  to: string
+  from?: string
+  /** For `paste-needed`: the line to paste into the target's tab. */
+  pasteText?: string
+  /** Why a paste is needed, or what the target must still do. */
+  note?: string
+  /** Delivered, but the target shows it only once the user approves it in its terminal (ADR-0045). */
+  needsApproval?: true
+}
+
+/** A Claude settings file and whether its sessions show Messages at once, for the "Receiving messages" dialog. */
+export interface PanelInboundGroup {
+  /** The file, with `~`. */
+  file: string
+  accounts: string[]
+  state: InboundGroup['state']
+  reason?: string
+  undo: boolean
+  /** Its sessions hold a Message for approval: `hold`, or not set while an Account starts in bypass mode. */
+  waits: boolean
 }
 
 /** A Live Session as the Sessions page gets it: the working directory with `~`, and the three texts it can copy. */
@@ -214,6 +244,8 @@ export type PanelAccount = (AccountStatus | (Account & Partial<AccountStatus>)) 
   aliasArgs?: Record<string, string[]>
   /** The model and effort it starts with and where each comes from (spec §3.19); absent for Families without a choice. */
   modelInfo?: Omit<AccountModel, 'ref' | 'family'>
+  /** Its reads take longer than the state waits (`readBudget`); they go on, and a later state carries them. */
+  pending?: true
 }
 
 export type { DoctorHistory }
@@ -503,7 +535,8 @@ export function handoffByFamily(
 ): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [id, f] of rt.families) {
-    const list = accounts.filter((a) => a.family === id)
+    // An Account still being read has no Quota yet; it is neither a pick nor an alternative until it has.
+    const list = accounts.filter((a) => a.family === id && !a.pending)
     // Count logins, not directories: a Same Login group (spec §3.21) is one Quota, so it alone is no alternative.
     const subs = list.filter((a) => a.kind === 'subscription')
     const logins = subs.filter((a, i) => !subs.slice(0, i).some((b) => a.sameLogin?.includes(b.ref))).length
@@ -596,6 +629,96 @@ function readBody(req: IncomingMessage): Promise<unknown> {
   })
 }
 
+// Session History (spec §3.33, ADR-0042): the page's filters, checked here, and the rows it gets with `~` paths and
+// a Session Reference in the Panel's language. The continue command stays as typed, so a paste works anywhere.
+const HISTORY_SINCE = new Set(['today', '7d', '30d', 'all'])
+const HISTORY_GROUPS = new Set(['project', 'category', 'account', 'family', 'day', 'none'])
+type HistoryModule = typeof import('../core/history.ts')
+type HistoryQueryIn = import('../core/history.ts').HistoryQuery
+type HistorySessionOut = import('../core/history.ts').HistorySession
+
+function historyQuery(body: Record<string, unknown>): HistoryQueryIn {
+  const since = optString(body, 'since')
+  if (since !== undefined && !HISTORY_SINCE.has(since))
+    throw new HttpError(400, '"since" must be today, 7d, 30d or all')
+  const num = (key: string, max: number): number | undefined => {
+    const v = body[key]
+    if (v === undefined || v === null) return undefined
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > max)
+      throw new HttpError(400, `"${key}" must be a whole number from 0 to ${max}`)
+    return v
+  }
+  const project = optString(body, 'project')
+  const q: HistoryQueryIn = { scripts: optBool(body, 'scripts') }
+  const words = optString(body, 'q')
+  if (words !== undefined) q.q = words.slice(0, 200)
+  if (project !== undefined) q.project = project
+  const family = optString(body, 'family')
+  if (family !== undefined) q.family = family
+  const account = optString(body, 'account')
+  if (account !== undefined) q.account = account
+  if (since !== undefined) q.since = since as HistoryQueryIn['since']
+  const limit = num('limit', 500)
+  if (limit !== undefined) q.limit = Math.max(1, limit)
+  const offset = num('offset', 1_000_000)
+  if (offset !== undefined) q.offset = offset
+  const group = optString(body, 'group')
+  if (group !== undefined) {
+    if (!HISTORY_GROUPS.has(group))
+      throw new HttpError(400, '"group" must be project, category, account, family, day or none')
+    q.group = group as HistoryQueryIn['group']
+  }
+  const category = optString(body, 'category')
+  if (category !== undefined) q.category = category
+  if (body.collapsed !== undefined) {
+    const c = body.collapsed
+    if (!Array.isArray(c) || c.length > 500 || c.some((k) => typeof k !== 'string' || k.length > 1024))
+      throw new HttpError(400, '"collapsed" must be a list of at most 500 group keys')
+    q.collapsed = c as string[]
+  }
+  return q
+}
+
+/** Project group keys go out with `~` like every path on the page, and come back the same way. */
+const untildify = (p: string, home: string) => (p === '~' || p.startsWith('~/') ? home + p.slice(1) : p)
+
+function historyView(s: HistorySessionOut, home: string, lang: 'en' | 'zh'): HistorySessionOut {
+  return {
+    ...s,
+    cwd: tildify(s.cwd, home),
+    project: tildify(s.project, home),
+    transcript: tildify(s.transcript, home),
+    reference: referenceText(
+      {
+        accountLabel: s.accountLabel,
+        sessionId: s.sessionId,
+        title: s.title,
+        cwd: s.cwd,
+        transcript: s.transcript,
+        guessed: false,
+        resumeCommand: s.resumeCommand,
+      },
+      lang,
+    ),
+  }
+}
+
+/** A search of tool output the page started; it runs while the page polls it, and stops when asked or forgotten. */
+interface ToolScan {
+  ctrl: AbortController
+  hits: HistorySessionOut[]
+  done: number
+  total: number
+  finished: boolean
+  error?: string
+  /** When the page last asked; a scan nobody polls for TOOL_SCAN_IDLE_MS stops. */
+  seen: number
+}
+const TOOL_SCAN_IDLE_MS = 15_000
+const TOOL_SCAN_MAX_HITS = 100
+/** The longest one scan of tool output runs, polled or not. */
+const TOOL_SCAN_MAX_MS = 120_000
+
 function optString(body: Record<string, unknown>, key: string): string | undefined {
   const v = body[key]
   if (v === undefined || v === null || v === '') return undefined
@@ -664,9 +787,84 @@ function rcView(groups: readonly RemoteControlGroup[], home: string): RemoteCont
   return groups.map((g) => ({ ...g, file: tildify(g.file, home) }))
 }
 
+/**
+ * How long one state waits for an Account's reads. A slower Account (a plugin reader that hangs, a Host that answers
+ * late) is sent as pending, so it does not hold up every other row; its reads go on and the next state picks up the
+ * answer. Mutable for tests only.
+ */
+export const readBudget = { ms: 2000, hungMs: 60_000 }
+/** An answer kept longer than this is not used: the next state reads the Account again. */
+const KEPT_MS = 30_000
+type Reading = { promise: Promise<PanelAccount>; started: number; done?: { state: PanelAccount; at: number } }
+/** Reads still going on, by Account ref; one map per Panel, since a Runtime may be made anew for every request. */
+type Readings = Map<string, Reading>
+
+/** The Account's state within `readBudget`, or a pending placeholder while its reads go on. */
+async function timedAccountState(
+  rt: Runtime,
+  account: Account,
+  families: FamilyInfo[],
+  mine: Readings,
+): Promise<PanelAccount> {
+  const fam = families.find((f) => f.id === account.family)
+  const placeholder = async (extra: Partial<PanelAccount>): Promise<PanelAccount> => {
+    // Its Same Login is known without the slow reads, so its rows stay grouped meanwhile.
+    const sameLogin = await rt.sameLogin(account).catch(() => [] as string[])
+    return {
+      ...account,
+      familyTitle: fam?.title ?? account.family,
+      hostInstalled: fam?.installed ?? false,
+      login: 'unknown',
+      ...(sameLogin.length ? { sameLogin } : {}),
+      ...extra,
+    }
+  }
+  let r = mine.get(account.ref)
+  if (r?.done && Date.now() - r.done.at > KEPT_MS) r = undefined
+  // A read still going after `readBudget.hungMs` has hung (a plugin reader, a Host that never answers).
+  if (r && !r.done && Date.now() - r.started > readBudget.hungMs) {
+    // Dropped, so the next state starts a new read; this one says what happened instead of spinning on.
+    mine.delete(account.ref)
+    return placeholder({
+      error: `reading this account took longer than ${Math.round(readBudget.hungMs / 1000)} s; refresh to try again`,
+    })
+  }
+  if (!r) {
+    const fresh: Reading = { promise: accountState(rt, account, families), started: Date.now() }
+    fresh.promise.then(
+      (state) => {
+        fresh.done = { state, at: Date.now() }
+      },
+      () => undefined,
+    )
+    mine.set(account.ref, fresh)
+    r = fresh
+  }
+  const reading = r
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<null>((done) => {
+    timer = setTimeout(() => done(null), readBudget.ms)
+  })
+  let state: PanelAccount | null
+  try {
+    state = await Promise.race([reading.promise, late])
+  } catch (err) {
+    if (mine.get(account.ref) === reading) mine.delete(account.ref)
+    return placeholder({ error: (err as Error).message })
+  } finally {
+    clearTimeout(timer)
+  }
+  if (state) {
+    // Only this reading: another request may already have started a newer one.
+    if (mine.get(account.ref) === reading) mine.delete(account.ref)
+    return state
+  }
+  return placeholder({ pending: true })
+}
+
 async function buildState(
   rt: Runtime,
-  opts: { version: string; build: string; readOnly: boolean; updates: boolean },
+  opts: { version: string; build: string; readOnly: boolean; updates: boolean; readings: Readings },
 ): Promise<PanelState> {
   const ctx = rt.readContext()
   const [families, accounts, history, quotaSetups, remoteControl, upd] = await Promise.all([
@@ -678,10 +876,16 @@ async function buildState(
     opts.updates ? updateState(rt, opts.readOnly).catch(() => undefined) : Promise.resolve(undefined),
   ])
   const health = healthByAccount(history)
+  // Reads of Accounts that are gone are dropped.
+  for (const ref of opts.readings.keys()) if (!accounts.some((a) => a.ref === ref)) opts.readings.delete(ref)
   const aliases = aliasesByAccount(aliasRefs(rt.config.aliases), accounts)
   // Desktop Apps (spec §3.20): one process listing for every Account, run alongside the per-Account reads.
   const [states, appProfiles] = await Promise.all([
-    withDesktopApps(rt, accounts, Promise.all(accounts.map((a) => accountState(rt, a, families)))),
+    withDesktopApps(
+      rt,
+      accounts,
+      Promise.all(accounts.map((a) => timedAccountState(rt, a, families, opts.readings))),
+    ),
     listAppProfiles(rt),
   ])
   const list = states.map((st): PanelAccount => {
@@ -938,6 +1142,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   const ask = resolveAsk(opts.ask)
   const token = randomBytes(32).toString('base64url')
   const serial = writeQueue()
+  const readings: Readings = new Map()
   const getRuntime = typeof opts.runtime === 'function' ? opts.runtime : async () => opts.runtime as Runtime
   const sessionsSource = (opts as { [LIVE_SESSIONS_SOURCE]?: LiveSessionsSource })[LIVE_SESSIONS_SOURCE]
   const liveSessions = sessionsSource?.list ?? listLiveSessions
@@ -945,6 +1150,47 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   const orcaOf = (rt: Runtime) => sessionsSource?.orca ?? systemOrca(rt.env)
   const sendTo = sessionsSource?.send ?? sendMessage
   const messages = sessionsSource?.messages ?? listMessages
+  // Session History loads node:sqlite only when the page first asks for it.
+  let historyMod: Promise<HistoryModule> | undefined
+  const history = () => (historyMod ??= import('../core/history.ts'))
+  // Which Sessions run now, for the "running" mark of History rows: read at most every 5 s, given 3 s.
+  const LIVE_FIRST_MS = 300
+  let liveMark: { at: number; ids: Promise<Set<string>>; last?: Set<string> } | undefined
+  // Which past Sessions run now. A search never waits for that list once one is known: it answers with the last
+  // one while a fresh one is read, and waits at most LIVE_FIRST_MS for the very first.
+  const liveIds = async (rt: Runtime): Promise<Set<string>> => {
+    if (!liveMark || Date.now() - liveMark.at > 5_000) {
+      const ids = (
+        sessionsSource?.list ? sessionsSource.list(rt) : listLiveSessions(rt, { deadlineMs: 3_000 })
+      )
+        .then((r) => new Set(r.sessions.map((x) => liveKey(x.account, x.sessionId))))
+        .catch(() => new Set<string>())
+      const last = liveMark?.last
+      liveMark = { at: Date.now(), ids, ...(last ? { last } : {}) }
+      const mark = liveMark
+      void ids.then((v) => {
+        mark.last = v
+      })
+    }
+    if (liveMark.last) return liveMark.last
+    let timer: NodeJS.Timeout | undefined
+    const late = new Promise<Set<string>>((r) => {
+      timer = setTimeout(() => r(new Set()), LIVE_FIRST_MS)
+    })
+    try {
+      return await Promise.race([liveMark.ids, late])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  const toolScans = new Map<string, ToolScan>()
+  const dropIdleScans = () => {
+    for (const [id, scan] of toolScans)
+      if (Date.now() - scan.seen > TOOL_SCAN_IDLE_MS) {
+        scan.ctrl.abort()
+        toolScans.delete(id)
+      }
+  }
 
   // Every route declares whether a request writes files. `writes` defaults to true, so a route that forgets
   // to declare it is refused by a read-only Panel instead of slipping through.
@@ -1305,6 +1551,153 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         }
       },
     },
+    // Session History (spec §3.33): every past Session of every Account, from the History Index sideby keeps in its
+    // own state folder. Read only for the Host folders; it answers from what is built and builds the rest behind.
+    '/api/history': {
+      writes: () => false,
+      queued: false,
+      async run(body) {
+        const lang = body.lang === 'zh' ? 'zh' : 'en'
+        const rt = await getRuntime()
+        const home = rt.paths.home
+        const h = await history()
+        const q = historyQuery(body)
+        const paths = q.group === 'project'
+        if (paths && q.collapsed) q.collapsed = q.collapsed.map((k) => untildify(k, home))
+        const r = await h.searchHistory(rt, q, { live: await liveIds(rt) })
+        h.syncHistoryInBackground(rt)
+        const key = (k: string) => (paths ? tildify(k, home) : k)
+        return {
+          ...r,
+          sessions: r.sessions.map((x) => {
+            const v = historyView(x, home, lang)
+            return v.group === undefined ? v : { ...v, group: key(v.group) }
+          }),
+          ...(r.groups ? { groups: r.groups.map((g) => ({ ...g, key: key(g.key) })) } : {}),
+          problems: r.problems.map((p) => p.split(home).join('~')),
+        }
+      },
+    },
+    '/api/history/projects': {
+      writes: () => false,
+      queued: false,
+      async run(body) {
+        const rt = await getRuntime()
+        const home = rt.paths.home
+        const r = await (await history()).historyProjects(rt, historyQuery(body))
+        return {
+          ...r,
+          projects: r.projects.map((p) => ({ ...p, project: tildify(p.project, home) })),
+          ...(r.problems ? { problems: r.problems.map((p) => p.split(home).join('~')) } : {}),
+        }
+      },
+    },
+    '/api/history/show': {
+      writes: () => false,
+      queued: false,
+      async run(body) {
+        const id = optString(body, 'id')
+        if (!id) throw new HttpError(400, '"id" is required')
+        const before = body.before
+        if (before !== undefined && (typeof before !== 'number' || !Number.isInteger(before) || before < 0))
+          throw new HttpError(400, '"before" must be a whole number')
+        const lang = body.lang === 'zh' ? 'zh' : 'en'
+        const rt = await getRuntime()
+        const home = rt.paths.home
+        const account = optString(body, 'account')
+        const r = await (await history()).historyShow(rt, id, {
+          ...(before === undefined ? {} : { before }),
+          ...(account ? { account } : {}),
+        })
+        return { ...r, session: historyView(r.session, home, lang) }
+      },
+    },
+    // "Also search tool output": reads the record files at that moment and keeps nothing (ADR-0042). The page starts
+    // one scan, polls it with its id and stops it; a new scan stops the one before.
+    '/api/history/tools': {
+      writes: () => false,
+      queued: false,
+      async run(body) {
+        dropIdleScans()
+        const lang = body.lang === 'zh' ? 'zh' : 'en'
+        const rt = await getRuntime()
+        const home = rt.paths.home
+        const job = optString(body, 'job')
+        if (job) {
+          const scan = toolScans.get(job)
+          if (!scan) throw new HttpError(404, 'This search of tool output has stopped; search again.')
+          if (optBool(body, 'cancel')) {
+            scan.ctrl.abort()
+            toolScans.delete(job)
+            return { job, stopped: true }
+          }
+          scan.seen = Date.now()
+          if (scan.finished) toolScans.delete(job)
+          return {
+            job,
+            hits: scan.hits.map((x) => historyView(x, home, lang)),
+            done: scan.done,
+            total: scan.total,
+            finished: scan.finished,
+            ...(scan.error ? { error: scan.error } : {}),
+          }
+        }
+        const q = historyQuery(body)
+        if (!q.q?.trim()) throw new HttpError(400, 'Type the words to look for first.')
+        for (const scan of toolScans.values()) scan.ctrl.abort()
+        toolScans.clear()
+        const skip = Array.isArray(body.skip)
+          ? new Set(body.skip.filter((x): x is string => typeof x === 'string').slice(0, 500))
+          : undefined
+        const id = randomBytes(8).toString('hex')
+        const scan: ToolScan = {
+          ctrl: new AbortController(),
+          hits: [],
+          done: 0,
+          total: 0,
+          finished: false,
+          seen: Date.now(),
+        }
+        toolScans.set(id, scan)
+        const h = await history()
+        const started = Date.now()
+        void (async () => {
+          try {
+            for await (const hit of h.scanToolOutput(rt, q, {
+              signal: scan.ctrl.signal,
+              live: await liveIds(rt),
+              ...(skip ? { skip } : {}),
+              onProgress: (done, total) => {
+                scan.done = done
+                scan.total = total
+                // A scan stops by itself once the page stops asking, or after TOOL_SCAN_MAX_MS.
+                const now = Date.now()
+                if (now - scan.seen > TOOL_SCAN_IDLE_MS || now - started > TOOL_SCAN_MAX_MS) scan.ctrl.abort()
+              },
+            })) {
+              scan.hits.push(hit.session)
+              if (scan.hits.length >= TOOL_SCAN_MAX_HITS) break
+            }
+          } catch (err) {
+            scan.error = (err instanceof Error ? err.message : String(err)).split(home).join('~')
+          }
+          scan.finished = true
+        })()
+        return { job: id, hits: [], done: 0, total: 0, finished: false }
+      },
+    },
+    // How far the History Index is built, and "Delete the index" (it is built again on the next search). Deleting
+    // writes only sideby's own state folder, but a read-only Panel still refuses it.
+    '/api/history/index': {
+      writes: (body) => body.clear === true,
+      queued: false,
+      async run(body) {
+        const rt = await getRuntime()
+        const home = rt.paths.home
+        const r = await (await history()).historyIndexInfo(rt, { clear: optBool(body, 'clear') })
+        return { ...r, path: tildify(r.path, home) }
+      },
+    },
     // Brings the Orca tab a Session runs in to the front (ADR-0039). The page sends only the Session id: the handle is
     // found again here, from the running process and Orca's own list. It starts a program, so a read-only Panel
     // refuses it (writes defaults to true).
@@ -1381,8 +1774,56 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const latest: Record<string, PanelMessageStatus> = {}
         // Newest first: the first one met for a Session is its latest.
         for (const m of await messages(await getRuntime(), { limit: 200, persist: !readOnly }))
-          latest[m.toSessionId] ??= { id: m.id, status: m.status, sentAt: m.sentAt }
+          latest[m.toSessionId] ??= {
+            id: m.id,
+            status: m.status,
+            sentAt: m.sentAt,
+            to: m.to,
+            ...(m.from ? { from: m.from } : {}),
+            ...(m.status === 'paste-needed' ? { pasteText: m.pasteText } : {}),
+            ...(m.note ? { note: m.note } : {}),
+            ...(m.needsApproval ? { needsApproval: true as const } : {}),
+          }
         return { latest }
+      },
+    },
+    // Receiving Messages (ADR-0045): whether each Claude settings file lets its sessions show a Message at once, and
+    // the same change as `sideby messages inbound accept|undo`; the page shows each file's change before it asks.
+    '/api/messages/inbound': {
+      writes: () => false,
+      queued: false,
+      async run() {
+        const rt = await getRuntime()
+        const accounts = await rt.accounts()
+        const groups = await inboundGroups(accounts, rt.readContext())
+        const waits = await waitingFiles(groups, accounts, startArgsOf(rt.config, accounts))
+        const home = rt.paths.home
+        return {
+          groups: groups.map(
+            (g): PanelInboundGroup => ({
+              ...g,
+              file: tildify(g.file, home),
+              ...(g.reason ? { reason: g.reason.split(home).join('~') } : {}),
+              waits: waits.has(g.file),
+            }),
+          ),
+        }
+      },
+    },
+    '/api/messages/inbound/accept': {
+      async run() {
+        const rt = await getRuntime()
+        const r = await acceptInbound(await rt.accounts(), rt.readContext())
+        const home = rt.paths.home
+        return { ...r, results: r.results.map((x) => ({ ...x, file: tildify(x.file, home) })) }
+      },
+    },
+    '/api/messages/inbound/undo': {
+      async run() {
+        const rt = await getRuntime()
+        const r = await undoInbound(await rt.accounts(), rt.readContext())
+        const home = rt.paths.home
+        return { ...r, results: r.results.map((x) => ({ ...x, file: tildify(x.file, home) })) }
       },
     },
     // Auto Handoff (spec §3.17): readiness reads only; configure shows the config change unless `confirm`.
@@ -1859,7 +2300,11 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           return true
         }
         if (sub === '/api/state') {
-          send(res, 200, await buildState(await getRuntime(), { version, build, readOnly, updates }))
+          send(
+            res,
+            200,
+            await buildState(await getRuntime(), { version, build, readOnly, updates, readings }),
+          )
           return true
         }
         if (Object.hasOwn(routes, sub) || Object.hasOwn(uploads, sub)) throw new HttpError(405, 'use POST')
@@ -1884,7 +2329,10 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       const body = (await readBody(req)) as Record<string, unknown>
       if (readOnly && (route.writes?.(body) ?? true)) throw new HttpError(403, 'this panel is read-only')
       // Reads that record history (doctor) also run in this queue, so overlapping checks merge in order.
-      send(res, 200, await (route.queued === false ? route.run(body) : serial(() => route.run(body))))
+      const result = await (route.queued === false ? route.run(body) : serial(() => route.run(body)))
+      // A change may concern an Account whose read began before it: the next state reads again.
+      if (route.writes?.(body) ?? true) readings.clear()
+      send(res, 200, result)
       return true
     } catch (err) {
       if (res.headersSent) {

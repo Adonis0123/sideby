@@ -12,9 +12,11 @@ import { type FakeHome, withFakeHome } from '../../testing/index.ts'
 import {
   argsBypass,
   claudeSocketOf,
+  isSocketFolderName,
   messageLine,
   sessionBypass,
   socketProblem,
+  socketRoots,
   writeToSocket,
 } from '../families/claude/messaging.ts'
 import { createRuntime } from '../runtime.ts'
@@ -283,14 +285,14 @@ describe('sideby send', () => {
       assert.equal(g.status, 'paste-needed')
       assert.match(
         g.note!,
-        /^Grok Build has no channel sideby can deliver to yet; paste the line into its tab$/,
+        /^Grok Build cannot receive messages directly yet; paste the line into its terminal tab$/,
       )
-      assert.match(g.pasteText, new RegExp(`^去读 sideby 留给你的消息 .*（sideby message ${g.id}）。$`))
+      assert.match(g.pasteText, new RegExp(`^请读取 sideby 存好的消息 .*（sideby message ${g.id}）。$`))
       const p = await sendMessage(rt, 'pi:main', { text: 'x' }, depsFor(procs, s.root))
       assert.equal(p.status, 'paste-needed')
       assert.match(
         p.note!,
-        /could not tell which pi:main session runs now \(it took the newest one\), so it did not deliver it/,
+        /could not tell which pi:main session is running \(picked the newest one\)\. Paste the line into the right tab/,
       )
       await s.close()
       assert.equal(s.got.length, 0)
@@ -310,15 +312,15 @@ describe('sideby send', () => {
       await fsp.truncate(big, 20 * 1024 * 1024 + 1)
       await assert.rejects(
         sendMessage(rt, 'cc002', { text: 'x', images: [text] }, depsFor(procs, s.root)),
-        /notes\.txt is not a PNG, JPEG, GIF or WebP image; only screenshots can be attached/,
+        /notes\.txt is not a PNG, JPEG, GIF or WebP image\. Attach a screenshot in one of those formats/,
       )
       await assert.rejects(
         sendMessage(rt, 'cc002', { text: 'x', images: [big] }, depsFor(procs, s.root)),
-        /big\.png is larger than 20 MB, too large to send/,
+        /big\.png is over 20 MB\. Crop it or pick a smaller screenshot/,
       )
       await assert.rejects(
         sendMessage(rt, 'cc002', { text: 'x', images: [h.path('gone.png')] }, depsFor(procs, s.root)),
-        /gone\.png is not a file sideby can read/,
+        /sideby cannot read .*gone\.png; check the path/,
       )
       await s.close()
       assert.equal(await fsp.stat(h.path('.local/state/sideby/messages')).catch(() => null), null)
@@ -358,8 +360,25 @@ describe('sideby send', () => {
       const other = await sendMessage(rt, 'cc002', { text: 'x' }, depsFor(procs, s.root, { uid: 4242 }))
       assert.match(
         other.note!,
-        /^sideby did not deliver it because its socket folder belongs to another user;/,
+        /^sideby did not deliver it because its message channel folder belongs to another user on this computer;/,
       )
+    })
+  })
+
+  it('hands over a paste, without connecting, when the settings file cannot be read', async () => {
+    await withFakeHome(async (h) => {
+      const s = await socketServer(h, '4102')
+      const procs = await machine(h, s.path)
+      await h.write('.claude-002/settings.json', '{ not json')
+      const rt = await createRuntime({ env: h.env })
+      const r = await sendMessage(rt, 'cc002', { text: 'x' }, depsFor(procs, s.root))
+      await s.close()
+      assert.equal(r.status, 'paste-needed')
+      assert.match(
+        r.note!,
+        /^sideby could not tell if cc002 accepts messages \(settings\.json cannot be changed safely/,
+      )
+      assert.equal(s.got.length, 0)
     })
   })
 })
@@ -371,31 +390,61 @@ describe('the message socket checks', () => {
       const uid = process.getuid?.()
       const o = { tempRoots: [s.root], uid }
       assert.equal(await socketProblem(s.path, o), null)
-      assert.equal(await socketProblem('rel/cc-socks/1.sock', o), 'its socket path is not absolute')
+      assert.equal(
+        await socketProblem('rel/cc-socks/1.sock', o),
+        'its message channel path is invalid (restart the session to fix it)',
+      )
       const link = join(s.dir, 'link.sock')
       await fsp.symlink(s.path, link)
-      assert.equal(await socketProblem(link, o), 'its socket is a link')
-      assert.equal(await socketProblem(join(s.dir, 'none.sock'), o), 'its socket does not exist')
+      assert.equal(
+        await socketProblem(link, o),
+        'its message channel is a symlink instead of a live channel (restart the session to fix it)',
+      )
+      assert.equal(
+        await socketProblem(join(s.dir, 'none.sock'), o),
+        'its message channel is gone (the session may have ended)',
+      )
       const file = join(s.dir, 'file.sock')
       await fsp.writeFile(file, '')
-      assert.equal(await socketProblem(file, o), 'its socket path is not a socket')
+      assert.equal(
+        await socketProblem(file, o),
+        'its message channel is not a valid channel file (restart the session to fix it)',
+      )
       assert.equal(
         await socketProblem(s.path, { tempRoots: [h.home], uid }),
-        'its socket is not in the system temp folder',
+        'its message channel is outside the system temp folder (restart the session to fix it)',
       )
       const elsewhere = join(s.root, 'socks')
       await fsp.mkdir(elsewhere)
       assert.equal(
         await socketProblem(join(elsewhere, '1.sock'), o),
-        'its socket is not in a cc-socks folder',
+        'its message channel is not in a cc-socks folder (restart the session to fix it)',
       )
+      // Claude Code's per-user fallback folder, `cc-socks-<uid>`, is accepted for this user only.
+      if (uid !== undefined) {
+        const mine = join(s.root, `cc-socks-${uid}`)
+        await fsp.mkdir(mine, { mode: 0o700 })
+        await fsp.chmod(mine, 0o700)
+        const srv = createServer()
+        const minePath = join(mine, '2.sock')
+        await new Promise<void>((r) => srv.listen(minePath, r))
+        assert.equal(await socketProblem(minePath, o), null)
+        assert.equal(
+          await socketProblem(minePath, { ...o, uid: uid + 1 }),
+          'its message channel is not in a cc-socks folder (restart the session to fix it)',
+        )
+        await new Promise<void>((r) => srv.close(() => r()))
+      }
       if (uid !== undefined)
         assert.equal(
           await socketProblem(s.path, { ...o, uid: uid + 1 }),
-          'its socket folder belongs to another user',
+          'its message channel folder belongs to another user on this computer',
         )
       await fsp.chmod(s.dir, 0o755)
-      assert.equal(await socketProblem(s.path, o), 'others can enter its socket folder')
+      assert.equal(
+        await socketProblem(s.path, o),
+        'other users on this computer can access its message channel folder (restart the session to fix it)',
+      )
       await fsp.chmod(s.dir, 0o700)
       await s.close()
 
@@ -413,6 +462,20 @@ describe('the message socket checks', () => {
       for (const c of held) c.destroy()
       await new Promise<void>((r) => quiet.close(() => r()))
     })
+  })
+
+  it('looks for cc-socks under XDG_RUNTIME_DIR first, then the system temp folders', () => {
+    const roots = socketRoots({ XDG_RUNTIME_DIR: '/run/user/1000' })
+    assert.equal(roots[0], '/run/user/1000')
+    assert.ok(roots.includes('/tmp'))
+    assert.deepEqual(socketRoots({}), socketRoots({ XDG_RUNTIME_DIR: 'relative/dir' }))
+    assert.ok(!socketRoots({ XDG_RUNTIME_DIR: '' }).includes(''))
+    assert.equal(isSocketFolderName('cc-socks', 501), true)
+    assert.equal(isSocketFolderName('cc-socks-501', 501), true)
+    assert.equal(isSocketFolderName('cc-socks-502', 501), false)
+    assert.equal(isSocketFolderName('cc-socks-502', undefined), true)
+    assert.equal(isSocketFolderName('cc-socks-', 501), false)
+    assert.equal(isSocketFolderName('socks', 501), false)
   })
 
   it('reads the socket path only from a record whose process still runs that session', async () => {
@@ -434,7 +497,7 @@ describe('the message socket checks', () => {
       const reused = processView(fakeDeps([{ ...proc(4102, 'claude'), startMs: START + 3_600_000 }]))
       assert.deepEqual(await claudeSocketOf(dir, 4102, ID_B, reused), { problem: 'the session has ended' })
       assert.deepEqual(await claudeSocketOf(dir, 4102, ID_A, alive), {
-        problem: 'the process now runs another session',
+        problem: 'that terminal is now running a different session',
       })
     })
   })
@@ -464,11 +527,60 @@ describe('bypass and the read receipt', () => {
       assert.equal(held.status, 'delivered')
       assert.equal(
         held.note,
-        'cc002 holds messages from other sessions: approve it in its terminal within 5 minutes, or run `sideby messages inbound accept` so it shows them at once',
+        'sent, but cc002 needs your approval: approve the message in its terminal within 5 minutes, or run `sideby messages inbound accept` to receive future messages right away',
       )
+      assert.equal(held.needsApproval, true)
       const plain = await sendMessage(rt, 'cc001', { text: 'x' }, depsFor(procs, s.root))
       assert.equal(plain.note, undefined, 'a session not in bypass shows it at once')
+      assert.equal(plain.needsApproval, undefined)
       await s.close()
+      const kept = JSON.parse(await fsp.readFile(held.file.replace(/\.md$/, '.json'), 'utf8'))
+      assert.equal(kept.needsApproval, true, 'the receipt remembers it waits for approval')
+      assert.deepEqual(
+        (await listMessages(rt, { to: 'cc002' })).map((m) => [m.status, m.needsApproval]),
+        [['delivered', true]],
+        'still within the time Claude Code keeps it',
+      )
+      // Approved in time: the id shows in the transcript, the Message is read and no longer waits.
+      await fsp.appendFile(
+        h.path(`.claude-002/projects/-work-b/${ID_B}.jsonl`),
+        `${JSON.stringify({ type: 'user', message: { content: deliveredText(held.id, undefined, 'x', []) } })}\n`,
+      )
+      const read = (await listMessages(rt, { to: 'cc002' }))[0]!
+      assert.equal(read.status, 'read')
+      assert.equal(read.needsApproval, undefined)
+    })
+    await withFakeHome(async (h) => {
+      // Nobody approved it within 6 minutes: Claude Code dropped it, so the user pastes the line instead.
+      const s = await socketServer(h, '4102')
+      const procs = await machine(h, s.path)
+      const sent = new Date('2026-10-21T10:00:00Z')
+      let clock = sent
+      const rt = await createRuntime({ env: h.env, now: () => clock })
+      const held = await sendMessage(rt, 'cc002', { text: 'x' }, depsFor(procs, s.root))
+      await s.close()
+      assert.equal(held.needsApproval, true)
+      clock = new Date(sent.getTime() + 5 * 60_000)
+      assert.equal((await listMessages(rt))[0]!.status, 'delivered')
+      clock = new Date(sent.getTime() + 7 * 60_000)
+      const late = (await listMessages(rt))[0]!
+      assert.equal(late.status, 'paste-needed')
+      assert.equal(late.needsApproval, undefined)
+      assert.match(late.note!, /nobody approved it within 5 minutes/)
+      const kept = JSON.parse(await fsp.readFile(held.file.replace(/\.md$/, '.json'), 'utf8'))
+      assert.equal(kept.status, 'paste-needed')
+      assert.equal(kept.needsApproval, undefined)
+    })
+    await withFakeHome(async (h) => {
+      // "hold" waits for approval in every session, bypass or not.
+      const s = await socketServer(h, '4102')
+      const procs = await machine(h, s.path)
+      await h.write('.claude-001/settings.json', '{"crossSessionInbound":"hold"}')
+      const rt = await createRuntime({ env: h.env })
+      const r = await sendMessage(rt, 'cc001', { text: 'x' }, depsFor(procs, s.root))
+      await s.close()
+      assert.equal(r.status, 'delivered')
+      assert.equal(r.needsApproval, true)
     })
     await withFakeHome(async (h) => {
       const s = await socketServer(h, '4102')
@@ -477,7 +589,7 @@ describe('bypass and the read receipt', () => {
       const r = await sendMessage(rt, 'cc002', { text: 'x' }, depsFor(procs, s.root))
       await s.close()
       assert.equal(r.status, 'paste-needed')
-      assert.match(r.note!, /cc002 refuses messages from other sessions \(crossSessionInbound is "refuse"\)/)
+      assert.match(r.note!, /cc002 blocks messages from other sessions \(crossSessionInbound is "refuse"\)/)
       assert.equal(s.got.length, 0)
     })
   })
@@ -553,7 +665,7 @@ describe('a receipt that cannot be recorded', () => {
         await s.close()
       }
       assert.equal(r.status, 'delivered')
-      assert.match(r.note ?? '', /could not record that it was delivered \(EACCES\)/)
+      assert.match(r.note ?? '', /could not save the message status \(EACCES\)/)
     })
   })
 })

@@ -43,7 +43,8 @@ export default {
 
 | 扩展点 | 时机 | 能做什么 | 超时 |
 |---|---|---|---|
-| `api.family(def)` | 加载插件时 | 注册家族：目录约定、选择变量、Hijack Variables、默认参数、共享项、登录命令、登录态判断、模型，可选的 `logo`、`readQuota`、`readUsage`、`quotaSetup`、`keepTitle`（让宿主保留 config `accountTitle` 所设标题的参数）、`probe`（发一次很短的非交互请求的宿主参数，`sideby try` 运行它）、`aiTaskArgs`（AI Task 启动前去掉跳过宿主权限检查的参数，可以加上宿主自己的安全模式） | — |
+| `api.family(def)` | 加载插件时 | 注册家族：目录约定、选择变量、Hijack Variables、默认参数、共享项、登录命令、登录态判断、模型，可选的 `logo`、`website` 和 `history`（见下文）、`readQuota`、`readUsage`、`quotaSetup`、`keepTitle`（让宿主保留 config `accountTitle` 所设标题的参数）、`probe`（发一次很短的非交互请求的宿主参数，`sideby try` 运行它）、`aiTaskArgs`（AI Task 启动前去掉跳过宿主权限检查的参数，可以加上宿主自己的安全模式） | — |
+| `api.projectCategories(def)` | 加载插件时 | 把项目分到自己的分类里，会话页可以按它分组（见下文）；只用第一个注册的插件 | 每次回答 3 s |
 | `launch.before` | 每次 `run`、`login` 之前 | 改 `ctx.env`、`ctx.args`，或用 `throw api.abort(msg)` 中止启动 | 30 秒 |
 | `account.create.before` | `new`（CLI 或面板）写入任何文件之前 | 用 `throw api.abort(msg)` 拒绝新建；`ctx` 里有 `family`、`name`、`api`、该家族已有的 `accounts` 和 `config`。CLI 以退出码 1 结束，面板显示 `msg`，所以要写明改怎么做 | 10 秒 |
 | `account.created` | `new` 成功后 | 补文件，用 `ctx.log()` 打印下一步提示 | 30 秒 |
@@ -56,6 +57,42 @@ logo: { path: 'M11.503.131 1.891 5.678…', title: 'Cursor', color: '#000000' } 
 ```
 
 `path` 只能是 SVG path 数据（命令字母、数字、空格、逗号、点、`+`、`-`，最多 20000 个字符），`color` 必须是十六进制颜色，`fillRule` 取 `nonzero` 或 `evenodd`。不合法的 logo 会被丢弃，并在 `sideby plugins` 里报一条插件错误；家族照常加载，面板改为显示首字母。黑色标志不要设 `color`，这样在深色模式下会跟随文字颜色。
+
+家族的 `website` 让它的订阅账号在面板「网页登录」一格里也有「在浏览器打开」和「选择」，和 Claude、Codex、Grok 一样（ADR-0043）：
+
+```ts
+website: {
+  url: 'https://cursor.com/dashboard',
+  // 可选：让 sideby 自己找出每个账号登录过的 Chrome 浏览器用户。
+  match: {
+    origin: 'https://cursor.com',
+    // 网站也写进 Local Storage 键名的 id，从宿主自己的登录文件里读。
+    async signInId(account) {
+      const cfg = JSON.parse(await readFile(join(account.dir, 'cli-config.json'), 'utf8'))
+      return String(cfg.authInfo?.authId ?? '').split('|').pop() || undefined
+    },
+  },
+}
+```
+
+`url` 必须是 `https://` 地址，不带查询和片段（路径只含字母、数字和 `._~/-`）。`origin` 是网站来源，不带路径。只返回 id，不要返回 token：sideby 只在内存里和键名比对，不显示、不记日志、不保存；短于 8 个字符的 id 不用，读取抛错只记一条点名账号的问题。没有 `match` 时由用户选浏览器用户；账号登录邮箱等于某个浏览器用户的 Google 账号时，照样能对上。不合法的 `website` 会被丢弃并报插件错误（`sideby plugins check` 里是 `website.invalid`），家族照常加载。
+
+家族的 `history` 让「会话」页和 `sideby history` 也能列出、搜索、打开这个工具的历史会话，和内置工具一样（ADR-0044）。没有它时，这个 AI 的账号会显示为 sideby 读不了历史。
+
+```ts
+history: {
+  // 每个会话一条：记录文件或文件夹，以及内容变了就会变的签名。
+  async list(account, problems) { /* … */ return [{ path, sig, mtimeMs }] },
+  // 一条记录里的会话：id、目录、标题、时间，以及用户输入的和模型回答的文字。
+  async parse(file, account) { /* … */ return { sessionId, cwd, title, titleFrom: 'host', messages, script: false, prompts, replies } },
+  async *messages(path) { yield { role: 'user', text: '…' } },
+  resumeArgs: (id) => ['--resume', id], // 继续一个会话的宿主参数
+}
+```
+
+只读宿主自己的会话记录，不打开登录文件。`prompts` 只放用户输入的文字，`replies` 只放模型的回答：不含工具调用和工具输出，也不含宿主注入的上下文。sideby 会把这两项存进本机的 History Index。`toolText(path)` 可选，只在有人搜工具输出时读；`titles(account)` 可选，给宿主另外保存的标题。成员不是函数的 `history` 会被丢弃并报插件错误，家族照常加载。
+
+`api.projectCategories({ label, categoriesOf })` 把项目分到你自己的分组里，比如按客户或工作区。sideby 一次传入很多项目路径；返回 `{ [路径]: 分类名 }`，没有分类的路径不写。`label` 是分组在页面上的叫法（如「工作区」，不写时为「分类」）。答案缓存约 1 分钟；超过 3 s 没答或抛错时，记一条点名你插件的问题，列表照常显示、只是没有分类。这时会话页的「显示 → 分组方式」里会出现「分类」，左栏把项目按分类分层；`sideby history --group category` 和 `--category <名字>` 效果相同。
 
 错误信息里总会标明插件名。加载失败只影响它自己；`doctor.check` 出错会变成该账号的一条 fail Finding；`launch.before` 出错会中止启动；家族的读取函数（例如 `model`）抛错时，会出现在 `list` 里该账号的 `problems` 中。`fix()` 只能写当前账号目录，并且要通过 `api.fs.writeFileAtomic` 写。
 

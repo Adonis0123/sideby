@@ -1,0 +1,410 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/history.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "sessions",
+    "total",
+    "index",
+    "sources",
+    "problems"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "sessions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "account",
+          "accountLabel",
+          "family",
+          "sessionId",
+          "title",
+          "titleFrom",
+          "project",
+          "projectName",
+          "cwd",
+          "startedAt",
+          "updatedAt",
+          "messages",
+          "script",
+          "children",
+          "live",
+          "transcript",
+          "resumeCommand",
+          "continueCommand",
+          "reference"
+        ],
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "The Account ref, for example `claude:work`."
+          },
+          "accountLabel": {
+            "type": "string",
+            "description": "The account's short command when it has one, else its ref."
+          },
+          "family": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "The host's own session id."
+          },
+          "title": {
+            "type": "string",
+            "description": "The Session Title: the name the user gave it, else the host's title, else the first prompt; may be empty."
+          },
+          "titleFrom": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "user"
+              },
+              {
+                "type": "string",
+                "const": "host"
+              },
+              {
+                "type": "string",
+                "const": "prompt"
+              },
+              {
+                "type": "string",
+                "const": "none"
+              }
+            ]
+          },
+          "project": {
+            "type": "string",
+            "description": "The Project: the git repository root of the working directory (worktrees folded in), else the folder."
+          },
+          "projectName": {
+            "type": "string",
+            "description": "Its folder name, with the parent folder when two Projects share one."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "The working directory the session ran in; may be empty."
+          },
+          "cwdGone": {
+            "type": "boolean",
+            "description": "True when that folder no longer exists."
+          },
+          "branch": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "description": "ISO time; empty when the record gives none."
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "Last activity, ISO time; empty when the record gives none."
+          },
+          "messages": {
+            "type": "integer",
+            "description": "Prompts plus replies."
+          },
+          "script": {
+            "type": "boolean",
+            "description": "A Script Session: started by a script, an SDK or another agent."
+          },
+          "parent": {
+            "type": "string",
+            "description": "For a subagent session: the session id that started it."
+          },
+          "children": {
+            "type": "integer",
+            "description": "Subagent sessions it started."
+          },
+          "preview": {
+            "type": "string",
+            "description": "The first prompt on one line (at most 240 characters), when it says more than the title."
+          },
+          "snippet": {
+            "type": "string",
+            "description": "Where the words matched, about 40 characters each side."
+          },
+          "foundIn": {
+            "type": "string",
+            "const": "tools",
+            "description": "`tools` when the words matched only its tool output (--tools)."
+          },
+          "live": {
+            "type": "boolean",
+            "description": "True while the session is running."
+          },
+          "transcript": {
+            "type": "string",
+            "description": "Path of the session's record."
+          },
+          "resumeCommand": {
+            "type": "string",
+            "description": "The command that resumes it in the account that holds it."
+          },
+          "continueCommand": {
+            "type": "string",
+            "description": "`cd <cwd> && <resumeCommand>` (only the resume command when the folder is gone): continue it where it was."
+          },
+          "reference": {
+            "type": "string",
+            "description": "The Session Reference in English: one sentence that points another AI at the session and its record."
+          },
+          "group": {
+            "type": "string",
+            "description": "With --group: the key of the group the session is listed under."
+          }
+        }
+      },
+      "description": "Sessions best match first (relevance times recency), or newest first without words; subagent sessions are counted in their parent. Matches found only in tool output (--tools) come last."
+    },
+    "total": {
+      "type": "integer",
+      "description": "All matching sessions; more than `sessions` when --limit or --offset cut the list."
+    },
+    "index": {
+      "type": "object",
+      "required": [
+        "state",
+        "progress"
+      ],
+      "properties": {
+        "state": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "building"
+            },
+            {
+              "type": "string",
+              "const": "ready"
+            },
+            {
+              "type": "string",
+              "const": "off"
+            },
+            {
+              "type": "string",
+              "const": "unavailable"
+            }
+          ],
+          "description": "`building`: the History Index is still reading files (what is built answers already); `off`: config `history.index` is false or the index file could not be opened, so only titles and folders are searched; `unavailable`: this Node has no `node:sqlite`."
+        },
+        "progress": {
+          "type": "object",
+          "required": [
+            "done",
+            "total"
+          ],
+          "properties": {
+            "done": {
+              "type": "integer"
+            },
+            "total": {
+              "type": "integer"
+            }
+          },
+          "description": "Files read in the current build of the History Index, and how many it has to read."
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "account",
+          "accountLabel",
+          "family",
+          "sessions",
+          "files",
+          "failed"
+        ],
+        "properties": {
+          "account": {
+            "type": "string"
+          },
+          "accountLabel": {
+            "type": "string"
+          },
+          "family": {
+            "type": "string"
+          },
+          "sessions": {
+            "type": "integer",
+            "description": "Sessions stored for the account."
+          },
+          "files": {
+            "type": "integer",
+            "description": "Session record files found."
+          },
+          "failed": {
+            "type": "integer",
+            "description": "Record files that could not be read."
+          },
+          "note": {
+            "type": "string",
+            "description": "Why the account has no sessions or could not be listed, in plain words."
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "empty"
+              },
+              {
+                "type": "string",
+                "const": "no-conversation"
+              },
+              {
+                "type": "string",
+                "const": "unreadable"
+              },
+              {
+                "type": "string",
+                "const": "unsupported"
+              }
+            ],
+            "description": "`note` as a code: no record files, records without a conversation, a folder that could not be read, or a tool sideby reads no history for."
+          }
+        },
+        "description": "How many sessions sideby read from one account."
+      }
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "An account or file that could not be read, and what to do; never aborts the listing."
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "sessions",
+          "updatedAt"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "The Project path, category name, Account ref, Family id or day (`today`, `yesterday`, `week`, `month`, `older`); empty for sessions without one."
+          },
+          "label": {
+            "type": "string"
+          },
+          "sessions": {
+            "type": "integer",
+            "description": "Matching sessions in the group, collapsed or not."
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "collapsed": {
+            "type": "boolean",
+            "description": "True when its sessions were left out of `sessions` (folded in the Panel)."
+          }
+        }
+      },
+      "description": "With --group (not `none`): every group of the matches, best first and the one without a key last; days in time order."
+    },
+    "categories": {
+      "type": "object",
+      "required": [
+        "label",
+        "from"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "What the categories are called on screen; \"Category\" when the plugin gives none."
+        },
+        "from": {
+          "type": "string",
+          "description": "The plugin that sorts Projects into them."
+        }
+      },
+      "description": "Set when a plugin sorts Projects into Project Categories (ADR-0044)."
+    },
+    "toolOutputMore": {
+      "type": "boolean",
+      "const": true,
+      "description": "With --tools: more sessions matched in tool output than the page holds; a larger --limit lists them."
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby history --json"
+}

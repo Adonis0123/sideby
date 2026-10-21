@@ -1,0 +1,275 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/history-show.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "session",
+    "messages"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "session": {
+      "type": "object",
+      "required": [
+        "account",
+        "accountLabel",
+        "family",
+        "sessionId",
+        "title",
+        "titleFrom",
+        "project",
+        "projectName",
+        "cwd",
+        "startedAt",
+        "updatedAt",
+        "messages",
+        "script",
+        "children",
+        "live",
+        "transcript",
+        "resumeCommand",
+        "continueCommand",
+        "reference"
+      ],
+      "properties": {
+        "account": {
+          "type": "string",
+          "description": "The Account ref, for example `claude:work`."
+        },
+        "accountLabel": {
+          "type": "string",
+          "description": "The account's short command when it has one, else its ref."
+        },
+        "family": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "The host's own session id."
+        },
+        "title": {
+          "type": "string",
+          "description": "The Session Title: the name the user gave it, else the host's title, else the first prompt; may be empty."
+        },
+        "titleFrom": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "user"
+            },
+            {
+              "type": "string",
+              "const": "host"
+            },
+            {
+              "type": "string",
+              "const": "prompt"
+            },
+            {
+              "type": "string",
+              "const": "none"
+            }
+          ]
+        },
+        "project": {
+          "type": "string",
+          "description": "The Project: the git repository root of the working directory (worktrees folded in), else the folder."
+        },
+        "projectName": {
+          "type": "string",
+          "description": "Its folder name, with the parent folder when two Projects share one."
+        },
+        "cwd": {
+          "type": "string",
+          "description": "The working directory the session ran in; may be empty."
+        },
+        "cwdGone": {
+          "type": "boolean",
+          "description": "True when that folder no longer exists."
+        },
+        "branch": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string",
+          "description": "ISO time; empty when the record gives none."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last activity, ISO time; empty when the record gives none."
+        },
+        "messages": {
+          "type": "integer",
+          "description": "Prompts plus replies."
+        },
+        "script": {
+          "type": "boolean",
+          "description": "A Script Session: started by a script, an SDK or another agent."
+        },
+        "parent": {
+          "type": "string",
+          "description": "For a subagent session: the session id that started it."
+        },
+        "children": {
+          "type": "integer",
+          "description": "Subagent sessions it started."
+        },
+        "preview": {
+          "type": "string",
+          "description": "The first prompt on one line (at most 240 characters), when it says more than the title."
+        },
+        "snippet": {
+          "type": "string",
+          "description": "Where the words matched, about 40 characters each side."
+        },
+        "foundIn": {
+          "type": "string",
+          "const": "tools",
+          "description": "`tools` when the words matched only its tool output (--tools)."
+        },
+        "live": {
+          "type": "boolean",
+          "description": "True while the session is running."
+        },
+        "transcript": {
+          "type": "string",
+          "description": "Path of the session's record."
+        },
+        "resumeCommand": {
+          "type": "string",
+          "description": "The command that resumes it in the account that holds it."
+        },
+        "continueCommand": {
+          "type": "string",
+          "description": "`cd <cwd> && <resumeCommand>` (only the resume command when the folder is gone): continue it where it was."
+        },
+        "reference": {
+          "type": "string",
+          "description": "The Session Reference in English: one sentence that points another AI at the session and its record."
+        },
+        "group": {
+          "type": "string",
+          "description": "With --group: the key of the group the session is listed under."
+        }
+      }
+    },
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "n",
+          "role",
+          "text"
+        ],
+        "properties": {
+          "n": {
+            "type": "integer",
+            "description": "Position in the session, from 1."
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "user"
+              },
+              {
+                "type": "string",
+                "const": "assistant"
+              },
+              {
+                "type": "string",
+                "const": "tool"
+              }
+            ]
+          },
+          "text": {
+            "type": "string",
+            "description": "For `tool`: only the tool name; its input and output are never shown."
+          },
+          "at": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Oldest first: the newest --limit (default 200) before --before."
+    },
+    "before": {
+      "type": "integer",
+      "description": "Pass as --before for the messages before these; absent at the first message."
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby history show --json"
+}

@@ -1,7 +1,7 @@
 // Browser Sign-ins (spec §3.24, ADR-0023): which Browser Profile of Google Chrome signed in to each Account's vendor
 // website, from Chrome's local data on this computer only. Read-only: `Local State` gives each profile's folder,
 // display name and the email of the Google account it is signed in to Chrome with, `Local Storage/leveldb` the key
-// names of claude.ai and chatgpt.com (core/leveldb-keys.ts). Never Cookies, Login Data, IndexedDB or the Keychain,
+// names of each Family website's origin (core/leveldb-keys.ts). Never Cookies, Login Data, IndexedDB or the Keychain,
 // never a value, never the network. The Host-side id each match needs (families/browser.ts) is compared in memory
 // and never leaves this module. Opening a website starts Chrome unchanged with `open`, through `DesktopDeps.exec`,
 // so tests never start a real browser. On WSL the Chrome is the one installed on Windows: its folders come from one
@@ -101,6 +101,8 @@ export interface BrowserReport {
   profiles: BrowserProfile[]
   /** Families whose Accounts can be matched, and those that can only be opened in a profile the user picks. */
   families: { matched: string[]; openOnly: string[] }
+  /** The website each of those Families opens, Family id → https address. */
+  sites: Record<string, string>
   /**
    * The browser user the user chose for an Account (config `browser.choices`), ref → folder, only where that folder
    * still exists; such an Account appears in that profile's `signIns` alone.
@@ -177,9 +179,10 @@ async function profileKeys(dir: string, origins: readonly string[]) {
   return value
 }
 
-const BOUNDARY = /[A-Za-z0-9_]/
+// `_` separates, as in cursor.com's `radar_last_evaluated_<id>`; ids that hold one (`user_…`) still match whole.
+const BOUNDARY = /[A-Za-z0-9]/
 
-/** `id` appears in `key` as a whole segment: not glued to another letter, digit or underscore. */
+/** `id` appears in `key` as a whole segment: not glued to another letter or digit. */
 export function keyHasId(key: string, id: string): boolean {
   const k = key.toLowerCase()
   const i0 = id.toLowerCase()
@@ -192,15 +195,13 @@ export function keyHasId(key: string, id: string): boolean {
   return false
 }
 
-/** Accounts that a Browser Sign-in can apply to: Subscription Accounts of built-in Families with a website. */
+/** Accounts that a Browser Sign-in can apply to: Subscription Accounts of Families with a website. */
 function eligible(rt: Runtime, accounts: readonly Account[]): Account[] {
-  return accounts.filter(
-    (a) =>
-      a.kind !== 'api' &&
-      websiteDef(a.family) &&
-      rt.plugins.some((p) => p.source === 'builtin' && p.families.includes(a.family)),
-  )
+  return accounts.filter((a) => a.kind !== 'api' && websiteDef(rt.families, a.family))
 }
+
+/** Shorter ids would match key names by chance. */
+const MIN_SIGN_IN_ID = 8
 
 /** The Browser Report for `sideby browser` and the Panel. Reads nothing of the browser while it is off. */
 export async function browserReport(rt: Runtime, accounts: readonly Account[]): Promise<BrowserReport> {
@@ -208,10 +209,11 @@ export async function browserReport(rt: Runtime, accounts: readonly Account[]): 
   const list = eligible(rt, accounts)
   const fams = [...new Set(list.map((a) => a.family))]
   const families = {
-    matched: fams.filter((f) => websiteDef(f)?.match),
-    openOnly: fams.filter((f) => !websiteDef(f)?.match),
+    matched: fams.filter((f) => websiteDef(rt.families, f)?.match),
+    openOnly: fams.filter((f) => !websiteDef(rt.families, f)?.match),
   }
-  const base = { enabled, browser: CHROME.title, families, choices: {} as Record<string, string> }
+  const sites = Object.fromEntries(fams.map((f) => [f, websiteDef(rt.families, f)?.url ?? '']))
+  const base = { enabled, browser: CHROME.title, families, sites, choices: {} as Record<string, string> }
   if (!enabled) return { ...base, found: false, profiles: [], problems: [] }
   const problems: string[] = []
   const userData = await userDataFor(rt, depsFor(rt), problems)
@@ -220,11 +222,20 @@ export async function browserReport(rt: Runtime, accounts: readonly Account[]): 
   if (entries === null) return { ...base, found: false, profiles: [], problems }
   const ids: { ref: string; origin: string; id: string }[] = []
   for (const a of list) {
-    const m = websiteDef(a.family)?.match
-    const id = m ? await m.signInId(a) : undefined
-    if (m && id) ids.push({ ref: a.ref, origin: m.origin, id })
+    const m = websiteDef(rt.families, a.family)?.match
+    if (!m) continue
+    let id: unknown
+    try {
+      id = await m.signInId(a)
+    } catch {
+      // A plugin's reader may fail; its message could quote the login file, so only the Family is named.
+      problems.push(`${a.ref}: the ${a.family} family could not read its sign-in id`)
+      continue
+    }
+    if (typeof id === 'string' && id.trim().length >= MIN_SIGN_IN_ID)
+      ids.push({ ref: a.ref, origin: m.origin, id: id.trim() })
   }
-  const origins = matchedOrigins()
+  const origins = matchedOrigins(rt.families)
   const read: { e: ProfileEntry; counts: number[]; changedAt?: string }[] = []
   for (const e of entries) {
     const r = await profileKeys(join(userData, e.dir, 'Local Storage', 'leveldb'), origins)
@@ -340,13 +351,13 @@ export async function openInBrowser(
   const deps = depsFor(rt)
   if (deps.platform !== 'darwin' && !deps.wslMount)
     throw new UserError(
-      `opening a browser user works on macOS and WSL only for now (this is ${deps.platform}); open ${websiteDef(account.family)?.url ?? 'the website'} yourself`,
+      `opening a browser user works on macOS and WSL only for now (this is ${deps.platform}); open ${websiteDef(rt.families, account.family)?.url ?? 'the website'} yourself`,
       { code: 'unsupported' },
     )
-  const site = websiteDef(account.family)
+  const site = websiteDef(rt.families, account.family)
   if (!site || account.kind === 'api' || !eligible(rt, [account]).length)
     throw new UserError(
-      `${account.ref} has no website to open; only Claude, Codex and Grok subscription accounts do`,
+      `${account.ref} has no website to open; only subscription accounts of Claude, Codex, Grok and plugin families that set \`website\` do`,
       {
         code: 'no-website',
       },
@@ -438,9 +449,9 @@ export async function setBrowserChoice(
   account: Account,
   profile: string | null,
 ): Promise<BrowserChoice> {
-  if (!websiteDef(account.family) || account.kind === 'api' || !eligible(rt, [account]).length)
+  if (!websiteDef(rt.families, account.family) || account.kind === 'api' || !eligible(rt, [account]).length)
     throw new UserError(
-      `${account.ref} has no website; only Claude, Codex and Grok subscription accounts have a browser user`,
+      `${account.ref} has no website; only subscription accounts of Claude, Codex, Grok and plugin families that set \`website\` have a browser user`,
       { code: 'no-website' },
     )
   let pick: ProfileEntry | undefined
@@ -507,8 +518,8 @@ async function chromeLauncher(deps: DesktopDeps, problems: string[]): Promise<Ch
 /** What turning Browser Sign-ins on reads, for the confirmation in the CLI and the Panel. */
 export const BROWSER_READS = [
   "the name of each Google Chrome browser user and the Google account email it uses in Chrome (from Chrome's Local State)",
-  'the key names claude.ai and chatgpt.com keep in each browser user’s Local Storage, never their values',
-  'the account id in each Claude and Codex login file, only to compare; it is never shown or saved',
+  'the key names claude.ai, chatgpt.com, grok.com and the websites of plugin tools that declare one keep in each browser user’s Local Storage, never their values',
+  'the account id in each Claude, Codex and Grok login file, and the one a plugin tool reads from its own, only to compare; it is never shown or saved',
 ] as const
 
 export interface BrowserSwitch {

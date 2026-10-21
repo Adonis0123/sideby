@@ -109,6 +109,28 @@ export async function inboundOf(account: Account, ctx: ReadContext): Promise<Inb
   return g?.state ?? 'default'
 }
 
+/**
+ * The settings files whose sessions hold a Message for approval (ADR-0045): set to `hold`, or not set while one of
+ * its Accounts starts in bypass permission mode (doctor's `messages.inbound-held`). Reads what doctor reads.
+ */
+export async function waitingFiles(
+  groups: readonly InboundGroup[],
+  accounts: readonly Account[],
+  starts: (a: Account) => readonly (readonly string[])[],
+): Promise<Set<string>> {
+  const out = new Set<string>()
+  for (const g of groups) {
+    if (g.state === 'hold') out.add(g.file)
+    if (g.state !== 'default') continue
+    for (const a of accounts.filter((x) => g.accounts.includes(x.ref)))
+      if ((await inboundFindings(a, starts(a))).length) {
+        out.add(g.file)
+        break
+      }
+  }
+  return out
+}
+
 /** The groups `accept` would change: not set, or `hold`. A `refuse` or a value sideby does not know is left alone. */
 export function groupsToAccept(groups: readonly InboundGroup[]): InboundGroup[] {
   return groups.filter((g) => g.state === 'default' || g.state === 'hold')

@@ -4,31 +4,15 @@
 import { randomBytes } from 'node:crypto'
 import { constants } from 'node:fs'
 import { chmod, lstat, mkdir, open, readdir, readFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
-import {
-  checkSocket,
-  claudeSocketOf,
-  DELIVER_TIMEOUT_MS,
-  messageLine,
-  sessionBypass,
-  socketChanged,
-  writeToSocket,
-} from '../families/claude/messaging.ts'
 import { tailLinesWith } from '../families/claude/session-files.ts'
+import { DELIVERERS, type Delivery } from '../families/messaging.ts'
 import type { Runtime } from '../runtime.ts'
 import type { Account } from '../types.ts'
 import { UserError } from './errors.ts'
 import { writeFileAtomic } from './fs-safe.ts'
-import { inboundOf } from './inbound.ts'
 import type { LiveSession } from './live-sessions.ts'
-import {
-  hostArgs,
-  type LiveSessionDeps,
-  type ProcessInfo,
-  processView,
-  systemDeps,
-} from './live-sessions-procs.ts'
+import { type LiveSessionDeps, type ProcessInfo, processView, systemDeps } from './live-sessions-procs.ts'
 import { selectSession } from './session-select.ts'
 
 /** stored: kept as a file only; delivered: the Host's channel accepted it; read: the target Session shows it; paste-needed: the user must paste `pasteText` into the target. */
@@ -53,6 +37,8 @@ export interface MessageReceipt {
   pasteText: string
   /** Plain-language note: why paste is needed, or that the target must approve it (bypass mode). */
   note?: string
+  /** Delivered, but the target shows it only once the user approves it in its terminal (ADR-0045). */
+  needsApproval?: boolean
   sentAt: string
 }
 
@@ -69,7 +55,7 @@ export interface SendOptions {
 export interface MessageDeps {
   /** The programs Live Sessions are read with (`ps`, `lsof`). */
   procs?: LiveSessionDeps
-  /** Folders a Claude message socket may sit in (inside `cc-socks`); the system temp folders when left out. */
+  /** Folders a Claude message socket's `cc-socks` may sit in; `socketRoots(rt.env)` when left out. */
   tempRoots?: readonly string[]
   /** The user a socket must belong to; the current user when left out. */
   uid?: number
@@ -83,6 +69,8 @@ export interface MessageDeps {
     verify: () => Promise<string | null>,
   ) => Promise<void>
   timeoutMs?: number
+  /** How `codex <args>` runs for Codex delivery; resolves to its exit code. */
+  runCodex?: (args: readonly string[], env: NodeJS.ProcessEnv, timeoutMs: number) => Promise<number>
 }
 
 /** The largest screenshot sideby copies. */
@@ -111,10 +99,9 @@ export function imageType(head: Buffer): string | null {
 const badImage = (message: string) => new UserError(message, { code: 'bad-image' })
 const notImage = (p: string) =>
   badImage(
-    `${p} is not a PNG, JPEG, GIF or WebP image; only screenshots can be attached (send other files' paths in the text)`,
+    `${p} is not a PNG, JPEG, GIF or WebP image. Attach a screenshot in one of those formats, or mention the file path in your message`,
   )
-const tooLarge = (p: string) =>
-  badImage(`${p} is larger than 20 MB, too large to send; send a smaller screenshot or crop it first`)
+const tooLarge = (p: string) => badImage(`${p} is over 20 MB. Crop it or pick a smaller screenshot`)
 
 type FileHandle = Awaited<ReturnType<typeof open>>
 interface OpenImage {
@@ -136,13 +123,13 @@ async function openImages(paths: readonly string[]): Promise<OpenImage[]> {
       } catch (err) {
         throw badImage(
           (err as NodeJS.ErrnoException).code === 'ELOOP'
-            ? `${p} is a link; give the path of the screenshot itself`
-            : `${p} is not a file sideby can read; give the path of a screenshot`,
+            ? `${p} is a symlink. Pass the path to the screenshot file itself`
+            : `sideby cannot read ${p}; check the path and that the file is readable, then send again`,
         )
       }
       out.push({ path: p, fh })
       const st = await fh.stat()
-      if (!st.isFile()) throw badImage(`${p} is not a file sideby can read; give the path of a screenshot`)
+      if (!st.isFile()) throw badImage(`${p} is not a regular file. Pass the path to a screenshot`)
       if (st.size > MAX_IMAGE_BYTES) throw tooLarge(p)
       const head = Buffer.alloc(16)
       await fh.read(head, 0, 16, 0)
@@ -188,7 +175,7 @@ const isSafeName = (name: string) => /^[A-Za-z0-9_-][\w.-]*$/.test(name) && name
 
 function unsafeFolder(path: string): UserError {
   return new UserError(
-    `${path} is not a folder sideby can keep messages in: it must be your own real folder that nobody else can write. Move it away and send again`,
+    `sideby cannot save messages in ${path}: it must be a real folder you own that nobody else can write to. Move or delete ${path}, then send again`,
     { code: 'messages-unsafe' },
   )
 }
@@ -253,7 +240,7 @@ export function senderSession(
 /** The line the user pastes into the target (and keeps for reference when it was delivered). */
 export function pasteLine(id: string, file: string, screenshots: number, lang: 'en' | 'zh'): string {
   if (lang === 'zh')
-    return `去读 sideby 留给你的消息 ${file}（sideby message ${id}）${screenshots ? '，以及里面列出的截图' : ''}。`
+    return `请读取 sideby 存好的消息 ${file}（sideby message ${id}）${screenshots ? '，以及里面列出的截图' : ''}。`
   return `Read the message sideby kept for you at ${file} (sideby message ${id})${screenshots ? ' and the screenshots it lists' : ''}.`
 }
 
@@ -283,9 +270,8 @@ function messageFile(r: MessageReceipt, text: string): string {
 }
 
 const NO_CHANNEL: Record<string, string> = {
-  codex: 'Codex has no channel sideby can deliver to yet',
-  grok: 'Grok Build has no channel sideby can deliver to yet',
-  pi: 'pi has no channel sideby can deliver to yet',
+  grok: 'Grok Build cannot receive messages directly yet',
+  pi: 'pi cannot receive messages directly yet',
 }
 
 /** Sends `opts` to the Live Session `target` names (an Account ref/alias with one Live Session, or a session id or its first 8 chars). */
@@ -298,7 +284,7 @@ export async function sendMessage(
   const text = opts.text.trim()
   const paths = opts.images ?? []
   if (!text && !paths.length)
-    throw new UserError('the message is empty; write what to tell the session, or attach a screenshot', {
+    throw new UserError('the message is empty; write a message or attach a screenshot', {
       code: 'empty',
     })
   const lang = opts.lang ?? 'en'
@@ -331,7 +317,7 @@ async function sendOpened(
     from = senderSession(deps.selfPid ?? process.pid, all, listed.sessions)
   }
   if (from?.sessionId === to.sessionId)
-    throw new UserError(`${to.label} is the session you are in; send it to another session`, {
+    throw new UserError(`you are already in ${to.label}; pick another session to send to`, {
       code: 'same-session',
     })
   // Read every screenshot before anything is written, so a refused one leaves nothing behind.
@@ -340,7 +326,7 @@ async function sendOpened(
 
   // Keep the Message first, so nothing is lost whatever happens next.
   const id = randomBytes(4).toString('hex')
-  const sentAt = new Date().toISOString()
+  const sentAt = rt.readContext().now.toISOString()
   const dir = (await messageFolder(rt.readContext().stateDir, [safeName(to.sessionId)], true)) as string
   const stem = `${sentAt.slice(0, 19).replace(/:/g, '-')}Z-${id}`
   const file = join(dir, `${stem}.md`)
@@ -371,10 +357,10 @@ async function sendOpened(
   } catch (err) {
     // Without a receipt sideby could not follow it later, so it does not deliver it; the Message file is kept.
     receipt.status = 'paste-needed'
-    receipt.note = `sideby kept the message but could not record it (${(err as NodeJS.ErrnoException).code ?? (err as Error).message}), so it did not deliver it; paste the line into its tab`
+    receipt.note = `sideby saved the message file, but could not save its status (${(err as NodeJS.ErrnoException).code ?? (err as Error).message}). Paste the line into the session's tab`
     return publicReceipt(receipt)
   }
-  let result: { status: MessageStatus; note?: string }
+  let result: { status: MessageStatus; note?: string; needsApproval?: boolean }
   try {
     const acct = (await rt.accounts()).find((a) => a.ref === to.account)
     result = await deliver(rt, to, acct, receipt, text, procDeps, deps)
@@ -390,10 +376,9 @@ async function sendOpened(
   } catch (err) {
     // The Message file is kept; only its status could not be recorded. Still hand the user what to do.
     const why = (err as NodeJS.ErrnoException).code ?? (err as Error).message
-    if (receipt.status !== 'paste-needed')
-      receipt.note = `sideby could not record that it was ${receipt.status} (${why})`
+    if (receipt.status !== 'paste-needed') receipt.note = `sideby could not save the message status (${why})`
     else
-      receipt.note = `${receipt.note ?? 'paste the line into its tab'}; sideby could not record this (${why})`
+      receipt.note = `${receipt.note ?? 'paste the line into its tab'} (sideby also could not save the message status: ${why})`
   }
   return publicReceipt(receipt)
 }
@@ -406,53 +391,34 @@ async function deliver(
   text: string,
   procDeps: LiveSessionDeps,
   deps: MessageDeps,
-): Promise<{ status: MessageStatus; note?: string }> {
-  // A fresh look at the processes: the screenshots were copied since the listing, and the session may have ended.
-  const procs = processView(procDeps)
-  const paste = (note: string) => ({ status: 'paste-needed' as const, note })
+): Promise<Delivery> {
   if (to.guessed)
-    return paste(
-      `sideby could not tell which ${to.accountLabel} session runs now (it took the newest one), so it did not deliver it; paste the line into the right tab`,
-    )
-  if (to.family !== 'claude' || !acct || to.pid === undefined)
-    return paste(
-      `${NO_CHANNEL[to.family] ?? `${rt.families.get(to.family)?.title ?? to.family} has no channel sideby can deliver to`}; paste the line into its tab`,
-    )
-  const inbound = await inboundOf(acct, rt.readContext())
-  if (inbound === 'refuse')
-    return paste(
-      `${to.accountLabel} refuses messages from other sessions (crossSessionInbound is "refuse"); paste the line into its tab`,
-    )
-  const sock = await claudeSocketOf(acct.dir, to.pid, to.sessionId, procs)
-  if ('problem' in sock)
-    return paste(`sideby did not deliver it because ${sock.problem}; paste the line into its tab`)
-  const checked = await checkSocket(sock.path, {
-    tempRoots: deps.tempRoots ?? [tmpdir(), '/tmp'],
-    uid: deps.uid ?? process.getuid?.(),
-  })
-  if ('problem' in checked)
-    return paste(`sideby did not deliver it because ${checked.problem}; paste the line into its tab`)
-  try {
-    await (deps.write ?? writeToSocket)(
-      sock.path,
-      messageLine(deliveredText(r.id, r.from, text, r.attachments)),
-      deps.timeoutMs ?? DELIVER_TIMEOUT_MS,
-      () => socketChanged(sock.path, checked.identity),
-    )
-  } catch (err) {
-    return paste(
-      `sideby could not reach ${to.label} (${(err as Error).message}); paste the line into its tab`,
-    )
-  }
-  if (inbound === 'accept') return { status: 'delivered' }
-  const proc = await procs.get(to.pid)
-  const args = (await procs.argv(to.pid)) ?? (proc ? hostArgs(proc.command) : [])
-  if (inbound === 'hold' || (await sessionBypass(to.transcript, args)))
     return {
-      status: 'delivered',
-      note: `${to.accountLabel} holds messages from other sessions: approve it in its terminal within 5 minutes, or run \`sideby messages inbound accept\` so it shows them at once`,
+      status: 'paste-needed',
+      note: `sideby could not tell which ${to.accountLabel} session is running (picked the newest one). Paste the line into the right tab`,
     }
-  return { status: 'delivered' }
+  if (!acct)
+    return {
+      status: 'paste-needed',
+      note: `account ${to.account} was not found. Paste the line into its terminal tab`,
+    }
+  const family = DELIVERERS[to.family]
+  if (!family || to.pid === undefined)
+    return {
+      status: 'paste-needed',
+      note: `${NO_CHANNEL[to.family] ?? `${rt.families.get(to.family)?.title ?? to.family} cannot receive messages directly`}; paste the line into its terminal tab`,
+    }
+  return family({
+    rt,
+    to,
+    pid: to.pid,
+    acct,
+    text: deliveredText(r.id, r.from, text, r.attachments),
+    pasteText: r.pasteText,
+    // A fresh look at the processes: the screenshots were copied since the listing, and the session may have ended.
+    procs: processView(procDeps),
+    deps,
+  })
 }
 
 function publicReceipt(s: Stored): MessageReceipt {
@@ -465,6 +431,9 @@ const receiptPath = (file: string) => file.replace(/\.md$/, '.json')
 async function saveReceipt(r: Stored, path = receiptPath(r.file)): Promise<void> {
   await writeFileAtomic(path, `${JSON.stringify(r, null, 2)}\n`, 0o600)
 }
+
+/** How long after sending a held Message counts as dropped: Claude Code's five minutes plus one of margin. */
+export const APPROVAL_EXPIRED_MS = 6 * 60_000
 
 const STATUSES: readonly string[] = ['stored', 'delivered', 'read', 'paste-needed']
 const optStr = (v: unknown) => v === undefined || typeof v === 'string'
@@ -479,6 +448,7 @@ function validReceipt(raw: unknown, dir: string, path: string): Stored | null {
   const strs = ['id', 'to', 'toSessionId', 'toAccount', 'file', 'pasteText', 'sentAt']
   if (!strs.every((k) => typeof r[k] === 'string')) return null
   if (!optStr(r.from) || !optStr(r.note) || !optStr(r.transcript)) return null
+  if (r.needsApproval !== undefined && typeof r.needsApproval !== 'boolean') return null
   if (typeof r.status !== 'string' || !STATUSES.includes(r.status)) return null
   if (!Array.isArray(r.attachments) || !r.attachments.every((a) => typeof a === 'string')) return null
   if (!/^[0-9a-f]{8}$/.test(r.id as string) || Number.isNaN(Date.parse(r.sentAt as string))) return null
@@ -540,13 +510,27 @@ export async function listMessages(
   }
   list.sort((a, b) => b.r.sentAt.localeCompare(a.r.sentAt))
   list = list.slice(0, opts.limit ?? 20)
+  const now = rt.readContext().now.getTime()
   for (const { r, path } of list) {
     if ((r.status !== 'delivered' && r.status !== 'paste-needed') || !r.transcript) continue
     const seen = await tailLinesWith(r.transcript, `sideby message ${r.id}`).catch(() => [])
+    let changed = false
     if (seen.length) {
       r.status = 'read'
-      if (opts.persist !== false) await saveReceipt(r, path).catch(() => {})
+      delete r.needsApproval
+      changed = true
+    } else if (
+      r.status === 'delivered' &&
+      r.needsApproval &&
+      now - Date.parse(r.sentAt) > APPROVAL_EXPIRED_MS
+    ) {
+      // Claude Code drops a held Message after about five minutes (ADR-0045): the user pastes it instead.
+      r.status = 'paste-needed'
+      delete r.needsApproval
+      r.note = `${r.to} did not show it: nobody approved it within 5 minutes, so the session dropped it. Paste the line into its tab`
+      changed = true
     }
+    if (changed && opts.persist !== false) await saveReceipt(r, path).catch(() => {})
   }
   return list.map(({ r }) => publicReceipt(r))
 }

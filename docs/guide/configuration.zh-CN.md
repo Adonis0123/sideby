@@ -44,6 +44,7 @@
 | `pickCommands` | 自动选号命令：短名到家族的映射（`{ "cc": "claude" }`）。每次运行启动这个家族额度最多的账号，都没有额度数据时启动主账号。与 `aliases` 共用一套名字；用 `sideby alias add <短名> --pick <family>` 添加。 |
 | `shellInitFile` | 可选，`{ "zsh": …, "bash": … }`，绝对路径或以 `~/` 开头。sideby 每次新增账号、新增或删除别名（`sideby new`、`sideby alias`、面板）后，都用 `sideby shell-init <shell>` 的输出重写这些文件，source 它的 shell 就能用上新命令。不是 `shell-init` 写的文件，它不会覆盖。 |
 | `accountTitle` | 可选，默认关。设为 `true` 时，启动账号会把终端标签页标题设成 `[<短命令或 ref>]`，并用 `-c tui.terminal_title=[]` 启动 Codex，让它保留这个标题（你的参数里自己设了 `tui.terminal_title` 时不加）。其他宿主可能换成自己的标题；见[在会话里显示是哪个账号](usage.zh-CN.md#在会话里显示是哪个账号)。 |
+| `claudeMod` | 可选，默认开。sideby 启动 Claude Code 账号（2.1.287 及以上，不是 `-p`）时加 `--plugin-dir`，带上 sideby 的 mod：提示框上方显示 Session Label，收到消息时弹提示，多一个 `/sessions` 面板。设为 `false` 时不带。sideby 对每个装好的 claude 只问一次 `claude --version`，答案存在它的状态目录里。 |
 | `resumeRouting` | 可选，默认关。设为 `true` 时，`shell-init` 还会生成与宿主同名的函数（`claude`、`codex`、`grok`），按 id 恢复会话时转到存有该会话的账号；见[从其他工具恢复会话](#从其他工具恢复会话)。 |
 | `display` | 你在面板里排的工具和账号顺序，以及置顶的账号：`{ "families": ["codex", "claude"], "accounts": { "claude": ["003", "main"] }, "pinned": { "claude": ["work"] } }`，写账号名，不是 ref。没写进去的按原来的顺序排在后面。由面板写入，**恢复默认顺序** 删掉顺序、保留 `pinned`。只影响显示，见 [自己排顺序](usage.zh-CN.md#自己排顺序)。 |
 | `quota.check.<family>` | 设为 `false` 就不再为这个工具做需要联网的额度查询。目前只有 Grok：每个账号最多每 15 分钟问一次它的命令行，见 [Grok 额度](usage.zh-CN.md#grok-额度)。默认开启，CI 里关闭。 |

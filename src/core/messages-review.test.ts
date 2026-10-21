@@ -93,7 +93,7 @@ describe('the socket is checked again at delivery', () => {
       const b = await serve(h, 's')
       await assert.rejects(
         writeToSocket(b.path, messageLine('x'), 1000, () => socketChanged(b.path, checked.identity)),
-        /its socket was replaced after sideby checked it/,
+        /its message channel changed while sending \(send again\)/,
       )
       assert.deepEqual(b.got, [])
       // The whole folder swapped for another one holding a socket of the same name.
@@ -103,7 +103,7 @@ describe('the socket is checked again at delivery', () => {
       const d = await serve(h, 's')
       await assert.rejects(
         writeToSocket(d.path, messageLine('x'), 1000, () => socketChanged(d.path, c.identity)),
-        /its socket folder was replaced after sideby checked it/,
+        /its message channel folder changed while sending \(send again\)/,
       )
       assert.deepEqual(d.got, [])
       await b.close()
@@ -131,7 +131,7 @@ describe('the socket is checked again at delivery', () => {
       assert.equal(r.status, 'paste-needed')
       assert.match(
         r.note!,
-        /\(its socket was replaced after sideby checked it\); paste the line into its tab/,
+        /\(its message channel changed while sending \(send again\)\); paste the line into its tab/,
       )
       assert.deepEqual(s.got, [])
       await s.close()
@@ -201,7 +201,7 @@ describe('message folders', () => {
       assert.deepEqual(await fsp.readdir(host), [])
       await assert.rejects(
         messageFolder(h.path('.local/state/sideby'), ['..'], true),
-        /is not a folder sideby can keep messages in/,
+        /sideby cannot save messages in .*: it must be a real folder you own/,
       )
       await s.close()
     })
@@ -232,7 +232,7 @@ describe('screenshots', () => {
       }
       await assert.rejects(
         sendMessage(rt, 'cc002', { text: 'grown', images: [shot] }, with_(procs, s.root)),
-        /larger than 20 MB/,
+        /is over 20 MB\. Crop it or pick a smaller screenshot/,
       )
       // The same file overwritten with text after the check.
       await fsp.writeFile(shot, PNG)
@@ -252,7 +252,7 @@ describe('screenshots', () => {
       await fsp.symlink(h.path('shot.png'), link)
       await assert.rejects(
         sendMessage(rt, 'cc002', { text: 'x', images: [link] }, with_(procs, s.root)),
-        /is a link/,
+        /is a symlink\. Pass the path to the screenshot file itself/,
       )
       await s.close()
     })

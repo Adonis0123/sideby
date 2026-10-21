@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
 import type { Account, ReadContext } from '../types.ts'
-import { acceptInbound, groupsToAccept, inboundGroups, undoInbound } from './inbound.ts'
+import { acceptInbound, groupsToAccept, inboundGroups, undoInbound, waitingFiles } from './inbound.ts'
 
 const MARKER = 'not-a-secret-marker-only-for-this-test'
 
@@ -60,6 +60,17 @@ describe('sideby messages inbound', () => {
         groupsToAccept(groups).map((g) => g.accounts[0]),
         ['claude:main', 'claude:002'],
       )
+    })
+  })
+
+  it('tells which files hold Messages for approval: hold, or not set where an Account starts in bypass', async () => {
+    await withFakeHome(async (h) => {
+      const all = await setUp(h)
+      const groups = await inboundGroups(all, ctx(h))
+      const files = (s: Set<string>) => groups.filter((g) => s.has(g.file)).map((g) => g.accounts[0])
+      assert.deepEqual(files(await waitingFiles(groups, all, () => [])), ['claude:002'])
+      const bypass = (a: Account) => (a.ref === 'claude:001' ? [['--dangerously-skip-permissions']] : [])
+      assert.deepEqual(files(await waitingFiles(groups, all, bypass)), ['claude:main', 'claude:002'])
     })
   })
 

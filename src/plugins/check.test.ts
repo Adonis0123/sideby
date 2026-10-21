@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { demoFamily, demoPlugin } from '../../testing/demo.ts'
 import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
-import { checkBuiltinPlugin, checkPlugin, type PluginCheckResult } from './check.ts'
+import { checkBuiltinPlugin, checkPlugin, defProblems, type PluginCheckResult } from './check.ts'
 import { scaffoldPlugin, TODO_MARK } from './scaffold.ts'
 
 /** A scaffold with every TODO line removed: its placeholder values are already fake. */
@@ -207,5 +207,16 @@ describe('checkBuiltinPlugin', () => {
       const bad = demoPlugin(demoFamily({ layout: { main: '.demo', account: '.demo' } }))
       assert.deepEqual(codes(await checkBuiltinPlugin({ plugin: bad, dir: src })), ['field.layout'])
     })
+  })
+})
+
+describe('defProblems: website', () => {
+  it('reports a website sideby would drop, with a fix', () => {
+    const ok = defProblems(demoFamily({ website: { url: 'https://example.com/app' } }))
+    assert.ok(!ok.some((p) => p.code === 'website.invalid'))
+    const bad = defProblems(demoFamily({ website: { url: 'https://example.com/?x=1&y' } }))
+    const problem = bad.find((p) => p.code === 'website.invalid')
+    assert.ok(problem)
+    assert.match(problem.fix, /website\.url/)
   })
 })

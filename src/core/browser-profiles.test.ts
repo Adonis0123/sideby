@@ -7,8 +7,10 @@ import { dirname } from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { Value } from 'typebox/value'
+import { asBuiltin, demoFamily, demoPlugin, seedDemoMain } from '../../testing/demo.ts'
 import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
 import { OUTPUT_SCHEMAS } from '../cli/json-schemas.ts'
+import { BUILTIN_PLUGINS } from '../families/index.ts'
 import { createRuntime } from '../runtime.ts'
 import type { Env } from '../types.ts'
 import {
@@ -133,6 +135,7 @@ const CLAUDE_MAIN = '11111111-2222-4333-8444-555555555555'
 const CLAUDE_WORK = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
 const CLAUDE_ORG = '99999999-8888-4777-8666-555555555555'
 const CODEX_USER = 'user-FakeUser0123456789'
+const GROK_USER = 'aaaabbbb-1111-4222-8333-ccccddddeeee'
 const SECRET = 'value-that-must-never-be-read'
 
 const plist = (id: string) =>
@@ -312,6 +315,125 @@ describe('keyHasId', () => {
     assert.ok(keyHasId(CLAUDE_MAIN.toUpperCase(), CLAUDE_MAIN))
     assert.ok(!keyHasId(`cache/${CODEX_USER}x/y`, CODEX_USER))
     assert.ok(!keyHasId(`x${CLAUDE_MAIN}`, CLAUDE_MAIN))
+    // `_` separates, also before an id that holds one itself.
+    assert.ok(keyHasId(`radar_last_evaluated_${DEMO_USER}`, DEMO_USER))
+    assert.ok(!keyHasId(`x${DEMO_USER}`, DEMO_USER))
+  })
+})
+
+// --- plugin Families (ADR-0043) ----------------------------------------------------------------------------------
+
+const DEMO_USER = 'user_01FAKEDEMOID0123456789'
+const DEMO_SITE = 'https://demo.example.com'
+
+/** The built-ins plus the test-only `demo` Family declaring `website`; its sign-in id comes from `.demo/id.json`. */
+async function demoRuntime(h: FakeHome, website: unknown, fake: Fake) {
+  const def = demoFamily({ website: website as never })
+  return createRuntime({
+    env: h.env,
+    desktop: fake.deps,
+    builtins: [...BUILTIN_PLUGINS, asBuiltin(demoPlugin(def))],
+  })
+}
+
+const readDemoId = async (a: { dir: string }) => {
+  try {
+    return (JSON.parse(await readFile(`${a.dir}/id.json`, 'utf8')) as { id?: string }).id
+  } catch {
+    return undefined
+  }
+}
+
+describe('sideby browser: plugin families (ADR-0043)', () => {
+  it('matches a plugin family by the id its signInId reads, and opens its url', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      await seedDemoMain(h.write)
+      await h.write('.demo/id.json', JSON.stringify({ id: DEMO_USER }), 0o600)
+      await bin(
+        h,
+        `${CHROME}/Profile 1/Local Storage/leveldb/000009.log`,
+        logFile(
+          [
+            { key: lsKey(DEMO_SITE, `radar_last_evaluated_${DEMO_USER}`), value: SECRET },
+            { key: lsKey(DEMO_SITE, `dashboard.x:user:${DEMO_USER}:personal`), value: SECRET },
+          ],
+          300,
+        ),
+      )
+      const fake = fakeDeps(h)
+      const rt = await demoRuntime(
+        h,
+        { url: `${DEMO_SITE}/dashboard`, match: { origin: DEMO_SITE, signInId: readDemoId } },
+        fake,
+      )
+      assert.deepEqual(rt.pluginErrors, [])
+      const r = await browserReport(rt, await rt.accounts())
+      assert.ok(r.families.matched.includes('demo'))
+      const by = Object.fromEntries(r.profiles.map((p) => [p.dir, p.signIns]))
+      assert.deepEqual(by['Profile 1'], ['claude:work', 'demo:main'])
+      assert.ok(!JSON.stringify(r).includes(DEMO_USER))
+      const opened = await openInBrowser(rt, await rt.resolve('demo:main'))
+      assert.equal(opened.url, `${DEMO_SITE}/dashboard`)
+      assert.deepEqual(opened.profile, { dir: 'Profile 1', name: 'Work' })
+    })
+  })
+
+  it('without match, lets the user pick; a short id or a throwing reader matches nothing and names only the family', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      await seedDemoMain(h.write)
+      const fake = fakeDeps(h)
+      const open = await demoRuntime(h, { url: DEMO_SITE }, fake)
+      assert.ok((await browserReport(open, await open.accounts())).families.openOnly.includes('demo'))
+      await refused(openInBrowser(open, await open.resolve('demo:main')), 'profile-needed')
+      assert.equal((await openInBrowser(open, await open.resolve('demo:main'), 'Default')).url, DEMO_SITE)
+
+      const short = await demoRuntime(
+        h,
+        { url: DEMO_SITE, match: { origin: DEMO_SITE, signInId: async () => 'user' } },
+        fake,
+      )
+      const rs = await browserReport(short, await short.accounts())
+      assert.ok(rs.profiles.every((p) => !p.signIns.includes('demo:main')))
+
+      const boom = await demoRuntime(
+        h,
+        {
+          url: DEMO_SITE,
+          match: {
+            origin: DEMO_SITE,
+            signInId: async () => {
+              throw new Error(`token ${SECRET}`)
+            },
+          },
+        },
+        fake,
+      )
+      const rb = await browserReport(boom, await boom.accounts())
+      assert.ok(rb.problems.includes('demo:main: the demo family could not read its sign-in id'))
+      assert.ok(!JSON.stringify(rb).includes(SECRET))
+    })
+  })
+
+  it('drops a website whose url or origin could reach a shell, keeping the family', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const fake = fakeDeps(h)
+      for (const website of [
+        { url: 'http://demo.example.com' },
+        { url: 'https://demo.example.com/?a=1&b=2' },
+        { url: 'https://demo.example.com" & calc' },
+        { url: DEMO_SITE, match: { origin: `${DEMO_SITE}/path`, signInId: readDemoId } },
+        { url: DEMO_SITE, match: { origin: DEMO_SITE } },
+      ]) {
+        const rt = await demoRuntime(h, website, fake)
+        assert.ok(rt.families.has('demo'))
+        assert.equal(rt.families.get('demo')?.website, undefined, JSON.stringify(website))
+        assert.match(rt.pluginErrors.map((e) => e.message).join('\n'), /family demo: website/)
+        await refused(openInBrowser(rt, await rt.resolve('demo:main'), 'Default'), 'no-website')
+      }
+    })
   })
 })
 
@@ -322,7 +444,7 @@ describe('sideby browser: report', () => {
       const r = await browserReport(rt, await rt.accounts())
       assert.equal(r.enabled, false)
       assert.deepEqual(r.profiles, [])
-      assert.deepEqual(r.families, { matched: ['claude', 'codex'], openOnly: ['grok'] })
+      assert.deepEqual(r.families, { matched: ['claude', 'codex', 'grok'], openOnly: [] })
     })
   })
 
@@ -376,6 +498,35 @@ describe('sideby browser: report', () => {
         'Profile 2': [],
         'Profile 3': ['claude:work'],
       })
+    })
+  })
+
+  it('matches grok by the x.ai user id in auth.json, never reading or showing a token', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      await h.write(
+        '.grok/auth.json',
+        JSON.stringify({
+          'https://auth.x.ai::fake-client': { user_id: GROK_USER, team_id: null, refresh_token: SECRET },
+        }),
+        0o600,
+      )
+      await bin(
+        h,
+        `${CHROME}/Profile 2/Local Storage/leveldb/000008.log`,
+        logFile(
+          [
+            { key: lsKey('https://grok.com', `dismissed:banner:${GROK_USER}`), value: SECRET },
+            { key: lsKey('https://grok.com', `abc123:${GROK_USER}`), value: SECRET },
+          ],
+          400,
+        ),
+      )
+      const rt = await createRuntime({ env: h.env, desktop: fakeDeps(h).deps })
+      const r = await browserReport(rt, await rt.accounts())
+      assert.deepEqual(r.profiles.find((p) => p.dir === 'Profile 2')?.signIns, ['grok:main'])
+      const text = JSON.stringify(r)
+      for (const secret of [GROK_USER, SECRET]) assert.ok(!text.includes(secret), secret)
     })
   })
 

@@ -28,15 +28,20 @@ export interface LogicAccount {
   }
   /** The other Accounts of its Same Login (spec §3.21). */
   sameLogin?: string[]
-  usage?: {
-    status: string
-    inputTokens?: number
-    cacheReadTokens?: number
-    cacheWriteTokens?: number
-    totalTokens?: number
-    daily?: { date: string; totalTokens: number }[]
-    lastActivityAt?: string
-  }
+  usage?: LogicUsage
+}
+
+/** The parts of an Account's usage the helpers read. */
+export interface LogicUsage {
+  status: string
+  sessions?: number
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+  totalTokens?: number
+  daily?: { date: string; totalTokens: number }[]
+  lastActivityAt?: string
 }
 
 /** A short countdown such as `2h 05m`, `3d 4h` or `12m` (`2小时05分` in Chinese); fixed shape so it does not jump. */
@@ -370,6 +375,41 @@ export function mergeDaily(lists: ({ date: string; totalTokens: number }[] | und
     .map((date) => ({ date, totalTokens: sums[date] || 0 }))
 }
 
+/**
+ * One usage for the directories of a Same Login (spec §3.21): their token counts and days added up, their newest
+ * use. Directories without readable usage are left out; with none readable it is the first one's usage as it is.
+ */
+export function mergeUsage(usages: (LogicUsage | undefined)[]): LogicUsage | undefined {
+  const ok = usages.filter((u): u is LogicUsage => Boolean(u && u.status === 'ok'))
+  if (ok.length < 2) return ok[0] || usages[0]
+  const sum = (
+    k: 'sessions' | 'totalTokens' | 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheWriteTokens',
+  ) => ok.reduce((n, u) => n + (Number(u[k]) || 0), 0)
+  const at = (u: LogicUsage) => {
+    const v = Date.parse(u.lastActivityAt || '')
+    return Number.isFinite(v) ? v : -1
+  }
+  const newest = ok.reduce((x, y) => (at(y) > at(x) ? y : x))
+  const days: Record<string, number> = {}
+  for (const u of ok)
+    for (const d of u.daily || [])
+      if (d && typeof d.date === 'string') days[d.date] = (days[d.date] || 0) + (Number(d.totalTokens) || 0)
+  return {
+    ...ok[0],
+    status: 'ok',
+    sessions: sum('sessions'),
+    totalTokens: sum('totalTokens'),
+    inputTokens: sum('inputTokens'),
+    outputTokens: sum('outputTokens'),
+    cacheReadTokens: sum('cacheReadTokens'),
+    cacheWriteTokens: sum('cacheWriteTokens'),
+    daily: Object.keys(days)
+      .sort()
+      .map((date) => ({ date, totalTokens: days[date] || 0 })),
+    lastActivityAt: newest.lastActivityAt,
+  }
+}
+
 /** The soonest Quota reset still ahead of `now`, with the window label and Account. */
 export function nextReset(
   accounts: LogicAccount[],
@@ -656,6 +696,25 @@ export function sortSessions<T extends LogicSession>(list: readonly T[]): T[] {
     )
 }
 
+/**
+ * The order a refresh shows: Sessions already on screen keep their places (`shown`, their ids in screen order), so a
+ * Session that just answered does not jump past another. A Session that needs the user still goes first, and one not
+ * shown before comes ahead of the shown ones, in `sortSessions` order.
+ */
+export function steadyOrder<T extends LogicSession>(shown: readonly string[], list: readonly T[]): T[] {
+  const sorted = sortSessions(list)
+  if (!shown.length) return sorted
+  const pos = new Map(shown.map((id, i) => [id, i]))
+  const needs = (s: T) => (s.status === 'needs-you' ? 0 : 1)
+  const rank = sorted.map((s, i) => ({
+    s,
+    seen: pos.has(s.sessionId) ? 1 : 0,
+    at: pos.get(s.sessionId) ?? i,
+  }))
+  rank.sort((a, b) => needs(a.s) - needs(b.s) || a.seen - b.seen || a.at - b.at)
+  return rank.map((x) => x.s)
+}
+
 /** How long ago a Session was last active, as a message key and count; null when it has no time at all. */
 export function sessionAge(s: LogicSession, now: number): { key: string; n?: number } | null {
   const ts = Date.parse(s.updatedAt || s.startedAt || '')
@@ -680,18 +739,20 @@ export interface LogicMessage {
   status: string
   pasteText?: string
   note?: string
+  needsApproval?: boolean
 }
 
 /**
- * What the "Send to it" dialog shows after a send: `done` (the Host took it; `hint` is a note such as "the target must
- * approve it", shown as a yellow hint), `paste` (the user pastes `pasteText`; `reason` says why, `jump` offers the
+ * What the "Send to it" dialog shows after a send: `done` (the Host took it; `hint` is any note, shown as a yellow
+ * hint), `approve` (it took it, but the target shows it only once the user approves it there; `reason` says how, ADR-0045),
+ * `paste` (the user pastes `pasteText`; `reason` says why, `jump` offers the
  * target's Orca tab) or `stored` (kept as a file only; `pasteText` for reference). `key` is the headline's message key.
  */
 export function sendResultView(
   m: LogicMessage,
   orca: boolean,
 ): {
-  kind: 'done' | 'paste' | 'stored'
+  kind: 'done' | 'approve' | 'paste' | 'stored'
   key: string
   pasteText: string
   reason: string
@@ -700,6 +761,8 @@ export function sendResultView(
 } {
   const pasteText = m.pasteText || ''
   const note = (m.note || '').trim()
+  if (m.status === 'delivered' && m.needsApproval)
+    return { kind: 'approve', key: 'send.approve', pasteText, reason: note, hint: '', jump: false }
   if (m.status === 'delivered' || m.status === 'read')
     return {
       kind: 'done',
@@ -724,11 +787,68 @@ export function sendResultView(
 /** The chip a Sessions row shows for the latest Message to it, or null when there is none worth showing. */
 export function messageChip(
   status: string | undefined,
+  needsApproval?: boolean,
 ): { key: string; tone: 'ok' | 'warn' | 'accent' } | null {
+  // Taken by the Host, but shown only once the user approves it in the target's terminal (ADR-0045).
+  if (status === 'delivered' && needsApproval) return { key: 'send.chip.approve', tone: 'warn' }
   if (status === 'delivered') return { key: 'send.chip.delivered', tone: 'accent' }
   if (status === 'read') return { key: 'send.chip.read', tone: 'ok' }
   if (status === 'paste-needed') return { key: 'send.chip.paste', tone: 'warn' }
   return null
+}
+
+/** The latest Message to one Session, as `/api/sessions/messages` gives it (`PanelMessageStatus` in handler.ts). */
+export interface LogicMessageStatus {
+  id: string
+  status: string
+  sentAt?: string
+  to?: string
+  from?: string
+  needsApproval?: boolean
+}
+
+/** A Session Label without its short id: `cc002 · knip cleanup · 61230c3d` → `cc002 · knip cleanup`. */
+export function shortSessionLabel(label: string | undefined): string {
+  const parts = (label || '').split(' · ').filter(Boolean)
+  if (parts.length > 1 && /^[0-9a-f]{8}$/i.test(parts[parts.length - 1]!)) parts.pop()
+  return parts.join(' · ')
+}
+
+export type MessageNewsKind = 'new' | 'approve' | 'read' | 'paste'
+
+/**
+ * What changed between two readings of the latest Messages, for the Panel's notices (spec §3.32): `new` (a Message
+ * reached a Session), `approve` (it reached one that shows it only once the user approves it, ADR-0045), `read` (its
+ * Session read it) or `paste` (it waits for the user to paste it). The first reading (`before` null) only sets the
+ * baseline, so opening the Panel announces nothing that was already there.
+ */
+export function messageNews(
+  before: Record<string, LogicMessageStatus> | null,
+  after: Record<string, LogicMessageStatus>,
+): { kind: MessageNewsKind; sessionId: string; id: string; to: string; from: string }[] {
+  if (!before) return []
+  const out: { kind: MessageNewsKind; sessionId: string; id: string; to: string; from: string }[] = []
+  for (const [sessionId, m] of Object.entries(after)) {
+    // A kept Message that is not delivered yet says nothing; it is announced once it arrives or needs a paste.
+    if (m.status === 'stored') continue
+    const was = before[sessionId]
+    const same = was && was.id === m.id
+    if (same && was.status === m.status) continue
+    const fresh = !same || was.status === 'stored'
+    const kind: MessageNewsKind | null =
+      m.status === 'paste-needed'
+        ? 'paste'
+        : fresh
+          ? m.status === 'delivered' && m.needsApproval
+            ? 'approve'
+            : 'new'
+          : m.status === 'read'
+            ? 'read'
+            : null
+    if (kind)
+      out.push({ kind, sessionId, id: m.id, to: shortSessionLabel(m.to), from: shortSessionLabel(m.from) })
+  }
+  return out
 }
 
 /**
@@ -1472,5 +1592,267 @@ export function widthFollower<T>(
     current = latest
     apply(latest)
     timer = timers.set(settle, settleMs)
+  }
+}
+
+// ---------- Session History (spec §3.33) ----------
+
+/** When a History row was last active: "x min ago" within a week, then its date (key `time.on`). */
+/**
+ * Whether the end of a list is close enough to load its next page: within `margin` px of the bottom of what can be
+ * seen, which is the viewport where the list's box grows with its rows (the page scrolls, not the box).
+ */
+export function tailInView(tailTop: number, boxBottom: number, viewHeight: number, margin = 200): boolean {
+  return tailTop < Math.min(boxBottom, viewHeight) + margin
+}
+
+export function historyWhen(
+  iso: string | undefined,
+  now: number,
+): { key: string; n?: number; date?: string } | null {
+  const ts = Date.parse(iso || '')
+  if (!Number.isFinite(ts)) return null
+  const ms = Math.max(0, now - ts)
+  if (ms < 7 * 86_400_000) return updatedAge(ms)
+  const d = new Date(ts)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return { key: 'time.on', date: d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) }
+}
+
+/** `text` cut into the parts that match one of `words` (any case) and the parts between, for highlighting. */
+export function highlightParts(text: string, words: readonly string[]): { text: string; hit: boolean }[] {
+  const low = text.toLowerCase()
+  const marks: [number, number][] = []
+  for (const w of words) {
+    const lw = w.toLowerCase()
+    if (!lw) continue
+    for (let at = low.indexOf(lw); at >= 0; at = low.indexOf(lw, at + lw.length))
+      marks.push([at, at + lw.length])
+  }
+  marks.sort((a, b) => a[0] - b[0] || b[1] - a[1])
+  const out: { text: string; hit: boolean }[] = []
+  let pos = 0
+  for (const [from, to] of marks) {
+    if (to <= pos) continue
+    const start = Math.max(from, pos)
+    if (start > pos) out.push({ text: text.slice(pos, start), hit: false })
+    out.push({ text: text.slice(start, to), hit: true })
+    pos = to
+  }
+  if (pos < text.length) out.push({ text: text.slice(pos), hit: false })
+  return out
+}
+
+/**
+ * What an empty History list says, and which way out it offers: a wider time range, searching tool output too.
+ * Null while there are rows.
+ */
+export function historyEmpty(v: {
+  q: string
+  since: string
+  state: string
+  total: number
+  tools: boolean
+  project: string
+  /** Accounts sideby found, and the Sessions stored for all of them, in any time. */
+  accounts: number
+  stored: number
+  /** The chosen AI is one sideby reads no past Sessions of. */
+  unreadable?: boolean
+}): { key: string; widen: boolean; tools: boolean; accounts?: boolean; everywhere?: boolean } | null {
+  if (v.total > 0) return null
+  const searching = v.q.trim() !== ''
+  const widen = v.since !== 'all'
+  if (v.state === 'building') return { key: 'hist.emptyBuilding', widen: false, tools: false }
+  if (v.unreadable) return { key: 'hist.emptyUnreadable', widen: false, tools: false }
+  if (v.accounts === 0) return { key: 'hist.emptyNoAccounts', widen: false, tools: false, accounts: true }
+  if (v.stored === 0 && !searching) return { key: 'hist.emptyNone', widen: false, tools: false }
+  if (searching && v.project)
+    return { key: 'hist.emptyMatchProject', widen, tools: !v.tools, everywhere: true }
+  if (searching) return { key: 'hist.emptyMatch', widen, tools: !v.tools }
+  if (v.project) return { key: 'hist.emptyProject', widen, tools: false }
+  return { key: widen ? 'hist.emptySince' : 'hist.emptyNone', widen, tools: false }
+}
+
+/** A Session's messages for reading, with each run of tool calls folded into one line naming the tools. */
+export function foldToolCalls<
+  T extends { role: string; text: string; tool?: string; n: number; at?: string },
+>(messages: readonly T[]): (T | { role: 'tools'; tools: string[]; n: number; at?: string })[] {
+  const out: (T | { role: 'tools'; tools: string[]; n: number; at?: string })[] = []
+  for (const m of messages) {
+    const last = out[out.length - 1]
+    if (m.role !== 'tool') out.push(m)
+    else if (last && last.role === 'tools') (last as { tools: string[] }).tools.push(m.tool || m.text)
+    else
+      out.push(
+        m.at
+          ? { role: 'tools', tools: [m.tool || m.text], n: m.n, at: m.at }
+          : { role: 'tools', tools: [m.tool || m.text], n: m.n },
+      )
+  }
+  return out
+}
+
+/** One block of a message read as Markdown, for the conversation viewer. Text stays text: the page builds nodes. */
+export type MdBlock =
+  | { type: 'p'; text: string }
+  | { type: 'h'; level: number; text: string }
+  | { type: 'code'; lang: string; text: string }
+  | { type: 'quote'; text: string }
+  | { type: 'list'; ordered: boolean; items: string[] }
+  | { type: 'table'; head: string[]; align: ('left' | 'center' | 'right' | '')[]; rows: string[][] }
+  | { type: 'hr' }
+
+/**
+ * Splits a message into Markdown blocks: headings, fenced code, quotes, lists, GitHub tables, rules and paragraphs.
+ * An unclosed fence (a message cut short) runs to the end. Anything else is a paragraph, line breaks kept.
+ */
+export function mdBlocks(text: string): MdBlock[] {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n')
+  const out: MdBlock[] = []
+  const cells = (line: string) => {
+    let s = line.trim()
+    if (s.startsWith('|')) s = s.slice(1)
+    if (s.endsWith('|') && !s.endsWith('\\|')) s = s.slice(0, -1)
+    return s.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'))
+  }
+  const isRule = (line: string) =>
+    /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line) && line.includes('-')
+  const listItem = (line: string) => /^\s{0,3}([-*+]|\d{1,9}[.)])\s+(.*)$/.exec(line)
+  let para: string[] = []
+  const flush = () => {
+    if (para.length) out.push({ type: 'p', text: para.join('\n') })
+    para = []
+  }
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]!
+    const fence = /^\s{0,3}(`{3,}|~{3,})\s*([\w+-]*)/.exec(line)
+    if (fence) {
+      flush()
+      const body: string[] = []
+      i++
+      while (i < lines.length && !lines[i]!.trim().startsWith(fence[1]!)) body.push(lines[i++]!)
+      i++
+      out.push({ type: 'code', lang: fence[2] || '', text: body.join('\n') })
+      continue
+    }
+    if (!line.trim()) {
+      flush()
+      i++
+      continue
+    }
+    const head = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line)
+    if (head) {
+      flush()
+      out.push({ type: 'h', level: head[1]!.length, text: head[2]! })
+      i++
+      continue
+    }
+    if (/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line)) {
+      flush()
+      out.push({ type: 'hr' })
+      i++
+      continue
+    }
+    if (line.includes('|') && i + 1 < lines.length && isRule(lines[i + 1]!)) {
+      const headCells = cells(line)
+      const align = cells(lines[i + 1]!).map((c) =>
+        c.startsWith(':') && c.endsWith(':')
+          ? 'center'
+          : c.endsWith(':')
+            ? 'right'
+            : c.startsWith(':')
+              ? 'left'
+              : '',
+      )
+      if (align.length === headCells.length) {
+        flush()
+        const rows: string[][] = []
+        i += 2
+        while (i < lines.length && lines[i]!.includes('|') && lines[i]!.trim()) {
+          const r = cells(lines[i++]!)
+          rows.push(headCells.map((_, k) => r[k] ?? ''))
+        }
+        out.push({ type: 'table', head: headCells, align, rows })
+        continue
+      }
+    }
+    if (/^\s{0,3}>/.test(line)) {
+      flush()
+      const body: string[] = []
+      while (i < lines.length && /^\s{0,3}>/.test(lines[i]!))
+        body.push(lines[i++]!.replace(/^\s{0,3}>\s?/, ''))
+      out.push({ type: 'quote', text: body.join('\n') })
+      continue
+    }
+    const item = listItem(line)
+    // A list may start right under a paragraph line; a numbered one only from 1, as in CommonMark.
+    if (item && (!para.length || !/\d/.test(item[1]!) || /^1\D/.test(item[1]!))) {
+      flush()
+      const ordered = /\d/.test(item[1]!)
+      const items: string[] = []
+      while (i < lines.length) {
+        const m = listItem(lines[i]!)
+        if (m && /\d/.test(m[1]!) === ordered) items.push(m[2]!)
+        else if (items.length && lines[i]!.trim() && /^\s{2,}/.test(lines[i]!))
+          items[items.length - 1] += '\n' + lines[i]!.trim()
+        else break
+        i++
+      }
+      out.push({ type: 'list', ordered, items })
+      continue
+    }
+    para.push(line)
+    i++
+  }
+  flush()
+  return out
+}
+
+/** Inline Markdown in one block: `code`, **bold**, *italic*, and [links](https://…) with a web address only. */
+export function mdInline(
+  text: string,
+): { t: 'text' | 'code' | 'b' | 'i' | 'a'; text: string; href?: string }[] {
+  const out: { t: 'text' | 'code' | 'b' | 'i' | 'a'; text: string; href?: string }[] = []
+  const re =
+    /(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)|\*\*([^*\n]+?)\*\*|__([^_\n]+?)__|\*([^*\s][^*\n]*?)\*|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g
+  let last = 0
+  for (const m of text.matchAll(re)) {
+    if (m.index > last) out.push({ t: 'text', text: text.slice(last, m.index) })
+    if (m[1]) out.push({ t: 'code', text: m[2]!.trim() || m[2]! })
+    else if (m[3] || m[4]) out.push({ t: 'b', text: (m[3] || m[4])! })
+    else if (m[5]) out.push({ t: 'i', text: m[5] })
+    else out.push({ t: 'a', text: m[6]!, href: m[7]! })
+    last = m.index + m[0].length
+  }
+  if (last < text.length) out.push({ t: 'text', text: text.slice(last) })
+  return out
+}
+
+/** The History filters a reload keeps. A tool-output search is left out: it reads every file again. */
+export type HistFilters = {
+  q: string
+  since: string
+  family: string
+  account: string
+  project: string
+  category: string
+  scripts: boolean
+}
+
+/** The History filters saved before a reload, each dropped back to its default when it is missing or malformed. */
+export function histFilters(raw: unknown): HistFilters {
+  const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  const str = (v: unknown) => (typeof v === 'string' && v.length <= 1000 ? v : '')
+  const since = str(o.since)
+  return {
+    q: str(o.q),
+    since: ['today', '7d', '30d', 'all'].includes(since) ? since : '30d',
+    family: str(o.family),
+    account: str(o.account),
+    project: str(o.project),
+    category: str(o.category),
+    scripts: o.scripts === true,
   }
 }

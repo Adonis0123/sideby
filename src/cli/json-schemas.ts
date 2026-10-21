@@ -530,8 +530,119 @@ const MessageReceipt = Type.Object({
   note: Type.Optional(
     Type.String({ description: 'Why a paste is needed, or that the target must approve it (bypass mode).' }),
   ),
+  needsApproval: Type.Optional(
+    Type.Boolean({
+      description:
+        'true while a delivered Message waits for the user to approve it in the target terminal (ADR-0045); dropped once it is read, and after 6 minutes unread the status becomes paste-needed.',
+    }),
+  ),
   sentAt: Str,
 })
+
+const IndexState = Type.Union(
+  ['building', 'ready', 'off', 'unavailable'].map((k) => Type.Literal(k)),
+  {
+    description:
+      '`building`: the History Index is still reading files (what is built answers already); `off`: config `history.index` is false or the index file could not be opened, so only titles and folders are searched; `unavailable`: this Node has no `node:sqlite`.',
+  },
+)
+const IndexProgressCount = Type.Object(
+  { done: Type.Integer(), total: Type.Integer() },
+  { description: 'Files read in the current build of the History Index, and how many it has to read.' },
+)
+const HistorySource = Type.Object(
+  {
+    account: Str,
+    accountLabel: Str,
+    family: Str,
+    sessions: Type.Integer({ description: 'Sessions stored for the account.' }),
+    files: Type.Integer({ description: 'Session record files found.' }),
+    failed: Type.Integer({ description: 'Record files that could not be read.' }),
+    note: Type.Optional(
+      Type.String({ description: 'Why the account has no sessions or could not be listed, in plain words.' }),
+    ),
+    reason: Type.Optional(
+      Type.Union(
+        [
+          Type.Literal('empty'),
+          Type.Literal('no-conversation'),
+          Type.Literal('unreadable'),
+          Type.Literal('unsupported'),
+        ],
+        {
+          description:
+            '`note` as a code: no record files, records without a conversation, a folder that could not be read, or a tool sideby reads no history for.',
+        },
+      ),
+    ),
+  },
+  { description: 'How many sessions sideby read from one account.' },
+)
+const HistorySession = Type.Object({
+  account: Type.String({ description: 'The Account ref, for example `claude:work`.' }),
+  accountLabel: Type.String({ description: "The account's short command when it has one, else its ref." }),
+  family: Str,
+  sessionId: Type.String({ description: "The host's own session id." }),
+  title: Type.String({
+    description:
+      "The Session Title: the name the user gave it, else the host's title, else the first prompt; may be empty.",
+  }),
+  titleFrom: Type.Union(['user', 'host', 'prompt', 'none'].map((k) => Type.Literal(k))),
+  project: Type.String({
+    description:
+      'The Project: the git repository root of the working directory (worktrees folded in), else the folder.',
+  }),
+  projectName: Type.String({
+    description: 'Its folder name, with the parent folder when two Projects share one.',
+  }),
+  cwd: Type.String({ description: 'The working directory the session ran in; may be empty.' }),
+  cwdGone: Type.Optional(Type.Boolean({ description: 'True when that folder no longer exists.' })),
+  branch: Type.Optional(Str),
+  model: Type.Optional(Str),
+  startedAt: Type.String({ description: 'ISO time; empty when the record gives none.' }),
+  updatedAt: Type.String({ description: 'Last activity, ISO time; empty when the record gives none.' }),
+  messages: Type.Integer({ description: 'Prompts plus replies.' }),
+  script: Type.Boolean({ description: 'A Script Session: started by a script, an SDK or another agent.' }),
+  parent: Type.Optional(
+    Type.String({ description: 'For a subagent session: the session id that started it.' }),
+  ),
+  children: Type.Integer({ description: 'Subagent sessions it started.' }),
+  preview: Type.Optional(
+    Type.String({
+      description: 'The first prompt on one line (at most 240 characters), when it says more than the title.',
+    }),
+  ),
+  snippet: Type.Optional(
+    Type.String({ description: 'Where the words matched, about 40 characters each side.' }),
+  ),
+  foundIn: Type.Optional(
+    Type.Literal('tools', { description: '`tools` when the words matched only its tool output (--tools).' }),
+  ),
+  live: Type.Boolean({ description: 'True while the session is running.' }),
+  transcript: Type.String({ description: "Path of the session's record." }),
+  resumeCommand: Type.String({ description: 'The command that resumes it in the account that holds it.' }),
+  continueCommand: Type.String({
+    description:
+      '`cd <cwd> && <resumeCommand>` (only the resume command when the folder is gone): continue it where it was.',
+  }),
+  reference: Type.String({
+    description:
+      'The Session Reference in English: one sentence that points another AI at the session and its record.',
+  }),
+  group: Type.Optional(
+    Type.String({ description: 'With --group: the key of the group the session is listed under.' }),
+  ),
+})
+
+const HistoryCategories = Type.Object(
+  {
+    label: Type.String({
+      description: 'What the categories are called on screen; "Category" when the plugin gives none.',
+    }),
+    from: Type.String({ description: 'The plugin that sorts Projects into them.' }),
+  },
+  { description: 'Set when a plugin sorts Projects into Project Categories (ADR-0044).' },
+)
 
 export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
   pin: PinResult,
@@ -1185,6 +1296,116 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     },
     { title: 'sideby sessions copy --json' },
   ),
+  history: Type.Object(
+    {
+      schemaVersion: Version,
+      sessions: Type.Array(HistorySession, {
+        description:
+          'Sessions best match first (relevance times recency), or newest first without words; subagent sessions are counted in their parent. Matches found only in tool output (--tools) come last.',
+      }),
+      total: Type.Integer({
+        description: 'All matching sessions; more than `sessions` when --limit or --offset cut the list.',
+      }),
+      index: Type.Object({ state: IndexState, progress: IndexProgressCount }),
+      sources: Type.Array(HistorySource),
+      problems: Type.Array(Str, {
+        description: 'An account or file that could not be read, and what to do; never aborts the listing.',
+      }),
+      groups: Type.Optional(
+        Type.Array(
+          Type.Object({
+            key: Type.String({
+              description:
+                'The Project path, category name, Account ref, Family id or day (`today`, `yesterday`, `week`, `month`, `older`); empty for sessions without one.',
+            }),
+            label: Str,
+            sessions: Type.Integer({ description: 'Matching sessions in the group, collapsed or not.' }),
+            updatedAt: Str,
+            collapsed: Type.Optional(
+              Type.Boolean({
+                description: 'True when its sessions were left out of `sessions` (folded in the Panel).',
+              }),
+            ),
+          }),
+          {
+            description:
+              'With --group (not `none`): every group of the matches, best first and the one without a key last; days in time order.',
+          },
+        ),
+      ),
+      categories: Type.Optional(HistoryCategories),
+      toolOutputMore: Type.Optional(
+        Type.Literal(true, {
+          description:
+            'With --tools: more sessions matched in tool output than the page holds; a larger --limit lists them.',
+        }),
+      ),
+    },
+    { title: 'sideby history --json' },
+  ),
+  'history-show': Type.Object(
+    {
+      schemaVersion: Version,
+      session: HistorySession,
+      messages: Type.Array(
+        Type.Object({
+          n: Type.Integer({ description: 'Position in the session, from 1.' }),
+          role: Type.Union([Type.Literal('user'), Type.Literal('assistant'), Type.Literal('tool')]),
+          text: Type.String({
+            description: 'For `tool`: only the tool name; its input and output are never shown.',
+          }),
+          at: Type.Optional(Str),
+          tool: Type.Optional(Str),
+        }),
+        { description: 'Oldest first: the newest --limit (default 200) before --before.' },
+      ),
+      before: Type.Optional(
+        Type.Integer({
+          description: 'Pass as --before for the messages before these; absent at the first message.',
+        }),
+      ),
+    },
+    { title: 'sideby history show --json' },
+  ),
+  'history-projects': Type.Object(
+    {
+      schemaVersion: Version,
+      projects: Type.Array(
+        Type.Object({
+          project: Type.String({ description: 'The Project path; empty for sessions without a folder.' }),
+          name: Str,
+          sessions: Type.Integer({ description: 'Top-level sessions, Script Sessions not counted.' }),
+          updatedAt: Str,
+          gone: Type.Optional(
+            Type.Boolean({ description: 'True when every session ran in a folder that is gone.' }),
+          ),
+          category: Type.Optional(
+            Type.String({ description: 'Its Project Category, when a plugin sorts Projects into them.' }),
+          ),
+        }),
+        { description: 'Most recent activity first.' },
+      ),
+      categories: Type.Optional(HistoryCategories),
+    },
+    { title: 'sideby history projects --json' },
+  ),
+  'history-index': Type.Object(
+    {
+      schemaVersion: Version,
+      enabled: Type.Boolean({ description: 'False under config `history.index: false`.' }),
+      path: Type.String({ description: "The History Index file (mode 600) in sideby's state folder." }),
+      state: IndexState,
+      progress: IndexProgressCount,
+      files: Type.Integer({ description: 'Session record files known.' }),
+      sessions: Type.Integer({ description: 'Sessions stored, subagent sessions included.' }),
+      bytes: Type.Integer({ description: 'Size of the index file and its journal; 0 when off.' }),
+      sources: Type.Array(HistorySource),
+      cleared: Type.Optional(
+        Type.Boolean({ description: 'With --clear: whether there was a file to delete.' }),
+      ),
+    },
+    { title: 'sideby history index --json' },
+  ),
   send: Type.Object(
     {
       schemaVersion: Version,
@@ -1324,10 +1545,16 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
         { description: 'Most recently changed first.' },
       ),
       families: Type.Object({
-        matched: Type.Array(Str, { description: 'Families whose accounts can be matched (claude, codex).' }),
+        matched: Type.Array(Str, {
+          description:
+            'Families whose accounts can be matched (claude, codex, and plugin families whose `website` has `match`).',
+        }),
         openOnly: Type.Array(Str, {
           description: 'Families that can only be opened in a browser user given with --profile (grok).',
         }),
+      }),
+      sites: Type.Record(Str, Str, {
+        description: 'Family → the https address its accounts open, for the families above.',
       }),
       choices: Type.Record(Str, Str, {
         description:

@@ -43,7 +43,8 @@ export default {
 
 | Extension point | When | What it can do | Timeout |
 |---|---|---|---|
-| `api.family(def)` | when the plugin loads | Add a Family: directory layout, selection variable, Hijack Variables, default arguments, Shared Items, sign-in command, login check, model, optional `logo`, `readQuota`, `readUsage`, `quotaSetup`, `keepTitle` (Host arguments that keep the title config `accountTitle` sets) `probe` (the Host arguments for one short non-interactive request, which `sideby try` runs) and `aiTaskArgs` (removes the arguments that switch the Host's permission checks off before an AI Task starts, and may add the Host's safe mode) | — |
+| `api.family(def)` | when the plugin loads | Add a Family: directory layout, selection variable, Hijack Variables, default arguments, Shared Items, sign-in command, login check, model, optional `logo`, `website` and `history` (see below), `readQuota`, `readUsage`, `quotaSetup`, `keepTitle` (Host arguments that keep the title config `accountTitle` sets) `probe` (the Host arguments for one short non-interactive request, which `sideby try` runs) and `aiTaskArgs` (removes the arguments that switch the Host's permission checks off before an AI Task starts, and may add the Host's safe mode) | — |
+| `api.projectCategories(def)` | when the plugin loads | Sort Projects into categories the Sessions page can group by (see below); only the first plugin that registers one is used | 3 s per answer |
 | `launch.before` | before every `run` and `login` | Change `ctx.env` and `ctx.args`, or stop the launch with `throw api.abort(msg)` | 30 s |
 | `account.create.before` | before `new` (CLI or panel) writes anything | Refuse the new account with `throw api.abort(msg)`; `ctx` has `family`, `name`, `api`, the family's existing `accounts` and `config`. The CLI exits 1 and the panel shows `msg`, so say what to do instead | 10 s |
 | `account.created` | after `new` succeeds | Add files, print next steps with `ctx.log()` | 30 s |
@@ -56,6 +57,42 @@ logo: { path: 'M11.503.131 1.891 5.678…', title: 'Cursor', color: '#000000' } 
 ```
 
 `path` may hold only SVG path data (commands, numbers, spaces, commas, dots, `+`, `-`; up to 20000 characters), `color` must be a hex color and `fillRule` is `nonzero` or `evenodd`. An invalid logo is dropped with a plugin error in `sideby plugins`; the Family still loads and the panel shows its initials. Leave out `color` for a black mark so it follows the text color in dark mode.
+
+A Family's `website` gives its subscription accounts **Open in browser** and **Choose** under the panel's sign-in cell, like Claude, Codex and Grok (ADR-0043):
+
+```ts
+website: {
+  url: 'https://cursor.com/dashboard',
+  // Optional: lets sideby find the Chrome browser user signed in to each account by itself.
+  match: {
+    origin: 'https://cursor.com',
+    // An id the website also puts in its Local Storage key names; read it from the Host's own login file.
+    async signInId(account) {
+      const cfg = JSON.parse(await readFile(join(account.dir, 'cli-config.json'), 'utf8'))
+      return String(cfg.authInfo?.authId ?? '').split('|').pop() || undefined
+    },
+  },
+}
+```
+
+`url` must be an `https://` address with no query or fragment (letters, digits and `._~/-` in the path). `origin` is the website's origin, with no path. Return an id, never a token: sideby compares it with the key names in memory and never shows, logs or keeps it; ids shorter than 8 characters are ignored, and a reader that throws only adds a problem naming the account. Without `match`, the user picks the browser user, and an account whose login email is a browser user's Google account is still found. An invalid `website` is dropped with a plugin error (`website.invalid` in `sideby plugins check`); the Family still loads.
+
+A Family's `history` lets the **Sessions** page and `sideby history` list, search and open its past sessions, like the built-in tools (ADR-0044). Without it, that AI's accounts are listed as having no history sideby can read.
+
+```ts
+history: {
+  // One entry per session: the record file or folder, and a signature that changes when it changes.
+  async list(account, problems) { /* … */ return [{ path, sig, mtimeMs }] },
+  // The session in one entry: id, folder, title, times, and the text the person typed and the model replied.
+  async parse(file, account) { /* … */ return { sessionId, cwd, title, titleFrom: 'host', messages, script: false, prompts, replies } },
+  async *messages(path) { yield { role: 'user', text: '…' } },
+  resumeArgs: (id) => ['--resume', id], // the Host arguments that continue a session
+}
+```
+
+Read only the Host's own session records, never its login file. Put in `prompts` only what the person typed and in `replies` only the model's text: no tool calls or tool output, no context the Host injected. sideby keeps those two in the History Index on this machine. `toolText(path)` is optional and is read only while someone searches tool output; `titles(account)` is optional for titles the Host keeps apart. A `history` whose members are not functions is dropped with a plugin error; the Family still loads.
+
+`api.projectCategories({ label, categoriesOf })` sorts Projects into your own groups, for example by client or workspace. sideby passes many Project paths at once; return `{ [path]: categoryName }` and leave out paths without one. `label` is what the groups are called on screen ("Workspace"; "Category" when left out). Answers are kept for about a minute; one that takes longer than 3 s or throws adds one problem naming your plugin, and the list is shown without categories. The Sessions page then offers **Display → Group by → Category** and nests Projects under them in the side list; `sideby history --group category` and `--category <name>` do the same.
 
 Errors always name the plugin. A plugin that fails to load affects only itself; a failing `doctor.check` becomes a fail Finding for that account; a failing `launch.before` stops the launch; a family reader that throws (for example `model`) shows up as one of that account's `problems` in `list`. A `fix()` may write only inside the current account directory, through `api.fs.writeFileAtomic`.
 

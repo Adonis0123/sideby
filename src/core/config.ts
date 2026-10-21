@@ -285,6 +285,12 @@ export const ConfigSchema = Type.Object(
           'Set the terminal title to `[<short command or account>]` when sideby starts an Account, and keep Hosts that allow it (Codex) from replacing it. Off by default.',
       }),
     ),
+    claudeMod: Type.Optional(
+      Type.Boolean({
+        description:
+          "Load sideby's Claude Code mod (`--plugin-dir`, Claude Code 2.1.287 or later) when sideby starts a Claude Code account: a band with the Session Label, a toast when a Message arrives and a `/sessions` pane. On by default; false turns it off.",
+      }),
+    ),
     resumeRouting: Type.Optional(
       Type.Boolean({
         description:
@@ -309,6 +315,19 @@ export const ConfigSchema = Type.Object(
           ),
         },
         { additionalProperties: false, description: 'Update Check and Auto Update (ADR-0021).' },
+      ),
+    ),
+    history: Type.Optional(
+      Type.Object(
+        {
+          index: Type.Optional(
+            Type.Boolean({
+              description:
+                "Keep a local History Index of every Session's title, Project, typed prompts and model replies (never tool output) in sideby's state folder, so Session History opens and searches at once. On by default; false stops it and deletes the index.",
+            }),
+          ),
+        },
+        { additionalProperties: false, description: 'Session History (spec §3.33, ADR-0042).' },
       ),
     ),
     browser: Type.Optional(

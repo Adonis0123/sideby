@@ -12,7 +12,13 @@ import { SHARE_MODES } from '../core/share-mode-names.ts'
 import { BUILTIN_PLUGINS } from '../families/index.ts'
 import { createRuntime } from '../runtime.ts'
 import type { Env, FamilyDef, Plugin, PluginApi } from '../types.ts'
-import { type BuiltinPlugin, checkTrustedTree, logoProblem, type PluginManifest } from './loader.ts'
+import {
+  type BuiltinPlugin,
+  checkTrustedTree,
+  logoProblem,
+  type PluginManifest,
+  websiteProblem,
+} from './loader.ts'
 import { FAMILY_ID_RE, TODO_MARK } from './scaffold.ts'
 
 export interface PluginProblem {
@@ -297,11 +303,12 @@ async function loadedFamilies(
 ): Promise<string[] | null> {
   const rt = await createRuntime({ env: h.env, builtins })
   const mine = rt.plugins.find((p) => p.source === source)
-  // A dropped logo is reported by defProblems as `logo.invalid`, with its own fix.
+  // A dropped logo or website is reported by defProblems as `logo.invalid` or `website.invalid`, with its own fix.
   const errors = rt.pluginErrors.filter(
     (e) =>
       (e.where === source || e.where === mine?.name || !mine) &&
-      !e.message.endsWith('showing its initials instead'),
+      !e.message.endsWith('showing its initials instead') &&
+      !e.message.endsWith('"Open in browser" until this is fixed'),
   )
   for (const e of errors)
     problems.push({
@@ -318,7 +325,8 @@ async function loadedFamilies(
       })
     return null
   }
-  if (mine.families.length === 0)
+  // A Plugin may sort Projects into categories without adding a Family.
+  if (mine.families.length === 0 && rt.projectCategoriesFrom !== mine.name)
     problems.push({
       code: 'family.none',
       message: `plugin ${mine.name} registers no Family`,
@@ -332,6 +340,7 @@ async function checkDefs(plugin: Plugin, problems: PluginProblem[]): Promise<voi
   const defs: unknown[] = []
   const api: PluginApi = {
     family: (def) => void defs.push(def),
+    projectCategories: () => {},
     on: () => {},
     abort: (message) => new Error(message),
     fs: { writeFileAtomic: async () => {} },
@@ -495,6 +504,15 @@ export function defProblems(raw: unknown): PluginProblem[] {
         code: 'logo.invalid',
         message: `${at}: ${problem}`,
         fix: 'Use one 24x24 SVG path from an icon set whose license allows it, or leave `logo` out.',
+      })
+  }
+  if (def.website !== undefined) {
+    const problem = websiteProblem(def.website)
+    if (problem)
+      out.push({
+        code: 'website.invalid',
+        message: `${at}: ${problem}`,
+        fix: "Set `website.url` to the vendor's https address, and `match` to { origin, signInId } or leave it out.",
       })
   }
   return out

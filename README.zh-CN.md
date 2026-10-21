@@ -80,6 +80,9 @@ cc-switch 自己的说明是：切换时把配置写进宿主正在用的文件�
 
 | 你想 | 命令 | 说明 |
 |---|---|---|
+| 凭记得的内容找回任何账号以前的任何会话，按项目分组，查看对话并在原处继续 | 面板的「会话 › 历史」，或 `sideby history "fix login" --project .` | [历史](docs/guide/panel.zh-CN.md#历史) |
+| 看每个账号正在跑什么，把一个会话复制给另一个 AI | 面板的「会话 › 运行中」，或 `sideby sessions` | [会话](docs/guide/panel.zh-CN.md#会话) |
+| 给正在跑的会话发消息，可以带截图 | 运行中会话上的「发给它」，或 `sideby send claude:work "跑一下测试"` | [发给会话](docs/guide/panel.zh-CN.md#发给会话) |
 | 在面板里把事情交给你自己的 AI：配账号、修问题、支持新工具 | 面板的「让 AI 帮我」，或 `sideby ask` | [让 AI 帮我](docs/guide/panel.zh-CN.md#让-ai-帮我) |
 | 在 macOS 状态栏一眼看到额度 | 面板的「设置 › 启动」，或 `sideby menubar on` | [状态栏额度](docs/guide/usage.zh-CN.md#状态栏额度) |
 | 登录电脑后面板就在后台准备好 | 面板的「设置 › 启动」，或 `sideby autostart on` | [开机启动](docs/guide/usage.zh-CN.md#开机启动) |
@@ -98,7 +101,7 @@ cc-switch 自己的说明是：切换时把配置写进宿主正在用的文件�
 | 同时开几个 Grok Bot 窗口，各登录一个账号（macOS） | `sideby desktop grok-bot:002`（或在面板里） | [Grok Bot 窗口](docs/guide/usage.zh-CN.md#grok-bot-窗口) |
 | 从 Dock 或应用菜单打开面板 | `sideby app install` | [面板应用](docs/guide/panel.zh-CN.md#面板应用) |
 | 把面板嵌进自己的本地页面 | `createPanelHandler()` | [嵌入面板](docs/guide/panel.zh-CN.md#嵌入面板) |
-| 新增一个宿主，或加启动前检查 | 本地插件 | [插件](docs/guide/plugins.zh-CN.md) |
+| 新增一个宿主、加启动前检查，或给历史加自己的项目分类 | 本地插件 | [插件](docs/guide/plugins.zh-CN.md) |
 
 ## 支持的宿主
 
@@ -135,8 +138,8 @@ sideby 启动 `PATH` 上的官方程序，从不修改它。测试过的版本�
 - [使用指南](docs/guide/usage.zh-CN.md)：账号、API 账号、体检、额度、接力、宿主说明
 - [命令](docs/guide/commands.zh-CN.md)：所有命令、退出码和 `--json`
 - [配置](docs/guide/configuration.zh-CN.md)：`config.json`、短命令、Shell 函数
-- [面板](docs/guide/panel.zh-CN.md)：面板、面板应用、嵌入
-- [插件](docs/guide/plugins.zh-CN.md)：自己写家族或启动 hook
+- [面板](docs/guide/panel.zh-CN.md)：面板、会话和历史、面板应用、嵌入
+- [插件](docs/guide/plugins.zh-CN.md)：自己写家族、启动 hook 或项目分类
 - [常见问题](docs/guide/faq.zh-CN.md)：服务条款、数据位置、同类工具对比、卸载
 - [更新记录](https://github.com/Adonis0123/sideby/releases)
 

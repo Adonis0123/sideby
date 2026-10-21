@@ -9,6 +9,7 @@
     "found",
     "profiles",
     "families",
+    "sites",
     "choices",
     "problems"
   ],
@@ -78,7 +79,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Families whose accounts can be matched (claude, codex)."
+          "description": "Families whose accounts can be matched (claude, codex, and plugin families whose `website` has `match`)."
         },
         "openOnly": {
           "type": "array",
@@ -88,6 +89,15 @@
           "description": "Families that can only be opened in a browser user given with --profile (grok)."
         }
       }
+    },
+    "sites": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "type": "string"
+        }
+      },
+      "description": "Family → the https address its accounts open, for the families above."
     },
     "choices": {
       "type": "object",

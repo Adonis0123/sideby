@@ -1,0 +1,7 @@
+{
+  "name": "sideby",
+  "version": "0.1.0",
+  "description": "Shows which sideby account and session this is, tells you when a sideby Message arrives, and lists your running sessions with /sessions.",
+  "author": { "name": "sideby" },
+  "license": "MIT"
+}

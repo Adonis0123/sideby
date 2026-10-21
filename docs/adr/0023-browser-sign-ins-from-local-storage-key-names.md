@@ -37,7 +37,7 @@ Options considered:
 
 - The lookup breaks without warning when claude.ai or chatgpt.com rename their keys; it then finds nothing and says so.
 - A few keys left from an old sign-in are outweighed by the current one's, but a profile that signed out and signed in to nothing else still shows the old Account.
-- Grok Build has no match until grok.com stores an id that `auth.json` also has.
+- Grok Build has no match until grok.com stores an id that `auth.json` also has. (Superseded 2026-10-20 by ADR-0043: it does now.)
 - Other Chromium browsers (Arc, Brave, Edge, Chrome Beta) share the format and need only their directory added.
 
 ## Amendment 2026-10-16: WSL

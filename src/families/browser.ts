@@ -1,23 +1,16 @@
-// Vendor websites of the built-in Families, for Browser Sign-ins (spec §3.24, ADR-0023). Internal on purpose: not
-// part of the public FamilyDef, so plugin Families cannot declare one in v1.
-import type { Account } from '../types.ts'
+// Vendor websites for Browser Sign-ins (spec §3.24, ADR-0023, ADR-0043). The built-in Families' websites are set
+// here; a plugin Family declares its own as `FamilyDef.website`, checked by the loader.
+import type { FamilyDef, FamilyWebsite } from '../types.ts'
 import { claudeSignInId } from './claude/browser.ts'
 import { codexSignInId } from './codex/browser.ts'
+import { grokSignInId } from './grok/browser.ts'
 
-export interface WebsiteDef {
+export type WebsiteDef = FamilyWebsite & {
   /** The Family id. */
   family: string
-  /** Where "Open in browser" goes. */
-  url: string
-  /**
-   * The Local Storage origin whose key names may hold `signInId`, and the reader of that id from the Host's login
-   * file. The id is compared in memory only; it is never shown, returned, logged or cached. Missing when the website
-   * keeps no id the Host also has (grok.com), so the Account can only be opened in a Browser Profile the user picks.
-   */
-  match?: { origin: string; signInId(account: Account): Promise<string | undefined> }
 }
 
-const WEBSITES: ReadonlyMap<string, WebsiteDef> = new Map(
+const BUILTIN: ReadonlyMap<string, WebsiteDef> = new Map(
   (
     [
       {
@@ -30,17 +23,29 @@ const WEBSITES: ReadonlyMap<string, WebsiteDef> = new Map(
         url: 'https://chatgpt.com',
         match: { origin: 'https://chatgpt.com', signInId: codexSignInId },
       },
-      { family: 'grok', url: 'https://grok.com' },
+      // grok.com keys such as `dismissed:<x>:<user_id>` carry the x.ai user id (checked 2026-10-20, ADR-0043).
+      {
+        family: 'grok',
+        url: 'https://grok.com',
+        match: { origin: 'https://grok.com', signInId: grokSignInId },
+      },
     ] satisfies WebsiteDef[]
   ).map((w) => [w.family, w]),
 )
 
-/** The website of a built-in Family id, if it has one. */
-export function websiteDef(familyId: string): WebsiteDef | undefined {
-  return WEBSITES.get(familyId)
+/** The website of a Family: sideby's own for a built-in one, else the one its plugin declares. */
+export function websiteDef(
+  families: ReadonlyMap<string, FamilyDef>,
+  familyId: string,
+): WebsiteDef | undefined {
+  const own = BUILTIN.get(familyId)
+  if (own) return own
+  const w = families.get(familyId)?.website
+  return w ? { ...w, family: familyId } : undefined
 }
 
-/** Every website that can be matched, for the origins to read. */
-export function matchedOrigins(): string[] {
-  return [...WEBSITES.values()].flatMap((w) => (w.match ? [w.match.origin] : []))
+/** Every website origin that can be matched, for the origins to read. */
+export function matchedOrigins(families: ReadonlyMap<string, FamilyDef>): string[] {
+  const ids = new Set([...BUILTIN.keys(), ...families.keys()])
+  return [...new Set([...ids].flatMap((id) => websiteDef(families, id)?.match?.origin ?? []))]
 }

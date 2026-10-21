@@ -2,6 +2,7 @@ import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Account, FamilyDef } from '../types.ts'
 import { ACCOUNT_NAME } from './account-name.ts'
+import { aliasArgs, aliasRefs, type Config } from './config.ts'
 import { UserError } from './errors.ts'
 import { lstatOrNull, statOrNull } from './fs-safe.ts'
 
@@ -138,4 +139,19 @@ export function aliasesByAccount(
     out.set(ref, [...(out.get(ref) ?? []), alias].sort())
   }
   return out
+}
+
+/**
+ * The argument lists an Account may start with: its config `accounts.<ref>.args`, then each of its short commands'
+ * own arguments. Doctor and the Panel read them to tell whether its sessions start in bypass permission mode.
+ */
+export function startArgsOf(
+  config: Pick<Config, 'accounts' | 'aliases'>,
+  accounts: readonly Account[],
+): (a: Account) => string[][] {
+  const byAccount = aliasesByAccount(aliasRefs(config.aliases), accounts)
+  return (a) => [
+    config.accounts?.[a.ref]?.args ?? [],
+    ...(byAccount.get(a.ref) ?? []).map((n) => aliasArgs(config.aliases?.[n])),
+  ]
 }

@@ -21,7 +21,7 @@ Options:
 
 - In the list view, the members of a Same Login that are shown together become one row: the name and short commands of the first member, a "2 directories · shared quota" label, the email, browser sign-in and Quota once, and the newest "last used".
 - Expanding the row lists each directory with its own short command, last use, a "Copy start command" button and its own menu.
-- The row's menu has Pin first, then one section per directory, then the actions the login shares.
+- The row's menu has Pin first, then one section per directory, then the actions the login shares. (Revised 2026-10-20: the menu is the single-account menu of the directory the row is named after, so each action appears once; a last group lists every other directory as one item that opens its own actions in the same menu, with Back.)
 - The "Next" tag, Quota warnings and the attention count appear once, on the row.
 - Card view and a filter that leaves one member keep one entry per directory, as before.
 

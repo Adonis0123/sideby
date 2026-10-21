@@ -47,6 +47,8 @@ sideby 每次启动账号，都给宿主设两个变量：`SIDEBY_ACCOUNT`（ref
 
 开了 `sideby quota setup claude` 时，状态栏命令是 `sideby statusline-tap --orig-b64 …`：改它运行的那个脚本，不要改这条命令。原来没有状态栏、想加一个时，先 `sideby quota teardown claude`，设好 `statusLine`，再 `sideby quota setup claude --yes`。
 
+Claude Code 2.1.287 及以上不用配这些：sideby 启动它时带上自己的 mod（`--plugin-dir`，不往账号里写东西），提示框上方一行淡色字显示 Session Label（`cc002 · knip cleanup · 61230c3d`），收到[消息](commands.zh-CN.md)时弹提示，并多一个 `/sessions`：右侧面板列出所有正在运行的会话，带「复制给 AI」按钮（完整标签和面板按名字调用 `sideby`，所以要把 sideby 装到终端找得到的地方，不能只靠 npx）。不想要时在[配置](configuration.zh-CN.md)里设 `"claudeMod": false`。
+
 ## API 账号
 
 ```sh
@@ -218,10 +220,9 @@ sideby browser open grok:main --profile Work
 sideby browser set codex:main "Profile 7"   # 指定就是这个浏览器用户；--auto 改回自动识别
 ```
 
-- sideby 读取这三样：每个浏览器用户的名字和它在 Chrome 里登录的 Google 账号；claude.ai 和 chatgpt.com 在 Chrome Local Storage 里存的键名（不读内容）；每个 Claude、Codex 登录文件里的账号 ID，只用来比对。它不打开 Cookie、已存密码和钥匙串，也不改 Chrome。
+- sideby 读取这三样：每个浏览器用户的名字和它在 Chrome 里登录的 Google 账号；claude.ai、chatgpt.com、grok.com 和插件工具声明的官网在 Chrome Local Storage 里存的键名（不读内容）；Claude、Codex、Grok 和插件工具登录文件里的账号 ID，只用来比对。它不打开 Cookie、已存密码和钥匙串，也不改 Chrome。
 - "登录过"的意思是：这个浏览器用户的数据里，有以这个账号登录的记录。网站退出登录后不删这些记录，所以一个账号可能出现在好几个浏览器用户里。这时 sideby 只留下 Chrome 里登录的 Google 账号和这个账号登录邮箱相同的那些；哪个都没找到的账号，配上 Google 账号就是它登录邮箱的那个浏览器用户（只有一个时）。
 - 还是认错时，在面板账号详情里点它旁边的 **更改**，再在正确的浏览器用户旁点 **就是这个**。sideby 记住你的选择，以后都用它，并标上 **你选的**；**改回自动识别** 可以撤销。只改 sideby 自己的配置，不改 Chrome。
-- grok.com 没有保存能比对的信息，所以 Grok 账号只按登录邮箱找；找不到就自己选浏览器用户。
 - 目前只支持 Google Chrome：macOS 上的，以及 WSL 里用的 Windows 上装的那个。网站改变存数据的方式后，sideby 会找不到，并直接告诉你没找到。
 
 ## 上下文调优

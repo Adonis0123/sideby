@@ -2,7 +2,7 @@
 // endpoints, behind the Panel's usual checks. sendMessage and listMessages are replaced, so no test reaches a Session.
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
-import { chmod, mkdir, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
@@ -14,7 +14,12 @@ import type { LiveSession } from '../core/live-sessions.ts'
 import type { MessageReceipt, SendOptions } from '../core/messages.ts'
 import type { Runtime } from '../runtime.ts'
 import { createRuntime } from '../runtime.ts'
-import { createPanelHandler, LIVE_SESSIONS_SOURCE, type LiveSessionsSource } from './handler.ts'
+import {
+  createPanelHandler,
+  LIVE_SESSIONS_SOURCE,
+  type LiveSessionsSource,
+  type PanelMessageStatus,
+} from './handler.ts'
 import type { OrcaDeps } from './orca.ts'
 
 const SID = '61230c3d-0000-4000-8000-000000000001'
@@ -432,7 +437,12 @@ describe('panel "Send to it"', () => {
         const r = await request(ro.port, '/api/sessions/messages', ro.good)
         assert.equal(r.status, 200, JSON.stringify(r.body))
         assert.deepEqual(r.body.latest, {
-          [SID]: { id: '0a1b2c3d', status: 'read', sentAt: '2026-10-20T10:00:00.000Z' },
+          [SID]: {
+            id: '0a1b2c3d',
+            status: 'read',
+            sentAt: '2026-10-20T10:00:00.000Z',
+            to: 'dw · knip cleanup · 61230c3d',
+          },
         })
         assert.deepEqual(diffSnapshots(before, await snapshot(h.path('.local/state/sideby/messages'))), [])
       } finally {
@@ -448,7 +458,12 @@ describe('panel "Send to it"', () => {
       const messages = async (_rt: Runtime, opts?: { to?: string; limit?: number; persist?: boolean }) => {
         asked = opts
         return [
-          receipt(home, { id: 'new', status: 'read', sentAt: '2026-10-20T10:05:00.000Z' }),
+          receipt(home, {
+            id: 'new',
+            status: 'read',
+            sentAt: '2026-10-20T10:05:00.000Z',
+            from: 'cc008 · app · 0d6e4079',
+          }),
           receipt(home, { id: 'old', status: 'paste-needed' }),
           receipt(home, { id: 'other', toSessionId: 'abc', status: 'paste-needed' }),
         ]
@@ -456,15 +471,94 @@ describe('panel "Send to it"', () => {
       const { server, port, good } = await panel(h, { messages })
       try {
         const r = await request(port, '/api/sessions/messages', good)
+        const latest = r.body.latest as Record<string, PanelMessageStatus>
         assert.equal(r.status, 200, JSON.stringify(r.body))
         assert.deepEqual(asked, { limit: 200, persist: true })
         assert.deepEqual(r.body.latest, {
-          [SID]: { id: 'new', status: 'read', sentAt: '2026-10-20T10:05:00.000Z' },
-          abc: { id: 'other', status: 'paste-needed', sentAt: '2026-10-20T10:00:00.000Z' },
+          [SID]: {
+            id: 'new',
+            status: 'read',
+            sentAt: '2026-10-20T10:05:00.000Z',
+            to: 'dw · knip cleanup · 61230c3d',
+            from: 'cc008 · app · 0d6e4079',
+          },
+          abc: {
+            id: 'other',
+            status: 'paste-needed',
+            sentAt: '2026-10-20T10:00:00.000Z',
+            to: 'dw · knip cleanup · 61230c3d',
+            pasteText: latest.abc!.pasteText,
+          },
         })
-        assert.ok(!JSON.stringify(r.body).includes(home), 'no paths')
+        assert.match(latest.abc!.pasteText!, /^Read .*\.md$/)
+        // The paste line is the one place a path may appear: the user pastes it into the tab.
+        const { pasteText: _line, ...rest } = latest.abc!
+        assert.ok(!JSON.stringify({ ...latest, abc: rest }).includes(home), 'no other paths')
       } finally {
         await close(server)
+      }
+    })
+  })
+})
+
+describe('panel "Receiving messages" (ADR-0045)', () => {
+  it('lists each Claude settings file and whether it waits, accepts with an undo, and refuses writes when read-only', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{"model":"x"}')
+      await h.write('.claude-002/settings.json', '{"crossSessionInbound":"hold"}')
+      const make = (readOnly: boolean) =>
+        serve((p) =>
+          createPanelHandler({
+            runtime: () => createRuntime({ env: h.env }),
+            allowedHosts: [`127.0.0.1:${p}`],
+            readOnly,
+          }),
+        )
+      const rw = await make(false)
+      const ro = await make(true)
+      const good = (s: typeof rw) => ({
+        origin: `http://127.0.0.1:${s.port}`,
+        'x-sideby-token': s.handler.token,
+      })
+      try {
+        const list = await request(rw.port, '/api/messages/inbound', good(rw))
+        assert.equal(list.status, 200)
+        const groups = list.body.groups as { file: string; state: string; waits: boolean }[]
+        assert.deepEqual(
+          groups.map((g) => [g.file, g.state, g.waits]),
+          [
+            ['~/.claude/settings.json', 'default', false],
+            ['~/.claude-002/settings.json', 'hold', true],
+          ],
+        )
+        // A read-only Panel shows the list but changes nothing.
+        assert.equal((await request(ro.port, '/api/messages/inbound', good(ro))).status, 200)
+        for (const path of ['/api/messages/inbound/accept', '/api/messages/inbound/undo'])
+          assert.equal((await request(ro.port, path, good(ro))).status, 403, `${path} read-only`)
+        assert.equal(
+          JSON.parse(await readFile(h.path('.claude-002/settings.json'), 'utf8')).crossSessionInbound,
+          'hold',
+        )
+
+        const accepted = await request(rw.port, '/api/messages/inbound/accept', good(rw))
+        assert.equal(accepted.body.ok, true)
+        assert.ok(!JSON.stringify(accepted.body).includes(h.env.HOME!), 'files are shown under ~')
+        assert.equal(
+          JSON.parse(await readFile(h.path('.claude-002/settings.json'), 'utf8')).crossSessionInbound,
+          'accept',
+        )
+        const after = (await request(rw.port, '/api/messages/inbound', good(rw))).body.groups as {
+          waits: boolean
+        }[]
+        assert.ok(after.every((g) => !g.waits))
+        assert.equal((await request(rw.port, '/api/messages/inbound/undo', good(rw))).body.ok, true)
+        assert.equal(
+          JSON.parse(await readFile(h.path('.claude-002/settings.json'), 'utf8')).crossSessionInbound,
+          'hold',
+        )
+      } finally {
+        await close(rw.server)
+        await close(ro.server)
       }
     })
   })

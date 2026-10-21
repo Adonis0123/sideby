@@ -19,10 +19,15 @@ import {
   fileSize,
   fixPrompt,
   foldSkips,
+  foldToolCalls,
   formatDuration,
   handoffChangeOf,
   handoffHintAccount,
   handoffTaskFacts,
+  highlightParts,
+  histFilters,
+  historyEmpty,
+  historyWhen,
   hotkeyFromKey,
   hotkeyPressKind,
   inDisplayOrder,
@@ -32,9 +37,13 @@ import {
   loginKey,
   maskEmail,
   matchesQuery,
+  mdBlocks,
+  mdInline,
   menuPlacement,
   mergeDaily,
+  mergeUsage,
   messageChip,
+  messageNews,
   newAccountDir,
   nextReset,
   panelFixes,
@@ -59,10 +68,12 @@ import {
   shortCwd,
   sortAccounts,
   sortSessions,
+  steadyOrder,
   stripSecrets,
   suggestAlias,
   suggestName,
   switchFailure,
+  tailInView,
   taskFindings,
   taskPrompt,
   updatedAge,
@@ -850,7 +861,13 @@ describe('Display Order in the page (spec §3.25)', () => {
     assert.match(body('pinMark'), /isPinned\(a\)[\s\S]*'aria-label': t\('pin\.mark'\)/)
     assert.match(body('pinItem'), /togglePin\(a\)/)
     assert.match(body('accountMenu'), /\[pinItem\(a\)/)
-    assert.match(body('loginMenu'), /\[pinItem\(ms\[0\]\)\]/)
+    assert.match(body('loginMenu'), /accountMenu\(ms\[0\], anchor, ms\.slice\(1\)\)/)
+    // A Same Login row lists the shared actions once; each other directory is one item that opens its own actions.
+    assert.match(
+      body('accountMenu'),
+      /sub: \[up, '-', \{ header: [\s\S]*\.\.\.dirItems\(m\), \.\.\.dirTools\(m\)\]/,
+    )
+    assert.match(body('accountMenu'), /t\('menu\.groupOtherDirs'\)/)
     assert.match(body('arrangeRow'), /togglePin\(a\)/)
     assert.match(body('arrangeRow'), /t\('pin\.full'/)
   })
@@ -1705,6 +1722,91 @@ describe('settings in config, start at login and Auto Handoff facts (spec §3.29
   })
 })
 
+describe('card view', () => {
+  const fn = (name: string) => {
+    const at = PAGE_SCRIPT.indexOf(`  function ${name}(`)
+    assert.ok(at >= 0, name)
+    return PAGE_SCRIPT.slice(at, PAGE_SCRIPT.indexOf('\n  function ', at + 10))
+  }
+  it('marks a Same Login with its link but keeps its own badge, and leaves health to the label after the name', () => {
+    // The fake peers only name the directories: statusBadge must not see them, or isNext() would mark every card.
+    assert.match(fn('card'), /nameLine\(a, null, \{ linked: peers \}\)/)
+    assert.match(fn('nameLine'), /loginMark\(o\.linked \|\| members\)[\s\S]*statusBadge\(a, members\)/)
+    assert.match(
+      fn('card'),
+      /usageBlock\(a\), h\('div', \{ class: 'card-side' \}, deskButton\(a\), runButton\(a\)\)/,
+    )
+    assert.doesNotMatch(fn('card'), /healthChip/)
+  })
+  it('shows a Same Login as one card, as the list shows it as one row', () => {
+    assert.match(
+      PAGE_SCRIPT,
+      /loginClusters\(list\)\.map\(\(x\) => Array\.isArray\(x\) \? loginCard\(x, now, cols\) : card\(x, now, cols\)\)/,
+    )
+    const body = fn('loginCard')
+    assert.equal((body.match(/quotaBlock\(/g) || []).length, 1)
+    assert.match(body, /mergeUsage\(ms\.map\(\(m\) => m\.usage\)\)/)
+    assert.match(body, /loginMenu\(ms, anchor\)/)
+    assert.match(body, /deskButton\(a, ms\)/)
+  })
+  it('makes a health label open the account findings, and leaves the quota label as text', () => {
+    assert.match(fn('attentionWord'), /reason !== 'quota-high'[\s\S]*filterHealth\(subject\.ref\)/)
+  })
+  it('shows a session count when the records have no token totals', () => {
+    const body = fn('usageBlock')
+    assert.match(body, /!u\.totalTokens && u\.sessions > 0/)
+    assert.match(body, /t\('usage\.noTokenCounts'\)/)
+    assert.match(body, /t\('usage\.noTokens'/)
+  })
+  it('offers the settings file for a read error only when the error names it', () => {
+    assert.match(PAGE_SCRIPT, /a\.error\.includes\(family\(a\.family\)\.settingsFile\) \? item : null/)
+  })
+})
+
+describe('mergeUsage', () => {
+  const u = (total: number, at: string, daily: { date: string; totalTokens: number }[]) => ({
+    status: 'ok',
+    sessions: 2,
+    inputTokens: total / 2,
+    outputTokens: 1,
+    cacheReadTokens: total / 4,
+    cacheWriteTokens: 0,
+    totalTokens: total,
+    daily,
+    lastActivityAt: at,
+  })
+  it('adds up the tokens and days of every readable directory and keeps the newest use', () => {
+    const got = mergeUsage([
+      u(100, '2026-10-19T10:00:00Z', [
+        { date: '2026-10-18', totalTokens: 40 },
+        { date: '2026-10-19', totalTokens: 60 },
+      ]),
+      { status: 'unreadable' },
+      u(20, '2026-10-20T08:00:00Z', [
+        { date: '2026-10-19', totalTokens: 5 },
+        { date: '2026-10-20', totalTokens: 15 },
+      ]),
+    ])
+    assert.equal(got?.totalTokens, 120)
+    assert.equal(got?.sessions, 4)
+    assert.equal(got?.cacheReadTokens, 30)
+    assert.equal(got?.lastActivityAt, '2026-10-20T08:00:00Z')
+    assert.deepEqual(got?.daily, [
+      { date: '2026-10-18', totalTokens: 40 },
+      { date: '2026-10-19', totalTokens: 65 },
+      { date: '2026-10-20', totalTokens: 15 },
+    ])
+  })
+  it('gives the one readable usage, or the first as it is when none is readable', () => {
+    const one = u(7, '2026-10-19T10:00:00Z', [])
+    assert.equal(mergeUsage([{ status: 'no-session' }, one]), one)
+    assert.deepEqual(mergeUsage([{ status: 'no-session' }, { status: 'unreadable' }]), {
+      status: 'no-session',
+    })
+    assert.equal(mergeUsage([]), undefined)
+  })
+})
+
 describe('widthTier', () => {
   it('puts each width in the band its narrow-screen rules were written for, edges included', () => {
     assert.deepEqual([1300, 1101, 1100, 761, 760, 561, 560, 320].map(widthTier), [
@@ -1854,6 +1956,35 @@ describe('Sessions page', () => {
     assert.equal(list[0]!.sessionId, 'aaaaaaaa1', 'leaves the given list alone')
   })
 
+  it('keeps shown Sessions in place on a refresh, puts new ones ahead and one that needs the user first', () => {
+    const first = steadyOrder(
+      [],
+      [
+        s('aaaaaaaa1', { updatedAt: '2026-10-20T11:50:00Z' }),
+        s('bbbbbbbb2', { updatedAt: '2026-10-20T11:40:00Z' }),
+      ],
+    )
+    assert.deepEqual(
+      first.map((x) => x.sessionId),
+      ['aaaaaaaa1', 'bbbbbbbb2'],
+    )
+    const shown = first.map((x) => x.sessionId)
+    const later = [
+      s('aaaaaaaa1', { updatedAt: '2026-10-20T11:50:00Z' }),
+      s('bbbbbbbb2', { updatedAt: '2026-10-20T11:58:00Z' }),
+      s('cccccccc3', { updatedAt: '2026-10-20T11:55:00Z' }),
+    ]
+    assert.deepEqual(
+      steadyOrder(shown, later).map((x) => x.sessionId),
+      ['cccccccc3', 'aaaaaaaa1', 'bbbbbbbb2'],
+    )
+    later[1] = s('bbbbbbbb2', { status: 'needs-you', updatedAt: '2026-10-20T11:58:00Z' })
+    assert.deepEqual(
+      steadyOrder(shown, later).map((x) => x.sessionId),
+      ['bbbbbbbb2', 'cccccccc3', 'aaaaaaaa1'],
+    )
+  })
+
   it('says how long ago a Session was active, from updatedAt or else startedAt', () => {
     assert.deepEqual(sessionAge(s('a', { updatedAt: '2026-10-20T11:53:00Z' }), now), {
       key: 'time.minAgo',
@@ -1916,6 +2047,21 @@ describe('send to a session (spec §3.32 step 2)', () => {
     const bypass = sendResultView({ status: 'delivered', note: ' It must approve it first. ' }, false)
     assert.equal(bypass.hint, 'It must approve it first.')
     assert.equal(sendResultView({ status: 'read' }, false).key, 'send.read')
+    // Held for approval in the target terminal (ADR-0045): its own headline, the note as the reason.
+    assert.deepEqual(
+      sendResultView(
+        { status: 'delivered', needsApproval: true, note: ' Approve it there. ', pasteText: 'Read /m.md' },
+        false,
+      ),
+      {
+        kind: 'approve',
+        key: 'send.approve',
+        pasteText: 'Read /m.md',
+        reason: 'Approve it there.',
+        hint: '',
+        jump: false,
+      },
+    )
   })
 
   it('shows the line to paste, why, and the Orca tab only when there is one', () => {
@@ -1938,6 +2084,12 @@ describe('send to a session (spec §3.32 step 2)', () => {
 
   it('maps the latest status to a chip', () => {
     assert.deepEqual(messageChip('delivered'), { key: 'send.chip.delivered', tone: 'accent' })
+    assert.deepEqual(messageChip('delivered', true), { key: 'send.chip.approve', tone: 'warn' })
+    assert.deepEqual(
+      messageChip('read', true),
+      { key: 'send.chip.read', tone: 'ok' },
+      'read wins over waiting',
+    )
     assert.deepEqual(messageChip('read'), { key: 'send.chip.read', tone: 'ok' })
     assert.deepEqual(messageChip('paste-needed'), { key: 'send.chip.paste', tone: 'warn' })
     assert.equal(messageChip('stored'), null)
@@ -1947,10 +2099,57 @@ describe('send to a session (spec §3.32 step 2)', () => {
         'send.chip.delivered',
         'send.chip.read',
         'send.chip.paste',
+        'send.chip.approve',
+        'send.approve',
         'send.done',
         'send.paste',
         'send.stored',
         'send.read',
+      ])
+        assert.ok(MESSAGES[lang][key], `${key} ${lang}`)
+  })
+
+  it('announces a new, read or paste-needed Message, but nothing on the first reading', () => {
+    const to = 'cc002 · knip cleanup · 61230c3d'
+    const first = { s1: { id: 'a1', status: 'delivered', to } }
+    assert.deepEqual(messageNews(null, first), [])
+    assert.deepEqual(messageNews(first, first), [])
+    assert.deepEqual(
+      messageNews(first, { s1: { id: 'a2', status: 'delivered', to, from: 'cc008 · app · 0d6e4079' } }),
+      [{ kind: 'new', sessionId: 's1', id: 'a2', to: 'cc002 · knip cleanup', from: 'cc008 · app' }],
+    )
+    assert.deepEqual(messageNews(first, { s1: { id: 'a1', status: 'read', to } }), [
+      { kind: 'read', sessionId: 's1', id: 'a1', to: 'cc002 · knip cleanup', from: '' },
+    ])
+    assert.deepEqual(
+      messageNews(first, { s1: first.s1, s2: { id: 'b1', status: 'paste-needed', to: 'gk · lab' } }),
+      [{ kind: 'paste', sessionId: 's2', id: 'b1', to: 'gk · lab', from: '' }],
+    )
+    // A status that only moves on from read, or a reading that lost a Session, announces nothing.
+    assert.deepEqual(
+      messageNews({ s1: { id: 'a1', status: 'read' } }, { s1: { id: 'a1', status: 'delivered' } }),
+      [],
+    )
+    assert.deepEqual(messageNews(first, {}), [])
+    // A new Message held for approval says so instead of "got a message".
+    assert.deepEqual(messageNews(first, { s1: { id: 'a4', status: 'delivered', to, needsApproval: true } }), [
+      { kind: 'approve', sessionId: 's1', id: 'a4', to: 'cc002 · knip cleanup', from: '' },
+    ])
+    // A Message only kept so far waits; it is new once it is delivered.
+    const kept = { s1: { id: 'a3', status: 'stored', to } }
+    assert.deepEqual(messageNews(first, kept), [])
+    assert.deepEqual(messageNews(kept, { s1: { id: 'a3', status: 'delivered', to } }), [
+      { kind: 'new', sessionId: 's1', id: 'a3', to: 'cc002 · knip cleanup', from: '' },
+    ])
+    for (const lang of ['en', 'zh'] as const)
+      for (const key of [
+        'msgn.new',
+        'msgn.newFrom',
+        'msgn.read',
+        'msgn.paste',
+        'msgn.approve',
+        'msgn.aSession',
+        'msgn.show',
       ])
         assert.ok(MESSAGES[lang][key], `${key} ${lang}`)
   })
@@ -1983,5 +2182,220 @@ describe('send blocked by a failed screenshot (spec §3.32 step 2)', () => {
       assert.ok(MESSAGES[lang]['send.blocked']?.includes('{names}'), lang)
       assert.ok(MESSAGES[lang]['send.retry'], lang)
     }
+  })
+})
+
+describe('Session History page logic (spec §3.33)', () => {
+  const now = Date.parse('2026-10-20T12:00:00Z')
+  it('says how long ago within a week, and the date after', () => {
+    assert.deepEqual(historyWhen('2026-10-20T11:30:00Z', now), { key: 'time.minAgo', n: 30 })
+    assert.deepEqual(historyWhen('2026-10-14T11:59:00Z', now), { key: 'time.dAgo', n: 6 })
+    assert.equal(historyWhen('2026-10-13T12:00:00Z', now)!.key, 'time.on')
+    assert.match(historyWhen('2026-09-01T12:00:00Z', now)!.date!, /^2026-09-0[12]$/)
+    assert.equal(historyWhen('not a date', now), null)
+    assert.equal(historyWhen(undefined, now), null)
+  })
+  it('marks every word in any case, merges overlaps, and keeps the text whole', () => {
+    const parts = highlightParts('Login page: fix the LOGIN button', ['login', 'button'])
+    assert.equal(parts.map((p) => p.text).join(''), 'Login page: fix the LOGIN button')
+    assert.deepEqual(
+      parts.filter((p) => p.hit).map((p) => p.text),
+      ['Login', 'LOGIN', 'button'],
+    )
+    assert.deepEqual(highlightParts('登录页改蓝色', ['登录', '登录页']), [
+      { text: '登录页', hit: true },
+      { text: '改蓝色', hit: false },
+    ])
+    assert.deepEqual(highlightParts('abc', []), [{ text: 'abc', hit: false }])
+    assert.deepEqual(highlightParts('', ['x']), [])
+  })
+  it('says why the list is empty and which way out it offers', () => {
+    const base = {
+      q: '',
+      since: '30d',
+      state: 'ready',
+      total: 0,
+      tools: false,
+      project: '',
+      accounts: 2,
+      stored: 9,
+    }
+    assert.equal(historyEmpty({ ...base, total: 3 }), null)
+    assert.deepEqual(historyEmpty({ ...base, state: 'building', q: 'x' }), {
+      key: 'hist.emptyBuilding',
+      widen: false,
+      tools: false,
+    })
+    assert.deepEqual(historyEmpty({ ...base, q: 'login' }), {
+      key: 'hist.emptyMatch',
+      widen: true,
+      tools: true,
+    })
+    assert.deepEqual(historyEmpty({ ...base, q: 'login', since: 'all', tools: true }), {
+      key: 'hist.emptyMatch',
+      widen: false,
+      tools: false,
+    })
+    assert.equal(historyEmpty({ ...base, project: '~/code/app' })!.key, 'hist.emptyProject')
+    assert.deepEqual(historyEmpty({ ...base, q: 'login', project: '~/code/app' }), {
+      key: 'hist.emptyMatchProject',
+      widen: true,
+      tools: true,
+      everywhere: true,
+    })
+    assert.deepEqual(historyEmpty({ ...base, q: 'login', unreadable: true }), {
+      key: 'hist.emptyUnreadable',
+      widen: false,
+      tools: false,
+    })
+    assert.equal(historyEmpty(base)!.key, 'hist.emptySince')
+    assert.equal(historyEmpty({ ...base, since: 'all' })!.key, 'hist.emptyNone')
+    assert.deepEqual(historyEmpty({ ...base, accounts: 0, stored: 0 }), {
+      key: 'hist.emptyNoAccounts',
+      widen: false,
+      tools: false,
+      accounts: true,
+    })
+    assert.deepEqual(historyEmpty({ ...base, stored: 0 }), {
+      key: 'hist.emptyNone',
+      widen: false,
+      tools: false,
+    })
+  })
+  it('folds each run of tool calls into one line and keeps the rest in order', () => {
+    const m = (n: number, role: string, text: string, tool?: string) =>
+      tool ? { n, role, text, tool } : { n, role, text }
+    const out = foldToolCalls([
+      m(0, 'user', 'q'),
+      m(1, 'tool', 'Read', 'Read'),
+      m(2, 'tool', 'Bash', 'Bash'),
+      m(3, 'assistant', 'a'),
+      m(4, 'tool', 'Edit', 'Edit'),
+    ])
+    assert.deepEqual(
+      out.map((x) => (x.role === 'tools' ? `tools:${(x as { tools: string[] }).tools.join(',')}` : x.role)),
+      ['user', 'tools:Read,Bash', 'assistant', 'tools:Edit'],
+    )
+  })
+  it('has every History text the page uses in both languages', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const src = await readFile(new URL('./page-script.ts', import.meta.url), 'utf8')
+    const used = new Set([...src.matchAll(/'((?:hist|hv)\.[a-zA-Z.0-9]*[a-zA-Z0-9])'/g)].map((x) => x[1]!))
+    used.add('time.on')
+    for (const k of used) {
+      // Keys picked by count are written once in the source and stored as .one / .other.
+      const keys = MESSAGES.en[k] === undefined ? [`${k}.one`, `${k}.other`] : [k]
+      for (const key of keys) {
+        assert.ok(MESSAGES.en[key], `en ${key}`)
+        assert.ok(MESSAGES.zh[key], `zh ${key}`)
+      }
+    }
+  })
+})
+
+describe('tailInView', () => {
+  it('loads the next page only when the end of the list is near the bottom of the window', () => {
+    // The page scrolls: the list's box ends with its last row, far below the window.
+    assert.equal(tailInView(5000, 5010, 800), false)
+    assert.equal(tailInView(900, 5010, 800), true)
+    // A box shorter than the window: its own bottom counts.
+    assert.equal(tailInView(300, 320, 800), true)
+  })
+})
+
+describe('mdBlocks', () => {
+  it('reads a GitHub table with alignment, filling short rows', () => {
+    const b = mdBlocks('Intro\n\n| Name | Count |\n| :--- | ---: |\n| a \\| b | 2 |\n| c |\n\nAfter')
+    assert.deepEqual(b, [
+      { type: 'p', text: 'Intro' },
+      {
+        type: 'table',
+        head: ['Name', 'Count'],
+        align: ['left', 'right'],
+        rows: [
+          ['a | b', '2'],
+          ['c', ''],
+        ],
+      },
+      { type: 'p', text: 'After' },
+    ])
+  })
+
+  it('reads headings, fences, lists, quotes and rules, and runs an unclosed fence to the end', () => {
+    const b = mdBlocks(
+      '## Plan\n- one\n  more\n- two\n1. first\n> said\n---\n```ts\nconst a = 1\n| not | table |',
+    )
+    assert.deepEqual(b, [
+      { type: 'h', level: 2, text: 'Plan' },
+      { type: 'list', ordered: false, items: ['one\nmore', 'two'] },
+      { type: 'list', ordered: true, items: ['first'] },
+      { type: 'quote', text: 'said' },
+      { type: 'hr' },
+      { type: 'code', lang: 'ts', text: 'const a = 1\n| not | table |' },
+    ])
+  })
+
+  it('starts a list right under a paragraph line, a numbered one only from 1', () => {
+    assert.deepEqual(mdBlocks('Why CI is red\n- lint\n- tests'), [
+      { type: 'p', text: 'Why CI is red' },
+      { type: 'list', ordered: false, items: ['lint', 'tests'] },
+    ])
+    assert.deepEqual(mdBlocks('In 2026\n7. ok'), [{ type: 'p', text: 'In 2026\n7. ok' }])
+  })
+
+  it('keeps a line with a bar but no rule under it as a paragraph', () => {
+    assert.deepEqual(mdBlocks('a | b\nc'), [{ type: 'p', text: 'a | b\nc' }])
+  })
+})
+
+describe('mdInline', () => {
+  it('keeps code inside bold for the page to read again', () => {
+    assert.deepEqual(mdInline('**use `a.png`**'), [{ t: 'b', text: 'use `a.png`' }])
+    assert.deepEqual(mdInline('use `a.png`'), [
+      { t: 'text', text: 'use ' },
+      { t: 'code', text: 'a.png' },
+    ])
+  })
+
+  it('reads code, bold, italic and web links, and leaves other links as text', () => {
+    assert.deepEqual(
+      mdInline('run `x*y` **now** *then* [docs](https://example.com) [no](javascript:alert(1))'),
+      [
+        { t: 'text', text: 'run ' },
+        { t: 'code', text: 'x*y' },
+        { t: 'text', text: ' ' },
+        { t: 'b', text: 'now' },
+        { t: 'text', text: ' ' },
+        { t: 'i', text: 'then' },
+        { t: 'text', text: ' ' },
+        { t: 'a', text: 'docs', href: 'https://example.com' },
+        { t: 'text', text: ' [no](javascript:alert(1))' },
+      ],
+    )
+  })
+})
+
+describe('histFilters', () => {
+  it('keeps the saved filters and drops malformed ones to their defaults', () => {
+    const all = {
+      q: 'auth',
+      since: '7d',
+      family: 'claude',
+      account: 'claude:work',
+      project: '/a/app',
+      category: 'Work',
+      scripts: true,
+    }
+    assert.deepEqual(histFilters(all), all)
+    assert.deepEqual(histFilters({ q: 3, since: 'forever', scripts: 'yes', tools: true }), {
+      q: '',
+      since: '30d',
+      family: '',
+      account: '',
+      project: '',
+      category: '',
+      scripts: false,
+    })
+    assert.deepEqual(histFilters(null), histFilters({}))
   })
 })

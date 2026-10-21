@@ -71,6 +71,11 @@ export interface FakeHostOptions {
    * the file a Host hook would write. It may call `process.exit`.
    */
   onStart?: string
+  /**
+   * What the fake prints for `--version`, as the real Host does (`2.1.304 (Claude Code)`). `--version` is answered
+   * without a start record either way; left out, it prints nothing, as a Host whose version cannot be told.
+   */
+  version?: string
 }
 
 /**
@@ -83,6 +88,11 @@ export async function fakeHost(h: FakeHome, name: string, opts: FakeHostOptions 
 const fs = require('node:fs')
 const log = ${JSON.stringify(log)}
 const rec = (o) => fs.appendFileSync(log, JSON.stringify(o) + '\\n')
+// A version question starts no session, so it leaves no record.
+if (process.argv.length === 3 && process.argv[2] === '--version') {
+  process.stdout.write(${JSON.stringify(opts.version ? `${opts.version}\n` : '')})
+  process.exit(0)
+}
 // Handlers first: tests signal the Host as soon as the start record appears.
 for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT']) process.on(s, () => { rec({ signal: s }); process.exit(${opts.sleep ? 100 : 0}) })
 rec({ argv: process.argv.slice(2), env: process.env, pid: process.pid })

@@ -47,6 +47,8 @@ Every time sideby starts an account it sets two variables for the Host: `SIDEBY_
 
 With `sideby quota setup claude` on, the status line command is `sideby statusline-tap --orig-b64 …`: edit the script it runs, not that command. To add a status line where there was none, run `sideby quota teardown claude`, set `statusLine`, then `sideby quota setup claude --yes` again.
 
+Claude Code 2.1.287 or later needs none of this: sideby starts it with its own mod (`--plugin-dir`, nothing is written into the account), which shows the Session Label (`cc002 · knip cleanup · 61230c3d`) in a dim line above the prompt, raises a toast when a [Message](commands.md) arrives, and adds `/sessions`, a pane with every running session and buttons that copy one for another AI (the band's full label and the pane run `sideby` by name, so install sideby where the terminal finds it, not only through npx). Set `"claudeMod": false` in the [config](configuration.md) to start without it.
+
 ## API accounts
 
 ```sh
@@ -218,10 +220,9 @@ sideby browser open grok:main --profile Work
 sideby browser set codex:main "Profile 7"   # that browser user is the one; --auto finds it again
 ```
 
-- sideby reads each browser user's name and the Google account it uses in Chrome, the key names (never the values) claude.ai and chatgpt.com keep in Chrome's Local Storage, and the account id in each Claude and Codex login file, only to compare. It never opens cookies, saved passwords or the Keychain, and never changes Chrome.
+- sideby reads each browser user's name and the Google account it uses in Chrome, the key names (never the values) claude.ai, chatgpt.com, grok.com and the websites plugin tools declare keep in Chrome's Local Storage, and the account id in each Claude, Codex, Grok or plugin tool login file, only to compare. It never opens cookies, saved passwords or the Keychain, and never changes Chrome.
 - "Signed in to" means that browser user's data shows a sign-in as that account. Websites keep this data after you sign out, so one account can show up in several browser users. Then sideby keeps only those whose Google account in Chrome is the account's login email; an account found nowhere gets the one browser user whose Google account is its login email.
 - When it still picks the wrong one, click **Change** next to it in the panel (in the account's details), then **This is the one** next to the right browser user. sideby keeps your choice and uses it from then on; it shows **Your choice**, and **Let sideby find it again** undoes it. Only sideby's own config changes, never Chrome.
-- grok.com keeps nothing sideby can compare, so a Grok account is found only by its login email; otherwise choose its browser user yourself.
 - Only Google Chrome, on macOS and in WSL (where sideby uses the Chrome installed on Windows), for now. The websites can change how they store data; when they do, sideby finds nothing and says so.
 
 ## Context tuning

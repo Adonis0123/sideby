@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/history-index.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "enabled",
+    "path",
+    "state",
+    "progress",
+    "files",
+    "sessions",
+    "bytes",
+    "sources"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "False under config `history.index: false`."
+    },
+    "path": {
+      "type": "string",
+      "description": "The History Index file (mode 600) in sideby's state folder."
+    },
+    "state": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "building"
+        },
+        {
+          "type": "string",
+          "const": "ready"
+        },
+        {
+          "type": "string",
+          "const": "off"
+        },
+        {
+          "type": "string",
+          "const": "unavailable"
+        }
+      ],
+      "description": "`building`: the History Index is still reading files (what is built answers already); `off`: config `history.index` is false or the index file could not be opened, so only titles and folders are searched; `unavailable`: this Node has no `node:sqlite`."
+    },
+    "progress": {
+      "type": "object",
+      "required": [
+        "done",
+        "total"
+      ],
+      "properties": {
+        "done": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        }
+      },
+      "description": "Files read in the current build of the History Index, and how many it has to read."
+    },
+    "files": {
+      "type": "integer",
+      "description": "Session record files known."
+    },
+    "sessions": {
+      "type": "integer",
+      "description": "Sessions stored, subagent sessions included."
+    },
+    "bytes": {
+      "type": "integer",
+      "description": "Size of the index file and its journal; 0 when off."
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "account",
+          "accountLabel",
+          "family",
+          "sessions",
+          "files",
+          "failed"
+        ],
+        "properties": {
+          "account": {
+            "type": "string"
+          },
+          "accountLabel": {
+            "type": "string"
+          },
+          "family": {
+            "type": "string"
+          },
+          "sessions": {
+            "type": "integer",
+            "description": "Sessions stored for the account."
+          },
+          "files": {
+            "type": "integer",
+            "description": "Session record files found."
+          },
+          "failed": {
+            "type": "integer",
+            "description": "Record files that could not be read."
+          },
+          "note": {
+            "type": "string",
+            "description": "Why the account has no sessions or could not be listed, in plain words."
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "empty"
+              },
+              {
+                "type": "string",
+                "const": "no-conversation"
+              },
+              {
+                "type": "string",
+                "const": "unreadable"
+              },
+              {
+                "type": "string",
+                "const": "unsupported"
+              }
+            ],
+            "description": "`note` as a code: no record files, records without a conversation, a folder that could not be read, or a tool sideby reads no history for."
+          }
+        },
+        "description": "How many sessions sideby read from one account."
+      }
+    },
+    "cleared": {
+      "type": "boolean",
+      "description": "With --clear: whether there was a file to delete."
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby history index --json"
+}

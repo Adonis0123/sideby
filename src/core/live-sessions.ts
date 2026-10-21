@@ -53,18 +53,22 @@ export const shortId = (id: string): string => id.slice(0, 8)
 export const sessionLabel = (accountLabel: string, title: string, id: string): string =>
   [accountLabel, title, shortId(id)].filter(Boolean).join(' · ')
 
+/** The key that names a Session across Accounts: the same id in two Accounts is two Sessions. */
+export const liveKey = (account: string, sessionId: string): string => `${account}\0${sessionId}`
+
+/** The Host arguments that resume Session `id` of a Family. */
+export function hostResumeArgs(family: string, id: string): string {
+  if (family === 'codex') return `resume ${id}`
+  if (family === 'claude' || family === 'grok') return `--resume ${id}`
+  return `--session ${id}`
+}
+
 /** The command that resumes `id` (Resume Routing, spec §3.15, starts the Account that holds it). */
 export function resumeCommandFor(family: string, account: string, id: string): string {
-  switch (family) {
-    case 'codex':
-      return `sideby resume codex -- resume ${id}`
-    case 'claude':
-    case 'grok':
-      return `sideby resume ${family} -- --resume ${id}`
-    default:
-      // pi has no Resume Routing: start the Account itself on that session.
-      return `sideby run ${account} -- --session ${id}`
-  }
+  if (family === 'codex' || family === 'claude' || family === 'grok')
+    return `sideby resume ${family} -- ${hostResumeArgs(family, id)}`
+  // pi has no Resume Routing: start the Account itself on that session.
+  return `sideby run ${account} -- ${hostResumeArgs(family, id)}`
 }
 
 /** The short name an Account is shown by: its first Alias without Host arguments, else its first Alias, else its ref. */
@@ -189,12 +193,12 @@ export async function listLiveSessions(
   return { sessions: sortSessions([...found]), problems: [...new Set(problems)] }
 }
 
-type ReferenceFields = Pick<
+export type ReferenceFields = Pick<
   LiveSession,
   'accountLabel' | 'sessionId' | 'title' | 'cwd' | 'transcript' | 'guessed' | 'resumeCommand'
 >
 
-function referenceText(s: ReferenceFields, lang: 'en' | 'zh'): string {
+export function referenceText(s: ReferenceFields, lang: 'en' | 'zh'): string {
   const id = shortId(s.sessionId)
   if (lang === 'zh') {
     const parts = [

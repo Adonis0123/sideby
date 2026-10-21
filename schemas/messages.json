@@ -86,6 +86,10 @@
             "type": "string",
             "description": "Why a paste is needed, or that the target must approve it (bypass mode)."
           },
+          "needsApproval": {
+            "type": "boolean",
+            "description": "true while a delivered Message waits for the user to approve it in the target terminal (ADR-0045); dropped once it is read, and after 6 minutes unread the status becomes paste-needed."
+          },
           "sentAt": {
             "type": "string"
           }
