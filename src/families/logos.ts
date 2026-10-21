@@ -1,7 +1,7 @@
 // Built-in Family marks for the Panel (FamilyDef.logo): 24x24 single-path SVG icons, drawn inline because the page CSP
 // allows no external images.
 // Sources: Claude, OpenAI and pi from Simple Icons (CC0 1.0, https://simpleicons.org; OpenAI from v15.0.0, the last release
-// that ships it; pi is the mark from https://pi.dev). Grok from LobeHub Icons (MIT, Copyright (c) 2023 LobeHub,
+// that ships it; pi is the mark from https://pi.dev). Grok and Antigravity (v1.95.1) from LobeHub Icons (MIT, Copyright (c) 2023 LobeHub,
 // https://github.com/lobehub/lobe-icons). The marks are trademarks of their owners and only identify each Host.
 
 import type { FamilyLogo } from '../types.ts'
@@ -26,4 +26,15 @@ export const BUILTIN_LOGOS = {
     title: 'pi',
     path: 'M0 0v24h6v-6h6v-6H6V6h6v6h6V0Zm18 12v12h6V12Z',
   },
-} satisfies Record<'claude' | 'codex' | 'grok' | 'pi', FamilyLogo>
+  agy: {
+    title: 'Antigravity',
+    // The mark is a blue base with green, yellow and red washing in from the top, as in LobeHub's colour version.
+    color: '#3186FF',
+    gradients: [
+      { from: [4, 8], to: [10, 15], color: '#00B95C' },
+      { from: [8, 2], to: [12, 8], color: '#FFE432' },
+      { from: [18, 2], to: [14, 10], color: '#FC413D' },
+    ],
+    path: 'M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z',
+  },
+} satisfies Record<'claude' | 'codex' | 'grok' | 'pi' | 'agy', FamilyLogo>

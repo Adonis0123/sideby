@@ -16,6 +16,7 @@ import {
   type BuiltinPlugin,
   checkTrustedTree,
   logoProblem,
+  mainOnlyProblem,
   type PluginManifest,
   websiteProblem,
 } from './loader.ts'
@@ -386,7 +387,17 @@ export function defProblems(raw: unknown): PluginProblem[] {
       'installUrl must be an http(s) link',
       "Set `installUrl` to the Host's official install page.",
     )
-  if (!nonEmpty(def.selectVar))
+  const mainOnly = def.mainOnly !== undefined
+  const shape = mainOnlyProblem(def)
+  if (shape)
+    field(
+      'mainOnly',
+      shape,
+      'Leave out `mainOnly` when the Host has a variable that moves its config directory; set `mainOnly: true` and leave out `selectVar` and `layout.account` only when it has none (ADR-0047).',
+    )
+  else if (mainOnly) {
+    // A Main-only Family has neither field to check.
+  } else if (!nonEmpty(def.selectVar))
     out.push({
       code: 'select-var.missing',
       message: `${at}: selectVar is missing, so every Account would share one config directory`,
@@ -412,9 +423,10 @@ export function defProblems(raw: unknown): PluginProblem[] {
       'Set `layout.main` such as ".mytool".',
     )
   if (
-    !nonEmpty(account) ||
-    !isRelativeInside(account as string) ||
-    !(account as string).split('/')[0]!.includes('<name>')
+    !mainOnly &&
+    (!nonEmpty(account) ||
+      !isRelativeInside(account as string) ||
+      !(account as string).split('/')[0]!.includes('<name>'))
   )
     field(
       'layout',
@@ -541,13 +553,16 @@ async function round(
       return false
     }
   }
-  const layoutOk = defProblems(def).every((p) => p.code !== 'field.layout' && p.code !== 'field.bin')
+  const layoutOk = defProblems(def).every(
+    (p) => p.code !== 'field.layout' && p.code !== 'field.bin' && p.code !== 'field.mainOnly',
+  )
   if (!layoutOk) return
   await fakeHost(h, def.bin)
   await h.mkdir(def.layout.main)
   for (const item of def.sharedItems) await seed(h, def, item.path, item)
-  const accountDir = def.layout.account.replace('<name>', CHECK_ACCOUNT)
-  await h.mkdir(accountDir)
+  // A Main-only Family (ADR-0047) has only its Main Account to find.
+  const accountDir = def.layout.account?.replace('<name>', CHECK_ACCOUNT)
+  if (accountDir) await h.mkdir(accountDir)
 
   let refs: string[] = []
   const found = await step('round.discover', 'finding Accounts', async () => {
@@ -559,18 +574,22 @@ async function round(
     }
   })
   const ref = `${id}:${CHECK_ACCOUNT}`
-  if (found && (!refs.includes(`${id}:main`) || !refs.includes(ref)))
+  if (found && (!refs.includes(`${id}:main`) || (accountDir && !refs.includes(ref))))
     problems.push({
       code: 'round.discover',
-      message: `family ${id}: sideby found ${refs.join(', ') || 'no Accounts'} in ~/${def.layout.main} and ~/${accountDir}, not both`,
+      message: accountDir
+        ? `family ${id}: sideby found ${refs.join(', ') || 'no Accounts'} in ~/${def.layout.main} and ~/${accountDir}, not both`
+        : `family ${id}: sideby found no Main Account in ~/${def.layout.main}`,
       fix: 'Check `layout` and `markers`: an Account directory counts when it holds proxy.env, a marker, or nothing at all.',
     })
-  if (refs.includes(ref))
+  if (accountDir && def.selectVar && refs.includes(ref)) {
+    const selectVar = def.selectVar
     await step('round.launch', 'preparing a launch', async () => {
       const launch = await rt.prepareLaunch(ref, [], 'run')
-      if (launch.env[def.selectVar] !== h.path(accountDir))
-        throw new Error(`${def.selectVar} does not point at the Account directory`)
+      if (launch.env[selectVar] !== h.path(accountDir))
+        throw new Error(`${selectVar} does not point at the Account directory`)
     })
+  }
   await step('round.doctor', 'doctor', async () => {
     await rt.doctor({ target: id, persist: false })
   })

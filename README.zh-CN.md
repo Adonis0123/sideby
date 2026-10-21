@@ -111,6 +111,7 @@ cc-switch 自己的说明是：切换时把配置写进宿主正在用的文件�
 | Codex CLI | `~/.codex`、`~/.codex-<name>` | `codex login` | ✓ | ✓ |
 | Grok Build | `~/.grok`、`~/.grok-<name>` | `grok login` | 每周额度，由 `grok` 命令行查询 | 无公开来源 |
 | pi | `~/.pi/agent`、`~/.pi-<name>/agent` | 在 pi 里输入 `/login` | 无公开来源 | 无公开来源 |
+| Antigravity CLI | `~/.gemini/antigravity-cli`（只支持主账号） | 在 `agy` 里用 Google 登录 | 按模型组的 5 小时和每周额度，由 `agy` 命令行查询 | 无公开来源 |
 
 sideby 启动 `PATH` 上的官方程序，从不修改它。测试过的版本和各宿主的注意事项见[使用指南](docs/guide/usage.zh-CN.md#宿主说明)。
 

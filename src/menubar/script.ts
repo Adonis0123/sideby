@@ -269,10 +269,21 @@ function run(argv) {
     // headers cannot be clicked, and macOS greys a template image on an item that cannot be clicked.
     var rule = logo.fillRule ? ' fill-rule="' + logo.fillRule + '"' : '';
     var fill = /^#[0-9a-f]{3,8}$/i.test(logo.color || '') ? logo.color : dark() ? '#f5f5f7' : '#1d1d1f';
-    return svgImage('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14"><path' + rule + ' fill="' + fill + '" d="' + logo.path + '"/></svg>', 14, false);
+    // A multicoloured mark: the shape again per wash, each filled with a gradient that fades out. Only numbers and
+    // hex colours reach the markup.
+    var defs = '', washes = '';
+    (logo.gradients || []).forEach(function (g, i) {
+      var n = [g.from[0], g.from[1], g.to[0], g.to[1]].map(Number);
+      if (!n.every(isFinite) || !/^#[0-9a-f]{3,8}$/i.test(g.color || '')) return;
+      defs += '<linearGradient id="w' + i + '" gradientUnits="userSpaceOnUse" x1="' + n[0] + '" y1="' + n[1] + '" x2="' + n[2] + '" y2="' + n[3] + '"><stop offset="0" stop-color="' + g.color + '"/><stop offset="1" stop-color="' + g.color + '" stop-opacity="0"/></linearGradient>';
+      washes += '<path' + rule + ' fill="url(#w' + i + ')" d="' + logo.path + '"/>';
+    });
+    return svgImage('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14">' + (defs ? '<defs>' + defs + '</defs>' : '') + '<path' + rule + ' fill="' + fill + '" d="' + logo.path + '"/>' + washes + '</svg>', 14, false);
   }
 
   var GUTTER = $.NSImage.alloc.initWithSize($.NSMakeSize(14, 14));
+  // Model group lines sit a little in from their account's name.
+  var GROUP_INDENT = '\u2003';
   // Where a menu item draws its image and its title (macOS 26 and 27), for the header views that line up with them.
   var HEAD_X = 15, HEAD_TEXT_X = 34;
 
@@ -310,7 +321,10 @@ function run(argv) {
     sections.forEach(function (s) {
       nameW = Math.max(nameW, width(s.title, L.head));
       if (s.columns[0]) first = true;
-      s.rows.concat(s.more ? s.more.rows : []).forEach(function (r) { nameW = Math.max(nameW, width(r.label, L.font)); });
+      s.rows.concat(s.more ? s.more.rows : []).forEach(function (r) {
+        nameW = Math.max(nameW, width(r.label, L.font));
+        (r.groups || []).forEach(function (g) { nameW = Math.max(nameW, width(GROUP_INDENT + g.label, L.font)); });
+      });
     });
     var pctW = width('100%', L.mono), x = Math.ceil(nameW) + 20, stops = [], at = [];
     function tab(pos) { stops.push($.NSTextTab.alloc.initWithTextAlignmentLocationOptions($.NSTextAlignmentLeft, pos, $())); }
@@ -367,6 +381,15 @@ function run(argv) {
         mi.attributedTitle = t;
       }
     }
+    // A Host that gives each model group its own limits: a line per group under the account, with that group's bars.
+    // Clicking one starts the same account.
+    (r.groups || []).forEach(function (g) {
+      refs.push(r.ref);
+      var gi = add(menu, g.label, 'start:', refs.length);
+      gi.attributedTitle = rowTitle({ label: GROUP_INDENT + g.label, bars: g.bars, reset: g.reset, stale: r.stale, note: g.reset }, L);
+      gi.image = GUTTER;
+      gi.toolTip = g.tip;
+    });
     return mi;
   }
   // A tool's header: its mark, its name, and the window names over the bar columns. A view, not a title: macOS dims
@@ -377,7 +400,7 @@ function run(argv) {
     line.appendAttributedString(str(s.title, attrs($.NSColor.labelColor, L.head, L.headPara)));
     var cols = L.first ? s.columns : [s.columns[1]];
     cols.forEach(function (c) { line.appendAttributedString(str('\t' + (c || ''), attrs($.NSColor.secondaryLabelColor, L.small, L.headPara))); });
-    if (s.rows.some(function (r) { return r.reset; }))
+    if (s.rows.some(function (r) { return r.reset || (r.groups || []).some(function (g) { return g.reset; }); }))
       line.appendAttributedString(str('\t' + snap.labels.resetsHeader, attrs($.NSColor.secondaryLabelColor, L.small, L.headPara)));
     var W = Math.max(280, L.width), H = 24;
     var v = $.NSView.alloc.initWithFrame($.NSMakeRect(0, 0, W, H));

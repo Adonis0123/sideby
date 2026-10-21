@@ -159,6 +159,12 @@ const FamilyInfo = Type.Object({
       description: "The Host's settings file `sideby edit` opens, relative to the account directory.",
     }),
   ),
+  mainOnly: Type.Optional(
+    Type.Literal(true, {
+      description:
+        'The Host keeps one sign-in per computer, so sideby knows only its Main Account and refuses to create others (ADR-0047).',
+    }),
+  ),
 })
 
 const ShareModeSchema = Type.Union(
@@ -171,12 +177,18 @@ const FamilyDetail = Type.Intersect([
   FamilyInfo,
   Type.Object({
     layout: Type.Object(
-      { main: Str, account: Str },
-      { description: 'Relative to HOME, for example `.claude` and `.claude-<name>`.' },
+      { main: Str, account: Type.Optional(Str) },
+      {
+        description:
+          'Relative to HOME, for example `.claude` and `.claude-<name>`. A Main-only Family has no `account`.',
+      },
     ),
-    selectVar: Type.String({
-      description: 'Environment variable that selects a non-main Account directory.',
-    }),
+    selectVar: Type.Optional(
+      Type.String({
+        description:
+          'Environment variable that selects a non-main Account directory. Left out for a Main-only Family.',
+      }),
+    ),
     login: Type.Object({
       args: Type.Union([Type.Array(Str), Type.Null()], {
         description: "Arguments of the Host's sign-in command; null when sign-in happens inside the Host.",
@@ -494,11 +506,31 @@ const MenubarRow = Type.Object({
   recommended: Type.Boolean({ description: 'The account `sideby next` would pick in this Family.' }),
   observedAt: Type.Union([Str, Type.Null()], { description: 'When the quota was observed, not checked.' }),
   stale: Type.Boolean({ description: 'The quota is old, undated, or its last query failed.' }),
-  tip: Type.String({ description: 'Hover text: when each window resets, and what a click does.' }),
+  tip: Type.String({
+    description:
+      "Hover text: when the numbers were read, each window's use and reset, and what a click does.",
+  }),
   bars: Type.Union([Type.Tuple([MenubarBar, MenubarBar]), Type.Null()], {
     description:
       'The shorter window, then the longer one; a single window fills the second. Null without quota.',
   }),
+  groups: Type.Union(
+    [
+      Type.Array(
+        Type.Object({
+          label: Str,
+          bars: Type.Union([Type.Tuple([MenubarBar, MenubarBar]), Type.Null()]),
+          reset: Str,
+          tip: Str,
+        }),
+      ),
+      Type.Null(),
+    ],
+    {
+      description:
+        "A Host whose every limit covers one model group: a line per group under the account, each with its own bars; the account's `bars` are then null.",
+    },
+  ),
   reset: Type.String({
     description: 'Until the fullest window resets, such as `4d 17h`; empty when nothing is used.',
   }),
@@ -1848,6 +1880,19 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
             fillRule: Type.Optional(Type.String({ enum: ['nonzero', 'evenodd'] })),
             color: Type.Optional(
               Type.String({ description: 'Brand colour; without one the mark follows the text colour.' }),
+            ),
+            gradients: Type.Optional(
+              Type.Array(
+                Type.Object({
+                  from: Type.Tuple([Type.Number(), Type.Number()]),
+                  to: Type.Tuple([Type.Number(), Type.Number()]),
+                  color: Str,
+                }),
+                {
+                  description:
+                    'Colour washes over a multicoloured mark: each fades from `color` at `from` to clear at `to`.',
+                },
+              ),
             ),
           }),
           Type.Null(),

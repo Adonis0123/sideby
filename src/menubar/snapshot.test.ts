@@ -69,7 +69,7 @@ describe('menubarSnapshot', () => {
       assert.equal(row.observedAt, at(-120))
       assert.equal(row.stale, true)
       assert.match(row.detail, /older reading/)
-      assert.match(row.tip, /2026-10-19T10:00:00.000Z/)
+      assert.match(row.tip, /^Quota read 2h \d+m ago\nThese numbers may be old/)
       assert.equal(row.bars?.[1]?.percent, 68)
       assert.match(snap.labels.updatedJustNow, /Checked/)
       assert.equal(snap.card?.status, 'Quota needs refreshing')
@@ -137,7 +137,7 @@ describe('menubarSnapshot', () => {
     assert.equal(rows[0]!.note, '')
     assert.equal(
       rows[1]!.tip,
-      'Quota recorded at 2026-10-19T12:00:00.000Z\n5h resets in 2h 5m\n7d resets in 2d 4h\nStart claude:main in your terminal',
+      'Quota read just now\n\n5h: 90% used · resets in 2h 5m\n7d: 40% used · resets in 2d 4h\n\nStart claude:main in your terminal',
     )
   })
 
@@ -372,4 +372,78 @@ describe('untilText and menubarLang', () => {
         k,
       )
   })
+})
+
+it('shows every model group of a Host as its own line under the account, with its 5h and 7d bars', () => {
+  const w = (name: string, label: '5h' | '7d', used: number, resetIn = 120) => ({
+    name,
+    label,
+    windowMinutes: label === '5h' ? 300 : 10080,
+    usedPercent: used,
+    resetsAt: at(resetIn),
+  })
+  const q: QuotaResult = {
+    status: 'ok',
+    windows: [
+      w('Gemini Models', '5h', 53),
+      w('Gemini Models', '7d', 16, 5000),
+      w('Claude and GPT models', '5h', 100, -5),
+      w('Claude and GPT models', '7d', 56, 9000),
+      w('Gemini 4 Argon', '7d', 100, 4000),
+    ],
+    observedAt: NOW.toISOString(),
+    source: 'test',
+  }
+  const snap = menubarSnapshot([family('agy', 'Antigravity CLI', [sub('main', q, 'agy')])], NOW, 'en')
+  const section = snap.sections[0]!
+  const r = section.rows[0]!
+  assert.equal(r.bars, null)
+  // Every limit shows, in the order the Host lists the groups; a passed reset counts as empty.
+  assert.deepEqual(
+    r.groups?.map((g) => [g.label, g.bars?.map((b) => b && [b.label, b.percent])]),
+    [
+      [
+        'Gemini',
+        [
+          ['5h', 53],
+          ['7d', 16],
+        ],
+      ],
+      [
+        'Claude and GPT',
+        [
+          ['5h', 0],
+          ['7d', 56],
+        ],
+      ],
+      ['Gemini 4 Argon', [null, ['7d', 100]]],
+    ],
+  )
+  assert.deepEqual(section.columns, ['5h', '7d'])
+  assert.equal(r.level, 'fail')
+  // The hover text says when the numbers were read and gives each window's use and reset, by group.
+  assert.match(r.tip, /^Quota read just now\n/)
+  assert.match(
+    r.tip,
+    /Gemini Models\n {3}5h: 53% used · resets in 2h\n {3}7d: 16% used · resets in 3d 11h 20m|Gemini Models\n {3}5h: 53% used · resets in 2h/,
+  )
+  assert.match(r.tip, /Claude and GPT models\n {3}5h: 0% used\n/)
+  assert.match(r.groups![2]!.tip, /Gemini 4 Argon\n {3}7d: 100% used/)
+  assert.doesNotMatch(r.groups![2]!.tip, /Gemini Models/)
+})
+
+it('writes the hover text in words: how long ago the numbers were read, and why they may be old', () => {
+  const q: QuotaResult = {
+    status: 'ok',
+    windows: [{ label: '5h', windowMinutes: 300, usedPercent: 40, resetsAt: at(90) }],
+    observedAt: new Date(NOW.getTime() - 25 * 60000).toISOString(),
+    source: 'test',
+    fetchError: 'no answer within 20 seconds',
+  }
+  const tip = menubarSnapshot([family('agy', 'Antigravity CLI', [sub('main', q, 'agy')])], NOW, 'zh')
+    .sections[0]!.rows[0]!.tip
+  assert.match(tip, /^额度读于 25分前\n/)
+  assert.match(tip, /上次检查没成功：no answer within 20 seconds/)
+  assert.match(tip, /5h：已用 40% · 1小时 30分后重置/)
+  assert.doesNotMatch(tip, /\d{4}-\d{2}-\d{2}T/)
 })

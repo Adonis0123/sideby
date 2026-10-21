@@ -1,6 +1,7 @@
 import { packageVersion } from '../core/version.ts'
 import { accountScript } from '../plugins/account-script.ts'
 import type { BuiltinPlugin } from '../plugins/loader.ts'
+import { agyPlugin } from './agy/index.ts'
 import { claudePlugin } from './claude/index.ts'
 import { codexPlugin } from './codex/index.ts'
 import { grokPlugin } from './grok/index.ts'
@@ -32,6 +33,12 @@ export const BUILTIN_PLUGINS: BuiltinPlugin[] = [
     plugin: piPlugin,
     version: VERSION,
     description: 'pi family (~/.pi/agent, PI_CODING_AGENT_DIR)',
+    defaultEnabled: true,
+  },
+  {
+    plugin: agyPlugin,
+    version: VERSION,
+    description: 'Antigravity CLI family (~/.gemini/antigravity-cli, main account only)',
     defaultEnabled: true,
   },
   {

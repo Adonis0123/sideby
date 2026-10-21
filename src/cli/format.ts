@@ -90,8 +90,9 @@ export function clock(iso: string, now: Date): string {
 }
 
 function windowText(w: QuotaWindow, now: Date): string {
-  // A window that covers only some models goes by their name (spec §3.26).
-  const label = w.name ?? w.label
+  // A window that covers only some models goes by their name (spec §3.26), with its length, since one group may have
+  // a 5-hour and a weekly limit (Antigravity CLI).
+  const label = w.name ? `${w.name} ${w.label}` : w.label
   if (Date.parse(w.resetsAt) <= now.getTime()) return `${label} reset`
   const pct = Math.round(w.usedPercent)
   const level = quotaLevel(pct)

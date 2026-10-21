@@ -222,7 +222,11 @@ export async function activate(deps: DesktopDeps, pid: number): Promise<boolean>
 
 /** The environment `open` runs with: the caller's, without anything that would pick another Account (spec §3.5). */
 function openEnv(base: Env, family: FamilyDef, def: DesktopAppDef): Env {
-  return cleanEnv(base, [...family.hijackVars, family.selectVar, ...def.clearVars])
+  return cleanEnv(base, [
+    ...family.hijackVars,
+    ...(family.selectVar ? [family.selectVar] : []),
+    ...def.clearVars,
+  ])
 }
 
 /** The caller's environment without `clear`, `SIDEBY_*` and the variables of the agent session it may run in. */

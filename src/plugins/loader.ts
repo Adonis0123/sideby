@@ -98,7 +98,7 @@ export const MAX_LOGO_PATH = 20_000
 /** Why a Family logo is unusable, or null when it is fine. The Panel draws it with DOM APIs, never as markup. */
 export function logoProblem(logo: unknown): string | null {
   if (typeof logo !== 'object' || logo === null || Array.isArray(logo)) return 'logo must be an object'
-  const { path, color, title, fillRule } = logo as Record<string, unknown>
+  const { path, color, title, fillRule, gradients } = logo as Record<string, unknown>
   if (typeof path !== 'string' || !path.trim()) return 'logo.path must be a non-empty string'
   if (path.length > MAX_LOGO_PATH) return `logo.path is over ${MAX_LOGO_PATH} characters`
   if (!LOGO_PATH_RE.test(path))
@@ -109,7 +109,28 @@ export function logoProblem(logo: unknown): string | null {
     return 'logo.title must be a string of at most 80 characters'
   if (fillRule !== undefined && fillRule !== 'nonzero' && fillRule !== 'evenodd')
     return 'logo.fillRule must be "nonzero" or "evenodd"'
+  if (gradients !== undefined) {
+    if (!Array.isArray(gradients) || gradients.length > MAX_LOGO_GRADIENTS)
+      return `logo.gradients must be a list of at most ${MAX_LOGO_GRADIENTS} washes`
+    for (const g of gradients) {
+      const { from, to, color: c } = (g ?? {}) as Record<string, unknown>
+      if (!isLogoPoint(from) || !isLogoPoint(to))
+        return 'each of logo.gradients needs `from` and `to` points such as [12, 2], numbers from -24 to 48'
+      if (typeof c !== 'string' || !LOGO_COLOR_RE.test(c))
+        return 'each of logo.gradients needs a hex `color` such as #3186FF'
+    }
+  }
   return null
+}
+
+const MAX_LOGO_GRADIENTS = 4
+/** A point of a logo wash: two plain numbers near the 24x24 view box, so it reaches markup as nothing else. */
+function isLogoPoint(p: unknown): boolean {
+  return (
+    Array.isArray(p) &&
+    p.length === 2 &&
+    p.every((n) => typeof n === 'number' && Number.isFinite(n) && n >= -24 && n <= 48)
+  )
 }
 
 // The url reaches `open` and, on WSL, `cmd.exe /c start`, so it holds no character a shell gives meaning to.
@@ -149,6 +170,15 @@ function cleanLogo(logo: FamilyLogo): FamilyLogo {
     ...(logo.color ? { color: logo.color } : {}),
     ...(logo.title ? { title: logo.title } : {}),
     ...(logo.fillRule ? { fillRule: logo.fillRule } : {}),
+    ...(logo.gradients?.length
+      ? {
+          gradients: logo.gradients.map((g) => ({
+            from: [g.from[0], g.from[1]] as [number, number],
+            to: [g.to[0], g.to[1]] as [number, number],
+            color: g.color,
+          })),
+        }
+      : {}),
   }
 }
 
@@ -199,6 +229,8 @@ async function register(
       const owner = result.familyOwner.get(def.id)
       if (owner) throw new Error(`family ${def.id} is already provided by ${owner}`)
       if (stagedFamilies.some((f) => f.id === def.id)) throw new Error(`family ${def.id} is registered twice`)
+      const shape = mainOnlyProblem(def)
+      if (shape) throw new Error(`family ${def.id}: ${shape}`)
       // A bad logo or website costs only that field: the Family still loads.
       let clean: FamilyDef = def
       if (def.logo !== undefined) {
@@ -358,4 +390,25 @@ export async function loadPlugins(opts: {
     }
   }
   return result
+}
+
+/**
+ * What is wrong with how a FamilyDef says where its Accounts live (ADR-0047): either `selectVar` and `layout.account`
+ * both set, or `mainOnly: true` with both left out. undefined when it is right.
+ */
+export function mainOnlyProblem(def: {
+  mainOnly?: unknown
+  selectVar?: unknown
+  layout?: { account?: unknown } | unknown
+}): string | undefined {
+  const layout = (typeof def.layout === 'object' && def.layout !== null ? def.layout : {}) as {
+    account?: unknown
+  }
+  const hasSelect = def.selectVar !== undefined
+  const hasAccount = layout.account !== undefined
+  if (def.mainOnly === undefined) return undefined
+  if (def.mainOnly !== true) return 'mainOnly must be true or left out'
+  if (hasSelect || hasAccount)
+    return 'a Main-only Family (mainOnly: true) must leave out selectVar and layout.account'
+  return undefined
 }

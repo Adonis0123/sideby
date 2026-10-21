@@ -1351,8 +1351,15 @@ describe('setup by an agent (spec §3.16)', () => {
       const all = checkSchema('families', (await sideby(h, ['families', '--json'])).out)
       assert.deepEqual(
         (all.families as { id: string }[]).map((f) => f.id),
-        ['claude', 'codex', 'grok', 'pi'],
+        ['claude', 'codex', 'grok', 'pi', 'agy'],
       )
+      const agy = (
+        all.families as { id: string; mainOnly?: boolean; selectVar?: string; layout: object }[]
+      ).find((f) => f.id === 'agy')!
+      assert.equal(agy.mainOnly, true)
+      assert.equal(agy.selectVar, undefined)
+      assert.deepEqual(agy.layout, { main: '.gemini/antigravity-cli' })
+      assert.match((await sideby(h, ['families', 'agy'])).out, /main only: Antigravity CLI keeps one sign-in/)
       const grok = (all.families as { id: string; shared: { path: string; meaning: string }[] }[]).find(
         (f) => f.id === 'grok',
       )!

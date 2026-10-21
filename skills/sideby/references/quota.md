@@ -15,6 +15,8 @@ Two accounts of one tool signed in as the same login (Claude: same email and org
 
 Grok quota needs no setup: sideby asks the `grok` CLI of each signed-in account (`grok agent --no-leader stdio`, the Host makes the request with its own login; sideby never reads `auth.json`) at most every 15 minutes, and also reads the quota Grok logs after each turn. `sideby quota grok --refresh` asks again now. `quota.status: "unavailable"` with `reason: "fetch-failed"` carries the cause and next step in `detail` (update Grok, `sideby login grok:<name>`); `"not-enabled"` means the user turned it off (config `quota.check.grok: false`, or the Panel's Settings) or it runs in CI. A reading with `fetchError` is the last good one; say it may be old.
 
+Antigravity CLI (`agy`, main account only) quota also needs no setup: sideby runs `agy -p /usage --output-format json` (agy answers with its own Google sign-in and starts no model turn) at most every 15 minutes; `sideby quota agy --refresh` asks again now, and config `quota.check.agy: false` turns it off. Each window carries a model group `name` (5-hour and 7-day windows per group, some groups weekly only); tell the user which group each number belongs to. Named windows never count toward picking an account. A `detail` saying agy is not signed in means the user runs `sideby login agy:main` (it starts `agy`; they sign in with Google in the browser).
+
 A window with a `name` (a plugin's Cursor "Other models") covers only some models: show it, but it does not make the account full.
 
 Usage (7-day tokens) is read by sideby itself from Claude Code and Codex local records; no ccusage is needed. Grok and pi have no usage source; pi has no quota either.

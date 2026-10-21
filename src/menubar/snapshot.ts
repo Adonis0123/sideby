@@ -1,7 +1,7 @@
 // What the Menu Bar Item shows (spec §3.31, ADR-0034), computed here so the menu bar script only draws it.
 import type { HandoffPlan } from '../core/handoff.ts'
 import { openWindows, quotaIsStale, quotaLevel } from '../core/quota-levels.ts'
-import type { Account, FamilyLogo, LoginState, QuotaResult } from '../types.ts'
+import type { Account, FamilyLogo, LoginState, QuotaResult, QuotaWindow } from '../types.ts'
 import { fill, MENUBAR_STRINGS, type MenubarLang, type MenubarStrings } from './strings.ts'
 
 export type MenubarLevel = 'ok' | 'warn' | 'fail' | 'none'
@@ -25,13 +25,18 @@ export interface MenubarRow {
   observedAt: string | null
   /** An old or undated reading, or a failed quota query. */
   stale: boolean
-  /** Hover text: when each window resets, and what a click does. */
+  /** Hover text: when the numbers were read, each window's use and reset, and what a click does. */
   tip: string
   /**
    * The bars, in two columns: the shorter window, then the longer one. A Family with one window (such as `7d`) fills
    * the second, so the long windows of all Families line up. Null when the row has no Quota to draw.
    */
   bars: [MenubarBar | null, MenubarBar | null] | null
+  /**
+   * A Host whose every limit covers one model group (Antigravity CLI): a line per group under the account, each with
+   * its own two bars, reset and hover text, while the account's own `bars` stay null. Null otherwise.
+   */
+  groups: { label: string; bars: MenubarRow['bars']; reset: string; tip: string }[] | null
   /** How long until the fullest window resets, such as `4d 17h`; empty when nothing is used. */
   reset: string
   /** A no-quota explanation, or an old-reading warning beside the bars. */
@@ -45,7 +50,7 @@ export interface MenubarSection {
    * The Family's mark before its title, as the Panel draws it: in its brand `color` when it has one, else in the
    * menu's text colour; null when the Family has no mark.
    */
-  logo: { path: string; fillRule?: 'nonzero' | 'evenodd'; color?: string } | null
+  logo: Pick<FamilyLogo, 'path' | 'fillRule' | 'color' | 'gradients'> | null
   /** The window names above the two bar columns, such as `5h` and `7d`; null where no row has that column. */
   columns: [string | null, string | null]
   /** The recommended account first, then the others in Display Order. */
@@ -188,13 +193,91 @@ export function menubarHotkey(value: string | undefined): MenubarHotkey | null {
 
 /** `2h 5m`, `3d 4h` or `12m` until `at`; at least one minute. */
 export function untilText(at: string, now: Date, s: MenubarStrings): string {
-  const total = Math.max(1, Math.ceil((Date.parse(at) - now.getTime()) / 60000))
+  return durationText(Math.ceil((Date.parse(at) - now.getTime()) / 60000), s)
+}
+
+/** `2h 5m`, `3d 4h` or `12m` for a number of minutes; at least one minute. */
+function durationText(minutes: number, s: MenubarStrings): string {
+  const total = Math.max(1, minutes)
   const d = Math.floor(total / 1440)
   const h = Math.floor((total % 1440) / 60)
   const m = total % 60
   if (d > 0) return fill(s.daysHours, { d, h })
   if (h > 0) return fill(s.hoursMinutes, { h, m })
   return fill(s.minutes, { m })
+}
+
+/**
+ * The model groups of a Quota whose every window covers one group (Antigravity CLI), in the order the Host lists them,
+ * as the Panel shows them: each with its own windows, so the menu draws a line per group with its `5h` and `7d` bars.
+ * Null when some window covers every model.
+ */
+export function quotaGroups(
+  quota: QuotaResult,
+): { name: string; quota: QuotaResult & { status: 'ok' } }[] | null {
+  if (quota.status !== 'ok' || !quota.windows.length || quota.windows.some((w) => !w.name)) return null
+  const groups = new Map<string, QuotaWindow[]>()
+  for (const { name, ...w } of quota.windows) groups.set(name!, [...(groups.get(name!) ?? []), w])
+  return [...groups].map(([name, windows]) => ({ name, quota: { ...quota, windows } }))
+}
+
+/** A model group's name over its line, without a trailing "models" so it fits. */
+function groupLabel(name: string): string {
+  return name.replace(/\s+models$/i, '') || name
+}
+
+/**
+ * What a Quota whose windows cover every model draws: two bar columns (the shortest window, then the fullest of the
+ * others, so a third window that is used up still shows; a single window fills the second), the time until the fullest
+ * resets, and one hover line per window with its use and reset.
+ */
+function drawn(quota: QuotaResult & { status: 'ok' }, now: Date, s: MenubarStrings) {
+  const open = openWindows(quota, now) ?? []
+  const windows = quota.windows
+    .filter((w) => !w.name)
+    .sort((x, y) => (x.windowMinutes ?? 0) - (y.windowMinutes ?? 0))
+  const openOf = (w: QuotaWindow) => open.find((o) => o.label === w.label)
+  const bar = (w: QuotaWindow): MenubarBar => {
+    const percent = Math.round(openOf(w)?.usedPercent ?? 0)
+    return { label: w.label, percent, level: quotaLevel(percent) }
+  }
+  const longer = windows
+    .slice(1)
+    .map(bar)
+    .reduce<MenubarBar | null>((best, b) => (!best || b.percent > best.percent ? b : best), null)
+  const bars: MenubarRow['bars'] = !windows.length
+    ? null
+    : longer
+      ? [bar(windows[0]!), longer]
+      : [null, bar(windows[0]!)]
+  const fullest = open.reduce<QuotaWindow | null>(
+    (best, w) => (!best || w.usedPercent > best.usedPercent ? w : best),
+    null,
+  )
+  const reset = fullest && fullest.usedPercent > 0 ? untilText(fullest.resetsAt, now, s) : ''
+  const lines = windows.map((w) => {
+    const o = openOf(w)
+    const p = bar(w).percent
+    return o && p > 0
+      ? fill(s.windowResetsTip, { label: w.label, p, time: untilText(o.resetsAt, now, s) })
+      : fill(s.windowTip, { label: w.label, p })
+  })
+  return {
+    bars,
+    fullest,
+    reset,
+    parts: windows.map((w) => fill(s.window, { label: w.label, p: bar(w).percent })),
+    lines,
+  }
+}
+
+/** When the numbers were read, in words: "just now", "25 min ago", or the time itself when the date is unknown. */
+function observedText(observedAt: string, now: Date, s: MenubarStrings): string {
+  const at = Date.parse(observedAt)
+  if (!Number.isFinite(at)) return fill(s.observedAt, { time: '?' })
+  const minutes = Math.max(0, Math.floor((now.getTime() - at) / 60000))
+  if (minutes < 1) return s.observedJustNow
+  return fill(s.observedAgo, { time: durationText(minutes, s) })
 }
 
 function row(
@@ -211,6 +294,7 @@ function row(
     recommended,
     tip: startTip,
     bars: null,
+    groups: null,
     reset: '',
     observedAt: null,
     stale: false,
@@ -218,57 +302,70 @@ function row(
   const noted = (note: string): MenubarRow => ({ ...base, detail: note, note, level: 'none' })
   if (a.kind === 'api') return noted(s.api)
   if (a.login === 'logged-out') return noted(s.signedOut)
-  const open = openWindows(a.quota, now)
-  if (a.quota.status !== 'ok' || open === null) return noted(s.noData)
-  const observedAt = a.quota.observedAt
-  const at = Date.parse(observedAt)
-  const stale = quotaIsStale(a.quota, now.getTime())
-  const windows = a.quota.windows
-    .filter((w) => !w.name)
-    .sort((x, y) => (x.windowMinutes ?? 0) - (y.windowMinutes ?? 0))
-  const bar = (w: (typeof windows)[number]): MenubarBar => {
-    const percent = Math.round(open.find((o) => o.label === w.label)?.usedPercent ?? 0)
-    return { label: w.label, percent, level: quotaLevel(percent) }
+  const quota = a.quota
+  if (quota.status !== 'ok') return noted(s.noData)
+  const stale = quotaIsStale(quota, now.getTime())
+  // The head of the hover text: when the numbers were read, and why they may be old.
+  const head = [
+    observedText(quota.observedAt, now, s),
+    ...(stale ? [s.olderReadingTip] : []),
+    ...(quota.fetchError ? [fill(s.fetchFailed, { error: quota.fetchError })] : []),
+  ]
+  const groups = quotaGroups(quota)
+  if (groups) {
+    // One line per model group under the account, each with its own 5h and 7d bars (spec §3.31).
+    const drawnGroups = groups.map((g) => ({ name: g.name, d: drawn(g.quota, now, s) }))
+    const fullest = drawnGroups
+      .map((g) => g.d.fullest)
+      .reduce<QuotaWindow | null>(
+        (best, w) => (w && (!best || w.usedPercent > best.usedPercent) ? w : best),
+        null,
+      )
+    const groupTip = (g: (typeof drawnGroups)[number]) => [g.name, ...g.d.lines.map((l) => `   ${l}`)]
+    return {
+      ...base,
+      observedAt: quota.observedAt,
+      stale,
+      detail: [
+        ...drawnGroups.map((g) => `${groupLabel(g.name)} ${g.d.parts.join(' ')}`),
+        ...(stale ? [s.olderReading] : []),
+      ].join(s.sep),
+      level: quotaLevel(fullest?.usedPercent ?? 0),
+      tip: [...head, '', ...drawnGroups.flatMap(groupTip), '', startTip].join('\n'),
+      groups: drawnGroups.map((g) => ({
+        label: groupLabel(g.name),
+        bars: g.d.bars,
+        reset: g.d.reset,
+        tip: [...head, '', ...groupTip(g), '', startTip].join('\n'),
+      })),
+      note: stale ? s.olderReading : '',
+    }
   }
-  // Two columns: the shortest window, then the fullest of the others, so a third window that is used up still shows.
-  const longer = windows
-    .slice(1)
-    .map(bar)
-    .reduce<MenubarBar | null>((best, b) => (!best || b.percent > best.percent ? b : best), null)
-  const bars: MenubarRow['bars'] = longer ? [bar(windows[0]!), longer] : [null, bar(windows[0]!)]
-  const parts = windows.map((w) => fill(s.window, { label: w.label, p: bar(w).percent }))
-  const fullest = open.reduce<(typeof open)[number] | null>(
-    (best, w) => (!best || w.usedPercent > best.usedPercent ? w : best),
-    null,
-  )
-  const reset = fullest && fullest.usedPercent > 0 ? untilText(fullest.resetsAt, now, s) : ''
-  if (reset) parts.push(fill(s.resets, { time: reset }))
+  if (openWindows(quota, now) === null) return noted(s.noData)
+  const d = drawn(quota, now, s)
+  const parts = [...d.parts]
+  if (d.reset) parts.push(fill(s.resets, { time: d.reset }))
   if (stale) parts.push(s.olderReading)
-  const tips = open
-    .filter((w) => w.usedPercent > 0)
-    .map((w) => fill(s.resetsTip, { label: w.label, time: untilText(w.resetsAt, now, s) }))
   return {
     ...base,
-    observedAt,
+    observedAt: quota.observedAt,
     stale,
     detail: parts.join(s.sep),
-    level: quotaLevel(fullest?.usedPercent ?? 0),
-    tip: [
-      fill(s.observedAt, { time: Number.isFinite(at) ? observedAt : '?' }),
-      ...(stale ? [s.olderReading] : []),
-      ...(a.quota.fetchError ? [a.quota.fetchError] : []),
-      ...tips,
-      startTip,
-    ].join('\n'),
-    bars,
-    reset,
+    level: quotaLevel(d.fullest?.usedPercent ?? 0),
+    tip: [...head, '', ...d.lines, '', startTip].join('\n'),
+    bars: d.bars,
+    reset: d.reset,
     note: stale ? s.olderReading : '',
   }
 }
 
 /** The recommended row first; API key and signed-out rows into `more` while other rows remain to show. */
 function columns(rows: MenubarRow[]): MenubarSection['columns'] {
-  const at = (i: 0 | 1) => rows.map((r) => r.bars?.[i]?.label).find((l) => l !== undefined) ?? null
+  const at = (i: 0 | 1) =>
+    rows
+      .flatMap((r) => [r.bars, ...(r.groups ?? []).map((g) => g.bars)])
+      .map((bars) => bars?.[i]?.label)
+      .find((l) => l !== undefined) ?? null
   return [at(0), at(1)]
 }
 
@@ -278,6 +375,7 @@ function section(f: MenubarFamilyInput, now: Date, s: MenubarStrings): MenubarSe
         path: f.logo.path,
         ...(f.logo.fillRule ? { fillRule: f.logo.fillRule } : {}),
         ...(f.logo.color ? { color: f.logo.color } : {}),
+        ...(f.logo.gradients?.length ? { gradients: f.logo.gradients } : {}),
       }
     : null
   const all = f.accounts.map((a) => ({ a, r: row(a, f.plan, now, s) }))

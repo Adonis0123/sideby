@@ -2190,14 +2190,22 @@ export async function cmdFamilies(a: ParsedArgs, io: Io): Promise<number> {
     io.out(
       `${c.bold(f.title)} (${f.id})  ${f.installed ? c.green('installed') : c.yellow(f.brokenBin ? `install broken (${tildify(f.brokenBin, rt.paths.home)} cannot run); reinstall: ${installHint(f)}` : `not installed: ${installHint(f)}`)}`,
     )
-    io.out(`  Accounts   ~/${f.layout.main} (main), ~/${f.layout.account}; selected with ${f.selectVar}`)
     io.out(
-      `  Sign in    sideby login ${f.id}:<name>  ${c.dim(f.login.args ? `(runs ${[f.bin, ...f.login.args].join(' ')})` : `(${f.login.hint})`)}`,
+      f.mainOnly
+        ? `  Accounts   ~/${f.layout.main} (main only: ${f.title} keeps one sign-in per computer)`
+        : `  Accounts   ~/${f.layout.main} (main), ~/${f.layout.account}; selected with ${f.selectVar}`,
+    )
+    io.out(
+      `  Sign in    sideby login ${f.id}:${f.mainOnly ? 'main' : '<name>'}  ${c.dim(f.login.args ? `(runs ${[f.bin, ...f.login.args].join(' ')})` : `(${f.login.hint})`)}`,
     )
     const yes = (b: boolean) => (b ? c.green('yes') : c.dim('no public source'))
     io.out(
       `  Quota      ${yes(f.quota)}${f.quotaSetup ? c.dim(`, after \`sideby quota setup ${f.id}\``) : ''}   Usage ${yes(f.usage)}`,
     )
+    if (!f.shared.length) {
+      io.out(c.dim('  No shared items: everything in the account directory is its own.'))
+      return
+    }
     io.out('  Shared items, and how each account holds them:')
     const rows = f.shared.map((s) => [
       `    ${s.path}${s.key ? `#${s.key}` : ''}`,

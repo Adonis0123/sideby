@@ -588,3 +588,22 @@ it('ask --task terminal prints the terminal prompt, and an unknown task lists ev
     assert.match(bad.err, /--task free\|fix\|quota\|account\|host\|plugin\|terminal/)
   })
 })
+
+it('ask --run gives Antigravity CLI the prompt through --prompt-interactive, without the permission bypass', async () => {
+  await withFakeHome(async (h) => {
+    await h.mkdir('.gemini/antigravity-cli')
+    await fakeHost(h, 'agy')
+    await h.write(
+      '.config/sideby/config.json',
+      JSON.stringify({ accounts: { 'agy:main': { args: ['--dangerously-skip-permissions'] } } }),
+    )
+    const rt = await createRuntime({ env: h.env })
+    const prompt = '--dangerously-skip-permissions is part of this prompt'
+    const id = await writeTask(
+      { kind: 'prompt', account: 'agy:main', prompt, cwd: await taskWorkDir(rt.paths) },
+      rt.paths,
+    )
+    assert.equal((await cli(h, ['ask', '--run', id])).code, 0)
+    assert.deepEqual((await readHostLog(h, 'agy'))[0]!.argv, [`--prompt-interactive=${prompt}`])
+  })
+})

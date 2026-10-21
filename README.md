@@ -111,6 +111,7 @@ cc-switch's docs describe that switch: it writes the live settings file ([README
 | Codex CLI | `~/.codex`, `~/.codex-<name>` | `codex login` | ✓ | ✓ |
 | Grok Build | `~/.grok`, `~/.grok-<name>` | `grok login` | weekly, asked from the `grok` CLI | no public source |
 | pi | `~/.pi/agent`, `~/.pi-<name>/agent` | `/login` inside pi | no public source | no public source |
+| Antigravity CLI | `~/.gemini/antigravity-cli` (main account only) | sign in with Google inside `agy` | 5-hour and weekly per model group, asked from the `agy` CLI | no public source |
 
 sideby starts the official binary on your `PATH` and never patches it. Tested versions and per-Host notes are in the [guide](docs/guide/usage.md#host-notes).
 

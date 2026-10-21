@@ -57,6 +57,11 @@
               "settingsFile": {
                 "type": "string",
                 "description": "The Host's settings file `sideby edit` opens, relative to the account directory."
+              },
+              "mainOnly": {
+                "type": "boolean",
+                "const": true,
+                "description": "The Host keeps one sign-in per computer, so sideby knows only its Main Account and refuses to create others (ADR-0047)."
               }
             }
           },
@@ -64,7 +69,6 @@
             "type": "object",
             "required": [
               "layout",
-              "selectVar",
               "login",
               "quota",
               "usage",
@@ -75,8 +79,7 @@
               "layout": {
                 "type": "object",
                 "required": [
-                  "main",
-                  "account"
+                  "main"
                 ],
                 "properties": {
                   "main": {
@@ -86,11 +89,11 @@
                     "type": "string"
                   }
                 },
-                "description": "Relative to HOME, for example `.claude` and `.claude-<name>`."
+                "description": "Relative to HOME, for example `.claude` and `.claude-<name>`. A Main-only Family has no `account`."
               },
               "selectVar": {
                 "type": "string",
-                "description": "Environment variable that selects a non-main Account directory."
+                "description": "Environment variable that selects a non-main Account directory. Left out for a Main-only Family."
               },
               "login": {
                 "type": "object",

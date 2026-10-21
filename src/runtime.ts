@@ -180,6 +180,8 @@ export interface FamilyInfo {
   tuning: boolean
   /** The Host's settings file that `sideby edit` opens (spec §3.30), relative to the account directory. */
   settingsFile?: string
+  /** Set only for a Main-only Family: sideby knows only its Main Account and creates no other (ADR-0047). */
+  mainOnly?: true
 }
 
 /** One Shared Item as `sideby families` reports it (spec §3.16). */
@@ -199,8 +201,9 @@ export interface SharedItemInfo {
 /** A Family's facts for agents and docs: FamilyInfo plus layout, sign-in, sources and Shared Items (spec §3.16). */
 export interface FamilyDetail extends FamilyInfo {
   /** Relative to HOME: `{ main: '.claude', account: '.claude-<name>' }`. */
-  layout: { main: string; account: string }
-  selectVar: string
+  layout: { main: string; account?: string }
+  /** Left out for a Main-only Family (ADR-0047). */
+  selectVar?: string
   /** `args` is null when sign-in happens inside the Host. */
   login: { args: string[] | null; hint: string }
   quota: boolean
@@ -719,6 +722,7 @@ export async function createRuntime(
             plugin: loaded.familyOwner.get(f.id) ?? 'unknown',
             tuning: Boolean(f.readTuning),
             ...(hostSettingsFile(f) ? { settingsFile: hostSettingsFile(f) } : {}),
+            ...(f.mainOnly ? { mainOnly: true as const } : {}),
           }
         }),
       )
@@ -730,8 +734,8 @@ export async function createRuntime(
         const fromConfig = new Set<unknown>(config.extraSharedItems?.[f.id] ?? [])
         return {
           ...info.get(f.id)!,
-          layout: { main: f.layout.main, account: f.layout.account },
-          selectVar: f.selectVar,
+          layout: { main: f.layout.main, ...(f.layout.account ? { account: f.layout.account } : {}) },
+          ...(f.selectVar ? { selectVar: f.selectVar } : {}),
           login: { args: f.login.args ? [...f.login.args] : null, hint: f.login.hint },
           quota: Boolean(f.readQuota || f.fetchQuota),
           usage: Boolean(f.readUsage),
@@ -1039,9 +1043,12 @@ export async function createRuntime(
         ? [...families.values()]
             .filter(
               (f) =>
-                f.resumedSession && f.sessionWrittenAt && list.some((a) => a.family === f.id && !a.isMain),
+                f.selectVar &&
+                f.resumedSession &&
+                f.sessionWrittenAt &&
+                list.some((a) => a.family === f.id && !a.isMain),
             )
-            .map((f) => ({ family: f.id, bin: f.bin, selectVar: f.selectVar }))
+            .map((f) => ({ family: f.id, bin: f.bin, selectVar: f.selectVar! }))
         : []
       return shellInitScript(list, { ...config.aliases, ...config.pickCommands }, routes)
     },
@@ -1091,7 +1098,7 @@ export async function createRuntime(
         )
       const host: HostLaunch = { family, bin: family.bin, args: [...userArgs], env }
       // A select variable already set means an Account was chosen on purpose: run the Host as it is.
-      if (env[family.selectVar]) return { launch: host }
+      if (family.selectVar && env[family.selectVar]) return { launch: host }
       const route = await findResumeRoute(family, await accounts(), userArgs)
       const id = route.sessionId ? { sessionId: route.sessionId } : {}
       if (route.neverSaved && route.account && family.withoutResume) {

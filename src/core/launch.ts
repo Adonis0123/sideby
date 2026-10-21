@@ -93,8 +93,10 @@ export async function sidebyBinProblem(env: Env, why: string): Promise<string | 
 export function accountEnv(family: FamilyDef, account: Account, baseEnv: Env): Env {
   const env: Env = { ...baseEnv }
   for (const v of family.hijackVars) delete env[v]
-  delete env[family.selectVar]
-  if (!account.isMain) env[family.selectVar] = account.dir
+  if (family.selectVar) {
+    delete env[family.selectVar]
+    if (!account.isMain) env[family.selectVar] = account.dir
+  }
   return env
 }
 
@@ -153,7 +155,7 @@ export async function prepareLaunch(
   const env = accountEnv(family, account, opts.baseEnv)
   if (account.secretFile) Object.assign(env, await readSecretFile(account.secretFile, opts.baseEnv))
   // The Secret File may not move the Account: its directory always wins.
-  if (!account.isMain) env[family.selectVar] = account.dir
+  if (!account.isMain && family.selectVar) env[family.selectVar] = account.dir
   // Which Account this is, for a status line, prompt or hook to show (spec §3.5); set for every Launch, so a value
   // inherited from another sideby Launch never leaks through.
   env.SIDEBY_ACCOUNT = account.ref

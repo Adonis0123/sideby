@@ -57,6 +57,11 @@
           "settingsFile": {
             "type": "string",
             "description": "The Host's settings file `sideby edit` opens, relative to the account directory."
+          },
+          "mainOnly": {
+            "type": "boolean",
+            "const": true,
+            "description": "The Host keeps one sign-in per computer, so sideby knows only its Main Account and refuses to create others (ADR-0047)."
           }
         }
       }

@@ -30,8 +30,11 @@ export interface SharedItemDef {
 export interface FamilyLayout {
   /** Main Account directory relative to HOME, for example `.claude` or `.pi/agent`. */
   main: string
-  /** Other Accounts relative to HOME, with `<name>` in the first path segment: `.claude-<name>`, `.pi-<name>/agent`. */
-  account: string
+  /**
+   * Other Accounts relative to HOME, with `<name>` in the first path segment: `.claude-<name>`, `.pi-<name>/agent`.
+   * Left out only by a Main-only Family (`mainOnly: true`, ADR-0047).
+   */
+  account?: string
 }
 
 export type LoginState = 'logged-in' | 'logged-out' | 'unknown'
@@ -48,6 +51,19 @@ export interface FamilyLogo {
   /** Name of the mark for tooltips; defaults to the Family title. */
   title?: string
   fillRule?: 'nonzero' | 'evenodd'
+  /**
+   * Colour washes painted over the mark, in order, for a multicoloured mark (at most 4). Each fades in a straight line
+   * from `color` at `from` to transparent at `to`, in the 24x24 view box. `color` is then the base under them.
+   */
+  gradients?: FamilyLogoGradient[]
+}
+
+/** One colour wash of a FamilyLogo: `color` at `from`, fading to transparent at `to`. */
+export interface FamilyLogoGradient {
+  from: [number, number]
+  to: [number, number]
+  /** Hex colour such as `#3186FF`. */
+  color: string
 }
 
 /**
@@ -161,8 +177,17 @@ export interface FamilyDef {
   installUrl: string
   /** The Host's official one-line install command, shown before `installUrl`; sideby never runs it. */
   installCommand?: string
-  /** Environment variable that selects the Account directory. Not set for the Main Account. */
-  selectVar: string
+  /**
+   * Environment variable that selects the Account directory. Not set for the Main Account. Left out only by a
+   * Main-only Family (`mainOnly: true`).
+   */
+  selectVar?: string
+  /**
+   * The Host offers no way to run a second Account apart from the first (no variable that moves its configuration
+   * directory, or a login kept in one fixed place): sideby knows only its Main Account and refuses to create others
+   * (ADR-0047). Set it with `selectVar` and `layout.account` both left out; any other combination is rejected.
+   */
+  mainOnly?: true
   layout: FamilyLayout
   /**
    * Entries that prove a directory is this Family's Account (besides a Secret File or an empty directory).
@@ -195,6 +220,12 @@ export interface FamilyDef {
    * it read the images from the paths the prompt lists. Public contract, additive only.
    */
   imageArg?: string
+  /**
+   * The Host option that starts an interactive session with a first prompt, for a Host that refuses the prompt as a
+   * positional argument (Antigravity CLI: `--prompt-interactive`). An AI Task then passes `<promptArg>=<prompt>` in
+   * place of the positional prompt. Public contract, additive only.
+   */
+  promptArg?: string
   /**
    * Makes a Launch safe for an AI Task (spec §3.28 "权限检查", ADR-0031): given every argument the Host would get
    * (Family defaults, the Account's config arguments, the task's own), returns them without any argument that
@@ -392,7 +423,7 @@ export interface QuotaFetchContext extends ReadContext {
   signal: AbortSignal
   /**
    * The environment the Host gets at Launch, before the Secret File and Plugin hooks: sideby's own, Hijack Variables
-   * cleared, the Family's `selectVar` set for every Account but the Main Account. Run the Host with this one.
+   * cleared, the Family's `selectVar` (if any) set for every Account but the Main Account. Run the Host with this one.
    */
   hostEnv: Env
 }

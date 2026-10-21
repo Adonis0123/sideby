@@ -56,7 +56,7 @@ export default {
 logo: { path: 'M11.503.131 1.891 5.678…', title: 'Cursor', color: '#000000' } // color 可省略
 ```
 
-`path` 只能是 SVG path 数据（命令字母、数字、空格、逗号、点、`+`、`-`，最多 20000 个字符），`color` 必须是十六进制颜色，`fillRule` 取 `nonzero` 或 `evenodd`。不合法的 logo 会被丢弃，并在 `sideby plugins` 里报一条插件错误；家族照常加载，面板改为显示首字母。黑色标志不要设 `color`，这样在深色模式下会跟随文字颜色。
+`path` 只能是 SVG path 数据（命令字母、数字、空格、逗号、点、`+`、`-`，最多 20000 个字符），`color` 必须是十六进制颜色，`fillRule` 取 `nonzero` 或 `evenodd`。多色标志加 `gradients`：最多 4 层 `{ from: [x, y], to: [x, y], color }`，每层从 `from` 处的十六进制颜色渐变到 `to` 处透明，叠在底色 `color` 上（坐标是 -24 到 48 的数字）。不合法的 logo 会被丢弃，并在 `sideby plugins` 里报一条插件错误；家族照常加载，面板改为显示首字母。黑色标志不要设 `color`，这样在深色模式下会跟随文字颜色。
 
 家族的 `website` 让它的订阅账号在面板「网页登录」一格里也有「在浏览器打开」和「选择」，和 Claude、Codex、Grok 一样（ADR-0043）：
 

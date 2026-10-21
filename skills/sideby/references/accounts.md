@@ -17,6 +17,7 @@ Then:
 - **Subscription account**: tell the user to run `sideby login claude:work` in their own terminal (for pi, `sideby login pi:<name>` starts pi; then they type `/login`). Do not run it for them.
 - **API account**: tell the user to run `sideby key <ref>` in their own terminal (or click **Enter key** in the Panel), which writes the key without showing it, or to open the `proxy.env` path printed by `new` in their editor. Never ask for the key or read the file yourself. It then shows `login: "not-needed"`.
 - **pi**: a `proxy.env` in a pi account only loads provider keys; the account stays a subscription account and still needs `/login`.
+- **agy** (Antigravity CLI): main account only. `sideby new agy …` (also `--api`) fails with `code: "family-main-only"` and writes nothing: agy keeps one Google sign-in per computer and cannot move its config. Do not work around it by changing `HOME`; tell the user to use `agy:main`.
 - Afterwards: `sideby doctor <ref> --json` to confirm the new account is healthy, then the user starts it with `sideby run <ref>`.
 
 ## Switch an account to another login

@@ -8,6 +8,7 @@ import { UserError } from '../core/errors.ts'
 import { createRuntime } from '../runtime.ts'
 import { accountScript, SCRIPT_NAME } from './account-script.ts'
 import { HookBus } from './bus.ts'
+import { logoProblem } from './loader.ts'
 
 async function runtime(h: FakeHome, extra: Parameters<typeof asBuiltin>[0][] = []) {
   return createRuntime({
@@ -259,5 +260,47 @@ describe('account.create.before', () => {
         /\[slow\] account.create.before timed out/,
       )
     })
+  })
+})
+
+describe('logoProblem', () => {
+  const path = 'M0 0h24v24H0z'
+  it('accepts colour washes made of numbers and hex colours, and the built-in marks', async () => {
+    const { BUILTIN_LOGOS } = await import('../families/logos.ts')
+    assert.equal(
+      logoProblem({ path, color: '#3186FF', gradients: [{ from: [4, 8], to: [10, 15], color: '#00B95C' }] }),
+      null,
+    )
+    for (const logo of Object.values(BUILTIN_LOGOS)) assert.equal(logoProblem(logo), null)
+  })
+
+  it('keeps the washes of a mark when the Family registers, and nothing else a plugin put on them', async () => {
+    await withFakeHome(async (h) => {
+      const fam = demoFamily()
+      const wash = { from: [4, 8], to: [10, 15], color: '#00B95C', extra: 'x' }
+      const rt = await runtime(h, [
+        {
+          name: 'washed',
+          register: (api) => api.family({ ...fam, id: 'washed', logo: { path, gradients: [wash] } as never }),
+        },
+      ])
+      assert.deepEqual(rt.families.get('washed')?.logo, {
+        path,
+        gradients: [{ from: [4, 8], to: [10, 15], color: '#00B95C' }],
+      })
+    })
+  })
+  it('rejects a wash that could carry anything but numbers and a hex colour, or too many washes', () => {
+    const wash = { from: [0, 0], to: [24, 24], color: '#fff' }
+    for (const gradients of [
+      'red',
+      [{ ...wash, color: 'url(#x)' }],
+      [{ ...wash, from: ['0', 0] }],
+      [{ ...wash, to: [0] }],
+      [{ ...wash, from: [0, Number.NaN] }],
+      [{ ...wash, from: [0, 1e9] }],
+      Array(5).fill(wash),
+    ])
+      assert.match(logoProblem({ path, gradients }) ?? '', /logo\.gradients/)
   })
 })

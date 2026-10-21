@@ -2,7 +2,7 @@ import { mkdir, readFile, symlink } from 'node:fs/promises'
 import { dirname, join, relative, sep } from 'node:path'
 import { type HookBus, HookError } from '../plugins/bus.ts'
 import type { Account, FamilyDef, SharedItemDef } from '../types.ts'
-import { ACCOUNT_NAME, accountAt, accountDirOf, mainDirOf } from './accounts.ts'
+import { ACCOUNT_NAME, accountAt, accountDirOf, mainDirOf, mainOnlyMessage } from './accounts.ts'
 import { UserError } from './errors.ts'
 import {
   assertInside,
@@ -63,6 +63,8 @@ export async function createAccount(opts: {
   accounts?: Account[]
 }): Promise<CreateResult> {
   const { family, name, api, home } = opts
+  // A Main-only Family (ADR-0047) has no second Account to create, API Accounts included: refused before any write.
+  if (family.mainOnly) throw new CreateError(mainOnlyMessage(family), { code: 'family-main-only' })
   if (!ACCOUNT_NAME.test(name) || name === 'main')
     throw new CreateError(
       `"${name}" is not a valid account name: use 1–32 lowercase letters, digits or "-", not "main"`,

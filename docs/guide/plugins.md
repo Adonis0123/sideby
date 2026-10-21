@@ -56,7 +56,7 @@ A Family's `logo` is the mark the panel shows on its cards and in the Tool selec
 logo: { path: 'M11.503.131 1.891 5.678…', title: 'Cursor', color: '#000000' } // color is optional
 ```
 
-`path` may hold only SVG path data (commands, numbers, spaces, commas, dots, `+`, `-`; up to 20000 characters), `color` must be a hex color and `fillRule` is `nonzero` or `evenodd`. An invalid logo is dropped with a plugin error in `sideby plugins`; the Family still loads and the panel shows its initials. Leave out `color` for a black mark so it follows the text color in dark mode.
+`path` may hold only SVG path data (commands, numbers, spaces, commas, dots, `+`, `-`; up to 20000 characters), `color` must be a hex color and `fillRule` is `nonzero` or `evenodd`. A multicoloured mark adds `gradients`: up to 4 washes `{ from: [x, y], to: [x, y], color }`, each fading from its hex `color` at `from` to clear at `to` over the base `color` (points are numbers from -24 to 48). An invalid logo is dropped with a plugin error in `sideby plugins`; the Family still loads and the panel shows its initials. Leave out `color` for a black mark so it follows the text color in dark mode.
 
 A Family's `website` gives its subscription accounts **Open in browser** and **Choose** under the panel's sign-in cell, like Claude, Codex and Grok (ADR-0043):
 

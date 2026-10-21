@@ -178,6 +178,49 @@
                   "color": {
                     "type": "string",
                     "description": "Brand colour; without one the mark follows the text colour."
+                  },
+                  "gradients": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "from",
+                        "to",
+                        "color"
+                      ],
+                      "properties": {
+                        "from": {
+                          "type": "array",
+                          "additionalItems": false,
+                          "items": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            }
+                          ],
+                          "minItems": 2
+                        },
+                        "to": {
+                          "type": "array",
+                          "additionalItems": false,
+                          "items": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            }
+                          ],
+                          "minItems": 2
+                        },
+                        "color": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "description": "Colour washes over a multicoloured mark: each fades from `color` at `from` to clear at `to`."
                   }
                 }
               },
@@ -228,6 +271,7 @@
                 "stale",
                 "tip",
                 "bars",
+                "groups",
                 "reset",
                 "note"
               ],
@@ -283,7 +327,7 @@
                 },
                 "tip": {
                   "type": "string",
-                  "description": "Hover text: when each window resets, and what a click does."
+                  "description": "Hover text: when the numbers were read, each window's use and reset, and what a click does."
                 },
                 "bars": {
                   "anyOf": [
@@ -386,6 +430,137 @@
                   ],
                   "description": "The shorter window, then the longer one; a single window fills the second. Null without quota."
                 },
+                "groups": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "label",
+                          "bars",
+                          "reset",
+                          "tip"
+                        ],
+                        "properties": {
+                          "label": {
+                            "type": "string"
+                          },
+                          "bars": {
+                            "anyOf": [
+                              {
+                                "type": "array",
+                                "additionalItems": false,
+                                "items": [
+                                  {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "required": [
+                                          "label",
+                                          "percent",
+                                          "level"
+                                        ],
+                                        "properties": {
+                                          "label": {
+                                            "type": "string"
+                                          },
+                                          "percent": {
+                                            "type": "number"
+                                          },
+                                          "level": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "const": "ok"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "warn"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "fail"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "none"
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "required": [
+                                          "label",
+                                          "percent",
+                                          "level"
+                                        ],
+                                        "properties": {
+                                          "label": {
+                                            "type": "string"
+                                          },
+                                          "percent": {
+                                            "type": "number"
+                                          },
+                                          "level": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "const": "ok"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "warn"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "fail"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "none"
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                ],
+                                "minItems": 2
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "reset": {
+                            "type": "string"
+                          },
+                          "tip": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "A Host whose every limit covers one model group: a line per group under the account, each with its own bars; the account's `bars` are then null."
+                },
                 "reset": {
                   "type": "string",
                   "description": "Until the fullest window resets, such as `4d 17h`; empty when nothing is used."
@@ -424,6 +599,7 @@
                         "stale",
                         "tip",
                         "bars",
+                        "groups",
                         "reset",
                         "note"
                       ],
@@ -479,7 +655,7 @@
                         },
                         "tip": {
                           "type": "string",
-                          "description": "Hover text: when each window resets, and what a click does."
+                          "description": "Hover text: when the numbers were read, each window's use and reset, and what a click does."
                         },
                         "bars": {
                           "anyOf": [
@@ -581,6 +757,137 @@
                             }
                           ],
                           "description": "The shorter window, then the longer one; a single window fills the second. Null without quota."
+                        },
+                        "groups": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "label",
+                                  "bars",
+                                  "reset",
+                                  "tip"
+                                ],
+                                "properties": {
+                                  "label": {
+                                    "type": "string"
+                                  },
+                                  "bars": {
+                                    "anyOf": [
+                                      {
+                                        "type": "array",
+                                        "additionalItems": false,
+                                        "items": [
+                                          {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "required": [
+                                                  "label",
+                                                  "percent",
+                                                  "level"
+                                                ],
+                                                "properties": {
+                                                  "label": {
+                                                    "type": "string"
+                                                  },
+                                                  "percent": {
+                                                    "type": "number"
+                                                  },
+                                                  "level": {
+                                                    "anyOf": [
+                                                      {
+                                                        "type": "string",
+                                                        "const": "ok"
+                                                      },
+                                                      {
+                                                        "type": "string",
+                                                        "const": "warn"
+                                                      },
+                                                      {
+                                                        "type": "string",
+                                                        "const": "fail"
+                                                      },
+                                                      {
+                                                        "type": "string",
+                                                        "const": "none"
+                                                      }
+                                                    ]
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "required": [
+                                                  "label",
+                                                  "percent",
+                                                  "level"
+                                                ],
+                                                "properties": {
+                                                  "label": {
+                                                    "type": "string"
+                                                  },
+                                                  "percent": {
+                                                    "type": "number"
+                                                  },
+                                                  "level": {
+                                                    "anyOf": [
+                                                      {
+                                                        "type": "string",
+                                                        "const": "ok"
+                                                      },
+                                                      {
+                                                        "type": "string",
+                                                        "const": "warn"
+                                                      },
+                                                      {
+                                                        "type": "string",
+                                                        "const": "fail"
+                                                      },
+                                                      {
+                                                        "type": "string",
+                                                        "const": "none"
+                                                      }
+                                                    ]
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ]
+                                          }
+                                        ],
+                                        "minItems": 2
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "reset": {
+                                    "type": "string"
+                                  },
+                                  "tip": {
+                                    "type": "string"
+                                  }
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "A Host whose every limit covers one model group: a line per group under the account, each with its own bars; the account's `bars` are then null."
                         },
                         "reset": {
                           "type": "string",

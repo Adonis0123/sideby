@@ -19,11 +19,18 @@ export function mainDirOf(family: FamilyDef, home: string): string {
 }
 
 export function accountDirOf(family: FamilyDef, home: string, name: string): string {
-  return name === 'main' ? mainDirOf(family, home) : join(home, family.layout.account.replace('<name>', name))
+  if (name === 'main') return mainDirOf(family, home)
+  if (!family.layout.account) throw new UserError(mainOnlyMessage(family), { code: 'family-main-only' })
+  return join(home, family.layout.account.replace('<name>', name))
+}
+
+/** Why a Main-only Family (ADR-0047) has no other Account, and what the user can do instead. */
+export function mainOnlyMessage(family: FamilyDef): string {
+  return `${family.title} keeps one sign-in per computer, so sideby supports only its main account for now; run \`sideby run ${family.id}:main\` to use it`
 }
 
 function splitLayout(family: FamilyDef): { prefix: string; suffix: string; rest: string } {
-  const [first, ...rest] = family.layout.account.split('/')
+  const [first, ...rest] = (family.layout.account ?? '').split('/')
   const at = first!.indexOf('<name>')
   if (at === -1)
     throw new Error(`family ${family.id}: layout.account must contain <name> in its first segment`)
@@ -64,7 +71,10 @@ async function looksLikeAccount(family: FamilyDef, dir: string): Promise<boolean
   }
 }
 
-/** Discovers the Main Account (if its directory exists) and every `<prefix><name><suffix>` directory in HOME. */
+/**
+ * Discovers the Main Account (if its directory exists) and every `<prefix><name><suffix>` directory in HOME. A
+ * Main-only Family (ADR-0047) has only its Main Account: HOME is not scanned for it.
+ */
 export async function discoverAccounts(
   family: FamilyDef,
   home: string,
@@ -73,6 +83,7 @@ export async function discoverAccounts(
   const out: Account[] = []
   const main = mainDirOf(family, home)
   if ((await statOrNull(main))?.isDirectory()) out.push(await accountAt(family, home, 'main'))
+  if (!family.layout.account) return out
   const { prefix, suffix, rest } = splitLayout(family)
   let entries: string[] = []
   try {

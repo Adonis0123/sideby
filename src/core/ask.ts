@@ -187,10 +187,12 @@ function validAttachments(list: unknown): boolean {
  * The Host arguments `ask --run` adds for a prompt task: `<imageArg>=<path>` per attached image for a Family that
  * declares `imageArg` (spec §3.28 "附件"), then the prompt, always last. The `=` form keeps one value per option, so a
  * Host option that takes several values cannot swallow the prompt. An image that is gone, or whose path holds a comma
- * (a Host taking lists may split it), is left to the path in the prompt.
+ * (a Host taking lists may split it), is left to the path in the prompt. A Family with `promptArg` gets the prompt as
+ * `<promptArg>=<prompt>` instead, since its Host refuses a positional prompt.
  */
 export async function taskHostArgs(rt: Runtime, task: TaskFile): Promise<string[]> {
-  const flag = rt.families.get((await rt.resolve(task.account)).family)?.imageArg
+  const family = rt.families.get((await rt.resolve(task.account)).family)
+  const flag = family?.imageArg
   const images: string[] = []
   if (flag)
     for (const a of task.attachments ?? []) {
@@ -203,7 +205,8 @@ export async function taskHostArgs(rt: Runtime, task: TaskFile): Promise<string[
       )
         images.push(`${flag}=${a.path}`)
     }
-  return [...images, task.prompt ?? '']
+  const prompt = task.prompt ?? ''
+  return [...images, family?.promptArg ? `${family.promptArg}=${prompt}` : prompt]
 }
 
 /** `env` with the HOME and XDG folders the task was written under, so the Runtime sees what the Panel saw. */
