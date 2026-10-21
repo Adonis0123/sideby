@@ -995,19 +995,15 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .hist-gtitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hist-gtoggle .spin { width: 12px; height: 12px; }
 .hist-catgrp { display: flex; flex-direction: column; margin-top: 6px; }
-.hist-cathead { position: relative; display: flex; align-items: center; min-width: 0; }
-.hist-cathead > .hist-proj, .hist-cathead > .hist-cat-none { padding-left: 24px; }
-.hist-catfold { position: absolute; left: 2px; top: 50%; z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-top: -10px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--faint); cursor: pointer; transition: background-color .12s, color .12s; }
-.hist-catfold:hover { background: var(--hover); color: var(--text); }
-.hist-catfold:focus-visible { outline: var(--focus-outline); outline-offset: 1px; box-shadow: var(--focus-ring); }
-.hist-catfold .chev { width: 12px; height: 12px; color: inherit; }
-.hist-catfold[aria-expanded=true] .chev { transform: rotate(90deg); }
+.hist-cathead { display: flex; align-items: center; min-width: 0; }
+.hist-cathead > .hist-proj { padding-left: 6px; }
+.hist-cathead .chev { flex: none; width: 12px; height: 12px; }
+.hist-cathead [aria-expanded=true] .chev { transform: rotate(90deg); }
 /* The rows fold by easing the grid row from its content to nothing, so nothing below jumps. */
 .hist-catbody { display: grid; grid-template-rows: 1fr; transition: grid-template-rows .18s ease, opacity .18s ease; }
 .hist-catbody > .hist-catps { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 1px; padding-top: 1px; }
 .hist-catgrp.is-folded .hist-catbody { grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows .18s ease, opacity .18s ease, visibility 0s .18s; }
 .hist-cat { color: var(--text); font-weight: var(--strong-weight); }
-.hist-cat-none { display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 10px; font-size: var(--small); color: var(--muted); }
 .hist-catps .hist-proj { padding-left: 24px; }
 .hist-check { display: inline-flex; align-items: center; gap: 6px; font-size: var(--small); color: var(--muted); cursor: pointer; white-space: nowrap; }
 .hist-check input { margin: 0; accent-color: var(--accent); }
@@ -1122,12 +1118,10 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 :where(:root[data-width=narrow], :root[data-width=phone]) .hist-projs { flex-direction: row; gap: 4px; }
 :where(:root[data-width=narrow], :root[data-width=phone]) .hist-proj { width: auto; flex: none; max-width: 16em; }
 :where(:root[data-width=narrow], :root[data-width=phone]) :is(.hist-catgrp, .hist-catps) { flex-direction: row; display: flex; gap: 4px; margin-top: 0; }
-:where(:root[data-width=narrow], :root[data-width=phone]) .hist-cat-none { display: none; }
 :where(:root[data-width=narrow], :root[data-width=phone]) .hist-catps .hist-proj { padding-left: 10px; }
-:where(:root[data-width=narrow], :root[data-width=phone]) .hist-catfold { display: none; }
-:where(:root[data-width=narrow], :root[data-width=phone]) .hist-cathead > .hist-proj { padding-left: 10px; }
-:where(:root[data-width=narrow], :root[data-width=phone]) :is(.hist-catbody, .hist-cathead) { display: contents; }
-/* Without the arrow a folded category could not be opened again, so a narrow screen shows every category open. */
+:where(:root[data-width=narrow], :root[data-width=phone]) .hist-cathead { display: none; }
+:where(:root[data-width=narrow], :root[data-width=phone]) .hist-catbody { display: contents; }
+/* Without its heading a folded category could not be opened again, so a narrow screen shows every category open. */
 :where(:root[data-width=narrow], :root[data-width=phone]) .hist-catgrp.is-folded .hist-catbody { opacity: 1; visibility: visible; }
 :where(:root[data-width=narrow], :root[data-width=phone]) .hist-row { grid-template-columns: auto minmax(0, 1fr); row-gap: 8px; }
 :where(:root[data-width=narrow], :root[data-width=phone]) .hist-row .sess-actions { grid-column: 2; }
@@ -1162,7 +1156,7 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .dialog:not([open])::backdrop { opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
   .sk, .spin, .is-spinning svg, .toast, .toast.bump, .toast.toast-out, .view-in > *, .set-pane.view-in, .row.flash, .sess-row.flash, .sess-msg, .seg-badge, .card.flash, .pulse, .sess-busy .sess-dot, .menu, .menu.float-out, .dialog[open], .dialog[open]::backdrop, .enter, .fade-in, .hist-list.swap-in, .tip-body, .tip-float, .row-run.is-done .ic { animation: none; }
-  .bar > span, .chev, .row, .sess-row, .sess-copy, .hist-row, .hist-cont, .hist-proj, .hist-catfold, .hist-catbody, .hist-opt, .hist-list, .icon-btn, .seg-btn, .menu-item, .set-tab, .link-btn, .tag-btn, .email-btn, .btn, .chip-btn, .set-link .ic, .dialog, .dialog[open], .dialog::backdrop { transition: none; }
+  .bar > span, .chev, .row, .sess-row, .sess-copy, .hist-row, .hist-cont, .hist-proj, .hist-catbody, .hist-opt, .hist-list, .icon-btn, .seg-btn, .menu-item, .set-tab, .link-btn, .tag-btn, .email-btn, .btn, .chip-btn, .set-link .ic, .dialog, .dialog[open], .dialog::backdrop { transition: none; }
   :is(.btn, .icon-btn, .seg-btn, .set-tab, .chip-btn):active:not(:disabled), .set-link:hover .ic, .dialog:not([open]) { transform: none; }
 }
 `

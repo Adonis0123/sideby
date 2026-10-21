@@ -15,6 +15,7 @@ import {
   autostartNote,
   cacheHitRate,
   canLeaveLocal,
+  categoryOrder,
   codeSwapOutcome,
   fileSize,
   fixPrompt,
@@ -2397,5 +2398,22 @@ describe('histFilters', () => {
       scripts: false,
     })
     assert.deepEqual(histFilters(null), histFilters({}))
+  })
+})
+
+describe('categoryOrder', () => {
+  it('keeps the latest-Session order when nothing was dragged, with uncategorized Projects last', () => {
+    assert.deepEqual(categoryOrder(['coding', '', 'docs'], []), ['coding', 'docs', ''])
+  })
+  it('puts dragged categories first and new ones after them, dropping gone and repeated names', () => {
+    assert.deepEqual(categoryOrder(['coding', 'docs', 'work', ''], ['work', 'gone', 'docs', 'work']), [
+      'work',
+      'docs',
+      'coding',
+      '',
+    ])
+  })
+  it('never moves the empty category out of last place', () => {
+    assert.deepEqual(categoryOrder(['a', '', 'b'], ['', 'b']), ['b', 'a', ''])
   })
 })
