@@ -210,6 +210,13 @@ export const ConfigSchema = Type.Object(
               description: "Panel language: the browser's (default), English, or Chinese.",
             }),
           ),
+          colorTheme: Type.Optional(
+            Type.String({
+              pattern: '^[a-z0-9][a-z0-9-]{0,39}$',
+              description:
+                'Panel Theme: a Built-in Theme (sky, the default, or leaf) or a Theme File in <config>/themes (spec §3.34).',
+            }),
+          ),
         },
         { additionalProperties: false, description: 'How the Panel looks (spec §3.29).' },
       ),
@@ -410,11 +417,24 @@ export const ConfigSchema = Type.Object(
                 'Per family, the names of the accounts pinned to the top of their group, in the order they are shown; they lead the group in every sort. Resetting the order keeps them.',
             }),
           ),
+          hiddenFamilies: Type.Optional(
+            Type.Array(Type.String({ minLength: 1 }), {
+              uniqueItems: true,
+              description:
+                'Family ids hidden from the Panel, the menu bar and `sideby list` (spec §3.25). Display only: they can still be started and picked by a Handoff.',
+            }),
+          ),
+          hidden: Type.Optional(
+            Type.Record(Type.String(), Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true }), {
+              description:
+                'Per family, the names of the accounts hidden from the Panel, the menu bar and `sideby list`. Display only: they can still be started and picked by a Handoff.',
+            }),
+          ),
         },
         {
           additionalProperties: false,
           description:
-            'Display Order (spec §3.25): the order you gave families and accounts in the Panel, and the accounts you pinned. Display only: it never changes which account a Handoff picks.',
+            'Display Order (spec §3.25): the order you gave families and accounts in the Panel, the accounts you pinned, and what you hid. Display only: it never changes which account a Handoff picks.',
         },
       ),
     ),
@@ -683,10 +703,13 @@ export function editConfigDisplay(
     Object.fromEntries(Object.entries(r ?? {}).filter(([, names]) => names.length))
   const accounts = lists(display?.accounts)
   const pinned = lists(display?.pinned)
+  const hidden = lists(display?.hidden)
   const next: DisplayConfig = {
     ...(display?.families?.length ? { families: [...display.families] } : {}),
     ...(Object.keys(accounts).length ? { accounts } : {}),
     ...(Object.keys(pinned).length ? { pinned } : {}),
+    ...(display?.hiddenFamilies?.length ? { hiddenFamilies: [...display.hiddenFamilies] } : {}),
+    ...(Object.keys(hidden).length ? { hidden } : {}),
   }
   return editConfigKey(file, 'display', 'move it again', () => (Object.keys(next).length ? next : undefined))
 }
@@ -823,12 +846,16 @@ export function editConfigAsk(file: string, account?: string) {
 export type PanelConfig = NonNullable<Config['panel']>
 
 /**
- * The Panel's theme and language (spec §3.29): a value sets the key, null removes it (back to the default), and an
+ * The Panel's light/dark, language and Theme (spec §3.29, §3.34): a value sets the key, null removes it (back to the default), and an
  * empty `panel` goes away with it (see `editConfigKey` for how the file is written).
  */
 export function editConfigPanel(
   file: string,
-  patch: { theme?: PanelConfig['theme'] | null; language?: PanelConfig['language'] | null },
+  patch: {
+    theme?: PanelConfig['theme'] | null
+    language?: PanelConfig['language'] | null
+    colorTheme?: PanelConfig['colorTheme'] | null
+  },
   opts: { dryRun?: boolean } = {},
 ): Promise<{ changed: boolean; before: PanelConfig | undefined; after: PanelConfig | undefined }> {
   return editConfigKey(
@@ -837,7 +864,7 @@ export function editConfigPanel(
     'change the setting',
     (current) => {
       const next: Record<string, unknown> = { ...current }
-      for (const k of ['theme', 'language'] as const)
+      for (const k of ['theme', 'language', 'colorTheme'] as const)
         if (patch[k] === null) delete next[k]
         else if (patch[k] !== undefined) next[k] = patch[k]
       return Object.keys(next).length ? (next as PanelConfig) : undefined
@@ -871,6 +898,7 @@ const PLACEHOLDERS: Record<string, string> = {
   'handoff.families': '<family>',
   'display.accounts': '<family>',
   'display.pinned': '<family>',
+  'display.hidden': '<family>',
   'quota.check': '<family>',
 }
 

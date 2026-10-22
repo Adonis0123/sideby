@@ -1677,6 +1677,59 @@ describe('model (spec §3.19)', () => {
   })
 })
 
+describe('theme (spec §3.34)', () => {
+  it('lists, checks, imports, switches, undoes and removes Themes with --json output that matches its schema', async () => {
+    await withFakeHome(async (h) => {
+      const list = checkSchema('theme', (await sideby(h, ['theme', '--json'])).out)
+      assert.deepEqual(
+        (list.themes as { id: string; active: boolean }[]).map((t) => [t.id, t.active]),
+        [
+          ['sky', true],
+          ['leaf', false],
+        ],
+      )
+      const file = await h.write(
+        'work/faint.json',
+        JSON.stringify({ schemaVersion: 1, name: 'Faint', accent: '#cc3366', light: { muted: '#cccccc' } }),
+      )
+      const check = await sideby(h, ['theme', 'check', file, '--json'])
+      assert.equal(check.code, 1)
+      const report = checkSchema('theme-check', check.out)
+      assert.equal(report.ok, false)
+      assert.ok(
+        (report.pairs as { fg: string; ok: boolean; suggest?: string }[]).some(
+          (p) => p.fg === 'muted' && !p.ok && p.suggest,
+        ),
+      )
+      const imported = checkSchema(
+        'theme-import',
+        (await sideby(h, ['theme', 'import', file, '--id', 'mine', '--json'])).out,
+      )
+      assert.equal(imported.replaced, false)
+      const again = await sideby(h, ['theme', 'import', file, '--id', 'mine', '--json'])
+      assert.equal(again.code, 10)
+      checkSchema('theme-import', again.out)
+      const used = checkSchema('theme-use', (await sideby(h, ['theme', 'use', 'mine', '--json'])).out)
+      assert.deepEqual([used.before, used.after], ['default', 'mine'])
+      assert.equal(
+        JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8')).panel.colorTheme,
+        'mine',
+      )
+      checkSchema('theme-use', (await sideby(h, ['theme', 'use', '--undo', '--json'])).out)
+      checkSchema('theme-export', (await sideby(h, ['theme', 'export', 'leaf', '--json'])).out)
+      assert.equal((await sideby(h, ['theme', 'remove', 'mine'])).code, 10)
+      const removed = checkSchema(
+        'theme-remove',
+        (await sideby(h, ['theme', 'remove', 'mine', '--yes', '--json'])).out,
+      )
+      assert.equal(removed.removed, true)
+      const unknown = await sideby(h, ['theme', 'use', 'ocean'])
+      assert.equal(unknown.code, 1)
+      assert.match(unknown.err, /sideby theme list/)
+    })
+  })
+})
+
 describe('config get|set|unset (spec §3.29)', () => {
   it('previews a change with exit 10, writes it with --yes, and lists every key', async () => {
     await withFakeHome(async (h) => {
@@ -2298,6 +2351,74 @@ describe('Panel CLI parity', () => {
       for (const [i, dir] of hostDirs.entries())
         assert.deepEqual(diffSnapshots(before[i]!, await snapshot(h.path(dir))), [])
       assert.equal(await readFile(h.path('.claude.json'), 'utf8'), loginBefore)
+    })
+  })
+
+  it('hides a Same Login or a Family from list and the menu bar, keeps it in --json and through a reset', async () => {
+    await withFakeHome(async (h) => {
+      for (const name of ['main', 'work', 'old']) {
+        const dir = name === 'main' ? '.claude' : `.claude-${name}`
+        await h.write(`${dir}/settings.json`, '{}')
+        const email = name === 'old' ? 'old@example.com' : 'me@example.com'
+        await h.write(
+          name === 'main' ? '.claude.json' : `${dir}/.claude.json`,
+          JSON.stringify({ oauthAccount: { emailAddress: email } }),
+          0o600,
+        )
+      }
+      await fakeHost(h, 'claude')
+      await codexMain(h)
+      await fakeHost(h, 'codex')
+      const hostDirs = ['.claude', '.claude-work', '.claude-old', '.codex']
+      const before = await Promise.all(hostDirs.map((dir) => snapshot(h.path(dir))))
+      const hide = await sideby(h, ['hide', 'claude:work', '--json'])
+      assert.equal(hide.code, 0, hide.out)
+      const data = checkSchema('hide', hide.out)
+      assert.equal(data.kind, 'account')
+      assert.equal(data.changed, true)
+      let config = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8'))
+      // The Same Login of main and work is hidden whole.
+      assert.deepEqual(new Set(config.display.hidden.claude), new Set(['main', 'work']))
+      assert.equal(
+        checkSchema('hide', (await sideby(h, ['hide', 'claude:main', '--json'])).out).changed,
+        false,
+      )
+      const text = await sideby(h, ['list'])
+      assert.equal(text.code, 0)
+      assert.doesNotMatch(text.out, /claude:main|claude:work/)
+      assert.match(text.out, /claude:old/)
+      assert.match(text.out, /2 hidden; sideby list --all/)
+      assert.match((await sideby(h, ['list', '--all'])).out, /claude:work.*\(hidden\)/)
+      const listed = checkSchema('list', (await sideby(h, ['list', '--json'])).out) as {
+        accounts: { ref: string; hidden?: true }[]
+      }
+      assert.deepEqual(
+        listed.accounts
+          .filter((x) => x.hidden)
+          .map((x) => x.ref)
+          .sort(),
+        ['claude:main', 'claude:work'],
+      )
+      const hideFamily = checkSchema('hide', (await sideby(h, ['hide', 'codex', '--json'])).out)
+      assert.equal(hideFamily.kind, 'family')
+      const menu = checkSchema('menubar-snapshot', (await sideby(h, ['menubar', 'snapshot', '--json'])).out)
+      const refs = JSON.stringify(menu)
+      assert.doesNotMatch(refs, /claude:work|codex:main/)
+      assert.match(refs, /claude:old/)
+      const order = checkSchema('order', (await sideby(h, ['order', '--reset', '--json'])).out)
+      assert.deepEqual((order.display as { hiddenFamilies?: string[] }).hiddenFamilies, ['codex'])
+      assert.ok(
+        (order.families as { family: string; hidden: boolean }[]).find((f) => f.family === 'codex')?.hidden,
+      )
+      const blocked = await sideby(h, ['unhide', 'codex:main', '--json'])
+      assert.equal(blocked.code, 1)
+      assert.match(String(checkSchema('error', blocked.out).error), /sideby unhide codex/)
+      assert.equal((await sideby(h, ['unhide', 'codex'])).code, 0)
+      assert.equal((await sideby(h, ['unhide', 'claude:work'])).code, 0)
+      config = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8'))
+      assert.equal(config.display, undefined)
+      for (const [i, dir] of hostDirs.entries())
+        assert.deepEqual(diffSnapshots(before[i]!, await snapshot(h.path(dir))), [])
     })
   })
 

@@ -159,11 +159,16 @@ In the panel, open **Settings** and choose **Account order and pins** (or pick *
 
 Open the row's **⋯** menu and choose **Pin to top**, or use **Settings › Account order and pins**, or run `sideby pin <account>`. A pinned account shows a small pin before its name and stays at the top of its tool in every sort; `sideby list` puts it first too. Up to three per tool; while arranging, pinned accounts move among themselves. **Default order** keeps your pins; choose **Unpin** in the same menu to take one off. Pins never change which account `sideby next` or Auto Handoff picks.
 
+### Hide a tool or an account
+
+When the list shows tools or accounts you do not use, open the row's **⋯** menu and choose **Hide this account** or **Hide all of Claude Code** (whichever tool it is), or click the eye in **Settings › Account order, pins and hidden**, or run `sideby hide pi` / `sideby hide claude:old`. A hidden one leaves the panel's list, its counts and warnings, the menu bar, and `sideby list`; a line under the list says how many are hidden, with a red dot when one of them needs a look, and **Show** brings them back for this page, marked **Hidden**. Two directories of one login are hidden together. Hiding only changes what you see: the account still starts with `sideby run`, still shows in Session History, and `sideby next` or Auto Handoff can still pick it (change the Handoff Rules to stop that). **Default order** keeps what you hid. A new tool or account is shown until you hide it.
+
 
 CLI settings (also accept `--json`):
 
 - `sideby pin claude:work` / `sideby unpin claude:work`: pin or unpin a Same Login together, at most three per Family. Repeated operations do nothing; unpin one first when full.
-- `sideby order`: show Display Order with pins marked. `sideby order claude work main` sets account names; `sideby order --families codex claude` sets Families. Unknown names fail. `sideby order --reset` restores default order and keeps pins.
+- `sideby hide pi` / `sideby unhide pi`: hide or show a whole tool; `sideby hide claude:old` hides one account with its Same Login. `sideby list --all` also lists hidden ones; `sideby list --json` always does, marked `hidden: true`.
+- `sideby order`: show Display Order with pins and hidden ones marked. `sideby order claude work main` sets account names; `sideby order --families codex claude` sets Families. Unknown names fail. `sideby order --reset` restores default order and keeps pins and hidden ones.
 - `sideby quota check grok on` / `sideby quota check grok off`: save the quota fetching switch. `sideby quota --refresh` refreshes every Family that fetches, respecting disabled checks and CI.
 - `sideby update --auto on` / `sideby update --auto off`: save Auto Update immediately, without checking or installing an update.
 - `sideby handoff status --json`: includes `overview.settings`, `overview.takeover` and `overview.recent` alongside readiness.
@@ -339,7 +344,7 @@ On macOS, run `sideby menubar on` (or turn on **Show quota in the menu bar** in 
 
 Every other setting has a command too: `sideby config get` lists them with their values, and `sideby config set panel.theme dark` changes one (it shows the change first).
 
-The menu footer says when sideby last **checked**. Each row keeps the quota observation time in its tooltip. Readings older than one hour, or whose query failed, are grey and marked **older reading**. Repeated checks do not make old data current.
+The menu footer says when sideby last **checked**. Each row keeps the quota observation time in its tooltip. Readings older than one hour, or whose query failed, are grey and marked **older reading**, unless this computer has not used that login since the reading: then the numbers stand, and the tooltip says that use on the web or another computer is not included. Repeated checks do not make old data current. Claude Code quota changes only when a session runs in that account, so its older readings say that instead of asking you to refresh.
 
 ## Host notes
 

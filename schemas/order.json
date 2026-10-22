@@ -42,6 +42,23 @@
               }
             }
           }
+        },
+        "hiddenFamilies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "hidden": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     },
@@ -51,11 +68,15 @@
         "type": "object",
         "required": [
           "family",
+          "hidden",
           "accounts"
         ],
         "properties": {
           "family": {
             "type": "string"
+          },
+          "hidden": {
+            "type": "boolean"
           },
           "accounts": {
             "type": "array",
@@ -64,7 +85,8 @@
               "required": [
                 "name",
                 "ref",
-                "pinned"
+                "pinned",
+                "hidden"
               ],
               "properties": {
                 "name": {
@@ -74,6 +96,9 @@
                   "type": "string"
                 },
                 "pinned": {
+                  "type": "boolean"
+                },
+                "hidden": {
                   "type": "boolean"
                 }
               }

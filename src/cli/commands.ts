@@ -1,3 +1,5 @@
+import { stat, writeFile } from 'node:fs/promises'
+import { basename, join, resolve } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { fileURLToPath } from 'node:url'
 import { aliasesByAccount } from '../core/accounts.ts'
@@ -45,6 +47,7 @@ import { MODEL_NAME } from '../families/shared/model-args.ts'
 import {
   AI_TASK_KINDS,
   type AiTaskKind,
+  hiddenIn,
   inDisplayOrder,
   pinnedIn,
   suggestAlias,
@@ -185,6 +188,8 @@ function cleanDisplay(rt: Runtime, groups: Map<string, string[]>): DisplayConfig
     families: d.families?.filter((id) => groups.has(id)),
     accounts: clean(d.accounts),
     pinned: clean(d.pinned),
+    hiddenFamilies: d.hiddenFamilies?.filter((id) => groups.has(id)),
+    hidden: clean(d.hidden),
   }
 }
 
@@ -226,6 +231,60 @@ export async function cmdPin(a: ParsedArgs, io: Io, pin: boolean): Promise<numbe
   return 0
 }
 
+/**
+ * `sideby hide|unhide <family|account>` (spec §3.25): takes a Family, or an Account with the other directories of its
+ * Same Login, out of the lists or puts it back. Display only.
+ */
+export async function cmdHide(a: ParsedArgs, io: Io, hide: boolean): Promise<number> {
+  if (a.positionals.length !== 1 || a.rest.length)
+    throw new UsageError('usage: sideby hide|unhide <family|account|short command> [--json]')
+  const rt = await createRuntime()
+  const target = a.positionals[0]!
+  const accounts = await rt.accounts()
+  const d = cleanDisplay(rt, await orderGroups(rt, accounts))
+  let kind: 'family' | 'account'
+  let ref: string
+  let already: boolean
+  if (rt.families.has(target)) {
+    kind = 'family'
+    ref = target
+    const list = d.hiddenFamilies ?? []
+    already = list.includes(target)
+    d.hiddenFamilies = hide ? (already ? list : [...list, target]) : list.filter((id) => id !== target)
+  } else {
+    kind = 'account'
+    const account = await rt.resolve(target)
+    ref = account.ref
+    const peers = new Set([account.ref, ...(await rt.sameLogin(account))])
+    const names = accounts.filter((x) => peers.has(x.ref)).map((x) => x.name)
+    const list = d.hidden?.[account.family] ?? []
+    already = names.some((name) => list.includes(name))
+    d.hidden = {
+      ...d.hidden,
+      [account.family]: hide
+        ? [...list, ...names.filter((name) => !list.includes(name))]
+        : list.filter((name) => !names.includes(name)),
+    }
+    if (!hide && !already && d.hiddenFamilies?.includes(account.family))
+      throw new UserError(
+        `All of ${account.family} is hidden, not just ${account.ref}; run sideby unhide ${account.family} to show the family again.`,
+      )
+  }
+  const before = JSON.stringify(rt.displayOrder())
+  const display = await rt.setDisplayOrder(d)
+  const changed = before !== JSON.stringify(display)
+  const message = hide
+    ? already
+      ? 'Already hidden.'
+      : `Hidden from the Panel, the menu bar and sideby list; it can still be started. sideby unhide ${ref} shows it again.`
+    : already
+      ? 'Shown again.'
+      : 'Not hidden; nothing to change.'
+  if (a.flags.has('json')) json(io, { target: ref, kind, hidden: hide, changed, message, display })
+  else io.out(`${ref}: ${message}`)
+  return 0
+}
+
 export async function cmdOrder(a: ParsedArgs, io: Io): Promise<number> {
   const reset = a.flags.has('reset')
   const families = a.flags.has('families')
@@ -241,7 +300,7 @@ export async function cmdOrder(a: ParsedArgs, io: Io): Promise<number> {
   if (reset || families || a.positionals.length) {
     const groups = await orderGroups(rt, accounts)
     let d = cleanDisplay(rt, groups)
-    if (reset) d = { pinned: d.pinned }
+    if (reset) d = { pinned: d.pinned, hiddenFamilies: d.hiddenFamilies, hidden: d.hidden }
     else {
       const [id, ...names] = a.positionals
       const requested = families ? a.positionals : names
@@ -266,6 +325,7 @@ export async function cmdOrder(a: ParsedArgs, io: Io): Promise<number> {
   const groups = await orderGroups(rt, accounts)
   const rows = inDisplayOrder([...groups.keys()], (id) => id, display.families).map((family) => ({
     family,
+    hidden: display.hiddenFamilies?.includes(family) ?? false,
     accounts: rt.families.has(family)
       ? ordered
           .filter((x) => x.family === family)
@@ -273,18 +333,20 @@ export async function cmdOrder(a: ParsedArgs, io: Io): Promise<number> {
             name: x.name,
             ref: x.ref,
             pinned: display.pinned?.[family]?.includes(x.name) ?? false,
+            hidden: hiddenIn(x, display),
           }))
       : inDisplayOrder(groups.get(family) ?? [], (n) => n, display.accounts?.[family]).map((name) => ({
           name,
           ref: `${family}:${name}`,
           pinned: false,
+          hidden: hiddenIn({ family, name }, display),
         })),
   }))
   if (a.flags.has('json')) json(io, { display, families: rows })
   else
     for (const row of rows)
       io.out(
-        `${row.family}: ${row.accounts.map((x) => `${x.name}${x.pinned ? ' (pinned)' : ''}`).join(', ') || '(no accounts)'}`,
+        `${row.family}${row.hidden ? ' (hidden)' : ''}: ${row.accounts.map((x) => `${x.name}${x.pinned ? ' (pinned)' : ''}${x.hidden && !row.hidden ? ' (hidden)' : ''}`).join(', ') || '(no accounts)'}`,
       )
   return 0
 }
@@ -299,9 +361,11 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
   const accounts = displayOrdered(await rt.accounts(), rt)
   const [statuses, appProfiles] = await Promise.all([
     withDesktopApps(rt, accounts, Promise.all(accounts.map((x) => rt.status(x)))).then((list) =>
-      list.map((s) =>
-        pinnedIn(s, rt.displayOrder().pinned?.[s.family] ?? []) ? { ...s, pinned: true as const } : s,
-      ),
+      list.map((s) => {
+        const d = rt.displayOrder()
+        const marked = pinnedIn(s, d.pinned?.[s.family] ?? []) ? { ...s, pinned: true as const } : s
+        return hiddenIn(s, d) ? { ...marked, hidden: true as const } : marked
+      }),
     ),
     // Desktop app windows in the Display Order too (spec §3.25), the main window first by default.
     listAppProfiles(rt).then((list) => {
@@ -319,13 +383,25 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
     }),
   ])
   const hasDesktop = statuses.some((s) => s.desktopApp)
-  const families = inDisplayOrder(await rt.familyInfo(), (f) => f.id, rt.displayOrder().families)
+  const families = inDisplayOrder(await rt.familyInfo(), (f) => f.id, rt.displayOrder().families).map((f) =>
+    rt.displayOrder().hiddenFamilies?.includes(f.id) ? { ...f, hidden: true as const } : f,
+  )
   if (a.flags.has('json')) {
     json(io, { families, accounts: statuses, appProfiles, pluginErrors: [...rt.pluginErrors] })
     return 0
   }
   const home = rt.paths.home
-  if (statuses.length === 0) {
+  // Hidden Accounts (spec §3.25) stay out of the text unless --all asks for them; --json above has them all.
+  const all = a.flags.has('all')
+  const shown = all ? statuses : statuses.filter((s) => !s.hidden)
+  const hiddenCount = statuses.length - shown.length
+  const hiddenLine = c.dim(
+    `\n${hiddenCount} hidden; sideby list --all shows them, sideby unhide <family|account> puts one back.`,
+  )
+  if (statuses.length && !shown.length) {
+    io.out(`All ${statuses.length} accounts are hidden.`)
+    io.out(hiddenLine)
+  } else if (statuses.length === 0) {
     io.out('No accounts found yet.')
     const installed = families.filter((f) => f.installed)
     if (installed.length === 0)
@@ -336,8 +412,8 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
     const brokenOf = (id: string) => families.find((f) => f.id === id)?.brokenBin
     const sameMark = (refs: readonly string[] | undefined) =>
       refs?.length ? ` ${c.dim(`= ${refs.map((r) => r.slice(r.indexOf(':') + 1)).join(', ')}`)}` : ''
-    const rows = statuses.map((s) => [
-      `${c.bold(s.ref)}${sameMark(s.sameLogin)}`,
+    const rows = shown.map((s) => [
+      `${c.bold(s.ref)}${sameMark(s.sameLogin)}${s.hidden ? ` ${c.dim('(hidden)')}` : ''}`,
       s.isMain ? 'main' : s.kind === 'api' ? c.cyan('api') : 'sub',
       s.login === 'logged-in'
         ? c.green('✓')
@@ -357,7 +433,7 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
       table(rows, ['ACCOUNT', 'TYPE', 'LOGIN', 'EMAIL', 'MODEL', 'DIR', ...(hasDesktop ? ['DESKTOP'] : [])]),
     )
     // One line per Host that cannot run, with what to do: the rows only say which accounts it affects.
-    for (const f of families.filter((x) => !x.installed && statuses.some((s) => s.family === x.id)))
+    for (const f of families.filter((x) => !x.installed && shown.some((s) => s.family === x.id)))
       io.out(
         c.yellow(
           f.brokenBin
@@ -365,8 +441,9 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
             : `\n${f.title} is not installed; install it: ${installHint(f)}`,
         ),
       )
-    if (statuses.some((s) => s.sameLogin?.length))
+    if (shown.some((s) => s.sameLogin?.length))
       io.out(c.dim('\n= <account>: signed in as the same login as that account, so they share one quota.'))
+    if (hiddenCount) io.out(hiddenLine)
     io.out(c.dim('\nsideby run <account>  ·  sideby new <family> <name>  ·  sideby quota  ·  sideby ui'))
   }
   // App Profiles (ADR-0019): windows of an app that signs in apart from the Accounts above. Not on the first screen
@@ -393,7 +470,7 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
     const id = list[0]?.ref.slice(0, list[0].ref.indexOf(':'))
     io.out(c.dim(`sideby desktop ${id}:<name> opens one (a new name makes a new window)`))
   }
-  for (const s of statuses) for (const p of s.problems ?? []) io.err(c.yellow(`${s.ref}: ${p}`))
+  for (const s of shown) for (const p of s.problems ?? []) io.err(c.yellow(`${s.ref}: ${p}`))
   for (const e of rt.pluginErrors) io.err(c.yellow(`plugin ${e.where}: ${e.message}`))
   return 0
 }
@@ -2719,27 +2796,61 @@ export async function cmdAutostart(a: ParsedArgs, io: Io): Promise<number> {
   return 0
 }
 
+/** The newest session activity among these Accounts, from their Usage; undefined when none can be read. */
+async function lastLocalUse(rt: Runtime, list: readonly Account[]): Promise<string | undefined> {
+  const times = await Promise.all(
+    list.map(async (x) => {
+      const u = await rt.usage(x).catch(() => null)
+      return u?.status === 'ok' && u.lastActivityAt ? Date.parse(u.lastActivityAt) : Number.NaN
+    }),
+  )
+  const newest = Math.max(...times.filter(Number.isFinite))
+  return Number.isFinite(newest) ? new Date(newest).toISOString() : undefined
+}
+
 /** What the Menu Bar Item lists (spec §3.31): each Family's accounts in Display Order, with its Handoff ranking. */
 async function menubarFamilies(rt: Runtime) {
-  const accounts = displayOrdered(await rt.accounts(), rt)
+  // Hidden Families and Accounts (spec §3.25) stay out of the menu and its percent; a Same Login is hidden whole.
+  const display = rt.displayOrder()
+  const every = displayOrdered(await rt.accounts(), rt)
+  const accounts: Account[] = []
+  for (const x of every) if (!hiddenIn({ ...x, sameLogin: await rt.sameLogin(x) }, display)) accounts.push(x)
   const ids = [...new Set(accounts.map((x) => x.family))]
   return Promise.all(
     ids.map(async (id) => {
       const f = rt.families.get(id)!
       const plan = f.readQuota || f.fetchQuota ? await rt.handoff(id).catch(() => null) : null
+      const now = rt.readContext().now.getTime()
       const list = await Promise.all(
         accounts
           .filter((x) => x.family === id)
-          .map(async (x) => ({
-            ref: x.ref,
-            name: x.name,
-            kind: x.kind,
-            login: x.kind === 'api' ? ('not-needed' as const) : (await rt.status(x)).login,
-            quota: await rt.quota(x),
-            sameLogin: await rt.sameLogin(x),
-          })),
+          .map(async (x) => {
+            const quota = await rt.quota(x)
+            const sameLogin = await rt.sameLogin(x)
+            // Usage is read only for a reading over an hour old, to tell whether this computer used the login since.
+            const old = quota.status === 'ok' && now - Date.parse(quota.observedAt) > 3600_000
+            const lastUseAt = old
+              ? await lastLocalUse(rt, [x, ...accounts.filter((p) => sameLogin.includes(p.ref))])
+              : undefined
+            return {
+              ref: x.ref,
+              name: x.name,
+              kind: x.kind,
+              login: x.kind === 'api' ? ('not-needed' as const) : (await rt.status(x)).login,
+              quota,
+              sameLogin,
+              ...(lastUseAt ? { lastUseAt } : {}),
+            }
+          }),
       )
-      return { id, title: f.title, logo: f.logo ?? null, plan, accounts: list }
+      return {
+        id,
+        title: f.title,
+        logo: f.logo ?? null,
+        refreshable: Boolean(f.fetchQuota),
+        plan,
+        accounts: list,
+      }
     }),
   )
 }
@@ -3835,4 +3946,204 @@ async function messagesInbound(a: ParsedArgs, args: string[], io: Io, runtime?: 
     io.out(r.message)
   }
   return r.ok ? 0 : 1
+}
+
+/** `sideby theme` (spec §3.34): list, use, undo, check, preview, import, export and remove Themes. */
+export async function cmdTheme(a: ParsedArgs, io: Io): Promise<number> {
+  const t = await import('../core/themes.ts')
+  const { loadConfig } = await import('../core/config.ts')
+  const [sub = 'list', target, ...more] = a.positionals
+  const wantJson = a.flags.has('json')
+  const paths = resolvePaths()
+  const usage =
+    'usage: sideby theme [list] | use <name> | use --undo | check <name|file> | preview <name|file> | import <file> [--id <name>] [--yes] | export <name> [--out <file>] | remove <name> [--yes] [--json]'
+  if (more.length) throw new UsageError(usage)
+  const active = async () =>
+    (await loadConfig(paths.configFile).catch(() => ({}) as { panel?: { colorTheme?: string } })).panel
+      ?.colorTheme ?? 'sky'
+  // A name, or a path to a Theme File not yet in the themes folder.
+  const load = async (ref: string) => {
+    if (t.THEME_ID_RE.test(ref) && !ref.endsWith('.json'))
+      return { id: ref, theme: await t.exportTheme(paths, ref) }
+    const r = await t.readThemeFile(resolve(ref))
+    if (!r.theme) throw new UserError(`${ref} ${r.problems.join('; ')}`)
+    for (const w of r.warnings) io.err(c.yellow(`! ${w}`))
+    return { id: basename(ref, '.json'), theme: r.theme }
+  }
+  if (sub === 'list') {
+    if (target) throw new UsageError(usage)
+    const now = await active()
+    const themes = (await t.listThemes(paths)).map((e) => ({
+      id: e.id,
+      name: e.name,
+      source: e.source,
+      ...(e.path ? { path: tilde(e.path, paths.home) } : {}),
+      active: e.id === now,
+      problems: e.problems,
+      warnings: e.warnings,
+    }))
+    if (wantJson) json(io, { folder: tilde(t.themesDir(paths), paths.home), themes })
+    else {
+      for (const e of themes) {
+        const mark = e.active ? c.green('●') : ' '
+        io.out(`${mark} ${e.id.padEnd(14)} ${e.name}${e.source === 'builtin' ? c.dim(' (built in)') : ''}`)
+        for (const p of e.problems) io.out(c.red(`    ✗ ${p}${e.path ? ` (${e.path})` : ''}`))
+        for (const w of e.warnings) io.out(c.yellow(`    ! ${w}`))
+      }
+      io.out(
+        c.dim(
+          `Switch: sideby theme use <name>. Your Theme Files go in ${tilde(t.themesDir(paths), paths.home)}.`,
+        ),
+      )
+    }
+    return 0
+  }
+  if (sub === 'use') {
+    const undo = a.flags.has('undo')
+    if (undo === Boolean(target))
+      throw new UsageError(
+        'usage: sideby theme use <name> | sideby theme use --undo | sideby theme use default [--json]',
+      )
+    let r: { before: string; after: string; changed?: boolean }
+    try {
+      r = undo ? await t.undoTheme(paths) : await t.useTheme(paths, target!)
+    } catch (e) {
+      throw new UserError((e as Error).message)
+    }
+    if (wantJson) json(io, { before: r.before, after: r.after, changed: r.changed ?? true })
+    else
+      io.out(
+        r.changed === false
+          ? `Already using ${r.after}.`
+          : `${c.green('✓')} Theme ${r.before} → ${r.after}. The Panel shows it on its next refresh${undo ? '.' : '; undo with `sideby theme use --undo`.'}`,
+      )
+    return 0
+  }
+  if (sub === 'check') {
+    if (!target) throw new UsageError(usage)
+    const { id, theme } = await load(target)
+    const pairs = t.contrastPairs(t.themeColors(theme))
+    const failing = pairs.filter((p) => !p.ok)
+    if (wantJson) json(io, { id, ok: failing.length === 0, pairs, warnings: [] })
+    else {
+      for (const p of pairs)
+        if (p.ratio !== undefined)
+          io.out(
+            `${p.ok ? c.green('✓') : c.red('✗')} ${p.mode.padEnd(5)} ${`${p.fg} on ${p.bg}`.padEnd(24)} ${p.ratio.toFixed(2)}:1 (needs ${p.min})${p.suggest ? c.dim(`  try ${p.fg}: ${p.suggest}`) : ''}`,
+          )
+      io.out(
+        failing.length
+          ? c.yellow(
+              `${failing.length} pair(s) too faint. The Panel moves them to the value shown; set those values in the file to choose them yourself.`,
+            )
+          : `${c.green('✓')} Every pair is readable in light and dark.`,
+      )
+    }
+    return failing.length ? 1 : 0
+  }
+  if (sub === 'preview') {
+    if (!target) throw new UsageError(usage)
+    const { theme } = await load(target)
+    await t.setPreview(paths, theme)
+    const { backgroundPanelPort, findRunningPanel } = await import('../panel/background.ts')
+    const port = await backgroundPanelPort(paths)
+    const url = port ? await findRunningPanel(paths, port) : undefined
+    if (!url) {
+      if (wantJson)
+        json(io, {
+          opened: false,
+          hint: 'start the Panel with `sideby ui --background`, then run this again',
+        })
+      else
+        io.err(
+          c.yellow('The Panel is not running. Start it with `sideby ui --background`, then run this again.'),
+        )
+      return 1
+    }
+    const { openBrowser } = await import('../panel/server.ts')
+    const opened = await openBrowser(`${url}?theme=preview`)
+    if (wantJson) json(io, { opened, url: `${url}?theme=preview` })
+    else
+      io.out(
+        `Showing ${theme.name} for this one look (${url}?theme=preview); your Theme stays the same. Keep it with \`sideby theme import\` and \`sideby theme use\`.`,
+      )
+    return 0
+  }
+  if (sub === 'import') {
+    if (!target) throw new UsageError(usage)
+    const { id: fromName, theme } = await load(target)
+    const idFlag = a.flags.get('id')
+    const id = typeof idFlag === 'string' ? idFlag : fromName
+    const dest = join(t.themesDir(paths), `${id}.json`)
+    const exists = await stat(dest).then(
+      () => true,
+      () => false,
+    )
+    if (exists && !a.flags.has('yes')) {
+      if (wantJson) json(io, { id, path: tilde(dest, paths.home), replaced: false, exists: true })
+      else
+        io.out(
+          `${tilde(dest, paths.home)} already exists. Replace it with \`sideby theme import ${target} --yes\`.`,
+        )
+      return 10
+    }
+    let path: string
+    try {
+      path = await t.saveThemeFile(paths, id, theme)
+    } catch (e) {
+      throw new UserError((e as Error).message)
+    }
+    if (wantJson) json(io, { id, path: tilde(path, paths.home), replaced: exists })
+    else io.out(`${c.green('✓')} Saved ${theme.name} as ${id}. Use it with \`sideby theme use ${id}\`.`)
+    return 0
+  }
+  if (sub === 'export') {
+    if (!target) throw new UsageError(usage)
+    let theme: Awaited<ReturnType<typeof t.exportTheme>>
+    try {
+      theme = await t.exportTheme(paths, target)
+    } catch (e) {
+      throw new UserError((e as Error).message)
+    }
+    const text = `${JSON.stringify(theme, null, 2)}\n`
+    const out = a.flags.get('out')
+    if (typeof out === 'string') {
+      await writeFile(resolve(out), text, { flag: 'wx' }).catch((e: NodeJS.ErrnoException) => {
+        throw new UserError(
+          e.code === 'EEXIST'
+            ? `${out} already exists; pick another file`
+            : `cannot write ${out} (${e.code})`,
+        )
+      })
+      if (wantJson) json(io, { id: target, out })
+      else
+        io.out(
+          `${c.green('✓')} Wrote ${out}. Edit it, then \`sideby theme check ${out}\` and \`sideby theme import ${out}\`.`,
+        )
+    } else if (wantJson) json(io, { id: target, theme })
+    else io.out(text.trimEnd())
+    return 0
+  }
+  if (sub === 'remove') {
+    if (!target) throw new UsageError(usage)
+    if (!a.flags.has('yes')) {
+      if (wantJson) json(io, { id: target, removed: false })
+      else
+        io.out(`This deletes the Theme File ${target}. Run \`sideby theme remove ${target} --yes\` to do it.`)
+      return 10
+    }
+    let r: { path: string; wasActive: boolean }
+    try {
+      r = await t.removeThemeFile(paths, target)
+    } catch (e) {
+      throw new UserError((e as Error).message)
+    }
+    if (wantJson) json(io, { id: target, removed: true, wasActive: r.wasActive })
+    else
+      io.out(
+        `${c.green('✓')} Removed ${tilde(r.path, paths.home)}${r.wasActive ? '; the Panel is back on Sky' : ''}.`,
+      )
+    return 0
+  }
+  throw new UsageError(usage)
 }

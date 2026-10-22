@@ -21,10 +21,22 @@ export const USAGE_DAYS = 7
 
 export type QuotaLevel = 'ok' | 'warn' | 'fail'
 
-/** Shared by the Panel and menu bar. Self-contained so the Panel can inline it without other module state. */
-export function quotaIsStale(quota: { observedAt: string; fetchError?: string }, now: number): boolean {
+/**
+ * Shared by the Panel and menu bar. Self-contained so the Panel can inline it without other module state.
+ * A reading over an hour old is still current when `lastUseAt`, the newest use of its login on this computer, came at
+ * most 10 minutes after it (a session's last records land after its last status line): nothing here has used the
+ * Quota since (spec §3.31). Use on the web or another computer cannot be seen; the hover text says so.
+ */
+export function quotaIsStale(
+  quota: { observedAt: string; fetchError?: string },
+  now: number,
+  lastUseAt?: string | null,
+): boolean {
   const at = Date.parse(quota.observedAt)
-  return Boolean(quota.fetchError) || !Number.isFinite(at) || now - at > 3600_000 || at - now > 60_000
+  if (quota.fetchError || !Number.isFinite(at) || at - now > 60_000) return true
+  if (now - at <= 3600_000) return false
+  const used = lastUseAt ? Date.parse(lastUseAt) : Number.NaN
+  return !(Number.isFinite(used) && used - at <= 600_000)
 }
 
 export function quotaLevel(usedPercent: number): QuotaLevel {

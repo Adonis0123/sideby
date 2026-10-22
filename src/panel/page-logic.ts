@@ -154,6 +154,22 @@ export function attentionReasons(
 }
 
 /**
+ * How serious an Account's `quota-high` is: `fail` once its fullest live window reaches `fail` (the bar turns red),
+ * else `warn`, so a running-low label takes the same color as the bar it speaks about.
+ */
+export function quotaHighLevel(a: LogicAccount, now: number, fail: number): 'warn' | 'fail' {
+  const q = a.quota
+  if (!q || q.status !== 'ok' || !q.windows || q.from) return 'warn'
+  for (const w of q.windows) {
+    if (w.name) continue
+    const reset = Date.parse(w.resetsAt)
+    if (Number.isFinite(reset) && reset <= now) continue
+    if ((Number(w.usedPercent) || 0) >= fail) return 'fail'
+  }
+  return 'warn'
+}
+
+/**
  * The one status badge an account row shows after its name (spec §3.27), most important first: `health-fail`
  * (needs fixing), `quota-high` (running low), the other attention labels (`signed-out`, `not-installed`,
  * `health-warn`), then `next` (recommended) and last `api`. Null when none applies. `reasons` are attentionReasons'.
@@ -290,6 +306,21 @@ export function pinnedIn(
 ): boolean {
   return (
     pinned.includes(a.name) || (a.sameLogin ?? []).some((r) => pinned.includes(r.slice(r.indexOf(':') + 1)))
+  )
+}
+
+/**
+ * Whether an Account is Hidden (spec §3.25): its Family is in `hiddenFamilies`, or its name is in `hidden.<family>`,
+ * or, for a Same Login, the name of any of its directories, so the login is hidden as a whole.
+ */
+export function hiddenIn(
+  a: { family: string; name: string; sameLogin?: readonly string[] },
+  display: { hiddenFamilies?: readonly string[]; hidden?: Record<string, readonly string[]> },
+): boolean {
+  if (display.hiddenFamilies?.includes(a.family)) return true
+  const names = display.hidden?.[a.family] ?? []
+  return (
+    names.includes(a.name) || (a.sameLogin ?? []).some((r) => names.includes(r.slice(r.indexOf(':') + 1)))
   )
 }
 
@@ -1082,6 +1113,7 @@ export const AI_TASK_KINDS = [
   'host',
   'plugin',
   'terminal',
+  'theme',
   'handoff',
   'menubar',
   'hotkey',
@@ -1197,6 +1229,8 @@ export function taskPrompt(
       version?: string
       /** The custom terminal command saved now (`terminal` task). */
       terminalCustom?: string
+      /** The Theme in use, for `theme`. */
+      theme?: string
       /** Names of the supported terminals installed on this computer (`terminal` task). */
       terminals?: readonly string[]
       /** Auto Handoff facts, one per line, as `handoffTaskFacts` gives them (`handoff` task). */
@@ -1231,6 +1265,7 @@ export function taskPrompt(
         host: '帮我给 sideby 加一个它还不支持的 AI 编程工具（宿主），先做成本机的 Family 插件。',
         plugin: '帮我写一个 sideby 插件或 hook。',
         terminal: '帮我让 sideby 能在我用的终端里打开 AI 任务：写一条自定义终端命令。',
+        theme: '帮我给 sideby 面板配一套颜色（主题）。',
         handoff: '帮我调好 sideby 的自动接力：根据我的账号推荐什么时候接力（阈值）和接力的顺序。',
         menubar: 'sideby 的状态栏额度图标在 macOS 顶栏里看不到，请帮我找出原因并让它显示出来。',
         hotkey: '帮我给 sideby 的状态栏菜单挑一个单手按着顺手、又没被别的程序占用的快捷键，并替我设好。',
@@ -1246,6 +1281,7 @@ export function taskPrompt(
         cFindings: '体检发现：',
         cQuota: '额度原因：',
         cVersion: 'sideby 版本：',
+        cTheme: '现在的主题：',
         cCustom: '现在的自定义终端命令：',
         cTerminals: '本机装了的、sideby 支持的终端：',
         cNoTerminals: '本机没找到 sideby 支持的终端',
@@ -1261,6 +1297,8 @@ export function taskPrompt(
           '用 `sideby plugins new <id>` 生成插件骨架；收集事实时写明宿主的版本和日期；用 `sideby plugins check <id>` 检查，并在演示 HOME 里试一遍。',
         pPlugin:
           '照 sideby 仓库的插件指南 docs/guide/plugins.zh-CN.md 写；写完用 `sideby plugins check <id>` 检查。',
+        pTheme:
+          '先跑 `sideby theme --json` 看现有主题和正在用的那套，再问我想要的感觉；我给了截图、网址或品牌色，就从里面取色。写一个主题文件（JSON，只放颜色，不放代码）：`{"schemaVersion":1,"name":"…","base":"sky" 或 "leaf","accent":"#rrggbb","light":{…},"dark":{…}}`；多数时候给 `base` 和 `accent` 就够了，`light` / `dark` 只写要改的 token（`sideby theme export sky` 能看到全部 token）。先放在当前目录，跑 `sideby theme check <文件>`，有不达标的就按建议值改到全部通过；再跑 `sideby theme preview <文件>` 让我在面板里看一眼。我满意后才 `sideby theme import <文件>` 和 `sideby theme use <名字>`；不满意就接着改。随时可以用 `sideby theme use --undo` 换回去。',
         pTerminal:
           "先问我用的是什么终端。只看这个终端的官方文档和它的 `--help`，找出「在指定目录新开一个窗口运行一条命令」的写法，写明你看的版本。写成一个模板：`{cmd}` 是要运行的命令，`{cwd}` 是文件夹，sideby 按参数填入，不经过 shell。保存要用 `sideby terminal --custom '<模板>'`，它会改 sideby 的设置，先问我。保存后让我在面板上点一次「让 AI 帮我」试一下，打不开就一起看错误再改。",
         share:
@@ -1284,6 +1322,7 @@ export function taskPrompt(
           'account to sideby (a subscription, or an API address).',
         host: 'Help me add an AI coding tool (Host) that sideby does not support yet, first as a local Family Plugin.',
         plugin: 'Help me write a sideby plugin or hook.',
+        theme: 'Help me pick a set of colors (a Theme) for the sideby Panel.',
         terminal: 'Help sideby open AI Tasks in the terminal I use: write a custom terminal command.',
         handoff:
           "Help me tune sideby's Auto Handoff: from my accounts, recommend when to hand over (the threshold) and in what order.",
@@ -1302,6 +1341,7 @@ export function taskPrompt(
         cFindings: 'Health check findings:',
         cQuota: 'Quota reason: ',
         cVersion: 'sideby version: ',
+        cTheme: 'Theme now: ',
         cCustom: 'Custom terminal command now: ',
         cTerminals: 'Supported terminals installed here: ',
         cNoTerminals: 'No supported terminal is installed here',
@@ -1317,6 +1357,8 @@ export function taskPrompt(
           'Start with `sideby plugins new <id>`; note the Host version and the date with every fact you gather; check it with `sideby plugins check <id>` and try it in a demo HOME.',
         pPlugin:
           'Follow the plugins guide in the sideby repository (docs/guide/plugins.md); check it with `sideby plugins check <id>`.',
+        pTheme:
+          'Run `sideby theme --json` first to see the Themes and the one in use, then ask me what feel I want; if I give you a screenshot, a website or a brand color, take the colors from it. Write a Theme File (JSON, colors only, never code): `{"schemaVersion":1,"name":"…","base":"sky" or "leaf","accent":"#rrggbb","light":{…},"dark":{…}}`; usually `base` and `accent` are enough, and `light` / `dark` hold only the tokens to change (`sideby theme export sky` shows them all). Keep it in the current folder, run `sideby theme check <file>` and change what fails to the suggested values until every pair passes, then run `sideby theme preview <file>` so I can look at it in the Panel. Only when I like it, run `sideby theme import <file>` and `sideby theme use <name>`; otherwise keep changing it. `sideby theme use --undo` goes back at any time.',
         pTerminal:
           "Ask me which terminal I use first. Read only that terminal's official docs and its `--help` to find how it opens a new window that runs one command in a given folder, and note the version you read. Write it as a template: `{cmd}` is the command and `{cwd}` the folder; sideby fills them in as separate arguments, no shell runs it. Save it with `sideby terminal --custom '<template>'`, which changes sideby's settings, so ask me first. Then have me click Let AI do it in the Panel once to try it; if it does not open, look at the error with me and fix the template.",
         share:
@@ -1355,6 +1397,10 @@ export function taskPrompt(
     if (custom) facts.push('- ' + L.cCustom + custom)
     const terms = (c.terminals || []).map(clean).filter(Boolean)
     facts.push('- ' + (terms.length ? L.cTerminals + terms.join(', ') : L.cNoTerminals))
+  }
+  if (task === 'theme') {
+    const now = clean(c.theme)
+    if (now) facts.push('- ' + L.cTheme + now)
   }
   if (task === 'handoff') {
     const lines = (c.handoff || []).map(clean).filter(Boolean)

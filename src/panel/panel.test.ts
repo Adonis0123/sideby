@@ -2518,6 +2518,67 @@ describe('start at login and settings in config (spec §3.29)', () => {
     })
   })
 
+  it("switches Themes (spec §3.34): a Portal's colors until one is picked, then the picked one wins, and undo works", async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const config = h.path('.config/sideby/config.json')
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({
+          runtime: factory(h),
+          allowedHosts: [`127.0.0.1:${p}`],
+          theme: { light: { accent: '#123456' } },
+        }),
+      )
+      try {
+        const hdr = headers(port, handler.token)
+        const host = { host: `127.0.0.1:${port}` }
+        const first = JSON.parse((await request(port, 'GET', '/api/themes', host)).text)
+        // No Theme chosen: the Portal's colors, as a card of their own, in use.
+        assert.deepEqual(
+          [first.active, first.chosen, first.portalColors, first.themes.map((t: { id: string }) => t.id)],
+          ['default', 'default', true, ['default', 'sky', 'leaf']],
+        )
+        assert.equal(first.themes[0].source, 'portal')
+        assert.match(String(first.css), /--accent: #123456/)
+        const leaf = await post(port, '/api/theme', { use: 'leaf' }, hdr)
+        assert.equal(leaf.status, 200)
+        assert.equal(leaf.body.active, 'leaf')
+        const css = String(leaf.body.css)
+        assert.match(css, /--primary: #daf1db/)
+        // The picked Theme's accent comes after the Portal's, so it wins.
+        assert.ok(css.lastIndexOf('--accent: #2a7e3b') > css.lastIndexOf('--accent: #123456'))
+        assert.deepEqual(JSON.parse(await readFile(config, 'utf8')).panel, { colorTheme: 'leaf' })
+        const page = (await request(port, 'GET', '/', host)).text
+        assert.ok(page.lastIndexOf('--accent: #2a7e3b') > page.lastIndexOf('--accent: #123456'))
+        // Sky picked by name is kept, and wins over the Portal too.
+        const sky = await post(port, '/api/theme', { use: 'sky' }, hdr)
+        assert.equal(sky.body.chosen, 'sky')
+        assert.deepEqual(JSON.parse(await readFile(config, 'utf8')).panel, { colorTheme: 'sky' })
+        const skyCss = String(sky.body.css)
+        assert.ok(skyCss.lastIndexOf('--accent: #') > skyCss.lastIndexOf('--accent: #123456'))
+        // "default" drops the choice and gives the Portal its colors back.
+        const page2 = await post(port, '/api/theme', { use: 'default' }, hdr)
+        assert.equal(page2.body.active, 'default')
+        assert.equal(JSON.parse(await readFile(config, 'utf8')).panel?.colorTheme, undefined)
+        assert.equal((await post(port, '/api/theme', { use: 'leaf' }, hdr)).body.active, 'leaf')
+        const own = await post(port, '/api/theme', { accent: '#cc3366' }, hdr)
+        assert.equal(own.body.active, 'custom')
+        assert.ok(
+          (own.body.themes as { id: string; source: string }[]).some(
+            (t) => t.id === 'custom' && t.source === 'file',
+          ),
+        )
+        const back = await post(port, '/api/theme', { undo: true }, hdr)
+        assert.equal(back.body.active, 'leaf')
+        for (const bad of [{ use: 'ocean' }, { accent: 'pink' }, { remove: 'sky' }, {}])
+          assert.equal((await post(port, '/api/theme', bad, hdr)).status, 400, JSON.stringify(bad))
+        assert.equal((await post(port, '/api/theme', { remove: 'custom' }, hdr)).status, 200)
+      } finally {
+        await close(server)
+      }
+    })
+  })
+
   it('writes the theme and language to config, shows them in the state and the page, and refuses bad values', async () => {
     await withFakeHome(async (h) => {
       await seedDemoMain(h.write)

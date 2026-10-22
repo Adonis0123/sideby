@@ -47,11 +47,13 @@ Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique
 | Know what accounts share and what stays separate | `sideby families <family> --json` | `references/sharing.md` |
 | See accounts, health, quota and usage | `sideby list --json`, `sideby doctor --json`, `sideby quota --json` | `references/diagnose.md` |
 | Pin accounts or arrange their Display Order | `sideby order --json`, `sideby pin <ref> --json`, `sideby unpin <ref> --json` | `references/panel.md` |
+| Hide or show a tool or an account in the lists ("too many shown", "hide pi") | `sideby hide <family\|ref> --json`, `sideby unhide <family\|ref> --json`, `sideby list --all` | `references/panel.md` |
 | Turn quota checks on or off, or fix outdated Codex/Grok quota | `sideby quota check <family> on|off --json`, `sideby quota [family] --refresh --json` | `references/quota.md` |
 | Set the model, effort or Remote Control | `sideby model <ref> --json`, `sideby remote-control --json` | `references/panel.md` |
 | Start sideby at login ("开机启动", "start the panel when I log in") | `sideby autostart --json`, `sideby autostart on --json` (exit 10 first) | `references/panel.md` |
 | Show quota in the macOS menu bar ("状态栏显示额度", "menu bar"), its icon is missing ("状态栏没有图标"), or change its shortcut ("换个快捷键", "帮我挑个顺手的快捷键") | `sideby menubar --json`, `sideby menubar on --json` (exit 10 first), `sideby menubar snapshot --json`, `sideby menubar hotkey [<keys>] --json` | `references/panel.md` |
 | Change the Panel's theme or language, or any other setting ("改成深色", "change any setting") | `sideby config get --json`, `sideby config set <key> <value> --json` (exit 10 first) | `references/panel.md` |
+| Change the Panel's colors or Theme ("换个主题", "面板颜色太丑", "make the Panel green", "按我公司的品牌色配一套"), check one, or go back | `sideby theme --json`, `sideby theme use <name>` / `use --undo`, `sideby theme check <file> --json`, `sideby theme preview <file>`, `sideby theme import <file>` (exit 10 when the name exists) | `references/themes.md` |
 | Turn Auto Update on or off | `sideby update --auto on|off --json` | `references/update.md` |
 | Switch between a local build of sideby and the release ("切换到正式版", "切回 dev 版本") | `sideby local --json`, `sideby local on|off --json` (exits 10 first) | `references/update.md` |
 | Repair drift or permissions | `sideby doctor [ref] --json`, then `--fix` after they agree | `references/diagnose.md` |

@@ -183,6 +183,8 @@ export interface FamilyInfo {
   settingsFile?: string
   /** Set only for a Main-only Family: sideby knows only its Main Account and creates no other (ADR-0047). */
   mainOnly?: true
+  /** Hidden from the lists (spec §3.25); set by `sideby list` only, absent when shown. */
+  hidden?: true
 }
 
 /** One Shared Item as `sideby families` reports it (spec §3.16). */
@@ -227,6 +229,8 @@ export interface AccountStatus extends Account {
   sameLogin?: string[]
   /** Pinned to the top of its Family (spec §3.25); set by `sideby list` only, absent when not pinned. */
   pinned?: true
+  /** Hidden from the lists (spec §3.25); set by `sideby list` only, absent when shown. */
+  hidden?: true
   /** Plugin errors met while reading this Account (for example an unreadable settings file). */
   problems?: string[]
   /**

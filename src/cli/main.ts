@@ -14,6 +14,7 @@ Usage:
   sideby key <account> [--var <NAME>] enter an API key without echo
   sideby try <account> [--yes]        try the Host with a short paid request
   sideby                              list accounts (same as \`sideby list\`)
+  sideby list --all                   also list hidden families and accounts
   sideby run <account> [-- args]      start the host CLI for one account
   sideby new <family> <name>|--next [--api] [--alias <short>]
                                       create an account (families: claude, codex, grok, pi);
@@ -21,10 +22,12 @@ Usage:
                                       --alias also adds a short command such as cc008
   sideby pin|unpin <account|short command> [--json]
                                       pin or unpin a Same Login (at most 3 per family)
-  sideby order [--json]               show display order, with pinned accounts marked
+  sideby hide|unhide <family|account> [--json]
+                                      hide a family or an account from the Panel, menu bar and list
+  sideby order [--json]               show display order, with pinned and hidden accounts marked
   sideby order <family> <name>...     set account order within a family
   sideby order --families <id>...     set family order
-  sideby order --reset               restore default order, keeping pins
+  sideby order --reset               restore default order, keeping pins and hidden ones
   sideby quota check <family> on|off  turn quota fetching on or off
   sideby update --auto on|off         set Auto Update without running an update
   sideby update --skill [--yes]       update only the installed sideby skill to this version
@@ -117,6 +120,9 @@ Usage:
                                       file first)
   sideby menubar [on|off] [--yes]     show quota in the macOS menu bar; click an account to start it
   sideby menubar hotkey [<keys>|off]  show or change the shortcut that opens that menu (⌥X)
+  sideby theme [list]                 the Panel's Themes; use <name> switches, use --undo goes back, use default clears
+  sideby theme check|preview <name|file>  contrast report, or one look in the Panel without switching
+  sideby theme import <file> | export <name> | remove <name>   your own Themes (JSON, colors only)
   sideby config get [<key>]           every setting with its value and meaning, or one setting
   sideby config set <key> <value> [--yes]
                                       change any setting (sideby config set panel.theme dark)
@@ -147,7 +153,7 @@ Updates: once a day sideby asks the npm registry for its newest version and says
 
 /** `sideby <command> --help` for the commands agents use to set up and repair accounts (spec §3.16). */
 const COMMAND_HELP: Record<string, string> = {
-  ask: 'sideby ask [<text>] [--task free|fix|quota|account|host|plugin|terminal|handoff|menubar|hotkey] [--account <ref>] [--terminal <id>] [--attach <file>]... [--print] [--json]\nsideby ask --run <id> [--state-dir <dir>]\nsideby ask --spec - [--print] --json\nsideby ask --choices --json\nOpen a task in your terminal. --spec reads a Task Spec (one JSON object, at most 1 MB) from stdin, as a Portal sends it; --choices lists the accounts and terminals a task can use. --attach adds an image (PNG, JPEG, GIF, WebP; up to 20 MB) or a video (MP4, MOV, WebM; up to 200 MB), at most 5. --print prints only the prompt. If opening fails, paste the command into a terminal.',
+  ask: 'sideby ask [<text>] [--task free|fix|quota|account|host|plugin|terminal|handoff|theme|menubar|hotkey] [--account <ref>] [--terminal <id>] [--attach <file>]... [--print] [--json]\nsideby ask --run <id> [--state-dir <dir>]\nsideby ask --spec - [--print] --json\nsideby ask --choices --json\nOpen a task in your terminal. --spec reads a Task Spec (one JSON object, at most 1 MB) from stdin, as a Portal sends it; --choices lists the accounts and terminals a task can use. --attach adds an image (PNG, JPEG, GIF, WebP; up to 20 MB) or a video (MP4, MOV, WebM; up to 200 MB), at most 5. --print prints only the prompt. If opening fails, paste the command into a terminal.',
   terminal:
     "sideby terminal [--set <id>|--custom '<program> … {cwd} … {cmd}'|--unset] [--json]\nList terminals or save your preference; --custom saves and selects your own launch command.",
   key: 'sideby key <account> [--var <NAME>] [--json]\nEnter an API key without echo. Run in a terminal or use the Panel key box.',
@@ -398,6 +404,20 @@ Examples:
 Exit: 0 shown, done or nothing to change; 10 a change was shown and waits for --yes; 1 refused (not macOS, sideby
 in the npx cache or a temporary folder, a file that is not sideby's), failed, or the terminal did not open; 2
 malformed command line.`,
+  theme: `sideby theme [list] [--json]
+sideby theme use <name> [--json] | sideby theme use --undo | sideby theme use default
+sideby theme check <name|file> [--json]
+sideby theme preview <name|file>
+sideby theme import <file> [--id <name>] [--yes] [--json]
+sideby theme export <name> [--out <file>] [--json]
+sideby theme remove <name> [--yes] [--json]
+
+The Panel's colors. Built-in Themes: sky (default) and leaf. A Theme File is JSON in <config>/themes/<name>.json:
+{"schemaVersion": 1, "name": "My blue", "base": "sky", "accent": "#2f7fbf", "light": {...}, "dark": {...}}
+base and accent are optional; light and dark take the same tokens as a Portal Theme. Files hold colors only, never code.
+check reports text and control contrast in light and dark with a value that would pass (exit 1 when any fails); the
+Panel moves failing colors itself. preview shows a Theme once in the running Panel without switching. Exit 10: import
+over an existing name or remove waits for --yes.`,
   config: `sideby config get [<key>] [--json]
 sideby config set <key> <value> [--yes] [--json]
 sideby config unset <key> [--yes] [--json]
@@ -483,8 +503,11 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   autostart: { flags: ['json', 'yes', 'refresh'] },
   menubar: { flags: ['json', 'yes', 'refresh'], valued: ['lang', 'hotkey', 'hotkey-label', 'icon'] },
   config: { flags: ['json', 'yes'] },
-  list: { flags: ['json'] },
+  theme: { flags: ['json', 'yes', 'undo'], valued: ['id', 'out'] },
+  list: { flags: ['json', 'all'] },
   pin: { flags: ['json'] },
+  hide: { flags: ['json'] },
+  unhide: { flags: ['json'] },
   unpin: { flags: ['json'] },
   order: { flags: ['json', 'families', 'reset'] },
   run: { flags: [] },
@@ -734,6 +757,9 @@ async function dispatch(
     case 'pin':
     case 'unpin':
       return await cmds.cmdPin(parsed, io, cmd === 'pin')
+    case 'hide':
+    case 'unhide':
+      return await cmds.cmdHide(parsed, io, cmd === 'hide')
     case 'order':
       return await cmds.cmdOrder(parsed, io)
     case 'list':
@@ -798,6 +824,8 @@ async function dispatch(
       return await cmds.cmdMenubar(parsed, io)
     case 'config':
       return await cmds.cmdConfig(parsed, io)
+    case 'theme':
+      return await cmds.cmdTheme(parsed, io)
   }
   return 2
 }

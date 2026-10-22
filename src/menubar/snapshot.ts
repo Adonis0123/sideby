@@ -105,6 +105,11 @@ export interface MenubarFamilyInput {
   id: string
   title: string
   logo?: FamilyLogo | null
+  /**
+   * Whether "Refresh" asks the Host for new numbers (the Family has `fetchQuota`). False for Claude Code, whose Quota
+   * changes only when a session runs in the account; old readings then say so. Default true.
+   */
+  refreshable?: boolean
   /** Its Handoff ranking (`sideby next`); null when the Family has no Quota source. */
   plan: HandoffPlan | null
   /** In Display Order. */
@@ -116,6 +121,11 @@ export interface MenubarFamilyInput {
     quota: QuotaResult
     /** The other refs of its Same Login: the same subscription, so one quota. */
     sameLogin?: readonly string[]
+    /**
+     * The newest use of its login on this computer (its own and its Same Login's sessions), when known. A reading
+     * older than an hour with no use since is not marked old (`quotaIsStale`).
+     */
+    lastUseAt?: string
   }[]
 }
 
@@ -285,6 +295,7 @@ function row(
   plan: HandoffPlan | null,
   now: Date,
   s: MenubarStrings,
+  refreshable: boolean,
 ): MenubarRow {
   const recommended = Boolean(plan?.hasQuota && plan.pick === a.ref)
   const startTip = fill(s.startTip, { account: a.ref })
@@ -304,11 +315,14 @@ function row(
   if (a.login === 'logged-out') return noted(s.signedOut)
   const quota = a.quota
   if (quota.status !== 'ok') return noted(s.noData)
-  const stale = quotaIsStale(quota, now.getTime())
+  const stale = quotaIsStale(quota, now.getTime(), a.lastUseAt)
+  // Over an hour old but unused here since: the numbers stand, and the hover text says what it cannot see.
+  const quiet = !stale && now.getTime() - Date.parse(quota.observedAt) > 3600_000
   // The head of the hover text: when the numbers were read, and why they may be old.
   const head = [
     observedText(quota.observedAt, now, s),
-    ...(stale ? [s.olderReadingTip] : []),
+    ...(stale ? [refreshable ? s.olderReadingTip : s.olderReadingSessionTip] : []),
+    ...(quiet ? [s.quietTip] : []),
     ...(quota.fetchError ? [fill(s.fetchFailed, { error: quota.fetchError })] : []),
   ]
   const groups = quotaGroups(quota)
@@ -378,7 +392,7 @@ function section(f: MenubarFamilyInput, now: Date, s: MenubarStrings): MenubarSe
         ...(f.logo.gradients?.length ? { gradients: f.logo.gradients } : {}),
       }
     : null
-  const all = f.accounts.map((a) => ({ a, r: row(a, f.plan, now, s) }))
+  const all = f.accounts.map((a) => ({ a, r: row(a, f.plan, now, s, f.refreshable !== false) }))
   const aside = (a: MenubarFamilyInput['accounts'][number]) => a.kind === 'api' || a.login === 'logged-out'
   // A Same Login is one quota, so one row, named like the Panel's: after the directory first in Display Order (the
   // Panel's "Set as shown name" moves one there). It is recommended when any of its directories is. The other
@@ -465,6 +479,15 @@ export function menubarSnapshot(
     : {}
   const low = worst !== null && quotaLevel(worst.value) !== 'ok'
   const old = sections.some((s) => s.rows.some((r) => r.stale))
+  // "Refresh" brings new numbers only for a Family that can be asked; otherwise a session in that account must run.
+  const oldSays =
+    old &&
+    sections.every(
+      (sec) =>
+        !sec.rows.some((r) => r.stale) || families.find((f) => f.id === sec.family)?.refreshable === false,
+    )
+      ? s.detailOldSession
+      : s.detailOld
   const {
     recommended,
     empty,
@@ -490,7 +513,7 @@ export function menubarSnapshot(
     level: worst && !old ? quotaLevel(worst.value) : 'none',
     tooltip: [
       old
-        ? `${s.statusOld} · ${s.detailOld}`
+        ? `${s.statusOld} · ${oldSays}`
         : worst
           ? fill(low ? s.tooltipLow : s.tooltipOk, values)
           : s.tooltipEmpty,
@@ -501,7 +524,7 @@ export function menubarSnapshot(
     card: worst
       ? {
           status: old ? s.statusOld : fill(low ? s.statusLow : s.statusOk, values),
-          detail: old ? s.detailOld : fill(low ? s.detailLow : s.detailOk, values),
+          detail: old ? oldSays : fill(low ? s.detailLow : s.detailOk, values),
           level: old ? 'none' : quotaLevel(worst.value),
         }
       : null,

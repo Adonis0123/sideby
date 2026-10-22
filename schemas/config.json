@@ -26,6 +26,11 @@
             "zh"
           ],
           "description": "Panel language: the browser's (default), English, or Chinese."
+        },
+        "colorTheme": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,39}$",
+          "description": "Panel Theme: a Built-in Theme (sky, the default, or leaf) or a Theme File in <config>/themes (spec §3.34)."
         }
       },
       "additionalProperties": false,
@@ -423,10 +428,33 @@
             }
           },
           "description": "Per family, the names of the accounts pinned to the top of their group, in the order they are shown; they lead the group in every sort. Resetting the order keeps them."
+        },
+        "hiddenFamilies": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "Family ids hidden from the Panel, the menu bar and `sideby list` (spec §3.25). Display only: they can still be started and picked by a Handoff."
+        },
+        "hidden": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            }
+          },
+          "description": "Per family, the names of the accounts hidden from the Panel, the menu bar and `sideby list`. Display only: they can still be started and picked by a Handoff."
         }
       },
       "additionalProperties": false,
-      "description": "Display Order (spec §3.25): the order you gave families and accounts in the Panel, and the accounts you pinned. Display only: it never changes which account a Handoff picks."
+      "description": "Display Order (spec §3.25): the order you gave families and accounts in the Panel, the accounts you pinned, and what you hid. Display only: it never changes which account a Handoff picks."
     },
     "quota": {
       "type": "object",

@@ -131,6 +131,12 @@ const AccountStatus = Type.Intersect([
           'Pinned to the top of its family in the Panel and `sideby list` (spec §3.25). Display only; absent when not pinned.',
       }),
     ),
+    hidden: Type.Optional(
+      Type.Literal(true, {
+        description:
+          'Hidden from the Panel, the menu bar and the text of `sideby list` (spec §3.25). Display only; set by `sideby list`, absent when shown.',
+      }),
+    ),
     problems: Type.Optional(Type.Array(Str)),
     desktopApp: Type.Optional(
       Type.Object(
@@ -163,6 +169,12 @@ const FamilyInfo = Type.Object({
     Type.Literal(true, {
       description:
         'The Host keeps one sign-in per computer, so sideby knows only its Main Account and refuses to create others (ADR-0047).',
+    }),
+  ),
+  hidden: Type.Optional(
+    Type.Literal(true, {
+      description:
+        'Hidden from the Panel, the menu bar and the text of `sideby list` (spec §3.25). Display only; set by `sideby list`, absent when shown.',
     }),
   ),
 })
@@ -428,11 +440,22 @@ const Display = Type.Object({
   families: Type.Optional(Type.Array(Str)),
   accounts: Type.Optional(Type.Record(Str, Type.Array(Str))),
   pinned: Type.Optional(Type.Record(Str, Type.Array(Str))),
+  hiddenFamilies: Type.Optional(Type.Array(Str)),
+  hidden: Type.Optional(Type.Record(Str, Type.Array(Str))),
 })
 const PinResult = Type.Object({
   schemaVersion: Version,
   ref: Str,
   pinned: Type.Boolean(),
+  changed: Type.Boolean(),
+  message: Str,
+  display: Display,
+})
+const HideResult = Type.Object({
+  schemaVersion: Version,
+  target: Type.String({ description: 'The Family id or account ref that was hidden or shown again.' }),
+  kind: Type.Union([Type.Literal('family'), Type.Literal('account')]),
+  hidden: Type.Boolean(),
   changed: Type.Boolean(),
   message: Str,
   display: Display,
@@ -672,10 +695,15 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     families: Type.Array(
       Type.Object({
         family: Str,
-        accounts: Type.Array(Type.Object({ name: Str, ref: Str, pinned: Type.Boolean() })),
+        hidden: Type.Boolean(),
+        accounts: Type.Array(
+          Type.Object({ name: Str, ref: Str, pinned: Type.Boolean(), hidden: Type.Boolean() }),
+        ),
       }),
     ),
   }),
+  hide: HideResult,
+  unhide: HideResult,
   'quota-check': Type.Object({
     schemaVersion: Version,
     family: Str,
@@ -1980,6 +2008,69 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     value: Type.Optional(Type.Unknown()),
     meaning: Type.Optional(Str),
     takes: Type.Optional(Str),
+  }),
+  // `sideby theme` (spec §3.34, ADR-0050).
+  theme: Type.Object({
+    schemaVersion: Version,
+    folder: Type.String({ description: 'Where Theme Files go, with ~ for the home folder.' }),
+    themes: Type.Array(
+      Type.Object({
+        id: Type.String({ description: 'The name to pass to `sideby theme use`.' }),
+        name: Str,
+        source: Type.Union([Type.Literal('builtin'), Type.Literal('file')]),
+        path: Type.Optional(Str),
+        active: Type.Boolean(),
+        problems: Type.Array(Str, { description: 'Why the Theme cannot be used; empty when it can.' }),
+        warnings: Type.Array(Str, { description: 'Keys of the file that were ignored.' }),
+      }),
+    ),
+  }),
+  'theme-use': Type.Object({ schemaVersion: Version, before: Str, after: Str, changed: Type.Boolean() }),
+  'theme-check': Type.Object({
+    schemaVersion: Version,
+    id: Str,
+    ok: Type.Boolean({ description: 'Every pair passes; the command exits 1 otherwise.' }),
+    pairs: Type.Array(
+      Type.Object({
+        mode: Type.Union([Type.Literal('light'), Type.Literal('dark')]),
+        fg: Str,
+        bg: Str,
+        ratio: Type.Optional(
+          Type.Number({ description: 'WCAG 2 contrast; missing when a value is not #rrggbb.' }),
+        ),
+        min: Type.Number(),
+        ok: Type.Boolean(),
+        suggest: Type.Optional(Type.String({ description: 'A value for fg that passes.' })),
+      }),
+    ),
+    warnings: Type.Array(Str),
+  }),
+  'theme-preview': Type.Object({
+    schemaVersion: Version,
+    opened: Type.Boolean(),
+    url: Type.Optional(Str),
+    hint: Type.Optional(Str),
+  }),
+  'theme-import': Type.Object({
+    schemaVersion: Version,
+    id: Str,
+    path: Str,
+    replaced: Type.Boolean(),
+    exists: Type.Optional(
+      Type.Boolean({ description: 'A Theme File of that name exists; rerun with --yes to replace it.' }),
+    ),
+  }),
+  'theme-export': Type.Object({
+    schemaVersion: Version,
+    id: Str,
+    out: Type.Optional(Str),
+    theme: Type.Optional(Type.Unknown({ description: 'The Theme File, when no --out was given.' })),
+  }),
+  'theme-remove': Type.Object({
+    schemaVersion: Version,
+    id: Str,
+    removed: Type.Boolean(),
+    wasActive: Type.Optional(Type.Boolean()),
   }),
   'config-set': Type.Object({
     schemaVersion: Version,

@@ -159,11 +159,16 @@ sideby quota grok --refresh   # 现在重新查询，不用上一次的结果
 
 打开账号行的 **⋯** 菜单，选 **置顶**；也可以在 **设置 › 账号顺序与置顶** 里改，或者运行 `sideby pin <账号>`。置顶的账号名字前有一个小图钉，不管怎么排序都在本工具最前；`sideby list` 也把它排在最前。每个工具最多 3 个；调整顺序时，置顶的账号只在置顶的几个之间移动。**恢复默认顺序** 不会取消置顶；在同一个菜单里选 **取消置顶** 就取消。置顶不影响 `sideby next` 和自动接力选哪个账号。
 
+### 隐藏工具或账号
+
+列表里有不用的工具或账号时，打开账号行的 **⋯** 菜单，选 **隐藏这个账号** 或 **隐藏整个 Claude Code**（按它所属的工具）；也可以在 **设置 › 账号顺序、置顶与隐藏** 里点眼睛按钮，或者运行 `sideby hide pi` / `sideby hide claude:old`。隐藏后，它不出现在面板的列表、计数和提醒里，也不出现在菜单栏和 `sideby list` 里；列表下方一行写着已隐藏几个，其中有账号需要处理时带一个红点，点 **显示** 就在本页带着 **已隐藏** 标记显示出来。同一登录的两个目录一起隐藏。隐藏只影响显示：账号照常能用 `sideby run` 启动，照常能在会话历史里搜到，`sideby next` 和自动接力照常能选它（不想让它接班，就改接力规则）。**恢复默认顺序** 会保留隐藏。新工具、新账号默认显示，你隐藏了才不显示。
+
 
 CLI 设置（也支持 `--json`）：
 
 - `sideby pin claude:work` / `sideby unpin claude:work`：按 Same Login 整组置顶或取消，每 Family 最多三组。重复操作不改变配置；满了先取消一个。
-- `sideby order`：显示 Display Order 并标记置顶。`sideby order claude work main` 设置账号名顺序；`sideby order --families codex claude` 设置 Family 顺序。未知名字报错。`sideby order --reset` 恢复默认顺序，保留置顶。
+- `sideby hide pi` / `sideby unhide pi`：隐藏或显示整个工具；`sideby hide claude:old` 连同它的 Same Login 隐藏一个账号。`sideby list --all` 会连隐藏的一起列出；`sideby list --json` 总是全部返回，隐藏的带 `hidden: true`。
+- `sideby order`：显示 Display Order 并标记置顶和隐藏。`sideby order claude work main` 设置账号名顺序；`sideby order --families codex claude` 设置 Family 顺序。未知名字报错。`sideby order --reset` 恢复默认顺序，保留置顶和隐藏。
 - `sideby quota check grok on` / `sideby quota check grok off`：保存联网额度开关。`sideby quota --refresh` 刷新每个支持联网查询的 Family，仍遵守关闭设置和 CI 限制。
 - `sideby update --auto on` / `sideby update --auto off`：立即保存 Auto Update 开关，本次不查更新、不安装。
 - `sideby handoff status --json`：在就绪状态之外返回 `overview.settings`、`overview.takeover` 和 `overview.recent`。
@@ -339,7 +344,7 @@ headless 运行（`claude -p`、`codex exec`、`grok -p`）、带 `--remote` 的
 
 其他设置也都有命令：`sideby config get` 列出全部设置和当前值，`sideby config set panel.theme dark` 改一项（先显示改动）。
 
-菜单底部写的是最近「检查」时间。每个账号的悬停说明保留额度记录时间。记录超过一小时或查询失败，额度条变灰并标为「旧数据」。反复检查不会使旧数据变新。
+菜单底部写的是最近「检查」时间。每个账号的悬停说明保留额度记录时间。记录超过一小时或查询失败，额度条变灰并标为「旧数据」；但如果记录之后这台电脑没再用过这个登录，数字照常显示，悬停说明网页或其他电脑上的用量不在内。反复检查不会使旧数据变新。Claude Code 的额度只在这个账号跑会话时更新，所以它的旧数据提示写的是开一次会话，而不是点刷新。
 
 ## 宿主说明
 

@@ -91,6 +91,18 @@ import { openRunBoard, withRuns } from '../core/run-link.ts'
 import { SECRET_VAR_NAME, secretVarFor, setSecret } from '../core/secret-file.ts'
 import { SKILL_INSTALL } from '../core/skill-check.ts'
 import { launchArgs, TERMINALS } from '../core/terminal.ts'
+import {
+  checkThemeData,
+  listThemes,
+  NO_THEME,
+  previewColors,
+  type ResolvedColors,
+  removeThemeFile,
+  resolveColors,
+  saveThemeFile,
+  undoTheme,
+  useTheme,
+} from '../core/themes.ts'
 import { MIN_CALLS } from '../core/tuning.ts'
 import type { TuneApplyPlan } from '../core/tuning-apply.ts'
 import * as update from '../core/update.ts'
@@ -110,7 +122,9 @@ import type { Account, FamilyDef, FamilyLogo, QuotaResult, QuotaSetupPlan, Usage
 import { type OrcaDeps, orcaTabs, switchOrcaTab, systemOrca } from './orca.ts'
 import { renderPage } from './page.ts'
 import { AI_TASK_KINDS } from './page-logic.ts'
-import { type PanelTheme, resolveTheme } from './theme.ts'
+import { tokenStyles } from './page-styles.ts'
+import { type PanelTheme, type ResolvedTheme, resolveTheme } from './theme.ts'
+import { BUILTIN_THEMES, DEFAULT_THEME_ID } from './themes.ts'
 
 export const PANEL_VERSION = packageVersion()
 export const MAX_BODY_BYTES = 64 * 1024
@@ -277,9 +291,13 @@ export type PanelFamily = FamilyInfo & {
   tryCommand?: string[]
   /** AI Tasks start this Host with its permission checks on (`aiTaskArgs`, ADR-0031), so the AI dialog says so. */
   aiTaskSafe?: true
+  /** "Refresh" can ask the Host for its Quota (`fetchQuota`); without it old numbers wait for a session (spec §3.31). */
+  quotaRefresh?: true
 }
 
-function keyFacts(def: FamilyDef): Pick<PanelFamily, 'keyVar' | 'keyAlways' | 'tryCommand' | 'aiTaskSafe'> {
+function keyFacts(
+  def: FamilyDef,
+): Pick<PanelFamily, 'keyVar' | 'keyAlways' | 'tryCommand' | 'aiTaskSafe' | 'quotaRefresh'> {
   let keyVar: string | null = null
   try {
     keyVar = secretVarFor(def)
@@ -289,6 +307,7 @@ function keyFacts(def: FamilyDef): Pick<PanelFamily, 'keyVar' | 'keyAlways' | 't
     ...(def.secretFileMeansApi === false ? { keyAlways: true } : {}),
     ...(def.probe ? { tryCommand: [def.bin, ...def.probe.args] } : {}),
     ...(def.aiTaskArgs ? { aiTaskSafe: true as const } : {}),
+    ...(def.fetchQuota ? { quotaRefresh: true as const } : {}),
   }
 }
 
@@ -972,6 +991,7 @@ function displayBody(body: Record<string, unknown>): DisplayConfig | undefined {
   const out: DisplayConfig = {}
   for (const [k, v] of Object.entries(d)) {
     if (k === 'families') out.families = names(v, '"families"')
+    else if (k === 'hiddenFamilies') out.hiddenFamilies = names(v, '"hiddenFamilies"')
     else if (k === 'accounts') {
       if (!v || typeof v !== 'object' || Array.isArray(v))
         throw new HttpError(400, '"accounts" must be an object')
@@ -982,6 +1002,10 @@ function displayBody(body: Record<string, unknown>): DisplayConfig | undefined {
       if (!v || typeof v !== 'object' || Array.isArray(v))
         throw new HttpError(400, '"pinned" must be an object')
       out.pinned = Object.fromEntries(Object.entries(v).map(([f, list]) => [f, names(list, `"pinned.${f}"`)]))
+    } else if (k === 'hidden') {
+      if (!v || typeof v !== 'object' || Array.isArray(v))
+        throw new HttpError(400, '"hidden" must be an object')
+      out.hidden = Object.fromEntries(Object.entries(v).map(([f, list]) => [f, names(list, `"hidden.${f}"`)]))
     } else throw new HttpError(400, `unknown key "${k}"`)
   }
   return out
@@ -1158,6 +1182,71 @@ function writeQueue() {
       inFlight--
     })
   }
+}
+
+/** What the Theme dialog shows (spec §3.34); the config is read again, so a switch from the CLI shows at once. */
+async function themesView(rt: Runtime, portal: ResolvedTheme) {
+  const chosen = (await loadConfig(rt.paths.configFile).catch(() => rt.config)).panel?.colorTheme ?? NO_THEME
+  const colors = await resolveColors(rt.paths, chosen)
+  const portalColors = portal.light.length + portal.dark.length > 0
+  // Inside a Portal, no Theme chosen means the Portal's colors: a card of their own, in use.
+  const pageCard = portalColors
+    ? [
+        {
+          id: NO_THEME,
+          name: "This page's colors",
+          source: 'portal',
+          swatches: portalSwatches(portal),
+          problems: [],
+          warnings: [],
+        },
+      ]
+    : []
+  const listed = (await listThemes(rt.paths)).map((t) => ({
+    id: t.id,
+    name: t.name,
+    ...(t.source === 'builtin' ? { nameZh: BUILTIN_THEMES.find((b) => b.id === t.id)?.name.zh } : {}),
+    source: t.source,
+    swatches: t.swatches,
+    problems: t.problems,
+    warnings: t.warnings,
+  }))
+  const page = chosen === NO_THEME && portalColors
+  return {
+    active: page ? NO_THEME : colors.id,
+    chosen,
+    adjusted: colors.adjusted,
+    ...(colors.fallback ? { fallback: colors.fallback } : {}),
+    portalColors,
+    // The token CSS the page swaps in.
+    css: tokenStyles(page ? portal : layerTheme(colors, portal)),
+    themes: [...pageCard, ...listed],
+  }
+}
+
+/** A Portal's own page, card, accent tint, main button and dark page, over the Default Theme's where it leaves one out. */
+function portalSwatches(portal: ResolvedTheme): string[] {
+  const value = (decls: string[], name: string) =>
+    decls
+      .findLast((d) => d.startsWith(`--${name}:`))
+      ?.slice(name.length + 3)
+      .trim()
+  const sky = BUILTIN_THEMES.find((b) => b.id === DEFAULT_THEME_ID)?.swatches ?? []
+  return [
+    value(portal.light, 'bg') ?? sky[0],
+    value(portal.light, 'accent-soft') ?? sky[1],
+    value(portal.light, 'primary') ?? sky[2],
+    value(portal.dark, 'bg') ?? sky[3],
+  ].filter((c): c is string => typeof c === 'string')
+}
+
+/**
+ * A Theme the user picked over the Portal's tokens (ADR-0050): its colors win over the Portal's, and what the Theme
+ * does not name (font, sizes, header) stays the Portal's.
+ */
+function layerTheme(colors: ResolvedColors, portal: ResolvedTheme): ResolvedTheme {
+  const own = resolveTheme({ light: colors.light, dark: colors.dark })
+  return { ...portal, light: [...portal.light, ...own.light], dark: [...portal.dark, ...own.dark] }
 }
 
 export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
@@ -1362,6 +1451,34 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const account = optString(body, 'account')
         if (!account) throw new HttpError(400, '"account" is required')
         return tryAccount(await getRuntime(), account)
+      },
+    },
+    // Themes (spec §3.34): `use` a Theme, `undo` the last switch, `accent` saves and uses the Theme File custom.json
+    // (the current Built-in Theme with that accent), `remove` deletes a Theme File. Answers what GET /api/themes does.
+    '/api/theme': {
+      async run(body) {
+        const rt = await getRuntime()
+        try {
+          if (typeof body.use === 'string') await useTheme(rt.paths, body.use)
+          else if (body.undo === true) await undoTheme(rt.paths)
+          else if (typeof body.accent === 'string') {
+            const current = (await loadConfig(rt.paths.configFile)).panel?.colorTheme
+            const base = BUILTIN_THEMES.some((t) => t.id === current) ? current : undefined
+            const checked = checkThemeData({
+              schemaVersion: 1,
+              name: 'Custom',
+              ...(base ? { base } : {}),
+              accent: body.accent,
+            })
+            if (!checked.theme) throw new Error(checked.problems[0])
+            await saveThemeFile(rt.paths, 'custom', checked.theme)
+            await useTheme(rt.paths, 'custom')
+          } else if (typeof body.remove === 'string') await removeThemeFile(rt.paths, body.remove)
+          else throw new Error('send "use", "undo", "accent" or "remove"')
+        } catch (err) {
+          throw new HttpError(400, (err as Error).message)
+        }
+        return themesView(await getRuntime(), theme)
       },
     },
     // Preferred Terminal and Custom terminal command (spec §3.28): `id` null or left out goes back to the guess;
@@ -2269,6 +2386,23 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
                   (rt) => rt.config.panel,
                   () => undefined,
                 )
+          // The user's Theme under the Portal's colors (spec §3.34): `?theme=preview` shows the Theme `sideby theme
+          // preview` set, for this load only. A Theme that cannot be read leaves the default and Settings says why.
+          const preview = new URL(req.url ?? '/', 'http://x').searchParams.get('theme') === 'preview'
+          const colors =
+            method === 'HEAD'
+              ? undefined
+              : await getRuntime().then(
+                  async (rt) =>
+                    (preview ? await previewColors(rt.paths) : undefined) ??
+                    (rt.config.panel?.colorTheme && rt.config.panel.colorTheme !== NO_THEME
+                      ? await resolveColors(rt.paths, rt.config.panel.colorTheme)
+                      : undefined),
+                  () => undefined,
+                )
+          // No Theme chosen: the page's own tokens (the Default Theme) under the Portal's. A chosen Theme, even the
+          // Default one, wins over the Portal's colors.
+          const pageTheme = colors ? layerTheme(colors, theme) : theme
           res.writeHead(200, {
             'content-type': 'text/html; charset=utf-8',
             'cache-control': 'no-store',
@@ -2296,7 +2430,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
                   build,
                   local,
                   readOnly,
-                  theme,
+                  theme: pageTheme,
                   lang,
                   updates,
                   ...(ask ? { ask } : {}),
@@ -2324,6 +2458,11 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         if (sub === '/api/session') {
           if (req.headers['sec-fetch-site'] === 'cross-site') throw new HttpError(403, 'origin not allowed')
           send(res, 200, { token })
+          return true
+        }
+        // Themes (spec §3.34): every Theme with its swatches and problems, and the one in use.
+        if (sub === '/api/themes') {
+          send(res, 200, await themesView(await getRuntime(), theme))
           return true
         }
         if (sub === '/api/terminals') {

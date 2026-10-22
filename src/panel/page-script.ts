@@ -27,6 +27,7 @@ import {
   handoffChangeOf,
   handoffHintAccount,
   handoffTaskFacts,
+  hiddenIn,
   highlightParts,
   histFilters,
   historyEmpty,
@@ -55,6 +56,7 @@ import {
   passedWindow,
   pinnedIn,
   quotaAskable,
+  quotaHighLevel,
   quotaPressure,
   remoteControlSummary,
   reorder,
@@ -97,6 +99,7 @@ const LOGIC = [
   aliasIssue,
   attentionReasons,
   attentionWhy,
+  quotaHighLevel,
   autostartNote,
   hotkeyFromKey,
   hotkeyPressKind,
@@ -161,6 +164,7 @@ const LOGIC = [
   tailInView,
   updatedAge,
   pinnedIn,
+  hiddenIn,
   widthFollower,
   widthTier,
   windowState,
@@ -435,6 +439,11 @@ const MAIN = String.raw`
   }
 
   const ICONS = {
+    // Lucide "users-round", "messages-square", "gauge" and "route" for the page tabs (ISC license)
+    tabAccounts: 'M18 21a8 8 0 0 0-16 0M5 8a5 5 0 1 0 10 0 5 5 0 1 0-10 0M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3',
+    tabSessions: 'M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2zM20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1',
+    tabTuning: 'm12 14 4-4M3.34 19a10 10 0 1 1 17.32 0',
+    tabHandoff: 'M3 19a3 3 0 1 0 6 0 3 3 0 1 0-6 0M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15M15 5a3 3 0 1 0 6 0 3 3 0 1 0-6 0',
     refresh: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7',
     search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4.2-4.2',
     chevron: 'M9 6l6 6-6 6',
@@ -1055,7 +1064,7 @@ const MAIN = String.raw`
       up.from = item
       return { up, item }
     })
-    const items = [pinItem(a),
+    const items = [pinItem(a), ...hideItems(a),
       opens.length ? '-' : null, opens.length ? { header: t('menu.groupOpen') } : null, ...opens,
       '-', { header: t('menu.groupCopy') }, run, ...(fold ? [fold] : more),
       '-', { header: t('menu.groupManage') }, signInItem, key, ...dirTools(a), likeItem(a),
@@ -1224,7 +1233,8 @@ const MAIN = String.raw`
   function renderSummary() {
     const box = $('summary')
     if (!S.state) { if (S.loadError) box.hidden = true; return }
-    const list = S.state.accounts
+    // Hidden Accounts (spec §3.25) stay out of the counts and the attention card; the list's last line counts them.
+    const list = visibleAccounts()
     // Another page keeps it hidden: a refresh while there must not push that page down (renderPageChrome shows it).
     box.hidden = !list.length || curPage !== 'accounts'
     box.removeAttribute('aria-busy')
@@ -1240,9 +1250,10 @@ const MAIN = String.raw`
       for (const r of rs) counts[r] = (counts[r] || 0) + 1
     }
     const order = ['error', 'health-fail', 'signed-out', 'not-installed', 'quota-high', 'health-warn']
-    // Who needs a look, by name: counting reasons beside a count of accounts made numbers that did not add up.
+    // Who needs a look, by name: counting reasons beside a count of accounts made numbers that did not add up. One name
+    // and a count, as two names did not fit the card.
     const needing = list.filter((a) => reasonsOf(a, now).length)
-    const needSub = need ? t(needing.length > 2 ? 'stat.needWhoMore' : 'stat.needWho', { names: needing.slice(0, 2).map((a) => a.ref).join(' · '), n: needing.length - 2 }) : t('stat.allClear')
+    const needSub = need ? t(needing.length > 1 ? 'stat.needWhoMore' : 'stat.needWho', { names: needing[0].ref, n: needing.length - 1 }) : t('stat.allClear')
     const needTitle = need ? order.filter((r) => counts[r]).map((r) => tn('need.' + r, counts[r])).join(' · ') : null
     const usages = list.filter((a) => a.usage && a.usage.status === 'ok')
     const total = usages.reduce((s, a) => s + (Number(a.usage.totalTokens) || 0), 0)
@@ -1324,9 +1335,10 @@ const MAIN = String.raw`
   }
   function renderFamilyFilter() {
     if (!tb.family) return
-    const fams = S.state ? S.state.families.filter((f) => S.state.accounts.some((a) => a.family === f.id)) : []
+    const list = S.state ? listedAccounts() : []
+    const fams = S.state ? S.state.families.filter((f) => list.some((a) => a.family === f.id)) : []
     tb.family.replaceChildren(h('option', { value: '' }, t('tb.allFamilies')),
-      ...fams.map((f) => h('option', { value: f.id }, f.title + ' (' + S.state.accounts.filter((a) => a.family === f.id).length + ')')))
+      ...fams.map((f) => h('option', { value: f.id }, f.title + ' (' + list.filter((a) => a.family === f.id).length + ')')))
     if (prefs.family && S.state && !fams.some((f) => f.id === prefs.family)) prefs.family = ''
     tb.family.value = prefs.family
     tb.family.hidden = fams.length < 2 && !prefs.family
@@ -1409,20 +1421,30 @@ const MAIN = String.raw`
     if (!quotaAskable(q.reason)) return null
     return h('button', { class: 'link-btn small q-ask', type: 'button', onclick: (e) => { e.stopPropagation(); openAsk({ task: 'quota', context: { account: a.ref, family: a.family, quotaReason: q.reason + (q.detail ? ': ' + q.detail : ''), version: BOOT.version } }) } }, t('ask.quotaWhy'))
   }
+  // The newest session of this login on this computer: the Account's own and its Same Login's (spec §3.31).
+  function lastUseOf(a) {
+    const refs = [a.ref, ...(a.sameLogin || [])]
+    const times = (S.state ? S.state.accounts : []).filter((x) => refs.includes(x.ref) && x.usage && x.usage.status === 'ok' && x.usage.lastActivityAt).map((x) => Date.parse(x.usage.lastActivityAt)).filter(Number.isFinite)
+    return times.length ? new Date(Math.max(...times)).toISOString() : null
+  }
   function quotaBlock(a, now, cols) {
     // Still reading (a slow plugin or Host): say so where its numbers will appear; the page asks again soon.
     if (a.pending) return h('div', { class: 'quota' }, h('div', { class: 'q-note' }, spinner(), t('acct.reading', { host: famTitle(a) })))
     const q = a.quota
     if (!q) return h('div', { class: 'quota' }, h('div', { class: 'q-note' }, '—'))
     if (q.status !== 'ok') return h('div', { class: 'quota' }, quotaNote(a, q))
-    const stale = quotaIsStale(q, now)
+    const stale = quotaIsStale(q, now, lastUseOf(a))
+    // Over an hour old but unused here since: the numbers stand, and the hover text says what it cannot see.
+    const quiet = !stale && now - Date.parse(q.observedAt) > 3600_000
+    // Old numbers of a Host that cannot be asked (Claude Code) change only when a session runs in the account.
+    const waits = stale && !q.fetchError && !family(a.family).quotaRefresh ? t('quota.staleSession') : null
     const wins = q.windows || []
     // A reading borrowed from another Account of the same login says where it came from (spec §3.21).
     const from = q.from ? t('quota.sharedFrom', { name: refName(q.from), ago: ago(q.observedAt) }) : null
     // Where the numbers came from when the Host was asked (spec §3.26), and why the latest ask failed.
     const via = q.fetched ? t('quota.fetchedFrom', { host: famTitle(a), ago: ago(q.observedAt) }) : null
     const failed = q.fetchError ? t('quota.lastCheckFailed', { why: q.fetchError }) : null
-    const title = [from || via || (stale ? null : t('quota.dataFrom', { ago: ago(q.observedAt) })), failed].filter(Boolean).join('\n') || null
+    const title = [from || via || (stale ? null : t('quota.dataFrom', { ago: ago(q.observedAt) })), quiet ? t('quota.quiet') : null, failed, waits].filter(Boolean).join('\n') || null
     // --qr: this row's own number of windows, so a narrow list can split the width between them alone (--qn is the
     // widest Family's, for the wide list's shared columns).
     return h('div', { class: 'quota' + (stale ? ' is-stale' : ''), title, css: wins.length ? { '--qr': String(cols.length) } : null },
@@ -1433,7 +1455,7 @@ const MAIN = String.raw`
         return w ? meter(w, now, stale, q.observedAt, same.length > 1) : noMeter(winTitle(c), winShort(c))
       }) : h('div', { class: 'q-note' }, t('quota.noWindows')),
       // Old numbers keep their colours and say their age once, under the bars.
-      stale && wins.length ? h('div', { class: 'q-asof', title: failed || t('quota.asOf', { ago: ago(q.observedAt) }) }, icon('clock'), q.fetchError ? t('quota.fetchFailed') + ' · ' : '', t('quota.staleShort', { ago: agoShort(now - Date.parse(q.observedAt)) })) : null)
+      stale && wins.length ? h('div', { class: 'q-asof', title: failed || [t('quota.asOf', { ago: ago(q.observedAt) }), waits].filter(Boolean).join('\n') }, icon('clock'), q.fetchError ? t('quota.fetchFailed') + ' · ' : '', t('quota.staleShort', { ago: agoShort(now - Date.parse(q.observedAt)) })) : null)
   }
   function usageBlock(a) {
     const u = a.usage
@@ -1489,7 +1511,7 @@ const MAIN = String.raw`
   }
   // A word, not only a colour (spec §3.8): what kind of look the account needs; the reason is on hover.
   function attentionWord(subject, reason) {
-    const lvl = reason === 'health-fail' ? 'fail' : 'warn'
+    const lvl = reason === 'health-fail' ? 'fail' : reason === 'quota-high' ? quotaHighLevel(subject, Date.now(), FAIL) : 'warn'
     const why = whyOf(subject, Date.now())
     const word = reason === 'health-fail' ? t('att.fix') : reason === 'quota-high' ? t('att.quota') : t('att.check')
     const dot = h('span', { class: 'dot dot-' + lvl, 'aria-hidden': 'true' })
@@ -1540,6 +1562,7 @@ const MAIN = String.raw`
       h('span', { class: 'name', title: a.name }, a.name),
       loginMark(o.linked || members),
       aliasText(a),
+      hiddenMark(isHidden(a) && !famHidden(a.family)),
       statusBadge(a, members))
   }
   // An organization name as the vendor wrote it, without a trailing comma or full stop it sometimes carries.
@@ -1741,7 +1764,7 @@ const MAIN = String.raw`
   }
   // What a row or card shows depends on more than the account (health, view preferences, language); the
   // fingerprint covers what its click handlers use.
-  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref, ui.browserRef === a.ref, ui.copied === a.ref, browserFor(a), prefs.hideEmail, isOpen(a), loginLead(a), isPinned(a)]) }
+  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref, ui.browserRef === a.ref, ui.copied === a.ref, browserFor(a), prefs.hideEmail, isOpen(a), loginLead(a), isPinned(a), isHidden(a), famHidden(a.family)]) }
   // Whether the row sits in a login group (spec §3.21): its first row then shows the quota for all of them.
   function inLogin(a) { return ui.loginRefs.has(a.ref) }
   // The group's first row, which shows the quota for all of them.
@@ -2038,13 +2061,15 @@ const MAIN = String.raw`
   // The group's attention tag says who and why: with one Account its name and reason, and a click shows its row;
   // with more, the count, each one's reason on hover, and a click shows only them (as the summary card does).
   function attentionTag(needing, now) {
+    // Red when one of them needs a fix or has a red quota bar, so the tag matches what the rows show.
+    const lvl = needing.some((a) => reasonsOf(a, now).includes('health-fail') || quotaHighLevel(a, now, FAIL) === 'fail') ? 'fail' : 'warn'
     if (needing.length === 1) {
       const a = needing[0]
       const label = a.name + ' · ' + whyOf(a, now)
-      return h('button', { class: 'tag tag-warn tag-btn', type: 'button', title: t('group.attentionShow', { name: a.name }), onclick: () => flashRow(a.ref) }, label)
+      return h('button', { class: 'tag tag-' + lvl + ' tag-btn', type: 'button', title: t('group.attentionShow', { name: a.name }), onclick: () => flashRow(a.ref) }, label)
     }
     const list = needing.map((a) => a.name + colon() + whyOf(a, now)).join('\n')
-    return h('button', { class: 'tag tag-warn tag-btn', type: 'button', title: list, 'aria-pressed': String(ui.attention), onclick: () => { ui.attention = !ui.attention; renderSummary(); renderAccounts() } }, tn('group.attention', needing.length))
+    return h('button', { class: 'tag tag-' + lvl + ' tag-btn', type: 'button', title: list, 'aria-pressed': String(ui.attention), onclick: () => { ui.attention = !ui.attention; renderSummary(); renderAccounts() } }, tn('group.attention', needing.length))
   }
   // ---------- Grok Bot windows (ADR-0019) ----------
   // Windows of an app that signs in apart from every account, so they get a group of their own after the accounts.
@@ -2225,11 +2250,13 @@ const MAIN = String.raw`
             h('button', { class: 'btn btn-sm', type: 'button', title: setup.summary, 'aria-label': t('quota.turnOnFamilyLabel', { host: info.title }), onclick: () => openSetup(fam) }, t('quota.turnOnFamily')))
           : null,
         off && setup && setup.plan.status === 'blocked' ? h('span', { class: 'muted small label-tip' }, t('quota.blocked'), tipRaw(t('quota.blocked'), setup.plan.message)) : null,
+        hiddenMark(famHidden(fam)),
+        ui.arrange && !BOOT.readOnly ? hideToggle(info.title, famHidden(fam), () => toggleHideFamily(fam)) : null,
         ui.arrange ? null : pickHead(fam)))
     const body = collapsedNow ? null : cards
       ? h('div', { class: 'grid', id: bodyId, 'data-key': 'cards', 'data-patch': '' }, loginClusters(list).map((x) => Array.isArray(x) ? loginCard(x, now, cols) : card(x, now, cols)))
       : h('div', { class: 'rows', id: bodyId, role: 'list', 'data-key': ui.arrange ? 'rows-arrange' : 'rows', 'data-patch': '' }, loginClusters(list).map((x) => Array.isArray(x) ? loginRow(x, now, cols) : row(x, now, cols)))
-    return h('section', { class: 'group' + (cards ? ' group-cards' : ' group-list') + (collapsedNow ? ' is-collapsed' : '') + (ui.arrange ? ' is-arranging' : ''), 'aria-label': info.title, 'data-key': 'g:' + fam, 'data-fam': fam, 'data-patch': '' },
+    return h('section', { class: 'group' + (cards ? ' group-cards' : ' group-list') + (collapsedNow ? ' is-collapsed' : '') + (ui.arrange ? ' is-arranging' : '') + (famHidden(fam) ? ' is-hidden' : ''), 'aria-label': info.title, 'data-key': 'g:' + fam, 'data-fam': fam, 'data-patch': '' },
       head, collapsedNow || cards || ui.arrange ? null : colHead(cols, list), body)
   }
   function emptyState() {
@@ -2299,7 +2326,8 @@ const MAIN = String.raw`
   }
   function ordered() { const d = displayOf(); return Boolean((d.families && d.families.length) || (d.accounts && Object.keys(d.accounts).length)) }
   function copyDisplay(d) {
-    return { families: d.families ? d.families.slice() : [], accounts: Object.assign({}, d.accounts || {}), pinned: Object.assign({}, d.pinned || {}) }
+    return { families: d.families ? d.families.slice() : [], accounts: Object.assign({}, d.accounts || {}), pinned: Object.assign({}, d.pinned || {}),
+      hiddenFamilies: d.hiddenFamilies ? d.hiddenFamilies.slice() : [], hidden: Object.assign({}, d.hidden || {}) }
   }
   // Shows next at once and writes it to the config. Writes go one at a time; a failed one puts back what the config
   // last confirmed, never another write's unsaved state.
@@ -2308,7 +2336,7 @@ const MAIN = String.raw`
     if (!displaySaves.pending) displaySaves.confirmed = before
     displaySaves.pending++
     S.state.display = next
-    renderAccounts()
+    renderDisplayed()
     const run = displaySaves.chain.then(async () => {
       try {
         const r = await api('/api/display-order', { display: next })
@@ -2317,7 +2345,7 @@ const MAIN = String.raw`
         return true
       } catch (e) {
         // A newer write already on its way settles the screen; only the latest one puts things back.
-        if (S.state.display === next) { S.state.display = displaySaves.confirmed; renderAccounts() }
+        if (S.state.display === next) { S.state.display = displaySaves.confirmed; renderDisplayed() }
         toast(t(failKey || 'order.failed', { msg: e.message }), { kind: 'fail' })
         return false
       } finally { displaySaves.pending-- }
@@ -2338,6 +2366,74 @@ const MAIN = String.raw`
     }
     next.pinned[a.family] = list
     saveDisplay(before, next, 'pin.failed')
+  }
+  // What the Display Order changes on screen: the accounts, and the counts and tool filter that leave Hidden ones out.
+  function renderDisplayed() { renderAccounts(); renderSummary(); renderFamilyFilter(); renderPageChrome() }
+
+  // ---------- Hidden Families and Accounts (spec §3.25) ----------
+  // Display only: a hidden Account still starts, shows in History and can be picked by a Handoff.
+  function isHidden(a) { return hiddenIn(a, displayOf()) }
+  function famHidden(fam) { return (displayOf().hiddenFamilies || []).includes(fam) }
+  function hiddenOf(fam) { return (displayOf().hidden || {})[fam] || [] }
+  function visibleAccounts() { return S.state.accounts.filter((a) => !isHidden(a)) }
+  // The accounts the list shows: the arrange mode and "Show hidden" bring the hidden ones back, marked.
+  function listedAccounts() { return ui.arrange || ui.showHidden ? S.state.accounts : visibleAccounts() }
+  function afterHide(hide, name, undo) {
+    // Hiding from the list itself makes the row go away; the toast says where it went and offers it back.
+    if (hide && !ui.arrange && !ui.showHidden) toast(t('hide.done', { name }), { action: { label: t('order.undo'), run: undo } })
+  }
+  // Hides or shows an Account, with the other directories of its Same Login.
+  function toggleHide(a) {
+    const before = displayOf()
+    const next = copyDisplay(before)
+    const names = [a.name].concat((a.sameLogin || []).map(refName))
+    const exists = (n) => S.state.accounts.some((x) => x.family === a.family && x.name === n)
+    const list = hiddenOf(a.family).filter((n) => !names.includes(n) && exists(n))
+    const hide = !hiddenIn(a, { hidden: displayOf().hidden })
+    if (hide) list.push(...names.filter(exists))
+    next.hidden[a.family] = list
+    saveDisplay(before, next, 'hide.failed').then((ok) => { if (ok) afterHide(hide, a.ref, () => toggleHide(a)) })
+  }
+  function toggleHideFamily(fam) {
+    const before = displayOf()
+    const next = copyDisplay(before)
+    const hide = !famHidden(fam)
+    next.hiddenFamilies = hide ? next.hiddenFamilies.concat(fam) : next.hiddenFamilies.filter((x) => x !== fam)
+    saveDisplay(before, next, 'hide.failed').then((ok) => { if (ok) afterHide(hide, family(fam).title, () => toggleHideFamily(fam)) })
+  }
+  // The row menu's items: hide this account, or all of its tool; on a hidden row, show it again.
+  function hideItems(a) {
+    if (BOOT.readOnly) return []
+    const title = family(a.family).title
+    if (famHidden(a.family)) return [{ icon: 'eye', label: t('hide.showFamily', { title }), run: () => toggleHideFamily(a.family) }]
+    if (isHidden(a)) return [{ icon: 'eye', label: t('hide.showAccount'), run: () => toggleHide(a) }]
+    return [{ icon: 'eyeOff', label: t('hide.account'), run: () => toggleHide(a) }, { icon: 'eyeOff', label: t('hide.family', { title }), run: () => toggleHideFamily(a.family) }]
+  }
+  // A hidden row or group says so while "Show hidden" or the arrange mode brings it back.
+  function hiddenMark(on) {
+    return on ? h('span', { class: 'chip chip-sm hidden-chip' }, icon('eyeOff'), t('hide.mark')) : null
+  }
+  // The eye in the arrange mode: one click hides or shows the Family or the Account (with its Same Login).
+  function hideToggle(label, hidden, run) {
+    const text = t(hidden ? 'hide.showName' : 'hide.hideName', { name: label })
+    return h('button', { class: 'icon-btn hide-btn' + (hidden ? ' is-on' : ''), type: 'button', 'aria-pressed': String(hidden), 'aria-label': text, title: text, onclick: (e) => { e.stopPropagation(); run() } }, icon(hidden ? 'eyeOff' : 'eye'))
+  }
+  // Under the list: how many are hidden, a red dot when one of them needs a look, and the switch to show them.
+  function hiddenBar(n) {
+    const now = Date.now()
+    const needs = S.state.accounts.some((a) => isHidden(a) && reasonsOf(a, now).length)
+    return h('div', { class: 'hidden-bar', 'data-key': 'hidden-bar', 'data-sig': sig([n, needs, Boolean(ui.showHidden), lang]) },
+      needs ? h('span', { class: 'hidden-dot', role: 'img', title: t('hide.needs'), 'aria-label': t('hide.needs') }) : null,
+      h('span', { class: 'muted small' }, tn('hide.count', n)),
+      h('button', { class: 'link-btn small', type: 'button', 'aria-expanded': String(Boolean(ui.showHidden)), onclick: toggleShowHidden }, t(ui.showHidden ? 'hide.collapse' : 'hide.show')))
+  }
+  function toggleShowHidden() { ui.showHidden = !ui.showHidden; renderFamilyFilter(); renderAccounts() }
+  // Everything is hidden: say so, instead of the first-run screen that would suggest the accounts are gone.
+  function allHiddenState() {
+    return h('div', { class: 'empty empty-sm', 'data-key': 'all-hidden' },
+      h('h3', null, t('hide.allTitle')),
+      h('p', { class: 'muted' }, t('hide.allBody')),
+      h('button', { class: 'btn', type: 'button', onclick: toggleShowHidden }, icon('eye'), t('hide.show')))
   }
 
   // The arrange mode: the only place to drag (spec §3.25). It starts from the order on screen, saves each move at
@@ -2388,13 +2484,19 @@ const MAIN = String.raw`
     const label = ms.map((m) => m.name).join(', ')
     const full = !pinned && pinnedUnits(fam) >= PIN_MAX
     const pinLabel = full ? t('pin.full', { n: PIN_MAX }) : t(pinned ? 'pin.unpinName' : 'pin.pinName', { name: label, title: family(fam).title })
-    return h('div', { class: 'row row-arrange' + (pinned ? ' is-pinned' : ''), role: 'listitem', 'data-ref': a.ref, 'data-key': 'arr:' + loginKey(ms.map((m) => m.ref)), 'data-sig': sig([ms.map(rowSig), at, lo, hi, full]) },
+    const hidden = isHidden(a)
+    return h('div', { class: 'row row-arrange' + (pinned ? ' is-pinned' : '') + (hidden ? ' is-hidden' : ''), role: 'listitem', 'data-ref': a.ref, 'data-key': 'arr:' + loginKey(ms.map((m) => m.ref)), 'data-sig': sig([ms.map(rowSig), at, lo, hi, full, hidden, famHidden(fam)]) },
       h('div', { class: 'ident' }, dragHandle('account', fam, a.name, label), badge(fam, 'sm'), h('div', { class: 'ident-text' }, h('div', { class: 'ident-name' },
         pinMark(a),
         h('span', { class: 'name', title: a.name }, a.name),
         loginMark(ms),
-        aliasText(a)))),
+        aliasText(a),
+        hiddenMark(hidden && !famHidden(fam))))),
       h('div', { class: 'arrange-tools' },
+        // In a hidden Family the row keeps its eye, greyed, so the columns stay in line; the group's eye shows it again.
+        famHidden(fam)
+          ? h('button', { class: 'icon-btn hide-btn is-on', type: 'button', disabled: true, title: t('hide.inFamily', { title: family(fam).title }), 'aria-label': t('hide.inFamily', { title: family(fam).title }) }, icon('eyeOff'))
+          : hideToggle(label, isHidden(a), () => toggleHide(a)),
         h('button', { class: 'icon-btn', type: 'button', 'aria-label': t('order.up', { name: label }), title: t('order.up', { name: label }), disabled: at <= lo ? true : undefined, onclick: () => moveUnit('account', fam, at, at - 1, { focus: a.name, label, button: 'up' }) }, icon('arrowUp')),
         h('button', { class: 'icon-btn', type: 'button', 'aria-label': t('order.down', { name: label }), title: t('order.down', { name: label }), disabled: at >= hi ? true : undefined, onclick: () => moveUnit('account', fam, at, at + 1, { focus: a.name, label, button: 'down' }) }, icon('arrowDown')),
         // Words, not a lone pin icon at the end of the row: the arrange mode is where the order and the pins are set.
@@ -2528,8 +2630,10 @@ const MAIN = String.raw`
   // Forgets the order of Families and accounts; pins stay.
   async function resetOrder() {
     const before = displayOf()
-    const pinned = before.pinned && Object.keys(before.pinned).length ? before.pinned : null
-    if (await saveDisplay(before, pinned ? { pinned } : {})) toast(t('order.reset'))
+    const keep = {}
+    for (const k of ['pinned', 'hidden']) if (before[k] && Object.keys(before[k]).length) keep[k] = before[k]
+    if (before.hiddenFamilies && before.hiddenFamilies.length) keep.hiddenFamilies = before.hiddenFamilies
+    if (await saveDisplay(before, keep)) toast(t('order.reset'))
   }
   // Words for screen readers only, such as the new place of something moved with the keyboard.
   let live = null
@@ -2551,13 +2655,17 @@ const MAIN = String.raw`
     const now = Date.now()
     $('toolbar').hidden = !all.length
     if (!all.length) { setKids(count, null); patch(box, [emptyState()].concat(appGroups())); return }
-    const shown = all.filter((a) => (!prefs.family || a.family === prefs.family) && matchesQuery(a, ui.query, famTitle(a)) && (!ui.attention || reasonsOf(a, now).length))
-    const filtered = shown.length !== all.length
+    const listed = listedAccounts()
+    const hiddenN = all.length - visibleAccounts().length
+    if (!listed.length) { setKids(count, null); patch(box, [allHiddenState()].concat(appGroups())); return }
+    const shown = listed.filter((a) => (!prefs.family || a.family === prefs.family) && matchesQuery(a, ui.query, famTitle(a)) && (!ui.attention || reasonsOf(a, now).length))
+    const filtered = shown.length !== listed.length
     patch(count, filtered
-      ? [t('count.filtered', { n: shown.length, total: all.length }), ' ', h('button', { class: 'link-btn', type: 'button', onclick: clearFilters }, t('filter.clear'))]
-      : tn('count.accounts', all.length))
+      ? [t('count.filtered', { n: shown.length, total: listed.length }), ' ', h('button', { class: 'link-btn', type: 'button', onclick: clearFilters }, t('filter.clear'))]
+      : tn('count.accounts', listed.length))
     const apps = appGroups()
-    if (!shown.length && !apps.length) { patch(box, noMatch()); return }
+    const tail = hiddenN && !ui.arrange ? [hiddenBar(hiddenN)] : []
+    if (!shown.length && !apps.length) { patch(box, [noMatch()].concat(tail)); return }
     ui.loginRefs = new Map()
     for (const x of loginClusters(shown)) if (Array.isArray(x)) for (const a of x) ui.loginRefs.set(a.ref, loginMembers(x)[0].ref)
     // Families in the Display Order (spec §3.25) whatever the sort; each group gets the quota columns it uses.
@@ -2577,10 +2685,10 @@ const MAIN = String.raw`
       const sorted = withPinned(sortAccounts(list, prefs.sort, now, accountOrder(fam)), pinnedOf(fam))
       const cols = quotaColumns(sorted)
       width = Math.max(width, cols.length)
-      groups.push(group(fam, sorted, all.filter((a) => a.family === fam).length, now, cols))
+      groups.push(group(fam, sorted, listed.filter((a) => a.family === fam).length, now, cols))
     }
     box.style.setProperty('--qn', String(width))
-    patch(box, (ui.arrange ? [arrangeBar()] : []).concat(groups))
+    patch(box, (ui.arrange ? [arrangeBar()] : []).concat(groups, tail))
     if (ui.fade && !REDUCED) {
       box.classList.add('view-in')
       setTimeout(() => box.classList.remove('view-in'), 400)
@@ -3040,8 +3148,9 @@ const MAIN = String.raw`
     if (canHandoff) tabs.push(['handoff', t('page.handoff')])
     nav.hidden = tabs.length < 2
     // Underline tabs: each page has its mark, the Accounts tab its count and Auto Handoff a dot while it is on.
-    const tabIcon = { accounts: 'users', sessions: 'messages', tuning: 'sliders', handoff: 'swap' }
-    const nAccounts = S.state ? S.state.accounts.length : 0
+    const tabIcon = { accounts: 'tabAccounts', sessions: 'tabSessions', tuning: 'tabTuning', handoff: 'tabHandoff' }
+    // The tab counts what the list shows: Hidden Accounts (spec §3.25) are counted on the line under it.
+    const nAccounts = S.state ? visibleAccounts().length : 0
     const handoffOn = Boolean(ahState() && ahState().settings.auto)
     // Redrawn only when something on it changes, so a refresh never replays the underline.
     const navShape = JSON.stringify([lang, curPage, tabs, nAccounts, handoffOn, sp.opening, pasteCount()])
@@ -5404,7 +5513,8 @@ const MAIN = String.raw`
       const a = S.state.accounts.find((x) => x.ref === r.ref)
       const p = a ? quotaPressure(a, Date.now()) : -1
       return h('li', null,
-        h('span', { class: 'title-logo' }, badge(r.family, 'sm'), h('span', { class: 'mono' }, accountLabel(r.ref))),
+        // A hidden Account can still take over (spec §3.25): the mark says why it is here though the list leaves it out.
+        h('span', { class: 'title-logo' }, badge(r.family, 'sm'), h('span', { class: 'mono' }, accountLabel(r.ref)), hiddenMark(Boolean(a && isHidden(a)))),
         h('span', { class: 'muted num' }, p >= 0 ? t('hp.used', { p: Math.round(p) }) : t('hp.noQuota')),
         h('span', { class: r.decision.kind === 'none' ? 'muted' : null }, hpDecision(r.decision, r.starts)))
     }))
@@ -5724,7 +5834,7 @@ const MAIN = String.raw`
   function settingsGroups(leave) {
     const secs = settingsSections()
     const link = (...args) => setLink(leave, ...args)
-    const general = [...lookRows(), autostartRow('autostart')]
+    const general = [...lookRows(), link(t('th.title'), themeLabel(), '', openThemes, true), autostartRow('autostart')]
     if (!BOOT.readOnly) general.push(link(t('term.title'), '', '', openTerminals, true))
     // The menu bar switch shows only where it works (macOS); while its state loads it waits, unseen.
     const bar = []
@@ -5737,7 +5847,8 @@ const MAIN = String.raw`
     const acct = []
     // The arrange mode (spec §3.25) has a place here too, where people look for "how do I change this".
     if (secs.includes('order')) {
-      const pins = Object.values(displayOf().pinned || {}).some((x) => x.length)
+      const d = displayOf()
+      const pins = [d.pinned, d.hidden].some((r) => Object.values(r || {}).some((x) => x.length)) || Boolean(d.hiddenFamilies && d.hiddenFamilies.length)
       acct.push(link(t('set.order'), t(ordered() || pins ? 'set.orderMine' : 'set.orderDefault'), '', () => {
         setPage('accounts')
         startArrange()
@@ -6099,6 +6210,7 @@ const MAIN = String.raw`
   function adoptPanel(next) {
     if (!CFG || cfgSaving) return
     next = next || {}
+    if ((next.colorTheme || 'default') !== themeChosen) refreshThemeCss()
     if (next.theme === cfgPanel.theme && next.language === cfgPanel.language) return
     cfgPanel = Object.assign({}, next)
     applyTheme()
@@ -6122,6 +6234,7 @@ const MAIN = String.raw`
     else if (dlg.kind === 'ask' && ak) { if (ak.els.text) ak.text = ak.els.text.value; renderAsk() }
     else if (dlg.kind === 'key' && ky && ky.step !== 'enter') renderKey()
     else if (dlg.kind === 'terminal' && tm) renderTerminals()
+    else if (dlg.kind === 'theme' && th) renderThemes()
     else if (dlg.kind === 'autostart') renderAutostart()
     else if (dlg.kind === 'mbset') renderMenubarSettings()
     else if (dlg.kind === 'pick' && pk) renderPick()
@@ -6138,7 +6251,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.theme', 'ai.ask.tool']
   function openRc() {
     if (!S.state || !rcSummary()) return
     rc.target = null
@@ -6707,6 +6820,124 @@ const MAIN = String.raw`
     }
     if (tm.error) body.push(errorNote(tm.error, null))
     setKids(dlg.el, dialogFrame(t('term.title'), null, body, [h('button', { class: 'btn', type: 'button', onclick: () => dlg.el.close() }, t('btn.close'))]))
+  }
+
+  // ---------- Themes (spec §3.34, ADR-0050) ----------
+  // The Theme dialog: Built-in Themes and Theme Files as cards, the user's own color, and "Let AI pick my colors".
+  // A switch swaps the page's token rules in place (a constructed sheet after the page's own), so the colors ease over
+  // instead of the page reloading.
+  let th = null
+  let themeFetching = false
+  // The Theme config names ('default' when none) and the one the page shows (inside a Portal, 'default' is its colors).
+  let themeChosen = (BOOT.panel && BOOT.panel.colorTheme) || 'default'
+  let themeNow = themeChosen === 'default' ? 'sky' : themeChosen
+  function themeName(x) { return x.source === 'portal' ? t('th.page') : x.id === 'custom' && x.source === 'file' ? t('th.custom') : lang === 'zh' && x.nameZh ? x.nameZh : x.name }
+  function themeLabel() {
+    const x = th && th.data && th.data.themes.find((y) => y.id === themeNow)
+    if (x) return themeName(x)
+    if (themeNow === 'default') return t('th.page')
+    const b = { sky: ['Sky', '晴空'], leaf: ['New Leaf', '新叶'] }[themeNow]
+    return b ? b[lang === 'zh' ? 1 : 0] : themeNow
+  }
+  function applyThemeCss(css) {
+    if (!css || typeof CSSStyleSheet !== 'function' || !('adoptedStyleSheets' in document)) { location.reload(); return }
+    const root = document.documentElement
+    if (!REDUCED) { root.classList.add('theme-fade'); setTimeout(() => root.classList.remove('theme-fade'), 220) }
+    const sheet = new CSSStyleSheet()
+    sheet.replaceSync(css)
+    document.adoptedStyleSheets = [sheet]
+  }
+  function refreshThemeCss() {
+    if (themeFetching) return
+    themeFetching = true
+    api('/api/themes').then((d) => { themeFetching = false; themeData(d) }, () => { themeFetching = false })
+  }
+  function themeData(d) {
+    themeNow = d.active
+    themeChosen = d.chosen
+    applyThemeCss(d.css)
+    if (th) { th.data = d; if (dlg.kind === 'theme') renderThemes() }
+    refreshSettings()
+  }
+  function openThemes() {
+    closeMenu()
+    th = { data: null, busy: false, error: null, accent: null, ai: '', armed: null, status: null }
+    showDialog('theme')
+    renderThemes()
+    api('/api/themes').then((d) => { if (th) { th.data = d; themeNow = d.active; themeChosen = d.chosen; renderThemes() } }, (e) => { if (th) { th.error = e; renderThemes() } })
+  }
+  async function themeSend(body) {
+    if (th) { th.busy = true; th.error = null; renderThemes() }
+    let d = null
+    try { d = await api('/api/theme', body) } catch (e) { if (th) th.error = e; else toast(e.message, { kind: 'fail' }) }
+    if (th) th.busy = false
+    if (d) themeData(d)
+    else if (th && dlg.kind === 'theme') renderThemes()
+    return d
+  }
+  async function useThemeBy(body) {
+    const d = await themeSend(body)
+    if (!d || !th) return
+    const x = d.themes.find((y) => y.id === d.active)
+    th.status = { text: t('th.switched', { name: x ? themeName(x) : d.active }), undo: true }
+    renderThemes()
+  }
+  async function undoThemeSwitch() {
+    const back = await themeSend({ undo: true })
+    if (!back || !th) return
+    const y = back.themes.find((z) => z.id === back.active)
+    th.status = { text: t('th.undone', { name: y ? themeName(y) : back.active }), undo: false }
+    renderThemes()
+  }
+  function renderThemes() {
+    if (!th) return
+    const d = th.data
+    const body = [h('p', { class: 'muted small' }, t('th.intro'))]
+    // What changed, with undo, sits in the footer beside Close, so the dialog never grows when it appears.
+    const st = th.status
+    const status = h('p', { class: 'theme-status small', role: 'status' }, st ? [st.text, st.undo ? h('button', { class: 'link-btn', type: 'button', disabled: th.busy, onclick: undoThemeSwitch }, t('th.undo')) : null] : null)
+    if (!d && !th.error) body.push(h('p', { class: 'muted small' }, spinner(), ' ', t('th.loading')))
+    if (d) {
+      if (d.fallback) body.push(h('p', { class: 'note note-warn' }, d.fallback))
+      else if (d.adjusted) body.push(h('p', { class: 'note' }, t('th.adjusted', { n: d.adjusted })))
+      body.push(h('div', { class: 'theme-grid', role: 'radiogroup', 'aria-label': t('th.title') }, d.themes.filter((x) => x.source === 'builtin' || !x.problems.length).map((x) => {
+        const on = x.id === d.active
+        return h('button', { class: 'theme-card' + (on ? ' is-on' : ''), type: 'button', role: 'radio', 'aria-checked': String(on), disabled: th.busy || (BOOT.readOnly && !on), onclick: () => { if (!on && !BOOT.readOnly) useThemeBy({ use: x.id }) } },
+          h('span', { class: 'theme-sw', 'aria-hidden': 'true' }, x.swatches.map((c) => h('span', { css: { background: c } }))),
+          h('span', { class: 'theme-name' }, h('span', null, themeName(x)), on ? h('span', { class: 'chip chip-sm chip-ok' }, t('th.inUse')) : x.source === 'file' ? h('span', { class: 'faint small' }, t('th.mine')) : null))
+      })))
+      if (!BOOT.readOnly) {
+        const cur = d.themes.find((y) => y.id === d.active)
+        const pick = h('input', { id: 'th-accent', type: 'color', value: th.accent || (cur && cur.swatches[2]) || '#3f8fc4', disabled: th.busy, 'aria-label': t('th.accent') })
+        pick.addEventListener('input', () => { th.accent = pick.value })
+        body.push(h('div', { class: 'theme-row' },
+          h('label', { class: 'theme-label', for: 'th-accent' }, t('th.accent')), pick,
+          h('button', { class: 'btn btn-sm', type: 'button', disabled: th.busy, onclick: () => useThemeBy({ accent: pick.value }) }, t('th.accentUse'))),
+          h('p', { class: 'field-hint' }, t('th.accentHint')))
+        const ai = h('input', { id: 'th-ai', type: 'text', autocomplete: 'off', placeholder: t('th.aiPh'), 'aria-label': t('th.ai') })
+        ai.value = th.ai
+        ai.addEventListener('input', () => { th.ai = ai.value })
+        const go = () => {
+          openAsk({ task: 'theme', text: th.ai.trim(), context: { theme: cur ? cur.name + ' (' + cur.id + ')' : d.active, version: BOOT.version } })
+        }
+        ai.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); go() } })
+        body.push(h('label', { class: 'field', for: 'th-ai' }, h('span', null, t('th.ai')), ai),
+          h('div', { class: 'theme-row' }, h('button', { class: 'btn btn-sm', type: 'button', onclick: go }, icon('bot'), t('th.aiGo')), h('span', { class: 'field-hint' }, t('th.aiHint'))))
+        const files = d.themes.filter((x) => x.source === 'file')
+        if (files.length) body.push(h('div', { class: 'theme-files' }, h('p', { class: 'set-label' }, t('th.files')), files.map((x) => {
+          const sure = th.armed === x.id
+          return h('div', { class: 'theme-file' },
+            h('span', { class: 'theme-file-name' }, themeName(x), x.problems.length ? h('span', { class: 'theme-bad small' }, x.problems[0]) : null),
+            h('button', { class: 'btn btn-sm' + (sure ? ' btn-danger' : ''), type: 'button', disabled: th.busy, onclick: async () => {
+              if (!sure) { th.armed = x.id; renderThemes(); return }
+              th.armed = null
+              if (await themeSend({ remove: x.id })) toast(t('th.removed', { name: themeName(x) }))
+            } }, t(sure ? 'th.removeSure' : 'th.remove')))
+        })))
+      }
+    }
+    if (th.error) body.push(errorNote(th.error, null))
+    setKids(dlg.el, dialogFrame(t('th.title'), null, body, [status, h('button', { class: 'btn', type: 'button', onclick: () => dlg.el.close() }, t('btn.close'))]))
   }
 
   // ---------- pick commands (spec §3.13, ADR-0035) ----------

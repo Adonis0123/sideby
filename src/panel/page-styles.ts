@@ -1,12 +1,22 @@
 // The Panel page's styles: design tokens (a host theme layers its values over them, see theme.ts) and the rules
 // that read them. Every color, radius and size below comes from a token, so a host theme reaches every component.
-import { type ResolvedTheme, resolveTheme } from './theme.ts'
 
-// Colors defined from other tokens; repeated in both schemes so they follow that scheme's base colors. Dark mode keeps
-// the logo tile light: the mark's ink outline (core/brand-mark.ts) needs a light ground.
+import { type PanelThemeTokens, type ResolvedTheme, resolveTheme, THEME_TOKENS } from './theme.ts'
+import { BUILTIN_THEMES, DEFAULT_THEME_ID } from './themes.ts'
+
+// The default Theme's colors (spec §3.34): every color token, as declarations for the token blocks below.
+const DEFAULT_THEME = BUILTIN_THEMES.find((t) => t.id === DEFAULT_THEME_ID) as (typeof BUILTIN_THEMES)[number]
+const colorDecls = (tokens: PanelThemeTokens) =>
+  Object.entries(tokens)
+    .map(([k, v]) => `${THEME_TOKENS[k as keyof PanelThemeTokens]}: ${v}`)
+    .join('; ')
+
+// Colors defined from other tokens, before each scheme's Theme colors so a Theme can set them; repeated in both schemes so they follow that scheme's base colors. Dark mode keeps
+// the logo tile light: the mark's ink outline (core/brand-mark.ts) needs a light ground. The mark's body stays the brand
+// blue whatever the Theme (ADR-0050).
 const DERIVED_COLORS = `
   --btn-text: var(--text); --btn-hover-text: var(--accent); --check: var(--focus);
-  --logo-bg: var(--accent-soft); --logo-fg: var(--focus); --logo-line: var(--border);
+  --logo-bg: var(--surface-2); --logo-fg: #3f8fc4; --logo-line: var(--border);
   --focus-outline: 2px solid var(--focus); --focus-ring: none;`
 // Design tokens. A host theme (theme.ts) layers its values over these: light values after LIGHT_TOKENS, dark values after
 // DARK_TOKENS. DARK_TOKENS sets every color token again, so a host's light colors never leak into dark mode, while
@@ -16,28 +26,14 @@ const LIGHT_TOKENS = `
   --font-size: 14px; --small: 12.5px; --control-size: 13.5px; --heading-size: 15px; --large: 16px; --title-size: 22px;
   --title-weight: 750; --heading-weight: 650; --strong-weight: 600; --button-weight: 600; --primary-weight: 650;
   --radius: 14px; --ctl-radius: 8px; --chip-radius: 999px; --ctl-h: 34px; --ctl-h-sm: 28px; --field-h: 36px;
-  --content-width: 1180px; --gutter: 24px;
-  --bg: #f2f8fc; --surface: #fcfcfa; --surface-2: #f6fafd; --border: #dce8f0; --border-strong: #c5d7e4;
-  --text: #15171c; --muted: #555b63; --faint: #8b93a1; --accent: #27658f; --accent-soft: #e5f2fb;
-  --primary: #d9ebf9; --primary-hover: #cbe3f7; --primary-active: #bcdbf4; --on-primary: #17588a;
-  --primary-border: #7eb2dd; --primary-hover-border: #5f9dd0; --btn-hover-border: #8fbde3;
-  --hover: #f0f7fc; --active: #e6f1fa; --focus: #3f8fc4;
-  --ok: #15803d; --ok-bar: #22c55e; --ok-soft: #e8f7ee; --warn: #b45309; --warn-bar: #f59e0b; --warn-soft: #fdf3e2;
-  --fail: #c81e1e; --fail-bar: #ef4444; --fail-soft: #fdecec; --track: #e4edf4;
+  --content-width: 1180px; --gutter: 24px;${DERIVED_COLORS}
   --spark: oklch(from var(--accent) clamp(0.55, l, 0.62) max(c, 0.14) h); --spark-soft: oklch(from var(--accent) 0.83 calc(max(c, 0.14) * 0.6) h);
-  --shadow: 0 1px 2px rgba(16,24,40,.04), 0 2px 8px rgba(16,24,40,.05);
-  --float-shadow: 0 10px 30px rgba(16,24,40,.14), 0 2px 6px rgba(16,24,40,.06);${DERIVED_COLORS}`
-const DARK_TOKENS = `
-  --bg: #0e1621; --surface: #141e2a; --surface-2: #111a25; --border: #233244; --border-strong: #30455b;
-  --text: #e6edf3; --muted: #9aa9b8; --faint: #6b7a8a; --accent: #8cc4ee; --accent-soft: #16314a;
-  --primary: #1a4366; --primary-hover: #20507a; --primary-active: #265c8a; --on-primary: #dcedfb;
-  --primary-border: #3d74a3; --primary-hover-border: #4f86b5; --btn-hover-border: #4a7fa8;
-  --hover: #182736; --active: #1c2f42; --focus: #5aa7dc;
-  --ok: #4ade80; --ok-bar: #22c55e; --ok-soft: #13291c; --warn: #fbbf24; --warn-bar: #f59e0b; --warn-soft: #2d2410;
-  --fail: #f87171; --fail-bar: #ef4444; --fail-soft: #331717; --track: #1f2c3a;
+  ${colorDecls(DEFAULT_THEME.light)};
+  --float-shadow: 0 10px 30px rgba(20,22,24,.14), 0 2px 6px rgba(20,22,24,.06);`
+const DARK_TOKENS = `${DERIVED_COLORS}
   --spark: oklch(from var(--accent) clamp(0.7, l, 0.78) max(c, 0.14) h); --spark-soft: oklch(from var(--accent) 0.45 calc(max(c, 0.14) * 0.6) h);
-  --shadow: 0 1px 2px rgba(0,0,0,.3); --float-shadow: 0 12px 32px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.3);${DERIVED_COLORS}
-  --logo-bg: #dcebf7; --logo-line: transparent;`
+  ${colorDecls(DEFAULT_THEME.dark)};
+  --float-shadow: 0 12px 32px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.3);`
 
 /**
  * The page's style block: default tokens, the host's tokens over them, then the rules that read them. With
@@ -45,6 +41,11 @@ const DARK_TOKENS = `
  * `data-theme` on the root element.
  */
 export function pageStyles(theme: ResolvedTheme = resolveTheme(undefined)): string {
+  return tokenStyles(theme) + CSS
+}
+
+/** Only the token rules of `pageStyles`: the page swaps them in when the user picks another Theme (spec §3.34). */
+export function tokenStyles(theme: ResolvedTheme): string {
   const rule = (decls: string[], sel = ':root') => (decls.length ? `${sel} { ${decls.join('; ')}; }\n` : '')
   const scheme = theme.colorScheme === 'auto' ? 'light dark' : theme.colorScheme
   let css = `:root {${LIGHT_TOKENS}\n  color-scheme: ${scheme};\n}\n${rule(theme.light)}`
@@ -54,7 +55,7 @@ export function pageStyles(theme: ResolvedTheme = resolveTheme(undefined)): stri
     css += `:root[data-theme=dark] {${DARK_TOKENS}\n  color-scheme: dark;\n}\n${rule(theme.dark, ':root[data-theme=dark]')}`
     css += ':root[data-theme=light] { color-scheme: light; }\n'
   } else if (theme.colorScheme === 'dark') css += `:root {${DARK_TOKENS}\n}\n${rule(theme.dark)}`
-  return css + CSS
+  return css
 }
 
 const CSS = `
@@ -108,6 +109,26 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .block { margin-bottom: 22px; }
 .ic { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
+/* Themes (spec §3.34): the cards in the Theme dialog, and the short fade while the page takes a new Theme. */
+.theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 12px 0 18px; }
+.theme-card { display: flex; flex-direction: column; gap: 8px; padding: 10px; text-align: left; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: calc(var(--radius) - 4px); cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.theme-card:hover:not(:disabled) { border-color: var(--btn-hover-border); }
+.theme-card.is-on { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); cursor: default; }
+.theme-card:disabled:not(.is-on) { opacity: .6; cursor: default; }
+.theme-card:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
+.theme-sw { display: flex; height: 28px; border-radius: 6px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--border); }
+.theme-sw span { flex: 1; }
+.theme-name { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-weight: var(--strong-weight); }
+.theme-status { display: flex; align-items: center; gap: 8px; margin: 0 auto 0 0; min-width: 0; color: var(--muted); }
+.theme-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0; }
+.theme-label { font-weight: var(--strong-weight); }
+.theme-row input[type=color] { width: 40px; height: 30px; padding: 2px; border: 1px solid var(--border-strong); border-radius: var(--ctl-radius); background: var(--surface); cursor: pointer; }
+.theme-files { margin-top: 16px; display: grid; gap: 6px; }
+.theme-file { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; border-top: 1px solid var(--border); }
+.theme-file-name { display: flex; flex-direction: column; min-width: 0; }
+.theme-bad { color: var(--fail); }
+.theme-fade, .theme-fade * { transition: background-color .18s ease, color .18s ease, border-color .18s ease, fill .18s ease !important; }
+@media (prefers-reduced-motion: reduce) { .theme-fade, .theme-fade * { transition: none !important; } }
 /* Summary: four quiet numbers in one surface. */
 .summary[hidden], #checkup[hidden] { display: none; }
 .summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 18px; overflow: hidden; }
@@ -648,7 +669,8 @@ a.btn:hover { text-decoration: none; }
 .ah-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
 .disabled-why { color: var(--muted); font-size: var(--small); margin-top: 10px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.spin { display: inline-block; width: 13px; height: 13px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite; vertical-align: -2px; flex: none; }
+/* A thin ring with an arc that fades out behind its head: lighter than a thick broken circle at text size. */
+.spin { display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: conic-gradient(from 0deg, transparent 0 8%, color-mix(in srgb, currentColor 18%, transparent) 30%, currentColor); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 1.75px), #000 calc(100% - 1.5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 1.75px), #000 calc(100% - 1.5px)); animation: spin .75s linear infinite; vertical-align: -2px; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .copy { display: flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; }
 .copy code { background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px; padding: 3px 8px; overflow-x: auto; white-space: nowrap; color: var(--text); min-width: 0; }
@@ -1193,12 +1215,11 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .tab::before { content: ""; position: absolute; inset: 6px 2px 7px; z-index: -1; border-radius: var(--ctl-radius); background: var(--hover); opacity: 0; transition: opacity .12s; }
 .tab:hover { color: var(--text); }
 .tab:hover::before { opacity: 1; }
-.tab .ic { width: 16px; height: 16px; color: var(--faint); transition: color .12s; }
-.tab:hover .ic { color: var(--muted); }
+/* The icon takes its tab's text color, so a tab is always one color: muted, then the accent once selected. */
+.tab .ic { width: 16px; height: 16px; color: currentColor; transition: color .12s; }
 .tab-label { display: inline-grid; }
 .tab-label::after { content: attr(data-label); height: 0; overflow: hidden; visibility: hidden; font-weight: var(--strong-weight); }
-.tab[aria-selected=true] { color: var(--text); font-weight: var(--strong-weight); }
-.tab[aria-selected=true] .ic { color: var(--accent); }
+.tab[aria-selected=true] { color: var(--accent); font-weight: var(--strong-weight); }
 .tab[aria-selected=true]::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: 0; height: 2px; border-radius: 2px 2px 0 0; background: var(--accent); animation: tab-line .22s cubic-bezier(.16, 1, .3, 1); }
 @keyframes tab-line { from { opacity: 0; transform: scaleX(.3); } }
 .tab:focus-visible { outline: var(--focus-outline); outline-offset: -5px; border-radius: var(--ctl-radius); }
@@ -1251,8 +1272,17 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 :where(:root[data-width=phone]) .tg-stat { border-left: 0; border-top: 1px solid var(--border); }
 :where(:root[data-width=phone]) .tg-stat:first-child { border-top: 0; }
 
+/* Hidden Families and Accounts (spec §3.25): the line under the list, and the marks while they are shown. */
+.hidden-bar { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 0 2px; animation: chip-in .16s ease-out; }
+.hidden-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fail); flex: none; }
+.hidden-chip .ic { width: 12px; height: 12px; }
+.ident-name .hidden-chip { margin-left: 2px; }
+.group.is-hidden .group-title, .row.is-hidden .name { color: var(--muted); }
+.hide-btn .ic { width: 16px; height: 16px; }
+.hide-btn.is-on { color: var(--muted); }
+.hide-btn:disabled { opacity: .4; cursor: not-allowed; }
 @media (prefers-reduced-motion: reduce) {
-  .sk, .spin, .is-spinning svg, .toast, .toast.bump, .toast.toast-out, .view-in > *, .set-pane.view-in, .row.flash, .sess-row.flash, .sess-msg, .seg-badge, .card.flash, .pulse, .sess-busy .sess-dot, .menu, .menu.float-out, .dialog[open], .dialog[open]::backdrop, .enter, .fade-in, .hist-list.swap-in, .tip-body, .tip-float, .row-run.is-done .ic, .tab[aria-selected=true]::after { animation: none; }
+  .sk, .spin, .hidden-bar, .is-spinning svg, .toast, .toast.bump, .toast.toast-out, .view-in > *, .set-pane.view-in, .row.flash, .sess-row.flash, .sess-msg, .seg-badge, .card.flash, .pulse, .sess-busy .sess-dot, .menu, .menu.float-out, .dialog[open], .dialog[open]::backdrop, .enter, .fade-in, .hist-list.swap-in, .tip-body, .tip-float, .row-run.is-done .ic, .tab[aria-selected=true]::after { animation: none; }
   .bar > span, .chev, .row, .sess-row, .sess-copy, .hist-row, .hist-cont, .hist-proj, .hist-catbody, .hist-opt, .hist-list, .icon-btn, .seg-btn, .menu-item, .set-tab, .link-btn, .tag-btn, .email-btn, .btn, .chip-btn, .set-link .ic, .dialog, .dialog[open], .dialog::backdrop, .tab, .tab::before, .tab .ic, .hp-status { transition: none; }
   :is(.btn, .icon-btn, .seg-btn, .set-tab, .chip-btn):active:not(:disabled), .set-link:hover .ic, .dialog:not([open]) { transform: none; }
 }

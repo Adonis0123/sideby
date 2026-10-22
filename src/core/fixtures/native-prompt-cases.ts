@@ -8,6 +8,7 @@ export const NATIVE_CONTEXT = {
   version: '0.0.0-test',
   terminalCustom: 'demo-term --cwd {cwd} -e {cmd}',
   terminals: ['Ghostty', 'Terminal'],
+  theme: 'Sky (sky)',
   handoff: ['Auto Handoff: on', 'Threshold: 90%'],
   findings: [
     { code: 'link.dangling', account: 'claude:work', item: 'settings.json', message: 'points nowhere', hint: 'relink it' },

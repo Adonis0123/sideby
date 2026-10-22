@@ -67,7 +67,12 @@ export interface PanelThemeTokens {
   warnSoft?: string
   fail?: string
   failSoft?: string
-  /** The sideby mark in the page header. */
+  /** Quota bars: normal (the accent by default), running out and used up; `track` is the empty part of a bar. */
+  okBar?: string
+  warnBar?: string
+  failBar?: string
+  track?: string
+  /** The sideby mark in the page header; `logoColor` stays the brand blue whatever the Theme unless set. */
   logoBg?: string
   logoColor?: string
   logoBorder?: string
@@ -151,6 +156,10 @@ export const THEME_TOKENS: Record<keyof PanelThemeTokens, string> = {
   warnSoft: '--warn-soft',
   fail: '--fail',
   failSoft: '--fail-soft',
+  okBar: '--ok-bar',
+  warnBar: '--warn-bar',
+  failBar: '--fail-bar',
+  track: '--track',
   logoBg: '--logo-bg',
   logoColor: '--logo-fg',
   logoBorder: '--logo-line',

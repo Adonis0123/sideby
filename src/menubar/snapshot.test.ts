@@ -98,6 +98,45 @@ describe('menubarSnapshot', () => {
     }
   })
 
+  it('keeps a reading over an hour old current while this computer has not used the login since', () => {
+    const old = { ...quota(10, 58), observedAt: at(-600) }
+    const rowWith = (lastUseAt: string | undefined, refreshable = false) =>
+      menubarSnapshot(
+        [
+          {
+            ...family('claude', 'Claude Code', [{ ...sub('002', old), ...(lastUseAt ? { lastUseAt } : {}) }]),
+            refreshable,
+          },
+        ],
+        NOW,
+        'en',
+      )
+    // Last used before the reading, or within 10 minutes after it: no "older reading", and the hover says what it cannot see.
+    for (const used of [at(-700), at(-595)]) {
+      const snap = rowWith(used)
+      const row = snap.sections[0]!.rows[0]!
+      assert.equal(row.stale, false)
+      assert.doesNotMatch(row.detail, /older reading/)
+      assert.match(row.tip, /^Quota read 10h 0m ago\nNot used on this computer since/)
+      assert.notEqual(snap.card?.status, 'Quota needs refreshing')
+    }
+    // Used later, or no usage to go by: old, and a Host that cannot be asked says a session updates it.
+    for (const used of [at(-500), undefined]) {
+      const snap = rowWith(used)
+      const row = snap.sections[0]!.rows[0]!
+      assert.equal(row.stale, true)
+      assert.match(row.tip, /they update when a session runs in this account/)
+      assert.equal(
+        snap.card?.detail,
+        'Some readings are old · they update when a session runs in that account',
+      )
+    }
+    // A Family that "Refresh" can ask keeps the refresh hint.
+    const asked = rowWith(undefined, true)
+    assert.match(asked.sections[0]!.rows[0]!.tip, /click Refresh/)
+    assert.equal(asked.card?.detail, 'Some readings are old · refresh to check')
+  })
+
   it('titles each Family by the account sideby would pick and shows the highest', () => {
     const snap = menubarSnapshot(
       [

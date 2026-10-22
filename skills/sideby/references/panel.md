@@ -13,6 +13,15 @@ Use these commands for the same persistent settings as the Panel. Prefer account
 - Same Login row name: the Panel shows two directories of one login as one row, named after the one that comes first in the order. To show `001` instead of `main`, run `sideby order claude 001` (the rest follows). `order --reset` brings back the main directory's name.
 - Desktop app windows (Grok Bot, id `grok-bot`) are a group in the same order: `sideby order --families claude grok-bot codex` places the group, `sideby order grok-bot 001 main` orders its windows. They cannot be pinned.
 
+## Hidden Families and Accounts
+
+When the user says the Panel or the menu bar shows too many tools or accounts ("hide pi", "别显示 Antigravity", "把旧账号藏起来"):
+
+- `sideby hide pi --json` hides a whole Family; `sideby hide claude:old --json` (an account or short command) hides one account with the other directories of its Same Login. `sideby unhide <same> --json` shows it again. Both return `target`, `kind` (`family` or `account`), `hidden`, `changed`, `message`, `display`, save immediately, and repeating one is a no-op. An account of a hidden Family cannot be shown alone: `unhide` says to unhide the Family.
+- Hidden is display only: the account still starts with `sideby run`, still shows in Session History, and can still be picked by `sideby next` or Auto Handoff. To stop it taking over, change the Handoff Rules instead. Turning a plugin off (`plugins.<plugin>.enabled: false`) is different: it stops sideby loading the Family at all, so only suggest it when the user asks for that.
+- The Panel's account list, the menu bar and the text of `sideby list` leave hidden ones out; `sideby list --all` shows them marked `(hidden)`. `sideby list --json` keeps every account and marks hidden ones `hidden: true` (Families too), so read that field before telling the user an account is missing. `sideby order --json` marks `hidden` per Family and account, and `order --reset` keeps what is hidden.
+- In the Panel: the row's … menu has "Hide this account" and "Hide all of <tool>"; the arrange mode has an eye per group and row; the line "N hidden · Show" under the list brings them back for this page.
+
 These affect display only, never Handoff Order. Saving removes names that no longer exist. The existing Same Login rules apply (Claude groups by email and organization; Codex also by ChatGPT workspace; Grok also by x.ai user and team).
 
 ## Model and effort

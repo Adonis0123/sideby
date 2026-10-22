@@ -28,6 +28,7 @@ import {
   handoffChangeOf,
   handoffHintAccount,
   handoffTaskFacts,
+  hiddenIn,
   highlightParts,
   histFilters,
   historyEmpty,
@@ -58,6 +59,7 @@ import {
   passedWindow,
   pinnedIn,
   quotaAskable,
+  quotaHighLevel,
   quotaPressure,
   remoteControlSummary,
   reorder,
@@ -191,6 +193,18 @@ describe('page logic', () => {
     const passed = quota(90, 10)
     passed!.windows![0]!.resetsAt = at(-1)
     assert.equal(attentionWhy(acct('a', { quota: passed }), { fail: 0, warn: 0 }, NOW, 60), null)
+  })
+
+  it('colors a running-low label like its bar: red from the fail level, amber below', () => {
+    assert.equal(quotaHighLevel(acct('a', { quota: quota(40, 62) }), NOW, 85), 'warn')
+    assert.equal(quotaHighLevel(acct('a', { quota: quota(40, 91) }), NOW, 85), 'fail')
+    // A window that has reset, or a Quota read from another Account of the same login, does not count.
+    const passed = quota(95, 10)
+    passed!.windows![0]!.resetsAt = at(-1)
+    assert.equal(quotaHighLevel(acct('a', { quota: passed }), NOW, 85), 'warn')
+    const shared = quota(95)
+    shared!.from = 'claude:main'
+    assert.equal(quotaHighLevel(acct('a', { quota: shared }), NOW, 85), 'warn')
   })
 
   it('lists attention reasons, most serious first', () => {
@@ -1100,6 +1114,18 @@ describe('withPinned', () => {
   })
   it('skips pinned names that are gone or filtered out', () => {
     assert.deepEqual(names(withPinned(list, ['gone', '001'])), ['001', 'main', 'work', '002'])
+  })
+})
+
+describe('hiddenIn', () => {
+  it('hides a whole Family, a named Account, and a Same Login through any of its directories', () => {
+    const display = { hiddenFamilies: ['pi'], hidden: { claude: ['old'] } }
+    assert.equal(hiddenIn({ family: 'pi', name: 'main' }, display), true)
+    assert.equal(hiddenIn({ family: 'claude', name: 'old' }, display), true)
+    assert.equal(hiddenIn({ family: 'claude', name: 'main', sameLogin: ['claude:old'] }, display), true)
+    assert.equal(hiddenIn({ family: 'claude', name: 'work' }, display), false)
+    assert.equal(hiddenIn({ family: 'codex', name: 'old' }, display), false)
+    assert.equal(hiddenIn({ family: 'claude', name: 'old' }, {}), false)
   })
 })
 

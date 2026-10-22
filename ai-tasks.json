@@ -71,6 +71,20 @@
           ]
         },
         {
+          "id": "theme",
+          "native": true,
+          "title": { "en": "Let AI pick your colors", "zh": "让 AI 帮我配色" },
+          "placeholder": {
+            "en": "What feel do you want? A website or a color works too.",
+            "zh": "想要什么感觉？给个网址或颜色也行。"
+          },
+          "examples": [
+            { "en": "Quiet and gray, like Notion", "zh": "素净的灰色，像 Notion" },
+            { "en": "Green, like my company site", "zh": "绿色，和我们公司官网一样" },
+            { "en": "Warmer, easier on the eyes at night", "zh": "暖一点，晚上看着不累" }
+          ]
+        },
+        {
           "id": "handoff",
           "native": true,
           "title": { "en": "Let AI tune it", "zh": "让 AI 帮我调" },

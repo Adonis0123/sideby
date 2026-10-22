@@ -344,7 +344,14 @@ export function taskContext(c: unknown, fail: (message: string) => Error): AiTas
     return v
   }
   for (const [k, v] of Object.entries(c)) {
-    if (k === 'account' || k === 'family' || k === 'quotaReason' || k === 'version' || k === 'terminalCustom')
+    if (
+      k === 'account' ||
+      k === 'family' ||
+      k === 'quotaReason' ||
+      k === 'version' ||
+      k === 'terminalCustom' ||
+      k === 'theme'
+    )
       out[k] = str(v, `"context.${k}"`)
     else if (k === 'terminals') {
       if (!Array.isArray(v) || v.length > 50) throw fail('"context.terminals" must be a list')
