@@ -2,7 +2,7 @@
 name: sideby
 description: Use when the user runs, or wants to run, several AI coding accounts (Claude Code, Codex, Grok Build, pi) side by side. Covers installing sideby and setting up a new account ("install sideby", "set up another Claude account", "add cc008", "配置一个 cc00x", "再加一个 Codex 账号"), explaining what accounts share and what stays separate ("what do my accounts share?", "这些账号共享了什么"), showing which account a session is ("show [cc001] in the status line", "加上账号标识"), finding a past session of any account ("找一下我上周改登录页的那个会话"), seeing accounts, quota and usage, moving on when one hits its 5-hour or weekly limit, moving the current task to another account ("用 cc008 继续", "交回 cc008"), adding a short command (alias) or a pick command that starts whichever account has the most quota ("加个 cc"), adding an API account from a vendor's docs ("加一个 DeepSeek API 账号"), supporting a new tool, and repairing drifted account directories (skills, hooks, rules or settings not shared, wrong symlinks, credential file permissions). Drives the `sideby` CLI with `--json`; the agent does every step except browser sign-in, filling in secrets and starting interactive sessions, which it hands to the user as one command (inside an Auto Handoff session, `sideby handoff ready --to` moves the task itself).
 metadata:
-  version: "0.22.0"
+  version: "0.23.0"
   requires:
     bins: [sideby, node]
   cliHelp: sideby --help
