@@ -6373,7 +6373,7 @@ const MAIN = String.raw`
   const ATTACH_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm'
   let dropsHooked = false
   // Which open dialog takes pasted or dropped files now: the AI Task's or "Send to it"'s, until it shows its result.
-  function dropTarget() {
+  function fileDropTarget() {
     if (BOOT.readOnly) return null
     if (dlg.kind === 'ask' && ak && !ak.result) return askAddFiles
     if (dlg.kind === 'send' && sd && !sd.result) return sendAddFiles
@@ -6383,7 +6383,7 @@ const MAIN = String.raw`
     if (dropsHooked) return
     dropsHooked = true
     const el = dlg.el
-    const active = () => Boolean(dropTarget())
+    const active = () => Boolean(fileDropTarget())
     const hasFiles = (e) => e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0
     el.addEventListener('paste', (e) => {
       const cd = e.clipboardData
@@ -6393,7 +6393,7 @@ const MAIN = String.raw`
       if (!active() || !files.length) return
       // A file copied in Finder also carries its name as text; only the file is wanted.
       e.preventDefault()
-      dropTarget()(files)
+      fileDropTarget()(files)
     })
     el.addEventListener('dragover', (e) => {
       if (!active() || !hasFiles(e)) return
@@ -6406,7 +6406,7 @@ const MAIN = String.raw`
       el.classList.remove('drop-on')
       if (!active() || !hasFiles(e)) return
       e.preventDefault()
-      dropTarget()(Array.from(e.dataTransfer.files || []))
+      fileDropTarget()(Array.from(e.dataTransfer.files || []))
     })
   }
   function askAttachField() {

@@ -31,4 +31,19 @@ describe('page script scope', () => {
       'these are called by a top-level listener but are not functions in the top scope',
     )
   })
+
+  // Two top-level function declarations with one name still parse in sloppy and strict mode alike, and the later one
+  // silently replaces the earlier everywhere (2026-10-23: the attachments' dropTarget() replaced the arrange mode's,
+  // so dragging an account or a tool into a new place did nothing).
+  it('declares each top-level function name once', () => {
+    const names = [...PAGE_SCRIPT.matchAll(/^ {2}(?:async )?function\*? ?([A-Za-z_$][\w$]*)\(/gm)].map(
+      (m) => m[1]!,
+    )
+    assert.ok(names.length > 50, `found the top-level functions (${names.length})`)
+    assert.deepEqual(
+      names.filter((name, i) => names.indexOf(name) !== i),
+      [],
+      'these names are declared twice in the top scope; the later declaration replaces the earlier one',
+    )
+  })
 })
