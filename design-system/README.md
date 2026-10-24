@@ -51,7 +51,7 @@ Use the Panel's classes from `components/bundle.css` (its real stylesheet): `btn
 
 ## Not synced
 
-- Not brought in: the `spark` / `spark-soft` colors (derived with `oklch(from var(--accent) …)`), `focus-outline` (`2px solid var(--focus)`, described above instead) and `focus-ring` (`none`).
+- Not tokens: the font stacks, sizes and weights the rules read by name (`--font`, `--font-size`, `--button-weight`, …), the `spark` / `spark-soft` colors (derived with `oklch(from var(--accent) …)`), `focus-outline` (`2px solid var(--focus)`) and `focus-ring` (`none`). `components/bundle.css` declares them in a `:root` block before the rules, at their light values, so the components keep their type and focus outline.
 - No font files: the Panel uses system fonts only.
 - UI icons were not copied as files: they are inline SVG strings in `src/panel/page-script.ts`.
 - Components took the read-only route: sideby's Panel is server-rendered HTML with one stylesheet, not a component library, so Button, Chip, Tag and QuotaBar are static previews styled by the real CSS. Cards, rows, dialogs, tabs and the summary strip are styled in `bundle.css` but have no preview card yet.

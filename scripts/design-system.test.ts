@@ -5,7 +5,7 @@ import { describe, it } from 'node:test'
 import { pageStyles } from '../src/panel/page-styles.ts'
 import { THEME_TOKENS } from '../src/panel/theme.ts'
 import { BUILTIN_THEMES } from '../src/panel/themes.ts'
-import { buildTokens, bundleCss, type Notes, ruleOf, SOURCE_DIR } from './design-system.ts'
+import { buildTokens, bundleCss, type Notes, ruleOf, SOURCE_DIR, tokenVars } from './design-system.ts'
 
 const notes = JSON.parse(readFileSync(join(SOURCE_DIR, 'notes.json'), 'utf8')) as Notes
 const tokens = buildTokens(notes, { ref: 'main@0000000', date: '2026-01-01' })
@@ -46,11 +46,18 @@ describe('the Design System built from code', () => {
     assert.throws(() => ruleOf('.a { color: red; }', '.gone'), /no rule "\.gone \{ … \}".*TYPE_STYLES/)
   })
 
-  it('ships the Panel rules without the token blocks as bundle.css', () => {
+  it('ships the Panel rules as bundle.css, after the variables they read that are no token', () => {
     const css = bundleCss()
-    assert.ok(pageStyles().endsWith(css))
-    assert.ok(!css.includes(':root {'), 'no token block')
-    assert.match(css, /^\* \{ box-sizing: border-box; \}/)
+    const [support = '', ...rest] = css.split('\n')
+    assert.ok(pageStyles().endsWith(rest.join('\n')), 'the rules as the Panel has them')
+    assert.match(support, /^:root \{ .*--font-size: 14px;.*--focus-outline: 2px solid var\(--focus\);.* \}$/)
+    const declared = new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]))
+    const tokenVar = tokenVars()
+    for (const t of tokens.color.tokens) assert.ok(tokenVar.has(`--${t.name}`))
+    // --qr is set per row by page-script.ts.
+    for (const m of css.matchAll(/var\((--[a-z0-9-]+)/g))
+      if (m[1] !== '--qr') assert.ok(declared.has(m[1]) || tokenVar.has(m[1]!), `${m[1]} is defined`)
+    assert.ok(!/:root \{[^}]*--accent:/.test(css), 'never overrides a token the system sets')
   })
 
   it('keeps no usage note for a token the code no longer has', () => {

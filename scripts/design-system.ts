@@ -59,13 +59,44 @@ export function rootTokens(): { light: Map<string, string>; dark: Map<string, st
   return { light: declarations(light[1]!), dark: declarations(dark[1]!) }
 }
 
-/** The Panel's rules without the token blocks: what components/bundle.css holds. */
+const SPACING = ['gutter']
+const RADII = ['radius', 'ctl-radius', 'chip-radius']
+const SIZES = ['ctl-h', 'ctl-h-sm', 'field-h', 'content-width']
+const SHADOWS = ['shadow', 'float-shadow']
+
+/** The color tokens' THEME_TOKENS keys: every token from `bg` to `logoBorder`. */
+function colorKeys(): (keyof PanelThemeTokens)[] {
+  const keys = Object.keys(THEME_TOKENS) as (keyof PanelThemeTokens)[]
+  return keys.slice(keys.indexOf('bg'), keys.indexOf('shadow'))
+}
+
+/** The CSS variables the system defines from tokens.json. */
+export function tokenVars(): Set<string> {
+  const names = [
+    ...colorKeys().map((k) => THEME_TOKENS[k].slice(2)),
+    ...SPACING,
+    ...RADII,
+    ...SIZES,
+    ...SHADOWS,
+  ]
+  return new Set(names.map((n) => `--${n}`))
+}
+
+/**
+ * What components/bundle.css holds: the Panel's rules, after a `:root` block with the variables they read that are
+ * no token of the system (font stacks, sizes, weights, the focus outline, spark colors), at their light values.
+ */
 export function bundleCss(): string {
   const tokens = tokenStyles(resolveTheme(undefined))
   const all = pageStyles()
   if (!all.startsWith(tokens))
     throw new Error('design-system: pageStyles() no longer starts with tokenStyles()')
-  return all.slice(tokens.length).replace(/^\n/, '')
+  const rules = all.slice(tokens.length).replace(/^\n/, '')
+  const { light } = rootTokens()
+  const exported = tokenVars()
+  const used = new Set([...rules.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1]!))
+  const support = [...light].filter(([name]) => used.has(name) && !exported.has(name))
+  return `:root { ${support.map(([n, v]) => `${n}: ${v};`).join(' ')} }\n${rules}`
 }
 
 /** One value when all themes agree, else a value per theme. */
@@ -84,9 +115,7 @@ function colorValue(v: string): string {
 
 /** The color tokens: every token from `bg` to `logoBorder` in theme.ts, each Theme's value or the Panel's default. */
 function colorTokens(notes: Notes, root: Map<string, string>) {
-  const keys = Object.keys(THEME_TOKENS) as (keyof PanelThemeTokens)[]
-  const colorKeys = keys.slice(keys.indexOf('bg'), keys.indexOf('shadow'))
-  return colorKeys.map((key) => {
+  return colorKeys().map((key) => {
     const name = THEME_TOKENS[key].slice(2)
     const values: Record<string, string> = {}
     for (const t of BUILTIN_THEMES)
@@ -238,11 +267,11 @@ export function buildTokens(notes: Notes, ref = gitRef()) {
         styles: g.styles.map((s) => typeStyle(css, light, s, notes)),
       })),
     },
-    spacing: { tokens: literalTokens(light, ['gutter'], notes.spacing, 'spacing') },
-    radius: { tokens: literalTokens(light, ['radius', 'ctl-radius', 'chip-radius'], notes.radius, 'radius') },
+    spacing: { tokens: literalTokens(light, SPACING, notes.spacing, 'spacing') },
+    radius: { tokens: literalTokens(light, RADII, notes.radius, 'radius') },
     size: {
       note: notes.sizeNote,
-      tokens: literalTokens(light, ['ctl-h', 'ctl-h-sm', 'field-h', 'content-width'], notes.size, 'size'),
+      tokens: literalTokens(light, SIZES, notes.size, 'size'),
     },
     shadow: {
       tokens: [
