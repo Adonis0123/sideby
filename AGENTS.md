@@ -36,6 +36,7 @@ Before you commit, read your diff once for these.
 | Put this checkout behind the global `sideby` (Local Build, ADR-0024) | `pnpm local` (`--back` undoes the last switch, `--off` goes back to npm, installing `latest` when the kept copy is older) |
 | Release (maintainer asks) | `pnpm release <patch\|minor>`: tag, push, wait for npm, then back off the Local Build |
 | Regenerate JSON Schemas | `pnpm schemas` (commit the result; CI fails if `schemas/` is stale) |
+| Rebuild the Design System on claude.ai (tokens, `bundle.css`, logos, guides) | `pnpm design-system`, then `/design-sync` in Claude Code with `design-system/dist/`. Values come from `src/panel/themes.ts`, `theme.ts`, `page-styles.ts` and `src/core/brand-mark.ts`; prose, previews and token usage notes from `design-system/`. Never edit the system on the page: the next sync replaces it |
 | Check publish contents | `npm pack --dry-run` (no `.ts` sources except `.d.ts`) |
 | Claude mod tests (not in `pnpm check`: they need Claude Code 2.1.287+) | `claude plugin test mods/claude` and `claude plugin validate mods/claude` |
 | Demo HOME for manual testing | `node scripts/demo-home.ts <dir> [normal\|empty\|error\|slow]` |
@@ -94,7 +95,7 @@ src/
 testing/          fake HOME, fake Host binaries, snapshots; also published as `sideby/testing`
 schemas/          generated JSON Schemas for config and every `--json` output
 skills/sideby/    Agent Skill shipped in the package: SKILL.md routes to references/*.md; metadata.version = package version
-scripts/          local.ts (`pnpm local`, Local Build, ADR-0024), release.ts (`pnpm release`), leak-check.sh, demo-home.ts, record-demo.ts (README demo GIF; demo-mark.ts writes its outro mark from brand-mark.ts), shoot-panel.ts (README screenshots), chrome.ts (shared by both), readme-assets.ts (run by `preversion`; manifest.ts formats what its `--mark` writes), sync-skill-version.ts (run by `npm version`), write-build-id.ts (run by `pnpm build`), pin-english-npm-readme.ts (run by `prepublishOnly`, so the npm readme is README.md)
+scripts/          local.ts (`pnpm local`, Local Build, ADR-0024), release.ts (`pnpm release`), leak-check.sh, demo-home.ts, record-demo.ts (README demo GIF; demo-mark.ts writes its outro mark from brand-mark.ts), shoot-panel.ts (README screenshots), chrome.ts (shared by both), readme-assets.ts (run by `preversion`; manifest.ts formats what its `--mark` writes), sync-skill-version.ts (run by `npm version`), write-build-id.ts (run by `pnpm build`), pin-english-npm-readme.ts (run by `prepublishOnly`, so the npm readme is README.md), design-system.ts (`pnpm design-system`: the Design System's files from the code, into `design-system/dist/`)
 docs/             adr/, specs/, plans/, verification/, guide/ (user guide, English and .zh-CN.md), assets/ (README banner and screenshots), release.md
 ```
 

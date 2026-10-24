@@ -66,6 +66,7 @@
     "format": "biome check --write .",
     "test": "node --test --test-concurrency=4 \"src/**/*.test.ts\" \"testing/**/*.test.ts\" \"scripts/**/*.test.ts\"",
     "schemas": "node src/cli/schemas.ts",
+    "design-system": "node scripts/design-system.ts",
     "leak-check": "sh scripts/leak-check.sh",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm leak-check",
     "preversion": "node scripts/readme-assets.ts",
