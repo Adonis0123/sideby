@@ -1,0 +1,31 @@
+<!-- @dsCard height=288 -->
+<!doctype html><html lang="en"><head><meta charset="utf-8"><style>
+html,body{margin:0;height:288px;background:var(--bg);overflow:hidden}
+.cv{position:relative;width:960px;height:288px}
+svg{position:absolute;left:0;top:0}
+.tint{fill:var(--primary)}.blue{fill:var(--logo-fg)}.amber{fill:var(--warn-bar)}.deep{fill:var(--accent)}
+.trk{fill:var(--track)}.okf{fill:var(--ok-bar)}
+.slab{rx:var(--radius)}.pill{rx:3px}
+.txt{position:absolute;left:40px;bottom:40px;max-width:440px}
+.name{margin:0;font:750 120px/.92 var(--font-sans,system-ui,sans-serif);letter-spacing:-0.03em;color:var(--text)}
+.tl{margin:12px 0 0;font:400 13px/1.45 var(--font-sans,system-ui,sans-serif);color:var(--muted)}
+</style></head><body><div class="cv">
+<svg width="960" height="288" viewBox="0 0 960 288" aria-hidden="true">
+<!-- blocks: primary 200x240, warn-bar 150x184 (Bai, amber, behind-left), logo-fg 168x224 (Sai, blue, front-right), accent 72x288 bleeding top and bottom; corners radius (14px)
+     arrangement: two tall slabs side by side and overlapping, the amber one lower and behind, the blue one in front — the mark's two buddies as blocks
+     pattern: quota-bar pills (track with ok-bar fill) — "state before decoration: color says how much quota is left"; precise, glanceable UI
+     steps and radii: gutter (24px) as bar pitch and top inset, bars 6px tall like the Panel bar, slabs at radius (14px) -->
+<rect class="tint slab" x="520" y="24" width="200" height="240"/>
+<rect class="amber slab" x="580" y="80" width="150" height="184"/>
+<rect class="blue slab" x="700" y="40" width="168" height="224"/>
+<rect class="deep" x="888" y="0" width="72" height="288"/>
+<g>
+<rect class="trk pill" x="740" y="96" width="96" height="6"/><rect class="okf pill" x="740" y="96" width="34" height="6"/>
+<rect class="trk pill" x="740" y="120" width="96" height="6"/><rect class="okf pill" x="740" y="120" width="58" height="6"/>
+<rect class="trk pill" x="740" y="144" width="96" height="6"/><rect class="okf pill" x="740" y="144" width="22" height="6"/>
+<rect class="trk pill" x="740" y="168" width="96" height="6"/><rect class="okf pill" x="740" y="168" width="76" height="6"/>
+<rect class="trk pill" x="740" y="192" width="96" height="6"/><rect class="okf pill" x="740" y="192" width="46" height="6"/>
+</g>
+</svg>
+<div class="txt"><h1 class="name">sideby</h1><p class="tl">Run work, personal and API-key accounts at the same time, without their configs drifting apart.</p></div>
+</div></body></html>

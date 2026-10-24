@@ -1,0 +1,109 @@
+{
+  "color": {
+    "bg": "Page background. Tinted, never plain gray (ADR-0050).",
+    "surface": "Cards, panels, fields and buttons.",
+    "surface-2": "Quiet areas inside a card: notes, logo tiles, chips, group counts.",
+    "border": "Card and divider borders.",
+    "border-strong": "Borders of fields, buttons and segmented controls.",
+    "text": "Body text on bg, surface and surface-2.",
+    "muted": "Secondary text: labels, meta, inactive tabs, on bg, surface and surface-2.",
+    "faint": "Captions, sub-stats, icons in fields; on bg, surface and surface-2. Source pair that misses: faint on bg in Sky · Light is 4.47:1 (under 4.5) — prefer it on surface there.",
+    "hover": "Background of a hovered secondary button, row or toggle.",
+    "active": "Background of a pressed button and a selected segment.",
+    "accent": "Links, the Subscription chip, the version pill with an update, a pinned account.",
+    "accent-soft": "Soft fill behind accent text: chip-accent, selected tab, pin mark.",
+    "focus": "Focus outline (2px solid) and focused field border; the selected Theme card.",
+    "primary": "Main action button fill (btn-primary).",
+    "primary-hover": "Main action button fill on hover.",
+    "primary-active": "Main action button fill when pressed.",
+    "on-primary": "Main action button label on primary, primary-hover and primary-active (3:1 floor allowed: weight 650).",
+    "primary-border": "Main action button border.",
+    "primary-hover-border": "Main action button border on hover and press.",
+    "btn-text": "Secondary button text; follows text unless a Theme sets it.",
+    "btn-hover-border": "Secondary button border on hover; hovered Theme card.",
+    "btn-hover-text": "Secondary button text on hover.",
+    "check": "Checkbox color.",
+    "ok": "Positive status text on ok-soft and surface (chip-ok, tag-ok, healthy stats).",
+    "ok-soft": "Background of ok chips and tags.",
+    "warn": "Warning text (running out) on warn-soft and surface.",
+    "warn-soft": "Background of warn chips, tags and a pressed attention stat.",
+    "fail": "Error text (used up, broken) on fail-soft and surface; error card border.",
+    "fail-soft": "Background of fail chips and tags.",
+    "ok-bar": "Quota bar fill, normal; live dot. Never red or amber.",
+    "warn-bar": "Quota bar fill, running out; stale dot, attention dots.",
+    "fail-bar": "Quota bar fill, used up; error dots.",
+    "track": "Empty part of a quota bar. Source pairs that miss: ok-bar and warn-bar on track are under 3:1 in both light themes (1.4–2.6:1) — always show the percentage beside a bar, colored warn/fail at those levels, so state never rests on the bar color alone.",
+    "logo-bg": "The 40px tile behind the sideby mark in the page header. Stays light in dark mode: the mark's ink outline needs a light ground.",
+    "logo-line": "Inset 1px ring of the logo tile (none in dark mode).",
+    "logo-fg": "Body of the front (blue) buddy in the mark. The brand blue whatever the Theme (ADR-0050); a Portal may set it with logoColor."
+  },
+  "type": {
+    "title": {
+      "usage": "Page title (the sideby name in the header). --title-size, --title-weight.",
+      "sample": "sideby"
+    },
+    "stat-value": {
+      "usage": "The four summary numbers. Tabular numerals.",
+      "sample": "3 of 7"
+    },
+    "large": {
+      "usage": "Account names on cards. --large, --heading-weight.",
+      "sample": "work · claude"
+    },
+    "heading": {
+      "usage": "Section headings and group titles. --heading-size.",
+      "sample": "Accounts"
+    },
+    "body": {
+      "usage": "All body text. --font-size; the body sets font-variant-numeric: tabular-nums.",
+      "sample": "Quota resets in 2 h 14 min."
+    },
+    "control": {
+      "usage": "Button labels (btn); the main button uses 650. --control-size, --button-weight.",
+      "sample": "Switch account"
+    },
+    "tagline": {
+      "usage": "The line under the page title, in muted.",
+      "sample": "Every account, side by side"
+    },
+    "small": {
+      "usage": "Meta text, hints, stat labels. --small.",
+      "sample": "Last used 5 min ago"
+    },
+    "chip": {
+      "usage": "Chips and group counts.",
+      "sample": "Subscription"
+    },
+    "tag": {
+      "usage": "Small status tags inside rows (tag, tag-ok, tag-warn, tag-fail).",
+      "sample": "Needs a look"
+    },
+    "version-pill": {
+      "usage": "The version pill after the name; aliases in tags (tag-alias, weight 400).",
+      "sample": "v0.23.1"
+    },
+    "kbd": {
+      "usage": "Keyboard hint inside the search field.",
+      "sample": "/"
+    }
+  },
+  "spacing": {
+    "gutter": "Left and right page padding (--gutter)."
+  },
+  "radius": {
+    "radius": "Cards, panels, summary strip; banners and notes derive smaller radii from it (radius − 4px).",
+    "ctl-radius": "Buttons, fields, segmented controls, group toggles.",
+    "chip-radius": "Chips and group counts (pill)."
+  },
+  "size": {
+    "ctl-h": "Button and segmented-control height.",
+    "ctl-h-sm": "Buttons inside cards and banners (btn-sm).",
+    "field-h": "Text field and select height.",
+    "content-width": "Maximum width of the page content."
+  },
+  "sizeNote": "Control heights and page width from the Panel (--ctl-h, --ctl-h-sm, --field-h, --content-width).",
+  "shadow": {
+    "shadow": "Cards, group lists and the summary strip. None in dark mode: borders carry the edge.",
+    "float-shadow": "Floating layers: menus, popovers, dialogs."
+  }
+}
