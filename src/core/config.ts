@@ -2,6 +2,7 @@ import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { type Static, Type } from 'typebox'
 import { Value } from 'typebox/value'
+import { RENAMED_THEMES } from '../panel/themes.ts'
 import { UserError } from './errors.ts'
 import { lstatOrNull, parseJsonSafely, realpathOrNull, sha256, writeIfUnchanged } from './fs-safe.ts'
 import { SHARE_MODES } from './share-mode-names.ts'
@@ -214,7 +215,7 @@ export const ConfigSchema = Type.Object(
             Type.String({
               pattern: '^[a-z0-9][a-z0-9-]{0,39}$',
               description:
-                'Panel Theme: a Built-in Theme (sky, the default, or leaf) or a Theme File in <config>/themes (spec §3.34).',
+                'Panel Theme: a Built-in Theme (teal, the default, leaf, celeste, claude or codex; the old sky reads as celeste) or a Theme File in <config>/themes (spec §3.34).',
             }),
           ),
         },
@@ -528,6 +529,11 @@ export async function loadConfig(file: string): Promise<Config> {
   }
   const shortProblem = shortCommandProblem(data)
   if (shortProblem) throw new ConfigError(`${file}: ${shortProblem}`)
+  // Built-in Themes renamed with the design system (sky is now celeste): an old name reads as the new one,
+  // so a Panel set up before keeps a Theme instead of falling back.
+  const color = data.panel?.colorTheme
+  if (color && Object.hasOwn(RENAMED_THEMES, color))
+    data.panel = { ...data.panel, colorTheme: RENAMED_THEMES[color] }
   return data
 }
 

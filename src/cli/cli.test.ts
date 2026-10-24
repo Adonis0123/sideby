@@ -1684,8 +1684,11 @@ describe('theme (spec §3.34)', () => {
       assert.deepEqual(
         (list.themes as { id: string; active: boolean }[]).map((t) => [t.id, t.active]),
         [
-          ['sky', true],
+          ['teal', true],
           ['leaf', false],
+          ['celeste', false],
+          ['claude', false],
+          ['codex', false],
         ],
       )
       const file = await h.write(
@@ -1716,7 +1719,7 @@ describe('theme (spec §3.34)', () => {
         'mine',
       )
       checkSchema('theme-use', (await sideby(h, ['theme', 'use', '--undo', '--json'])).out)
-      checkSchema('theme-export', (await sideby(h, ['theme', 'export', 'leaf', '--json'])).out)
+      checkSchema('theme-export', (await sideby(h, ['theme', 'export', 'codex', '--json'])).out)
       assert.equal((await sideby(h, ['theme', 'remove', 'mine'])).code, 10)
       const removed = checkSchema(
         'theme-remove',

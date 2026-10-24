@@ -16,8 +16,10 @@ const colorDecls = (tokens: PanelThemeTokens) =>
 // blue whatever the Theme (ADR-0050).
 const DERIVED_COLORS = `
   --btn-text: var(--text); --btn-hover-text: var(--accent); --check: var(--focus);
-  --logo-bg: var(--surface-2); --logo-fg: #3f8fc4; --logo-line: var(--border);
+  --logo-bg: var(--surface-2); --logo-fg: #3f8fc4; /* design-system-ignore: the mark's body keeps the brand blue (ADR-0050) */ --logo-line: var(--border);
   --focus-outline: 2px solid var(--focus); --focus-ring: none;`
+// The usage chart (--spark) takes the main button's hue at a readable lightness, keeping its chroma: a black-and-white
+// Theme gets a gray chart instead of a made-up color.
 // Design tokens. A host theme (theme.ts) layers its values over these: light values after LIGHT_TOKENS, dark values after
 // DARK_TOKENS. DARK_TOKENS sets every color token again, so a host's light colors never leak into dark mode, while
 // type, shape and layout tokens are shared by both schemes.
@@ -27,13 +29,13 @@ const LIGHT_TOKENS = `
   --title-weight: 750; --heading-weight: 650; --strong-weight: 600; --button-weight: 600; --primary-weight: 650;
   --radius: 14px; --ctl-radius: 8px; --chip-radius: 999px; --ctl-h: 34px; --ctl-h-sm: 28px; --field-h: 36px;
   --content-width: 1180px; --gutter: 24px;${DERIVED_COLORS}
-  --spark: oklch(from var(--accent) clamp(0.55, l, 0.62) max(c, 0.14) h); --spark-soft: oklch(from var(--accent) 0.83 calc(max(c, 0.14) * 0.6) h);
+  --spark: oklch(from var(--primary) clamp(0.55, l, 0.62) c h); --spark-soft: oklch(from var(--primary) 0.83 calc(c * 0.6) h);
   ${colorDecls(DEFAULT_THEME.light)};
-  --float-shadow: 0 10px 30px rgba(20,22,24,.14), 0 2px 6px rgba(20,22,24,.06);`
+  --float-shadow: 0 10px 30px color-mix(in srgb, var(--text) 14%, transparent), 0 2px 6px color-mix(in srgb, var(--text) 6%, transparent);`
 const DARK_TOKENS = `${DERIVED_COLORS}
-  --spark: oklch(from var(--accent) clamp(0.7, l, 0.78) max(c, 0.14) h); --spark-soft: oklch(from var(--accent) 0.45 calc(max(c, 0.14) * 0.6) h);
+  --spark: oklch(from var(--primary) clamp(0.7, l, 0.78) c h); --spark-soft: oklch(from var(--primary) 0.45 calc(c * 0.6) h);
   ${colorDecls(DEFAULT_THEME.dark)};
-  --float-shadow: 0 12px 32px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.3);`
+  --float-shadow: 0 12px 32px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.3);` // design-system-ignore: a shadow on a dark page is black whatever the Theme
 
 /**
  * The page's style block: default tokens, the host's tokens over them, then the rules that read them. With
@@ -431,7 +433,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .rows .m-label, .rows .m-unit { display: none; }
 
 /* Chips and badges */
-.badge { flex: none; display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: #fff; font-weight: 700; font-size: 12.5px; letter-spacing: .02em; }
+.badge { flex: none; display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: #fff; font-weight: 700; font-size: 12.5px; letter-spacing: .02em; } /* design-system-ignore: white initials on each Host's fixed logo color */
 .badge-logo { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
 .badge svg { display: block; width: 20px; height: 20px; fill: currentColor; }
 .badge-sm { width: 26px; height: 26px; border-radius: 7px; font-size: 10.5px; }
@@ -659,7 +661,7 @@ a.btn:hover { text-decoration: none; }
 .tune-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .tune-vals { display: flex; gap: 24px; }
 .tune-num { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.tune-best { color: var(--ok, var(--accent)); }
+.tune-best { color: var(--ok); }
 .ah-fam { border: 1px solid var(--border); border-radius: calc(var(--radius) - 4px); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 .ah-fam-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ah-order { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -670,7 +672,7 @@ a.btn:hover { text-decoration: none; }
 .disabled-why { color: var(--muted); font-size: var(--small); margin-top: 10px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 /* A thin ring with an arc that fades out behind its head: lighter than a thick broken circle at text size. */
-.spin { display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: conic-gradient(from 0deg, transparent 0 8%, color-mix(in srgb, currentColor 18%, transparent) 30%, currentColor); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 1.75px), #000 calc(100% - 1.5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 1.75px), #000 calc(100% - 1.5px)); animation: spin .75s linear infinite; vertical-align: -2px; flex: none; }
+.spin { display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: conic-gradient(from 0deg, transparent 0 8%, color-mix(in srgb, currentColor 18%, transparent) 30%, currentColor); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 1.75px), #000 calc(100% - 1.5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 1.75px), #000 calc(100% - 1.5px)); animation: spin .75s linear infinite; vertical-align: -2px; flex: none; } /* design-system-ignore: #000 sets mask opacity, not a color */
 @keyframes spin { to { transform: rotate(360deg); } }
 .copy { display: flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; }
 .copy code { background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px; padding: 3px 8px; overflow-x: auto; white-space: nowrap; color: var(--text); min-width: 0; }
@@ -789,7 +791,7 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 /* Dialog */
 .dialog { padding: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 48px); box-shadow: var(--float-shadow); }
 .dialog[open] { display: flex; }
-.dialog::backdrop { background: rgba(10, 12, 16, .4); }
+.dialog::backdrop { background: color-mix(in srgb, var(--text) 40%, transparent); }
 .dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px 4px; }
 .dlg-head h2 { font-size: var(--large); }
 .dlg-body { padding: 10px 18px 16px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }

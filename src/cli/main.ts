@@ -412,8 +412,9 @@ sideby theme import <file> [--id <name>] [--yes] [--json]
 sideby theme export <name> [--out <file>] [--json]
 sideby theme remove <name> [--yes] [--json]
 
-The Panel's colors. Built-in Themes: sky (default) and leaf. A Theme File is JSON in <config>/themes/<name>.json:
-{"schemaVersion": 1, "name": "My blue", "base": "sky", "accent": "#2f7fbf", "light": {...}, "dark": {...}}
+The Panel's colors. Built-in Themes: teal (default), leaf, celeste, claude and codex. A Theme File is JSON in
+<config>/themes/<name>.json:
+{"schemaVersion": 1, "name": "My blue", "base": "celeste", "accent": "#2f7fbf", "light": {...}, "dark": {...}}
 base and accent are optional; light and dark take the same tokens as a Portal Theme. Files hold colors only, never code.
 check reports text and control contrast in light and dark with a value that would pass (exit 1 when any fails); the
 Panel moves failing colors itself. preview shows a Theme once in the running Panel without switching. Exit 10: import

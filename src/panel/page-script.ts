@@ -6830,13 +6830,13 @@ const MAIN = String.raw`
   let themeFetching = false
   // The Theme config names ('default' when none) and the one the page shows (inside a Portal, 'default' is its colors).
   let themeChosen = (BOOT.panel && BOOT.panel.colorTheme) || 'default'
-  let themeNow = themeChosen === 'default' ? 'sky' : themeChosen
+  let themeNow = themeChosen === 'default' ? 'teal' : themeChosen
   function themeName(x) { return x.source === 'portal' ? t('th.page') : x.id === 'custom' && x.source === 'file' ? t('th.custom') : lang === 'zh' && x.nameZh ? x.nameZh : x.name }
   function themeLabel() {
     const x = th && th.data && th.data.themes.find((y) => y.id === themeNow)
     if (x) return themeName(x)
     if (themeNow === 'default') return t('th.page')
-    const b = { sky: ['Sky', '晴空'], leaf: ['New Leaf', '新叶'] }[themeNow]
+    const b = { teal: ['Teal', '青绿'], leaf: ['Leaf', '叶绿'], celeste: ['Celeste', '阿根廷蓝'], claude: ['Claude Orange', 'Claude 橙'], codex: ['Codex Black', 'Codex 墨黑'] }[themeNow]
     return b ? b[lang === 'zh' ? 1 : 0] : themeNow
   }
   function applyThemeCss(css) {
@@ -6908,7 +6908,7 @@ const MAIN = String.raw`
       })))
       if (!BOOT.readOnly) {
         const cur = d.themes.find((y) => y.id === d.active)
-        const pick = h('input', { id: 'th-accent', type: 'color', value: th.accent || (cur && cur.swatches[2]) || '#3f8fc4', disabled: th.busy, 'aria-label': t('th.accent') })
+        const pick = h('input', { id: 'th-accent', type: 'color', value: th.accent || (cur && cur.swatches[2]) || '#3f8fc4', disabled: th.busy, 'aria-label': t('th.accent') }) // design-system-ignore: a color input needs a hex start value when no Theme has one
         pick.addEventListener('input', () => { th.accent = pick.value })
         body.push(h('div', { class: 'theme-row' },
           h('label', { class: 'theme-label', for: 'th-accent' }, t('th.accent')), pick,

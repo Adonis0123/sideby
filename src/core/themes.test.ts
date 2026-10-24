@@ -17,6 +17,7 @@ import {
   removeThemeFile,
   resolveColors,
   saveThemeFile,
+  type ThemeFile,
   themeColors,
   themesDir,
   undoTheme,
@@ -64,7 +65,7 @@ describe('Theme Files', () => {
       await writeFile(join(dir, 'sky.json'), JSON.stringify({ schemaVersion: 1, name: 'Fake sky' }))
       const list = await listThemes(paths)
       assert.deepEqual(
-        list.slice(0, 2).map((t) => t.id),
+        list.slice(0, BUILTIN_THEMES.length).map((t) => t.id),
         BUILTIN_THEMES.map((t) => t.id),
       )
       const by = Object.fromEntries(list.map((t) => [t.id, t]))
@@ -107,7 +108,7 @@ describe('Theme colors', () => {
       assert.equal(c.light.warn, undefined)
       const full = themeColors({ schemaVersion: 1, name: 'x', accent })
       // A color picked in Settings must never need the Panel to fix it, in light or dark, on either base.
-      for (const base of ['sky', 'leaf'])
+      for (const base of BUILTIN_THEMES.map((t) => t.id))
         assert.deepEqual(
           contrastPairs(themeColors({ schemaVersion: 1, name: 'x', base, accent })).filter((p) => !p.ok),
           [],
@@ -117,7 +118,7 @@ describe('Theme colors', () => {
     }
   })
 
-  it('suggests a passing value for a faint color and the Panel uses it; a broken choice falls back to Sky', async () => {
+  it('suggests a passing value for a faint color and the Panel uses it; a broken choice falls back to Teal', async () => {
     await withFakeHome(async (h) => {
       const paths = resolvePaths(h.env)
       await saveThemeFile(paths, 'faint', { schemaVersion: 1, name: 'Faint', light: { muted: '#bbbbbb' } })
@@ -131,14 +132,14 @@ describe('Theme colors', () => {
       assert.ok(r.adjusted >= 1)
       assert.ok(contrast(r.light.muted as string, r.light.surface as string) >= 4.5)
       const missing = await resolveColors(paths, 'gone')
-      assert.equal(missing.id, 'sky')
+      assert.equal(missing.id, 'teal')
       assert.match(missing.fallback ?? '', /cannot be used/)
     })
   })
 })
 
 describe('switching Themes', () => {
-  it('writes only panel.colorTheme, undoes only what it wrote, and removing the Theme in use goes back to Sky', async () => {
+  it('writes only panel.colorTheme, undoes only what it wrote, and removing the Theme in use goes back to Teal', async () => {
     await withFakeHome(async (h) => {
       const paths = resolvePaths(h.env)
       await mkdir(paths.configDir, { recursive: true })
@@ -146,24 +147,24 @@ describe('switching Themes', () => {
         paths.configFile,
         JSON.stringify({ panel: { theme: 'dark' }, aliases: { cc: 'claude:main' } }),
       )
-      assert.deepEqual(await useTheme(paths, 'leaf'), { before: 'default', after: 'leaf', changed: true })
+      assert.deepEqual(await useTheme(paths, 'codex'), { before: 'default', after: 'codex', changed: true })
       const cfg = await loadConfig(paths.configFile)
-      assert.deepEqual(cfg.panel, { theme: 'dark', colorTheme: 'leaf' })
+      assert.deepEqual(cfg.panel, { theme: 'dark', colorTheme: 'codex' })
       assert.deepEqual(cfg.aliases, { cc: 'claude:main' })
-      assert.deepEqual(await undoTheme(paths), { before: 'leaf', after: 'default' })
+      assert.deepEqual(await undoTheme(paths), { before: 'codex', after: 'default' })
       assert.deepEqual((await loadConfig(paths.configFile)).panel, { theme: 'dark' })
-      // Sky picked by name is kept (inside a Portal it wins over the Portal's colors); "default" drops the choice.
-      await useTheme(paths, 'sky')
-      assert.equal((await loadConfig(paths.configFile)).panel?.colorTheme, 'sky')
-      assert.deepEqual(await useTheme(paths, 'default'), { before: 'sky', after: 'default', changed: true })
+      // Teal picked by name is kept (inside a Portal it wins over the Portal's colors); "default" drops the choice.
+      await useTheme(paths, 'teal')
+      assert.equal((await loadConfig(paths.configFile)).panel?.colorTheme, 'teal')
+      assert.deepEqual(await useTheme(paths, 'default'), { before: 'teal', after: 'default', changed: true })
       assert.deepEqual((await loadConfig(paths.configFile)).panel, { theme: 'dark' })
-      assert.deepEqual(await undoTheme(paths), { before: 'default', after: 'sky' })
+      assert.deepEqual(await undoTheme(paths), { before: 'default', after: 'teal' })
       await assert.rejects(undoTheme(paths), /nothing to undo/)
 
-      await useTheme(paths, 'leaf')
-      await useTheme(paths, 'sky')
+      await useTheme(paths, 'codex')
+      await useTheme(paths, 'teal')
       // Changed elsewhere since the last switch: undo refuses rather than overwrite it.
-      await writeFile(paths.configFile, JSON.stringify({ panel: { colorTheme: 'leaf' } }))
+      await writeFile(paths.configFile, JSON.stringify({ panel: { colorTheme: 'codex' } }))
       await assert.rejects(undoTheme(paths), /changed since/)
 
       await saveThemeFile(paths, 'mine', { schemaVersion: 1, name: 'Mine', accent: '#cc3366' })
@@ -172,13 +173,42 @@ describe('switching Themes', () => {
       assert.equal(removed.wasActive, true)
       assert.equal((await loadConfig(paths.configFile)).panel?.colorTheme, undefined)
       await assert.rejects(useTheme(paths, 'mine'), /no Theme named mine/)
-      await assert.rejects(removeThemeFile(paths, 'sky'), /Built-in Themes cannot be removed/)
-      for (const id of ['leaf', 'default'])
+      await assert.rejects(removeThemeFile(paths, 'teal'), /Built-in Themes cannot be removed/)
+      for (const id of ['codex', 'default', 'leaf'])
         await assert.rejects(
           saveThemeFile(paths, id, { schemaVersion: 1, name: 'x' }),
           /cannot be a Theme name/,
         )
       assert.match(await readFile(paths.configFile, 'utf8'), /\n$/)
+    })
+  })
+})
+
+describe('renamed Built-in Themes', () => {
+  it('reads the old sky as celeste in config, Theme Files and commands, and leaf stays leaf', async () => {
+    await withFakeHome(async (h) => {
+      const paths = resolvePaths(h.env)
+      await mkdir(paths.configDir, { recursive: true })
+      // A config written before the design system keeps a Theme instead of falling back.
+      await writeFile(paths.configFile, JSON.stringify({ panel: { colorTheme: 'sky' } }))
+      assert.equal((await loadConfig(paths.configFile)).panel?.colorTheme, 'celeste')
+      // New Leaf kept its id: a config naming it gets the design system's leaf.
+      await writeFile(paths.configFile, JSON.stringify({ panel: { colorTheme: 'leaf' } }))
+      assert.equal((await loadConfig(paths.configFile)).panel?.colorTheme, 'leaf')
+      const leaf = await resolveColors(paths, 'leaf')
+      assert.equal(leaf.id, 'leaf')
+      assert.equal(leaf.fallback, undefined)
+      const sky = await resolveColors(paths, 'sky')
+      assert.equal(sky.id, 'celeste')
+      assert.equal(sky.fallback, undefined)
+      // A Theme File based on an old name starts from the Theme it became.
+      const file = checkThemeData({ schemaVersion: 1, name: 'Old', base: 'sky' })
+      assert.deepEqual(file.problems, [])
+      const celeste = BUILTIN_THEMES.find((t) => t.id === 'celeste')
+      assert.equal(themeColors(file.theme as ThemeFile).light.primary, celeste?.light.primary)
+      // `sideby theme use sky` saves the new name.
+      assert.equal((await useTheme(paths, 'sky')).after, 'celeste')
+      assert.match(await readFile(paths.configFile, 'utf8'), /"colorTheme": "celeste"/)
     })
   })
 })
