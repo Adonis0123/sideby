@@ -1067,6 +1067,19 @@ export function menuPlacement(
   return { left, top: margin, maxHeight: above, above: true }
 }
 
+/**
+ * The option a key moves to in a row of radio buttons (WAI-ARIA radio group): the arrows step and wrap around, Home
+ * and End go to the ends. -1 for any other key, or an empty row.
+ */
+export function radioStep(count: number, index: number, key: string): number {
+  if (count < 1) return -1
+  if (key === 'ArrowRight' || key === 'ArrowDown') return (index + 1) % count
+  if (key === 'ArrowLeft' || key === 'ArrowUp') return (index - 1 + count) % count
+  if (key === 'Home') return 0
+  if (key === 'End') return count - 1
+  return -1
+}
+
 /** The key a Same Login group keeps its folded state under: its members, in a fixed order. */
 export function loginKey(refs: readonly string[]): string {
   return `login:${[...refs].sort().join(',')}`

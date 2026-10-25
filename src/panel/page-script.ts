@@ -58,6 +58,7 @@ import {
   quotaAskable,
   quotaHighLevel,
   quotaPressure,
+  radioStep,
   remoteControlSummary,
   reorder,
   rowBadge,
@@ -122,6 +123,7 @@ const LOGIC = [
   maskEmail,
   matchesQuery,
   menuPlacement,
+  radioStep,
   mergeDaily,
   mergeUsage,
   messageChip,
@@ -6830,14 +6832,14 @@ const MAIN = String.raw`
   let themeFetching = false
   // The Theme config names ('default' when none) and the one the page shows (inside a Portal, 'default' is its colors).
   let themeChosen = (BOOT.panel && BOOT.panel.colorTheme) || 'default'
-  let themeNow = themeChosen === 'default' ? 'teal' : themeChosen
+  let themeNow = themeChosen === 'default' ? BOOT.themes.default : themeChosen
   function themeName(x) { return x.source === 'portal' ? t('th.page') : x.id === 'custom' && x.source === 'file' ? t('th.custom') : lang === 'zh' && x.nameZh ? x.nameZh : x.name }
   function themeLabel() {
     const x = th && th.data && th.data.themes.find((y) => y.id === themeNow)
     if (x) return themeName(x)
     if (themeNow === 'default') return t('th.page')
-    const b = { teal: ['Teal', '青绿'], leaf: ['Leaf', '叶绿'], celeste: ['Celeste', '阿根廷蓝'], claude: ['Claude Orange', 'Claude 橙'], codex: ['Codex Black', 'Codex 墨黑'] }[themeNow]
-    return b ? b[lang === 'zh' ? 1 : 0] : themeNow
+    const b = BOOT.themes.names[themeNow]
+    return b ? b[lang === 'zh' ? 'zh' : 'en'] : themeNow
   }
   function applyThemeCss(css) {
     if (!css || typeof CSSStyleSheet !== 'function' || !('adoptedStyleSheets' in document)) { location.reload(); return }
@@ -6900,12 +6902,26 @@ const MAIN = String.raw`
     if (d) {
       if (d.fallback) body.push(h('p', { class: 'note note-warn' }, d.fallback))
       else if (d.adjusted) body.push(h('p', { class: 'note' }, t('th.adjusted', { n: d.adjusted })))
-      body.push(h('div', { class: 'theme-grid', role: 'radiogroup', 'aria-label': t('th.title') }, d.themes.filter((x) => x.source === 'builtin' || !x.problems.length).map((x) => {
+      // One row of color dots, a radio group: the arrows move the choice (and switch the Theme), the dot in use has a
+      // ring and a check, and its name sits beside the heading.
+      const now = d.themes.find((y) => y.id === d.active)
+      const dots = h('div', { class: 'theme-dots', role: 'radiogroup', 'aria-labelledby': 'th-dots-head', onkeydown: (e) => {
+        const all = [...dots.querySelectorAll('.theme-dot')]
+        const next = radioStep(all.length, all.indexOf(document.activeElement), e.key)
+        if (next < 0 || all[next].disabled) return
+        e.preventDefault()
+        th.keyed = true
+        all[next].focus()
+        all[next].click()
+      } }, d.themes.filter((x) => x.source === 'builtin' || !x.problems.length).map((x) => {
         const on = x.id === d.active
-        return h('button', { class: 'theme-card' + (on ? ' is-on' : ''), type: 'button', role: 'radio', 'aria-checked': String(on), disabled: th.busy || (BOOT.readOnly && !on), onclick: () => { if (!on && !BOOT.readOnly) useThemeBy({ use: x.id }) } },
-          h('span', { class: 'theme-sw', 'aria-hidden': 'true' }, x.swatches.map((c) => h('span', { css: { background: c } }))),
-          h('span', { class: 'theme-name' }, h('span', null, themeName(x)), on ? h('span', { class: 'chip chip-sm chip-ok' }, t('th.inUse')) : x.source === 'file' ? h('span', { class: 'faint small' }, t('th.mine')) : null))
-      })))
+        return h('button', { class: 'theme-dot', type: 'button', role: 'radio', 'aria-checked': String(on), tabindex: on ? '0' : '-1', 'aria-label': themeName(x), title: themeName(x), css: { '--dot': x.swatches[2] || x.swatches[0] }, disabled: th.busy || (BOOT.readOnly && !on), onclick: (e) => {
+          // A pointer click (detail > 0) ends keyboard use; the arrows click with detail 0.
+          if (e.detail > 0) th.keyed = false
+          if (!on && !BOOT.readOnly) useThemeBy({ use: x.id })
+        } })
+      }))
+      body.push(h('p', { class: 'theme-head', id: 'th-dots-head' }, t('th.title'), ' ', h('b', null, now ? themeName(now) : d.active)), dots)
       if (!BOOT.readOnly) {
         const cur = d.themes.find((y) => y.id === d.active)
         const pick = h('input', { id: 'th-accent', type: 'color', value: th.accent || (cur && cur.swatches[2]) || '#3f8fc4', disabled: th.busy, 'aria-label': t('th.accent') }) // design-system-ignore: a color input needs a hex start value when no Theme has one
@@ -6938,6 +6954,11 @@ const MAIN = String.raw`
     }
     if (th.error) body.push(errorNote(th.error, null))
     setKids(dlg.el, dialogFrame(t('th.title'), null, body, [status, h('button', { class: 'btn', type: 'button', onclick: () => dlg.el.close() }, t('btn.close'))]))
+    // A switch made with the arrows re-renders the dialog (more than once): keep the keyboard on the dot now in use.
+    if (th.keyed && !th.busy) {
+      const on = dlg.el.querySelector('.theme-dot[aria-checked="true"]')
+      if (on) on.focus()
+    }
   }
 
   // ---------- pick commands (spec §3.13, ADR-0035) ----------

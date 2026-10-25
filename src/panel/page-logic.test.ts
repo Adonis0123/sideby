@@ -61,6 +61,7 @@ import {
   quotaAskable,
   quotaHighLevel,
   quotaPressure,
+  radioStep,
   remoteControlSummary,
   reorder,
   rowBadge,
@@ -919,6 +920,22 @@ describe('Display Order in the page (spec §3.25)', () => {
       PAGE_SCRIPT,
       /withPinned\(sortAccounts\(list, prefs\.sort, now, accountOrder\(fam\)\), pinnedOf\(fam\)\)/,
     )
+  })
+})
+
+describe('radioStep', () => {
+  it('steps with the arrows and wraps around at both ends', () => {
+    assert.equal(radioStep(5, 0, 'ArrowRight'), 1)
+    assert.equal(radioStep(5, 4, 'ArrowRight'), 0)
+    assert.equal(radioStep(5, 4, 'ArrowDown'), 0)
+    assert.equal(radioStep(5, 0, 'ArrowLeft'), 4)
+    assert.equal(radioStep(5, 2, 'ArrowUp'), 1)
+  })
+  it('goes to the ends with Home and End, and ignores other keys and an empty row', () => {
+    assert.equal(radioStep(5, 3, 'Home'), 0)
+    assert.equal(radioStep(5, 1, 'End'), 4)
+    assert.equal(radioStep(5, 1, 'Enter'), -1)
+    assert.equal(radioStep(0, 0, 'ArrowRight'), -1)
   })
 })
 

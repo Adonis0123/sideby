@@ -12,6 +12,7 @@ import { widthTier } from './page-logic.ts'
 import { PAGE_SCRIPT } from './page-script.ts'
 import { pageStyles } from './page-styles.ts'
 import { type ResolvedTheme, resolveTheme } from './theme.ts'
+import { BUILTIN_THEMES, DEFAULT_THEME_ID } from './themes.ts'
 
 /** GitHub's mark, from Simple Icons (CC0 1.0, https://simpleicons.org); a trademark of GitHub that only names the site. */
 const GITHUB_MARK =
@@ -84,6 +85,11 @@ export function renderPage(opts: PageOptions): string {
     colorScheme: theme.colorScheme,
     lang,
     panel: opts.panel ?? {},
+    // Built-in Theme names and the default, for the Theme row in Settings before /api/themes answers.
+    themes: {
+      default: DEFAULT_THEME_ID,
+      names: Object.fromEntries(BUILTIN_THEMES.map((t) => [t.id, t.name])),
+    },
     warn: QUOTA_WARN_PERCENT,
     fail: QUOTA_FAIL_PERCENT,
     usageDays: USAGE_DAYS,

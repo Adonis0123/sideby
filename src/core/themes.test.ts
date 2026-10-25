@@ -91,6 +91,19 @@ describe('Theme colors', () => {
     }
   })
 
+  it('gives the main button its own color per mode: white text on accents, black-and-white flipped for Codex', () => {
+    for (const t of BUILTIN_THEMES) {
+      if (t.id === 'codex') {
+        assert.deepEqual([t.light.primary, t.light.onPrimary], ['#0d0d0d', '#ffffff'])
+        assert.deepEqual([t.dark.primary, t.dark.onPrimary], ['#ffffff', '#0d0d0d'])
+        continue
+      }
+      assert.equal(t.light.onPrimary, '#ffffff', t.id)
+      assert.equal(t.dark.onPrimary, '#ffffff', t.id)
+      assert.notEqual(t.light.primary, t.dark.primary, `${t.id} has a light and a dark main button`)
+    }
+  })
+
   it('makes the accent roles from one color with white main-button text at 3:1 or more, leaving warnings alone', () => {
     for (const accent of [
       '#82b241',
