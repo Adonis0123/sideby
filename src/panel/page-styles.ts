@@ -796,6 +796,10 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .dialog { padding: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 48px); box-shadow: var(--float-shadow); }
 .dialog[open] { display: flex; }
 .dialog::backdrop { background: var(--scrim); }
+/* The dialog box takes focus when it opens (showModal) but is not a control: no ring around it. Any other focusable
+   element without its own rule gets the Theme's focus ring, never the browser's default blue. */
+.dialog:focus, .dialog:focus-visible { outline: none; }
+:where(:focus-visible) { outline: var(--focus-outline); outline-offset: 2px; }
 .dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px 4px; }
 .dlg-head h2 { font-size: var(--large); }
 .dlg-body { padding: 10px 18px 16px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
