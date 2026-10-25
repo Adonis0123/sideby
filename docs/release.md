@@ -175,11 +175,12 @@ pnpm release patch    # 新功能用 minor
 
 `npm version` 先跑 `preversion`（`scripts/readme-assets.ts`），列出可能过期的 README 截图、GIF、banner、开场视频和文案。它只提醒、不拦发版；有输出就先让 agent 跑 `readme-assets` skill，处理完再发版。接着它会改 `package.json` 的版本号，并运行 `version` 脚本（`scripts/sync-skill-version.ts`），把 `skills/sideby/SKILL.md` 的 `metadata.version` 改成同一个版本，两者一起提交一次，再打上 `v<版本号>` tag。版本不一致时 `pnpm check` 会失败。推送后 `release.yml` 依次执行：
 
-1. `publish` job（environment `npm`，权限 `contents: read` 加 `id-token: write`，不用任何缓存）：
+1. `publish` job（environment `npm`，权限 `actions: read`、`contents: read` 加 `id-token: write`，不用任何缓存）：
    - 升级到最新 npm，并确认版本不低于 11.5.1。
    - `pnpm install --frozen-lockfile --ignore-scripts`。
    - 确认 tag 等于 `v` 加 `package.json` 里的版本号，不一致就失败。
-   - `pnpm check`、`pnpm build`，然后 `node scripts/pin-english-npm-readme.ts --publish`（内部是 `npm publish --access public`）。provenance 由 trusted publishing 自动生成，不传 token。
+   - 看 tag 前一个提交（推送前的 `main`）在 CI 里是否已经通过，以及版本提交是否只改了 `package.json` 和 `skills/sideby/SKILL.md`。两条都满足就跳过 `pnpm check`，因为同样的检查 CI 刚跑过，一次发版从约 3 分钟缩到约 1 分钟；有一条不满足（比如不是用 `pnpm release` 打的 tag，或查不到 CI 结果）就照常跑 `pnpm check`。
+   - `pnpm build`，然后 `node scripts/pin-english-npm-readme.ts --publish`（内部是 `npm publish --access public`）。provenance 由 trusted publishing 自动生成，不传 token。
 2. `github-release` job（权限 `contents: write`）：用 changelogithub 按 emoji 前缀的 commit 生成发布说明。
 
 发完检查：
