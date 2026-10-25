@@ -1067,6 +1067,28 @@ export function menuPlacement(
   return { left, top: margin, maxHeight: above, above: true }
 }
 
+/**
+ * The option a key moves to in a row of radio buttons (WAI-ARIA radio group): the arrows step and wrap around, Home
+ * and End go to the ends. -1 for any other key, or an empty row.
+ */
+export function radioStep(count: number, index: number, key: string): number {
+  if (count < 1) return -1
+  if (key === 'ArrowRight' || key === 'ArrowDown') return (index + 1) % count
+  if (key === 'ArrowLeft' || key === 'ArrowUp') return (index - 1 + count) % count
+  if (key === 'Home') return 0
+  if (key === 'End') return count - 1
+  return -1
+}
+
+/**
+ * Whether arrow-key use of a row of radio dots carries into the next render, which puts focus back on the dot in use.
+ * `focus` is where focus is before the render: nowhere in particular (the page or the dialog, as when a busy render
+ * disabled the dots), on a dot, or on another control. Once the user has moved to another control, keyboard use ends.
+ */
+export function dotsKeepKeyboard(focus: 'none' | 'dot' | 'other'): boolean {
+  return focus !== 'other'
+}
+
 /** The key a Same Login group keeps its folded state under: its members, in a fixed order. */
 export function loginKey(refs: readonly string[]): string {
   return `login:${[...refs].sort().join(',')}`
@@ -1298,7 +1320,7 @@ export function taskPrompt(
         pPlugin:
           '照 sideby 仓库的插件指南 docs/guide/plugins.zh-CN.md 写；写完用 `sideby plugins check <id>` 检查。',
         pTheme:
-          '先跑 `sideby theme --json` 看现有主题和正在用的那套，再问我想要的感觉；我给了截图、网址或品牌色，就从里面取色。写一个主题文件（JSON，只放颜色，不放代码）：`{"schemaVersion":1,"name":"…","base":"sky" 或 "leaf","accent":"#rrggbb","light":{…},"dark":{…}}`；多数时候给 `base` 和 `accent` 就够了，`light` / `dark` 只写要改的 token（`sideby theme export sky` 能看到全部 token）。先放在当前目录，跑 `sideby theme check <文件>`，有不达标的就按建议值改到全部通过；再跑 `sideby theme preview <文件>` 让我在面板里看一眼。我满意后才 `sideby theme import <文件>` 和 `sideby theme use <名字>`；不满意就接着改。随时可以用 `sideby theme use --undo` 换回去。',
+          '先跑 `sideby theme --json` 看现有主题和正在用的那套，再问我想要的感觉；我给了截图、网址或品牌色，就从里面取色。写一个主题文件（JSON，只放颜色，不放代码）：`{"schemaVersion":1,"name":"…","base":"teal"、"leaf"、"celeste"、"claude" 或 "codex","accent":"#rrggbb","light":{…},"dark":{…}}`；多数时候给 `base` 和 `accent` 就够了，`light` / `dark` 只写要改的 token（`sideby theme export teal` 能看到全部 token）。先放在当前目录，跑 `sideby theme check <文件>`，有不达标的就按建议值改到全部通过；再跑 `sideby theme preview <文件>` 让我在面板里看一眼。我满意后才 `sideby theme import <文件>` 和 `sideby theme use <名字>`；不满意就接着改。随时可以用 `sideby theme use --undo` 换回去。',
         pTerminal:
           "先问我用的是什么终端。只看这个终端的官方文档和它的 `--help`，找出「在指定目录新开一个窗口运行一条命令」的写法，写明你看的版本。写成一个模板：`{cmd}` 是要运行的命令，`{cwd}` 是文件夹，sideby 按参数填入，不经过 shell。保存要用 `sideby terminal --custom '<模板>'`，它会改 sideby 的设置，先问我。保存后让我在面板上点一次「让 AI 帮我」试一下，打不开就一起看错误再改。",
         share:
@@ -1358,7 +1380,7 @@ export function taskPrompt(
         pPlugin:
           'Follow the plugins guide in the sideby repository (docs/guide/plugins.md); check it with `sideby plugins check <id>`.',
         pTheme:
-          'Run `sideby theme --json` first to see the Themes and the one in use, then ask me what feel I want; if I give you a screenshot, a website or a brand color, take the colors from it. Write a Theme File (JSON, colors only, never code): `{"schemaVersion":1,"name":"…","base":"sky" or "leaf","accent":"#rrggbb","light":{…},"dark":{…}}`; usually `base` and `accent` are enough, and `light` / `dark` hold only the tokens to change (`sideby theme export sky` shows them all). Keep it in the current folder, run `sideby theme check <file>` and change what fails to the suggested values until every pair passes, then run `sideby theme preview <file>` so I can look at it in the Panel. Only when I like it, run `sideby theme import <file>` and `sideby theme use <name>`; otherwise keep changing it. `sideby theme use --undo` goes back at any time.',
+          'Run `sideby theme --json` first to see the Themes and the one in use, then ask me what feel I want; if I give you a screenshot, a website or a brand color, take the colors from it. Write a Theme File (JSON, colors only, never code): `{"schemaVersion":1,"name":"…","base":"teal", "leaf", "celeste", "claude" or "codex","accent":"#rrggbb","light":{…},"dark":{…}}`; usually `base` and `accent` are enough, and `light` / `dark` hold only the tokens to change (`sideby theme export teal` shows them all). Keep it in the current folder, run `sideby theme check <file>` and change what fails to the suggested values until every pair passes, then run `sideby theme preview <file>` so I can look at it in the Panel. Only when I like it, run `sideby theme import <file>` and `sideby theme use <name>`; otherwise keep changing it. `sideby theme use --undo` goes back at any time.',
         pTerminal:
           "Ask me which terminal I use first. Read only that terminal's official docs and its `--help` to find how it opens a new window that runs one command in a given folder, and note the version you read. Write it as a template: `{cmd}` is the command and `{cwd}` the folder; sideby fills them in as separate arguments, no shell runs it. Save it with `sideby terminal --custom '<template>'`, which changes sideby's settings, so ask me first. Then have me click Let AI do it in the Panel once to try it; if it does not open, look at the error with me and fix the template.",
         share:

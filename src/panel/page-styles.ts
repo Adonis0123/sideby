@@ -16,24 +16,28 @@ const colorDecls = (tokens: PanelThemeTokens) =>
 // blue whatever the Theme (ADR-0050).
 const DERIVED_COLORS = `
   --btn-text: var(--text); --btn-hover-text: var(--accent); --check: var(--focus);
-  --logo-bg: var(--surface-2); --logo-fg: #3f8fc4; --logo-line: var(--border);
-  --focus-outline: 2px solid var(--focus); --focus-ring: none;`
+  --logo-bg: var(--surface-2); --logo-fg: #3f8fc4; /* design-system-ignore: the mark's body keeps the brand blue (ADR-0050) */ --logo-line: var(--border);
+  --focus-outline: 2px solid var(--focus); --focus-ring: none;
+  --scrim: color-mix(in srgb, var(--text) 40%, transparent);`
+// The usage chart (--spark) takes the main button's hue at a readable lightness, keeping its chroma: a black-and-white
+// Theme gets a gray chart instead of a made-up color.
 // Design tokens. A host theme (theme.ts) layers its values over these: light values after LIGHT_TOKENS, dark values after
 // DARK_TOKENS. DARK_TOKENS sets every color token again, so a host's light colors never leak into dark mode, while
 // type, shape and layout tokens are shared by both schemes.
 const LIGHT_TOKENS = `
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --font-size: 14px; --small: 12.5px; --control-size: 13.5px; --heading-size: 15px; --large: 16px; --title-size: 22px;
-  --title-weight: 750; --heading-weight: 650; --strong-weight: 600; --button-weight: 600; --primary-weight: 650;
-  --radius: 14px; --ctl-radius: 8px; --chip-radius: 999px; --ctl-h: 34px; --ctl-h-sm: 28px; --field-h: 36px;
+  --title-weight: 750; --heading-weight: 650; --strong-weight: 600; --button-weight: 600; --primary-weight: 500;
+  --radius: 14px; --ctl-radius: 8px; --primary-radius: 999px; --chip-radius: 999px; --ctl-h: 34px; --ctl-h-sm: 28px; --field-h: 36px;
   --content-width: 1180px; --gutter: 24px;${DERIVED_COLORS}
-  --spark: oklch(from var(--accent) clamp(0.55, l, 0.62) max(c, 0.14) h); --spark-soft: oklch(from var(--accent) 0.83 calc(max(c, 0.14) * 0.6) h);
+  --spark: oklch(from var(--primary) clamp(0.55, l, 0.62) c h); --spark-soft: oklch(from var(--primary) 0.83 calc(c * 0.6) h);
   ${colorDecls(DEFAULT_THEME.light)};
-  --float-shadow: 0 10px 30px rgba(20,22,24,.14), 0 2px 6px rgba(20,22,24,.06);`
+  --float-shadow: 0 10px 30px color-mix(in srgb, var(--text) 14%, transparent), 0 2px 6px color-mix(in srgb, var(--text) 6%, transparent);`
 const DARK_TOKENS = `${DERIVED_COLORS}
-  --spark: oklch(from var(--accent) clamp(0.7, l, 0.78) max(c, 0.14) h); --spark-soft: oklch(from var(--accent) 0.45 calc(max(c, 0.14) * 0.6) h);
+  --scrim: rgba(0,0,0,.55); /* design-system-ignore: a dark page's dialog backdrop darkens it; the text color would wash it out */
+  --spark: oklch(from var(--primary) clamp(0.7, l, 0.78) c h); --spark-soft: oklch(from var(--primary) 0.45 calc(c * 0.6) h);
   ${colorDecls(DEFAULT_THEME.dark)};
-  --float-shadow: 0 12px 32px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.3);`
+  --float-shadow: 0 12px 32px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.3);` // design-system-ignore: a shadow on a dark page is black whatever the Theme
 
 /**
  * The page's style block: default tokens, the host's tokens over them, then the rules that read them. With
@@ -110,15 +114,17 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .ic { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
 /* Themes (spec §3.34): the cards in the Theme dialog, and the short fade while the page takes a new Theme. */
-.theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 12px 0 18px; }
-.theme-card { display: flex; flex-direction: column; gap: 8px; padding: 10px; text-align: left; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: calc(var(--radius) - 4px); cursor: pointer; transition: border-color .15s, box-shadow .15s; }
-.theme-card:hover:not(:disabled) { border-color: var(--btn-hover-border); }
-.theme-card.is-on { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); cursor: default; }
-.theme-card:disabled:not(.is-on) { opacity: .6; cursor: default; }
-.theme-card:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
-.theme-sw { display: flex; height: 28px; border-radius: 6px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--border); }
-.theme-sw span { flex: 1; }
-.theme-name { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-weight: var(--strong-weight); }
+.theme-head { margin: 12px 0 8px; color: var(--muted); font-size: var(--small); }
+.theme-head b { color: var(--text); font-weight: var(--strong-weight); }
+/* Theme dots: a 28px dot per Theme; the hairline keeps a black or white dot visible on a page of the same color. */
+.theme-dots { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 18px; padding: 4px; }
+.theme-dot { position: relative; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: var(--dot); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 18%, transparent); cursor: pointer; transition: transform .12s; }
+.theme-dot:hover:not(:disabled) { transform: scale(1.08); }
+.theme-dot[aria-checked=true] { outline: 2px solid var(--dot); outline-offset: 2px; cursor: default; }
+.theme-dot[aria-checked=true]::after { content: "✓"; position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 14px; font-weight: 700; text-shadow: 0 0 2px rgba(0,0,0,.45); } /* design-system-ignore: the check sits on the dot's own color, white with a soft edge reads on every accent */
+.theme-dot:disabled:not([aria-checked=true]) { opacity: .6; cursor: default; }
+.theme-dot:focus-visible { outline: var(--focus-outline); outline-offset: 3px; }
+.theme-dot[aria-checked=true]:focus-visible { outline: 2px solid var(--focus); }
 .theme-status { display: flex; align-items: center; gap: 8px; margin: 0 auto 0 0; min-width: 0; color: var(--muted); }
 .theme-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0; }
 .theme-label { font-weight: var(--strong-weight); }
@@ -137,7 +143,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .stat-text { min-width: 0; }
 .stat-label { color: var(--muted); font-size: var(--small); display: flex; align-items: center; gap: 6px; }
 .stat-value { font-size: 22px; font-weight: var(--heading-weight); letter-spacing: -0.02em; line-height: 1.35; white-space: nowrap; }
-.stat-sub { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat-sub { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat-btn { font: inherit; color: inherit; background: none; border: 0; border-left: 1px solid var(--border); cursor: pointer; transition: background-color .12s; }
 .stat-btn:hover { background: var(--hover); }
 .stat-btn[aria-pressed=true] { background: var(--warn-soft); }
@@ -150,7 +156,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .search { position: relative; flex: 1 1 160px; min-width: 120px; display: block; }
 .search-ic { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--faint); pointer-events: none; }
 .search .search-input { padding-left: 34px; padding-right: 34px; height: var(--ctl-h); }
-.kbd { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); font: 11px/16px var(--mono); color: var(--faint); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; pointer-events: none; }
+.kbd { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); font: 11px/16px var(--mono); color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; pointer-events: none; }
 .search:focus-within .kbd, .search input:not(:placeholder-shown) ~ .kbd { display: none; }
 .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .tb-select { width: auto; height: var(--ctl-h); font-size: var(--control-size); }
@@ -258,7 +264,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .is-dragging { opacity: .45; }
 .drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
-.menu-head { padding: 6px 10px 2px; color: var(--faint); font-size: 11px; font-weight: var(--strong-weight); }
+.menu-head { padding: 6px 10px 2px; color: var(--muted); font-size: 11px; font-weight: var(--strong-weight); }
 /* The arrow at a row's start opens and closes its details; so does a click anywhere else in the row. */
 .row-toggle { width: 28px; height: 28px; margin: -4px -6px -4px -8px; }
 .fold-hit { cursor: pointer; }
@@ -431,7 +437,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .rows .m-label, .rows .m-unit { display: none; }
 
 /* Chips and badges */
-.badge { flex: none; display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: #fff; font-weight: 700; font-size: 12.5px; letter-spacing: .02em; }
+.badge { flex: none; display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: #fff; font-weight: 700; font-size: 12.5px; letter-spacing: .02em; } /* design-system-ignore: white initials on each Host's fixed logo color */
 .badge-logo { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
 .badge svg { display: block; width: 20px; height: 20px; fill: currentColor; }
 .badge-sm { width: 26px; height: 26px; border-radius: 7px; font-size: 10.5px; }
@@ -520,7 +526,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 a.btn:hover { text-decoration: none; }
 .btn:hover:not(:disabled) { background: var(--hover); border-color: var(--btn-hover-border); color: var(--btn-hover-text); }
 .btn:active:not(:disabled) { background: var(--active); }
-.btn-primary { background: var(--primary); border-color: var(--primary-border); color: var(--on-primary); font-weight: var(--primary-weight); }
+.btn-primary { background: var(--primary); border-color: var(--primary-border); color: var(--on-primary); font-weight: var(--primary-weight); border-radius: var(--primary-radius); }
 .btn-primary:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover-border); color: var(--on-primary); }
 .btn-primary:active:not(:disabled) { background: var(--primary-active); border-color: var(--primary-hover-border); }
 .btn-ghost { border-color: transparent; background: transparent; color: var(--muted); }
@@ -659,7 +665,7 @@ a.btn:hover { text-decoration: none; }
 .tune-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .tune-vals { display: flex; gap: 24px; }
 .tune-num { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.tune-best { color: var(--ok, var(--accent)); }
+.tune-best { color: var(--ok); }
 .ah-fam { border: 1px solid var(--border); border-radius: calc(var(--radius) - 4px); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 .ah-fam-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ah-order { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -670,7 +676,7 @@ a.btn:hover { text-decoration: none; }
 .disabled-why { color: var(--muted); font-size: var(--small); margin-top: 10px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 /* A thin ring with an arc that fades out behind its head: lighter than a thick broken circle at text size. */
-.spin { display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: conic-gradient(from 0deg, transparent 0 8%, color-mix(in srgb, currentColor 18%, transparent) 30%, currentColor); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 1.75px), #000 calc(100% - 1.5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 1.75px), #000 calc(100% - 1.5px)); animation: spin .75s linear infinite; vertical-align: -2px; flex: none; }
+.spin { display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: conic-gradient(from 0deg, transparent 0 8%, color-mix(in srgb, currentColor 18%, transparent) 30%, currentColor); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 1.75px), #000 calc(100% - 1.5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 1.75px), #000 calc(100% - 1.5px)); animation: spin .75s linear infinite; vertical-align: -2px; flex: none; } /* design-system-ignore: #000 sets mask opacity, not a color */
 @keyframes spin { to { transform: rotate(360deg); } }
 .copy { display: flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; }
 .copy code { background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px; padding: 3px 8px; overflow-x: auto; white-space: nowrap; color: var(--text); min-width: 0; }
@@ -789,7 +795,11 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 /* Dialog */
 .dialog { padding: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 48px); box-shadow: var(--float-shadow); }
 .dialog[open] { display: flex; }
-.dialog::backdrop { background: rgba(10, 12, 16, .4); }
+.dialog::backdrop { background: var(--scrim); }
+/* The dialog box takes focus when it opens (showModal) but is not a control: no ring around it. Any other focusable
+   element without its own rule gets the Theme's focus ring, never the browser's default blue. */
+.dialog:focus, .dialog:focus-visible { outline: none; }
+:where(:focus-visible) { outline: var(--focus-outline); outline-offset: 2px; }
 .dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px 4px; }
 .dlg-head h2 { font-size: var(--large); }
 .dlg-body { padding: 10px 18px 16px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }

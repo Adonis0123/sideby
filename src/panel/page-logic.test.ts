@@ -19,6 +19,7 @@ import {
   canLeaveLocal,
   categoryOrder,
   codeSwapOutcome,
+  dotsKeepKeyboard,
   enableOutcome,
   fileSize,
   fixPrompt,
@@ -61,6 +62,7 @@ import {
   quotaAskable,
   quotaHighLevel,
   quotaPressure,
+  radioStep,
   remoteControlSummary,
   reorder,
   rowBadge,
@@ -919,6 +921,32 @@ describe('Display Order in the page (spec §3.25)', () => {
       PAGE_SCRIPT,
       /withPinned\(sortAccounts\(list, prefs\.sort, now, accountOrder\(fam\)\), pinnedOf\(fam\)\)/,
     )
+  })
+})
+
+describe('dotsKeepKeyboard', () => {
+  it('keeps keyboard use while focus is on a dot or was dropped by a busy render', () => {
+    assert.equal(dotsKeepKeyboard('dot'), true)
+    assert.equal(dotsKeepKeyboard('none'), true)
+  })
+  it('ends keyboard use once focus is on another control, such as Remove', () => {
+    assert.equal(dotsKeepKeyboard('other'), false)
+  })
+})
+
+describe('radioStep', () => {
+  it('steps with the arrows and wraps around at both ends', () => {
+    assert.equal(radioStep(5, 0, 'ArrowRight'), 1)
+    assert.equal(radioStep(5, 4, 'ArrowRight'), 0)
+    assert.equal(radioStep(5, 4, 'ArrowDown'), 0)
+    assert.equal(radioStep(5, 0, 'ArrowLeft'), 4)
+    assert.equal(radioStep(5, 2, 'ArrowUp'), 1)
+  })
+  it('goes to the ends with Home and End, and ignores other keys and an empty row', () => {
+    assert.equal(radioStep(5, 3, 'Home'), 0)
+    assert.equal(radioStep(5, 1, 'End'), 4)
+    assert.equal(radioStep(5, 1, 'Enter'), -1)
+    assert.equal(radioStep(0, 0, 'ArrowRight'), -1)
   })
 })
 

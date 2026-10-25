@@ -3952,6 +3952,7 @@ async function messagesInbound(a: ParsedArgs, args: string[], io: Io, runtime?: 
 export async function cmdTheme(a: ParsedArgs, io: Io): Promise<number> {
   const t = await import('../core/themes.ts')
   const { loadConfig } = await import('../core/config.ts')
+  const { DEFAULT_THEME_ID } = await import('../panel/themes.ts')
   const [sub = 'list', target, ...more] = a.positionals
   const wantJson = a.flags.has('json')
   const paths = resolvePaths()
@@ -3960,7 +3961,7 @@ export async function cmdTheme(a: ParsedArgs, io: Io): Promise<number> {
   if (more.length) throw new UsageError(usage)
   const active = async () =>
     (await loadConfig(paths.configFile).catch(() => ({}) as { panel?: { colorTheme?: string } })).panel
-      ?.colorTheme ?? 'sky'
+      ?.colorTheme ?? DEFAULT_THEME_ID
   // A name, or a path to a Theme File not yet in the themes folder.
   const load = async (ref: string) => {
     if (t.THEME_ID_RE.test(ref) && !ref.endsWith('.json'))
