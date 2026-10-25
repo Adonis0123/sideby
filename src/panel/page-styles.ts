@@ -120,7 +120,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .theme-dots { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 18px; padding: 4px; }
 .theme-dot { position: relative; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: var(--dot); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 18%, transparent); cursor: pointer; transition: transform .12s; }
 .theme-dot:hover:not(:disabled) { transform: scale(1.08); }
-.theme-dot[aria-checked=true] { outline: 2px solid var(--text); outline-offset: 2px; cursor: default; }
+.theme-dot[aria-checked=true] { outline: 2px solid var(--dot); outline-offset: 2px; cursor: default; }
 .theme-dot[aria-checked=true]::after { content: "✓"; position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 14px; font-weight: 700; text-shadow: 0 0 2px rgba(0,0,0,.45); } /* design-system-ignore: the check sits on the dot's own color, white with a soft edge reads on every accent */
 .theme-dot:disabled:not([aria-checked=true]) { opacity: .6; cursor: default; }
 .theme-dot:focus-visible { outline: var(--focus-outline); outline-offset: 3px; }

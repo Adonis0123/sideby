@@ -6903,7 +6903,7 @@ const MAIN = String.raw`
       if (d.fallback) body.push(h('p', { class: 'note note-warn' }, d.fallback))
       else if (d.adjusted) body.push(h('p', { class: 'note' }, t('th.adjusted', { n: d.adjusted })))
       // One row of color dots, a radio group: the arrows move the choice (and switch the Theme), the dot in use has a
-      // ring and a check, and its name sits beside the heading.
+      // ring in its own color and a check; the name is in its tooltip.
       const now = d.themes.find((y) => y.id === d.active)
       const dots = h('div', { class: 'theme-dots', role: 'radiogroup', 'aria-labelledby': 'th-dots-head', onkeydown: (e) => {
         const all = [...dots.querySelectorAll('.theme-dot')]
@@ -6921,7 +6921,7 @@ const MAIN = String.raw`
           if (!on && !BOOT.readOnly) useThemeBy({ use: x.id })
         } })
       }))
-      body.push(h('p', { class: 'theme-head', id: 'th-dots-head' }, t('th.title'), ' ', h('b', null, now ? themeName(now) : d.active)), dots)
+      body.push(h('p', { class: 'theme-head', id: 'th-dots-head' }, t('th.title')), dots)
       if (!BOOT.readOnly) {
         const cur = d.themes.find((y) => y.id === d.active)
         const pick = h('input', { id: 'th-accent', type: 'color', value: th.accent || (cur && cur.swatches[2]) || '#3f8fc4', disabled: th.busy, 'aria-label': t('th.accent') }) // design-system-ignore: a color input needs a hex start value when no Theme has one
