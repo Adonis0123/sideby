@@ -18,9 +18,9 @@ The panel listens on `127.0.0.1` only. If another sideby panel already runs on t
 
 ## Themes
 
-**Settings › Theme** picks the Panel's colors. Two Themes are built in: **Sky** (the default: light blue) and **New Leaf** (light green with green quota bars, also from Radix Colors). Click a card to switch; the colors ease over without reloading, and the message at the bottom offers **Undo**. Under the cards, **Your own color** makes buttons, links and quota bars any color you pick, and **Let AI pick my colors** hands a sentence such as "quiet like Notion" to your own AI: it writes a Theme, shows it to you in the Panel, and switches only after you agree.
+**Settings › Theme** picks the Panel's colors. Five Themes are built in, on the same cool-gray page and differing only in their accent: **Teal** (the default), **Leaf**, **Argentine Blue**, **Claude Orange** and **Codex Ink** (black and white, like the Codex app). The Theme that used to be called Sky is now Argentine Blue. They show as one row of color dots: click a dot, or move along the row with the arrow keys, to switch. The dot in use has a ring in its own color, and a dot's name shows when you point at it. The colors ease over without reloading, and the message at the bottom offers **Undo**. Under the dots, **Your own color** makes buttons, links and quota bars any color you pick, and **Let AI pick my colors** hands a sentence such as "quiet like Notion" to your own AI: it writes a Theme, shows it to you in the Panel, and switches only after you agree.
 
-Amber and red appear only when quota runs out, so they stand out. Text keeps WCAG contrast (4.5:1, and 3:1 for the bold main button); when a Theme of your own has a color too faint to read, the Panel makes it darker or lighter and says so. The sideby mark keeps its own blue whatever the Theme.
+Amber and red appear only when quota runs out, so they stand out. Text keeps WCAG contrast (4.5:1, and 3:1 for the white label on the main button); when a Theme of your own has a color too faint to read, the Panel makes it darker or lighter and says so. The sideby mark keeps its own blue whatever the Theme.
 
 A Theme of your own is a JSON file in `~/.config/sideby/themes/` and holds colors only, never code:
 

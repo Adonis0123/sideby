@@ -92,7 +92,8 @@ cc-switch's docs describe that switch: it writes the live settings file ([README
 | Find the cheapest auto-compact size from your own sessions, and use it in one click | `sideby tune` (or the panel's Context tuning tab) | [Context tuning](docs/guide/usage.md#context-tuning) |
 | See each account's model and effort, and set them per account | `sideby model <account>` (or click the model in the panel) | [Model and effort](docs/guide/usage.md#model-and-effort) |
 | Choose whether Claude sessions connect to claude.ai by themselves (Remote Control), for every account at once | `sideby remote-control off` or `on` (or the panel's Settings) | [Remote Control](docs/guide/usage.md#remote-control) |
-| Pin the accounts you use most and put tools and accounts in your own order | `sideby pin claude:work`, `sideby order` (or the panel's Settings) | [Your own order](docs/guide/usage.md#your-own-order) |
+| Pin the accounts you use most, put tools and accounts in your own order, and hide the ones you never use | `sideby pin claude:work`, `sideby order`, `sideby hide grok` (or the panel's Settings) | [Your own order](docs/guide/usage.md#your-own-order) |
+| Give the panel other colors: five built-in Themes, your own color, or one your AI writes | **Settings › Theme** in the panel, or `sideby theme use leaf` | [Themes](docs/guide/panel.md#themes) |
 | Move on when an account hits its limit | `sideby next claude` | [Handoff](docs/guide/usage.md#when-an-account-hits-its-limit) |
 | Let a running task move to the next account by itself when quota runs low (off by default; see the risk) | `sideby handoff enable` (or the panel) | [Auto Handoff](docs/guide/usage.md#auto-handoff) |
 | Short commands such as `ccw` | `sideby alias add ccw claude:work` | [Shell functions](docs/guide/configuration.md#shell-functions) |
