@@ -18,6 +18,7 @@ import {
   canLeaveLocal,
   categoryOrder,
   codeSwapOutcome,
+  dotsKeepKeyboard,
   enableOutcome,
   fileSize,
   fixPrompt,
@@ -124,6 +125,7 @@ const LOGIC = [
   matchesQuery,
   menuPlacement,
   radioStep,
+  dotsKeepKeyboard,
   mergeDaily,
   mergeUsage,
   messageChip,
@@ -6893,6 +6895,11 @@ const MAIN = String.raw`
   }
   function renderThemes() {
     if (!th) return
+    // Keyboard use of the dots ends once focus sits on another control (Tab to Remove, a field), so this render
+    // leaves it there instead of pulling it back to the dot in use.
+    const was = document.activeElement
+    const at = !was || was === document.body || was === dlg.el ? 'none' : was.classList.contains('theme-dot') ? 'dot' : 'other'
+    if (th.keyed && !dotsKeepKeyboard(at)) th.keyed = false
     const d = th.data
     const body = [h('p', { class: 'muted small' }, t('th.intro'))]
     // What changed, with undo, sits in the footer beside Close, so the dialog never grows when it appears.

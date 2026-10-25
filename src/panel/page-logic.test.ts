@@ -19,6 +19,7 @@ import {
   canLeaveLocal,
   categoryOrder,
   codeSwapOutcome,
+  dotsKeepKeyboard,
   enableOutcome,
   fileSize,
   fixPrompt,
@@ -920,6 +921,16 @@ describe('Display Order in the page (spec §3.25)', () => {
       PAGE_SCRIPT,
       /withPinned\(sortAccounts\(list, prefs\.sort, now, accountOrder\(fam\)\), pinnedOf\(fam\)\)/,
     )
+  })
+})
+
+describe('dotsKeepKeyboard', () => {
+  it('keeps keyboard use while focus is on a dot or was dropped by a busy render', () => {
+    assert.equal(dotsKeepKeyboard('dot'), true)
+    assert.equal(dotsKeepKeyboard('none'), true)
+  })
+  it('ends keyboard use once focus is on another control, such as Remove', () => {
+    assert.equal(dotsKeepKeyboard('other'), false)
   })
 })
 

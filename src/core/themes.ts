@@ -339,12 +339,14 @@ export interface ContrastPair {
   suggest?: string
 }
 
-// Text pairs need 4.5:1; the main button (bold text, ADR-0050) and the focus outline need 3:1.
+// Text pairs need 4.5:1 (faint too: the Panel uses it for captions, units and reset times people read); the main button (bold text, ADR-0050) and the focus outline need 3:1.
 const PAIRS: [keyof PanelThemeTokens, keyof PanelThemeTokens, number][] = [
   ['text', 'bg', 4.5],
   ['text', 'surface', 4.5],
   ['muted', 'bg', 4.5],
   ['muted', 'surface', 4.5],
+  ['faint', 'bg', 4.5],
+  ['faint', 'surface', 4.5],
   ['accent', 'bg', 4.5],
   ['accent', 'surface', 4.5],
   ['ok', 'okSoft', 4.5],

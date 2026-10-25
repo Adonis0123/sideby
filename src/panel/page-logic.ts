@@ -1080,6 +1080,15 @@ export function radioStep(count: number, index: number, key: string): number {
   return -1
 }
 
+/**
+ * Whether arrow-key use of a row of radio dots carries into the next render, which puts focus back on the dot in use.
+ * `focus` is where focus is before the render: nowhere in particular (the page or the dialog, as when a busy render
+ * disabled the dots), on a dot, or on another control. Once the user has moved to another control, keyboard use ends.
+ */
+export function dotsKeepKeyboard(focus: 'none' | 'dot' | 'other'): boolean {
+  return focus !== 'other'
+}
+
 /** The key a Same Login group keeps its folded state under: its members, in a fixed order. */
 export function loginKey(refs: readonly string[]): string {
   return `login:${[...refs].sort().join(',')}`
