@@ -1863,6 +1863,7 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
   try: Type.Object({
     schemaVersion: Version,
     account: Str,
+    model: Type.Optional(Type.String({ description: 'The model `--model` chose, when given.' })),
     confirmed: Type.Boolean(),
     command: Type.Optional(Type.Array(Str)),
     ok: Type.Optional(Type.Boolean()),

@@ -42,7 +42,14 @@ export const codexFamily: FamilyDef = {
   secretVar: 'OPENAI_API_KEY',
   // `exec` refuses to run outside a git repo unless this flag is set (Codex 0.163.0 --help:
   // allow running outside a Git repository). The probe's cwd is a temp directory.
-  probe: { args: ['exec', '--skip-git-repo-check', 'Reply with OK'] },
+  probe: {
+    args: ['exec', '--skip-git-repo-check', 'Reply with OK'],
+    // `exec` reads its own `-m`; a `-m` before the subcommand does not reach it.
+    model: {
+      flags: ['-m', '--model'],
+      args: (m) => ['exec', '--skip-git-repo-check', '-m', m, 'Reply with OK'],
+    },
+  },
   // `-i, --image <FILE>...` takes several values (Codex 0.163.0 --help); AI Tasks pass `--image=<path>`, one value
   // per flag, so the prompt after it stays a positional argument.
   imageArg: '--image',

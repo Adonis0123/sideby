@@ -15,6 +15,10 @@
     "account": {
       "type": "string"
     },
+    "model": {
+      "type": "string",
+      "description": "The model `--model` chose, when given."
+    },
     "confirmed": {
       "type": "boolean"
     },

@@ -69,7 +69,7 @@
 | `sideby theme [list]` / `theme use <名字>` / `theme use --undo` / `theme check <名字\|文件>` / `theme preview <名字\|文件>` / `theme import <文件> [--id <名字>] [--yes]` / `theme export <名字> [--out <文件>]` / `theme remove <名字> [--yes]` | 面板主题：列出、切换和撤销，检查亮暗两套的对比度，在运行中的面板里看一眼，把自己的主题存成 JSON 文件（只放颜色） | 完成为 0；`check` 有太淡的颜色为 1；`import` 遇到同名、`remove` 等 `--yes` 为 10；拒绝为 1；命令写错为 2 |
 | `sideby config get [<key>]` / `config set <key> <value> [--yes]` / `config unset <key> [--yes]` | 读或改任意设置，比如 `panel.theme`（`system`、`light`、`dark`）、`panel.language`（`auto`、`en`、`zh`）、`handoff.threshold`；`get` 不带 key 列出每个键、当前值和说明。值能按 JSON 解析就按 JSON，否则当文字。插件自己的配置不在这里读写 | `get` 为 0；`set`/`unset` 有变化等 `--yes` 为 10；不是键或值不对为 1；命令写错为 2 |
 | `sideby key <acct> [--var <NAME>]` | 把 API 密钥输入到这个账号的 `proxy.env`，屏幕上不显示（变量默认是宿主的密钥变量）；其他行原样保留，权限 600。用于 API 账号和 pi | 0；不是 API 账号、不是在终端里输入、写不了为 1 |
-| `sideby try <acct> [--yes]` | 试一下账号能不能用：宿主发一次很短的请求（花几个 token），sideby 告诉你它有没有回答 | 只说明了要运行什么为 10；宿主回答了为 0；失败或这个宿主不支持试一下为 1 |
+| `sideby try <acct> [--model <model>] [--yes]` | 试一下账号能不能用：宿主发一次很短的请求（花几个 token），sideby 告诉你它有没有回答。`<acct>` 也可以是短命令，它的参数（比如模型）和 `sideby run` 一样生效；`--model` 只这一次换个模型试，不改任何设置 | 只说明了要运行什么为 10；宿主回答了为 0；失败、这个宿主不支持试一下或不能选模型为 1 |
 | `sideby update [--yes]` | 向 npm registry 查 sideby 最新版本，显示安装它的命令；带 `--yes` 就执行，并重启后台面板（见[更新](configuration.zh-CN.md#更新)） | 0 已是最新或已更新；只显示了命令为 10；这种安装方式不能自己更新（会打印要运行的命令）、连不上 registry 或安装失败为 1 |
 | `sideby update --skill [--yes]` | 只把 agent 读的 sideby skill 更新到当前 sideby 的版本；不安装 sideby 本身，即使有新版本 | 0 已更新、已是最新，或因 skill 归某个 git 仓库管而不动它（会打印要运行的命令）；只显示了命令为 10；skill 更新失败为 1 |
 

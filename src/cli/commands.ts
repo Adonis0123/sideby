@@ -2676,19 +2676,22 @@ export async function cmdKey(a: ParsedArgs, io: Io, runtime?: Runtime): Promise<
 export async function cmdTry(a: ParsedArgs, io: Io): Promise<number> {
   const { tryAccount, tryPreview } = await import('../core/ask.ts')
   if (a.positionals.length !== 1 || a.rest.length)
-    throw new UsageError('Use sideby try <account> [--yes] [--json].')
+    throw new UsageError('Use sideby try <account> [--model <model>] [--yes] [--json].')
+  const model = a.flags.get('model') as string | undefined
   const rt = await createRuntime()
-  const { account, command } = await tryPreview(rt, a.positionals[0]!)
+  const ref = a.positionals[0]!
+  const { account, command } = await tryPreview(rt, ref, model)
   if (!a.flags.has('yes')) {
-    if (a.flags.has('json')) json(io, { account: account.ref, command, confirmed: false })
+    if (a.flags.has('json'))
+      json(io, { account: account.ref, ...(model === undefined ? {} : { model }), command, confirmed: false })
     else
       io.out(
         `This spends a few tokens: ${command.map((v) => JSON.stringify(v)).join(' ')}. Run again with --yes to continue.`,
       )
     return 10
   }
-  const { account: ref, command: _command, ...result } = await tryAccount(rt, account.ref)
-  if (a.flags.has('json')) json(io, { account: ref, confirmed: true, ...result })
+  const { account: done, command: _command, ...result } = await tryAccount(rt, ref, undefined, model)
+  if (a.flags.has('json')) json(io, { account: done, confirmed: true, ...result })
   else io.out(result.ok ? 'OK' : result.output || 'The Host did not reply; check the account and try again.')
   return result.ok ? 0 : 1
 }

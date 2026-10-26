@@ -1450,7 +1450,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       async run(body) {
         const account = optString(body, 'account')
         if (!account) throw new HttpError(400, '"account" is required')
-        return tryAccount(await getRuntime(), account)
+        return tryAccount(await getRuntime(), account, undefined, optString(body, 'model'))
       },
     },
     // Themes (spec §3.34): `use` a Theme, `undo` the last switch, `accent` saves and uses the Theme File custom.json

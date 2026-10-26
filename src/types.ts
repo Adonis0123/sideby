@@ -212,8 +212,11 @@ export interface FamilyDef {
    * Arguments for one short non-interactive check of an Account (`sideby try`, spec §3.28).
    * sideby runs `bin` with these arguments and no others. Public contract, additive only:
    * leaving it out means this tool cannot be tried.
+   * `model` lets `sideby try --model` choose the model: `flags` are the Host options that choose one (every
+   * earlier occurrence is taken out of the account's and short command's arguments) and `args(model)` replaces
+   * `args`. Leaving it out means `--model` is refused for this tool.
    */
-  probe?: { args: string[] }
+  probe?: { args: string[]; model?: { flags: string[]; args(model: string): string[] } }
   /**
    * The Host option that attaches an image to the first prompt, such as Codex's `--image` (spec §3.28 "附件").
    * An AI Task with attached images adds `<imageArg>=<path>` once per image before the prompt; Families without

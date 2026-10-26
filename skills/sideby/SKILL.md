@@ -66,7 +66,7 @@ Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique
 | Short commands say "command not found" in a new terminal ("cc 用不了", "短命令不生效") | `sideby shell-init setup --json` (exit 10 first) | `references/setup.md` |
 | Do something in sideby as an AI Task (the first message came from sideby or the Panel's "Let AI do it") | follow the task it names | `references/ai-tasks.md` |
 | A Portal starts AI Tasks through sideby, or one of its tasks failed (`spec-version`, `bad-cwd`, "which account would it use?") | `sideby ask --choices --json`, `sideby ask --spec - --print --json` (read only) | `references/ai-tasks.md` |
-| Add an API account from a vendor's address or docs link, enter its key, check it works | `sideby new <family> --next --api --json`, then the user runs `sideby key <ref>`; `sideby try <ref> --json` (exit 10 first) | `references/ai-tasks.md` |
+| Add an API account from a vendor's address or docs link, enter its key, check it works (also with a given model: "用 glm-5.3 试一下 pi") | `sideby new <family> --next --api --json`, then the user runs `sideby key <ref>`; `sideby try <ref|short command> [--model <m>] --json` (exit 10 first) | `references/ai-tasks.md` |
 | Support a tool sideby does not list yet, or write a plugin | `sideby plugins new <id> --json`, `sideby plugins check <id> --json` | `references/ai-tasks.md` |
 | Choose the terminal the Panel opens for AI Tasks and sign-in | `sideby terminal --json`, `sideby terminal --set <id> --json` | — |
 | Tune the auto-compact threshold ("which compaction setting costs the fewest tokens"), use the suggestion or undo it | `sideby tune --json`, `sideby tune apply` (exit 10 first), `sideby tune undo` | `references/diagnose.md` |

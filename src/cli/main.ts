@@ -12,7 +12,7 @@ Usage:
   sideby ask [<text>] [--print]       let your AI handle a sideby task
   sideby terminal [--set <id>|--custom <t>|--unset] choose your terminal
   sideby key <account> [--var <NAME>] enter an API key without echo
-  sideby try <account> [--yes]        try the Host with a short paid request
+  sideby try <account> [--model <m>]  try the Host with a short paid request
   sideby                              list accounts (same as \`sideby list\`)
   sideby list --all                   also list hidden families and accounts
   sideby run <account> [-- args]      start the host CLI for one account
@@ -157,7 +157,7 @@ const COMMAND_HELP: Record<string, string> = {
   terminal:
     "sideby terminal [--set <id>|--custom '<program> … {cwd} … {cmd}'|--unset] [--json]\nList terminals or save your preference; --custom saves and selects your own launch command.",
   key: 'sideby key <account> [--var <NAME>] [--json]\nEnter an API key without echo. Run in a terminal or use the Panel key box.',
-  try: 'sideby try <account> [--yes] [--json]\nSend a short request through the Host. This spends a few tokens. Exit 10 waits for --yes.',
+  try: 'sideby try <account> [--model <model>] [--yes] [--json]\nSend a short request through the Host. This spends a few tokens. Exit 10 waits for --yes.\n<account> may be a short command; its arguments apply as in sideby run. --model tries another model once.',
   plugins:
     'sideby plugins [--json]\nsideby plugins new <id> [--json]\nsideby plugins check <id|path> [--json]\nPlugins run as you, with your permissions. Only load plugins you trust.',
   new: `sideby new <family> <name> [--api] [--alias <short>] [--json]
@@ -500,7 +500,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   },
   terminal: { flags: ['json', 'unset'], valued: ['set', 'custom'] },
   key: { flags: ['json'], valued: ['var'] },
-  try: { flags: ['json', 'yes'] },
+  try: { flags: ['json', 'yes'], valued: ['model'] },
   autostart: { flags: ['json', 'yes', 'refresh'] },
   menubar: { flags: ['json', 'yes', 'refresh'], valued: ['lang', 'hotkey', 'hotkey-label', 'icon'] },
   config: { flags: ['json', 'yes'] },

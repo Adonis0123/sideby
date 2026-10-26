@@ -61,6 +61,7 @@ sideby ships no list of vendors, addresses or model names. Take every fact from 
 3. Set every variable except the key: show the user the lines you will add to `proxy.env` and add them after they agree. Do not read the file's other lines, and never write a key into it.
 4. Tell the user to run `sideby key <ref>` in their own terminal (or click **Enter key** in the Panel). Add `--var <NAME>` when the key belongs in a variable other than the Family's default. Wait until they say it is done.
 5. Offer `sideby try <ref> --json`: it exits 10 and says which command it runs and that it costs a few tokens. After they agree, run it with `--yes`. Exit 0 means the Host answered. On 1, read the Host's message it shows and check the mistakes below.
+   - To check one model, add `--model <model>` (for pi `provider/id`, optionally `:<thinking>`). It replaces the model the account's settings choose, this once, and writes nothing. To check a short command the user made (such as one with its own model), pass the short command instead of the ref: its arguments apply as in `sideby run`. Do not run the Host by hand to test a model.
 
 Common mistakes:
 
