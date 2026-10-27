@@ -1595,6 +1595,74 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     },
     { title: 'sideby desktop grok-bot:<name> --remove --json' },
   ),
+  network: Type.Object(
+    {
+      schemaVersion: Version,
+      guard: Type.Boolean({ description: 'Config `network.guard`: Network Guard is switched on.' }),
+      allow: Type.Array(Str, {
+        description: 'Allowed countries (ISO 3166-1 alpha-2), config `network.allow`.',
+      }),
+      active: Type.Boolean({
+        description: 'It checks Launches now: switched on, a country allowed, and not in CI.',
+      }),
+      ci: Type.Boolean({ description: 'Running in CI, where it makes no request and checks nothing.' }),
+      targets: Type.Array(
+        Type.Object({
+          url: Type.String({ description: 'The `/cdn-cgi/trace` address asked.' }),
+          accounts: Type.Array(Str, { description: 'Refs of the accounts checked at this address.' }),
+          status: Type.Union(
+            [
+              Type.Literal('ok'),
+              Type.Literal('blocked'),
+              Type.Literal('unknown'),
+              Type.Literal('not-checked'),
+            ],
+            {
+              description:
+                'ok: the country is allowed; blocked: it is not; unknown: the last check could not tell (it blocks); not-checked: no result yet.',
+            },
+          ),
+          loc: Type.Optional(
+            Type.String({ description: 'The country the vendor sees, from the newest result.' }),
+          ),
+          checkedAt: Type.Optional(Type.String({ description: 'When the newest result was asked (ISO).' })),
+          error: Type.Optional(Type.String({ description: 'Why the newest check could not tell.' })),
+          ipChanged: Type.Boolean({
+            description: 'The exit address changed in the last day (a notice only).',
+          }),
+        }),
+      ),
+      accounts: Type.Array(
+        Type.Object({
+          ref: Str,
+          url: Type.Optional(Type.String({ description: 'The address this account is checked at.' })),
+          skip: Type.Optional(
+            Type.Union(
+              [Type.Literal('not-covered'), Type.Literal('third-party'), Type.Literal('at-launch')],
+              {
+                description:
+                  'third-party: an API account on another endpoint, not checked; at-launch: an API account, whose address is known only when it starts.',
+              },
+            ),
+          ),
+        }),
+      ),
+    },
+    { title: 'sideby network [check] --json' },
+  ),
+  'network-set': Type.Object(
+    {
+      schemaVersion: Version,
+      changed: Type.Boolean(),
+      applied: Type.Boolean({
+        description: 'False when only the change was shown; run again with --yes (exit 10).',
+      }),
+      file: Type.String({ description: 'The config file changed.' }),
+      before: Type.Object({ guard: Type.Boolean(), allow: Type.Array(Str) }),
+      after: Type.Object({ guard: Type.Boolean(), allow: Type.Array(Str) }),
+    },
+    { title: 'sideby network on|off|allow --json' },
+  ),
   browser: Type.Object(
     {
       schemaVersion: Version,

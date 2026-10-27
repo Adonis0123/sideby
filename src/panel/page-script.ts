@@ -47,6 +47,7 @@ import {
   mergeUsage,
   messageChip,
   messageNews,
+  networkTaskFacts,
   newAccountDir,
   nextReset,
   panelFixes,
@@ -118,6 +119,7 @@ const LOGIC = [
   handoffChangeOf,
   handoffHintAccount,
   handoffTaskFacts,
+  networkTaskFacts,
   inDisplayOrder,
   loginClusters,
   loginKey,
@@ -5788,6 +5790,7 @@ const MAIN = String.raw`
     if (S.state && rcSummary()) out.push('rc')
     if (S.state && ahState()) out.push('ah')
     if (S.state && (S.state.quotaChecks || []).length) out.push('checks')
+    if (S.state && S.state.network) out.push('net')
     return out
   }
   function renderSettingsButton() {
@@ -5799,6 +5802,7 @@ const MAIN = String.raw`
     b.setAttribute('aria-label', t('set.button') + (warn ? colon() + t('set.rcOn') : ''))
     refreshSettings()
     if (dlg.kind === 'rc') renderRc()
+    if (dlg.kind === 'net' && net && !net.busy) renderNet()
   }
   // The settings live in two places (spec §3.29, 2026-10-20). The header popover holds only what people change
   // often, one click each and no explanations: language, theme, Auto Handoff, asking an AI, and "All settings…".
@@ -5879,6 +5883,13 @@ const MAIN = String.raw`
               h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === c.on), onclick: () => { if (v !== c.on) { leave(false); setCheck(c.family, v) } } }, text)))))
       }
     }
+    // Network Guard (spec §3.35): its own dialog, with the state on the link.
+    const netItems = []
+    if (secs.includes('net')) {
+      const n = S.state.network
+      const bad = netProblem()
+      netItems.push(link(t('net.title'), bad ? t('net.blocked') : n.guard ? t('ah.on') : t('ah.off'), bad ? 'chip-fail' : n.guard ? 'chip-ok' : '', openNet, true))
+    }
     // Everything here can also be asked of an AI assistant through the sideby skill (spec §3.8).
     const ai = [aiLink(leave), link(t('ask.plugin'), '', '', () => openAsk({ task: 'plugin', context: { version: BOOT.version } }), true)]
     return [
@@ -5887,6 +5898,7 @@ const MAIN = String.raw`
       { id: 'accounts', title: t('set.g.accounts'), items: acct },
       { id: 'quota', title: t('set.g.quota'), items: checks, foot: t('set.quotaChecksHint', { n: every }) },
       { id: 'handoff', title: t('ah.button'), items: [ahLink(leave)].filter(Boolean), foot: t('set.ahHint') },
+      { id: 'network', title: t('net.title'), items: netItems, foot: t('net.hint') },
       { id: 'ai', title: t('set.g.ai'), items: ai, foot: t('set.aiHint') },
     ].filter((g) => g.items.length)
   }
@@ -6255,7 +6267,122 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.theme', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.network', 'ai.ask.theme', 'ai.ask.tool']
+  // Network Guard (spec §3.35): one dialog with the switch, the allowed countries and the newest result per address.
+  // Countries are never ticked for the user, the current one included: a wrong network would allow itself.
+  const NET_COMMON = ['US', 'JP', 'SG', 'GB', 'DE', 'FR', 'NL', 'CA', 'AU', 'KR', 'TW', 'HK']
+  let net = null
+  function netState() { return S.state && S.state.network }
+  function netProblem() {
+    const n = netState()
+    return n && n.active ? n.targets.find((x) => x.status === 'blocked' || x.status === 'unknown') || null : null
+  }
+  function netCountry(code) {
+    const name = t('net.cty.' + code)
+    if (name === 'net.cty.' + code) return code
+    return lang === 'zh' ? name + '（' + code + '）' : name + ' (' + code + ')'
+  }
+  // "A, B or C" in English, "A、B、C" in Chinese.
+  function netList(items) {
+    if (items.length < 2) return items.join('')
+    return items.slice(0, -1).join(t('net.listSep')) + t('net.listLast') + items[items.length - 1]
+  }
+  function openNet() {
+    const n = netState()
+    if (!n) return
+    net = { guard: n.guard, allow: [...n.allow], busy: false, checking: false }
+    showDialog('net')
+    renderNet()
+    // Opening it answers "where am I now" at once, unless a result is fresh.
+    if (!n.targets.some((x) => x.checkedAt && Date.now() - Date.parse(x.checkedAt) < 60000)) netCheck()
+  }
+  async function netCheck() {
+    if (!net) net = { guard: false, allow: [], busy: false, checking: false }
+    net.checking = true
+    if (dlg.kind === 'net') renderNet()
+    renderBanners()
+    try { S.state.network = await api('/api/network/check', {}) } catch (e) { toast(t('net.checkFailed', { msg: e.message }), { kind: 'fail' }) }
+    net.checking = false
+    if (dlg.kind === 'net') renderNet()
+    renderBanners()
+  }
+  async function netSave() {
+    net.busy = true
+    renderNet()
+    try {
+      await api('/api/network/settings', { guard: net.guard, allow: net.allow, confirm: true })
+      toast(t(net.guard ? 'net.savedOn' : 'net.savedOff'))
+      await load({ silent: true })
+      if (dlg.kind === 'net') dlg.el.close()
+    } catch (e) { toast(e.message, { kind: 'fail' }) }
+    if (net) net.busy = false
+    if (dlg.kind === 'net') renderNet()
+  }
+  function renderNet() {
+    const n = netState()
+    if (!n || !net) return
+    const here = new Set(n.targets.map((x) => x.loc).filter(Boolean))
+    const list = [...new Set([...NET_COMMON, ...net.allow, ...here])]
+    const changed = net.guard !== n.guard || net.allow.join() !== n.allow.join()
+    const toggle = (c) => {
+      net.allow = net.allow.includes(c) ? net.allow.filter((x) => x !== c) : [...net.allow, c]
+      renderNet()
+    }
+    const sw = h('div', { class: 'set-row' }, h('span', { class: 'set-label' }, t('net.switch')),
+      h('div', { class: 'seg', role: 'group', 'aria-label': t('net.switch') }, [[true, t('ah.on')], [false, t('ah.off')]].map(([v, text]) =>
+        h('button', { class: 'seg-btn', type: 'button', 'data-key': 'net-sw-' + v, disabled: BOOT.readOnly || net.busy || (v && !net.allow.length), 'aria-pressed': String(net.guard === v), onclick: () => { net.guard = v; renderNet() } }, text))))
+    const countries = h('div', { class: 'net-countries', role: 'group', 'aria-label': t('net.allow') }, list.map((c) =>
+      h('button', { class: 'net-cty', type: 'button', 'data-key': 'net-cty-' + c, disabled: BOOT.readOnly || net.busy, 'aria-pressed': String(net.allow.includes(c)), onclick: () => toggle(c) },
+        netCountry(c), here.has(c) ? h('span', { class: 'chip chip-sm' }, t('net.current')) : null)))
+    const status = (x) => x.status === 'ok' ? ['chip-ok', t('net.ok')] : x.status === 'blocked' ? ['chip-fail', t('net.blocked')] : x.status === 'unknown' ? ['chip-fail', t('net.unknown')] : ['', t('net.notChecked')]
+    const rows = n.targets.map((x) => {
+      const [cls, label] = n.allow.length || x.status === 'not-checked' ? status(x) : ['', t('net.seen')]
+      return h('li', { class: 'rc-row' },
+        h('div', null, h('code', null, new URL(x.url).hostname), ' ', x.loc ? h('b', null, netCountry(x.loc)) : null, ' ', h('span', { class: 'chip chip-sm ' + cls }, label)),
+        h('div', { class: 'muted small' }, [x.checkedAt ? t('net.checked', { when: ago(x.checkedAt) }) : null, x.error || null, x.accounts.join(', ')].filter(Boolean).join(' · ')),
+        x.ipChanged ? h('div', { class: 'muted small' }, t('net.ipChanged')) : null)
+    })
+    const skipped = n.accounts.filter((a) => a.skip === 'third-party' || a.skip === 'at-launch')
+    const body = [
+      h('p', { class: 'small' }, t('net.explain')),
+      h('div', { class: 'row-actions' },
+        h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'net-ask', onclick: askNetwork }, icon('bot'), t('ask.title.network'))),
+      sw,
+      h('div', { class: 'set-label' }, t('net.allow')),
+      countries,
+      !net.allow.length ? h('p', { class: 'small muted', 'data-enter': 'net-pick' }, t(net.guard ? 'net.keepOne' : 'net.pickFirst')) : null,
+      h('div', { class: 'set-row' }, h('span', { class: 'set-label' }, t('net.now')),
+        h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'net-check', disabled: net.checking, 'aria-busy': net.checking ? 'true' : null, onclick: netCheck }, net.checking ? spinner() : icon('refresh'), t('net.recheck'))),
+      rows.length ? h('ul', { class: 'rc-list' }, rows) : h('p', { class: 'small muted' }, t('net.noTargets')),
+      skipped.length ? h('p', { class: 'small muted' }, t('net.skipped', { refs: skipped.map((a) => a.ref).join(', ') })) : null,
+      h('p', { class: 'small muted' }, t('net.notCovered')),
+      BOOT.readOnly ? h('p', { class: 'small' }, t('rc.readOnlyBoth')) : null,
+    ]
+    const foot = [h('button', { class: 'btn', type: 'button', 'data-key': 'net-close', disabled: net.busy, onclick: () => dlg.el.close() }, t(changed ? 'btn.cancel' : 'btn.close'))]
+    if (!BOOT.readOnly && changed) foot.push(h('button', { class: 'btn btn-primary', type: 'button', 'data-key': 'net-save', 'data-enter': 'net-save', disabled: net.busy || (net.guard && !net.allow.length), 'aria-busy': net.busy ? 'true' : null, onclick: netSave }, net.busy ? spinner() : null, t('net.save')))
+    swapKids(dlg.el, dialogFrame(t('net.title'), null, body, foot))
+  }
+  // Let AI do it (spec §3.28): the AI asks which countries, shows the change and writes it after the user agrees.
+  function askNetwork() {
+    const n = netState()
+    if (!n) return
+    openAsk({ task: 'network', context: { network: networkTaskFacts(n), version: BOOT.version } })
+  }
+  // Where the problem shows: a banner on every page while the guard is on and the exit is wrong or unknown.
+  function netBanner() {
+    const x = netProblem()
+    if (!x) return null
+    const n = netState()
+    const text = x.status === 'blocked'
+      ? t('net.bannerBlocked', { cty: netCountry(x.loc), allow: netList(n.allow.map(netCountry)) })
+      : t('net.bannerUnknown', { why: x.error || '' })
+    return h('div', { class: 'banner banner-warn', role: 'status', 'data-enter': 'net-banner' },
+      h('div', null, h('b', null, t('net.bannerTitle') + (lang === 'zh' ? '' : ' ')), text),
+      h('div', { class: 'banner-actions' },
+        h('button', { class: 'btn btn-sm btn-primary', type: 'button', 'data-key': 'net-banner-check', disabled: Boolean(net && net.checking), 'aria-busy': net && net.checking ? 'true' : null, onclick: netCheck }, net && net.checking ? spinner() : null, t('net.recheck')),
+        h('button', { class: 'btn btn-sm', type: 'button', onclick: openNet }, t('net.title')),
+        h('button', { class: 'btn btn-sm', type: 'button', onclick: askNetwork }, icon('bot'), t('ask.title.network'))))
+  }
   function openRc() {
     if (!S.state || !rcSummary()) return
     rc.target = null
@@ -7184,6 +7311,8 @@ const MAIN = String.raw`
       if (rcBanner) out.push(rcBanner)
       const inbBanner = inboundBanner()
       if (inbBanner) out.push(inbBanner)
+      const nb = netBanner()
+      if (nb) out.push(nb)
       const errs = S.state.pluginErrors
       if (errs.length) out.push(h('div', { class: 'banner banner-warn', role: 'status' }, h('div', null,
         h('b', null, tn('banner.plugins', errs.length) + ' '), t('banner.pluginsHint'),

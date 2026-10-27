@@ -29,6 +29,7 @@ import { type CreateResult, createAccount } from './core/create.ts'
 import { bindDesktopDeps, checkAppData, type DesktopDeps } from './core/desktop-app.ts'
 import { applyFixes, type DoctorReport, runDoctor } from './core/doctor.ts'
 import { hostSettingsFile } from './core/edit-settings.ts'
+import type { TraceFetcher } from './core/egress.ts'
 import { UserError } from './core/errors.ts'
 import { type HandoffPlan, planHandoff } from './core/handoff.ts'
 import { handoffFindings } from './core/handoff-doctor.ts'
@@ -44,6 +45,7 @@ import {
 } from './core/last-doctor.ts'
 import {
   accountEnv,
+  beforeDashes,
   brokenOnPath,
   type HostLaunch,
   type LaunchCommandOptions,
@@ -53,6 +55,16 @@ import {
   which,
 } from './core/launch.ts'
 import { memoStore } from './core/memo-store.ts'
+import {
+  codexNetworkTrustLine,
+  guardLaunch,
+  guardOn,
+  ipChangedLine,
+  type NetworkOverview,
+  networkHookArgs,
+  networkOverview,
+  networkSettingsLine,
+} from './core/network.ts'
 import { type Paths, resolvePaths } from './core/paths.ts'
 import { choosePick, type PickChoice, suggestPickName } from './core/pick-commands.ts'
 import { categoryReader, type ProjectCategories } from './core/project-categories.ts'
@@ -98,6 +110,7 @@ import { packageVersion } from './core/version.ts'
 import { withClaudeMod } from './families/claude/mod.ts'
 import { BUILTIN_PLUGINS } from './families/index.ts'
 import { LOGIN_KEY_READERS } from './families/login-keys.ts'
+import { hasOption } from './families/shared/handoff-args.ts'
 import { HookBus } from './plugins/bus.ts'
 import { type BuiltinPlugin, type LoadedPlugin, loadPlugins, type PluginLoadError } from './plugins/loader.ts'
 import type {
@@ -339,8 +352,10 @@ export interface Runtime {
     ref: string,
     userArgs: readonly string[],
     command: 'run' | 'login',
-    opts?: { aiTask?: boolean },
+    opts?: { aiTask?: boolean; ignoreNetwork?: boolean },
   ): Promise<PreparedLaunch>
+  /** Network Guard's state (spec §3.35): the cached result per address, or with `check` one request per address. */
+  networkStatus(opts?: { check?: boolean }): Promise<NetworkOverview>
   /**
    * The Host and arguments `prepareLaunch` starts from, without reading the Secret File or running `launch.before`
    * hooks: what a preview may show before the user agrees to start anything.
@@ -354,7 +369,11 @@ export interface Runtime {
    * Starts the non-main Account that holds the session the Host arguments resume, or else the Host unchanged
    * (spec §3.15). Throws UnknownFamilyError, or a UserError when the Family cannot route sessions.
    */
-  resumeLaunch(familyId: string, userArgs: readonly string[]): Promise<ResumeLaunch>
+  resumeLaunch(
+    familyId: string,
+    userArgs: readonly string[],
+    opts?: { ignoreNetwork?: boolean },
+  ): Promise<ResumeLaunch>
   /**
    * The Account's Quota. For an Account of a Same Login (spec §3.21) it is the group's freshest reading, with `from`
    * naming the Account it was read from when that is another one.
@@ -469,6 +488,11 @@ export async function createRuntime(
      * the plugin or Portal contract; it may change without notice.
      */
     desktop?: Partial<DesktopDeps>
+    /**
+     * Internal, for tests: replaces Network Guard's request and the machine's network print (spec §3.35), so a
+     * test never asks the network. Not part of the plugin or Portal contract.
+     */
+    network?: { fetcher?: TraceFetcher; print?: string }
   } = {},
 ): Promise<Runtime> {
   const env = opts.env ?? process.env
@@ -487,6 +511,38 @@ export async function createRuntime(
   const categories = loaded.categories && categoryReader(loaded.categories.def, loaded.categories.owner)
   const ignore = new Set(config.ignore ?? [])
   const now = opts.now ?? (() => new Date())
+
+  /**
+   * Network Guard on a prepared Launch (spec §3.35): refuses it (a UserError) when the Egress is wrong or cannot be
+   * told, and for a session (`hooks`) adds the variables and hook arguments that keep checking inside it.
+   */
+  const guardPrepared = async (p: PreparedLaunch, hooks: boolean): Promise<void> => {
+    const g = await guardLaunch({
+      account: p.account,
+      env: p.env,
+      config,
+      stateDir: paths.stateDir,
+      ...(p.env.SIDEBY_LABEL ? { label: p.env.SIDEBY_LABEL } : {}),
+      ...(opts.network?.fetcher ? { fetcher: opts.network.fetcher } : {}),
+      ...(opts.network?.print ? { print: opts.network.print } : {}),
+      now,
+    })
+    if (!g) return
+    const lines = [ipChangedLine(g.verdict, p.env)]
+    if (hooks) {
+      const own = p.family.id === 'claude' && hasOption(p.args, ['--settings'])
+      if (own) lines.push(networkSettingsLine(p.env))
+      else {
+        Object.assign(p.env, g.env)
+        p.networkArgs = await networkHookArgs(p.family.id, paths.stateDir)
+        p.args = beforeDashes(p.args, p.networkArgs)
+        if (p.family.id === 'codex')
+          lines.push(await codexNetworkTrustLine(paths.stateDir, p.account.ref, p.env))
+      }
+    }
+    const notice = [p.notice, ...lines].filter(Boolean).join('\n')
+    if (notice) p.notice = notice
+  }
 
   const familyOf = (id: string): FamilyDef => {
     const f = families.get(id)
@@ -1089,33 +1145,66 @@ export async function createRuntime(
           env: p.env,
           stateDir: paths.stateDir,
         })
+      // Network Guard (spec §3.35): last, on the environment the Host gets, so the check takes the Host's route.
+      if (!opts.ignoreNetwork) await guardPrepared(p, command === 'run')
       return p
+    },
+    async networkStatus(o = {}) {
+      return networkOverview({
+        accounts: await accounts(),
+        config,
+        stateDir: paths.stateDir,
+        env,
+        envFor: async (a) => accountEnv(familyOf(a.family), a, env),
+        ...(o.check ? { check: true } : {}),
+        ...(opts.network?.fetcher ? { fetcher: opts.network.fetcher } : {}),
+        ...(opts.network?.print ? { print: opts.network.print } : {}),
+        now,
+      })
     },
     async launchCommand(ref, userArgs, command) {
       const inputs = launchInputs(ref, await accounts(), userArgs, command)
       return { account: inputs.account, family: inputs.family, ...launchCommand(inputs) }
     },
-    async resumeLaunch(familyId, userArgs) {
+    async resumeLaunch(familyId, userArgs, ro = {}) {
       const family = familyOf(familyId)
       if (!family.resumedSession || !family.sessionWrittenAt)
         throw new UserError(
           `${family.title} sessions cannot be routed; start an account yourself with \`sideby run <account> -- …\``,
         )
       const host: HostLaunch = { family, bin: family.bin, args: [...userArgs], env }
+      // The Host run unchanged still talks to its vendor: Network Guard checks it as the Main Account (spec §3.35).
+      const guarded = async (h: HostLaunch): Promise<HostLaunch> => {
+        if (ro.ignoreNetwork || !guardOn(config, h.env)) return h
+        const main = (await accounts()).find((a) => a.family === family.id && a.isMain)
+        if (!main) return h
+        const p: PreparedLaunch = { ...h, account: main, args: [...h.args], env: { ...h.env } }
+        await guardPrepared(p, true)
+        return {
+          family: p.family,
+          bin: p.bin,
+          args: p.args,
+          env: p.env,
+          ...(h.title ? { title: h.title } : {}),
+          ...(h.account ? { account: h.account } : {}),
+          ...(p.notice ? { notice: p.notice } : {}),
+        }
+      }
       // A select variable already set means an Account was chosen on purpose: run the Host as it is.
-      if (family.selectVar && env[family.selectVar]) return { launch: host }
+      if (family.selectVar && env[family.selectVar]) return { launch: await guarded(host) }
       const route = await findResumeRoute(family, await accounts(), userArgs)
       const id = route.sessionId ? { sessionId: route.sessionId } : {}
       if (route.neverSaved && route.account && family.withoutResume) {
         const args = family.withoutResume(userArgs)
         const launch = route.account.isMain
-          ? { ...host, args }
-          : await rt.prepareLaunch(route.account.ref, args, 'run')
+          ? await guarded({ ...host, args })
+          : await rt.prepareLaunch(route.account.ref, args, 'run', ro)
         return { launch, ...id, account: route.account, newSession: true }
       }
-      if (!route.account || route.account.isMain || route.neverSaved) return { launch: host, ...id }
+      if (!route.account || route.account.isMain || route.neverSaved)
+        return { launch: await guarded(host), ...id }
       return {
-        launch: await rt.prepareLaunch(route.account.ref, userArgs, 'run'),
+        launch: await rt.prepareLaunch(route.account.ref, userArgs, 'run', ro),
         ...id,
         account: route.account,
       }

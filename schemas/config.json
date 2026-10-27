@@ -368,6 +368,26 @@
       "additionalProperties": false,
       "description": "Session History (spec §3.33, ADR-0042)."
     },
+    "network": {
+      "type": "object",
+      "properties": {
+        "guard": {
+          "type": "boolean",
+          "description": "Network Guard: before a Launch and before each prompt and tool call in a session sideby starts, check the country Claude Code's and Codex's requests leave from, and stop when it is not in `allow` or cannot be told. Asks the vendor's own `/cdn-cgi/trace` through the Host's proxy settings, with no credential. Off by default."
+        },
+        "allow": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          },
+          "uniqueItems": true,
+          "description": "Countries (ISO 3166-1 alpha-2, such as `US` or `JP`) a Host may send requests from. Network Guard cannot be turned on while it is empty."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Network Guard (spec §3.35, ADR-0053)."
+    },
     "browser": {
       "type": "object",
       "properties": {

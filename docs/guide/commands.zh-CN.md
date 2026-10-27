@@ -28,6 +28,7 @@
 | `sideby model <acct> [<model>\|default] [--effort <level>\|default] [--yes]` | 显示这个账号启动时用的模型和 effort 及各自来源；给出改动时先展示，加 `--yes` 才保存（Claude、Codex） | 0；等待 `--yes` 为 10；值不合法或是 API 账号为 1 |
 | `sideby tune apply <acct> [tokens] [--yes]` / `sideby tune undo <acct> [--yes]` | 把建议的自动压缩大小（或你给的大小，如 `120k`）用在一个 Claude 账号上，或恢复原值。只写该账号 `settings.json` 里的一个键；不加 `--yes` 只展示改动 | 只展示改动时为 10；完成为 0；被拦下、没有可撤销的、没有建议为 1；命令行有误为 2 |
 | `sideby remote-control [on\|off\|undo] [--yes]` | 显示每个 Claude 设置文件会不会自动打开 Remote Control；`off` 把开着或没设置的都改成 `remoteControlAtStartup: false`，`on` 把关着或没设置的都改成 `true`，`undo` 恢复原来的值（都先展示改动） | 只展示改动时 10；完成 0；无需改动、改不了、失败或没有可撤销的 1 |
+| `sideby network [check]`、`sideby network allow <地区代码>...`、`sideby network on\|off` [--yes] | 网络检查：显示 Claude、Codex 的请求从哪里发出（`check` 现在查），设置允许的地区，打开或关闭（每次改动先展示）。打开后，启动账号、以及 sideby 启动的会话里每条消息和工具调用前，地区不在允许范围内或查不出时都会被拦下；`run`、`next`、`resume` 加 `--ignore-network` 可以跳过一次 | 只展示改动时 10；显示或完成 0；地区代码不对、或没有允许的地区就打开 1；`run` 被拦时 1 |
 | `sideby handoff status` | 按家族列出本机启用自动接力还差什么，以及接下来要运行的命令 | 0 |
 | `sideby handoff enable [--same-family] [--order <family>=<acct,…>] [--threshold n] [--prepare-at n] [--yes]` | 展示 config 改动；加 `--yes` 才开启（其他设置保留），并列出还要做的步骤 | 只展示改动时为 10；写入后或已是这样为 0；`--order` 里有找不到的账号为 1 |
 | `sideby handoff disable [--yes]` | 关闭，其他设置保留 | 只展示改动时为 10；写入后或本来就关着为 0 |
@@ -76,5 +77,5 @@
 - 所有命令遇到用法错误（未知选项、缺参数）时退出码为 2；sideby 自身出错（账号不存在、名字不合法、配置读不了）时为 1。
 - `<acct>` 写成 `<family>:<name>`；名字在所有家族里唯一时，只写 `<name>` 也行。有歧义就报错，并列出候选。
 - 退出码 10 表示命令展示了改动、在等你确认：同意的话，加上 `--yes` 再跑一次同一条命令。
-- `list`、`new`、`next`、`alias`、`doctor`、`quota`（包括 `setup` 和 `teardown`）、`tune`、`model`、`remote-control`、`handoff`、`families`、`plugins`、`ask`、`terminal`、`key`、`try`、`autostart`、`menubar`、`config`、`app`、`desktop`、`sessions`、`send`、`messages` 支持 `--json`，输出带 `schemaVersion: 1`，JSON Schema 随包放在 [`schemas/`](../../schemas/)。有新版本或本机装的 skill 版本不对时，输出里还会多一个 `_notice`（sideby skill 让 agent 提一次并主动问要不要帮你更新；设 `SIDEBY_NO_UPDATE_NOTIFIER=1` 就不带）。加了 `--json` 时，出错会输出 `{ "schemaVersion": 1, "error": "…", "code": "…" }`：命令行写错时 `code` 为 `usage`，其他情况是 `no-quota-source` 这样的原因。只新增字段时版本不变；删除、改名或改语义时加 1。
+- `list`、`new`、`next`、`alias`、`doctor`、`quota`（包括 `setup` 和 `teardown`）、`tune`、`model`、`remote-control`、`network`、`handoff`、`families`、`plugins`、`ask`、`terminal`、`key`、`try`、`autostart`、`menubar`、`config`、`app`、`desktop`、`sessions`、`send`、`messages` 支持 `--json`，输出带 `schemaVersion: 1`，JSON Schema 随包放在 [`schemas/`](../../schemas/)。有新版本或本机装的 skill 版本不对时，输出里还会多一个 `_notice`（sideby skill 让 agent 提一次并主动问要不要帮你更新；设 `SIDEBY_NO_UPDATE_NOTIFIER=1` 就不带）。加了 `--json` 时，出错会输出 `{ "schemaVersion": 1, "error": "…", "code": "…" }`：命令行写错时 `code` 为 `usage`，其他情况是 `no-quota-source` 这样的原因。只新增字段时版本不变；删除、改名或改语义时加 1。
 - 任何输出、日志和错误信息里都不会出现凭据的值。

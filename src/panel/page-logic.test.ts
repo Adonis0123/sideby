@@ -50,6 +50,7 @@ import {
   mergeUsage,
   messageChip,
   messageNews,
+  networkTaskFacts,
   newAccountDir,
   nextReset,
   panelFixes,
@@ -1735,6 +1736,27 @@ describe('settings in config, start at login and Auto Handoff facts (spec §3.29
       assert.ok(!p.includes('abcdefghijklmnopqrstu'), 'key-shaped context is removed')
     }
     assert.ok(AI_TASK_KINDS.includes('handoff'))
+    // Network check (spec §3.35): the AI asks which countries, never picks the current one, and previews first.
+    for (const lang of ['en', 'zh']) {
+      const facts = networkTaskFacts({
+        guard: false,
+        allow: [],
+        targets: [
+          {
+            url: 'https://api.anthropic.com/cdn-cgi/trace',
+            status: 'not-checked',
+            accounts: ['claude:work'],
+          },
+        ],
+        accounts: [{ ref: 'claude:deepseek', skip: 'third-party' }],
+      })
+      const p = taskPrompt({ task: 'network', context: { network: facts }, lang }, stripSecrets)
+      assert.match(p, /sideby network check --json/)
+      assert.match(p, /sideby network allow/)
+      assert.match(p, /--yes/)
+      assert.match(p, /api\.anthropic\.com: not-checked \(claude:work\)/)
+      assert.match(p, /claude:deepseek: not checked here \(third-party\)/)
+    }
     // "Can't see the icon?": the AI starts from the menu bar item's own state, in either language.
     for (const lang of ['en', 'zh']) {
       const p = taskPrompt({ task: 'menubar', lang }, stripSecrets)

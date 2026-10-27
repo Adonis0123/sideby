@@ -1126,6 +1126,39 @@ export function stripSecrets(text: string): { text: string; removed: boolean } {
   return { text: out, removed }
 }
 
+/**
+ * Network Guard facts for the `network` AI Task (spec §3.35), one plain line each, from the Panel state's `network`:
+ * the switch, the allowed countries and the newest result per address. No address is ever in it, only countries.
+ */
+export function networkTaskFacts(n: {
+  guard: boolean
+  allow: readonly string[]
+  targets: readonly {
+    url: string
+    status: string
+    loc?: string
+    checkedAt?: string
+    error?: string
+    accounts: readonly string[]
+  }[]
+  accounts: readonly { ref: string; skip?: string }[]
+}): string[] {
+  const out = [`guard: ${n.guard ? 'on' : 'off'}`, `allow: ${n.allow.join(', ') || 'none'}`]
+  for (const t of n.targets) {
+    let host = t.url
+    try {
+      host = new URL(t.url).hostname
+    } catch {
+      // keep the URL
+    }
+    out.push(
+      `${host}: ${t.status}${t.loc ? `, country ${t.loc}` : ''}${t.checkedAt ? `, checked ${t.checkedAt}` : ''}${t.error ? `, ${t.error}` : ''} (${t.accounts.join(', ')})`,
+    )
+  }
+  for (const a of n.accounts) if (a.skip) out.push(`${a.ref}: not checked here (${a.skip})`)
+  return out
+}
+
 /** The kinds of AI Task (spec §3.28); anything else is refused. */
 export const AI_TASK_KINDS = [
   'free',
@@ -1139,6 +1172,7 @@ export const AI_TASK_KINDS = [
   'handoff',
   'menubar',
   'hotkey',
+  'network',
 ] as const
 export type AiTaskKind = (typeof AI_TASK_KINDS)[number]
 
@@ -1257,6 +1291,8 @@ export function taskPrompt(
       terminals?: readonly string[]
       /** Auto Handoff facts, one per line, as `handoffTaskFacts` gives them (`handoff` task). */
       handoff?: readonly string[]
+      /** Network Guard facts, one per line, as `networkTaskFacts` gives them (`network` task, spec §3.35). */
+      network?: readonly string[]
     }
     /** Files saved for the task (spec §3.28 "附件"): absolute paths and their kind. */
     attachments?: readonly { path: string; kind: string }[]
@@ -1296,6 +1332,11 @@ export function taskPrompt(
         pMenubar:
           '先运行 `sideby menubar --json`。`state` 为 `off`：它被关掉了（常见于菜单里的「从状态栏隐藏…」），给我看 `sideby menubar on` 的预览，我同意后加 `--yes`。`state` 为 `on` 但 `loaded` 为 `false`：macOS 没在运行它，`sideby menubar on --yes` 只是重新启动，不改文件。`loaded` 为 `true`：它在运行但被挡住了，依次查：状态栏是否太满或被刘海挡住（按住 ⌘ 拖动图标）；有没有 Ice、Bartender、Hidden Bar 这类菜单栏整理工具把它收起来了（查 `/Applications`，告诉我去它的设置里把 sideby（显示为 osascript）挪出来）；macOS 26 及以上要在「系统设置 › 菜单栏」里允许 osascript（`sideby menubar --json` 里的快捷键 `hotkey.label` 可以在任何地方打开菜单，用来确认它在运行）。不要结束或重启任何不是 sideby 的进程。',
         cHandoff: '自动接力现在的设置（来自 `sideby handoff status --json`）：',
+        network:
+          '帮我设置 sideby 的网络检查：请求要从我没允许的国家或地区发出时（比如代理断了、节点切错了），拦下 Claude 和 Codex。',
+        cNetwork: '网络检查现在的情况（来自 `sideby network --json`）：',
+        pNetwork:
+          '先运行 `sideby network check --json`，告诉我现在每个地址的请求从哪里发出。问我允许哪些国家或地区；不要替我决定，也不要因为现在在哪就把它加进去（网络不对时那正是错的地区）。我说了以后，先不加 `--yes` 跑 `sideby network allow <代码>... --json` 和 `sideby network on --json` 给我看预览，我同意后再加 `--yes`。告诉我：只检查 sideby 启动的会话；Codex 要在 `/hooks` 里信任一次 `network-hook`；临时跳过一次用 `sideby run <账号> --ignore-network`。被拦过的话，先帮我查代理（开没开、哪个节点），再跑 `sideby network check --json` 确认。它只防代理出意外，不会让在不支持的地区使用变得合规；不要帮我隐藏所在地（时区、指纹之类）。',
         pHandoff:
           '先运行 `sideby handoff status --json` 和 `sideby quota --json`，看清每个账号的额度来源和用量。只用 `sideby handoff enable …` 或 `sideby config set handoff.<键> <值>` 改设置；先不加 `--yes` 给我看预览，我同意后再加 `--yes`。没有额度数据的账号排在顺序后面，并告诉我怎么让它显示额度。',
         cAccount: '账号：',
@@ -1356,6 +1397,11 @@ export function taskPrompt(
         pMenubar:
           'Run `sideby menubar --json` first. `state` is `off`: it was turned off (often with "Hide from Menu Bar…" in its menu); show me the preview of `sideby menubar on`, and add `--yes` after I agree. `state` is `on` with `loaded: false`: macOS is not running it; `sideby menubar on --yes` only starts it again and changes no file. `loaded: true`: it runs but is hidden; check in turn whether the menu bar is too full or the notch covers it (hold ⌘ and drag icons), whether a menu bar organizer such as Ice, Bartender or Hidden Bar tucked it away (look in /Applications, and tell me where in its settings to move sideby, shown as osascript, out), and, on macOS 26 and later, whether osascript is allowed under System Settings › Menu Bar. The shortcut in `hotkey.label` opens the menu from anywhere, which shows it is running. Never end or restart a process that is not sideby\'s.',
         cHandoff: 'Auto Handoff now (from `sideby handoff status --json`):',
+        network:
+          "Help me set up sideby's network check: stop Claude and Codex when my requests would leave from a country I did not allow (for example when the proxy stopped or a node in the wrong country is picked).",
+        cNetwork: 'Network check now (from `sideby network --json`):',
+        pNetwork:
+          "Run `sideby network check --json` first and tell me where each address's requests leave from now. Ask me which countries to allow; never decide for me, and never add the current country because it is current (on a wrong network that is the wrong one). Once I say, run `sideby network allow <codes>... --json` and `sideby network on --json` without `--yes` to show me the change, and add `--yes` after I agree. Tell me: only sessions sideby starts are checked; in Codex I trust `network-hook` once in `/hooks`; `sideby run <account> --ignore-network` skips it once. If something was blocked, help me check the proxy (is it on, which node) first, then run `sideby network check --json` to confirm. It guards against proxy accidents; it does not make use from an unsupported region allowed, and never help hide where I am (time zone, fingerprints).",
         pHandoff:
           'Run `sideby handoff status --json` and `sideby quota --json` first to see where each account gets its quota and how much is used. Change settings only with `sideby handoff enable …` or `sideby config set handoff.<key> <value>`; show me the preview without `--yes` first, and add `--yes` only after I agree. Put accounts without quota data last in the order, and tell me how to make them show it.',
         cAccount: 'Account: ',
@@ -1427,6 +1473,10 @@ export function taskPrompt(
   if (task === 'handoff') {
     const lines = (c.handoff || []).map(clean).filter(Boolean)
     if (lines.length) facts.push('- ' + L.cHandoff, ...lines.map((l) => '  - ' + l))
+  }
+  if (task === 'network') {
+    const lines = (c.network || []).map(clean).filter(Boolean)
+    if (lines.length) facts.push('- ' + L.cNetwork, ...lines.map((l) => '  - ' + l))
   }
   const version = clean(c.version)
   if (version) facts.push('- ' + L.cVersion + version)

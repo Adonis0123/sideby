@@ -254,6 +254,27 @@ Under the suggestion each Claude account also has a **size menu** (Default, comm
 
 Accounts that link `settings.json` to the Main Account share one file, so they share one setting: the panel shows one card for them (the suggestion follows the model used most among them), each account's own numbers sit under "Details for each account", and the confirmation names every account the change reaches. To show your current value, sideby reads exactly that key (Claude) or `model_auto_compact_token_limit` from `config.toml` (Codex), and nothing else in those files.
 
+## Network check
+
+Many people reach Claude and Codex through a proxy or a company network. When the proxy stops, or a node in the wrong country is picked, requests leave from somewhere else, and the vendor may flag the account. The network check stops Claude and Codex before that happens. It guards against an accident for someone who is in a supported region; it does not make use from an unsupported region allowed.
+
+Turn it on in the panel under **Settings › Network check**: sideby first shows where your requests leave from now, then you tick the countries they may leave from (sideby never ticks one for you, not even the current one) and switch it on. From a terminal:
+
+```sh
+sideby network allow US JP --yes   # the countries your requests may leave from
+sideby network on --yes            # turn it on
+sideby network                     # the setting and the newest result per address
+sideby network check               # ask now
+```
+
+While it is on, sideby checks before it starts a Claude or Codex account, and before each message and tool call in a session it started. When the country is not allowed, or cannot be told within 3 seconds (the proxy is off, the network is down), the start, the message or the tool call is stopped with the reason and what to do; the panel shows a banner with **Check again**. To go on once anyway: `sideby run <account> --ignore-network`. Not sure what to allow, or something was blocked? **Let AI help** in the dialog or on the banner opens a task with your own AI: it checks where you are, asks which countries, and changes the setting only after you agree.
+
+- sideby asks the vendor's own `/cdn-cgi/trace` (`api.anthropic.com`, `chatgpt.com`, `api.openai.com`) through the account's proxy settings, so the check takes the same route as the requests. It sends no credential, account or identity, and keeps only the country and a hash of the address. A result is reused for 60 seconds, so most messages wait for nothing; a change of Wi-Fi or VPN is noticed at once, a node switch inside a proxy app within about a minute.
+- Only sessions sideby starts are checked. Running `claude` or `codex` directly is not.
+- Codex runs the hook only after you trust it once: type `/hooks` in that account and trust `network-hook`. Until then Codex is checked only before it starts. A Claude session started with its own `--settings` is also checked only before it starts.
+- API accounts on another endpoint (DeepSeek and the like) are not checked. An `http://` proxy is supported; a SOCKS proxy cannot be checked through and is treated as "cannot tell".
+- A changed exit address in the same country is only a notice.
+
 ## Remote Control
 
 Claude Code's Remote Control connects a session to claude.ai/code and the Claude mobile app, where every device signed in to that claude.ai account can read and continue it. Turning on "Enable Remote Control for all sessions" in `/config` saves `remoteControlAtStartup: true` in `settings.json`, and since accounts usually link that file to the main one, every account connects.

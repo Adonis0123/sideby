@@ -44,7 +44,7 @@ Usage:
   sideby login <account>              sign in to an account
   sideby resume <family> [-- args]    run the host; a session resumed by id (claude --resume <id>,
                                       codex resume <id>) starts in the account that holds it
-  sideby next <family> [--dry-run] [--include-api] [-- args]
+  sideby next <family> [--dry-run] [--include-api] [--ignore-network] [-- args]
                                       recommend the account with the most quota left (claude, codex, grok)
                                       and start it; --dry-run only recommends
   sideby doctor [target] [--fix] [--force]
@@ -98,6 +98,8 @@ Usage:
                                       whether Claude sessions show messages from other sessions at once
   sideby edit <account> [--path]      open the account's own settings file (settings.json,
                                       config.toml) in your editor
+  sideby network [check]              stop Claude and Codex when requests would leave from a country
+                                      you did not allow (network on|off|allow <CC>... [--yes])
   sideby browser [--enable [--yes]]   which Chrome browser user signed in to each account's website
                                       (read on this computer only; off until you enable it)
   sideby browser open <account> [--profile <name>]
@@ -153,7 +155,7 @@ Updates: once a day sideby asks the npm registry for its newest version and says
 
 /** `sideby <command> --help` for the commands agents use to set up and repair accounts (spec §3.16). */
 const COMMAND_HELP: Record<string, string> = {
-  ask: 'sideby ask [<text>] [--task free|fix|quota|account|host|plugin|terminal|handoff|theme|menubar|hotkey] [--account <ref>] [--terminal <id>] [--attach <file>]... [--print] [--json]\nsideby ask --run <id> [--state-dir <dir>]\nsideby ask --spec - [--print] --json\nsideby ask --choices --json\nOpen a task in your terminal. --spec reads a Task Spec (one JSON object, at most 1 MB) from stdin, as a Portal sends it; --choices lists the accounts and terminals a task can use. --attach adds an image (PNG, JPEG, GIF, WebP; up to 20 MB) or a video (MP4, MOV, WebM; up to 200 MB), at most 5. --print prints only the prompt. If opening fails, paste the command into a terminal.',
+  ask: 'sideby ask [<text>] [--task free|fix|quota|account|host|plugin|terminal|handoff|theme|menubar|hotkey|network] [--account <ref>] [--terminal <id>] [--attach <file>]... [--print] [--json]\nsideby ask --run <id> [--state-dir <dir>]\nsideby ask --spec - [--print] --json\nsideby ask --choices --json\nOpen a task in your terminal. --spec reads a Task Spec (one JSON object, at most 1 MB) from stdin, as a Portal sends it; --choices lists the accounts and terminals a task can use. --attach adds an image (PNG, JPEG, GIF, WebP; up to 20 MB) or a video (MP4, MOV, WebM; up to 200 MB), at most 5. --print prints only the prompt. If opening fails, paste the command into a terminal.',
   terminal:
     "sideby terminal [--set <id>|--custom '<program> … {cwd} … {cmd}'|--unset] [--json]\nList terminals or save your preference; --custom saves and selects your own launch command.",
   key: 'sideby key <account> [--var <NAME>] [--json]\nEnter an API key without echo. Run in a terminal or use the Panel key box.',
@@ -439,6 +441,31 @@ Examples:
   sideby config unset panel.language --yes
 Exit: 0 shown, saved or nothing to change; 10 a change was shown and waits for --yes; 1 not a key, a value the key
 does not take, or the file changed meanwhile; 2 malformed command line.`,
+  network: `sideby network [check] [--json]
+       sideby network allow <country>... [--yes] [--json]
+       sideby network on|off [--yes] [--json]
+
+Network check: before sideby starts a Claude or Codex account, and before each prompt and tool call in a session
+it started, check the country the requests leave from. When it is not one you allowed, or cannot be told within 3
+seconds (the proxy is off, the network is down), stop and say what to do. It guards against a proxy that stopped
+or a node in the wrong country; it does not make use from an unsupported region allowed.
+
+sideby asks the vendor's own https://api.anthropic.com, chatgpt.com or api.openai.com /cdn-cgi/trace, through the
+account's proxy settings, with no credential, account or identity, and keeps only the country and a hash of the
+address. Results are reused for 60 seconds. Off by default; off in CI. Sessions started without sideby (running
+claude or codex directly) are not checked. API accounts on a third-party endpoint are not checked.
+
+network        shows the setting and the newest result per address (no request)
+network check  asks every address now
+allow          sets the allowed countries (two letters, such as US JP); on and off turn it on and off
+To skip it once: sideby run <account> --ignore-network (also sideby next --ignore-network).
+
+Examples:
+  sideby network allow US JP --yes
+  sideby network on --yes
+  sideby network check
+Exit: 0 shown or changed; 10 a change was shown and waits for --yes; 1 a country code that is not one, or on with
+no country allowed; 2 malformed command line.`,
   browser: `sideby browser [--enable|--disable] [--yes] [--json]
        sideby browser open <account> [--profile <folder|name>] [--json]
        sideby browser set <account> <folder|name> [--json]
@@ -514,7 +541,8 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   run: { flags: [] },
   resume: { flags: [] },
   login: { flags: [] },
-  next: { flags: ['dry-run', 'include-api', 'json'] },
+  next: { flags: ['dry-run', 'include-api', 'json', 'ignore-network'] },
+  network: { flags: ['json', 'yes'] },
   new: { flags: ['api', 'json', 'next'], valued: ['alias'] },
   alias: { flags: ['json', 'yes'], valued: ['pick'] },
   doctor: { flags: ['fix', 'force', 'json'] },
@@ -651,6 +679,11 @@ export async function main(argv: string[]): Promise<number> {
   if (first === 'handoff-hook') {
     const { runHandoffHook } = await import('../handoff/hook.ts')
     return runHandoffHook(rest, process.env, process.stdin, process.stdout)
+  }
+  // Network Guard's hook runs before every prompt and tool call it guards (spec §3.35); same fast path.
+  if (first === 'network-hook') {
+    const { runNetworkHook } = await import('../network/hook.ts')
+    return runNetworkHook(rest, process.env, process.stderr)
   }
   if (nodeTooOld()) {
     console.error(
@@ -807,6 +840,8 @@ async function dispatch(
       return await cmds.cmdEdit(parsed, io)
     case 'browser':
       return await cmds.cmdBrowser(parsed, io)
+    case 'network':
+      return await cmds.cmdNetwork(parsed, io)
     case 'shell-init':
       return await cmds.cmdShellInit(parsed, io)
     case 'plugins':

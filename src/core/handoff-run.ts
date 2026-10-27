@@ -27,7 +27,8 @@ import {
   writeJsonFile,
 } from './handoff-chain.ts'
 import type { HandoffDecision } from './handoff-select.ts'
-import { type PreparedLaunch, runHost, sidebyBinProblem, spawnHost } from './launch.ts'
+import { beforeDashes, type PreparedLaunch, runHost, sidebyBinProblem, spawnHost } from './launch.ts'
+import { withClaudeNetworkHooks, withoutArgs } from './network.ts'
 import { quotaPressure } from './quota-levels.ts'
 
 export interface HandoffIo {
@@ -151,10 +152,11 @@ interface Hop {
   prompt?: string
 }
 
-/** `args` with `extra` before the first `--`, so a user's own `--` cannot turn sideby's options into prompt text. */
-export function beforeDashes(args: readonly string[], extra: readonly string[]): string[] {
-  const at = args.indexOf('--')
-  return at === -1 ? [...args, ...extra] : [...args.slice(0, at), ...extra, ...args.slice(at)]
+export { beforeDashes }
+
+/** A Launch's arguments without Network Guard's Claude `--settings`, which would read as the user's own. */
+function withoutNetwork(l: PreparedLaunch): string[] {
+  return l.family.id === 'claude' ? withoutArgs(l.args, l.networkArgs ?? []) : [...l.args]
 }
 
 /** Whether the `sideby` on PATH has the hook entry: an older install would fail every hook call. */
@@ -201,17 +203,26 @@ export async function runWithHandoff(
     exitGraceMs?: number
     /** An AI Task (ADR-0031): every Account it hands over to starts without permission bypasses too. */
     aiTask?: boolean
+    /** `--ignore-network` (spec §3.35): no Launch of this run is checked. */
+    ignoreNetwork?: boolean
   } = {},
 ): Promise<number | null> {
   const grace = opts.exitGraceMs ?? EXIT_GRACE_MS
   const settings = rt.handoffSettings()
   if (!settings.auto || !io.stdin.isTTY) return null
-  const launchOpts = opts.aiTask ? { aiTask: true } : {}
+  const launchOpts = {
+    ...(opts.aiTask ? { aiTask: true } : {}),
+    ...(opts.ignoreNetwork ? { ignoreNetwork: true } : {}),
+  }
   const firstLaunch = await rt.prepareLaunch(ref, userArgs, 'run', launchOpts)
   const firstHandoff = firstLaunch.family.handoff
   // Only built-in Families have a hook reader (spec §3.17); a Plugin Family can only take over.
   if (!firstHandoff?.starts.length || !HOOK_FAMILIES.includes(firstLaunch.family.id)) return null
-  const firstElig = await firstHandoff.eligibility(firstLaunch.args, firstLaunch.account, firstLaunch.env)
+  const firstElig = await firstHandoff.eligibility(
+    withoutNetwork(firstLaunch),
+    firstLaunch.account,
+    firstLaunch.env,
+  )
   if (!firstElig.start) {
     // A headless run is simply not part of it; an interactive one that cannot start says why.
     if (firstElig.receive && firstElig.reason)
@@ -243,7 +254,7 @@ export async function runWithHandoff(
     const account = launch.account
     const h = launch.family.handoff
     if (!h) return runHost(launch)
-    const elig = n === 1 ? firstElig : await h.eligibility(launch.args, account, launch.env)
+    const elig = n === 1 ? firstElig : await h.eligibility(withoutNetwork(launch), account, launch.env)
     const canStart = h.starts.length > 0 && elig.start && HOOK_FAMILIES.includes(account.family)
     if (!canStart && elig.reason) io.err(`sideby: ${account.ref} will not hand over: ${elig.reason}`)
 
@@ -251,15 +262,18 @@ export async function runWithHandoff(
     const brief = briefPath(dir, n, account.ref)
     const extra = [...(elig.args ?? [])]
     const env = { ...launch.env }
+    // Claude takes one `--settings`: Network Guard's hooks (spec §3.35) go into Auto Handoff's file.
+    const mergeNet = canStart && account.family === 'claude' && Boolean(launch.networkArgs?.length)
     if (canStart) {
-      extra.push(...((await h.hookArgs?.(hookCommand(account.family), rt.paths.stateDir)) ?? []))
+      const hookArgs = (await h.hookArgs?.(hookCommand(account.family), rt.paths.stateDir)) ?? []
+      extra.push(...(mergeNet ? await withClaudeNetworkHooks(hookArgs, rt.paths.stateDir) : hookArgs))
       env[HANDOFF_ENV.run] = runId
       env[HANDOFF_ENV.family] = account.family
       env[HANDOFF_ENV.dir] = dir
       if (account.family === 'codex') await codexTrustNotice(rt, account, io)
     }
     extra.push(...(h.dirArgs?.(dir) ?? []))
-    const args = beforeDashes(launch.args, extra)
+    const args = beforeDashes(mergeNet ? withoutNetwork(launch) : launch.args, extra)
     // Later hops carry no `--` of their own (continueArgs drops it), so the prompt goes after a fresh one.
     if (hop.prompt) args.push(...h.promptArgs(hop.prompt))
     used.push(account.ref)
@@ -399,7 +413,7 @@ export async function runWithHandoff(
       const backArgs = [...h.continueArgs(hop.args), ...h.resumeArgs(ready.sessionId)]
       const back = await rt.prepareLaunch(account.ref, backArgs, 'run', launchOpts)
       // The same per-Account arguments as before (Grok's leader socket), without sideby's hooks.
-      const backElig = await h.eligibility(back.args, account, back.env)
+      const backElig = await h.eligibility(withoutNetwork(back), account, back.env)
       return runHost({ ...back, args: beforeDashes(back.args, backElig.args ?? []) })
     }
 

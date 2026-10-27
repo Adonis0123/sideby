@@ -197,6 +197,32 @@ describe('runWithHandoff', () => {
     })
   })
 
+  it("puts Network Guard's hooks into Auto Handoff's one --settings file (spec §3.35)", async () => {
+    await withFakeHome(async (h) => {
+      await fakeHost(h, 'claude', { sleep: 1 })
+      await setup(h, {})
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({
+          aliases: { cc001: 'claude:001' },
+          handoff: { auto: true, sameFamily: true, countdownSeconds: 0 },
+          network: { guard: true, allow: ['US'] },
+        }),
+      )
+      const rt = await createRuntime({
+        env: h.env,
+        builtins,
+        network: { fetcher: async () => 'ip=203.0.113.7\nloc=US\n', print: 'p' },
+      })
+      const handed = await runWithHandoff(rt, 'cc001', [], { err: () => {}, stdin: terminal() })
+      assert.notEqual(handed, null, 'the network --settings does not read as the user’s own')
+      const argv = (await readHostLog(h, 'claude')).find((r) => r.argv)!.argv
+      assert.equal(argv.filter((a) => a === '--settings').length, 1)
+      const hooks = JSON.parse(await readFile(argv[argv.indexOf('--settings') + 1]!, 'utf8')).hooks
+      for (const e of ['PostToolUse', 'Stop', 'UserPromptSubmit', 'PreToolUse']) assert.ok(hooks[e], e)
+    })
+  })
+
   it('leaves a headless run alone, and turns off for a sideby on PATH without the hook entry', async () => {
     await withFakeHome(async (h) => {
       await fakeHost(h, 'claude')

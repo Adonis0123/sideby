@@ -373,6 +373,26 @@ export const ConfigSchema = Type.Object(
         { additionalProperties: false, description: 'Session History (spec §3.33, ADR-0042).' },
       ),
     ),
+    network: Type.Optional(
+      Type.Object(
+        {
+          guard: Type.Optional(
+            Type.Boolean({
+              description:
+                "Network Guard: before a Launch and before each prompt and tool call in a session sideby starts, check the country Claude Code's and Codex's requests leave from, and stop when it is not in `allow` or cannot be told. Asks the vendor's own `/cdn-cgi/trace` through the Host's proxy settings, with no credential. Off by default.",
+            }),
+          ),
+          allow: Type.Optional(
+            Type.Array(Type.String({ pattern: '^[A-Z]{2}$' }), {
+              uniqueItems: true,
+              description:
+                'Countries (ISO 3166-1 alpha-2, such as `US` or `JP`) a Host may send requests from. Network Guard cannot be turned on while it is empty.',
+            }),
+          ),
+        },
+        { additionalProperties: false, description: 'Network Guard (spec §3.35, ADR-0053).' },
+      ),
+    ),
     browser: Type.Optional(
       Type.Object(
         {
@@ -679,6 +699,20 @@ export function editConfigUpdate(
   opts: { dryRun?: boolean } = {},
 ): Promise<{ changed: boolean; before: UpdateConfig | undefined; after: UpdateConfig | undefined }> {
   return editConfigKey(file, 'update', 'change the setting', (current) => edit(current ?? {}), opts)
+}
+
+export type NetworkConfig = NonNullable<Config['network']>
+
+/**
+ * `sideby network on|off|allow` and the Panel's network check (spec §3.35): changes the config `network` key with
+ * `edit` (see `editConfigKey` for how the file is written). With `dryRun`, shows the change without writing.
+ */
+export function editConfigNetwork(
+  file: string,
+  edit: (current: NetworkConfig) => NetworkConfig,
+  opts: { dryRun?: boolean } = {},
+): Promise<{ changed: boolean; before: NetworkConfig | undefined; after: NetworkConfig | undefined }> {
+  return editConfigKey(file, 'network', 'change the setting', (current) => edit(current ?? {}), opts)
 }
 
 export type BrowserConfig = NonNullable<Config['browser']>

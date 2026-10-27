@@ -91,6 +91,7 @@ cc-switch 自己的说明是：切换时把配置写进宿主正在用的文件�
 | 看 Claude 额度（Codex 不用设置） | `sideby quota setup claude --yes` | [Claude 额度](docs/guide/usage.zh-CN.md#claude-额度) |
 | 用你自己的会话找出最省的自动压缩大小，一键使用 | `sideby tune`（或面板的「上下文调优」页签） | [上下文调优](docs/guide/usage.zh-CN.md#上下文调优) |
 | 查看每个账号的模型和 effort，并按账号设置 | `sideby model <账号>`（或在面板里点模型） | [模型与 effort](docs/guide/usage.zh-CN.md#模型与-effort) |
+| 请求要从你没允许的地区发出时（比如代理断了），拦下 Claude 和 Codex | 面板的**设置 › 网络检查**，或 `sideby network on` | [网络检查](docs/guide/usage.zh-CN.md#网络检查) |
 | 一次设置所有账号的 Claude 会话要不要自动连到 claude.ai（Remote Control） | `sideby remote-control off` 或 `on`（或面板的「设置」） | [Remote Control](docs/guide/usage.zh-CN.md#remote-control) |
 | 把常用账号置顶，按自己的习惯排工具和账号，隐藏从来不用的 | `sideby pin claude:work`、`sideby order`、`sideby hide grok`（或面板的设置） | [自己排顺序](docs/guide/usage.zh-CN.md#自己排顺序) |
 | 给面板换颜色：五套内置主题、自选主色，或让你的 AI 配一套 | 面板的**设置 › 主题**，或 `sideby theme use leaf` | [主题](docs/guide/panel.zh-CN.md#主题) |

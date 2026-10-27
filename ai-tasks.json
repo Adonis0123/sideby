@@ -125,6 +125,23 @@
             { "en": "Nothing happens when I press it", "zh": "按了没反应" },
             { "en": "Two keys at most", "zh": "最多两个键" }
           ]
+        },
+        {
+          "id": "network",
+          "native": true,
+          "title": { "en": "Let AI help", "zh": "让 AI 帮我" },
+          "placeholder": {
+            "en": "Where are you, and which proxy nodes do you use? Or paste what was blocked.",
+            "zh": "你在哪里、用哪些代理节点？或者贴上被拦下的提示。"
+          },
+          "examples": [
+            {
+              "en": "I am in the US; stop everything when the proxy drops",
+              "zh": "我在美国，代理一断就全部拦住"
+            },
+            { "en": "Allow only my Japan and Singapore nodes", "zh": "只允许日本和新加坡节点" },
+            { "en": "A message was blocked; help me check the proxy", "zh": "消息被拦了，帮我查查代理" }
+          ]
         }
       ]
     }

@@ -84,9 +84,23 @@ async function runAccount(
   ref: string,
   args: readonly string[],
   io: Io,
-  opts: { aiTask?: boolean } = {},
+  opts: { aiTask?: boolean; ignoreNetwork?: boolean } = {},
 ): Promise<number> {
   return whileRunning(rt, () => runAccountNow(rt, ref, args, io, opts))
+}
+
+/**
+ * Takes sideby's own `--ignore-network` (spec §3.35) out of the arguments `run` and `resume` pass to the Host,
+ * anywhere before `--`: no Host has an option of that name.
+ */
+export function takeIgnoreNetwork(args: readonly string[]): { args: string[]; ignoreNetwork: boolean } {
+  const end = args.indexOf('--')
+  const head = end === -1 ? args : args.slice(0, end)
+  if (!head.includes('--ignore-network')) return { args: [...args], ignoreNetwork: false }
+  return {
+    args: [...head.filter((x) => x !== '--ignore-network'), ...(end === -1 ? [] : args.slice(end))],
+    ignoreNetwork: true,
+  }
 }
 
 async function runAccountNow(
@@ -94,7 +108,7 @@ async function runAccountNow(
   ref: string,
   args: readonly string[],
   io: Io,
-  opts: { aiTask?: boolean },
+  opts: { aiTask?: boolean; ignoreNetwork?: boolean },
 ): Promise<number> {
   const handed = await runWithHandoff(
     rt,
@@ -600,9 +614,10 @@ export async function cmdRun(a: ParsedArgs, io: Io, command: 'run' | 'login'): P
   if (command === 'login' && (extra.length || a.rest.length))
     throw new UsageError('login takes no extra arguments')
   const rt = await createRuntime()
-  if (command === 'run' && rt.pickCommandFamily(ref) !== undefined)
-    return runPick(rt, ref, [...extra, ...a.rest], io)
-  if (command === 'run') return runAccount(rt, ref, [...extra, ...a.rest], io)
+  const { args, ignoreNetwork } = takeIgnoreNetwork([...extra, ...a.rest])
+  const net = ignoreNetwork ? { ignoreNetwork } : {}
+  if (command === 'run' && rt.pickCommandFamily(ref) !== undefined) return runPick(rt, ref, args, io, net)
+  if (command === 'run') return runAccount(rt, ref, args, io, net)
   return runLogin(rt, ref, io)
 }
 
@@ -639,7 +654,13 @@ async function runLogin(rt: Runtime, ref: string, io: Io): Promise<number> {
 }
 
 /** A Pick Command (spec §3.13, ADR-0035): start the Account with the most room, else the Main Account, and say which. */
-async function runPick(rt: Runtime, name: string, args: readonly string[], io: Io): Promise<number> {
+async function runPick(
+  rt: Runtime,
+  name: string,
+  args: readonly string[],
+  io: Io,
+  opts: { ignoreNetwork?: boolean } = {},
+): Promise<number> {
   const { choice, family } = await rt.pickChoice(name)
   if (choice.ref === null) {
     const now = rt.readContext().now
@@ -654,7 +675,7 @@ async function runPick(rt: Runtime, name: string, args: readonly string[], io: I
   }
   const { pickLine } = await import('../core/pick-commands.ts')
   io.err(c.dim(`sideby: ${pickLine(name, choice)}`))
-  return runAccount(rt, choice.ref, args, io)
+  return runAccount(rt, choice.ref, args, io, opts)
 }
 
 /**
@@ -665,7 +686,9 @@ export async function cmdResume(a: ParsedArgs, io: Io): Promise<number> {
   const [family, ...extra] = a.positionals
   if (!family) throw new UsageError('usage: sideby resume <family> [-- host args]')
   const rt = await createRuntime()
-  const route = await rt.resumeLaunch(family, [...extra, ...a.rest])
+  const { args, ignoreNetwork } = takeIgnoreNetwork([...extra, ...a.rest])
+  const route = await rt.resumeLaunch(family, args, ignoreNetwork ? { ignoreNetwork } : {})
+  if (route.launch.notice) io.err(c.cyan(route.launch.notice))
   if (route.newSession)
     io.err(
       c.dim(
@@ -686,7 +709,9 @@ function shellQuote(arg: string): string {
 export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
   const [family, ...extra] = a.positionals
   if (!family || extra.length)
-    throw new UsageError('usage: sideby next <family> [--dry-run] [--include-api] [-- host args]')
+    throw new UsageError(
+      'usage: sideby next <family> [--dry-run] [--include-api] [--ignore-network] [-- host args]',
+    )
   const includeApi = a.flags.has('include-api')
   const rt = await createRuntime()
   const plan = await rt.handoff(family, { includeApi })
@@ -764,7 +789,7 @@ export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
     io.out(
       c.dim('Sessions can also hand over by themselves when quota runs low: see `sideby handoff status`.'),
     )
-  return runAccount(rt, plan.pick, a.rest, io)
+  return runAccount(rt, plan.pick, a.rest, io, a.flags.has('ignore-network') ? { ignoreNetwork: true } : {})
 }
 
 export async function cmdDoctor(a: ParsedArgs, io: Io): Promise<number> {
@@ -4150,4 +4175,108 @@ export async function cmdTheme(a: ParsedArgs, io: Io): Promise<number> {
     return 0
   }
   throw new UsageError(usage)
+}
+
+/**
+ * `sideby network`: Network Guard (spec §3.35). Without a subcommand shows the switch, the allowed countries and the
+ * newest result per address from the cache; `check` asks each address now; `on`, `off` and `allow` change config
+ * `network` after a preview (exit 10 without `--yes`).
+ */
+export async function cmdNetwork(a: ParsedArgs, io: Io): Promise<number> {
+  const [sub, ...rest] = a.positionals
+  const { setNetwork } = await import('../core/network.ts')
+  const rt = await createRuntime()
+  const asJson = a.flags.has('json')
+  if (sub === 'on' || sub === 'off' || sub === 'allow') {
+    if (sub !== 'allow' && rest.length) throw new UsageError(`usage: sideby network ${sub} [--yes]`)
+    if (sub === 'allow' && !rest.length)
+      throw new UsageError(
+        'usage: sideby network allow <country>... [--yes] (for example: sideby network allow US JP)',
+      )
+    const change = sub === 'allow' ? { allow: rest } : { guard: sub === 'on' }
+    const r = await setNetwork(rt.paths.configFile, change, { apply: a.flags.has('yes') })
+    if (asJson) json(io, r)
+    else if (!r.changed) io.out('Nothing to change.')
+    else if (!r.applied) {
+      const show = (v: { guard: boolean; allow: string[] }) =>
+        `${v.guard ? 'on' : 'off'}, allowed: ${v.allow.join(', ') || 'none'}`
+      io.out(`Change to ${tildify(r.file, rt.paths.home)}: network ${show(r.before)} → ${show(r.after)}`)
+      if (r.after.guard && !r.before.guard)
+        io.out(
+          c.dim(
+            "Claude and Codex accounts started by sideby are then checked before starting and before each prompt and tool call; sideby asks the vendor's own /cdn-cgi/trace through the account's proxy, with no credential.",
+          ),
+        )
+      io.out(c.cyan(`Apply it with \`sideby network ${[sub, ...rest].join(' ')} --yes\`.`))
+    } else
+      io.out(
+        `${c.green('✓')} network check ${r.after.guard ? 'on' : 'off'}, allowed: ${r.after.allow.join(', ') || 'none'}.`,
+      )
+    return r.changed && !r.applied ? 10 : 0
+  }
+  if ((sub !== undefined && sub !== 'check') || rest.length || a.rest.length)
+    throw new UsageError(
+      'usage: sideby network [check] | sideby network on|off [--yes] | sideby network allow <country>... [--yes]',
+    )
+  const s = await rt.networkStatus(sub === 'check' ? { check: true } : {})
+  if (asJson) {
+    json(io, s)
+    return 0
+  }
+  const state = s.active
+    ? c.green('on')
+    : s.guard
+      ? c.yellow(s.ci ? 'on, but not in CI' : 'on')
+      : c.dim('off')
+  io.out(`Network check: ${state}${s.allow.length ? `, allowed: ${s.allow.join(', ')}` : ''}`)
+  const now = rt.readContext().now
+  const mark = {
+    ok: c.green('ok'),
+    blocked: c.red('blocked'),
+    unknown: c.red('cannot tell'),
+    'not-checked': c.dim('not checked yet'),
+  }
+  if (s.targets.length)
+    io.out(
+      table(
+        s.targets.map((t) => [
+          new URL(t.url).hostname,
+          t.loc ?? '-',
+          s.allow.length || t.status === 'not-checked'
+            ? mark[t.status]
+            : c.dim(t.loc ? 'seen' : 'not checked yet'),
+          c.dim(
+            [
+              t.checkedAt ? `checked ${clock(t.checkedAt, now)}` : '',
+              t.error ?? '',
+              t.ipChanged ? 'exit address changed in the last day' : '',
+              t.accounts.join(', '),
+            ]
+              .filter(Boolean)
+              .join(' · '),
+          ),
+        ]),
+        ['ADDRESS', 'COUNTRY', 'RESULT', 'NOTE'],
+      ),
+    )
+  const skipped = s.accounts.filter((x) => x.skip)
+  if (skipped.length) {
+    const why = {
+      'third-party': 'third-party endpoint, not checked',
+      'at-launch': 'API account, checked when it starts',
+      'not-covered': 'not covered',
+    }
+    for (const x of skipped) io.out(c.dim(`  ${x.ref}: ${why[x.skip!]}`))
+  }
+  if (!s.guard)
+    io.out(
+      c.cyan(
+        s.allow.length
+          ? 'Turn it on with `sideby network on --yes`.'
+          : 'Choose the countries your requests may leave from, then turn it on: `sideby network allow US JP --yes` and `sideby network on --yes`.',
+      ),
+    )
+  else if (sub !== 'check') io.out(c.dim('Check now with `sideby network check`.'))
+  io.out(c.dim('Sessions started without sideby (running `claude` or `codex` directly) are not checked.'))
+  return 0
 }

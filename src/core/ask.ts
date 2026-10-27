@@ -360,6 +360,9 @@ export function taskContext(c: unknown, fail: (message: string) => Error): AiTas
     } else if (k === 'handoff') {
       if (!Array.isArray(v) || v.length > 100) throw fail('"context.handoff" must be a list')
       out.handoff = v.map((x) => str(x, 'each of "context.handoff"'))
+    } else if (k === 'network') {
+      if (!Array.isArray(v) || v.length > 100) throw fail('"context.network" must be a list')
+      out.network = v.map((x) => str(x, 'each of "context.network"'))
     } else if (k === 'findings') {
       if (!Array.isArray(v) || v.length > 100) throw fail('"context.findings" must be a list')
       out.findings = v.map((f) => {
