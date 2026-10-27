@@ -323,22 +323,43 @@ const MAIN = String.raw`
     else el.removeAttribute('aria-label')
   }
   // replaceChildren() would render null as the text "null"; route children through add(), which skips it.
+  // The toast stack (raiseToasts) may live in the open dialog; redrawing the dialog leaves it where it is.
+  const keepsToasts = (n) => n.nodeType === 1 && n.id === 'toasts'
   function setKids(el, kids) {
-    el.replaceChildren()
-    add(el, kids)
+    for (const n of Array.from(el.childNodes)) if (!keepsToasts(n)) n.remove()
+    const stack = el.lastChild
+    if (!stack) return add(el, kids)
+    // New content goes before the stack, so a later patch finds it in place and moves nothing (moving loses focus).
+    const box = document.createDocumentFragment()
+    add(box, kids)
+    el.insertBefore(box, stack)
   }
   // Re-renders el without the jolt of a rebuild: the focused control keeps focus (matched by data-key), and an element
   // marked data-enter that was not there before grows in, so a row that appears does not snap the layout open.
   // A first render (el empty) animates nothing; the container itself has its own entrance.
   function swapKids(el, kids) {
     const before = new Set([...el.querySelectorAll('[data-enter]')].map((x) => x.getAttribute('data-enter')))
-    const shown = el.childNodes.length > 0
+    const shown = Array.from(el.childNodes).some((n) => !keepsToasts(n))
     const active = document.activeElement
     const focusKey = active && el.contains(active) ? active.getAttribute('data-key') : null
     setKids(el, kids)
     if (shown && !REDUCED)
       for (const x of el.querySelectorAll('[data-enter]')) if (!before.has(x.getAttribute('data-enter'))) x.classList.add('enter')
     if (focusKey) { const again = el.querySelector('[data-key="' + CSS.escape(focusKey) + '"]'); if (again) again.focus() }
+  }
+  // swapKids for a view that refreshes while open: unchanged elements stay (see patch), so a refresh that brings the
+  // same answer redraws nothing; new data-enter elements still grow in.
+  function patchEnter(el, kids) {
+    const before = new Set([...el.querySelectorAll('[data-enter]')].map((x) => x.getAttribute('data-enter')))
+    const shown = Array.from(el.childNodes).some((n) => !keepsToasts(n))
+    patch(el, kids)
+    if (shown && !REDUCED)
+      for (const x of el.querySelectorAll('[data-enter]'))
+        if (!before.has(x.getAttribute('data-enter'))) {
+          x.classList.add('enter')
+          // Gone once it has grown in, so the next refresh sees the same markup and keeps the element.
+          x.addEventListener('animationend', () => x.classList.remove('enter'), { once: true })
+        }
   }
   function add(el, kid) {
     if (kid === null || kid === undefined || kid === false) return
@@ -374,7 +395,7 @@ const MAIN = String.raw`
   }
   function patchKids(box, kids) {
     const next = flat(kids)
-    const old = Array.from(box.childNodes)
+    const old = Array.from(box.childNodes).filter((n) => !keepsToasts(n))
     const byKey = new Map()
     for (const o of old) if (o.nodeType === 1 && o.dataset.key) byKey.set(o.dataset.key, o)
     const used = new Set()
@@ -595,9 +616,13 @@ const MAIN = String.raw`
   // Hovering a toast pauses it, so an Undo stays reachable.
   const toasts = []
   // The toast stack is a manual popover so it sits in the top layer; raising it again after a modal dialog
-  // opens keeps toasts above that dialog's backdrop. Without popover support it stays a fixed element.
+  // opens keeps toasts above that dialog's backdrop. A modal dialog makes everything outside it inert, a popover
+  // above it included, so while one is open the stack moves into it and an Undo stays clickable; it moves back
+  // when the dialog closes. Without popover support it stays a fixed element.
   function raiseToasts() {
     const el = $('toasts')
+    const home = dlg.el && dlg.el.open ? dlg.el : document.body
+    if (el.parentNode !== home) home.append(el)
     if (typeof el.showPopover !== 'function') return
     try { if (el.matches(':popover-open')) el.hidePopover(); el.showPopover() } catch {}
   }
@@ -2874,6 +2899,7 @@ const MAIN = String.raw`
       const after = dlg.onClose
       dlg.kind = null
       dlg.onClose = null
+      raiseToasts()
       if (after) after()
     })
     document.body.append(dlg.el)
@@ -5802,7 +5828,7 @@ const MAIN = String.raw`
     b.setAttribute('aria-label', t('set.button') + (warn ? colon() + t('set.rcOn') : ''))
     refreshSettings()
     if (dlg.kind === 'rc') renderRc()
-    if (dlg.kind === 'net' && net && !net.busy) renderNet()
+    if (dlg.kind === 'net' && net) renderNet()
   }
   // The settings live in two places (spec §3.29, 2026-10-20). The header popover holds only what people change
   // often, one click each and no explanations: language, theme, Auto Handoff, asking an AI, and "All settings…".
@@ -5927,15 +5953,21 @@ const MAIN = String.raw`
     const leave = (opens) => { if (!opens && dlg.kind === 'settings') dlg.el.close() }
     const groups = settingsGroups(leave)
     const cur = groups.find((g) => g.id === prefs.setSec) || groups[0]
-    const nav = h('div', { class: 'set-nav', role: 'tablist', 'aria-label': t('set.title') }, groups.map((g) =>
+    const nav = h('div', { class: 'set-nav', role: 'tablist', 'aria-label': t('set.title'), 'data-patch': '' }, groups.map((g) =>
       h('button', { class: 'set-tab', type: 'button', role: 'tab', id: 'set-tab-' + g.id, 'aria-selected': String(g === cur), 'aria-controls': 'set-pane', onclick: () => { if (prefs.setSec === g.id || g === cur) return; prefs.setSec = g.id; savePrefs(); renderSettingsDialog(true) } }, g.title)))
-    const pane = h('div', { class: 'set-pane' + (switched ? ' view-in' : ''), id: 'set-pane', role: 'tabpanel', 'aria-labelledby': 'set-tab-' + cur.id },
+    const pane = h('div', { class: 'set-pane' + (switched ? ' view-in' : ''), id: 'set-pane', role: 'tabpanel', 'aria-labelledby': 'set-tab-' + cur.id, 'data-patch': '' },
       h('h3', { class: 'set-pane-title' }, cur.title),
       cur.foot ? h('p', { class: 'set-foot' }, cur.foot) : null,
-      h('div', { class: 'set-group' }, cur.items))
+      h('div', { class: 'set-group', 'data-patch': '' }, cur.items))
+    // Gone once it has slid in, so the next refresh sees the same markup.
+    if (switched) pane.addEventListener('animationend', () => pane.classList.remove('view-in'), { once: true })
     // It stays wide while it fades out; showDialog drops the width when another dialog takes the element.
     dlg.el.classList.add('dialog-wide')
-    setKids(dlg.el, dialogFrame(t('set.title'), null, h('div', { class: 'set-dialog' }, nav, pane)))
+    // Patched in place: the refresh every few seconds redraws only what changed, and a list the user has open stays.
+    const frame = dialogFrame(t('set.title'), null, h('div', { class: 'set-dialog', 'data-patch': '' }, nav, pane))
+    frame[1].setAttribute('data-patch', '')
+    if (switched) setKids(dlg.el, frame)
+    else patch(dlg.el, frame)
     // A redraw replaced the list; a section picked from it keeps the focus on its tab.
     if (switched) { const tab = document.getElementById('set-tab-' + cur.id); if (tab) tab.focus() }
   }
@@ -6290,14 +6322,14 @@ const MAIN = String.raw`
   function openNet() {
     const n = netState()
     if (!n) return
-    net = { guard: n.guard, allow: [...n.allow], busy: false, checking: false }
+    net = { guard: n.guard, allow: [...n.allow], checking: false }
     showDialog('net')
     renderNet()
     // Opening it answers "where am I now" at once, unless a result is fresh.
     if (!n.targets.some((x) => x.checkedAt && Date.now() - Date.parse(x.checkedAt) < 60000)) netCheck()
   }
   async function netCheck() {
-    if (!net) net = { guard: false, allow: [], busy: false, checking: false }
+    if (!net) net = { guard: false, allow: [], checking: false }
     net.checking = true
     if (dlg.kind === 'net') renderNet()
     renderBanners()
@@ -6306,38 +6338,49 @@ const MAIN = String.raw`
     if (dlg.kind === 'net') renderNet()
     renderBanners()
   }
-  async function netSave() {
-    net.busy = true
+  // Every change in the dialog applies at once, like a system setting, and its toast carries the undo. Changes are
+  // saved one after another in the order clicked; a failed one puts the dialog back to what the config holds.
+  let netSaving = Promise.resolve()
+  function netApply(next, opts) {
+    opts = opts || {}
+    const prev = { guard: net.guard, allow: [...net.allow] }
+    net.guard = next.guard
+    net.allow = [...next.allow]
     renderNet()
-    try {
-      await api('/api/network/settings', { guard: net.guard, allow: net.allow, confirm: true })
-      toast(t(net.guard ? 'net.savedOn' : 'net.savedOff'))
-      await load({ silent: true })
-      if (dlg.kind === 'net') dlg.el.close()
-    } catch (e) { toast(e.message, { kind: 'fail' }) }
-    if (net) net.busy = false
-    if (dlg.kind === 'net') renderNet()
+    netSaving = netSaving.then(async () => {
+      try {
+        await api('/api/network/settings', { guard: next.guard, allow: next.allow, confirm: true })
+        await load({ silent: true })
+        const text = opts.undone ? t('net.undone')
+          : next.guard !== prev.guard ? t(next.guard ? 'net.savedOn' : 'net.savedOff')
+          : t('net.savedAllow', { list: next.allow.length ? netList(next.allow.map(netCountry)) : t('net.none') })
+        toast(text, opts.undone ? { key: 'net' } : { key: 'net', action: { label: t('toast.undo'), run: () => netApply(prev, { undone: true }) }, duration: 10000 })
+      } catch (e) {
+        toast(e.message, { kind: 'fail' })
+        const n = netState()
+        if (n && net) { net.guard = n.guard; net.allow = [...n.allow] }
+      }
+      if (dlg.kind === 'net') renderNet()
+    })
   }
   function renderNet() {
     const n = netState()
     if (!n || !net) return
     const here = new Set(n.targets.map((x) => x.loc).filter(Boolean))
     const list = [...new Set([...NET_COMMON, ...net.allow, ...here])]
-    const changed = net.guard !== n.guard || net.allow.join() !== n.allow.join()
-    const toggle = (c) => {
-      net.allow = net.allow.includes(c) ? net.allow.filter((x) => x !== c) : [...net.allow, c]
-      renderNet()
-    }
-    const sw = h('div', { class: 'set-row' }, h('span', { class: 'set-label' }, t('net.switch')),
-      h('div', { class: 'seg', role: 'group', 'aria-label': t('net.switch') }, [[true, t('ah.on')], [false, t('ah.off')]].map(([v, text]) =>
-        h('button', { class: 'seg-btn', type: 'button', 'data-key': 'net-sw-' + v, disabled: BOOT.readOnly || net.busy || (v && !net.allow.length), 'aria-pressed': String(net.guard === v), onclick: () => { net.guard = v; renderNet() } }, text))))
-    const countries = h('div', { class: 'net-countries', role: 'group', 'aria-label': t('net.allow') }, list.map((c) =>
-      h('button', { class: 'net-cty', type: 'button', 'data-key': 'net-cty-' + c, disabled: BOOT.readOnly || net.busy, 'aria-pressed': String(net.allow.includes(c)), onclick: () => toggle(c) },
+    const toggle = (c) => netApply({ guard: net.guard, allow: net.allow.includes(c) ? net.allow.filter((x) => x !== c) : [...net.allow, c] })
+    // While it is on, the last country stays: taking it away would leave nothing allowed.
+    const lastOne = (c) => net.guard && net.allow.length === 1 && net.allow[0] === c
+    const sw = h('div', { class: 'set-row', 'data-patch': '' }, h('span', { class: 'set-label' }, t('net.switch')),
+      h('div', { class: 'seg', role: 'group', 'aria-label': t('net.switch'), 'data-patch': '' }, [[true, t('ah.on')], [false, t('ah.off')]].map(([v, text]) =>
+        h('button', { class: 'seg-btn', type: 'button', 'data-key': 'net-sw-' + v, disabled: BOOT.readOnly || (v && !net.allow.length), 'aria-pressed': String(net.guard === v), onclick: () => { if (net.guard !== v) netApply({ guard: v, allow: net.allow }) } }, text))))
+    const countries = h('div', { class: 'net-countries', role: 'group', 'aria-label': t('net.allow'), 'data-patch': '' }, list.map((c) =>
+      h('button', { class: 'net-cty', type: 'button', 'data-key': 'net-cty-' + c, disabled: BOOT.readOnly || lastOne(c), title: lastOne(c) ? t('net.keepOne') : null, 'aria-pressed': String(net.allow.includes(c)), onclick: () => toggle(c) },
         netCountry(c), here.has(c) ? h('span', { class: 'chip chip-sm' }, t('net.current')) : null)))
     const status = (x) => x.status === 'ok' ? ['chip-ok', t('net.ok')] : x.status === 'blocked' ? ['chip-fail', t('net.blocked')] : x.status === 'unknown' ? ['chip-fail', t('net.unknown')] : ['', t('net.notChecked')]
     const rows = n.targets.map((x) => {
       const [cls, label] = n.allow.length || x.status === 'not-checked' ? status(x) : ['', t('net.seen')]
-      return h('li', { class: 'rc-row' },
+      return h('li', { class: 'rc-row', 'data-key': 'net-row-' + x.url },
         h('div', null, h('code', null, new URL(x.url).hostname), ' ', x.loc ? h('b', null, netCountry(x.loc)) : null, ' ', h('span', { class: 'chip chip-sm ' + cls }, label)),
         h('div', { class: 'muted small' }, [x.checkedAt ? t('net.checked', { when: ago(x.checkedAt) }) : null, x.error || null, x.accounts.join(', ')].filter(Boolean).join(' · ')),
         x.ipChanged ? h('div', { class: 'muted small' }, t('net.ipChanged')) : null)
@@ -6350,17 +6393,19 @@ const MAIN = String.raw`
       sw,
       h('div', { class: 'set-label' }, t('net.allow')),
       countries,
-      !net.allow.length ? h('p', { class: 'small muted', 'data-enter': 'net-pick' }, t(net.guard ? 'net.keepOne' : 'net.pickFirst')) : null,
+      !net.allow.length ? h('p', { class: 'small muted', 'data-enter': 'net-pick' }, t('net.pickFirst')) : null,
       h('div', { class: 'set-row' }, h('span', { class: 'set-label' }, t('net.now')),
         h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'net-check', disabled: net.checking, 'aria-busy': net.checking ? 'true' : null, onclick: netCheck }, net.checking ? spinner() : icon('refresh'), t('net.recheck'))),
-      rows.length ? h('ul', { class: 'rc-list' }, rows) : h('p', { class: 'small muted' }, t('net.noTargets')),
+      rows.length ? h('ul', { class: 'rc-list', 'data-patch': '' }, rows) : h('p', { class: 'small muted' }, t('net.noTargets')),
       skipped.length ? h('p', { class: 'small muted' }, t('net.skipped', { refs: skipped.map((a) => a.ref).join(', ') })) : null,
       h('p', { class: 'small muted' }, t('net.notCovered')),
       BOOT.readOnly ? h('p', { class: 'small' }, t('rc.readOnlyBoth')) : null,
     ]
-    const foot = [h('button', { class: 'btn', type: 'button', 'data-key': 'net-close', disabled: net.busy, onclick: () => dlg.el.close() }, t(changed ? 'btn.cancel' : 'btn.close'))]
-    if (!BOOT.readOnly && changed) foot.push(h('button', { class: 'btn btn-primary', type: 'button', 'data-key': 'net-save', 'data-enter': 'net-save', disabled: net.busy || (net.guard && !net.allow.length), 'aria-busy': net.busy ? 'true' : null, onclick: netSave }, net.busy ? spinner() : null, t('net.save')))
-    swapKids(dlg.el, dialogFrame(t('net.title'), null, body, foot))
+    const foot = [h('button', { class: 'btn', type: 'button', 'data-key': 'net-close', onclick: () => dlg.el.close() }, t('btn.close'))]
+    const frame = dialogFrame(t('net.title'), null, body, foot)
+    // Patched in place, so the state refreshing every few seconds redraws only what changed (a row's "checked … ago").
+    frame[1].setAttribute('data-patch', '')
+    patchEnter(dlg.el, frame)
   }
   // Let AI do it (spec §3.28): the AI asks which countries, shows the change and writes it after the user agrees.
   function askNetwork() {

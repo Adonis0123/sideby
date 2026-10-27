@@ -258,7 +258,7 @@ Accounts that link `settings.json` to the Main Account share one file, so they s
 
 Many people reach Claude and Codex through a proxy or a company network. When the proxy stops, or a node in the wrong country is picked, requests leave from somewhere else, and the vendor may flag the account. The network check stops Claude and Codex before that happens. It guards against an accident for someone who is in a supported region; it does not make use from an unsupported region allowed.
 
-Turn it on in the panel under **Settings › Network check**: sideby first shows where your requests leave from now, then you tick the countries they may leave from (sideby never ticks one for you, not even the current one) and switch it on. From a terminal:
+Turn it on in the panel under **Settings › Network check**: sideby first shows where your requests leave from now, then you tick the countries they may leave from (sideby never ticks one for you, not even the current one) and switch it on. Each change saves at once, and the note that confirms it has **Undo**. From a terminal:
 
 ```sh
 sideby network allow US JP --yes   # the countries your requests may leave from

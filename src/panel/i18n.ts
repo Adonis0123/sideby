@@ -1439,8 +1439,10 @@ const en = {
   'net.skipped': '{refs}: API accounts are checked when they start (a third-party endpoint is not checked).',
   'net.notCovered':
     'Only sessions sideby starts are checked; running claude or codex directly is not. sideby asks the vendor’s own /cdn-cgi/trace with your proxy settings and no credential, and keeps only the country.',
-  'net.save': 'Save',
   'net.savedOn': 'Network check is on.',
+  'net.savedAllow': 'Allowed: {list}.',
+  'net.none': 'no country yet',
+  'net.undone': 'Changed back.',
   'net.savedOff': 'Network check is off.',
   'net.checkFailed': 'Could not check: {msg}',
   'net.bannerTitle': 'Wrong network.',
@@ -2961,8 +2963,10 @@ const zh: Record<MessageKey, string> = {
   'net.skipped': '{refs}：API 账号在启动时检查（第三方接口不检查）。',
   'net.notCovered':
     '只检查 sideby 启动的会话，直接运行 claude 或 codex 不检查。sideby 带着你的代理设置访问服务商自己的 /cdn-cgi/trace，不带任何凭证，只保留国家或地区。',
-  'net.save': '保存',
   'net.savedOn': '网络检查已打开。',
+  'net.savedAllow': '允许的地区：{list}。',
+  'net.none': '还没有选',
+  'net.undone': '已改回。',
   'net.savedOff': '网络检查已关闭。',
   'net.checkFailed': '没能检查：{msg}',
   'net.bannerTitle': '网络不对。',
