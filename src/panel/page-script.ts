@@ -1720,9 +1720,9 @@ const MAIN = String.raw`
     return h('li', { class: 'br-row' },
       h('span', null, h('b', null, profileName(p.name)), p.email ? h('span', { class: 'muted small' }, ' · ' + emailText(p.email)) : null, ' ', h('span', { class: 'muted small mono' }, p.dir), p.changedAt ? h('span', { class: 'muted small' }, ' · ' + t('br.changed', { when: ago(p.changedAt) })) : null),
       h('span', { class: 'br-acts' },
+        h('button', { class: 'btn btn-sm', type: 'button', disabled: Boolean(ui.browserRef), 'aria-busy': busy ? 'true' : null, onclick: () => openBrowser(a, p) }, t('br.openIt')),
         chosen ? h('span', { class: 'tag', title: t('br.chosenHint') }, t('br.chosen'))
-          : h('button', { class: 'link-btn small', type: 'button', disabled: br.busy, title: t('br.chooseHint', { ref: a.ref }), onclick: () => brChoose(a, p.dir) }, t('br.choose')),
-        h('button', { class: 'btn btn-sm', type: 'button', disabled: Boolean(ui.browserRef), 'aria-busy': busy ? 'true' : null, onclick: () => openBrowser(a, p) }, t('br.openIt'))))
+          : h('button', { class: 'link-btn small', type: 'button', disabled: br.busy, title: t('br.chooseHint', { ref: a.ref }), onclick: () => brChoose(a, p.dir) }, t('br.choose'))))
   }
   // Remembers the person's own choice for this account, or with null lets sideby find it again; sideby's config only.
   async function brChoose(a, dir) {
