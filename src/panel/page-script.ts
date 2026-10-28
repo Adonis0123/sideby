@@ -6239,8 +6239,9 @@ const MAIN = String.raw`
     const st = li[k]
     const s = st.status
     const n = autostartNote(s, BOOT.readOnly)
-    const label = lt(k, 'label')
-    const hint = [st.error ? lt(k, 'failed', { msg: st.error.message }) : lt(k, n.key.slice(3))]
+    const mech = k === 'autostart' && s ? s.mechanism : undefined
+    const label = lt(k, mech === 'wsl-startup' ? 'labelWsl' : 'label')
+    const hint = [st.error ? lt(k, 'failed', { msg: st.error.message }) : lt(k, n.key === 'as.hint' && mech === 'xdg' ? 'hintXdg' : n.key.slice(3))]
     // The menu bar item: how to bring it back once hidden, and why a running one may not show (Rectangle, Stats).
     if (k === 'menubar' && s && s.supported && !st.error && n.key === 'as.hint') {
       if (!n.on) hint.push(' ', lt(k, 'hintOff'))

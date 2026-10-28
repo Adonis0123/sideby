@@ -1814,9 +1814,10 @@ describe('autostart (spec §3.29)', () => {
     await withFakeHome(async (h) => {
       const status = checkSchema('autostart', (await sideby(h, ['autostart', '--json'])).out)
       assert.equal(status.state, 'off')
-      assert.equal(status.supported, process.platform === 'darwin')
+      const supported = process.platform === 'darwin' || process.platform === 'linux'
+      assert.equal(status.supported, supported)
       const off = await sideby(h, ['autostart', 'off', '--json'])
-      assert.equal(off.code, process.platform === 'darwin' ? 0 : 1)
+      assert.equal(off.code, supported ? 0 : 1)
       await h.write('Library/LaunchAgents/dev.sideby.panel.plist', '<plist/>\n', 0o644)
       if (process.platform === 'darwin') {
         assert.equal(

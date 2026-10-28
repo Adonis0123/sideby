@@ -355,7 +355,7 @@ A headless run (`claude -p`, `codex exec`, `grok -p`), Codex with `--remote`, or
 
 ## Start at login
 
-`sideby autostart on` makes the panel start in the background when you log in, so it already shows fresh quota when you open it. It opens no window and starts no host. It first shows the file it writes (`~/Library/LaunchAgents/dev.sideby.panel.plist`) and the `launchctl` command; run it again with `--yes` to turn it on, and `sideby autostart off --yes` to undo it. `sideby autostart` says whether it is on, and whether it still points at the sideby you use; `sideby update` keeps it pointing at the new version. macOS only for now. The same switch is in the panel's settings, or ask your AI to do it.
+`sideby autostart on` makes the panel start in the background when you log in, so it already shows fresh quota when you open it. It opens no window and starts no host. It first shows the file it writes (`~/Library/LaunchAgents/dev.sideby.panel.plist`) and the `launchctl` command; run it again with `--yes` to turn it on, and `sideby autostart off --yes` to undo it. `sideby autostart` says whether it is on, and whether it still points at the sideby you use; `sideby update` keeps it pointing at the new version. On Linux it writes `~/.config/autostart/dev.sideby.panel.desktop`, which desktop sessions run at login. Under WSL it writes `sideby-panel.vbs` into your Windows Startup folder, so the panel starts when you sign in to Windows; the script keeps a hidden `wsl.exe` open while the panel runs, so WSL does not shut down under it. Native Windows is not supported yet. The same switch is in the panel's settings, or ask your AI to do it.
 
 ## Quota in the menu bar
 

@@ -6,6 +6,8 @@ import { mkdir, readFile, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
+import { MENUBAR_AGENT } from '../menubar/agent.ts'
+import { autostartInstalled, PANEL_AGENT } from './autostart.ts'
 import { resolvePaths } from './paths.ts'
 import {
   afterCommandPlan,
@@ -94,6 +96,9 @@ function machine(h: FakeHome, over: Partial<UpdateDeps> & { latest?: string | Er
       m.appRefreshes++
       return true
     },
+    // The login items these tests write are LaunchAgents, whatever system runs the tests.
+    autostartInstalled: (home, command = 'autostart') =>
+      autostartInstalled(home, command === 'menubar' ? MENUBAR_AGENT : PANEL_AGENT, { platform: 'darwin' }),
     refreshAutostart: async (_env, command = 'autostart') => {
       m.autostartRefreshes++
       m.loginItems.push(command)

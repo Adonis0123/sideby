@@ -2363,6 +2363,7 @@ describe('start at login and settings in config (spec §3.29)', () => {
           supported: true,
           state: 'off',
           path: '~/Library/LaunchAgents/dev.sideby.panel.plist',
+          mechanism: 'launchd',
           current: false,
         })
 
@@ -2405,6 +2406,7 @@ describe('start at login and settings in config (spec §3.29)', () => {
         // Nothing but the agent's path and what it starts, with the home folder as ~.
         assert.deepEqual(Object.keys(now).sort(), [
           'current',
+          'mechanism',
           'path',
           'programArguments',
           'state',
@@ -2493,7 +2495,7 @@ describe('start at login and settings in config (spec §3.29)', () => {
   it('reports a system it cannot start on and changes nothing', async () => {
     await withFakeHome(async (h) => {
       await seedDemoMain(h.write)
-      const unbind = bindPanelAutostart({ platform: 'linux', launcher: LAUNCHER })
+      const unbind = bindPanelAutostart({ platform: 'win32', launcher: LAUNCHER })
       const { server, port, handler } = await serve((p) =>
         createPanelHandler({ runtime: factory(h), allowedHosts: [`127.0.0.1:${p}`] }),
       )
@@ -2502,7 +2504,7 @@ describe('start at login and settings in config (spec §3.29)', () => {
           (await request(port, 'GET', '/api/autostart', { host: `127.0.0.1:${port}` })).text,
         )
         assert.equal(got.supported, false)
-        assert.match(got.reason, /macOS only/)
+        assert.match(got.reason, /macOS, Linux and WSL/)
         const r = await post(
           port,
           '/api/autostart',

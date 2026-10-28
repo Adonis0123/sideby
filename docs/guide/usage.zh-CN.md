@@ -355,7 +355,7 @@ headless 运行（`claude -p`、`codex exec`、`grok -p`）、带 `--remote` 的
 
 ## 开机启动
 
-`sideby autostart on` 让面板在你登录后自动在后台启动，打开时就是最新额度。它不打开窗口，也不启动任何宿主。它先显示要写的文件（`~/Library/LaunchAgents/dev.sideby.panel.plist`）和 `launchctl` 命令；加 `--yes` 再跑一次就开启，`sideby autostart off --yes` 撤销。`sideby autostart` 告诉你是否开着、是否还指向你正在用的 sideby；`sideby update` 会让它跟着指向新版本。目前只支持 macOS。面板设置里有同一个开关，也可以让你的 AI 帮你开。
+`sideby autostart on` 让面板在你登录后自动在后台启动，打开时就是最新额度。它不打开窗口，也不启动任何宿主。它先显示要写的文件（`~/Library/LaunchAgents/dev.sideby.panel.plist`）和 `launchctl` 命令；加 `--yes` 再跑一次就开启，`sideby autostart off --yes` 撤销。`sideby autostart` 告诉你是否开着、是否还指向你正在用的 sideby；`sideby update` 会让它跟着指向新版本。Linux 上写 `~/.config/autostart/dev.sideby.panel.desktop`，桌面会话登录时会运行它。WSL 里写 Windows 启动文件夹里的 `sideby-panel.vbs`，登录 Windows 时启动面板；脚本在面板运行期间挂着一个隐藏的 `wsl.exe`，防止 WSL 空闲时关掉。Windows 原生暂不支持。面板设置里有同一个开关，也可以让你的 AI 帮你开。
 
 ## 状态栏额度
 

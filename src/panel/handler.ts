@@ -449,6 +449,7 @@ export function autostartView(s: AutostartStatus, home: string) {
     ...(s.reason ? { reason: s.reason } : {}),
     state: s.state,
     path: t(s.path),
+    ...(s.mechanism ? { mechanism: s.mechanism } : {}),
     current: s.current,
     ...(s.programArguments ? { programArguments: s.programArguments.map(t) } : {}),
     ...(s.missing ? { missing: s.missing.map(t) } : {}),

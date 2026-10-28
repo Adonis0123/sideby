@@ -1746,6 +1746,8 @@ export async function cmdUi(a: ParsedArgs, io: Io): Promise<number> {
     else io.err(c.red(`✗ could not stop the background panel: ${r.detail}`))
     return r.status === 'failed' ? 1 : 0
   }
+  if (a.flags.has('wait') && !a.flags.has('background'))
+    throw new UsageError('--wait goes with --background: sideby ui --background --wait')
   if (a.flags.has(bg.DETACHED_FLAG))
     return bg.serveDetached({
       paths,
@@ -1768,6 +1770,9 @@ export async function cmdUi(a: ParsedArgs, io: Io): Promise<number> {
         : `sideby panel: ${r.url} (in the background${r.replaced ? ', replacing the one from an older sideby' : ''}; stop it with \`sideby ui --stop\`)`,
     )
     if (!a.flags.has('no-open') && !(await openBrowser(r.url))) io.out(`open ${r.url} in your browser`)
+    // Under WSL the Startup script's `wsl.exe` waits here, so WSL keeps the distribution (and the Panel) up (ADR-0055).
+    if (a.flags.has('wait'))
+      while ((await bg.backgroundPanelPort(paths)) !== null) await new Promise((r) => setTimeout(r, 30_000))
     return 0
   }
   const srv = await startPanelServer({
@@ -2724,7 +2729,7 @@ export async function cmdTry(a: ParsedArgs, io: Io): Promise<number> {
 
 /** `sideby autostart [on|off] [--yes]` (spec §3.29, ADR-0029): start the Panel in the background at login. */
 export async function cmdAutostart(a: ParsedArgs, io: Io): Promise<number> {
-  const { applyAutostart, autostartStatus, planAutostart, refreshAutostart } = await import(
+  const { applyAutostart, autostartStatus, autostartWhen, planAutostart, refreshAutostart } = await import(
     '../core/autostart.ts'
   )
   const [action, extra] = a.positionals
@@ -2754,7 +2759,8 @@ export async function cmdAutostart(a: ParsedArgs, io: Io): Promise<number> {
     const s = await autostartStatus(ctx)
     if (wantJson) json(io, { ...s, path: tilde(s.path, home) })
     else if (!s.supported) io.out(`${s.reason}.`)
-    else if (s.state === 'off') io.out('Off: sideby does not start at login. Turn it on: sideby autostart on')
+    else if (s.state === 'off')
+      io.out(`Off: sideby does not start ${autostartWhen(s.mechanism)}. Turn it on: sideby autostart on`)
     else if (s.state === 'foreign')
       io.out(
         `${tilde(s.path, home)} is not sideby's, so sideby leaves it alone; remove or rename it yourself if it is not needed.`,
@@ -2764,7 +2770,9 @@ export async function cmdAutostart(a: ParsedArgs, io: Io): Promise<number> {
         `Out of date: the login item starts ${s.missing!.join(' and ')}, which no longer exists. Run \`sideby autostart on\` to point it at this sideby.`,
       )
     else {
-      io.out('On: the panel starts in the background at login, without opening a window.')
+      io.out(
+        `On: the panel starts in the background ${autostartWhen(s.mechanism)}, without opening a window.`,
+      )
       if (!s.current)
         io.out(c.dim('It starts another sideby than this one; `sideby autostart on` points it here.'))
       io.out(c.dim('Turn it off: sideby autostart off'))
@@ -2796,10 +2804,10 @@ export async function cmdAutostart(a: ParsedArgs, io: Io): Promise<number> {
         io.out(`Writes ${tilde(plan.path, home)}:`)
         io.out(c.dim(plan.content!.trimEnd()))
       } else io.out(`Removes ${tilde(plan.path, home)}.`)
-      io.out(`Then runs: ${plan.commands.map((cmd) => cmd.join(' ')).join('; ')}`)
+      if (plan.commands.length) io.out(`Then runs: ${plan.commands.map((cmd) => cmd.join(' ')).join('; ')}`)
       io.out(
         action === 'on'
-          ? 'At login the panel starts in the background, without opening a window. Run again with --yes to turn it on.'
+          ? `Then the panel starts in the background ${autostartWhen(plan.status.mechanism)}, without opening a window. Run again with --yes to turn it on.`
           : 'Run again with --yes to turn it off.',
       )
     }
@@ -2817,8 +2825,8 @@ export async function cmdAutostart(a: ParsedArgs, io: Io): Promise<number> {
   else {
     io.out(
       action === 'on'
-        ? 'On: the panel starts in the background at login. Undo: sideby autostart off'
-        : 'Off: sideby no longer starts at login.',
+        ? `On: the panel starts in the background ${autostartWhen(plan.status.mechanism)}. Undo: sideby autostart off`
+        : `Off: sideby no longer starts ${autostartWhen(plan.status.mechanism)}.`,
     )
     if (r.note) io.out(c.dim(r.note))
   }

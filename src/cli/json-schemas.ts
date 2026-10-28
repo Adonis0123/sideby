@@ -36,7 +36,7 @@ const hotkeyProps = {
 }
 const MenubarHotkeyView = Type.Object(hotkeyProps)
 
-/** `sideby autostart` and `sideby menubar` (ADR-0029, ADR-0034): a LaunchAgent sideby writes. */
+/** `sideby autostart` and `sideby menubar` (ADR-0029, ADR-0034, ADR-0055): the login item sideby writes. */
 const loginItem = (current: string) =>
   Type.Object({
     schemaVersion: Version,
@@ -52,6 +52,15 @@ const loginItem = (current: string) =>
       },
     ),
     path: Str,
+    mechanism: Type.Optional(
+      Type.Union(
+        ['launchd', 'xdg', 'wsl-startup'].map((k) => Type.Literal(k)),
+        {
+          description:
+            'How it starts at login: a LaunchAgent (macOS), an XDG autostart entry (Linux desktop sessions), or a script in the Windows Startup folder (WSL). Absent when unsupported.',
+        },
+      ),
+    ),
     programArguments: Type.Optional(Type.Array(Str)),
     current: Type.Boolean({ description: current }),
     missing: Type.Optional(Type.Array(Str)),

@@ -120,8 +120,8 @@ Usage:
   sideby plugins new <id>             create a local Family Plugin skeleton
   sideby plugins check <id|path>      check a plugin and show fixes
   sideby update [--yes]               update sideby to the newest version (shows the command first)
-  sideby autostart [on|off] [--yes]   start the panel in the background at login (macOS; shows the
-                                      file first)
+  sideby autostart [on|off] [--yes]   start the panel in the background at login (macOS, Linux, WSL;
+                                      shows the file first)
   sideby menubar [on|off] [--yes]     show quota in the macOS menu bar; click an account to start it
   sideby menubar hotkey [<keys>|off]  show or change the shortcut that opens that menu (⌥X)
   sideby theme [list]                 the Panel's Themes; use <name> switches, use --undo goes back, use default clears
@@ -370,8 +370,10 @@ malformed command line.`,
   autostart: `sideby autostart [on|off] [--yes] [--json]
 
 Start the panel in the background when you log in, so it already shows fresh quota when you open it. It never
-opens a window or a browser and never starts a host. macOS only for now (a LaunchAgent,
-~/Library/LaunchAgents/dev.sideby.panel.plist, that starts this Node and this sideby with ui --background).
+opens a window or a browser and never starts a host. It starts this Node and this sideby with ui --background:
+on macOS from a LaunchAgent (~/Library/LaunchAgents/dev.sideby.panel.plist), on Linux from an autostart entry
+(~/.config/autostart/dev.sideby.panel.desktop, run by desktop sessions), and under WSL from sideby-panel.vbs in
+the Windows Startup folder, when you sign in to Windows.
 
 Without on or off it says whether it is on, off, out of date (the Node or sideby it starts was moved) or blocked
 by a file that is not sideby's. on and off show the file and the launchctl command first; --yes does it.
@@ -567,7 +569,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
     flags: ['json', 'yes', 'same-family', 'no-same-family', 'other-ai', 'no-other-ai', 'api', 'no-api'],
     valued: ['brief', 'to', 'order', 'ai-order', 'prepare-at', 'threshold', 'wait-minutes', 'countdown'],
   },
-  ui: { flags: ['no-open', 'background', 'stop', 'serve-detached'], valued: ['port'] },
+  ui: { flags: ['no-open', 'background', 'stop', 'serve-detached', 'wait'], valued: ['port'] },
   app: { flags: ['json'], valued: ['url'] },
   desktop: { flags: ['json', 'remove', 'yes'] },
   sessions: { flags: ['json'], valued: ['as', 'lang'] },
