@@ -254,6 +254,27 @@ sideby tune undo claude:work --yes       # 恢复原来的值
 
 把 `settings.json` 链到主账号的账号共用同一个文件，所以共用一个设置：面板里它们只显示一张卡（建议值按其中用得最多的模型来定），各账号自己的数字收在「各账号的详情」里，确认页会列出改动会影响的每个账号。为了显示「现在的值」，sideby 只读这一个键（Claude）或 `config.toml` 里的 `model_auto_compact_token_limit`（Codex），文件里其他内容一概不读。
 
+## 网络检查
+
+很多人通过代理或公司网络使用 Claude 和 Codex。代理断了，或者节点切到了别的国家，请求就会从别处发出，服务商可能因此标记账号。网络检查会在那之前拦下 Claude 和 Codex。它防的是人在支持地区时出的意外，不会让在不支持的地区使用变得合规。
+
+在面板的**设置 › 网络检查**里打开：sideby 先显示你现在的请求从哪里发出，你再勾选允许的地区（sideby 不替你勾，当前地区也不会自动勾上），然后打开开关。每次改动立刻保存，确认的提示里有 **撤销**。在终端里：
+
+```sh
+sideby network allow US JP --yes   # 允许请求从这些地区发出
+sideby network on --yes            # 打开
+sideby network                     # 查看设置和每个地址最近的结果
+sideby network check               # 现在查一次
+```
+
+打开后，sideby 在启动 Claude 或 Codex 账号前，以及它启动的会话里每条消息、每次工具调用前都会检查。地区不在允许范围内，或者 3 秒内查不出来（代理没开、断网），这次启动、这条消息或这次工具调用就会被拦下，并说明原因和怎么办；面板顶部会出现横幅，带**重新检查**按钮。临时跳过一次：`sideby run <账号> --ignore-network`。不知道该允许哪些地区，或者被拦了不知道为什么？点对话框或横幅上的**让 AI 帮我**，会用你自己的 AI 开一个任务：它先查你现在在哪，再问你允许哪些地区，你同意后才改设置。
+
+- sideby 带着账号的代理设置，访问服务商自己的 `/cdn-cgi/trace`（`api.anthropic.com`、`chatgpt.com`、`api.openai.com`），所以检查和真实请求走同一条路。请求不带任何凭证、账号或身份，只保留国家或地区和地址的哈希。结果 60 秒内复用，大多数消息不用等；换 Wi-Fi、开关 VPN 能马上发现，代理软件里切换节点约一分钟内发现。
+- 只检查 sideby 启动的会话。直接运行 `claude` 或 `codex` 不检查。
+- Codex 要先信任 hook 才会在会话中检查：在那个账号里输入 `/hooks`，信任 `network-hook`。之前只在启动前检查。自己带了 `--settings` 启动的 Claude 会话也只在启动前检查。
+- 指向第三方接口的 API 账号（DeepSeek 等）不检查。支持 `http://` 代理；SOCKS 代理没法通过它检查，按“查不出”处理。
+- 同一地区内出口 IP 变了，只提示，不拦截。
+
 ## Remote Control
 
 Claude Code 的 Remote Control 把会话连到 claude.ai/code 和 Claude 手机 App，登录同一个 claude.ai 账号的设备都能看到并继续这些对话。在 `/config` 里打开「Enable Remote Control for all sessions」会在 `settings.json` 里存下 `remoteControlAtStartup: true`；账号一般都把这个文件链接到主账号，所以每个账号都会自动连接。
@@ -334,7 +355,7 @@ headless 运行（`claude -p`、`codex exec`、`grok -p`）、带 `--remote` 的
 
 ## 开机启动
 
-`sideby autostart on` 让面板在你登录后自动在后台启动，打开时就是最新额度。它不打开窗口，也不启动任何宿主。它先显示要写的文件（`~/Library/LaunchAgents/dev.sideby.panel.plist`）和 `launchctl` 命令；加 `--yes` 再跑一次就开启，`sideby autostart off --yes` 撤销。`sideby autostart` 告诉你是否开着、是否还指向你正在用的 sideby；`sideby update` 会让它跟着指向新版本。目前只支持 macOS。面板设置里有同一个开关，也可以让你的 AI 帮你开。
+`sideby autostart on` 让面板在你登录后自动在后台启动，打开时就是最新额度。它不打开窗口，也不启动任何宿主。它先显示要写的文件（`~/Library/LaunchAgents/dev.sideby.panel.plist`）和 `launchctl` 命令；加 `--yes` 再跑一次就开启，`sideby autostart off --yes` 撤销。`sideby autostart` 告诉你是否开着、是否还指向你正在用的 sideby；`sideby update` 会让它跟着指向新版本。Linux 上写 `~/.config/autostart/dev.sideby.panel.desktop`，桌面会话登录时会运行它。WSL 里写 Windows 启动文件夹里的 `sideby-panel.vbs`，登录 Windows 时启动面板；脚本在面板运行期间挂着一个隐藏的 `wsl.exe`，防止 WSL 空闲时关掉。Windows 原生暂不支持。面板设置里有同一个开关，也可以让你的 AI 帮你开。
 
 ## 状态栏额度
 

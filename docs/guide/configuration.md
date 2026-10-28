@@ -128,4 +128,4 @@ After an update, a background panel (`sideby ui --background`) restarts itself a
 | `"update": { "check": false }` | No daily check and no notice. `NO_UPDATE_NOTIFIER=1` or `SIDEBY_NO_UPDATE_NOTIFIER=1` do the same; CI turns it off by itself. `sideby update` still works. |
 | `"update": { "auto": true }` | Off by default; the panel's update dialog has the same switch. After the daily check sideby installs a newer version by itself, only for an npm, pnpm or bun global install, only when no `sideby run`, `next` or `resume` is running, and never a new major version (0.x to 1.0). It brings the sideby skill along, and brings a skill that is behind a current sideby up to date by itself. The next command says it updated, once. |
 
-`SIDEBY_UPDATE_REGISTRY` points the check at a mirror, for example `https://registry.npmmirror.com`.
+`SIDEBY_UPDATE_REGISTRY` points the check at a mirror, for example `https://registry.npmmirror.com`. Behind a proxy, the check follows `HTTPS_PROXY` (or `ALL_PROXY`, minus `NO_PROXY`) like npm does.

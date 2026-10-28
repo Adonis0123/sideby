@@ -148,6 +148,27 @@ describe('runWithHandoff', () => {
     })
   })
 
+  it('starts the next Account with its config arguments as they are now, not as they were when the chain began', async () => {
+    await withFakeHome(async (h) => {
+      await fakeHost(h, 'claude', { sleep: 20, onStart: READY_ON_FIRST_RUN })
+      const rt = await setup(h, { auto: true, sameFamily: true, countdownSeconds: 0 })
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({
+          aliases: { cc001: 'claude:001' },
+          accounts: { 'claude:002': { args: ['--dangerously-skip-permissions'] } },
+          handoff: { auto: true, sameFamily: true, countdownSeconds: 0 },
+        }),
+      )
+      const code = await runWithHandoff(rt, 'cc001', [], { err: () => {}, stdin: terminal() })
+      assert.equal(code, 0)
+      const starts = (await readHostLog(h, 'claude')).filter((r) => r.argv)
+      assert.equal(starts.length, 2)
+      assert.ok(!starts[0]!.argv.includes('--dangerously-skip-permissions'))
+      assert.ok(starts[1]!.argv.includes('--dangerously-skip-permissions'))
+    })
+  })
+
   it('hands over to the account a manual request names, not the first in line', async () => {
     await withFakeHome(async (h) => {
       const toThree = READY_ON_FIRST_RUN.replace("sessionId: 's1'", "sessionId: 's1', to: 'claude:003'")
@@ -194,6 +215,32 @@ describe('runWithHandoff', () => {
       const dashes = argv.indexOf('--')
       assert.ok(argv.indexOf('--settings') < dashes && argv.indexOf('--add-dir') < dashes)
       assert.deepEqual(argv.slice(dashes), ['--', 'fix the tests'])
+    })
+  })
+
+  it("puts Network Guard's hooks into Auto Handoff's one --settings file (spec §3.35)", async () => {
+    await withFakeHome(async (h) => {
+      await fakeHost(h, 'claude', { sleep: 1 })
+      await setup(h, {})
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({
+          aliases: { cc001: 'claude:001' },
+          handoff: { auto: true, sameFamily: true, countdownSeconds: 0 },
+          network: { guard: true, allow: ['US'] },
+        }),
+      )
+      const rt = await createRuntime({
+        env: h.env,
+        builtins,
+        network: { fetcher: async () => 'ip=203.0.113.7\nloc=US\n', print: 'p' },
+      })
+      const handed = await runWithHandoff(rt, 'cc001', [], { err: () => {}, stdin: terminal() })
+      assert.notEqual(handed, null, 'the network --settings does not read as the user’s own')
+      const argv = (await readHostLog(h, 'claude')).find((r) => r.argv)!.argv
+      assert.equal(argv.filter((a) => a === '--settings').length, 1)
+      const hooks = JSON.parse(await readFile(argv[argv.indexOf('--settings') + 1]!, 'utf8')).hooks
+      for (const e of ['PostToolUse', 'Stop', 'UserPromptSubmit', 'PreToolUse']) assert.ok(hooks[e], e)
     })
   })
 

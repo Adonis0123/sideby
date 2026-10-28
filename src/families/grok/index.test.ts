@@ -28,7 +28,9 @@ const at = (list: Finding[], item: string) => list.filter((f) => f.item === item
 describe('grok family', () => {
   it('names the key variable and a one-shot probe', () => {
     assert.equal(grokFamily.secretVar, 'XAI_API_KEY')
-    assert.deepEqual(grokFamily.probe, { args: ['-p', 'Reply with OK'] })
+    assert.deepEqual(grokFamily.probe?.args, ['-p', 'Reply with OK'])
+    assert.deepEqual(grokFamily.probe?.model?.flags, ['-m', '--model'])
+    assert.deepEqual(grokFamily.probe?.model?.args('m-1'), ['--model', 'm-1', '-p', 'Reply with OK'])
   })
 
   it('creates an account that passes doctor, with copies where Grok forbids links', async () => {

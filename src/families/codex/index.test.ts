@@ -41,9 +41,15 @@ describe('codex defaultArgs', () => {
 describe('codex family', () => {
   it('names the key variable and a probe that can run outside a git repo', () => {
     assert.equal(codexFamily.secretVar, 'OPENAI_API_KEY')
-    assert.deepEqual(codexFamily.probe, {
-      args: ['exec', '--skip-git-repo-check', 'Reply with OK'],
-    })
+    assert.deepEqual(codexFamily.probe?.args, ['exec', '--skip-git-repo-check', 'Reply with OK'])
+    assert.deepEqual(codexFamily.probe?.model?.flags, ['-m', '--model'])
+    assert.deepEqual(codexFamily.probe?.model?.args('m-1'), [
+      'exec',
+      '--skip-git-repo-check',
+      '-m',
+      'm-1',
+      'Reply with OK',
+    ])
   })
 
   it('creates subscription and API accounts', async () => {

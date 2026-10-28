@@ -85,6 +85,7 @@ import {
 } from '../core/live-sessions.ts'
 import { listMessages, type MessageReceipt, sendMessage } from '../core/messages.ts'
 import { type AccountModel, accountModel, setAccountModel } from '../core/model-choice.ts'
+import { GUARDED_FAMILIES, type NetworkChange, type NetworkOverview, setNetwork } from '../core/network.ts'
 import { tildify } from '../core/paths.ts'
 import { type RemoteControlGroup, remoteControlTodo } from '../core/remote-control.ts'
 import { openRunBoard, withRuns } from '../core/run-link.ts'
@@ -396,6 +397,8 @@ export interface PanelState {
   quotaChecks?: QuotaCheckInfo[]
   /** Config `panel` (spec §3.29): the theme and language the Panel shows; absent when neither is set. */
   panel?: PanelConfig
+  /** Network Guard (spec §3.35): the setting and the cached result per address; absent without Claude or Codex Accounts. */
+  network?: NetworkOverview
 }
 
 let autostartOverride: Partial<AutostartContext> = {}
@@ -446,6 +449,7 @@ export function autostartView(s: AutostartStatus, home: string) {
     ...(s.reason ? { reason: s.reason } : {}),
     state: s.state,
     path: t(s.path),
+    ...(s.mechanism ? { mechanism: s.mechanism } : {}),
     current: s.current,
     ...(s.programArguments ? { programArguments: s.programArguments.map(t) } : {}),
     ...(s.missing ? { missing: s.missing.map(t) } : {}),
@@ -897,6 +901,9 @@ async function buildState(
     opts.updates ? updateState(rt, opts.readOnly).catch(() => undefined) : Promise.resolve(undefined),
   ])
   const health = healthByAccount(history)
+  const network = accounts.some((a) => (GUARDED_FAMILIES as readonly string[]).includes(a.family))
+    ? await rt.networkStatus().catch(() => undefined)
+    : undefined
   // Reads of Accounts that are gone are dropped.
   for (const ref of opts.readings.keys()) if (!accounts.some((a) => a.ref === ref)) opts.readings.delete(ref)
   const aliases = aliasesByAccount(aliasRefs(rt.config.aliases), accounts)
@@ -974,6 +981,7 @@ async function buildState(
     display: rt.displayOrder(),
     ...(rt.quotaChecks().length ? { quotaChecks: rt.quotaChecks() } : {}),
     ...(rt.config.panel && Object.keys(rt.config.panel).length ? { panel: rt.config.panel } : {}),
+    ...(network ? { network } : {}),
   }
 }
 
@@ -1450,7 +1458,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       async run(body) {
         const account = optString(body, 'account')
         if (!account) throw new HttpError(400, '"account" is required')
-        return tryAccount(await getRuntime(), account)
+        return tryAccount(await getRuntime(), account, undefined, optString(body, 'model'))
       },
     },
     // Themes (spec §3.34): `use` a Theme, `undo` the last switch, `accent` saves and uses the Theme File custom.json
@@ -2039,6 +2047,32 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const r = await editSettings(rt, account)
         const home = rt.paths.home
         return { ...r, path: tildify(r.path, home), ...(r.target ? { target: tildify(r.target, home) } : {}) }
+      },
+    },
+    // Network Guard (spec §3.35): asks every address now. Only sideby's own cache changes, so a read-only Panel may.
+    '/api/network/check': {
+      writes: () => false,
+      async run() {
+        return (await getRuntime()).networkStatus({ check: true })
+      },
+    },
+    // Network Guard's switch and countries (spec §3.35): config `network`, shown first like every config change.
+    '/api/network/settings': {
+      writes: (body) => body.confirm === true,
+      async run(body) {
+        const change: NetworkChange = {}
+        if (body.guard !== undefined) {
+          if (typeof body.guard !== 'boolean') throw new HttpError(400, '"guard" must be true or false')
+          change.guard = body.guard
+        }
+        if (body.allow !== undefined) {
+          if (!Array.isArray(body.allow) || !body.allow.every((x) => typeof x === 'string'))
+            throw new HttpError(400, '"allow" must be a list of country codes')
+          change.allow = body.allow as string[]
+        }
+        const rt = await getRuntime()
+        const r = await setNetwork(rt.paths.configFile, change, { apply: optBool(body, 'confirm') })
+        return { ...r, file: tildify(r.file, rt.paths.home) }
       },
     },
     // Browser Sign-ins on or off (spec §3.24): config `browser.signIns`, shown first like every config change.

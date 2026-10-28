@@ -429,6 +429,66 @@ it('key input drops whole escape sequences and joins characters split across chu
   input.destroy()
 })
 
+it('try --model replaces the model the account and short command choose, and a short command keeps its arguments', async () => {
+  await withFakeHome(async (h) => {
+    await h.write('.codex/config.toml', '')
+    await h.write('.claude/settings.json', '{}')
+    await h.write('.claude-api/proxy.env', 'ANTHROPIC_AUTH_TOKEN=fictional-secret-value\n', 0o600)
+    await h.write(
+      '.config/sideby/config.json',
+      JSON.stringify({
+        accounts: { 'claude:api': { args: ['--model', 'fake-model'] } },
+        aliases: { 'cc-big': { account: 'claude:api', args: ['--model=alias-model', '--verbose'] } },
+      }),
+    )
+    await fakeHost(h, 'codex')
+    await fakeHost(h, 'claude')
+    // A short command's arguments apply, as in `sideby run`.
+    const viaAlias = shape('try', (await cli(h, ['try', 'cc-big', '--json'])).out)
+    assert.equal(viaAlias.account, 'claude:api')
+    assert.deepEqual(viaAlias.command, [
+      'claude',
+      '--model',
+      'fake-model',
+      '--model=alias-model',
+      '--verbose',
+      '-p',
+      'Reply with OK',
+    ])
+    // --model takes every earlier choice out, so the Host gets one model.
+    const preview = shape('try', (await cli(h, ['try', 'cc-big', '--model', 'other-model', '--json'])).out)
+    assert.equal(preview.model, 'other-model')
+    assert.deepEqual(preview.command, [
+      'claude',
+      '--verbose',
+      '--model',
+      'other-model',
+      '-p',
+      'Reply with OK',
+    ])
+    const ran = shape(
+      'try',
+      (await cli(h, ['try', 'cc-big', '--model', 'other-model', '--yes', '--json'])).out,
+    )
+    assert.equal(ran.model, 'other-model')
+    assert.deepEqual((await readHostLog(h, 'claude'))[0]!.argv, [
+      '--verbose',
+      '--model',
+      'other-model',
+      '-p',
+      'Reply with OK',
+    ])
+    // Codex's `exec` reads only its own -m.
+    assert.deepEqual(
+      shape('try', (await cli(h, ['try', 'codex:main', '--model', 'gpt-x', '--json'])).out).command,
+      ['codex', 'exec', '--skip-git-repo-check', '-m', 'gpt-x', 'Reply with OK'],
+    )
+    const bad = await cli(h, ['try', 'claude:api', '--model', 'a b', '--json'])
+    assert.equal(bad.code, 1)
+    assert.equal(JSON.parse(bad.out).code, 'model-invalid')
+  })
+})
+
 it('try starts the Host with Family defaults and config arguments before the probe', async () => {
   await withFakeHome(async (h) => {
     await h.write('.codex/config.toml', '')

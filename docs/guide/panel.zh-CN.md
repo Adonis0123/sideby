@@ -14,13 +14,15 @@ sideby ui --no-open    # 只打印地址
 
 **置顶和账号菜单。** 置顶的账号名字前有一个小图钉，点它取消置顶。鼠标移到其他账号上（或用键盘移到它那一行），同一位置会出现一个更浅的图钉，点它把这个账号置顶到所在分组的最前（每个工具最多 3 个）。在账号行或卡片上按右键，会在点的位置打开和「…」按钮一样的菜单；用键盘时，在聚焦的行上按菜单键或 Shift+F10 也能打开。在输入框、链接和按钮上右键，仍然是浏览器自己的菜单。
 
-**设置**把只需设一次的东西分成几组：外观（明暗、主题、语言）、启动、账号与额度、让 AI 帮我。明暗和语言存在 sideby 的配置里，所以 `sideby config set panel.theme dark` 也能改。「启动」里的「登录后在后台启动 sideby」（macOS）会在每次登录时启动面板，不打开窗口，打开面板时就是最新状态。打开或关闭时，先显示要写入或删除的文件和要运行的命令，你确认后才生效。终端里用 `sideby autostart on|off` 也一样。macOS 上的「在状态栏显示额度」会在状态栏放一个 sideby 小人图标，同样先预览再生效；面板第一次显示额度时会提示一次。终端里用 `sideby menubar on|off`。开着时，没在运行会直接写出来并给「重新启动」；下面的「状态栏图标 ›」点进去是它自己的对话框：上面是打开菜单的快捷键（从下拉里选 ⌥X、⌥Z、⌥⌘S、⌃⌥S 或关闭，想自己按就选「自定义…」；终端里用 `sideby menubar hotkey`），下面是「看不到图标？」，列出三种原因（状态栏放不下被 macOS 收进顶栏的 «、在「系统设置 › 菜单栏」里被关掉、被 Ice 或 Bartender 这类整理工具收起来）。图标被收进 « 时，开关下方会直接提示，并给「让 AI 帮我排查」，开一个 AI 任务替你找原因。
+**搜索**（顶栏的按钮，或 Cmd/Ctrl+K）按名字找到一个页面、一项设置或一个操作，中英文都行，并带你过去：设置会打开它所在的位置并短暂高亮，操作会打开它原有的预览，确认之前什么都不改。框里没字时列出最近用过的和几个常用项。它只找功能，不找会话：最后一行用同样的词搜索会话历史。`/` 和 Cmd/Ctrl+F 仍然跳到账号搜索。在终端里，`sideby commands <词>` 搜索同一份列表。
+
+**设置**把只需设一次的东西分成几组：外观（明暗、主题、语言）、启动、账号与额度、让 AI 帮我。明暗和语言存在 sideby 的配置里，所以 `sideby config set panel.theme dark` 也能改。「启动」里的「登录后在后台启动 sideby」（macOS、Linux 桌面，以及 WSL，在 WSL 里叫「登录 Windows 后在后台启动 sideby」）会在每次登录时启动面板，不打开窗口，打开面板时就是最新状态。打开或关闭时，先显示要写入或删除的文件和要运行的命令，你确认后才生效。终端里用 `sideby autostart on|off` 也一样。macOS 上的「在状态栏显示额度」会在状态栏放一个 sideby 小人图标，同样先预览再生效；面板第一次显示额度时会提示一次。终端里用 `sideby menubar on|off`。开着时，没在运行会直接写出来并给「重新启动」；下面的「状态栏图标 ›」点进去是它自己的对话框：上面是打开菜单的快捷键（从下拉里选 ⌥X、⌥Z、⌥⌘S、⌃⌥S 或关闭，想自己按就选「自定义…」；终端里用 `sideby menubar hotkey`），下面是「看不到图标？」，列出三种原因（状态栏放不下被 macOS 收进顶栏的 «、在「系统设置 › 菜单栏」里被关掉、被 Ice 或 Bartender 这类整理工具收起来）。图标被收进 « 时，开关下方会直接提示，并给「让 AI 帮我排查」，开一个 AI 任务替你找原因。
 
 ## 主题
 
-**设置 › 主题**选面板的颜色。内置两套：**晴空**（默认：浅蓝）和**新叶**（浅绿底配绿色额度条，同样取自 Radix Colors）。点一张卡片就换，颜色平滑过渡、不刷新页面，底部提示里可以**撤销**。卡片下面，**自选主色**把按钮、链接和额度条换成你挑的颜色；**让 AI 帮我配色**把一句话（比如“像 Notion 一样素净”）交给你自己的 AI：它写一套主题，先在面板里给你看，你同意后才换上。
+**设置 › 主题**选面板的颜色。内置五套，底色都是同一种冷灰，只有强调色不同：**青绿**（默认）、**叶绿**、**阿根廷蓝**、**Claude 橙**和 **Codex 墨黑**（像 Codex 应用一样黑白）。原来的晴空现在叫阿根廷蓝。它们排成一行色点：点一个色点，或用方向键在这一行里移动，就换过去。正在用的色点外面有一圈同色细环，鼠标移上去会显示名字。颜色平滑过渡、不刷新页面，底部提示里可以**撤销**。色点下面，**自选主色**把按钮、链接和额度条换成你挑的颜色；**让 AI 帮我配色**把一句话（比如“像 Notion 一样素净”）交给你自己的 AI：它写一套主题，先在面板里给你看，你同意后才换上。
 
-琥珀色和红色只在额度快用完、用完时出现，所以一眼就能看到。文字对比度按 WCAG（4.5:1，粗体主按钮 3:1）；你自己的主题里有颜色太淡看不清时，面板会自动调深或调浅，并写明。sideby 小人的蓝色不随主题变。
+琥珀色和红色只在额度快用完、用完时出现，所以一眼就能看到。文字对比度按 WCAG（4.5:1，主按钮上的白字 3:1）；你自己的主题里有颜色太淡看不清时，面板会自动调深或调浅，并写明。sideby 小人的蓝色不随主题变。
 
 自己的主题是 `~/.config/sideby/themes/` 里的一个 JSON 文件，只放颜色，不放代码：
 
@@ -138,7 +140,7 @@ createServer(async (req, res) => {
 
 `theme` 让面板和你的页面风格一致。token 会写成面板自带的、带 nonce 的 `<style>` 里的 CSS 自定义属性，面板严格的 CSP 不需要放宽。iframe 读不到父页面的 CSS 变量，所以要传具体值。
 
-- **token**（都可选）：字体排版 `font`、`monoFont`、`fontSize`、`smallSize`、`controlSize`、`headingSize`、`largeSize`、`titleSize`、`titleWeight`、`headingWeight`、`strongWeight`、`buttonWeight`、`primaryWeight`；颜色 `bg`、`surface`、`surfaceMuted`、`border`、`borderStrong`、`text`、`muted`、`faint`、`hover`、`active`、`accent`、`accentSoft`、`focus`、`primary`、`primaryHover`、`primaryActive`、`onPrimary`、`primaryBorder`、`primaryHoverBorder`、`buttonText`、`buttonHoverBorder`、`buttonHoverText`、`checkColor`、`ok`、`okSoft`、`warn`、`warnSoft`、`fail`、`failSoft`、`okBar`、`warnBar`、`failBar`、`track`、`logoBg`、`logoColor`、`logoBorder`、`shadow`、`focusOutline`、`focusRing`；形状与布局 `radius`、`controlRadius`、`chipRadius`、`controlHeight`、`controlHeightSmall`、`fieldHeight`、`contentWidth`、`gutter`。每个 token 的含义见 [`src/panel/theme.ts`](../../src/panel/theme.ts)。
+- **token**（都可选）：字体排版 `font`、`monoFont`、`fontSize`、`smallSize`、`controlSize`、`headingSize`、`largeSize`、`titleSize`、`titleWeight`、`headingWeight`、`strongWeight`、`buttonWeight`、`primaryWeight`；颜色 `bg`、`surface`、`surfaceMuted`、`border`、`borderStrong`、`text`、`muted`、`faint`、`hover`、`active`、`accent`、`accentSoft`、`focus`、`primary`、`primaryHover`、`primaryActive`、`onPrimary`、`primaryBorder`、`primaryHoverBorder`、`buttonText`、`buttonHoverBorder`、`buttonHoverText`、`checkColor`、`ok`、`okSoft`、`warn`、`warnSoft`、`fail`、`failSoft`、`okBar`、`warnBar`、`failBar`、`track`、`logoBg`、`logoColor`、`logoBorder`、`shadow`、`focusOutline`、`focusRing`；形状与布局 `radius`、`controlRadius`、`chipRadius`、`primaryRadius`、`controlHeight`、`controlHeightSmall`、`fieldHeight`、`contentWidth`、`gutter`。每个 token 的含义见 [`src/panel/theme.ts`](../../src/panel/theme.ts)。
 - **浅色与深色**：`light` 里的颜色只在浅色模式生效；字体排版、形状和布局 token 两种模式都生效。深色模式的颜色写在 `dark` 里；你的页面没有深色模式时，设 `colorScheme: 'light'`。
 - **创建 handler 时校验**：未知 token，或值里出现字母、数字、空格和 `# % ( ) , . + - / ' " _` 以外的字符（也就是不允许 `;`、`{`、`}`、`<`、`\`、`*`、`:`），或含 `url(`、括号或引号不成对、超过 200 个字符，都会抛出写明 token 名的 `TypeError`。
 - 不传 `theme` 时，外观和 `sideby ui` 一样。你给的颜色是面板在你页面里的默认颜色，在面板的**设置 › 主题**里显示为“这个页面的配色”；用户选了别的主题，颜色就以用户选的为准，字体、尺寸等其他 token 仍按你的。

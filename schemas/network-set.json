@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/network-set.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "changed",
+    "applied",
+    "file",
+    "before",
+    "after"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "changed": {
+      "type": "boolean"
+    },
+    "applied": {
+      "type": "boolean",
+      "description": "False when only the change was shown; run again with --yes (exit 10)."
+    },
+    "file": {
+      "type": "string",
+      "description": "The config file changed."
+    },
+    "before": {
+      "type": "object",
+      "required": [
+        "guard",
+        "allow"
+      ],
+      "properties": {
+        "guard": {
+          "type": "boolean"
+        },
+        "allow": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "after": {
+      "type": "object",
+      "required": [
+        "guard",
+        "allow"
+      ],
+      "properties": {
+        "guard": {
+          "type": "boolean"
+        },
+        "allow": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby network on|off|allow --json"
+}

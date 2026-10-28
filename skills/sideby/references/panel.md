@@ -2,6 +2,16 @@
 
 Use these commands for the same persistent settings as the Panel. Prefer account refs from `sideby list --json`; commands taking an account also accept its short command. Every JSON response has `schemaVersion: 1`.
 
+## Find where something is
+
+When the user asks where a setting or feature is ("语言在哪改", "where do I turn off Remote Control"), run
+`sideby commands <words> --json`. It searches the same list as the Panel's Search (Cmd/Ctrl+K), in English or Chinese,
+and returns `{ results: [{ id, kind, title, panel, cliCommand }] }`, best match first. `kind` is `page`, `setting` or
+`action` (tolerate others). Offer to do it with `cliCommand` (keep its preview step; never add `--yes` before the user
+agrees), or tell the user the `panel` place, such as `Settings → General → Language`. An empty `results` exits 0:
+try other words. It finds features only; to find a past session use `sideby history <words> --json`
+(`references/sessions.md`).
+
 ## Pinned Accounts and Display Order
 
 - `sideby order --json` returns `display` (saved `families`, `accounts`, `pinned`) and `families` in their effective order. Each family has `accounts` with `name`, `ref`, `pinned`; a family with no accounts has an empty array.
@@ -48,7 +58,7 @@ A value the key does not take fails with code `bad-value` and changes nothing; a
 
 `sideby autostart --json` returns `supported`, `state` and `path`. `state` is `off`, `on`, `stale` (the Node or sideby it starts was moved; `missing` names it) or `foreign` (a file at that path sideby did not write: leave it, and tell the user). `current` is false when it starts another sideby than this one.
 
-To turn it on ("start sideby at login", "开机启动"), run `sideby autostart on --json`: exit 10 returns the `content` of the file, the `programArguments` and the `commands` it will run. Show that, and run `sideby autostart on --yes --json` after the user agrees; `stale` or `current: false` is fixed the same way. `sideby autostart off` turns it off the same way. At login the Panel starts in the background without opening a window. macOS only for now; elsewhere `supported` is false and `on` fails with code `unsupported`. Running from the npx cache or a temporary folder fails with `npx-cache` or `temp-dir`: hand the user `npm i -g sideby` first. `sideby update` keeps an existing login item pointing at the new version.
+To turn it on ("start sideby at login", "开机启动"), run `sideby autostart on --json`: exit 10 returns the `content` of the file, the `programArguments` and the `commands` it will run. Show that, and run `sideby autostart on --yes --json` after the user agrees; `stale` or `current: false` is fixed the same way. `sideby autostart off` turns it off the same way. At login the Panel starts in the background without opening a window. `mechanism` says how: `launchd` (macOS), `xdg` (Linux, `~/.config/autostart/dev.sideby.panel.desktop`, run by desktop sessions only) or `wsl-startup` (WSL: `sideby-panel.vbs` in the Windows Startup folder, so it starts when the user signs in to Windows; `commands` is empty there and the change takes effect at the next sign-in, `sideby ui --background` starts it now). Native Windows has `supported` false and `on` fails with code `unsupported`; under WSL a path with `"`, `%` or non-ASCII letters fails with `unsafe-path`. Running from the npx cache or a temporary folder fails with `npx-cache` or `temp-dir`: hand the user `npm i -g sideby` first. `sideby update` keeps an existing login item pointing at the new version.
 
 ## Quota in the menu bar
 

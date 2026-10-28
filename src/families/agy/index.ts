@@ -31,7 +31,10 @@ export const agyFamily: FamilyDef = {
   ],
   apiVars: [],
   // `-p` is one non-interactive prompt (agy 1.4.4 --help, 2026-10-21).
-  probe: { args: ['-p', 'Reply with OK'] },
+  probe: {
+    args: ['-p', 'Reply with OK'],
+    model: { flags: ['--model'], args: (m) => ['--model', m, '-p', 'Reply with OK'] },
+  },
   // agy reads a prompt only from -p, -i or stdin: "unexpected argument" otherwise (agy 1.4.4, 2026-10-21).
   promptArg: '--prompt-interactive',
   aiTaskArgs: (args) =>

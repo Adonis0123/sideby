@@ -116,7 +116,10 @@ export const claudeFamily: FamilyDef = {
   apiVars: ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_MODEL'],
   secretVar: 'ANTHROPIC_AUTH_TOKEN',
   // `-p` is one non-interactive prompt (Claude Code 2.1.301 --help, 2026-10-17).
-  probe: { args: ['-p', 'Reply with OK'] },
+  probe: {
+    args: ['-p', 'Reply with OK'],
+    model: { flags: ['--model'], args: (m) => ['--model', m, '-p', 'Reply with OK'] },
+  },
   aiTaskArgs: claudeAiTaskArgs,
   settingsFile: 'settings.json',
   sharedItems: [

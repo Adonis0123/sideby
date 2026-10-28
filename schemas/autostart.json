@@ -45,6 +45,23 @@
     "path": {
       "type": "string"
     },
+    "mechanism": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "launchd"
+        },
+        {
+          "type": "string",
+          "const": "xdg"
+        },
+        {
+          "type": "string",
+          "const": "wsl-startup"
+        }
+      ],
+      "description": "How it starts at login: a LaunchAgent (macOS), an XDG autostart entry (Linux desktop sessions), or a script in the Windows Startup folder (WSL). Absent when unsupported."
+    },
     "programArguments": {
       "type": "array",
       "items": {

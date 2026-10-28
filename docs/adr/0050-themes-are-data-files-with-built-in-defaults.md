@@ -1,6 +1,6 @@
 # ADR-0050: Themes are data files over two Built-in Themes
 
-Status: accepted
+Status: accepted; Built-in Themes, the Sky default and main-button weight superseded by ADR-0052
 Date: 2026-10-22
 
 ## Context

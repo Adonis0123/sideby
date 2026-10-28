@@ -25,7 +25,9 @@ async function mainAccount(h: FakeHome): Promise<void> {
 describe('claude family', () => {
   it('names the key variable and a one-shot probe', () => {
     assert.equal(claudeFamily.secretVar, 'ANTHROPIC_AUTH_TOKEN')
-    assert.deepEqual(claudeFamily.probe, { args: ['-p', 'Reply with OK'] })
+    assert.deepEqual(claudeFamily.probe?.args, ['-p', 'Reply with OK'])
+    assert.deepEqual(claudeFamily.probe?.model?.flags, ['--model'])
+    assert.deepEqual(claudeFamily.probe?.model?.args('m-1'), ['--model', 'm-1', '-p', 'Reply with OK'])
   })
 
   it('discovers accounts, reports drift and login state in a fake HOME', async () => {

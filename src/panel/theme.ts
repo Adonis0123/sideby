@@ -25,7 +25,7 @@ export interface PanelThemeTokens {
   /** Labels, emphasis and numbers. */
   strongWeight?: string
   buttonWeight?: string
-  /** Main action button; defaults to `buttonWeight`. */
+  /** Main action button. */
   primaryWeight?: string
   // Colors
   /** Page background. */
@@ -87,6 +87,8 @@ export interface PanelThemeTokens {
   /** Buttons and fields. */
   controlRadius?: string
   chipRadius?: string
+  /** Main action button; a pill by default (design system, 2026-10-25). */
+  primaryRadius?: string
   /** Button height; `controlHeightSmall` for buttons inside cards and banners. */
   controlHeight?: string
   controlHeightSmall?: string
@@ -169,6 +171,7 @@ export const THEME_TOKENS: Record<keyof PanelThemeTokens, string> = {
   radius: '--radius',
   controlRadius: '--ctl-radius',
   chipRadius: '--chip-radius',
+  primaryRadius: '--primary-radius',
   controlHeight: '--ctl-h',
   controlHeightSmall: '--ctl-h-sm',
   fieldHeight: '--field-h',

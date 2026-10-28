@@ -10,7 +10,9 @@ const builtins = [{ plugin: piPlugin, version: '0.1.0', description: '', default
 describe('pi family', () => {
   it('names the first template key and a one-shot probe', () => {
     assert.equal(piFamily.secretVar, 'ANTHROPIC_API_KEY')
-    assert.deepEqual(piFamily.probe, { args: ['-p', 'Reply with OK'] })
+    assert.deepEqual(piFamily.probe?.args, ['-p', 'Reply with OK'])
+    assert.deepEqual(piFamily.probe?.model?.flags, ['--model'])
+    assert.deepEqual(piFamily.probe?.model?.args('m-1'), ['--model', 'm-1', '-p', 'Reply with OK'])
   })
 
   it('uses the extra agent/ level for discovery, creation, doctor and login state', async () => {

@@ -43,7 +43,7 @@ export default {
 
 | 扩展点 | 时机 | 能做什么 | 超时 |
 |---|---|---|---|
-| `api.family(def)` | 加载插件时 | 注册家族：目录约定、选择变量、Hijack Variables、默认参数、共享项、登录命令、登录态判断、模型，可选的 `logo`、`website` 和 `history`（见下文）、`readQuota`、`readUsage`、`quotaSetup`、`keepTitle`（让宿主保留 config `accountTitle` 所设标题的参数）、`probe`（发一次很短的非交互请求的宿主参数，`sideby try` 运行它）、`aiTaskArgs`（AI Task 启动前去掉跳过宿主权限检查的参数，可以加上宿主自己的安全模式） | — |
+| `api.family(def)` | 加载插件时 | 注册家族：目录约定、选择变量、Hijack Variables、默认参数、共享项、登录命令、登录态判断、模型，可选的 `logo`、`website` 和 `history`（见下文）、`readQuota`、`readUsage`、`quotaSetup`、`keepTitle`（让宿主保留 config `accountTitle` 所设标题的参数）、`probe`（发一次很短的非交互请求的宿主参数，`sideby try` 运行它；可选的 `model` 写明宿主选模型的参数，以及 `sideby try --model` 用的参数）、`aiTaskArgs`（AI Task 启动前去掉跳过宿主权限检查的参数，可以加上宿主自己的安全模式） | — |
 | `api.projectCategories(def)` | 加载插件时 | 把项目分到自己的分类里，会话页可以按它分组（见下文）；只用第一个注册的插件 | 每次回答 3 s |
 | `launch.before` | 每次 `run`、`login` 之前 | 改 `ctx.env`、`ctx.args`，或用 `throw api.abort(msg)` 中止启动 | 30 秒 |
 | `account.create.before` | `new`（CLI 或面板）写入任何文件之前 | 用 `throw api.abort(msg)` 拒绝新建；`ctx` 里有 `family`、`name`、`api`、该家族已有的 `accounts` 和 `config`。CLI 以退出码 1 结束，面板显示 `msg`，所以要写明改怎么做 | 10 秒 |
