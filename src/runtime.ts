@@ -1129,6 +1129,9 @@ export async function createRuntime(
       return out
     },
     async prepareLaunch(ref, userArgs, command, opts = {}) {
+      // A Handoff chain can run for hours: an Account's arguments changed meanwhile apply to its next start.
+      const fresh = await loadConfig(paths.configFile).catch(() => null)
+      if (fresh) config.accounts = fresh.accounts
       const all = await accounts()
       const inputs = launchInputs(ref, all, userArgs, command)
       const p = await prepareLaunch({

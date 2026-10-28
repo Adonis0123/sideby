@@ -148,6 +148,27 @@ describe('runWithHandoff', () => {
     })
   })
 
+  it('starts the next Account with its config arguments as they are now, not as they were when the chain began', async () => {
+    await withFakeHome(async (h) => {
+      await fakeHost(h, 'claude', { sleep: 20, onStart: READY_ON_FIRST_RUN })
+      const rt = await setup(h, { auto: true, sameFamily: true, countdownSeconds: 0 })
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({
+          aliases: { cc001: 'claude:001' },
+          accounts: { 'claude:002': { args: ['--dangerously-skip-permissions'] } },
+          handoff: { auto: true, sameFamily: true, countdownSeconds: 0 },
+        }),
+      )
+      const code = await runWithHandoff(rt, 'cc001', [], { err: () => {}, stdin: terminal() })
+      assert.equal(code, 0)
+      const starts = (await readHostLog(h, 'claude')).filter((r) => r.argv)
+      assert.equal(starts.length, 2)
+      assert.ok(!starts[0]!.argv.includes('--dangerously-skip-permissions'))
+      assert.ok(starts[1]!.argv.includes('--dangerously-skip-permissions'))
+    })
+  })
+
   it('hands over to the account a manual request names, not the first in line', async () => {
     await withFakeHome(async (h) => {
       const toThree = READY_ON_FIRST_RUN.replace("sessionId: 's1'", "sessionId: 's1', to: 'claude:003'")
