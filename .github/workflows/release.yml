@@ -15,11 +15,13 @@ jobs:
     runs-on: ubuntu-latest
     environment: npm
     permissions:
+      actions: read
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 2
           persist-credentials: false
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -55,7 +57,35 @@ jobs:
             exit 1
           fi
 
+      # The tag sits on the version commit made by `npm version`, one commit after a main that CI already checked.
+      # When CI passed on that parent and the version commit only bumps the version, the same checks need not run
+      # again; anything else runs them here.
+      - name: Reuse main's CI result
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          parent="$(git rev-parse HEAD^)"
+          extra="$(git diff --name-only HEAD^ HEAD | grep -vxE 'package\.json|skills/sideby/SKILL\.md' || true)"
+          # Inside those two files, every changed line must be a version line.
+          lines="$(git diff -U0 HEAD^ HEAD -- package.json skills/sideby/SKILL.md | grep -E '^[+-]' | grep -vE '^(\+\+\+|---) ' | grep -vE '^[+-] *("version": |version: )' || true)"
+          if [ -n "$lines" ]; then extra="${extra:+$extra }(lines other than the version)"; fi
+          passed="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$parent&status=success&per_page=1" --jq .total_count || echo 0)"
+          if [ -z "$extra" ] && [ "$passed" -gt 0 ]; then
+            echo "::notice::CI passed on $parent and the version commit only bumps the version; skipping pnpm check."
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "CI result reused: no (changes beyond the version bump: ${extra:-none}; passing CI runs on $parent: $passed)"
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - run: pnpm check
+        if: steps.ci.outputs.passed != 'true'
+
+      # The one check main's CI cannot cover: the version commit keeps package.json and the skill on one version.
+      - run: node --test src/core/skill-version.test.ts
+        if: steps.ci.outputs.passed == 'true'
 
       - run: pnpm build
 

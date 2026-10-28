@@ -3,9 +3,10 @@ import { constants } from 'node:fs'
 import { lstat, mkdtemp, open, readdir, realpath, rm, stat, unlink } from 'node:fs/promises'
 import { userInfo } from 'node:os'
 import { dirname, isAbsolute, join, sep } from 'node:path'
+import { MODEL_NAME, takeFlag } from '../families/shared/model-args.ts'
 import { AI_TASK_KINDS, type AiTaskKind, stripSecrets, taskPrompt } from '../panel/page-logic.ts'
 import type { Runtime } from '../runtime.ts'
-import type { Account, Env } from '../types.ts'
+import type { Account, Env, FamilyDef } from '../types.ts'
 import {
   type Attachment,
   checkAttachmentFiles,
@@ -350,7 +351,8 @@ export function taskContext(c: unknown, fail: (message: string) => Error): AiTas
       k === 'quotaReason' ||
       k === 'version' ||
       k === 'terminalCustom' ||
-      k === 'theme'
+      k === 'theme' ||
+      k === 'updateError'
     )
       out[k] = str(v, `"context.${k}"`)
     else if (k === 'terminals') {
@@ -359,6 +361,9 @@ export function taskContext(c: unknown, fail: (message: string) => Error): AiTas
     } else if (k === 'handoff') {
       if (!Array.isArray(v) || v.length > 100) throw fail('"context.handoff" must be a list')
       out.handoff = v.map((x) => str(x, 'each of "context.handoff"'))
+    } else if (k === 'network') {
+      if (!Array.isArray(v) || v.length > 100) throw fail('"context.network" must be a list')
+      out.network = v.map((x) => str(x, 'each of "context.network"'))
     } else if (k === 'findings') {
       if (!Array.isArray(v) || v.length > 100) throw fail('"context.findings" must be a list')
       out.findings = v.map((f) => {
@@ -581,19 +586,49 @@ export async function openPickInTerminal(rt: Runtime, name: string) {
   return openTask(rt, { kind: 'run', account: name, cwd: rt.paths.home })
 }
 
+/** The probe arguments for `model`, or the plain probe; refuses a model the Family cannot choose or a malformed name. */
+function probeArgs(family: FamilyDef, model: string | undefined): string[] {
+  const probe = family.probe!
+  if (model === undefined) return probe.args
+  if (!probe.model)
+    throw new UserError(`${family.title} cannot be tried with another model; leave out --model.`, {
+      code: 'no-model-choice',
+    })
+  if (!MODEL_NAME.test(model))
+    throw new UserError('A model name uses letters, digits and ._:/[]- only (at most 100); check the name.', {
+      code: 'model-invalid',
+    })
+  return probe.model.args(model)
+}
+
 /**
- * What `try` will run for an Account, computed as `sideby run` would (Family defaults, config arguments) but without
- * reading its Secret File or running `launch.before` hooks: nothing runs before the user agrees.
+ * With `--model`, the model options of the arguments before the probe's (the Account's and the short command's) are
+ * taken out, so the Host gets one model. Arguments a hook added around them stay; if the probe's own arguments
+ * cannot be found, nothing changes.
  */
-export async function tryPreview(rt: Runtime, ref: string) {
+function oneModel(args: string[], probe: string[], family: FamilyDef, model: string | undefined): string[] {
+  if (model === undefined || !family.probe?.model) return args
+  for (let at = args.length - probe.length; at >= 0; at--)
+    if (probe.every((v, i) => args[at + i] === v))
+      return [...takeFlag(args.slice(0, at), family.probe.model.flags).rest, ...args.slice(at)]
+  return args
+}
+
+/**
+ * What `try` will run for an Account, computed as `sideby run` would (Family defaults, config arguments, a short
+ * command's arguments) but without reading its Secret File or running `launch.before` hooks: nothing runs before the
+ * user agrees. `model` replaces the model those arguments choose.
+ */
+export async function tryPreview(rt: Runtime, ref: string, model?: string) {
   const account = await rt.resolve(ref)
   const family = rt.families.get(account.family)
   if (!family?.probe)
     throw new UserError(`This tool cannot be tried; use \`sideby run ${account.ref}\` instead.`, {
       code: 'no-probe',
     })
-  const { bin, args } = await rt.launchCommand(account.ref, family.probe.args, 'run')
-  return { account, family, command: [bin, ...args] }
+  const probe = probeArgs(family, model)
+  const { bin, args } = await rt.launchCommand(ref, probe, 'run')
+  return { account, family, probe, command: [bin, ...oneModel(args, probe, family, model)] }
 }
 
 /**
@@ -601,14 +636,26 @@ export async function tryPreview(rt: Runtime, ref: string) {
  * folder under the task directory that is removed afterwards. The caller has already said it spends a few tokens. The
  * launch is prepared once here, so `launch.before` hooks run once, and the command returned is what actually ran.
  * `spawn` replaces the process start (tests); by default the Host runs with stdin ignored and is killed at the timeout.
+ * `ref` may be a short command, whose arguments apply as in `sideby run`; `model` replaces the model they choose.
  */
-export async function tryAccount(rt: Runtime, ref: string, spawn: ProbeDeps['spawn'] = spawnProbe) {
-  const { account, family } = await tryPreview(rt, ref)
-  const launch = await rt.prepareLaunch(account.ref, family.probe!.args, 'run')
+export async function tryAccount(
+  rt: Runtime,
+  ref: string,
+  spawn: ProbeDeps['spawn'] = spawnProbe,
+  model?: string,
+) {
+  const { account, family, probe } = await tryPreview(rt, ref, model)
+  const prepared = await rt.prepareLaunch(ref, probe, 'run')
+  const launch = { ...prepared, args: oneModel(prepared.args, probe, family, model) }
   const cwd = await mkdtemp(join(await taskWorkDir(rt.paths), 'probe-'))
   try {
     const result = await runProbe(account, { family, baseEnv: rt.env, cwd, launch, spawn })
-    return { account: account.ref, command: [launch.bin, ...launch.args], ...result }
+    return {
+      account: account.ref,
+      ...(model === undefined ? {} : { model }),
+      command: [launch.bin, ...launch.args],
+      ...result,
+    }
   } finally {
     await rm(cwd, { recursive: true, force: true })
   }

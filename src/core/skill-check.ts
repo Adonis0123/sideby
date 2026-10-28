@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import type { FamilyDef, Finding } from '../types.ts'
 import { mainDirOf } from './accounts.ts'
 import { tildify } from './paths.ts'
+import { compareVersions } from './version.ts'
 
 export const SKILL_SOURCE = 'Adonis0123/sideby'
 /** sideby's repository, linked from the Panel's header. */
@@ -87,6 +88,13 @@ export async function installedSkills(home: string): Promise<{ dir: string; vers
 }
 
 /** The command `sideby update` runs to update an installed sideby skill: it keeps the agents it was installed for. */
+/**
+ * An installed skill for `installed` (null: from before skills had a version) is behind `target`. A skill for a newer
+ * sideby is not: `npx skills update` brings the newest skill, so it is the CLI that is behind (spec §3.23).
+ */
+export const skillIsBehind = (installed: string | null, target: string): boolean =>
+  installed !== target && compareVersions(installed ?? '', target) !== 1
+
 export const SKILL_UPDATE = ['npx', '-y', 'skills', 'update', 'sideby', '-g', '-y'] as const
 
 /**
@@ -118,7 +126,7 @@ export async function checkInstalledSkills(
     }
     seen.add(`${family.id}\0${real}`)
     const found = skillVersionOf(text)
-    if (found === version) continue
+    if (!skillIsBehind(found, version)) continue
     const where = tildify(path, home)
     // `sideby update` brings the skill along, except one a git repository owns (a dotfiles clone, say).
     const repo = await skillOwnerRepo(dirname(real))

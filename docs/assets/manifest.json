@@ -23,7 +23,7 @@
         "scripts/shoot-panel.ts"
       ],
       "retake": "node scripts/shoot-panel.ts",
-      "checked": "ba6819e"
+      "checked": "fab663b"
     },
     {
       "id": "demo-gif",
@@ -42,7 +42,7 @@
         "src/panel/page-styles.ts"
       ],
       "retake": "node scripts/record-demo.ts",
-      "checked": "ba6819e"
+      "checked": "fab663b"
     },
     {
       "id": "menubar-screenshots",
@@ -85,6 +85,6 @@
   "copy": {
     "files": ["README.md", "README.zh-CN.md"],
     "commits": "^(\\S+ )?feat(\\(|:|!)",
-    "checked": "ba6819e"
+    "checked": "c17132f"
   }
 }

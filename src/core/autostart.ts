@@ -1,15 +1,17 @@
-// Start the Panel at login (spec §3.29, ADR-0029): a LaunchAgent on macOS that runs this Node and this sideby's entry
-// with `ui --background --no-open`. sideby writes, replaces or removes only a file that carries its marker; any other
+// Start the Panel at login (spec §3.29, ADR-0029, ADR-0055): a LaunchAgent on macOS, an XDG autostart entry on Linux,
+// and a `.vbs` in the Windows Startup folder under WSL, each running this Node and this sideby's entry with
+// `ui --background --no-open`. sideby writes, replaces or removes only a file that carries its marker; any other
 // file at that path is reported and left alone. Every program runs through `AutostartContext.exec`, so tests never
 // load a real agent.
 import { execFile } from 'node:child_process'
 import { mkdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir, userInfo } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 import type { Env } from '../types.ts'
 import { UserError } from './errors.ts'
 import { fileHash, realpathOrNull, sha256, statOrNull, writeIfUnchanged } from './fs-safe.ts'
 import { type AskLauncher, askLauncher, launcherProblem } from './terminal.ts'
+import { toUnix } from './windows-dirs.ts'
 
 export const AUTOSTART_LABEL = 'dev.sideby.panel'
 /** Present in every agent sideby writes; a file without it is someone else's. */
@@ -40,6 +42,12 @@ export interface LoginAgent {
 
 export type AutostartState = 'off' | 'on' | 'stale' | 'foreign'
 
+/** How the system starts the agent at login: launchd (macOS), an XDG autostart entry (Linux), the Windows Startup folder (WSL). */
+export type AutostartMechanism = 'launchd' | 'xdg' | 'wsl-startup'
+
+/** The Windows file name under WSL; its folder is the current Windows user's Startup folder. */
+export const WSL_STARTUP_FILE = 'sideby-panel.vbs'
+
 /** Runs a program and resolves with its exit code and output; never rejects. */
 export type AutostartExec = (
   file: string,
@@ -59,6 +67,10 @@ export interface AutostartContext {
   env?: Env
   /** Waits between launchctl calls; tests pass one that returns at once. */
   sleep?: (ms: number) => Promise<void>
+  /** On WSL, the distribution and where Windows drives are mounted; null on other Linux. Found from the environment by default. */
+  wsl?: { distro: string; mount: string } | null
+  /** On WSL, the Windows Startup folder as WSL sees it; asked from `cmd.exe` by default (only for the login home). */
+  startupDir?: string
 }
 
 export interface AutostartStatus {
@@ -67,6 +79,8 @@ export interface AutostartStatus {
   reason?: string
   state: AutostartState
   path: string
+  /** How it starts at login; absent when unsupported. */
+  mechanism?: AutostartMechanism
   /** What sideby's agent starts (absent when off or foreign). */
   programArguments?: string[]
   /** The agent starts this sideby with this Node. */
@@ -192,7 +206,138 @@ export function parseProgramArguments(content: string): string[] | null {
 }
 
 const platformOf = (ctx: AutostartContext) => ctx.platform ?? process.platform
-const UNSUPPORTED = 'sideby can start at login on macOS only for now; Linux and Windows come later'
+const UNSUPPORTED = 'sideby cannot start at login on this system yet; it can on macOS, Linux and WSL'
+const UNSUPPORTED_AGENT = 'this login item is for macOS only'
+
+function wslOf(ctx: AutostartContext): { distro: string; mount: string } | null {
+  if (ctx.wsl !== undefined) return ctx.wsl
+  const distro = (ctx.env ?? process.env).WSL_DISTRO_NAME
+  return distro ? { distro, mount: '/mnt' } : null
+}
+
+/** The mechanism for this system and agent; null when there is none. Only the Panel's agent runs outside macOS. */
+export function autostartMechanism(
+  ctx: AutostartContext,
+  agent: LoginAgent = PANEL_AGENT,
+): AutostartMechanism | null {
+  const platform = platformOf(ctx)
+  if (platform === 'darwin') return 'launchd'
+  if (platform !== 'linux' || agent.label !== AUTOSTART_LABEL) return null
+  return wslOf(ctx) ? 'wsl-startup' : 'xdg'
+}
+
+const loginHomeOf = (ctx: AutostartContext) => {
+  if (ctx.loginHome !== undefined) return ctx.loginHome
+  try {
+    return userInfo().homedir
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * The Windows Startup folder as WSL sees it, from one `cmd.exe` call. Another HOME than the login one (a demo or test
+ * HOME) gets a folder inside it instead, so it never writes into the real Windows profile.
+ */
+async function wslStartupDir(ctx: AutostartContext, mount: string): Promise<string | null> {
+  if (ctx.startupDir) return ctx.startupDir
+  if (loginHomeOf(ctx) !== ctx.home) return join(ctx.home, '.sideby-windows-startup')
+  const r = await (ctx.exec ?? defaultExec)(join(mount, 'c', 'Windows', 'System32', 'cmd.exe'), [
+    '/d',
+    '/c',
+    'echo %APPDATA%',
+  ]).catch(() => null)
+  const appData = r?.code === 0 ? toUnix(r.output.trim().split(/\r?\n/)[0] ?? '', mount) : undefined
+  return appData ? join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup') : null
+}
+
+/** Where the agent's file goes for this mechanism; null when Windows could not be asked. */
+async function agentFile(
+  ctx: AutostartContext,
+  agent: LoginAgent,
+  mech: AutostartMechanism,
+): Promise<string | null> {
+  if (mech === 'launchd') return agentPath(ctx.home, agent)
+  if (mech === 'xdg') {
+    const xdg = (ctx.env ?? process.env).XDG_CONFIG_HOME
+    const config = xdg && isAbsolute(xdg) ? xdg : join(ctx.home, '.config')
+    return join(config, 'autostart', `${agent.label}.desktop`)
+  }
+  const dir = await wslStartupDir(ctx, wslOf(ctx)!.mount)
+  return dir ? join(dir, WSL_STARTUP_FILE) : null
+}
+
+/** The arguments the agent records: under WSL, `--wait` keeps `wsl.exe` attached so WSL keeps the distribution up. */
+const wantedArguments = (agent: LoginAgent, l: AskLauncher, mech: AutostartMechanism) =>
+  mech === 'wsl-startup' ? [...agent.programArguments(l), '--wait'] : agent.programArguments(l)
+
+/** One argument of a desktop entry's `Exec` line (Desktop Entry Specification, "The Exec key"). */
+function desktopArg(a: string): string {
+  const q = /^[A-Za-z0-9_/.:=+,@-]+$/.test(a) ? a : `"${a.replace(/[\\"`$]/g, (m) => `\\${m}`)}"`
+  return q.replace(/%/g, '%%')
+}
+
+/** The XDG autostart entry; the `sideby-args` line keeps the arguments for status. */
+export function desktopContent(args: readonly string[], agent: LoginAgent = PANEL_AGENT): string {
+  return `[Desktop Entry]
+# ${agent.marker}: ${agent.comment}. Turn it off with \`sideby ${agent.command} off\`.
+# sideby-args: ${JSON.stringify(args)}
+Type=Application
+Name=sideby panel
+Comment=${agent.comment}
+Exec=${args.map(desktopArg).join(' ')}
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+`
+}
+
+/** The Windows Startup script: runs `wsl.exe` with a hidden window and does not wait for it. */
+export function vbsContent(args: readonly string[], distro: string, agent: LoginAgent = PANEL_AGENT): string {
+  const q = (a: string) => `""${a}""`
+  // `wsl.exe -d` does not unquote the distribution name (WSL 2.4.13 exits -1), so it goes bare; see `unsafeDistro`.
+  const line = `wsl.exe -d ${distro} --exec ${args.map(q).join(' ')}`
+  return [
+    `' ${agent.marker}: ${agent.comment.replace(/ at login$/, '')} when you sign in to Windows. Turn it off with \`sideby ${agent.command} off\`.`,
+    `' sideby-args: ${JSON.stringify(args)}`,
+    `CreateObject("WScript.Shell").Run "${line}", 0, False`,
+    '',
+  ].join('\r\n')
+}
+
+/** What a WSL Startup script cannot carry safely: a `"`, a `%`, or anything outside printable ASCII. */
+const unsafeDistro = (s: string) => !/^[A-Za-z0-9._-]+$/.test(s)
+const unsafeForVbs = (s: string) => !/^[\x20-\x7e]+$/.test(s) || /["%]/.test(s)
+
+function contentFor(
+  ctx: AutostartContext,
+  agent: LoginAgent,
+  mech: AutostartMechanism,
+  args: string[],
+): string {
+  if (mech === 'xdg') return desktopContent(args, agent)
+  if (mech === 'wsl-startup') return vbsContent(args, wslOf(ctx)!.distro, agent)
+  return plistContent(args, agent, agent.environment?.(ctx.env ?? process.env))
+}
+
+function parseArgsFor(mech: AutostartMechanism, content: string): string[] | null {
+  if (mech === 'launchd') return parseProgramArguments(content)
+  const m = /sideby-args: (\[.*\])/.exec(content)
+  if (!m) return null
+  try {
+    const v = JSON.parse(m[1]!) as unknown
+    return Array.isArray(v) && v.every((x) => typeof x === 'string') ? v : null
+  } catch {
+    return null
+  }
+}
+
+/** What turning it on means for the user, by mechanism; used by the CLI and the Panel. */
+export function autostartWhen(mech: AutostartMechanism | undefined): string {
+  if (mech === 'wsl-startup') return 'when you sign in to Windows'
+  if (mech === 'xdg') return 'when your desktop session starts'
+  return 'at login'
+}
 
 async function readAgent(path: string): Promise<string | null> {
   try {
@@ -204,8 +349,15 @@ async function readAgent(path: string): Promise<string | null> {
 }
 
 /** Whether a sideby agent (with the marker) is installed; reads only that one file. */
-export async function autostartInstalled(home: string, agent: LoginAgent = PANEL_AGENT): Promise<boolean> {
-  const content = await readAgent(agentPath(home, agent)).catch(() => null)
+export async function autostartInstalled(
+  home: string,
+  agent: LoginAgent = PANEL_AGENT,
+  ctx: Partial<AutostartContext> = {},
+): Promise<boolean> {
+  const c: AutostartContext = { ...ctx, home }
+  const mech = autostartMechanism(c, agent)
+  const path = mech ? await agentFile(c, agent, mech).catch(() => null) : null
+  const content = path ? await readAgent(path).catch(() => null) : null
   return content?.includes(agent.marker) ?? false
 }
 
@@ -213,20 +365,38 @@ export async function autostartStatus(
   ctx: AutostartContext,
   agent: LoginAgent = PANEL_AGENT,
 ): Promise<AutostartStatus> {
-  const path = agentPath(ctx.home, agent)
-  const supported = platformOf(ctx) === 'darwin'
-  const base = { supported, ...(supported ? {} : { reason: UNSUPPORTED }), path, current: false }
-  if (!supported) return { ...base, state: 'off' }
+  const mech = autostartMechanism(ctx, agent)
+  const unsupported = (reason: string, path = agentPath(ctx.home, agent)): AutostartStatus => ({
+    supported: false,
+    reason,
+    path,
+    current: false,
+    state: 'off',
+  })
+  if (!mech)
+    return unsupported(
+      platformOf(ctx) === 'linux' || platformOf(ctx) === 'darwin' ? UNSUPPORTED_AGENT : UNSUPPORTED,
+    )
+  const path = await agentFile(ctx, agent, mech)
+  if (!path)
+    return unsupported(
+      'sideby could not ask Windows for your Startup folder (cmd.exe did not answer); check that WSL can run Windows programs, then try again',
+      '',
+    )
+  const base = { supported: true, path, mechanism: mech, current: false }
   const content = await readAgent(path)
   if (content === null) return { ...base, state: 'off' }
-  const args = content.includes(agent.marker) ? parseProgramArguments(content) : null
+  const args = content.includes(agent.marker) ? parseArgsFor(mech, content) : null
   if (!args) return { ...base, state: 'foreign' }
   const missing: string[] = []
   for (const p of agent.launcherPaths(args)) if (!(await statOrNull(p))) missing.push(p)
   const launcher = ctx.launcher ?? askLauncher()
-  const want = agent.programArguments(launcher)
+  const want = wantedArguments(agent, launcher, mech)
   const current = args.length === want.length && args.every((a, i) => a === want[i])
-  const loaded = agent.restartOnCrash && !launchctlNote(ctx) ? await agentLoaded(ctx, agent) : undefined
+  const loaded =
+    mech === 'launchd' && agent.restartOnCrash && !launchctlNote(ctx)
+      ? await agentLoaded(ctx, agent)
+      : undefined
   return {
     ...base,
     state: missing.length ? 'stale' : 'on',
@@ -308,14 +478,26 @@ export async function planAutostart(
         message: `${path} was not written by sideby, so sideby leaves it alone; look at it, and remove or rename it yourself before \`sideby ${agent.command} ${action}\` if it is not needed`,
       },
     })
+  const mech = status.mechanism!
+  const launchd = mech === 'launchd'
   if (action === 'off')
-    return status.state === 'off' ? plan({}) : plan({ changed: true, commands: [bootout(ctx, agent)] })
+    return status.state === 'off'
+      ? plan({})
+      : plan({ changed: true, commands: launchd ? [bootout(ctx, agent)] : [] })
   const launcher = ctx.launcher ?? askLauncher()
   const blocked = await autostartLauncherProblem(launcher, agent.command)
   if (blocked) return plan({ blocked })
-  const programArguments = agent.programArguments(launcher)
-  const content = plistContent(programArguments, agent, agent.environment?.(ctx.env ?? process.env))
+  const programArguments = wantedArguments(agent, launcher, mech)
+  if (mech === 'wsl-startup' && (programArguments.some(unsafeForVbs) || unsafeDistro(wslOf(ctx)!.distro)))
+    return plan({
+      blocked: {
+        code: 'unsafe-path',
+        message: `the path of sideby or Node, or the WSL distribution name, has a character the Windows Startup script cannot carry (\`"\`, \`%\` or a non-ASCII letter); install sideby with \`npm i -g sideby\` in an ordinary folder, then run \`sideby ${agent.command} on\` again`,
+      },
+    })
+  const content = contentFor(ctx, agent, mech, programArguments)
   const same = hash !== null && hash === sha256(content)
+  if (!launchd) return plan({ changed: !same, content, programArguments })
   // The file alone does not start it: launchd may have let it go (a `launchctl bootout`, a failed start), and then
   // only loading it again brings it back.
   const loaded = !same || (status.loaded ?? (await agentLoaded(ctx, agent)))
@@ -393,6 +575,29 @@ export async function applyAutostart(
         code: 'changed',
       },
     )
+  if (plan.status.mechanism !== 'launchd') {
+    // An autostart entry or a Startup script: nothing to tell, it takes effect at the next login.
+    if (plan.action === 'off') {
+      await rm(path, { force: true })
+      return { changed: true, state: 'off', path, loaded: false }
+    }
+    await mkdir(dirname(path), { recursive: true, mode: 0o755 })
+    if (!(await writeIfUnchanged(path, plan.hash, plan.content!, 0o644)))
+      throw new UserError(
+        `${path} changed while sideby was writing it; nothing was changed. Run the command again`,
+        {
+          code: 'changed',
+        },
+      )
+    return {
+      changed: true,
+      state: 'on',
+      path,
+      programArguments: plan.programArguments!,
+      loaded: false,
+      note: agent.later,
+    }
+  }
   const exec = ctx.exec ?? defaultExec
   const note = launchctlNote(ctx)
   const run = async (cmd: string[]) => (note ? null : exec(cmd[0]!, cmd.slice(1)))

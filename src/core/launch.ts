@@ -17,10 +17,12 @@ export interface PreparedLaunch {
   notice?: string
   /** Terminal title set before the Host starts (config `accountTitle`), for example `[codex002]`. */
   title?: string
+  /** The arguments Network Guard added to `args` for its session hooks (spec §3.35); Auto Handoff merges them. */
+  networkArgs?: string[]
 }
 
 /** What `runHost` needs: a prepared Account launch, or the Host run unchanged (`sideby resume`). */
-export type HostLaunch = Pick<PreparedLaunch, 'family' | 'bin' | 'args' | 'env' | 'title'> & {
+export type HostLaunch = Pick<PreparedLaunch, 'family' | 'bin' | 'args' | 'env' | 'title' | 'notice'> & {
   /** The Account the Host runs as, when sideby chose one: its Live Session can then grow the title (spec §3.32). */
   account?: Account
 }
@@ -268,4 +270,10 @@ export function spawnHost(p: HostLaunch): { child: ChildProcess; exited: Promise
     })
   })
   return { child: host, exited }
+}
+
+/** `args` with `extra` before the first `--`, so a user's own `--` cannot turn sideby's options into prompt text. */
+export function beforeDashes(args: readonly string[], extra: readonly string[]): string[] {
+  const at = args.indexOf('--')
+  return at === -1 ? [...args, ...extra] : [...args.slice(0, at), ...extra, ...args.slice(at)]
 }

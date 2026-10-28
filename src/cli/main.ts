@@ -12,7 +12,7 @@ Usage:
   sideby ask [<text>] [--print]       let your AI handle a sideby task
   sideby terminal [--set <id>|--custom <t>|--unset] choose your terminal
   sideby key <account> [--var <NAME>] enter an API key without echo
-  sideby try <account> [--yes]        try the Host with a short paid request
+  sideby try <account> [--model <m>]  try the Host with a short paid request
   sideby                              list accounts (same as \`sideby list\`)
   sideby list --all                   also list hidden families and accounts
   sideby run <account> [-- args]      start the host CLI for one account
@@ -31,6 +31,8 @@ Usage:
   sideby quota check <family> on|off  turn quota fetching on or off
   sideby update --auto on|off         set Auto Update without running an update
   sideby update --skill [--yes]       update only the installed sideby skill to this version
+  sideby commands <words>             find where a page, setting or action lives in the Panel,
+                                      and the command that does the same (read-only)
   sideby families [family]            what each host's accounts share with the main account,
                                       where they live and how they sign in
   sideby alias add <short> <account> [-- args]
@@ -44,7 +46,7 @@ Usage:
   sideby login <account>              sign in to an account
   sideby resume <family> [-- args]    run the host; a session resumed by id (claude --resume <id>,
                                       codex resume <id>) starts in the account that holds it
-  sideby next <family> [--dry-run] [--include-api] [-- args]
+  sideby next <family> [--dry-run] [--include-api] [--ignore-network] [-- args]
                                       recommend the account with the most quota left (claude, codex, grok)
                                       and start it; --dry-run only recommends
   sideby doctor [target] [--fix] [--force]
@@ -98,6 +100,8 @@ Usage:
                                       whether Claude sessions show messages from other sessions at once
   sideby edit <account> [--path]      open the account's own settings file (settings.json,
                                       config.toml) in your editor
+  sideby network [check]              stop Claude and Codex when requests would leave from a country
+                                      you did not allow (network on|off|allow <CC>... [--yes])
   sideby browser [--enable [--yes]]   which Chrome browser user signed in to each account's website
                                       (read on this computer only; off until you enable it)
   sideby browser open <account> [--profile <name>]
@@ -116,8 +120,8 @@ Usage:
   sideby plugins new <id>             create a local Family Plugin skeleton
   sideby plugins check <id|path>      check a plugin and show fixes
   sideby update [--yes]               update sideby to the newest version (shows the command first)
-  sideby autostart [on|off] [--yes]   start the panel in the background at login (macOS; shows the
-                                      file first)
+  sideby autostart [on|off] [--yes]   start the panel in the background at login (macOS, Linux, WSL;
+                                      shows the file first)
   sideby menubar [on|off] [--yes]     show quota in the macOS menu bar; click an account to start it
   sideby menubar hotkey [<keys>|off]  show or change the shortcut that opens that menu (⌥X)
   sideby theme [list]                 the Panel's Themes; use <name> switches, use --undo goes back, use default clears
@@ -132,9 +136,9 @@ Usage:
 
 Options:
   --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, remote-control, handoff,
-                families, plugins, app, desktop, sessions, history, send, messages, edit, browser, update, local, ask,
+                families, commands, plugins, app, desktop, sessions, history, send, messages, edit, browser, update, local, ask,
                 terminal, key, try, autostart, menubar, config)
-  -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, desktop, edit, browser,
+  -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, commands, desktop, edit, browser,
                 autostart, menubar, config, sessions, history, send, messages
   -v, --version show the version
 
@@ -153,11 +157,11 @@ Updates: once a day sideby asks the npm registry for its newest version and says
 
 /** `sideby <command> --help` for the commands agents use to set up and repair accounts (spec §3.16). */
 const COMMAND_HELP: Record<string, string> = {
-  ask: 'sideby ask [<text>] [--task free|fix|quota|account|host|plugin|terminal|handoff|theme|menubar|hotkey] [--account <ref>] [--terminal <id>] [--attach <file>]... [--print] [--json]\nsideby ask --run <id> [--state-dir <dir>]\nsideby ask --spec - [--print] --json\nsideby ask --choices --json\nOpen a task in your terminal. --spec reads a Task Spec (one JSON object, at most 1 MB) from stdin, as a Portal sends it; --choices lists the accounts and terminals a task can use. --attach adds an image (PNG, JPEG, GIF, WebP; up to 20 MB) or a video (MP4, MOV, WebM; up to 200 MB), at most 5. --print prints only the prompt. If opening fails, paste the command into a terminal.',
+  ask: 'sideby ask [<text>] [--task free|fix|quota|account|host|plugin|terminal|handoff|theme|menubar|hotkey|network] [--account <ref>] [--terminal <id>] [--attach <file>]... [--print] [--json]\nsideby ask --run <id> [--state-dir <dir>]\nsideby ask --spec - [--print] --json\nsideby ask --choices --json\nOpen a task in your terminal. --spec reads a Task Spec (one JSON object, at most 1 MB) from stdin, as a Portal sends it; --choices lists the accounts and terminals a task can use. --attach adds an image (PNG, JPEG, GIF, WebP; up to 20 MB) or a video (MP4, MOV, WebM; up to 200 MB), at most 5. --print prints only the prompt. If opening fails, paste the command into a terminal.',
   terminal:
     "sideby terminal [--set <id>|--custom '<program> … {cwd} … {cmd}'|--unset] [--json]\nList terminals or save your preference; --custom saves and selects your own launch command.",
   key: 'sideby key <account> [--var <NAME>] [--json]\nEnter an API key without echo. Run in a terminal or use the Panel key box.',
-  try: 'sideby try <account> [--yes] [--json]\nSend a short request through the Host. This spends a few tokens. Exit 10 waits for --yes.',
+  try: 'sideby try <account> [--model <model>] [--yes] [--json]\nSend a short request through the Host. This spends a few tokens. Exit 10 waits for --yes.\n<account> may be a short command; its arguments apply as in sideby run. --model tries another model once.',
   plugins:
     'sideby plugins [--json]\nsideby plugins new <id> [--json]\nsideby plugins check <id|path> [--json]\nPlugins run as you, with your permissions. Only load plugins you trust.',
   new: `sideby new <family> <name> [--api] [--alias <short>] [--json]
@@ -366,8 +370,10 @@ malformed command line.`,
   autostart: `sideby autostart [on|off] [--yes] [--json]
 
 Start the panel in the background when you log in, so it already shows fresh quota when you open it. It never
-opens a window or a browser and never starts a host. macOS only for now (a LaunchAgent,
-~/Library/LaunchAgents/dev.sideby.panel.plist, that starts this Node and this sideby with ui --background).
+opens a window or a browser and never starts a host. It starts this Node and this sideby with ui --background:
+on macOS from a LaunchAgent (~/Library/LaunchAgents/dev.sideby.panel.plist), on Linux from an autostart entry
+(~/.config/autostart/dev.sideby.panel.desktop, run by desktop sessions), and under WSL from sideby-panel.vbs in
+the Windows Startup folder, when you sign in to Windows.
 
 Without on or off it says whether it is on, off, out of date (the Node or sideby it starts was moved) or blocked
 by a file that is not sideby's. on and off show the file and the launchctl command first; --yes does it.
@@ -412,8 +418,9 @@ sideby theme import <file> [--id <name>] [--yes] [--json]
 sideby theme export <name> [--out <file>] [--json]
 sideby theme remove <name> [--yes] [--json]
 
-The Panel's colors. Built-in Themes: sky (default) and leaf. A Theme File is JSON in <config>/themes/<name>.json:
-{"schemaVersion": 1, "name": "My blue", "base": "sky", "accent": "#2f7fbf", "light": {...}, "dark": {...}}
+The Panel's colors. Built-in Themes: teal (default), leaf, celeste, claude and codex. A Theme File is JSON in
+<config>/themes/<name>.json:
+{"schemaVersion": 1, "name": "My blue", "base": "celeste", "accent": "#2f7fbf", "light": {...}, "dark": {...}}
 base and accent are optional; light and dark take the same tokens as a Portal Theme. Files hold colors only, never code.
 check reports text and control contrast in light and dark with a value that would pass (exit 1 when any fails); the
 Panel moves failing colors itself. preview shows a Theme once in the running Panel without switching. Exit 10: import
@@ -438,6 +445,31 @@ Examples:
   sideby config unset panel.language --yes
 Exit: 0 shown, saved or nothing to change; 10 a change was shown and waits for --yes; 1 not a key, a value the key
 does not take, or the file changed meanwhile; 2 malformed command line.`,
+  network: `sideby network [check] [--json]
+       sideby network allow <country>... [--yes] [--json]
+       sideby network on|off [--yes] [--json]
+
+Network check: before sideby starts a Claude or Codex account, and before each prompt and tool call in a session
+it started, check the country the requests leave from. When it is not one you allowed, or cannot be told within 3
+seconds (the proxy is off, the network is down), stop and say what to do. It guards against a proxy that stopped
+or a node in the wrong country; it does not make use from an unsupported region allowed.
+
+sideby asks the vendor's own https://api.anthropic.com, chatgpt.com or api.openai.com /cdn-cgi/trace, through the
+account's proxy settings, with no credential, account or identity, and keeps only the country and a hash of the
+address. Results are reused for 60 seconds. Off by default; off in CI. Sessions started without sideby (running
+claude or codex directly) are not checked. API accounts on a third-party endpoint are not checked.
+
+network        shows the setting and the newest result per address (no request)
+network check  asks every address now
+allow          sets the allowed countries (two letters, such as US JP); on and off turn it on and off
+To skip it once: sideby run <account> --ignore-network (also sideby next --ignore-network).
+
+Examples:
+  sideby network allow US JP --yes
+  sideby network on --yes
+  sideby network check
+Exit: 0 shown or changed; 10 a change was shown and waits for --yes; 1 a country code that is not one, or on with
+no country allowed; 2 malformed command line.`,
   browser: `sideby browser [--enable|--disable] [--yes] [--json]
        sideby browser open <account> [--profile <folder|name>] [--json]
        sideby browser set <account> <folder|name> [--json]
@@ -470,6 +502,17 @@ Examples:
   sideby browser set codex:main "Profile 7"
 Exit: 0 shown, changed, chosen or opened; 1 not macOS, Chrome not installed, no or several browser users to choose from, or
 Chrome did not open; 10 --enable/--disable without --yes; 2 malformed command line.`,
+  commands: `sideby commands <words>... [--json]
+
+Find a feature of sideby by name, in English or Chinese: a page of the Panel, a setting or an action. Each result
+says where it lives in the Panel (Settings → General → Language) and the command that does the same, when there is
+one. The Panel's Search (Cmd/Ctrl+K) searches the same list. It finds features, not sessions: for those use
+\`sideby history <words>\`.
+
+Examples:
+  sideby commands language
+  sideby commands 深色 --json
+Exit: 0, also when nothing matches; 2 no words given or malformed command line.`,
   families: `sideby families [family] [--json]
 
 For each host (built in or from a plugin): where its accounts live, the variable that selects one, how to sign
@@ -499,7 +542,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   },
   terminal: { flags: ['json', 'unset'], valued: ['set', 'custom'] },
   key: { flags: ['json'], valued: ['var'] },
-  try: { flags: ['json', 'yes'] },
+  try: { flags: ['json', 'yes'], valued: ['model'] },
   autostart: { flags: ['json', 'yes', 'refresh'] },
   menubar: { flags: ['json', 'yes', 'refresh'], valued: ['lang', 'hotkey', 'hotkey-label', 'icon'] },
   config: { flags: ['json', 'yes'] },
@@ -513,7 +556,8 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   run: { flags: [] },
   resume: { flags: [] },
   login: { flags: [] },
-  next: { flags: ['dry-run', 'include-api', 'json'] },
+  next: { flags: ['dry-run', 'include-api', 'json', 'ignore-network'] },
+  network: { flags: ['json', 'yes'] },
   new: { flags: ['api', 'json', 'next'], valued: ['alias'] },
   alias: { flags: ['json', 'yes'], valued: ['pick'] },
   doctor: { flags: ['fix', 'force', 'json'] },
@@ -525,7 +569,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
     flags: ['json', 'yes', 'same-family', 'no-same-family', 'other-ai', 'no-other-ai', 'api', 'no-api'],
     valued: ['brief', 'to', 'order', 'ai-order', 'prepare-at', 'threshold', 'wait-minutes', 'countdown'],
   },
-  ui: { flags: ['no-open', 'background', 'stop', 'serve-detached'], valued: ['port'] },
+  ui: { flags: ['no-open', 'background', 'stop', 'serve-detached', 'wait'], valued: ['port'] },
   app: { flags: ['json'], valued: ['url'] },
   desktop: { flags: ['json', 'remove', 'yes'] },
   sessions: { flags: ['json'], valued: ['as', 'lang'] },
@@ -540,6 +584,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   'shell-init': { flags: ['write', 'yes', 'undo', 'json'] },
   plugins: { flags: ['json'] },
   families: { flags: ['json'] },
+  commands: { flags: ['json'] },
   update: { flags: ['json', 'yes', 'skill'], valued: ['auto'] },
   local: { flags: ['json', 'yes'] },
   'update-check': { flags: [] },
@@ -650,6 +695,11 @@ export async function main(argv: string[]): Promise<number> {
   if (first === 'handoff-hook') {
     const { runHandoffHook } = await import('../handoff/hook.ts')
     return runHandoffHook(rest, process.env, process.stdin, process.stdout)
+  }
+  // Network Guard's hook runs before every prompt and tool call it guards (spec §3.35); same fast path.
+  if (first === 'network-hook') {
+    const { runNetworkHook } = await import('../network/hook.ts')
+    return runNetworkHook(rest, process.env, process.stderr)
   }
   if (nodeTooOld()) {
     console.error(
@@ -806,12 +856,16 @@ async function dispatch(
       return await cmds.cmdEdit(parsed, io)
     case 'browser':
       return await cmds.cmdBrowser(parsed, io)
+    case 'network':
+      return await cmds.cmdNetwork(parsed, io)
     case 'shell-init':
       return await cmds.cmdShellInit(parsed, io)
     case 'plugins':
       return await cmds.cmdPlugins(parsed, io)
     case 'families':
       return await cmds.cmdFamilies(parsed, io)
+    case 'commands':
+      return cmds.cmdCommands(parsed, io)
     case 'update':
       return await cmds.cmdUpdate(parsed, io)
     case 'update-check':

@@ -7,13 +7,22 @@ import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Env } from '../types.ts'
 import { afterInstall, runSkillUpdate } from './after-install.ts'
+import { fetchTrace, proxyFor } from './egress.ts'
 import { writeFileAtomic } from './fs-safe.ts'
 import { processAlive, takeFileLock } from './lock.ts'
 import type { Paths } from './paths.ts'
-import { installedSkills, REPO_URL, SKILL_UPDATE, SKILL_UPDATE_SHOWN, skillOwnerRepo } from './skill-check.ts'
-import { localBuild, packageVersion, parseLocalBuild } from './version.ts'
+import {
+  installedSkills,
+  REPO_URL,
+  SKILL_UPDATE,
+  SKILL_UPDATE_SHOWN,
+  skillIsBehind,
+  skillOwnerRepo,
+} from './skill-check.ts'
+import { compareVersions, localBuild, packageVersion, parseLocalBuild, parseVersion } from './version.ts'
 
 export { isZombieStat } from './lock.ts'
+export { compareVersions } from './version.ts'
 
 export const DEFAULT_REGISTRY = 'https://registry.npmjs.org'
 export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
@@ -137,8 +146,39 @@ async function ownPackageDir(): Promise<string> {
   return realpath(join(here, '../..'))
 }
 
+/**
+ * Node's `fetch` ignores `HTTPS_PROXY` and the like, so on a network that only reaches npm through a proxy the check
+ * would time out. An `https://` registry the proxy variables cover is asked through that proxy, as npm itself would.
+ */
+async function registryFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  const url = String(input instanceof Request ? input.url : input)
+  if (!url.startsWith('https://') || !proxyFor(url, process.env)) return fetch(input, init)
+  try {
+    const body = await fetchTrace(url, process.env, FETCH_TIMEOUT_MS, 'sideby-update-check')
+    return new Response(body, { status: 200, headers: { 'content-type': 'application/json' } })
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException
+    const status = /^HTTP (\d{3})$/.exec(e.message ?? '')
+    if (status) return new Response(null, { status: Number(status[1]) })
+    // Plain words that never carry the proxy address or its password.
+    const why =
+      e.message === 'timeout'
+        ? Object.assign(new Error('timed out'), { name: 'TimeoutError' })
+        : e.code === 'ECONNREFUSED'
+          ? new Error('the proxy in HTTPS_PROXY refused the connection; is it running?')
+          : e.code === 'ENOTFOUND' || e.code === 'EAI_AGAIN'
+            ? new Error('the address could not be looked up; offline?')
+            : new Error(
+                e.message?.startsWith('the proxy') || e.message?.startsWith('a ')
+                  ? `${e.message} (HTTPS_PROXY)`
+                  : 'the request through the proxy in HTTPS_PROXY failed',
+              )
+    throw why
+  }
+}
+
 const realDeps: UpdateDeps = {
-  fetch: (...args) => fetch(...args),
+  fetch: registryFetch,
   now: () => new Date(),
   packageDir: ownPackageDir,
   writable: (dir) =>
@@ -245,37 +285,6 @@ export const updateMachine = (): UpdateDeps => deps()
 export const takeInstallLock = (paths: Paths) => takeLock(paths, 'update-install.lock').catch(() => null)
 
 // ---- versions
-
-type Parsed = { core: [number, number, number]; pre: string[] }
-// Build metadata is limited to what semver allows, so a version never carries a terminal escape into the notice.
-const VERSION = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/
-function parseVersion(v: string): Parsed | null {
-  const m = VERSION.exec(v.trim())
-  return m ? { core: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] ? m[4].split('.') : [] } : null
-}
-
-/** Semver precedence of two prerelease identifiers: numbers compare as numbers and sort before words. */
-function comparePre(a: string, b: string): number {
-  const na = /^\d+$/.test(a)
-  const nb = /^\d+$/.test(b)
-  if (na && nb) return Math.sign(Number(a) - Number(b))
-  if (na !== nb) return na ? -1 : 1
-  return a < b ? -1 : a > b ? 1 : 0
-}
-
-/** -1, 0 or 1 like a sort comparator; a prerelease sorts before its release. Null when either is not a version. */
-export function compareVersions(a: string, b: string): number | null {
-  const pa = parseVersion(a)
-  const pb = parseVersion(b)
-  if (!pa || !pb) return null
-  for (let i = 0; i < 3; i++) if (pa.core[i] !== pb.core[i]) return pa.core[i]! < pb.core[i]! ? -1 : 1
-  if (!pa.pre.length || !pb.pre.length) return Math.sign(pb.pre.length - pa.pre.length)
-  for (let i = 0; i < Math.min(pa.pre.length, pb.pre.length); i++) {
-    const c = comparePre(pa.pre[i]!, pb.pre[i]!)
-    if (c) return c
-  }
-  return Math.sign(pa.pre.length - pb.pre.length)
-}
 
 /** `latest` is newer than `current`. */
 export const isNewer = (latest: string | undefined, current: string): latest is string =>
@@ -442,7 +451,7 @@ export async function fetchLatest(env: Env): Promise<string> {
   } catch (err) {
     const why = (err as Error).name === 'TimeoutError' ? 'timed out' : (err as Error).message
     throw new Error(
-      `could not reach ${shown} (${why}); check the connection, or set SIDEBY_UPDATE_REGISTRY to a mirror`,
+      `could not reach ${shown} (${why}); check the connection (and HTTPS_PROXY if you use a proxy), or set SIDEBY_UPDATE_REGISTRY to a mirror`,
     )
   }
   if (!res.ok)
@@ -541,7 +550,7 @@ export interface SkillBehind {
 /** The skill part of a `SkillUpdatePlan` toward the running version, as `afterCommandPlan` takes it. */
 export const skillBehind = (plan: SkillUpdatePlan | null, current: string): SkillBehind | null =>
   plan?.outdated
-    ? { installed: plan.installed.find((v) => v !== current) ?? null, canRun: plan.canRun }
+    ? { installed: plan.installed.find((v) => skillIsBehind(v, current)) ?? null, canRun: plan.canRun }
     : null
 
 /**
@@ -856,7 +865,7 @@ export function shownPlan(plan: UpdatePlan) {
 export interface SkillUpdatePlan {
   /** Versions of the installed skills (`null`: one without a version). */
   installed: (string | null)[]
-  /** Some installed skill is for another version than the one sideby will run. */
+  /** Some installed skill is for an older version than the one sideby will run (a newer one is not outdated). */
   outdated: boolean
   command: string
   /** False when sideby must not run it; `reason` says why and the user runs `command` where it belongs. */
@@ -874,7 +883,7 @@ export async function skillUpdatePlan(home: string, target: string): Promise<Ski
   const installed = skills.map((s) => s.version)
   const plan: SkillUpdatePlan = {
     installed,
-    outdated: installed.some((v) => v !== target),
+    outdated: installed.some((v) => skillIsBehind(v, target)),
     command: SKILL_UPDATE.join(' '),
     canRun: true,
   }

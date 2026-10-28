@@ -64,6 +64,18 @@ describe('doctor and the installed skill', () => {
     })
   })
 
+  it('says nothing about a skill for a newer sideby', async () => {
+    await withFakeHome(async (h) => {
+      await claudeMain(h)
+      await h.write('.agents/skills/sideby/SKILL.md', skill('99.0.0'))
+      const report = await (await createRuntime({ env: h.env })).doctor({ persist: false })
+      assert.deepEqual(
+        report.general.filter((f) => f.code === 'skill.outdated'),
+        [],
+      )
+    })
+  })
+
   it('points a skill that a git repository owns back to that repository', async () => {
     await withFakeHome(async (h) => {
       await claudeMain(h)

@@ -6,6 +6,8 @@ import { mkdir, readFile, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
+import { MENUBAR_AGENT } from '../menubar/agent.ts'
+import { autostartInstalled, PANEL_AGENT } from './autostart.ts'
 import { resolvePaths } from './paths.ts'
 import {
   afterCommandPlan,
@@ -94,6 +96,9 @@ function machine(h: FakeHome, over: Partial<UpdateDeps> & { latest?: string | Er
       m.appRefreshes++
       return true
     },
+    // The login items these tests write are LaunchAgents, whatever system runs the tests.
+    autostartInstalled: (home, command = 'autostart') =>
+      autostartInstalled(home, command === 'menubar' ? MENUBAR_AGENT : PANEL_AGENT, { platform: 'darwin' }),
     refreshAutostart: async (_env, command = 'autostart') => {
       m.autostartRefreshes++
       m.loginItems.push(command)
@@ -350,6 +355,18 @@ describe('Update and Auto Update', () => {
       const r = await applyUpdate(resolvePaths(h.env), plan, h.env)
       assert.equal(m.execs.length, 1, 'only the CLI install ran')
       assert.equal(r.skillUpdated, undefined)
+    })
+  })
+  it('does not call a skill for a newer sideby outdated: the CLI is what is behind', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.agents/skills/sideby/SKILL.md', skill('99.0.0'))
+      const plan = await skillUpdatePlan(h.home, CURRENT)
+      assert.equal(plan?.outdated, false)
+      assert.equal(plan && skillBehind(plan, CURRENT), null)
+      await h.write('.claude/skills/sideby/SKILL.md', skill('0.0.1'))
+      const both = await skillUpdatePlan(h.home, CURRENT)
+      assert.equal(both?.outdated, true)
+      assert.equal(both && skillBehind(both, CURRENT)?.installed, '0.0.1', 'names the older one')
     })
   })
   it('has no skill part without an installed skill, and runs nothing for a current one', async () => {

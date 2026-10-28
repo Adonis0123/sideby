@@ -2,14 +2,18 @@
 // call goes to an injected exec; the real one never runs.
 import assert from 'node:assert/strict'
 import { readFile, stat } from 'node:fs/promises'
+import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { withFakeHome } from '../../testing/index.ts'
+import { MENUBAR_AGENT } from '../menubar/agent.ts'
 import {
   AUTOSTART_MARKER,
   type AutostartContext,
   applyAutostart,
+  autostartInstalled,
   autostartPath,
   autostartStatus,
+  desktopContent,
   parseProgramArguments,
   planAutostart,
   plistContent,
@@ -201,15 +205,20 @@ describe('autostart', () => {
         ],
         [{ launcher: { node: '/bin/sh', entry: '/tmp/sideby/main.js' } }, 'temp-dir'],
         [{ launcher: { node: '/bin/sh', entry: '/opt/side\nby/main.js' } }, 'unsafe-path'],
-        [{ platform: 'linux' }, 'unsupported'],
+        [{ platform: 'win32' }, 'unsupported'],
       ]
       for (const [extra, code] of cases) {
         const plan = await planAutostart(ctxFor(h.home, extra), 'on')
         assert.equal(plan.blocked?.code, code, code)
-        assert.match(plan.blocked!.message, code === 'unsupported' ? /macOS only/ : /npm i -g sideby/)
+        assert.match(
+          plan.blocked!.message,
+          code === 'unsupported' ? /macOS, Linux and WSL/ : /npm i -g sideby/,
+        )
       }
-      const linux = await autostartStatus(ctxFor(h.home, { platform: 'linux' }))
-      assert.equal(linux.supported, false)
+      const win = await autostartStatus(ctxFor(h.home, { platform: 'win32' }))
+      assert.equal(win.supported, false)
+      const menubar = await autostartStatus(ctxFor(h.home, { platform: 'linux', wsl: null }), MENUBAR_AGENT)
+      assert.equal(menubar.supported, false)
       assert.equal(await stat(autostartPath(h.home)).catch(() => null), null)
     })
   })
@@ -240,5 +249,102 @@ describe('autostart', () => {
     const text = plistContent(['/opt/a&b<c>/node', '/x'])
     assert.ok(text.includes('/opt/a&amp;b&lt;c&gt;/node'))
     assert.deepEqual(parseProgramArguments(text), ['/opt/a&b<c>/node', '/x'])
+  })
+
+  it('writes an XDG autostart entry on Linux, runs nothing, and removes only its own file', async () => {
+    await withFakeHome(async (h) => {
+      const { calls, exec } = recorder()
+      const ctx = ctxFor(h.home, { exec, platform: 'linux', wsl: null, env: {} })
+      const path = join(h.home, '.config', 'autostart', 'dev.sideby.panel.desktop')
+      const off = await autostartStatus(ctx)
+      assert.deepEqual([off.supported, off.mechanism, off.state, off.path], [true, 'xdg', 'off', path])
+      const plan = await planAutostart(ctx, 'on')
+      assert.deepEqual(plan.commands, [])
+      assert.match(plan.content!, /^Exec=\/bin\/sh \/usr\/bin\/env ui --background --no-open$/m)
+      const r = await applyAutostart(ctx, plan)
+      assert.deepEqual([r.state, r.loaded], ['on', false])
+      assert.equal((await stat(path)).mode & 0o777, 0o644)
+      const on = await autostartStatus(ctx)
+      assert.deepEqual([on.state, on.current], ['on', true])
+      assert.equal(
+        await autostartInstalled(h.home, undefined, { platform: 'linux', wsl: null, env: {} }),
+        true,
+      )
+      await applyAutostart(ctx, await planAutostart(ctx, 'off'))
+      assert.equal(await stat(path).catch(() => null), null)
+      assert.deepEqual(calls, [])
+      await h.write('.config/autostart/dev.sideby.panel.desktop', '[Desktop Entry]\n', 0o644)
+      assert.equal((await planAutostart(ctx, 'off')).blocked?.code, 'foreign')
+    })
+  })
+
+  it('quotes desktop entry arguments and doubles %', () => {
+    const exec = desktopContent(['/opt/my node', '/a%b', 'x"$'])
+      .split('\n')
+      .find((l) => l.startsWith('Exec='))
+    assert.equal(exec, 'Exec="/opt/my node" "/a%%b" "x\\"\\$"')
+  })
+
+  it('under WSL writes a Startup script that runs wsl.exe hidden and waits with the panel', async () => {
+    await withFakeHome(async (h) => {
+      const { calls, exec } = recorder()
+      const startupDir = join(h.home, 'Startup')
+      const wsl = { distro: 'Ubuntu', mount: '/mnt' }
+      const ctx = ctxFor(h.home, { exec, platform: 'linux', wsl, startupDir })
+      const plan = await planAutostart(ctx, 'on')
+      assert.equal(plan.status.mechanism, 'wsl-startup')
+      assert.equal(plan.path, join(startupDir, 'sideby-panel.vbs'))
+      assert.deepEqual(plan.programArguments, [
+        '/bin/sh',
+        '/usr/bin/env',
+        'ui',
+        '--background',
+        '--no-open',
+        '--wait',
+      ])
+      const q = (a: string) => `""${a}""`
+      const line = `wsl.exe -d Ubuntu --exec ${plan.programArguments!.map(q).join(' ')}`
+      assert.ok(plan.content!.includes(`CreateObject("WScript.Shell").Run "${line}", 0, False\r\n`))
+      await applyAutostart(ctx, plan)
+      const on = await autostartStatus(ctx)
+      assert.deepEqual([on.state, on.current], ['on', true])
+      assert.deepEqual(calls, [])
+      const bad = await planAutostart(
+        { ...ctx, launcher: { node: '/bin/sh', entry: '/opt/50%/main.js' } },
+        'on',
+      )
+      assert.equal(bad.blocked?.code, 'unsafe-path')
+      const spaced = await planAutostart({ ...ctx, wsl: { distro: 'My Linux', mount: '/mnt' } }, 'on')
+      assert.equal(spaced.blocked?.code, 'unsafe-path')
+    })
+  })
+
+  it('under WSL keeps another HOME out of the real Windows Startup folder', async () => {
+    await withFakeHome(async (h) => {
+      const { calls, exec } = recorder()
+      const wsl = { distro: 'Ubuntu', mount: '/mnt' }
+      const ctx = ctxFor(h.home, { exec, platform: 'linux', wsl, loginHome: '/home/someone' })
+      const s = await autostartStatus(ctx)
+      assert.equal(s.path, join(h.home, '.sideby-windows-startup', 'sideby-panel.vbs'))
+      assert.deepEqual(calls, [])
+    })
+  })
+
+  it('under WSL asks cmd.exe for the Startup folder of the login home', async () => {
+    await withFakeHome(async (h) => {
+      const calls: string[][] = []
+      const exec = async (file: string, args: readonly string[]) => {
+        calls.push([file, ...args])
+        return { code: 0, output: 'C:\\Users\\me\\AppData\\Roaming\r\n' }
+      }
+      const ctx = ctxFor(h.home, { exec, platform: 'linux', wsl: { distro: 'Ubuntu', mount: h.home } })
+      const s = await autostartStatus(ctx)
+      const roaming = join(h.home, 'c', 'Users', 'me', 'AppData', 'Roaming')
+      assert.equal(
+        s.path,
+        join(roaming, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'sideby-panel.vbs'),
+      )
+      assert.equal(calls[0]![0], join(h.home, 'c', 'Windows', 'System32', 'cmd.exe'))
+    })
   })
 })

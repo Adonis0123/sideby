@@ -1684,8 +1684,11 @@ describe('theme (spec §3.34)', () => {
       assert.deepEqual(
         (list.themes as { id: string; active: boolean }[]).map((t) => [t.id, t.active]),
         [
-          ['sky', true],
+          ['teal', true],
           ['leaf', false],
+          ['celeste', false],
+          ['claude', false],
+          ['codex', false],
         ],
       )
       const file = await h.write(
@@ -1716,7 +1719,7 @@ describe('theme (spec §3.34)', () => {
         'mine',
       )
       checkSchema('theme-use', (await sideby(h, ['theme', 'use', '--undo', '--json'])).out)
-      checkSchema('theme-export', (await sideby(h, ['theme', 'export', 'leaf', '--json'])).out)
+      checkSchema('theme-export', (await sideby(h, ['theme', 'export', 'codex', '--json'])).out)
       assert.equal((await sideby(h, ['theme', 'remove', 'mine'])).code, 10)
       const removed = checkSchema(
         'theme-remove',
@@ -1811,9 +1814,10 @@ describe('autostart (spec §3.29)', () => {
     await withFakeHome(async (h) => {
       const status = checkSchema('autostart', (await sideby(h, ['autostart', '--json'])).out)
       assert.equal(status.state, 'off')
-      assert.equal(status.supported, process.platform === 'darwin')
+      const supported = process.platform === 'darwin' || process.platform === 'linux'
+      assert.equal(status.supported, supported)
       const off = await sideby(h, ['autostart', 'off', '--json'])
-      assert.equal(off.code, process.platform === 'darwin' ? 0 : 1)
+      assert.equal(off.code, supported ? 0 : 1)
       await h.write('Library/LaunchAgents/dev.sideby.panel.plist', '<plist/>\n', 0o644)
       if (process.platform === 'darwin') {
         assert.equal(

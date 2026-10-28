@@ -1,10 +1,10 @@
-// Themes (spec §3.34, ADR-0050): the two Built-in Themes plus the user's Theme Files in <config>/themes/<id>.json.
+// Themes (spec §3.34, ADR-0050): the Built-in Themes plus the user's Theme Files in <config>/themes/<id>.json.
 // A Theme File is data only: a base Built-in Theme, an optional accent that regenerates the accent roles, and token
 // overrides checked like a Portal Theme's. This module lists, checks, resolves and switches them; it never runs code.
 import { lstat, mkdir, readdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { type PanelThemeTokens, THEME_TOKENS, themeValueProblem } from '../panel/theme.ts'
-import { BUILTIN_THEMES, type BuiltinTheme, DEFAULT_THEME_ID } from '../panel/themes.ts'
+import { BUILTIN_THEMES, type BuiltinTheme, DEFAULT_THEME_ID, RENAMED_THEMES } from '../panel/themes.ts'
 import { editConfigPanel, loadConfig } from './config.ts'
 import { writeFileAtomic } from './fs-safe.ts'
 import type { Paths } from './paths.ts'
@@ -41,14 +41,16 @@ export interface ResolvedColors {
   dark: PanelThemeTokens
   /** How many colors were moved to pass the contrast check. */
   adjusted: number
-  /** Set when the chosen Theme could not be used and Sky stands in. */
+  /** Set when the chosen Theme could not be used and the Default Theme stands in. */
   fallback?: string
 }
 
 export const themesDir = (paths: Paths) => join(paths.configDir, 'themes')
 const undoFile = (paths: Paths) => join(paths.stateDir, 'theme-undo.json')
 const previewFile = (paths: Paths) => join(paths.stateDir, 'theme-preview.json')
-const builtin = (id: string) => BUILTIN_THEMES.find((t) => t.id === id)
+/** A Built-in Theme by id; a renamed one's old id (sky) finds the Theme it became. */
+const builtin = (id: string) =>
+  BUILTIN_THEMES.find((t) => t.id === (Object.hasOwn(RENAMED_THEMES, id) ? RENAMED_THEMES[id] : id))
 
 /**
  * The name `sideby theme use` takes for "no Theme chosen": the Panel then shows the Default Theme on its own and,
@@ -198,11 +200,11 @@ export function themeColors(theme: ThemeFile): { light: PanelThemeTokens; dark: 
   }
 }
 
-/** The colors for a Theme id (Built-in or file), with failing pairs moved until they pass. Unknown or broken: Sky. */
+/** The colors for a Theme id (Built-in or file), with failing pairs moved until they pass. Unknown or broken: the Default Theme. */
 export async function resolveColors(paths: Paths, id: string | undefined): Promise<ResolvedColors> {
   const want = id === undefined || id === NO_THEME ? DEFAULT_THEME_ID : id
   const b = builtin(want)
-  if (b) return { id: want, light: { ...b.light }, dark: { ...b.dark }, adjusted: 0 }
+  if (b) return { id: b.id, light: { ...b.light }, dark: { ...b.dark }, adjusted: 0 }
   if (!THEME_ID_RE.test(want))
     return { ...defaults(), fallback: `${want} is not a Theme name; using ${DEFAULT.name.en}` }
   const r = await readThemeFile(join(themesDir(paths), `${want}.json`))
@@ -337,12 +339,14 @@ export interface ContrastPair {
   suggest?: string
 }
 
-// Text pairs need 4.5:1; the main button (bold text, ADR-0050) and the focus outline need 3:1.
+// Text pairs need 4.5:1 (faint too: the Panel uses it for captions, units and reset times people read); the main button (bold text, ADR-0050) and the focus outline need 3:1.
 const PAIRS: [keyof PanelThemeTokens, keyof PanelThemeTokens, number][] = [
   ['text', 'bg', 4.5],
   ['text', 'surface', 4.5],
   ['muted', 'bg', 4.5],
   ['muted', 'surface', 4.5],
+  ['faint', 'bg', 4.5],
+  ['faint', 'surface', 4.5],
   ['accent', 'bg', 4.5],
   ['accent', 'surface', 4.5],
   ['ok', 'okSoft', 4.5],
@@ -388,6 +392,7 @@ export async function useTheme(
   paths: Paths,
   id: string,
 ): Promise<{ before: string; after: string; changed: boolean }> {
+  id = builtin(id)?.id ?? id
   if (id !== NO_THEME) {
     const entry = (await listThemes(paths)).find((t) => t.id === id)
     if (!entry) throw new Error(`no Theme named ${id}; run \`sideby theme list\` to see the names`)

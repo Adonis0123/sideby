@@ -568,6 +568,20 @@ export function codeSwapOutcome(s: {
   return s.landed === false ? 'failed' : 'unknown'
 }
 /**
+ * Whether a page whose server now runs another build reloads now (spec §3.23). It waits while the viewer is in the
+ * middle of something, except in the update dialog or the version popover: they describe the old build, so a stale
+ * version or error would stay on screen, and nothing is typed there. A running fix, check or update still waits.
+ */
+export function reloadForBuild(s: {
+  newBuild: boolean
+  busy: boolean
+  working: boolean
+  updateView: boolean
+}): boolean {
+  if (!s.newBuild || s.working) return false
+  return !s.busy || s.updateView
+}
+/**
  * Runs a request that may swap the server's code (an Update, a Local Build switch; spec §3.23). A background Panel
  * restarting from the new code drops the answer, and a Portal moving to it may answer 5xx: without an answer only a
  * fresh read of the state that shows the change counts as success (`codeSwapOutcome`). Each wait starts when the
@@ -1067,6 +1081,28 @@ export function menuPlacement(
   return { left, top: margin, maxHeight: above, above: true }
 }
 
+/**
+ * The option a key moves to in a row of radio buttons (WAI-ARIA radio group): the arrows step and wrap around, Home
+ * and End go to the ends. -1 for any other key, or an empty row.
+ */
+export function radioStep(count: number, index: number, key: string): number {
+  if (count < 1) return -1
+  if (key === 'ArrowRight' || key === 'ArrowDown') return (index + 1) % count
+  if (key === 'ArrowLeft' || key === 'ArrowUp') return (index - 1 + count) % count
+  if (key === 'Home') return 0
+  if (key === 'End') return count - 1
+  return -1
+}
+
+/**
+ * Whether arrow-key use of a row of radio dots carries into the next render, which puts focus back on the dot in use.
+ * `focus` is where focus is before the render: nowhere in particular (the page or the dialog, as when a busy render
+ * disabled the dots), on a dot, or on another control. Once the user has moved to another control, keyboard use ends.
+ */
+export function dotsKeepKeyboard(focus: 'none' | 'dot' | 'other'): boolean {
+  return focus !== 'other'
+}
+
 /** The key a Same Login group keeps its folded state under: its members, in a fixed order. */
 export function loginKey(refs: readonly string[]): string {
   return `login:${[...refs].sort().join(',')}`
@@ -1104,6 +1140,39 @@ export function stripSecrets(text: string): { text: string; removed: boolean } {
   return { text: out, removed }
 }
 
+/**
+ * Network Guard facts for the `network` AI Task (spec §3.35), one plain line each, from the Panel state's `network`:
+ * the switch, the allowed countries and the newest result per address. No address is ever in it, only countries.
+ */
+export function networkTaskFacts(n: {
+  guard: boolean
+  allow: readonly string[]
+  targets: readonly {
+    url: string
+    status: string
+    loc?: string
+    checkedAt?: string
+    error?: string
+    accounts: readonly string[]
+  }[]
+  accounts: readonly { ref: string; skip?: string }[]
+}): string[] {
+  const out = [`guard: ${n.guard ? 'on' : 'off'}`, `allow: ${n.allow.join(', ') || 'none'}`]
+  for (const t of n.targets) {
+    let host = t.url
+    try {
+      host = new URL(t.url).hostname
+    } catch {
+      // keep the URL
+    }
+    out.push(
+      `${host}: ${t.status}${t.loc ? `, country ${t.loc}` : ''}${t.checkedAt ? `, checked ${t.checkedAt}` : ''}${t.error ? `, ${t.error}` : ''} (${t.accounts.join(', ')})`,
+    )
+  }
+  for (const a of n.accounts) if (a.skip) out.push(`${a.ref}: not checked here (${a.skip})`)
+  return out
+}
+
 /** The kinds of AI Task (spec §3.28); anything else is refused. */
 export const AI_TASK_KINDS = [
   'free',
@@ -1117,6 +1186,8 @@ export const AI_TASK_KINDS = [
   'handoff',
   'menubar',
   'hotkey',
+  'network',
+  'update',
 ] as const
 export type AiTaskKind = (typeof AI_TASK_KINDS)[number]
 
@@ -1235,6 +1306,10 @@ export function taskPrompt(
       terminals?: readonly string[]
       /** Auto Handoff facts, one per line, as `handoffTaskFacts` gives them (`handoff` task). */
       handoff?: readonly string[]
+      /** Network Guard facts, one per line, as `networkTaskFacts` gives them (`network` task, spec §3.35). */
+      network?: readonly string[]
+      /** The error the last Update Check or Update showed (`update` task, spec §3.23). */
+      updateError?: string
     }
     /** Files saved for the task (spec §3.28 "附件"): absolute paths and their kind. */
     attachments?: readonly { path: string; kind: string }[]
@@ -1274,6 +1349,15 @@ export function taskPrompt(
         pMenubar:
           '先运行 `sideby menubar --json`。`state` 为 `off`：它被关掉了（常见于菜单里的「从状态栏隐藏…」），给我看 `sideby menubar on` 的预览，我同意后加 `--yes`。`state` 为 `on` 但 `loaded` 为 `false`：macOS 没在运行它，`sideby menubar on --yes` 只是重新启动，不改文件。`loaded` 为 `true`：它在运行但被挡住了，依次查：状态栏是否太满或被刘海挡住（按住 ⌘ 拖动图标）；有没有 Ice、Bartender、Hidden Bar 这类菜单栏整理工具把它收起来了（查 `/Applications`，告诉我去它的设置里把 sideby（显示为 osascript）挪出来）；macOS 26 及以上要在「系统设置 › 菜单栏」里允许 osascript（`sideby menubar --json` 里的快捷键 `hotkey.label` 可以在任何地方打开菜单，用来确认它在运行）。不要结束或重启任何不是 sideby 的进程。',
         cHandoff: '自动接力现在的设置（来自 `sideby handoff status --json`）：',
+        network:
+          '帮我设置 sideby 的网络检查：请求要从我没允许的国家或地区发出时（比如代理断了、节点切错了），拦下 Claude 和 Codex。',
+        cNetwork: '网络检查现在的情况（来自 `sideby network --json`）：',
+        update: '帮我把 sideby 和它的 skill 更新到最新版：面板检查更新或更新时出错了，请找出原因并修好。',
+        cUpdate: '面板上的报错：',
+        pUpdate:
+          '先运行 `sideby update --json`，看它能不能连上 npm、最新版是多少、是哪种安装方式（`canRun`）。连不上时先查网络：要走代理的话，看启动 sideby 的终端里有没有 `HTTPS_PROXY`、代理开没开；在中国大陆可以用镜像 `SIDEBY_UPDATE_REGISTRY=https://registry.npmmirror.com`，要写进 shell 配置文件前先问我。能更新时，`sideby update --json` 已经给出预览（退出码 10），我同意后再跑 `sideby update --yes --json`。`canRun` 为 `false` 时（npx、项目依赖、没有写权限的全局目录），把输出里的 `command` 给我，告诉我在哪里运行。skill 比 sideby 新不是问题，更新 sideby 就好。最后再跑一次 `sideby update --json`，确认 sideby 和 skill 都已是最新。',
+        pNetwork:
+          '先运行 `sideby network check --json`，告诉我现在每个地址的请求从哪里发出。问我允许哪些国家或地区；不要替我决定，也不要因为现在在哪就把它加进去（网络不对时那正是错的地区）。我说了以后，先不加 `--yes` 跑 `sideby network allow <代码>... --json` 和 `sideby network on --json` 给我看预览，我同意后再加 `--yes`。告诉我：只检查 sideby 启动的会话；Codex 要在 `/hooks` 里信任一次 `network-hook`；临时跳过一次用 `sideby run <账号> --ignore-network`。被拦过的话，先帮我查代理（开没开、哪个节点），再跑 `sideby network check --json` 确认。它只防代理出意外，不会让在不支持的地区使用变得合规；不要帮我隐藏所在地（时区、指纹之类）。',
         pHandoff:
           '先运行 `sideby handoff status --json` 和 `sideby quota --json`，看清每个账号的额度来源和用量。只用 `sideby handoff enable …` 或 `sideby config set handoff.<键> <值>` 改设置；先不加 `--yes` 给我看预览，我同意后再加 `--yes`。没有额度数据的账号排在顺序后面，并告诉我怎么让它显示额度。',
         cAccount: '账号：',
@@ -1298,7 +1382,7 @@ export function taskPrompt(
         pPlugin:
           '照 sideby 仓库的插件指南 docs/guide/plugins.zh-CN.md 写；写完用 `sideby plugins check <id>` 检查。',
         pTheme:
-          '先跑 `sideby theme --json` 看现有主题和正在用的那套，再问我想要的感觉；我给了截图、网址或品牌色，就从里面取色。写一个主题文件（JSON，只放颜色，不放代码）：`{"schemaVersion":1,"name":"…","base":"sky" 或 "leaf","accent":"#rrggbb","light":{…},"dark":{…}}`；多数时候给 `base` 和 `accent` 就够了，`light` / `dark` 只写要改的 token（`sideby theme export sky` 能看到全部 token）。先放在当前目录，跑 `sideby theme check <文件>`，有不达标的就按建议值改到全部通过；再跑 `sideby theme preview <文件>` 让我在面板里看一眼。我满意后才 `sideby theme import <文件>` 和 `sideby theme use <名字>`；不满意就接着改。随时可以用 `sideby theme use --undo` 换回去。',
+          '先跑 `sideby theme --json` 看现有主题和正在用的那套，再问我想要的感觉；我给了截图、网址或品牌色，就从里面取色。写一个主题文件（JSON，只放颜色，不放代码）：`{"schemaVersion":1,"name":"…","base":"teal"、"leaf"、"celeste"、"claude" 或 "codex","accent":"#rrggbb","light":{…},"dark":{…}}`；多数时候给 `base` 和 `accent` 就够了，`light` / `dark` 只写要改的 token（`sideby theme export teal` 能看到全部 token）。先放在当前目录，跑 `sideby theme check <文件>`，有不达标的就按建议值改到全部通过；再跑 `sideby theme preview <文件>` 让我在面板里看一眼。我满意后才 `sideby theme import <文件>` 和 `sideby theme use <名字>`；不满意就接着改。随时可以用 `sideby theme use --undo` 换回去。',
         pTerminal:
           "先问我用的是什么终端。只看这个终端的官方文档和它的 `--help`，找出「在指定目录新开一个窗口运行一条命令」的写法，写明你看的版本。写成一个模板：`{cmd}` 是要运行的命令，`{cwd}` 是文件夹，sideby 按参数填入，不经过 shell。保存要用 `sideby terminal --custom '<模板>'`，它会改 sideby 的设置，先问我。保存后让我在面板上点一次「让 AI 帮我」试一下，打不开就一起看错误再改。",
         share:
@@ -1334,6 +1418,16 @@ export function taskPrompt(
         pMenubar:
           'Run `sideby menubar --json` first. `state` is `off`: it was turned off (often with "Hide from Menu Bar…" in its menu); show me the preview of `sideby menubar on`, and add `--yes` after I agree. `state` is `on` with `loaded: false`: macOS is not running it; `sideby menubar on --yes` only starts it again and changes no file. `loaded: true`: it runs but is hidden; check in turn whether the menu bar is too full or the notch covers it (hold ⌘ and drag icons), whether a menu bar organizer such as Ice, Bartender or Hidden Bar tucked it away (look in /Applications, and tell me where in its settings to move sideby, shown as osascript, out), and, on macOS 26 and later, whether osascript is allowed under System Settings › Menu Bar. The shortcut in `hotkey.label` opens the menu from anywhere, which shows it is running. Never end or restart a process that is not sideby\'s.',
         cHandoff: 'Auto Handoff now (from `sideby handoff status --json`):',
+        network:
+          "Help me set up sideby's network check: stop Claude and Codex when my requests would leave from a country I did not allow (for example when the proxy stopped or a node in the wrong country is picked).",
+        cNetwork: 'Network check now (from `sideby network --json`):',
+        update:
+          'Bring sideby and its skill up to date: the Panel showed an error while checking for or installing an update. Find out why and fix it.',
+        cUpdate: 'The error the Panel showed: ',
+        pUpdate:
+          'Run `sideby update --json` first to see whether it reaches npm, the latest version and how sideby is installed (`canRun`). When it cannot reach npm, check the network: behind a proxy, whether the terminal that starts sideby has `HTTPS_PROXY` and the proxy is on; in mainland China the mirror `SIDEBY_UPDATE_REGISTRY=https://registry.npmmirror.com` helps, but ask me before writing it into a shell config file. When it can update, `sideby update --json` already shows the change (exit 10); run `sideby update --yes --json` after I agree. When `canRun` is false (npx, a project dependency, a global folder I cannot write), give me the `command` from its output and tell me where to run it. A skill newer than sideby is fine: updating sideby is enough. Finish with `sideby update --json` again to confirm sideby and the skill are current.',
+        pNetwork:
+          "Run `sideby network check --json` first and tell me where each address's requests leave from now. Ask me which countries to allow; never decide for me, and never add the current country because it is current (on a wrong network that is the wrong one). Once I say, run `sideby network allow <codes>... --json` and `sideby network on --json` without `--yes` to show me the change, and add `--yes` after I agree. Tell me: only sessions sideby starts are checked; in Codex I trust `network-hook` once in `/hooks`; `sideby run <account> --ignore-network` skips it once. If something was blocked, help me check the proxy (is it on, which node) first, then run `sideby network check --json` to confirm. It guards against proxy accidents; it does not make use from an unsupported region allowed, and never help hide where I am (time zone, fingerprints).",
         pHandoff:
           'Run `sideby handoff status --json` and `sideby quota --json` first to see where each account gets its quota and how much is used. Change settings only with `sideby handoff enable …` or `sideby config set handoff.<key> <value>`; show me the preview without `--yes` first, and add `--yes` only after I agree. Put accounts without quota data last in the order, and tell me how to make them show it.',
         cAccount: 'Account: ',
@@ -1358,7 +1452,7 @@ export function taskPrompt(
         pPlugin:
           'Follow the plugins guide in the sideby repository (docs/guide/plugins.md); check it with `sideby plugins check <id>`.',
         pTheme:
-          'Run `sideby theme --json` first to see the Themes and the one in use, then ask me what feel I want; if I give you a screenshot, a website or a brand color, take the colors from it. Write a Theme File (JSON, colors only, never code): `{"schemaVersion":1,"name":"…","base":"sky" or "leaf","accent":"#rrggbb","light":{…},"dark":{…}}`; usually `base` and `accent` are enough, and `light` / `dark` hold only the tokens to change (`sideby theme export sky` shows them all). Keep it in the current folder, run `sideby theme check <file>` and change what fails to the suggested values until every pair passes, then run `sideby theme preview <file>` so I can look at it in the Panel. Only when I like it, run `sideby theme import <file>` and `sideby theme use <name>`; otherwise keep changing it. `sideby theme use --undo` goes back at any time.',
+          'Run `sideby theme --json` first to see the Themes and the one in use, then ask me what feel I want; if I give you a screenshot, a website or a brand color, take the colors from it. Write a Theme File (JSON, colors only, never code): `{"schemaVersion":1,"name":"…","base":"teal", "leaf", "celeste", "claude" or "codex","accent":"#rrggbb","light":{…},"dark":{…}}`; usually `base` and `accent` are enough, and `light` / `dark` hold only the tokens to change (`sideby theme export teal` shows them all). Keep it in the current folder, run `sideby theme check <file>` and change what fails to the suggested values until every pair passes, then run `sideby theme preview <file>` so I can look at it in the Panel. Only when I like it, run `sideby theme import <file>` and `sideby theme use <name>`; otherwise keep changing it. `sideby theme use --undo` goes back at any time.',
         pTerminal:
           "Ask me which terminal I use first. Read only that terminal's official docs and its `--help` to find how it opens a new window that runs one command in a given folder, and note the version you read. Write it as a template: `{cmd}` is the command and `{cwd}` the folder; sideby fills them in as separate arguments, no shell runs it. Save it with `sideby terminal --custom '<template>'`, which changes sideby's settings, so ask me first. Then have me click Let AI do it in the Panel once to try it; if it does not open, look at the error with me and fix the template.",
         share:
@@ -1405,6 +1499,14 @@ export function taskPrompt(
   if (task === 'handoff') {
     const lines = (c.handoff || []).map(clean).filter(Boolean)
     if (lines.length) facts.push('- ' + L.cHandoff, ...lines.map((l) => '  - ' + l))
+  }
+  if (task === 'network') {
+    const lines = (c.network || []).map(clean).filter(Boolean)
+    if (lines.length) facts.push('- ' + L.cNetwork, ...lines.map((l) => '  - ' + l))
+  }
+  if (task === 'update') {
+    const err = clean(c.updateError)
+    if (err) facts.push('- ' + L.cUpdate + err)
   }
   const version = clean(c.version)
   if (version) facts.push('- ' + L.cVersion + version)

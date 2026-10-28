@@ -3,7 +3,7 @@
 Every `--json` output can carry `_notice` (it comes from sideby's daily Update Check and the installed skill, and reads no network itself):
 
 - `_notice.update`: `{ current, latest, command: "sideby update", message }`, a newer sideby is out.
-- `_notice.skill`: `{ installed, current, command: "sideby update", message }`, the sideby skill agents read here is for another version (`installed: null` when it has no version), so it may describe commands this CLI does not have.
+- `_notice.skill`: `{ installed, current, command: "sideby update", message }`, the sideby skill agents read here is for an older version (`installed: null` when it has no version), so it may describe commands this CLI does not have.
 
 What to do:
 
@@ -13,7 +13,8 @@ What to do:
    - Run `sideby update --json`. It shows the version, the install method and the command it would run, and exits `10`. Show that to the user; after their yes, run `sideby update --yes --json`.
    - If it exits `1` with `canRun: false` (npx, Volta, a project dependency, a source checkout, a Local Build), sideby cannot update itself: give the user the `command` it printed as one line to run.
    - The same command updates the installed sideby skill (`skillUpdate` in the plan, `skillUpdated` in the result), so do not run a skill command yourself. With sideby already current and only the skill old (`_notice.skill`), `sideby update` updates the skill alone, after the same preview. To update only the skill and never the CLI, even when a newer sideby is out, run `sideby update --skill --json` (preview, exit `10`), then `--skill --yes --json`. When `skillUpdate.canRun` is false (the skill lives in a git repository the skills tool did not install it into), tell the user `reason` and give them `command`. Tell them that sessions already running keep the old version until they start again.
-4. The user can turn notices off with `SIDEBY_NO_UPDATE_NOTIFIER=1` (or config `update.check: false`); set it for one command when a script needs JSON without `_notice`. A Local Build (`pnpm local`) never has one.
+4. When `sideby update --json` cannot reach the registry (the `update` AI Task, started from an error in the Panel's update dialog, brings that error): behind a proxy, check that the terminal or app that starts sideby has `HTTPS_PROXY` (sideby follows it, as npm does) and that the proxy is on; in mainland China, `SIDEBY_UPDATE_REGISTRY=https://registry.npmmirror.com` uses a mirror. Ask before writing either into a shell config file. A skill for a newer sideby than the CLI is not a problem: update the CLI.
+5. The user can turn notices off with `SIDEBY_NO_UPDATE_NOTIFIER=1` (or config `update.check: false`); set it for one command when a script needs JSON without `_notice`. A Local Build (`pnpm local`) never has one.
 
 ## Auto Update
 

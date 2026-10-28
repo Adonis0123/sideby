@@ -2,6 +2,7 @@ import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { type Static, Type } from 'typebox'
 import { Value } from 'typebox/value'
+import { RENAMED_THEMES } from '../panel/themes.ts'
 import { UserError } from './errors.ts'
 import { lstatOrNull, parseJsonSafely, realpathOrNull, sha256, writeIfUnchanged } from './fs-safe.ts'
 import { SHARE_MODES } from './share-mode-names.ts'
@@ -214,7 +215,7 @@ export const ConfigSchema = Type.Object(
             Type.String({
               pattern: '^[a-z0-9][a-z0-9-]{0,39}$',
               description:
-                'Panel Theme: a Built-in Theme (sky, the default, or leaf) or a Theme File in <config>/themes (spec §3.34).',
+                'Panel Theme: a Built-in Theme (teal, the default, leaf, celeste, claude or codex; the old sky reads as celeste) or a Theme File in <config>/themes (spec §3.34).',
             }),
           ),
         },
@@ -370,6 +371,26 @@ export const ConfigSchema = Type.Object(
           ),
         },
         { additionalProperties: false, description: 'Session History (spec §3.33, ADR-0042).' },
+      ),
+    ),
+    network: Type.Optional(
+      Type.Object(
+        {
+          guard: Type.Optional(
+            Type.Boolean({
+              description:
+                "Network Guard: before a Launch and before each prompt and tool call in a session sideby starts, check the country Claude Code's and Codex's requests leave from, and stop when it is not in `allow` or cannot be told. Asks the vendor's own `/cdn-cgi/trace` through the Host's proxy settings, with no credential. Off by default.",
+            }),
+          ),
+          allow: Type.Optional(
+            Type.Array(Type.String({ pattern: '^[A-Z]{2}$' }), {
+              uniqueItems: true,
+              description:
+                'Countries (ISO 3166-1 alpha-2, such as `US` or `JP`) a Host may send requests from. Network Guard cannot be turned on while it is empty.',
+            }),
+          ),
+        },
+        { additionalProperties: false, description: 'Network Guard (spec §3.35, ADR-0053).' },
       ),
     ),
     browser: Type.Optional(
@@ -528,6 +549,11 @@ export async function loadConfig(file: string): Promise<Config> {
   }
   const shortProblem = shortCommandProblem(data)
   if (shortProblem) throw new ConfigError(`${file}: ${shortProblem}`)
+  // Built-in Themes renamed with the design system (sky is now celeste): an old name reads as the new one,
+  // so a Panel set up before keeps a Theme instead of falling back.
+  const color = data.panel?.colorTheme
+  if (color && Object.hasOwn(RENAMED_THEMES, color))
+    data.panel = { ...data.panel, colorTheme: RENAMED_THEMES[color] }
   return data
 }
 
@@ -673,6 +699,20 @@ export function editConfigUpdate(
   opts: { dryRun?: boolean } = {},
 ): Promise<{ changed: boolean; before: UpdateConfig | undefined; after: UpdateConfig | undefined }> {
   return editConfigKey(file, 'update', 'change the setting', (current) => edit(current ?? {}), opts)
+}
+
+export type NetworkConfig = NonNullable<Config['network']>
+
+/**
+ * `sideby network on|off|allow` and the Panel's network check (spec §3.35): changes the config `network` key with
+ * `edit` (see `editConfigKey` for how the file is written). With `dryRun`, shows the change without writing.
+ */
+export function editConfigNetwork(
+  file: string,
+  edit: (current: NetworkConfig) => NetworkConfig,
+  opts: { dryRun?: boolean } = {},
+): Promise<{ changed: boolean; before: NetworkConfig | undefined; after: NetworkConfig | undefined }> {
+  return editConfigKey(file, 'network', 'change the setting', (current) => edit(current ?? {}), opts)
 }
 
 export type BrowserConfig = NonNullable<Config['browser']>

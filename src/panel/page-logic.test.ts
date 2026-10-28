@@ -19,6 +19,7 @@ import {
   canLeaveLocal,
   categoryOrder,
   codeSwapOutcome,
+  dotsKeepKeyboard,
   enableOutcome,
   fileSize,
   fixPrompt,
@@ -49,6 +50,7 @@ import {
   mergeUsage,
   messageChip,
   messageNews,
+  networkTaskFacts,
   newAccountDir,
   nextReset,
   panelFixes,
@@ -61,6 +63,8 @@ import {
   quotaAskable,
   quotaHighLevel,
   quotaPressure,
+  radioStep,
+  reloadForBuild,
   remoteControlSummary,
   reorder,
   rowBadge,
@@ -546,6 +550,25 @@ describe('switchFailure', () => {
   })
 })
 
+describe('reloadForBuild', () => {
+  const at = (o: Partial<{ newBuild: boolean; busy: boolean; working: boolean; updateView: boolean }>) =>
+    reloadForBuild({ newBuild: true, busy: false, working: false, updateView: false, ...o })
+  it('reloads into a new build when the viewer is idle, and never without one', () => {
+    assert.equal(at({}), true)
+    assert.equal(at({ newBuild: false }), false)
+  })
+  it('waits while another dialog, menu or form is open', () => {
+    assert.equal(at({ busy: true }), false)
+  })
+  it('does not let an open update dialog or version popover keep the old version and error on screen', () => {
+    assert.equal(at({ busy: true, updateView: true }), true)
+  })
+  it('waits while a fix, check or update is running, even in the update dialog', () => {
+    assert.equal(at({ busy: true, updateView: true, working: true }), false)
+    assert.equal(at({ working: true }), false)
+  })
+})
+
 describe('runCodeSwap', () => {
   // A fake clock: `pause` and a slow `send` move it; `states` answers each read in turn (the last one repeats).
   const run = async (o: {
@@ -922,6 +945,32 @@ describe('Display Order in the page (spec §3.25)', () => {
   })
 })
 
+describe('dotsKeepKeyboard', () => {
+  it('keeps keyboard use while focus is on a dot or was dropped by a busy render', () => {
+    assert.equal(dotsKeepKeyboard('dot'), true)
+    assert.equal(dotsKeepKeyboard('none'), true)
+  })
+  it('ends keyboard use once focus is on another control, such as Remove', () => {
+    assert.equal(dotsKeepKeyboard('other'), false)
+  })
+})
+
+describe('radioStep', () => {
+  it('steps with the arrows and wraps around at both ends', () => {
+    assert.equal(radioStep(5, 0, 'ArrowRight'), 1)
+    assert.equal(radioStep(5, 4, 'ArrowRight'), 0)
+    assert.equal(radioStep(5, 4, 'ArrowDown'), 0)
+    assert.equal(radioStep(5, 0, 'ArrowLeft'), 4)
+    assert.equal(radioStep(5, 2, 'ArrowUp'), 1)
+  })
+  it('goes to the ends with Home and End, and ignores other keys and an empty row', () => {
+    assert.equal(radioStep(5, 3, 'Home'), 0)
+    assert.equal(radioStep(5, 1, 'End'), 4)
+    assert.equal(radioStep(5, 1, 'Enter'), -1)
+    assert.equal(radioStep(0, 0, 'ArrowRight'), -1)
+  })
+})
+
 describe('menuPlacement', () => {
   const view = { width: 1280, height: 700 }
   const at = (top: number, left = 1000) => ({ top, bottom: top + 28, left, right: left + 28 })
@@ -1061,7 +1110,10 @@ describe('whole-Panel UX pass (three-way audit, 2026-10-17)', () => {
     // Settings: the general box, a plugin and the terminal choice (the last one only where it can be saved).
     assert.match(body('aiLink'), /t\('ai\.title'\)[^\n]*openAsk\(\)/)
     assert.match(body('settingsGroups'), /task: 'plugin'/)
-    assert.match(body('settingsGroups'), /if \(!BOOT\.readOnly\) general\.push\(link\(t\('term\.title'\)/)
+    assert.match(
+      body('settingsGroups'),
+      /if \(!BOOT\.readOnly\) general\.push\((?:fm\('terminal', )?link\(t\('term\.title'\)/,
+    )
     // Auto Handoff: Let AI tune it, with the handoff facts (spec §3.29).
     assert.match(body('askHandoff'), /task: 'handoff', context: \{ handoff: handoffTaskFacts\(/)
     assert.match(body('renderHandoffPage'), /onclick: askHandoff/)
@@ -1707,6 +1759,42 @@ describe('settings in config, start at login and Auto Handoff facts (spec §3.29
       assert.ok(!p.includes('abcdefghijklmnopqrstu'), 'key-shaped context is removed')
     }
     assert.ok(AI_TASK_KINDS.includes('handoff'))
+    // Network check (spec §3.35): the AI asks which countries, never picks the current one, and previews first.
+    for (const lang of ['en', 'zh']) {
+      const facts = networkTaskFacts({
+        guard: false,
+        allow: [],
+        targets: [
+          {
+            url: 'https://api.anthropic.com/cdn-cgi/trace',
+            status: 'not-checked',
+            accounts: ['claude:work'],
+          },
+        ],
+        accounts: [{ ref: 'claude:deepseek', skip: 'third-party' }],
+      })
+      const p = taskPrompt({ task: 'network', context: { network: facts }, lang }, stripSecrets)
+      assert.match(p, /sideby network check --json/)
+      assert.match(p, /sideby network allow/)
+      assert.match(p, /--yes/)
+      assert.match(p, /api\.anthropic\.com: not-checked \(claude:work\)/)
+      assert.match(p, /claude:deepseek: not checked here \(third-party\)/)
+    }
+    // An update that failed: the AI starts from `sideby update --json` with the Panel's error, and checks the proxy.
+    for (const lang of ['en', 'zh']) {
+      const p = taskPrompt(
+        {
+          task: 'update',
+          context: { updateError: 'could not reach https://registry.npmjs.org (timed out)' },
+          lang,
+        },
+        stripSecrets,
+      )
+      assert.match(p, /sideby update --json/)
+      assert.match(p, /HTTPS_PROXY/)
+      assert.match(p, /SIDEBY_UPDATE_REGISTRY/)
+      assert.match(p, /registry\.npmjs\.org \(timed out\)/)
+    }
     // "Can't see the icon?": the AI starts from the menu bar item's own state, in either language.
     for (const lang of ['en', 'zh']) {
       const p = taskPrompt({ task: 'menubar', lang }, stripSecrets)

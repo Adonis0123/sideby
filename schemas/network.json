@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/network.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "guard",
+    "allow",
+    "active",
+    "ci",
+    "targets",
+    "accounts"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "guard": {
+      "type": "boolean",
+      "description": "Config `network.guard`: Network Guard is switched on."
+    },
+    "allow": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Allowed countries (ISO 3166-1 alpha-2), config `network.allow`."
+    },
+    "active": {
+      "type": "boolean",
+      "description": "It checks Launches now: switched on, a country allowed, and not in CI."
+    },
+    "ci": {
+      "type": "boolean",
+      "description": "Running in CI, where it makes no request and checks nothing."
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "url",
+          "accounts",
+          "status",
+          "ipChanged"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The `/cdn-cgi/trace` address asked."
+          },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Refs of the accounts checked at this address."
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "ok"
+              },
+              {
+                "type": "string",
+                "const": "blocked"
+              },
+              {
+                "type": "string",
+                "const": "unknown"
+              },
+              {
+                "type": "string",
+                "const": "not-checked"
+              }
+            ],
+            "description": "ok: the country is allowed; blocked: it is not; unknown: the last check could not tell (it blocks); not-checked: no result yet."
+          },
+          "loc": {
+            "type": "string",
+            "description": "The country the vendor sees, from the newest result."
+          },
+          "checkedAt": {
+            "type": "string",
+            "description": "When the newest result was asked (ISO)."
+          },
+          "error": {
+            "type": "string",
+            "description": "Why the newest check could not tell."
+          },
+          "ipChanged": {
+            "type": "boolean",
+            "description": "The exit address changed in the last day (a notice only)."
+          }
+        }
+      }
+    },
+    "accounts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "ref"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "description": "The address this account is checked at."
+          },
+          "skip": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "not-covered"
+              },
+              {
+                "type": "string",
+                "const": "third-party"
+              },
+              {
+                "type": "string",
+                "const": "at-launch"
+              }
+            ],
+            "description": "third-party: an API account on another endpoint, not checked; at-launch: an API account, whose address is known only when it starts."
+          }
+        }
+      }
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby network [check] --json"
+}
