@@ -31,6 +31,8 @@ Usage:
   sideby quota check <family> on|off  turn quota fetching on or off
   sideby update --auto on|off         set Auto Update without running an update
   sideby update --skill [--yes]       update only the installed sideby skill to this version
+  sideby commands <words>             find where a page, setting or action lives in the Panel,
+                                      and the command that does the same (read-only)
   sideby families [family]            what each host's accounts share with the main account,
                                       where they live and how they sign in
   sideby alias add <short> <account> [-- args]
@@ -134,9 +136,9 @@ Usage:
 
 Options:
   --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, remote-control, handoff,
-                families, plugins, app, desktop, sessions, history, send, messages, edit, browser, update, local, ask,
+                families, commands, plugins, app, desktop, sessions, history, send, messages, edit, browser, update, local, ask,
                 terminal, key, try, autostart, menubar, config)
-  -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, desktop, edit, browser,
+  -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, commands, desktop, edit, browser,
                 autostart, menubar, config, sessions, history, send, messages
   -v, --version show the version
 
@@ -498,6 +500,17 @@ Examples:
   sideby browser set codex:main "Profile 7"
 Exit: 0 shown, changed, chosen or opened; 1 not macOS, Chrome not installed, no or several browser users to choose from, or
 Chrome did not open; 10 --enable/--disable without --yes; 2 malformed command line.`,
+  commands: `sideby commands <words>... [--json]
+
+Find a feature of sideby by name, in English or Chinese: a page of the Panel, a setting or an action. Each result
+says where it lives in the Panel (Settings → General → Language) and the command that does the same, when there is
+one. The Panel's Search (Cmd/Ctrl+K) searches the same list. It finds features, not sessions: for those use
+\`sideby history <words>\`.
+
+Examples:
+  sideby commands language
+  sideby commands 深色 --json
+Exit: 0, also when nothing matches; 2 no words given or malformed command line.`,
   families: `sideby families [family] [--json]
 
 For each host (built in or from a plugin): where its accounts live, the variable that selects one, how to sign
@@ -569,6 +582,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   'shell-init': { flags: ['write', 'yes', 'undo', 'json'] },
   plugins: { flags: ['json'] },
   families: { flags: ['json'] },
+  commands: { flags: ['json'] },
   update: { flags: ['json', 'yes', 'skill'], valued: ['auto'] },
   local: { flags: ['json', 'yes'] },
   'update-check': { flags: [] },
@@ -848,6 +862,8 @@ async function dispatch(
       return await cmds.cmdPlugins(parsed, io)
     case 'families':
       return await cmds.cmdFamilies(parsed, io)
+    case 'commands':
+      return cmds.cmdCommands(parsed, io)
     case 'update':
       return await cmds.cmdUpdate(parsed, io)
     case 'update-check':

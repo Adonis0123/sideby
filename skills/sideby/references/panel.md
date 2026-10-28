@@ -2,6 +2,16 @@
 
 Use these commands for the same persistent settings as the Panel. Prefer account refs from `sideby list --json`; commands taking an account also accept its short command. Every JSON response has `schemaVersion: 1`.
 
+## Find where something is
+
+When the user asks where a setting or feature is ("语言在哪改", "where do I turn off Remote Control"), run
+`sideby commands <words> --json`. It searches the same list as the Panel's Search (Cmd/Ctrl+K), in English or Chinese,
+and returns `{ results: [{ id, kind, title, panel, cliCommand }] }`, best match first. `kind` is `page`, `setting` or
+`action` (tolerate others). Offer to do it with `cliCommand` (keep its preview step; never add `--yes` before the user
+agrees), or tell the user the `panel` place, such as `Settings → General → Language`. An empty `results` exits 0:
+try other words. It finds features only; to find a past session use `sideby history <words> --json`
+(`references/sessions.md`).
+
 ## Pinned Accounts and Display Order
 
 - `sideby order --json` returns `display` (saved `families`, `accounts`, `pinned`) and `families` in their effective order. Each family has `accounts` with `name`, `ref`, `pinned`; a family with no accounts has an empty array.

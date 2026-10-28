@@ -41,6 +41,7 @@ import {
   remoteControlNothingToDo,
   remoteControlTodo,
 } from '../core/remote-control.ts'
+import { SEARCH_CATALOG, searchCatalog } from '../core/search-catalog.ts'
 import { SHELLS, type Shell, type ShellInitWrite } from '../core/shell-init.ts'
 import type { TuneApplyPlan } from '../core/tuning-apply.ts'
 import { MODEL_NAME } from '../families/shared/model-args.ts'
@@ -4278,5 +4279,42 @@ export async function cmdNetwork(a: ParsedArgs, io: Io): Promise<number> {
     )
   else if (sub !== 'check') io.out(c.dim('Check now with `sideby network check`.'))
   io.out(c.dim('Sessions started without sideby (running `claude` or `codex` directly) are not checked.'))
+  return 0
+}
+
+/**
+ * `sideby commands <words>` (spec §3.36, ADR-0054): the Search Catalog the Panel's Command Palette searches, read-only.
+ * Titles and places are in English, as every other command prints; the words may be English or Chinese.
+ */
+export function cmdCommands(a: ParsedArgs, io: Io): number {
+  const query = a.positionals.join(' ').trim()
+  if (!query)
+    throw new UsageError('usage: sideby commands <words> [--json], for example: sideby commands language')
+  const results = searchCatalog(query, SEARCH_CATALOG).map(({ entry }) => ({
+    id: entry.id,
+    kind: entry.kind,
+    title: entry.title.en,
+    panel: entry.panel.en,
+    cliCommand: entry.cliCommand,
+  }))
+  if (a.flags.has('json')) {
+    json(io, { results })
+    return 0
+  }
+  if (!results.length) {
+    io.out(`No feature of sideby matches "${query}".`)
+    io.out(
+      c.dim(
+        `Try other words (English or Chinese), \`sideby history ${query}\` to find a past session, or ask your AI.`,
+      ),
+    )
+    return 0
+  }
+  io.out(
+    table(
+      results.map((r) => [r.title, r.kind, r.panel, r.cliCommand ?? c.dim('Panel only')]),
+      ['Feature', 'Kind', 'In the Panel', 'Command'],
+    ),
+  )
   return 0
 }

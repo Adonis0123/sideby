@@ -1090,7 +1090,10 @@ describe('whole-Panel UX pass (three-way audit, 2026-10-17)', () => {
     // Settings: the general box, a plugin and the terminal choice (the last one only where it can be saved).
     assert.match(body('aiLink'), /t\('ai\.title'\)[^\n]*openAsk\(\)/)
     assert.match(body('settingsGroups'), /task: 'plugin'/)
-    assert.match(body('settingsGroups'), /if \(!BOOT\.readOnly\) general\.push\(link\(t\('term\.title'\)/)
+    assert.match(
+      body('settingsGroups'),
+      /if \(!BOOT\.readOnly\) general\.push\((?:fm\('terminal', )?link\(t\('term\.title'\)/,
+    )
     // Auto Handoff: Let AI tune it, with the handoff facts (spec §3.29).
     assert.match(body('askHandoff'), /task: 'handoff', context: \{ handoff: handoffTaskFacts\(/)
     assert.match(body('renderHandoffPage'), /onclick: askHandoff/)

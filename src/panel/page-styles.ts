@@ -1299,6 +1299,33 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .hide-btn .ic { width: 16px; height: 16px; }
 .hide-btn.is-on { color: var(--muted); }
 .hide-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* Command Palette (spec §3.36): a search box over one list; the dialog keeps its top edge while the list changes. */
+.kbd-inline { font: 11px/16px var(--mono); color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; margin-left: 2px; }
+.dialog.dialog-pal { width: min(620px, calc(100vw - 24px)); flex-direction: column; }
+.pal-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.pal-ic { flex: none; color: var(--muted); }
+.dialog .pal-input, .dialog .pal-input:focus, .dialog .pal-input:focus-visible { flex: 1; min-width: 0; height: 32px; padding: 0; border: 0; box-shadow: none; outline: none; background: none; color: var(--text); font: inherit; font-size: var(--large); outline: none; }
+.pal-input::-webkit-search-cancel-button { display: none; }
+.pal-list { overflow-y: auto; overscroll-behavior: contain; padding: 6px; display: flex; flex-direction: column; gap: 1px; max-height: min(56vh, 460px); }
+.pal-group { padding: 8px 10px 4px; font-size: 11px; font-weight: 600; color: var(--muted); }
+.pal-opt { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 5px 10px; border-radius: calc(var(--ctl-radius) - 2px); color: var(--text); cursor: pointer; transition: background-color .12s ease; }
+.pal-opt[aria-selected=true] { background: var(--hover); }
+.pal-opt[aria-disabled=true] { color: var(--faint); cursor: not-allowed; }
+.pal-kind { flex: none; min-width: 52px; font-size: 11px; line-height: 18px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; text-align: center; }
+.pal-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pal-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pal-also { font-size: 11px; color: var(--muted); }
+.pal-where { flex: none; max-width: 42%; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pal-opt mark { background: var(--accent-soft); color: inherit; border-radius: 2px; padding: 0 1px; }
+.pal-more .pal-main, .pal-hist .pal-title, .pal-ai .pal-title { color: var(--accent); }
+.pal-hist { margin-top: 4px; }
+.pal-none { padding: 14px 10px 4px; margin: 0; }
+.pal-foot { padding: 8px 16px; border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 var(--radius) var(--radius); }
+[data-width=narrow] .pal-where, [data-width=narrow] .pal-foot { display: none; }
+.find-flash { animation: find-flash 1.2s ease-out; border-radius: var(--ctl-radius); }
+@keyframes find-flash { 0%, 35% { box-shadow: 0 0 0 6px var(--accent-soft); background: var(--accent-soft); } to { box-shadow: 0 0 0 6px transparent; background: transparent; } }
+@media (prefers-reduced-motion: reduce) { .find-flash { animation: none; } .pal-opt { transition: none; } }
 @media (prefers-reduced-motion: reduce) {
   .sk, .spin, .hidden-bar, .is-spinning svg, .toast, .toast.bump, .toast.toast-out, .view-in > *, .set-pane.view-in, .row.flash, .sess-row.flash, .sess-msg, .seg-badge, .card.flash, .pulse, .sess-busy .sess-dot, .menu, .menu.float-out, .dialog[open], .dialog[open]::backdrop, .enter, .fade-in, .hist-list.swap-in, .tip-body, .tip-float, .row-run.is-done .ic, .tab[aria-selected=true]::after { animation: none; }
   .bar > span, .chev, .row, .sess-row, .sess-copy, .hist-row, .hist-cont, .hist-proj, .hist-catbody, .hist-opt, .hist-list, .icon-btn, .seg-btn, .menu-item, .set-tab, .link-btn, .tag-btn, .email-btn, .btn, .chip-btn, .set-link .ic, .dialog, .dialog[open], .dialog::backdrop, .tab, .tab::before, .tab .ic, .hp-status { transition: none; }

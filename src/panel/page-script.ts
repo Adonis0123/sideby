@@ -3,6 +3,7 @@
 import { groupsToAccept } from '../core/inbound.ts'
 import { quotaIsStale } from '../core/quota-levels.ts'
 import { remoteControlTodo } from '../core/remote-control.ts'
+import { catalogMatchLevel, catalogNorm, searchCatalog } from '../core/search-catalog.ts'
 import {
   aiTaskAccounts,
   aliasArgsOf,
@@ -91,6 +92,9 @@ import {
 
 const LOGIC = [
   quotaIsStale,
+  catalogNorm,
+  catalogMatchLevel,
+  searchCatalog,
   aiTaskAccounts,
   askBridge,
   askBridged,
@@ -1232,6 +1236,8 @@ const MAIN = String.raw`
     for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.getAttribute('data-i18n'))
     $('refresh').setAttribute('aria-label', t('top.refresh'))
     $('ask-ai').setAttribute('aria-label', t('ask.button'))
+    $('search-btn').setAttribute('aria-label', t('pal.button') + ' (' + palKey() + ')')
+    $('search-kbd').textContent = palKey()
     const repo = $('repo')
     for (const k of ['aria-label', 'title']) repo.setAttribute(k, t('top.repo'))
     if (/^https:\/\/github\.com\//.test(BOOT.repoUrl || '')) { repo.href = BOOT.repoUrl; repo.hidden = false }
@@ -1356,13 +1362,13 @@ const MAIN = String.raw`
     const redo = () => { savePrefs(); renderAccounts(); refreshPopover('display') }
     const emails = S.state && S.state.accounts.some((a) => a.identity && a.identity.email)
     return h('div', { class: 'display-panel' },
-      h('div', { class: 'dp-row' }, h('span', { class: 'dp-label' }, t('tb.quota')),
-        seg(t('tb.quota'), [['used', t('tb.used')], ['left', t('tb.left')]], prefs.quota, (v) => { prefs.quota = v; redo() })),
-      h('div', { class: 'dp-row' }, h('span', { class: 'dp-label' }, t('tb.view')),
-        seg(t('tb.view'), [['list', [icon('list'), h('span', null, t('tb.list'))], t('tb.list')], ['cards', [icon('grid'), h('span', null, t('tb.cards'))], t('tb.cards')]], prefs.view, (v) => { prefs.view = v; ui.fade = true; redo() })),
-      emails ? h('label', { class: 'dp-row dp-check' },
+      fm('quota', h('div', { class: 'dp-row' }, h('span', { class: 'dp-label' }, t('tb.quota')),
+        seg(t('tb.quota'), [['used', t('tb.used')], ['left', t('tb.left')]], prefs.quota, (v) => { prefs.quota = v; redo() }))),
+      fm('view', h('div', { class: 'dp-row' }, h('span', { class: 'dp-label' }, t('tb.view')),
+        seg(t('tb.view'), [['list', [icon('list'), h('span', null, t('tb.list'))], t('tb.list')], ['cards', [icon('grid'), h('span', null, t('tb.cards'))], t('tb.cards')]], prefs.view, (v) => { prefs.view = v; ui.fade = true; redo() }))),
+      emails ? fm('emails', h('label', { class: 'dp-row dp-check' },
         h('input', { type: 'checkbox', checked: prefs.hideEmail, onchange: (e) => { prefs.hideEmail = e.target.checked; redo() } }),
-        h('span', null, t('tb.hideEmails'))) : null)
+        h('span', null, t('tb.hideEmails')))) : null)
   }
   function renderFamilyFilter() {
     if (!tb.family) return
@@ -2920,7 +2926,8 @@ const MAIN = String.raw`
     // A wide dialog is wide before it opens, so it does not open narrow and then stretch.
     el.classList.toggle('dialog-wide', kind === 'settings' ? el.classList.contains('dialog-wide') : kind === 'history')
     // A dialog that grows as the user adds to it (screenshots, its result) keeps its top edge and grows downward.
-    el.classList.toggle('dialog-top', kind === 'send')
+    el.classList.toggle('dialog-top', kind === 'send' || kind === 'palette')
+    el.classList.toggle('dialog-pal', kind === 'palette')
     if (!el.open) { el.showModal(); raiseToasts() }
   }
 
@@ -5847,8 +5854,8 @@ const MAIN = String.raw`
   function lookRows() {
     const secs = settingsSections()
     const out = []
-    if (secs.includes('lang')) out.push(setSeg(t('set.lang'), [['en', 'English'], ['zh', '中文']], lang, setLang))
-    if (secs.includes('theme')) out.push(setSeg(t('set.theme'), CHOICES.theme.map((v) => [v, t('set.theme.' + v)]), viewPrefs().theme, setTheme))
+    if (secs.includes('lang')) out.push(fm('lang', setSeg(t('set.lang'), [['en', 'English'], ['zh', '中文']], lang, setLang)))
+    if (secs.includes('theme')) out.push(fm('theme', setSeg(t('set.theme'), CHOICES.theme.map((v) => [v, t('set.theme.' + v)]), viewPrefs().theme, setTheme)))
     return out
   }
   function ahLink(leave) {
@@ -5868,33 +5875,33 @@ const MAIN = String.raw`
   function settingsGroups(leave) {
     const secs = settingsSections()
     const link = (...args) => setLink(leave, ...args)
-    const general = [...lookRows(), link(t('th.title'), themeLabel(), '', openThemes, true), autostartRow('autostart')]
-    if (!BOOT.readOnly) general.push(link(t('term.title'), '', '', openTerminals, true))
+    const general = [...lookRows(), fm('themes', link(t('th.title'), themeLabel(), '', openThemes, true)), fm('autostart', autostartRow('autostart'))]
+    if (!BOOT.readOnly) general.push(fm('terminal', link(t('term.title'), '', '', openTerminals, true)))
     // The menu bar switch shows only where it works (macOS); while its state loads it waits, unseen.
     const bar = []
     if (li.menubar.status && li.menubar.status.supported) {
-      bar.push(autostartRow('menubar'))
+      bar.push(fm('menubar', autostartRow('menubar')))
       const mbs = li.menubar.status
       if ((mbs.state === 'on' || mbs.state === 'stale') && mbs.hotkey)
-        bar.push(link(t('mb.settings'), mbs.hotkey.enabled ? mbs.hotkey.label : t('hk.unset'), mbs.hotkey.registered === false ? 'chip-warn' : '', openMenubarSettings, true, 'mbset'))
+        bar.push(fm('hotkey', link(t('mb.settings'), mbs.hotkey.enabled ? mbs.hotkey.label : t('hk.unset'), mbs.hotkey.registered === false ? 'chip-warn' : '', openMenubarSettings, true, 'mbset')))
     }
     const acct = []
     // The arrange mode (spec §3.25) has a place here too, where people look for "how do I change this".
     if (secs.includes('order')) {
       const d = displayOf()
       const pins = [d.pinned, d.hidden].some((r) => Object.values(r || {}).some((x) => x.length)) || Boolean(d.hiddenFamilies && d.hiddenFamilies.length)
-      acct.push(link(t('set.order'), t(ordered() || pins ? 'set.orderMine' : 'set.orderDefault'), '', () => {
+      acct.push(fm('order', link(t('set.order'), t(ordered() || pins ? 'set.orderMine' : 'set.orderDefault'), '', () => {
         setPage('accounts')
         startArrange()
         const bar = document.querySelector('#accounts .arrange-bar')
         if (bar) bar.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'center' })
-      }))
+      })))
     }
     if (pickFamilies().length) {
       const names = Object.keys(S.state.pickCommands || {})
-      acct.push(link(t('pk.title'), names.length ? names.join(', ') : t('pk.noneYet'), names.length ? 'chip-ok' : '', () => openPick(null), true))
+      acct.push(fm('pick', link(t('pk.title'), names.length ? names.join(', ') : t('pk.noneYet'), names.length ? 'chip-ok' : '', () => openPick(null), true)))
     }
-    if (secs.includes('rc')) acct.push(rcLink(leave))
+    if (secs.includes('rc')) acct.push(fm('rc', rcLink(leave)))
     // Quota checks that ask the Host (spec §3.26): one switch per Family under one shared explanation.
     const checks = []
     let every = 15
@@ -5902,11 +5909,13 @@ const MAIN = String.raw`
       for (const c of S.state.quotaChecks) {
         every = c.everyMinutes
         const label = t('set.quotaCheck', { host: c.title })
-        checks.push(h('div', { class: 'set-row' + (c.blocked ? ' set-check' : '') },
+        // The first row is where the palette takes the user.
+        const mark = checks.length ? (el) => el : (el) => fm('checks', el)
+        checks.push(mark(h('div', { class: 'set-row' + (c.blocked ? ' set-check' : '') },
           h('div', { class: 'set-text' }, h('span', { class: 'set-label' }, c.title), c.blocked ? h('span', { class: 'set-hint' }, c.blocked) : null),
           BOOT.readOnly ? h('span', { class: 'chip chip-sm' + (c.on ? ' chip-ok' : '') }, c.on ? t('ah.on') : t('ah.off'))
             : h('div', { class: 'seg', role: 'group', 'aria-label': label }, [[true, t('ah.on')], [false, t('ah.off')]].map(([v, text]) =>
-              h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === c.on), onclick: () => { if (v !== c.on) { leave(false); setCheck(c.family, v) } } }, text)))))
+              h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === c.on), onclick: () => { if (v !== c.on) { leave(false); setCheck(c.family, v) } } }, text))))))
       }
     }
     // Network Guard (spec §3.35): its own dialog, with the state on the link.
@@ -5914,10 +5923,10 @@ const MAIN = String.raw`
     if (secs.includes('net')) {
       const n = S.state.network
       const bad = netProblem()
-      netItems.push(link(t('net.title'), bad ? t('net.blocked') : n.guard ? t('ah.on') : t('ah.off'), bad ? 'chip-fail' : n.guard ? 'chip-ok' : '', openNet, true))
+      netItems.push(fm('net', link(t('net.title'), bad ? t('net.blocked') : n.guard ? t('ah.on') : t('ah.off'), bad ? 'chip-fail' : n.guard ? 'chip-ok' : '', openNet, true)))
     }
     // Everything here can also be asked of an AI assistant through the sideby skill (spec §3.8).
-    const ai = [aiLink(leave), link(t('ask.plugin'), '', '', () => openAsk({ task: 'plugin', context: { version: BOOT.version } }), true)]
+    const ai = [fm('skill', aiLink(leave)), link(t('ask.plugin'), '', '', () => openAsk({ task: 'plugin', context: { version: BOOT.version } }), true)]
     return [
       { id: 'general', title: t('set.g.general'), items: general },
       { id: 'menubar', title: t('set.g.menubar'), items: bar },
@@ -5974,6 +5983,231 @@ const MAIN = String.raw`
   function refreshSettings() {
     refreshPopover('settings')
     if (dlg.kind === 'settings') renderSettingsDialog()
+  }
+
+  // ---------- Command Palette (spec §3.36, ADR-0054) ----------
+  // The Search button and Cmd/Ctrl+K open one list of pages, settings and actions from the Search Catalog that
+  // sideby commands searches too. It finds features, never Sessions: the last row hands the words to Session History.
+  // A setting opens where it lives and lights up; an action only opens its own preview or confirmation.
+  const CATALOG = JSON.parse(document.getElementById('sideby-catalog').textContent)
+  const PAL_RECENT_KEY = 'sideby.palette.recent'
+  const PAL_SHOWN = 8
+  const pal = { q: '', sel: 0, all: false, els: null, opts: [] }
+  function palKey() { return /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘K' : 'Ctrl K' }
+  // Marks a row the palette can take the user to; the Search Catalog names it by this id.
+  function fm(id, el) { if (id && el && el.setAttribute) el.setAttribute('data-find', id); return el }
+  // The actions the catalog names. ok: whether this Panel has it now; nav: it goes to a page instead of a dialog.
+  const PALETTE_ACTIONS = {
+    'new-account': { run: () => openCreate(null), ok: () => Boolean(S.state) },
+    'remote-control': { run: openRc, ok: () => Boolean(S.state && rcSummary()) },
+    'handoff-on': { run: () => setPage('handoff'), ok: () => Boolean(ahState()), nav: true },
+    network: { run: openNet, ok: () => Boolean(netState()) },
+    themes: { run: openThemes, ok: () => true },
+    update: { run: openUpdate, ok: () => Boolean(BOOT.updates) },
+    ask: { run: () => openAsk(), ok: () => !askBridged(BOOT, window) },
+    health: { run: palHealth, ok: () => Boolean(S.state && S.state.accounts.length), nav: true },
+    inbound: { run: openInbound, ok: () => Boolean(S.state) },
+  }
+  function palHealth() {
+    setPage('accounts')
+    const box = $('checkup')
+    if (!box) return
+    box.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'start' })
+    palFlash(box)
+  }
+  function palRecent() {
+    try {
+      const v = JSON.parse(localStorage.getItem(PAL_RECENT_KEY) || '[]')
+      return Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, 5) : []
+    } catch { return [] }
+  }
+  function palRemember(id) {
+    try { localStorage.setItem(PAL_RECENT_KEY, JSON.stringify([id].concat(palRecent().filter((x) => x !== id)).slice(0, 5))) } catch {}
+  }
+  // Which settings rows this Panel shows now (some depend on the machine, the accounts or a read-only Panel).
+  function palFindable() {
+    const found = new Set()
+    for (const g of settingsGroups(() => {})) for (const it of g.items) {
+      const f = it && it.getAttribute && it.getAttribute('data-find')
+      if (f) found.add('s:' + g.id + ':' + f)
+    }
+    if (document.querySelector('#toolbar:not([hidden]) .tb-display'))
+      for (const el of displayPanel().querySelectorAll('[data-find]')) found.add('d:' + el.getAttribute('data-find'))
+    return found
+  }
+  function palAvailable(e, found) {
+    const g = e.target
+    if (g.page) return g.page === 'accounts' ? true : g.page === 'tuning' ? tuningAvailable() : g.page === 'handoff' ? Boolean(ahState()) : Boolean(S.state)
+    if (g.settings) return found.has('s:' + g.settings + ':' + g.find)
+    if (g.display) return found.has('d:' + g.display)
+    const a = PALETTE_ACTIONS[g.action]
+    return Boolean(a && a.ok())
+  }
+  function palWhyOff(e) { return e.target.action && e.target.write && BOOT.readOnly ? t('pal.readOnly') : '' }
+  function openPalette() {
+    if (dlg.el && dlg.el.open) return
+    closeMenu()
+    pal.q = ''
+    pal.sel = 0
+    pal.all = false
+    pal.found = palFindable()
+    showDialog('palette')
+    const input = h('input', { type: 'search', class: 'pal-input', role: 'combobox', 'aria-expanded': 'true', 'aria-controls': 'pal-list', 'aria-autocomplete': 'list', autocomplete: 'off', spellcheck: 'false', placeholder: t('pal.placeholder'), 'aria-label': t('pal.title') })
+    input.addEventListener('input', () => { pal.q = input.value; pal.sel = 0; pal.all = false; drawPalette() })
+    input.addEventListener('keydown', palKeys)
+    const list = h('div', { id: 'pal-list', class: 'pal-list', role: 'listbox', 'aria-label': t('pal.title') })
+    pal.els = { input, list }
+    setKids(dlg.el, [
+      h('h2', { id: 'dlg-title', class: 'sr-only' }, t('pal.title')),
+      h('div', { class: 'pal-head' }, icon('search', 'pal-ic'), input, h('kbd', { class: 'kbd-inline', 'aria-hidden': 'true' }, 'Esc')),
+      list,
+      h('div', { class: 'pal-foot muted small', 'aria-hidden': 'true' }, t('pal.keys')),
+    ])
+    drawPalette()
+    input.focus()
+  }
+  // The title with the words the user typed marked; a match in the other language or a synonym is named under it.
+  function palText(text, raw) {
+    const q = raw ? catalogNorm(raw) : ''
+    const i = q ? text.toLowerCase().indexOf(q) : -1
+    if (i < 0) return [text]
+    return [text.slice(0, i), h('mark', null, text.slice(i, i + q.length)), text.slice(i + q.length)].filter((x) => x !== '')
+  }
+  function palAlso(e, raw) {
+    const q = raw ? catalogNorm(raw) : ''
+    if (!q) return null
+    const shown = e.title[lang] || e.title.en
+    if (catalogNorm(shown).includes(q)) return null
+    const w = [e.title.en, e.title.zh].concat(e.synonyms).find((x) => catalogNorm(x).includes(q))
+    return w ? h('span', { class: 'pal-also' }, tx('pal.also', { w: h('mark', null, w) })) : null
+  }
+  function palRows() {
+    const found = pal.found
+    const ok = (e) => palAvailable(e, found)
+    const byId = (id) => CATALOG.entries.find((e) => e.id === id)
+    const q = pal.q.trim()
+    if (!q) {
+      const recent = palRecent().map(byId).filter((e) => e && ok(e))
+      const common = CATALOG.common.map(byId).filter((e) => e && ok(e) && !recent.includes(e)).slice(0, 4)
+      return { q, groups: [['recent', recent], ['common', common]].filter((g) => g[1].length), more: 0 }
+    }
+    const hits = searchCatalog(q, CATALOG.entries).map((x) => x.entry).filter(ok)
+    const shown = pal.all ? hits : hits.slice(0, PAL_SHOWN)
+    return { q, groups: shown.length ? [['results', shown]] : [], more: hits.length - shown.length }
+  }
+  function drawPalette() {
+    if (!pal.els) return
+    const r = palRows()
+    const opts = []
+    const kids = []
+    const option = (cls, body, run, disabled) => {
+      const i = opts.length
+      const el = h('div', { class: 'pal-opt ' + cls, role: 'option', id: 'pal-opt-' + i, 'aria-selected': 'false', 'aria-disabled': disabled ? 'true' : null })
+      setKids(el, body)
+      el.addEventListener('mousemove', () => { if (pal.sel !== i) { pal.sel = i; palMark() } })
+      el.addEventListener('click', () => { if (!disabled) run() })
+      opts.push({ el, run, disabled })
+      return el
+    }
+    for (const [g, list] of r.groups) {
+      kids.push(h('div', { class: 'pal-group', role: 'presentation' }, t('pal.' + g)))
+      for (const e of list) {
+        const why = palWhyOff(e)
+        kids.push(option('', [
+          h('span', { class: 'pal-kind' }, t('pal.kind.' + e.kind) === 'pal.kind.' + e.kind ? e.kind : t('pal.kind.' + e.kind)),
+          h('span', { class: 'pal-main' }, h('span', { class: 'pal-title' }, palText(e.title[lang] || e.title.en, r.q)), palAlso(e, r.q)),
+          h('span', { class: 'pal-where' }, why || e.panel[lang] || e.panel.en),
+        ], () => palGo(e), Boolean(why)))
+      }
+    }
+    if (r.more > 0) kids.push(option('pal-more', [h('span', { class: 'pal-main' }, tn('pal.more', r.more))], () => { pal.all = true; drawPalette(); pal.els.input.focus() }))
+    if (r.q && !r.groups.length) kids.push(h('p', { class: 'pal-none muted' }, t('pal.none')))
+    if (r.q) {
+      kids.push(option('pal-hist', [icon('search', 'pal-ic'), h('span', { class: 'pal-main' }, h('span', { class: 'pal-title' }, t('pal.history', { q: r.q }))), h('span', { class: 'pal-where' }, t('pal.historyHint'))], () => palHistory(r.q)))
+      if (!r.groups.length && !BOOT.readOnly && PALETTE_ACTIONS.ask.ok())
+        kids.push(option('pal-ai', [icon('bot', 'pal-ic'), h('span', { class: 'pal-main' }, h('span', { class: 'pal-title' }, t('pal.askAi', { q: r.q })))], () => openAsk({ text: t('pal.askText', { q: r.q }) })))
+    }
+    pal.opts = opts
+    if (pal.sel >= opts.length) pal.sel = Math.max(0, opts.length - 1)
+    pal.els.list.replaceChildren(...kids)
+    palMark()
+  }
+  function palMark() {
+    pal.opts.forEach((o, i) => o.el.setAttribute('aria-selected', String(i === pal.sel)))
+    const cur = pal.opts[pal.sel]
+    if (cur) { pal.els.input.setAttribute('aria-activedescendant', cur.el.id); cur.el.scrollIntoView({ block: 'nearest' }) }
+    else pal.els.input.removeAttribute('aria-activedescendant')
+  }
+  function palKeys(e) {
+    const n = pal.opts.length
+    if (e.key === 'ArrowDown' && n) { e.preventDefault(); pal.sel = (pal.sel + 1) % n; palMark() }
+    else if (e.key === 'ArrowUp' && n) { e.preventDefault(); pal.sel = (pal.sel - 1 + n) % n; palMark() }
+    else if (e.key === 'Home' && n && !pal.q) { e.preventDefault(); pal.sel = 0; palMark() }
+    else if (e.key === 'End' && n && !pal.q) { e.preventDefault(); pal.sel = n - 1; palMark() }
+    else if (e.key === 'Enter') {
+      e.preventDefault()
+      const cur = pal.opts[pal.sel]
+      if (cur && !cur.disabled) cur.run()
+    } else if (e.key === 'Escape') {
+      // Escape first empties the box, as the account search does; a second one closes.
+      if (pal.q) { e.preventDefault(); pal.els.input.value = ''; pal.q = ''; pal.sel = 0; drawPalette() }
+    }
+  }
+  function palClose() { pal.els = null; if (dlg.kind === 'palette') dlg.el.close() }
+  // Lights a row up once it is in view, so the eye finds it; none under reduced motion.
+  function palFlash(el) {
+    if (REDUCED || !el) return
+    el.classList.remove('find-flash')
+    void el.offsetWidth
+    el.classList.add('find-flash')
+    setTimeout(() => el.classList.remove('find-flash'), 1300)
+  }
+  function palReveal(root, id) {
+    const el = root && root.querySelector('[data-find="' + id + '"]')
+    if (!el) return
+    el.scrollIntoView({ block: 'nearest', behavior: REDUCED ? 'auto' : 'smooth' })
+    const f = el.matches('button, input, select') ? el : el.querySelector('button[aria-pressed="true"]:not(:disabled), button:not(:disabled), input:not(:disabled), select:not(:disabled)')
+    if (f) f.focus({ preventScroll: true })
+    palFlash(el)
+  }
+  function palGo(e) {
+    palRemember(e.id)
+    const g = e.target
+    pal.els = null
+    if (g.page) { palClose(); setPage(g.page); window.scrollTo({ top: 0, behavior: REDUCED ? 'auto' : 'smooth' }); return }
+    if (g.settings) {
+      // The settings dialog takes the same dialog element, so it opens in place of the palette.
+      openSettingsDialog(g.settings)
+      requestAnimationFrame(() => palReveal(dlg.el, g.find))
+      return
+    }
+    if (g.display) {
+      palClose()
+      setPage('accounts')
+      requestAnimationFrame(() => {
+        const b = document.querySelector('#toolbar .tb-display')
+        if (!b) return
+        if (menu.anchor !== b) b.click()
+        palReveal(menu.el, g.display)
+      })
+      return
+    }
+    const a = PALETTE_ACTIONS[g.action]
+    if (a.nav) palClose()
+    a.run()
+    // An action that opened nothing (such as a task handed to the Portal) leaves no palette behind.
+    if (dlg.kind === 'palette') palClose()
+  }
+  // The words go to Session History's search box, which reads them as it does typed ones.
+  function palHistory(q) {
+    palClose()
+    hs.q = q.trim()
+    hs.mode = 'history'
+    sp.drawn = ''
+    if (hs.els) hs.els.q.value = hs.q
+    if (hs.data || hs.error) historyChanged(false)
+    else saveHistFilters()
+    setPage('sessions')
   }
 
   // ---------- start at login (spec §3.29, ADR-0029) and the Menu Bar Item (spec §3.31, ADR-0034) ----------
@@ -6299,7 +6533,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.network', 'ai.ask.theme', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.network', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.tool']
   // Network Guard (spec §3.35): one dialog with the switch, the allowed countries and the newest result per address.
   // Countries are never ticked for the user, the current one included: a wrong network would allow itself.
   const NET_COMMON = ['US', 'JP', 'SG', 'GB', 'DE', 'FR', 'NL', 'CA', 'AU', 'KR', 'TW', 'HK']
@@ -7835,6 +8069,14 @@ const MAIN = String.raw`
   $('ver-top').addEventListener('click', () => openVerPop($('ver-top')))
   $('refresh').addEventListener('click', refreshAll)
   $('ask-ai').addEventListener('click', () => openAsk())
+  $('search-btn').addEventListener('click', () => openPalette())
+  // Cmd/Ctrl+K opens the Command Palette from anywhere and closes it again; / and Cmd/Ctrl+F stay on the account search.
+  document.addEventListener('keydown', (e) => {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || (e.key !== 'k' && e.key !== 'K')) return
+    if (dlg.el && dlg.el.open) { if (dlg.kind === 'palette') { e.preventDefault(); palClose() } return }
+    e.preventDefault()
+    openPalette()
+  })
   // In a Portal that offers AI Tasks itself the Portal has the button; opened on its own, the Panel keeps it.
   $('ask-ai').hidden = askBridged(BOOT, window)
   $('accounts').addEventListener('dragover', onDragOver)

@@ -1206,6 +1206,25 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     { schemaVersion: Version, families: Type.Array(FamilyDetail) },
     { title: 'sideby families --json' },
   ),
+  commands: Type.Object(
+    {
+      schemaVersion: Version,
+      results: Type.Array(
+        Type.Object({
+          id: Str,
+          kind: Type.String({
+            description: "'page', 'setting' or 'action'; an open set, so tolerate others.",
+          }),
+          title: Str,
+          panel: Type.String({
+            description: 'Where it lives in the Panel, such as "Settings → General → Language".',
+          }),
+          cliCommand: Type.Union([Str, Type.Null()]),
+        }),
+      ),
+    },
+    { title: 'sideby commands --json' },
+  ),
   'app-install': Type.Object(
     {
       schemaVersion: Version,
