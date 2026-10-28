@@ -62,6 +62,7 @@ import {
   quotaHighLevel,
   quotaPressure,
   radioStep,
+  reloadForBuild,
   remoteControlSummary,
   reorder,
   rowBadge,
@@ -131,6 +132,7 @@ const LOGIC = [
   matchesQuery,
   menuPlacement,
   radioStep,
+  reloadForBuild,
   dotsKeepKeyboard,
   mergeDaily,
   mergeUsage,
@@ -7655,8 +7657,11 @@ const MAIN = String.raw`
     reloadForNewBuild()
   }
   // Reloads into the new build once the viewer is not in the middle of something (a dialog, a form, a selection).
+  // The update dialog and the version popover describe the old build, so they do not hold the reload back.
   function reloadForNewBuild() {
-    if (S.newBuild && !uiBusy() && !S.fixing && !S.checking && !dlg.busy) location.reload()
+    if (!S.newBuild) return
+    const updateView = (dlg.kind === 'update' && Boolean(dlg.el && dlg.el.open)) || menu.kind === 'version'
+    if (reloadForBuild({ newBuild: true, busy: uiBusy(), working: Boolean(S.fixing || S.checking || dlg.busy || (up && up.autoBusy)), updateView })) location.reload()
   }
   // Once a second: the "Updated" age ticks, a deferred render lands once the viewer is done, and the state
   // reloads on schedule while the page is visible.

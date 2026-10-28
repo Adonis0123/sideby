@@ -568,6 +568,20 @@ export function codeSwapOutcome(s: {
   return s.landed === false ? 'failed' : 'unknown'
 }
 /**
+ * Whether a page whose server now runs another build reloads now (spec §3.23). It waits while the viewer is in the
+ * middle of something, except in the update dialog or the version popover: they describe the old build, so a stale
+ * version or error would stay on screen, and nothing is typed there. A running fix, check or update still waits.
+ */
+export function reloadForBuild(s: {
+  newBuild: boolean
+  busy: boolean
+  working: boolean
+  updateView: boolean
+}): boolean {
+  if (!s.newBuild || s.working) return false
+  return !s.busy || s.updateView
+}
+/**
  * Runs a request that may swap the server's code (an Update, a Local Build switch; spec §3.23). A background Panel
  * restarting from the new code drops the answer, and a Portal moving to it may answer 5xx: without an answer only a
  * fresh read of the state that shows the change counts as success (`codeSwapOutcome`). Each wait starts when the

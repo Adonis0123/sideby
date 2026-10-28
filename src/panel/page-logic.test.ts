@@ -64,6 +64,7 @@ import {
   quotaHighLevel,
   quotaPressure,
   radioStep,
+  reloadForBuild,
   remoteControlSummary,
   reorder,
   rowBadge,
@@ -546,6 +547,25 @@ describe('switchFailure', () => {
     assert.equal(switchFailure({ status: 502 }), 'check')
     assert.equal(switchFailure({ status: 400 }), 'fail')
     assert.equal(switchFailure({}), 'fail')
+  })
+})
+
+describe('reloadForBuild', () => {
+  const at = (o: Partial<{ newBuild: boolean; busy: boolean; working: boolean; updateView: boolean }>) =>
+    reloadForBuild({ newBuild: true, busy: false, working: false, updateView: false, ...o })
+  it('reloads into a new build when the viewer is idle, and never without one', () => {
+    assert.equal(at({}), true)
+    assert.equal(at({ newBuild: false }), false)
+  })
+  it('waits while another dialog, menu or form is open', () => {
+    assert.equal(at({ busy: true }), false)
+  })
+  it('does not let an open update dialog or version popover keep the old version and error on screen', () => {
+    assert.equal(at({ busy: true, updateView: true }), true)
+  })
+  it('waits while a fix, check or update is running, even in the update dialog', () => {
+    assert.equal(at({ busy: true, updateView: true, working: true }), false)
+    assert.equal(at({ working: true }), false)
   })
 })
 
