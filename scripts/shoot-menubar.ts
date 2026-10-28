@@ -8,6 +8,8 @@
 //   node scripts/shoot-menubar.ts            write all four PNGs
 //   node scripts/shoot-menubar.ts --out <d>  write them to <d> instead, for a look before replacing
 // When the menu bar is too full to show one more icon, the script stops: hold ⌘ and drag icons to make room.
+// Keep hands off the mouse and keyboard while it runs: a real move, click or key press while the menu is open
+// highlights a row (a letter jumps to the row it starts) or closes the menu, so the picture is retaken.
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -97,7 +99,33 @@ writeFileSync(findMenu, FIND_MENU)
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/** Seconds since the last real mouse or keyboard input (the pointer moves made here do not count). */
+function idleSeconds(): number {
+  // kCGAnyInputEventType (~0) has no name in the JavaScript bridge.
+  const js =
+    "ObjC.import('CoreGraphics'); $.CGEventSourceSecondsSinceLastEventType($.kCGEventSourceStateHIDSystemState, 0xFFFFFFFF)"
+  return Number(
+    execFileSync('/usr/bin/osascript', ['-l', 'JavaScript', '-e', js], { encoding: 'utf8' }).trim(),
+  )
+}
+
+const TRIES = 5
+
 async function shoot(shot: (typeof shots)[number]): Promise<void> {
+  for (let i = 1; i <= TRIES; i++) {
+    if (await shootOnce(shot)) return
+    console.log(
+      `${shot.file}: the mouse or keyboard was used while the menu was open; taking it again (${i}/${TRIES})`,
+    )
+  }
+  fail(
+    `shoot-menubar: ${shot.file} was disturbed ${TRIES} times; keep hands off the mouse and keyboard while it runs`,
+  )
+}
+
+/** One picture; false when real input arrived while the menu was open, so the picture may show a highlighted row
+ *  or no menu at all. */
+async function shootOnce(shot: (typeof shots)[number]): Promise<boolean> {
   const file = join(work, `menubar-${shot.lang}-${shot.dark ? 'dark' : 'light'}.js`)
   writeFileSync(file, harness(shot.lang, shot.dark))
   const child: ChildProcess = track(
@@ -115,19 +143,22 @@ async function shoot(shot: (typeof shots)[number]): Promise<void> {
       encoding: 'utf8',
     }).trim()
     if (area) {
+      // The menu opened at most one poll and one window lookup (about 500 ms) before it was found.
+      const opened = Date.now() - 500
       await sleep(700)
       execFileSync('/usr/sbin/screencapture', ['-x', '-R', area, join(out, shot.file)])
+      const calm = idleSeconds() * 1000 > Date.now() - opened
       // The pointer goes back 2.5 s after the menu opened.
       await sleep(2200)
       child.kill()
-      console.log(`wrote ${join(out, shot.file)}`)
       await sleep(400)
-      return
+      if (calm) console.log(`wrote ${join(out, shot.file)}`)
+      return calm
     }
     await sleep(250)
   }
   child.kill()
-  fail('shoot-menubar: the menu did not open within 30 s')
+  return fail('shoot-menubar: the menu did not open within 30 s')
 }
 
 for (const shot of shots) await shoot(shot)
