@@ -21,10 +21,11 @@ describe('the Design System built from code', () => {
 
   it('takes every color from themes.ts, or from the Panel default when a Theme sets none', () => {
     const byTheme = (name: string) => color(name)?.value as Record<string, string>
-    assert.equal(byTheme('surface-2')['leaf-dark'], '#0e1511')
+    const leaf = BUILTIN_THEMES.find((t) => t.id === 'leaf')
+    assert.equal(byTheme('surface-2')['leaf-dark'], leaf?.dark.surfaceMuted)
     assert.equal(color('btn-text')?.value, '{text}', 'var(--text) becomes an alias')
     assert.equal(color('logo-fg')?.value, '#3f8fc4', 'one value when every Theme agrees')
-    assert.equal(byTheme('logo-line')['sky-dark'], '#00000000', 'transparent')
+    assert.equal(byTheme('logo-line')['celeste-dark'], '#00000000', 'transparent')
     const keys = Object.keys(THEME_TOKENS) as (keyof typeof THEME_TOKENS)[]
     assert.deepEqual(
       tokens.color.tokens.map((t) => `--${t.name}`),
@@ -54,9 +55,10 @@ describe('the Design System built from code', () => {
     const declared = new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]))
     const tokenVar = tokenVars()
     for (const t of tokens.color.tokens) assert.ok(tokenVar.has(`--${t.name}`))
-    // --qr is set per row by page-script.ts.
+    // --qr and --dot are set per element by page-script.ts.
     for (const m of css.matchAll(/var\((--[a-z0-9-]+)/g))
-      if (m[1] !== '--qr') assert.ok(declared.has(m[1]) || tokenVar.has(m[1]!), `${m[1]} is defined`)
+      if (m[1] !== '--qr' && m[1] !== '--dot')
+        assert.ok(declared.has(m[1]) || tokenVar.has(m[1]!), `${m[1]} is defined`)
     assert.ok(!/:root \{[^}]*--accent:/.test(css), 'never overrides a token the system sets')
   })
 

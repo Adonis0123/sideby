@@ -11,9 +11,9 @@ sideby keeps every account of every AI coding tool in one Panel. People glance a
 
 ## Color
 
-- Colors come from Themes. Four themes ship here: **Sky** (the default) and **New Leaf**, each with light and dark. Build on Sky · Light unless told otherwise; New Leaf is Radix `grass` over the `olive` gray.
+- Colors come from Themes. Five themes ship here, each with light and dark: **Teal** (the default), **Leaf**, **Argentine Blue**, **Claude Orange** and **Codex Ink**. They share the Radix `slate` neutrals, status colors and shape; only the accent changes. Build on Teal · Light unless told otherwise.
 - Page on `bg` (a tinted page, never plain gray); cards, fields and buttons on `surface`; quiet areas inside a card on `surface-2`. Borders: `border` for cards, `border-strong` for controls.
-- Text: `text` for body, `muted` for labels and meta, `faint` for captions. In Sky · Light, set `faint` on `surface` rather than `bg` (4.47:1 on `bg`).
+- Text: `text` for body, `muted` for labels and meta, `faint` for captions. In the light themes, keep `faint` on `bg` or `surface` rather than `surface-2` (4.20:1 on `surface-2`).
 - Color means state: what is selected (`accent`, `accent-soft`, `active`), what needs a look (`warn`, `fail`), and how much quota is left (`ok-bar`, `warn-bar`, `fail-bar` on `track`). Never use color for decoration alone.
 - Status text pairs with its soft fill: `ok` on `ok-soft`, `warn` on `warn-soft`, `fail` on `fail-soft`. Each status also carries a word or a percentage.
 - Never set `warn`, `fail`, `warn-bar` or `fail-bar` to the accent's hue; never make `ok-bar` red or amber.
