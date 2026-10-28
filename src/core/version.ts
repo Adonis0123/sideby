@@ -82,3 +82,34 @@ export function localBuild(): LocalBuild | null {
   }
   return cachedLocal
 }
+
+type Parsed = { core: [number, number, number]; pre: string[] }
+// Build metadata is limited to what semver allows, so a version never carries a terminal escape into the notice.
+const VERSION = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/
+export function parseVersion(v: string): Parsed | null {
+  const m = VERSION.exec(v.trim())
+  return m ? { core: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] ? m[4].split('.') : [] } : null
+}
+
+/** Semver precedence of two prerelease identifiers: numbers compare as numbers and sort before words. */
+function comparePre(a: string, b: string): number {
+  const na = /^\d+$/.test(a)
+  const nb = /^\d+$/.test(b)
+  if (na && nb) return Math.sign(Number(a) - Number(b))
+  if (na !== nb) return na ? -1 : 1
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
+/** -1, 0 or 1 like a sort comparator; a prerelease sorts before its release. Null when either is not a version. */
+export function compareVersions(a: string, b: string): number | null {
+  const pa = parseVersion(a)
+  const pb = parseVersion(b)
+  if (!pa || !pb) return null
+  for (let i = 0; i < 3; i++) if (pa.core[i] !== pb.core[i]) return pa.core[i]! < pb.core[i]! ? -1 : 1
+  if (!pa.pre.length || !pb.pre.length) return Math.sign(pb.pre.length - pa.pre.length)
+  for (let i = 0; i < Math.min(pa.pre.length, pb.pre.length); i++) {
+    const c = comparePre(pa.pre[i]!, pb.pre[i]!)
+    if (c) return c
+  }
+  return Math.sign(pa.pre.length - pb.pre.length)
+}

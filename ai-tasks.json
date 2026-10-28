@@ -142,6 +142,20 @@
             { "en": "Allow only my Japan and Singapore nodes", "zh": "只允许日本和新加坡节点" },
             { "en": "A message was blocked; help me check the proxy", "zh": "消息被拦了，帮我查查代理" }
           ]
+        },
+        {
+          "id": "update",
+          "native": true,
+          "title": { "en": "Let AI fix the update", "zh": "让 AI 帮我更新" },
+          "placeholder": {
+            "en": "Anything to add? For example: I use a proxy",
+            "zh": "想补充什么？比如：我要走代理才能上网"
+          },
+          "examples": [
+            { "en": "I am behind a proxy", "zh": "我上网要走代理" },
+            { "en": "Use a registry mirror in China", "zh": "在国内，帮我换成镜像源" },
+            { "en": "It says it cannot update itself here", "zh": "提示这里不能自己更新" }
+          ]
         }
       ]
     }

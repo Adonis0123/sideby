@@ -352,6 +352,18 @@ describe('Update and Auto Update', () => {
       assert.equal(r.skillUpdated, undefined)
     })
   })
+  it('does not call a skill for a newer sideby outdated: the CLI is what is behind', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.agents/skills/sideby/SKILL.md', skill('99.0.0'))
+      const plan = await skillUpdatePlan(h.home, CURRENT)
+      assert.equal(plan?.outdated, false)
+      assert.equal(plan && skillBehind(plan, CURRENT), null)
+      await h.write('.claude/skills/sideby/SKILL.md', skill('0.0.1'))
+      const both = await skillUpdatePlan(h.home, CURRENT)
+      assert.equal(both?.outdated, true)
+      assert.equal(both && skillBehind(both, CURRENT)?.installed, '0.0.1', 'names the older one')
+    })
+  })
   it('has no skill part without an installed skill, and runs nothing for a current one', async () => {
     await withFakeHome(async (h) => {
       machine(h)

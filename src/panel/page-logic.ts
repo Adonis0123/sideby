@@ -1173,6 +1173,7 @@ export const AI_TASK_KINDS = [
   'menubar',
   'hotkey',
   'network',
+  'update',
 ] as const
 export type AiTaskKind = (typeof AI_TASK_KINDS)[number]
 
@@ -1293,6 +1294,8 @@ export function taskPrompt(
       handoff?: readonly string[]
       /** Network Guard facts, one per line, as `networkTaskFacts` gives them (`network` task, spec §3.35). */
       network?: readonly string[]
+      /** The error the last Update Check or Update showed (`update` task, spec §3.23). */
+      updateError?: string
     }
     /** Files saved for the task (spec §3.28 "附件"): absolute paths and their kind. */
     attachments?: readonly { path: string; kind: string }[]
@@ -1335,6 +1338,10 @@ export function taskPrompt(
         network:
           '帮我设置 sideby 的网络检查：请求要从我没允许的国家或地区发出时（比如代理断了、节点切错了），拦下 Claude 和 Codex。',
         cNetwork: '网络检查现在的情况（来自 `sideby network --json`）：',
+        update: '帮我把 sideby 和它的 skill 更新到最新版：面板检查更新或更新时出错了，请找出原因并修好。',
+        cUpdate: '面板上的报错：',
+        pUpdate:
+          '先运行 `sideby update --json`，看它能不能连上 npm、最新版是多少、是哪种安装方式（`canRun`）。连不上时先查网络：要走代理的话，看启动 sideby 的终端里有没有 `HTTPS_PROXY`、代理开没开；在中国大陆可以用镜像 `SIDEBY_UPDATE_REGISTRY=https://registry.npmmirror.com`，要写进 shell 配置文件前先问我。能更新时，`sideby update --json` 已经给出预览（退出码 10），我同意后再跑 `sideby update --yes --json`。`canRun` 为 `false` 时（npx、项目依赖、没有写权限的全局目录），把输出里的 `command` 给我，告诉我在哪里运行。skill 比 sideby 新不是问题，更新 sideby 就好。最后再跑一次 `sideby update --json`，确认 sideby 和 skill 都已是最新。',
         pNetwork:
           '先运行 `sideby network check --json`，告诉我现在每个地址的请求从哪里发出。问我允许哪些国家或地区；不要替我决定，也不要因为现在在哪就把它加进去（网络不对时那正是错的地区）。我说了以后，先不加 `--yes` 跑 `sideby network allow <代码>... --json` 和 `sideby network on --json` 给我看预览，我同意后再加 `--yes`。告诉我：只检查 sideby 启动的会话；Codex 要在 `/hooks` 里信任一次 `network-hook`；临时跳过一次用 `sideby run <账号> --ignore-network`。被拦过的话，先帮我查代理（开没开、哪个节点），再跑 `sideby network check --json` 确认。它只防代理出意外，不会让在不支持的地区使用变得合规；不要帮我隐藏所在地（时区、指纹之类）。',
         pHandoff:
@@ -1400,6 +1407,11 @@ export function taskPrompt(
         network:
           "Help me set up sideby's network check: stop Claude and Codex when my requests would leave from a country I did not allow (for example when the proxy stopped or a node in the wrong country is picked).",
         cNetwork: 'Network check now (from `sideby network --json`):',
+        update:
+          'Bring sideby and its skill up to date: the Panel showed an error while checking for or installing an update. Find out why and fix it.',
+        cUpdate: 'The error the Panel showed: ',
+        pUpdate:
+          'Run `sideby update --json` first to see whether it reaches npm, the latest version and how sideby is installed (`canRun`). When it cannot reach npm, check the network: behind a proxy, whether the terminal that starts sideby has `HTTPS_PROXY` and the proxy is on; in mainland China the mirror `SIDEBY_UPDATE_REGISTRY=https://registry.npmmirror.com` helps, but ask me before writing it into a shell config file. When it can update, `sideby update --json` already shows the change (exit 10); run `sideby update --yes --json` after I agree. When `canRun` is false (npx, a project dependency, a global folder I cannot write), give me the `command` from its output and tell me where to run it. A skill newer than sideby is fine: updating sideby is enough. Finish with `sideby update --json` again to confirm sideby and the skill are current.',
         pNetwork:
           "Run `sideby network check --json` first and tell me where each address's requests leave from now. Ask me which countries to allow; never decide for me, and never add the current country because it is current (on a wrong network that is the wrong one). Once I say, run `sideby network allow <codes>... --json` and `sideby network on --json` without `--yes` to show me the change, and add `--yes` after I agree. Tell me: only sessions sideby starts are checked; in Codex I trust `network-hook` once in `/hooks`; `sideby run <account> --ignore-network` skips it once. If something was blocked, help me check the proxy (is it on, which node) first, then run `sideby network check --json` to confirm. It guards against proxy accidents; it does not make use from an unsupported region allowed, and never help hide where I am (time zone, fingerprints).",
         pHandoff:
@@ -1477,6 +1489,10 @@ export function taskPrompt(
   if (task === 'network') {
     const lines = (c.network || []).map(clean).filter(Boolean)
     if (lines.length) facts.push('- ' + L.cNetwork, ...lines.map((l) => '  - ' + l))
+  }
+  if (task === 'update') {
+    const err = clean(c.updateError)
+    if (err) facts.push('- ' + L.cUpdate + err)
   }
   const version = clean(c.version)
   if (version) facts.push('- ' + L.cVersion + version)

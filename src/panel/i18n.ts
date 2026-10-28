@@ -81,6 +81,7 @@ const en = {
   'upd.reloading': 'Waiting for the new version; this page reloads by itself.',
   'upd.restartHint':
     'This page still runs the old version. Restart sideby ui (or reload the page in your portal) to use the new one.',
+  'upd.askAi': 'Not sure why? Let AI fix it',
   'upd.skillLabel': 'Update skill',
   'upd.skillLater':
     'Once the new version is installed, open this again to bring the sideby skill agents read along.',
@@ -737,6 +738,13 @@ const en = {
   'th.removeSure': 'Remove for good?',
   'th.removed': 'Removed {name}',
   'ask.title.theme': 'Let AI pick your colors',
+  'ask.task.update':
+    'AI checks why the update failed (network, proxy, how sideby is installed), shows you the fix and updates sideby after you agree.',
+  'ask.title.update': 'Let AI fix the update',
+  'ask.ph.update': 'Anything to add? For example: I use a proxy',
+  'ask.ex.update.1': 'I am behind a proxy',
+  'ask.ex.update.2': 'Use a registry mirror in China',
+  'ask.ex.update.3': 'It says it cannot update itself here',
   'ask.title.network': 'Let AI help',
   'ask.task.network':
     'AI asks which countries your requests may leave from, shows the change, and turns the check on only after you agree.',
@@ -1702,6 +1710,7 @@ const zh: Record<MessageKey, string> = {
   'upd.unconfirmed': '没能确认是否已更新到 sideby {v}：这个页面连不上 sideby。刷新页面看看现在是哪个版本。',
   'upd.reloading': '等待新版本启动，本页会自动刷新。',
   'upd.restartHint': '本页仍在运行旧版本。重启 sideby ui（在 Portal 里就刷新页面）后使用新版本。',
+  'upd.askAi': '不知道怎么办？让 AI 帮我修',
   'upd.skillLabel': '更新 skill',
   'upd.skillLater': '装好新版本后，再打开这里把 agent 用的 sideby skill 一起更新。',
   'upd.skillLabelLong': 'agent 用的 sideby skill 还是 {s}，当前 sideby 是 {cur}。点击更新。',
@@ -2328,6 +2337,12 @@ const zh: Record<MessageKey, string> = {
   'th.removeSure': '确定删除？',
   'th.removed': '已删除「{name}」',
   'ask.title.theme': '让 AI 帮我配色',
+  'ask.task.update': 'AI 会查更新为什么失败（网络、代理、安装方式），先给你看怎么修，你同意后再更新 sideby。',
+  'ask.title.update': '让 AI 帮我更新',
+  'ask.ph.update': '想补充什么？比如：我要走代理才能上网',
+  'ask.ex.update.1': '我上网要走代理',
+  'ask.ex.update.2': '在国内，帮我换成镜像源',
+  'ask.ex.update.3': '提示这里不能自己更新',
   'ask.title.network': '让 AI 帮我',
   'ask.task.network': 'AI 会问你允许哪些地区，先给你看改动，你同意后才打开检查。',
   'ask.ph.network': '你在哪里、用哪些代理节点？或者贴上被拦下的提示。',

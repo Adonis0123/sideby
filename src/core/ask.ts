@@ -351,7 +351,8 @@ export function taskContext(c: unknown, fail: (message: string) => Error): AiTas
       k === 'quotaReason' ||
       k === 'version' ||
       k === 'terminalCustom' ||
-      k === 'theme'
+      k === 'theme' ||
+      k === 'updateError'
     )
       out[k] = str(v, `"context.${k}"`)
     else if (k === 'terminals') {

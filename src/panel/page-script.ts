@@ -7694,7 +7694,14 @@ const MAIN = String.raw`
   const skillOld = (u) => !!(u && !u.available && !isLocal(u) && u.skillUpdate && u.skillUpdate.outdated)
   const skillDue = (u) => skillOld(u) && u.skillUpdate.canRun
   function skillFor(u) {
-    const v = u.skillUpdate.installed.find((x) => x !== u.current)
+    // Only a skill for an older sideby is behind; one for a newer sideby means the CLI is the one to update.
+    const older = (a, b) => {
+      const p = (x) => String(x).split(/[.+-]/).slice(0, 3).map(Number)
+      const x = p(a), y = p(b)
+      for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] < y[i]
+      return false
+    }
+    const v = u.skillUpdate.installed.find((x) => x !== u.current && (x === null || older(x, u.current)))
     return v ? v : t('upd.skillNoVer')
   }
   // Why sideby cannot do something itself, in the viewer's language; the English reason when the code is unknown.
@@ -7800,6 +7807,12 @@ const MAIN = String.raw`
     openPopover(anchor, 'version', t('upd.title'), verPopKids)
   }
   function renderVerPop() { refreshPopover('version') }
+  // Where an update fails (spec §3.28): the AI checks the network, the proxy and the install method, and fixes them.
+  function updAskKids(err) {
+    if (BOOT.readOnly) return []
+    const go = () => { closeMenu(); if (dlg.el && dlg.el.open) dlg.el.close(); openAsk({ task: 'update', context: { updateError: err.message, version: BOOT.version } }) }
+    return [h('p', { class: 'small', 'data-enter': 'upd-ai' }, h('button', { class: 'link-btn small', type: 'button', onclick: go }, icon('bot'), ' ', t('upd.askAi')))]
+  }
   // A Local Build (ADR-0024) names its commit, with + when the working tree had changes, so the viewer can tell
   // which code they are looking at.
   function verLabel() {
@@ -7831,7 +7844,7 @@ const MAIN = String.raw`
       kids.push(h('div', { class: 'popover-actions' }, h('button', { class: 'btn btn-sm', type: 'button', disabled: vp.checking, 'aria-busy': vp.checking ? 'true' : null, onclick: verPopCheck },
         vp.checking ? spinner() : icon('refresh'), vp.checking ? t('upd.checking') : t('upd.check'))))
     }
-    if (vp.error) kids.push(errorNote(vp.error, null))
+    if (vp.error) kids.push(errorNote(vp.error, null), ...updAskKids(vp.error))
     const sw = localSwitchKids(u)
     if (sw) kids.push(sw)
     if (u && !BOOT.readOnly && !isLocal(u))
@@ -8049,7 +8062,7 @@ const MAIN = String.raw`
         h('button', { class: 'btn btn-sm btn-primary', type: 'button', disabled: up.autoBusy, onclick: updAutoSave }, t('upd.save'))))
     }
     if (BOOT.readOnly) body.push(h('p', { class: 'note' }, t('banner.readOnly')))
-    if (up.error) body.push(errorNote(up.error, null))
+    if (up.error) body.push(errorNote(up.error, null), ...updAskKids(up.error))
     const foot = [h('button', { class: 'btn', type: 'button', disabled: up.busy, onclick: () => dlg.el.close() }, t('btn.close'))]
     const primary = (label, run) => h('button', { class: 'btn btn-primary', type: 'button', disabled: up.busy, 'aria-busy': up.busy ? 'true' : null, onclick: run }, up.busy ? spinner() : null, up.busy ? t('upd.updating') : label)
     if (up.unknown || (u.available && isLocal(u) && (vs.stuck || vs.unknown))) foot.push(h('button', { class: 'btn btn-primary', type: 'button', onclick: () => location.reload() }, icon('refresh'), t('loc.reload')))

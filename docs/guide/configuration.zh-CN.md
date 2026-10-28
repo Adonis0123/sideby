@@ -128,4 +128,4 @@ sideby 每天向 npm registry 查一次自己的最新版本（一次 `GET https
 | `"update": { "check": false }` | 不再每天检查，也不提示。`NO_UPDATE_NOTIFIER=1` 或 `SIDEBY_NO_UPDATE_NOTIFIER=1` 效果相同；CI 里自动关闭。`sideby update` 照常可用。 |
 | `"update": { "auto": true }` | 默认关；面板的更新对话框里有同一个开关。每天检查后自动安装新版本，只对 npm、pnpm、bun 的全局安装生效，只在没有 `sideby run`、`next`、`resume` 运行时执行，不自动装大版本（0.x 到 1.0）。会一起更新 sideby skill；sideby 已是最新而 skill 落后时，也会自己把 skill 补上。下一次命令会提示一次已更新。 |
 
-`SIDEBY_UPDATE_REGISTRY` 可以让检查走镜像，比如 `https://registry.npmmirror.com`。
+`SIDEBY_UPDATE_REGISTRY` 可以让检查走镜像，比如 `https://registry.npmmirror.com`。要走代理时，检查和 npm 一样读 `HTTPS_PROXY`（或 `ALL_PROXY`，`NO_PROXY` 里的地址除外）。

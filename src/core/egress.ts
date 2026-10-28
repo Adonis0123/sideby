@@ -113,8 +113,16 @@ export function parseTrace(text: string): { ip?: string; loc?: string } {
   return out
 }
 
-/** One GET of `url`, directly or through an `http://` proxy (CONNECT), as the Host would send it. */
-export const fetchTrace: TraceFetcher = (url, env, timeoutMs) =>
+/**
+ * One GET of an `https://` `url`, directly or through an `http://` proxy (CONNECT), as the Host would send it. The
+ * Update Check uses it too, since Node's own `fetch` does not follow the proxy variables.
+ */
+export const fetchTrace = (
+  url: string,
+  env: Env,
+  timeoutMs: number,
+  userAgent = 'sideby-network-guard',
+): Promise<string> =>
   new Promise((resolve, reject) => {
     const target = new URL(url)
     const proxy = proxyFor(url, env)
@@ -144,9 +152,9 @@ export const fetchTrace: TraceFetcher = (url, env, timeoutMs) =>
       const req = httpsRequest(
         {
           host: target.hostname,
-          path: target.pathname,
+          path: target.pathname + target.search,
           method: 'GET',
-          headers: { 'user-agent': 'sideby-network-guard' },
+          headers: { 'user-agent': userAgent, accept: 'application/json, text/plain' },
           ...(socket ? { createConnection: () => socket } : {}),
         },
         read,

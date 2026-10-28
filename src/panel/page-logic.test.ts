@@ -1760,6 +1760,21 @@ describe('settings in config, start at login and Auto Handoff facts (spec §3.29
       assert.match(p, /api\.anthropic\.com: not-checked \(claude:work\)/)
       assert.match(p, /claude:deepseek: not checked here \(third-party\)/)
     }
+    // An update that failed: the AI starts from `sideby update --json` with the Panel's error, and checks the proxy.
+    for (const lang of ['en', 'zh']) {
+      const p = taskPrompt(
+        {
+          task: 'update',
+          context: { updateError: 'could not reach https://registry.npmjs.org (timed out)' },
+          lang,
+        },
+        stripSecrets,
+      )
+      assert.match(p, /sideby update --json/)
+      assert.match(p, /HTTPS_PROXY/)
+      assert.match(p, /SIDEBY_UPDATE_REGISTRY/)
+      assert.match(p, /registry\.npmjs\.org \(timed out\)/)
+    }
     // "Can't see the icon?": the AI starts from the menu bar item's own state, in either language.
     for (const lang of ['en', 'zh']) {
       const p = taskPrompt({ task: 'menubar', lang }, stripSecrets)
