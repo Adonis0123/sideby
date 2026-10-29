@@ -17,6 +17,8 @@ export interface EnableStep {
   diff?: string
   /** For `copy`: the Accounts that get the file. */
   accounts?: string[]
+  /** For `quota`: the display is on, and the step only adds what keeps it current (Claude's refresh, ADR-0056). */
+  upgrade?: true
 }
 
 export interface EnableManual {
@@ -133,7 +135,13 @@ export async function planHandoffEnable(
         .plan()
         .catch(() => null)
       if (plan?.status === 'ready')
-        steps.push({ id: 'quota', family: f.family, file: plan.file, diff: plan.diff })
+        steps.push({
+          id: 'quota',
+          family: f.family,
+          file: plan.file,
+          diff: plan.diff,
+          ...(plan.upgrade ? { upgrade: true as const } : {}),
+        })
       else if (plan?.status === 'blocked')
         manual.push({ id: 'setup-blocked', family: f.family, message: plan.message })
     }

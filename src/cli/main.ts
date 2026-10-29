@@ -694,7 +694,7 @@ export async function main(argv: string[]): Promise<number> {
   // so a Host never gets a version error from its own hook (spec §3.17).
   if (first === 'handoff-hook') {
     const { runHandoffHook } = await import('../handoff/hook.ts')
-    return runHandoffHook(rest, process.env, process.stdin, process.stdout)
+    return runHandoffHook(rest, process.env, process.stdin, process.stdout, process.stderr)
   }
   // Network Guard's hook runs before every prompt and tool call it guards (spec §3.35); same fast path.
   if (first === 'network-hook') {

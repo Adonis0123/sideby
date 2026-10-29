@@ -62,6 +62,16 @@ describe('claude handoff', () => {
       assert.equal(s.hooks.PostToolUse[0].hooks[0].command, 'sideby handoff-hook claude PostToolUse')
       assert.equal(s.hooks.SessionStart[0].hooks[0].command, 'sideby handoff-hook claude SessionStart')
       assert.equal(s.hooks.StopFailure[0].matcher, 'rate_limit')
+      // The usual Stop hook, and the background one that wakes a session waiting on background work (ADR-0056).
+      assert.deepEqual(s.hooks.Stop[0].hooks, [
+        { type: 'command', command: 'sideby handoff-hook claude Stop' },
+        {
+          type: 'command',
+          command: 'sideby handoff-hook claude IdleWatch',
+          asyncRewake: true,
+          timeout: 18000,
+        },
+      ])
     })
   })
 

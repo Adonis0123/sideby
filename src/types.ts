@@ -296,8 +296,11 @@ export interface FamilyDef {
   handoff?: FamilyHandoff
 }
 
-/** A Host hook event sideby's handoff hook listens to. */
-export type HandoffHookEvent = 'SessionStart' | 'PostToolUse' | 'Stop' | 'StopFailure'
+/**
+ * A Host hook event sideby's handoff hook listens to. `IdleWatch` is sideby's own name for a second, background Claude
+ * `Stop` hook that wakes a session waiting on background work (ADR-0056).
+ */
+export type HandoffHookEvent = 'SessionStart' | 'PostToolUse' | 'Stop' | 'StopFailure' | 'IdleWatch'
 
 /** Whether one run may start a Handoff, or start as the next Account of one, and why not. */
 export interface HandoffEligibility {
@@ -359,6 +362,11 @@ export interface QuotaSetupPlan {
   /** Unified diff of the change, empty when nothing would change. */
   diff: string
   message: string
+  /**
+   * With `ready`: the setup is already on and only an addition from a newer sideby is missing (Claude's
+   * `statusLine.refreshInterval`, ADR-0056); quota already shows, but `apply` should still run.
+   */
+  upgrade?: boolean
 }
 
 export interface QuotaSetup {

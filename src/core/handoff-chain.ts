@@ -1,8 +1,8 @@
 // The files one Handoff chain keeps under `<state>/handoffs/<chain>/` (spec §3.17). The handoff hook runs on every
 // tool call, so this module imports only Node built-ins and leaf modules (never the Runtime or a Family index).
 // The parent `sideby run` writes `plan.json`, `chain.json` and, while a session waits for a reset, `waiting.json`; the
-// hook writes `run-<id>.json` and `ready.json`; `sideby handoff ready` writes `request.json` (`ready.json` while the
-// session waits). Every file is mode 600 in a mode 700 directory.
+// hook writes `run-<id>.json`, `ready.json` and, for Claude's background `IdleWatch`, `watch-<id>.json`; `sideby
+// handoff ready` writes `request.json` (`ready.json` while the session waits). Every file is mode 600 in a mode 700 directory.
 import { randomBytes } from 'node:crypto'
 import { chmod, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -111,6 +111,8 @@ export const FILES = {
   waiting: 'waiting.json',
   chain: 'chain.json',
   run: (runId: string) => `run-${runId}.json`,
+  /** `{ id }` of the run's current `IdleWatch` (ADR-0056): a later one replaces it, and the earlier one then ends. */
+  watch: (runId: string) => `watch-${runId}.json`,
 } as const
 
 /** A short random id for a chain or a run: safe in file names and environment values. */

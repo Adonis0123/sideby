@@ -61,4 +61,22 @@ describe('handoff doctor findings', () => {
       assert.ok(!(await doctorCodes(h, { auto: true })).codes.includes('handoff.setup-missing'))
     })
   })
+
+  it('asks for the refresh when the Claude tap is on without refreshInterval, and not once it is there', async () => {
+    await withFakeHome(async (h) => {
+      const wrapped = { statusLine: { type: 'command', command: 'sideby statusline-tap' } }
+      await h.write('.claude/settings.json', `${JSON.stringify(wrapped)}\n`)
+      const stale = await doctorCodes(h, { auto: true })
+      assert.ok(stale.codes.includes('handoff.quota-refresh'))
+      assert.ok(!stale.codes.includes('handoff.no-quota-tap'))
+      const finding = stale.report.general.find((f) => f.code === 'handoff.quota-refresh')!
+      assert.equal(finding.level, 'warn')
+      assert.match(finding.hint ?? '', /sideby quota setup claude/)
+      const refreshed = { statusLine: { ...wrapped.statusLine, refreshInterval: 30 } }
+      await h.write('.claude/settings.json', `${JSON.stringify(refreshed)}\n`)
+      const codes = (await doctorCodes(h, { auto: true })).codes
+      assert.ok(!codes.includes('handoff.quota-refresh'))
+      assert.ok(!codes.includes('handoff.no-quota-tap'))
+    })
+  })
 })

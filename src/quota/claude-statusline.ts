@@ -41,6 +41,17 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
+/**
+ * Seconds between status line runs while a session is idle (ADR-0056): without it Claude Code runs the status line only
+ * on events in the main conversation, so the cache goes stale while the session waits on background agents.
+ */
+export const REFRESH_INTERVAL = 30
+
+/** Whether the status line already says how often it re-runs; a value the user set is kept. */
+function hasRefresh(statusLine: Record<string, unknown> | undefined): boolean {
+  return statusLine?.refreshInterval !== undefined && statusLine.refreshInterval !== null
+}
+
 /** Keeps the file's own indentation so the diff shows only the changed lines. */
 function serializeLike(original: string, value: unknown): string {
   const body = original.trimEnd()
@@ -90,29 +101,73 @@ async function analyze(ctx: ReadContext): Promise<Analysis> {
   const command = current?.command
   if (command !== undefined && typeof command !== 'string')
     return blocked(`statusLine.command in ${targetName} is not a string`, target)
-  if (isWrapped(command))
+  if (isWrapped(command)) {
+    if (hasRefresh(current))
+      return {
+        plan: {
+          status: 'enabled',
+          file: target,
+          diff: '',
+          message: `already enabled in ${targetName}${note}`,
+        },
+      }
+    // Wrapped by an older sideby, without `refreshInterval` (ADR-0056): offer only that key.
+    const statusLine = { ...current, refreshInterval: REFRESH_INTERVAL }
     return {
-      plan: { status: 'enabled', file: target, diff: '', message: `already enabled in ${targetName}${note}` },
+      plan: {
+        status: 'ready',
+        upgrade: true,
+        file: target,
+        diff: statusLineDiff(current, statusLine, targetName),
+        message: `adds statusLine.refreshInterval (${REFRESH_INTERVAL} seconds) in ${targetName} so Claude quota stays current while a session waits on background agents${note}; \`sideby quota teardown claude\` still restores the file as it was before quota setup`,
+      },
+      target,
+      original,
+      wrapped: serializeLike(text, { ...settings, statusLine }),
     }
+  }
 
   const problem = await sidebyBinProblem(ctx.env, `the status line runs \`${TAP_COMMAND}\` on every refresh`)
   if (problem) return blocked(problem, target)
 
+  const addRefresh = !hasRefresh(current)
+  const refresh = addRefresh ? { refreshInterval: REFRESH_INTERVAL } : {}
   const statusLine = current
-    ? { type: 'command', ...current, command: wrapCommand(command) }
-    : { type: 'command', command: TAP_COMMAND }
+    ? { type: 'command', ...current, command: wrapCommand(command), ...refresh }
+    : { type: 'command', command: TAP_COMMAND, ...refresh }
   const wrapped = serializeLike(text, { ...settings, statusLine })
   return {
     plan: {
       status: 'ready',
       file: target,
       diff: statusLineDiff(current, statusLine, targetName),
-      message: `wraps statusLine.command in ${targetName} so sideby can record Claude's rate limits${note}; undo with \`sideby quota teardown claude\``,
+      message: `wraps statusLine.command in ${targetName} so sideby can record Claude's rate limits${addRefresh ? `, and re-runs it every ${REFRESH_INTERVAL} seconds so they stay current while a session waits` : ''}${note}; undo with \`sideby quota teardown claude\``,
     },
     target,
     original,
     wrapped,
   }
+}
+
+/**
+ * Adds `refreshInterval` to a status line sideby wrapped earlier (ADR-0056). The backup's wrapped hash follows the new
+ * bytes only while it named the file as it was, so teardown still restores the original; otherwise it stays as it is
+ * and teardown refuses as before.
+ */
+async function applyUpgrade(ctx: ReadContext, a: Required<Analysis>, mode: number): Promise<QuotaSetupPlan> {
+  const { upgrade: _, ...plan } = a.plan
+  const before = sha256(a.original)
+  if (!(await writeIfUnchanged(a.target, before, a.wrapped, mode)))
+    return {
+      ...plan,
+      status: 'blocked',
+      message: `${tildify(a.target, ctx.home)} changed while applying; nothing was written, run setup again`,
+    }
+  const bf = backupFile(ctx.stateDir)
+  const b = await readBackup(bf)
+  if (b && b.file === a.target && b.wrappedHash === before)
+    await writeFileAtomic(bf, `${JSON.stringify({ ...b, wrappedHash: sha256(a.wrapped) }, null, 2)}\n`, 0o600)
+  return { ...plan, status: 'enabled', message: `updated: ${plan.message}` }
 }
 
 async function readBackup(file: string): Promise<StatuslineBackup | null> {
@@ -133,7 +188,7 @@ async function readBackup(file: string): Promise<StatuslineBackup | null> {
 
 export const claudeStatusline: QuotaSetup = {
   summary:
-    "Wrap the status line command in ~/.claude/settings.json with `sideby statusline-tap` so sideby can cache Claude's 5h and 7d rate limits. Your status line keeps working; teardown restores the file byte for byte.",
+    "Wrap the status line command in ~/.claude/settings.json with `sideby statusline-tap` so sideby can cache Claude's 5h and 7d rate limits, re-run every 30 seconds so they stay current while a session waits. Your status line keeps working; teardown restores the file byte for byte.",
 
   async plan(ctx) {
     return (await analyze(ctx)).plan
@@ -143,6 +198,7 @@ export const claudeStatusline: QuotaSetup = {
     const a = await analyze(ctx)
     if (a.plan.status !== 'ready' || !a.target || !a.original || a.wrapped === undefined) return a.plan
     const mode = (await stat(a.target)).mode & 0o777
+    if (a.plan.upgrade) return applyUpgrade(ctx, a as Required<Analysis>, mode)
     const backup: StatuslineBackup = {
       file: a.target,
       originalBase64: a.original.toString('base64'),
@@ -266,7 +322,7 @@ export function statusLineDiff(before: unknown, after: unknown, file: string): s
   return unifiedDiff(show(before), show(after), `${file} (statusLine only)`)
 }
 
-const SHOWN_STATUSLINE_KEYS = new Set(['type', 'command', 'padding'])
+const SHOWN_STATUSLINE_KEYS = new Set(['type', 'command', 'padding', 'refreshInterval'])
 
 /** Shows the statusLine fields sideby touches as they are; any other value becomes "<redacted>". */
 export function redactStatusLine(v: unknown): unknown {

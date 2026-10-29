@@ -103,7 +103,7 @@ sideby quota                      # 每个账号的 5h / 7d 额度和数据时�
 sideby quota teardown claude      # 把原文件逐字节还原
 ```
 
-`setup` 修改 `~/.claude/settings.json`：把你的 `statusLine.command` 包成 `sideby statusline-tap --orig-b64 <原命令的 base64>`，用 base64 是为了原命令里的引号和空格不被拆坏。原来没有 status line 时，设成 `sideby statusline-tap`，它会输出一行 `5h 72% · 7d 44%` 这样的内容。原始字节存进 sideby 的状态目录。status line 的显示不变；实测多出的冷启动耗时中位数约 82 ms。
+`setup` 修改 `~/.claude/settings.json`：把你的 `statusLine.command` 包成 `sideby statusline-tap --orig-b64 <原命令的 base64>`，用 base64 是为了原命令里的引号和空格不被拆坏。原来没有 status line 时，设成 `sideby statusline-tap`，它会输出一行 `5h 72% · 7d 44%` 这样的内容。你没设 `statusLine.refreshInterval` 时，它一并设成 30：Claude Code 每 30 秒重跑一次 status line，会话停下来等后台子代理时也跑，额度保持最新；你自己设的值保留不动。旧版 sideby 包装过、但没有这个键的，再跑 `sideby quota setup claude` 只会加这一个键（自动接力打开时，`sideby doctor` 和 `sideby handoff status` 会提醒）。原始字节存进 sideby 的状态目录。status line 的显示不变；实测多出的冷启动耗时中位数约 82 ms。
 
 Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 `PATH` 上、或者来自 npx 缓存时，`setup` 会拒绝，并提示先执行 `npm i -g sideby`。
 
@@ -351,7 +351,7 @@ sideby handoff disable --yes
 | Grok Build | 按它命令行查到的额度到达阈值时（见 [Grok 额度](#grok-额度)），以及某一轮撞上用量上限失败时 | `sideby handoff setup grok --yes`，再 `sideby doctor grok --fix`；默认 sandbox（`off` 或 `devbox`）；`workspace`、`read-only` 只能接手；`strict` 和自定义 profile 不参与。macOS 设备管理下发的 sandbox，sideby 看不到 |
 | pi | 不发起，可以接手 | — |
 
-headless 运行（`claude -p`、`codex exec`、`grok -p`）、带 `--remote` 的 Codex、不是 sideby 启动的会话，都不会接力。自动接力打开但缺 Claude 额度 tap 或 Grok hook 文件，或 `order` 为空、里面有找不到的账号时，`sideby doctor` 会提醒。`PATH` 上的 `sideby` 不存在、来自 npx 缓存，或版本太旧没有 hook 入口时，这次运行不启用自动接力，并在终端说明。
+Claude Code 会话结束这一轮、停下来等后台子代理时也会接力：某个窗口到了交接档，sideby 叫醒它，让它写好接力说明（写明还在跑的后台任务，它们会随会话一起停掉）再结束这一轮。这些消息只发给主会话，不发给子代理。headless 运行（`claude -p`、`codex exec`、`grok -p`）、带 `--remote` 的 Codex、不是 sideby 启动的会话，都不会接力。自动接力打开但缺 Claude 额度 tap 或 Grok hook 文件，或 `order` 为空、里面有找不到的账号时，`sideby doctor` 会提醒。`PATH` 上的 `sideby` 不存在、来自 npx 缓存，或版本太旧没有 hook 入口时，这次运行不启用自动接力，并在终端说明。
 
 ## 开机启动
 

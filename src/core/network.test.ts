@@ -192,11 +192,20 @@ describe('Auto Handoff and Claude settings', () => {
     await withFakeHome(async (h) => {
       const file = await h.write(
         'state/handoff.json',
-        JSON.stringify({ hooks: { PostToolUse: [{ hooks: [{ type: 'command', command: 'x' }] }] } }),
+        JSON.stringify({
+          hooks: {
+            PostToolUse: [{ hooks: [{ type: 'command', command: 'x' }] }],
+            Stop: [{ hooks: [{ type: 'command', command: 'w', asyncRewake: true, timeout: 18000 }] }],
+          },
+        }),
       )
       const args = await withClaudeNetworkHooks(['--settings', file], h.path('state'))
       const merged = JSON.parse(await readFile(args[1]!, 'utf8')).hooks
-      assert.deepEqual(Object.keys(merged).sort(), ['PostToolUse', 'PreToolUse', 'UserPromptSubmit'])
+      assert.deepEqual(Object.keys(merged).sort(), ['PostToolUse', 'PreToolUse', 'Stop', 'UserPromptSubmit'])
+      // Auto Handoff's background Stop hook keeps its options (ADR-0056).
+      assert.deepEqual(merged.Stop, [
+        { hooks: [{ type: 'command', command: 'w', asyncRewake: true, timeout: 18000 }] },
+      ])
       assert.notEqual(args[1], file)
     })
   })

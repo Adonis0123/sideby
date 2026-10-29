@@ -91,7 +91,16 @@ export const claudeHandoff: FamilyHandoff = {
       hooks: {
         SessionStart: hook('SessionStart'),
         PostToolUse: hook('PostToolUse'),
-        Stop: hook('Stop'),
+        // The second Stop hook runs in the background (`asyncRewake`): while the session waits on background work it
+        // watches the Quota and wakes the session at the hand-over level (ADR-0056). 18000 s: five hours.
+        Stop: [
+          {
+            hooks: [
+              { type: 'command', command: command('Stop') },
+              { type: 'command', command: command('IdleWatch'), asyncRewake: true, timeout: 18000 },
+            ],
+          },
+        ],
         StopFailure: [
           { matcher: 'rate_limit', hooks: [{ type: 'command', command: command('StopFailure') }] },
         ],

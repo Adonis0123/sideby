@@ -1,6 +1,8 @@
 // Entry for `sideby handoff-hook <family> <event>` (spec §3.17). A Host runs it on PostToolUse, Stop and
-// StopFailure, so it imports only Node built-ins and leaf modules: never the Runtime, a Family index or
-// core/accounts.ts. It never fails the Host: any problem means no output and exit 0.
+// StopFailure, and Claude also runs `IdleWatch` in the background after a Stop (ADR-0056), so it imports only Node
+// built-ins and leaf modules: never the Runtime, a Family index or core/accounts.ts. It never fails the Host: any
+// problem means no output and exit 0.
+import { randomBytes } from 'node:crypto'
 import { readFile, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
@@ -20,6 +22,7 @@ import type { Env, HandoffHookEvent } from '../types.ts'
 import { crossedWindow, firstMark, fullestWindow, recordTurn } from './levels.ts'
 import {
   endTurnMessage,
+  idleThresholdMessage,
   notifySequence,
   prepareMessage,
   sessionStartMessage,
@@ -40,7 +43,11 @@ const READERS: Record<string, HookReader> = {
 /** Families whose hooks this entry understands; only they can start a Handoff. */
 export const HOOK_FAMILIES: readonly string[] = Object.keys(READERS)
 
-const EVENTS = new Set<string>(['SessionStart', 'PostToolUse', 'Stop', 'StopFailure'])
+const EVENTS = new Set<string>(['SessionStart', 'PostToolUse', 'Stop', 'StopFailure', 'IdleWatch'])
+
+/** How often `IdleWatch` reads the Quota, and how long it watches at most: under its five-hour hook timeout. */
+export const WATCH_EVERY_MS = 15_000
+export const WATCH_FOR_MS = (4 * 60 + 55) * 60_000
 
 async function readAll(stream: AsyncIterable<Uint8Array | string>): Promise<string> {
   const chunks: Buffer[] = []
@@ -81,6 +88,10 @@ export async function decide(opts: {
   const reader = READERS[family]
   // Not a run sideby started for a Handoff, or another Family's hook (Grok also runs Claude's settings hooks).
   if (!runId || !dir || env[HANDOFF_ENV.family] !== family || !reader) return {}
+  // `IdleWatch` has its own entry; a `PostToolUse` inside a subagent or teammate (`agent_id`) would speak to that agent,
+  // not the main conversation, so it says nothing and marks nothing sent (ADR-0056).
+  if (event === 'IdleWatch') return {}
+  if (event === 'PostToolUse' && field(input, 'agent_id', 'agentId')) return {}
 
   const plan = await readJsonFile<PlanFile>(join(dir, FILES.plan))
   const usable = plan && plan.runId === runId ? plan : null
@@ -198,11 +209,79 @@ export async function decide(opts: {
   return {}
 }
 
+export interface IdleWatchOptions {
+  family: string
+  input: HookInput
+  env: Env
+  /** Replaced in tests; the defaults are the clock, a real wait, and whether the parent is gone (`ppid` 1). */
+  clock?: () => Date
+  sleep?: (ms: number) => Promise<void>
+  parentGone?: () => boolean
+  everyMs?: number
+  forMs?: number
+  /** This watch's id in `watch-<run>.json`; random by default. */
+  id?: string
+}
+
+/**
+ * Claude's background `Stop` hook (spec §3.17 "主会话等后台任务时", ADR-0056). While the session waits on background
+ * work, reads the Quota every 15 s; when a window reaches its Hand-over Level under a `pick` plan, marks the threshold
+ * as sent and returns the message with exit 2, which wakes the session. Ends with exit 0 when a later `Stop` starts a
+ * new watch, the run is over or handing over, the session handled the threshold itself, the parent is gone, or time
+ * runs out. A `wait` or `none` plan never wakes the session.
+ */
+export async function idleWatch(o: IdleWatchOptions): Promise<{ exit: 0 | 2; message?: string }> {
+  const { family, input, env } = o
+  const runId = env[HANDOFF_ENV.run]
+  const dir = env[HANDOFF_ENV.dir]
+  const reader = READERS[family]
+  // Only Claude Code can wake an idle session from a hook.
+  if (family !== 'claude' || !runId || !dir || env[HANDOFF_ENV.family] !== family || !reader?.windows)
+    return { exit: 0 }
+  const clock = o.clock ?? (() => new Date())
+  const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const parentGone = o.parentGone ?? (() => process.ppid === 1)
+  const id = o.id ?? randomBytes(8).toString('hex')
+  const watchFile = join(dir, FILES.watch(runId))
+  const runFile = join(dir, FILES.run(runId))
+  // Written first, so a watch left by an earlier Stop ends even when this one has nothing to watch.
+  await writeJsonFile(watchFile, { id })
+  const tasks = input.background_tasks ?? input.backgroundTasks
+  if (!Array.isArray(tasks) || tasks.length === 0) return { exit: 0 }
+
+  const start = clock().getTime()
+  for (;;) {
+    // The Stop that started this watch judged the Quota itself; the first reading comes one interval later.
+    await sleep(o.everyMs ?? WATCH_EVERY_MS)
+    const now = clock()
+    if (now.getTime() - start >= (o.forMs ?? WATCH_FOR_MS) || parentGone()) return { exit: 0 }
+    if ((await readJsonFile<{ id?: string }>(watchFile))?.id !== id) return { exit: 0 }
+    const plan = await readJsonFile<PlanFile>(join(dir, FILES.plan))
+    if (!plan || plan.runId !== runId) return { exit: 0 }
+    if (await readJsonFile<ReadyFile>(join(dir, FILES.ready))) return { exit: 0 }
+    const state = (await readJsonFile<RunState>(runFile)) ?? {}
+    if (state.thresholdSentAt) return { exit: 0 }
+    if (plan.decision !== 'pick') continue
+    const windows = await reader.windows(input, env, now)
+    const crossed = windows ? crossedWindow(windows, plan, state) : undefined
+    if (!crossed) continue
+    // Read again just before marking, so a turn that handled the threshold meanwhile is neither repeated nor undone.
+    const fresh = (await readJsonFile<RunState>(runFile)) ?? {}
+    if (fresh.thresholdSentAt) return { exit: 0 }
+    await writeJsonFile(runFile, { ...fresh, thresholdSentAt: now.toISOString(), thresholdWindow: crossed })
+    const message =
+      plan.agentBrief === false ? endTurnMessage(crossed) : idleThresholdMessage(plan.brief, crossed)
+    return { exit: 2, message }
+  }
+}
+
 export async function runHandoffHook(
   argv: readonly string[],
   env: Env,
   stdin: AsyncIterable<Uint8Array | string>,
   stdout: NodeJS.WritableStream,
+  stderr: NodeJS.WritableStream = process.stderr,
+  watch: Partial<IdleWatchOptions> = {},
 ): Promise<number> {
   // `sideby run` asks this first, so an older sideby on PATH without the hook entry is caught before any hook runs.
   if (argv[0] === '--check') {
@@ -219,6 +298,15 @@ export async function runHandoffHook(
       return 0
     }
     if (input === null || typeof input !== 'object' || Array.isArray(input)) return 0
+    if (event === 'IdleWatch') {
+      const w = await idleWatch({ ...watch, family, input: input as HookInput, env })
+      // Exit 2 wakes the session (asyncRewake), which shows stderr to the model.
+      if (w.exit === 2 && w.message) {
+        stderr.write(`${w.message}\n`)
+        return 2
+      }
+      return 0
+    }
     const r = await decide({
       family,
       event: event as HandoffHookEvent,

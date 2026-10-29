@@ -35,11 +35,12 @@ async function withoutCache(account: Account, ctx: ReadContext): Promise<QuotaRe
       detail:
         "this account's settings.json is not shared with the main account, so its quota needs its own status line setup",
     }
-  const planStatus = await claudeStatusline.plan(ctx).then(
-    (p) => p.status,
-    () => 'blocked' as const,
+  // A plan that only adds the refresh (ADR-0056) means the wrapper is already on.
+  const on = await claudeStatusline.plan(ctx).then(
+    (p) => p.status === 'enabled' || (p.status === 'ready' && p.upgrade === true),
+    () => false,
   )
-  if (wiring === 'shared' && planStatus !== 'enabled')
+  if (wiring === 'shared' && !on)
     return {
       status: 'unavailable',
       reason: 'not-enabled',

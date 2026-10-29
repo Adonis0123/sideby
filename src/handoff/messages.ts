@@ -34,6 +34,14 @@ export function thresholdMessage(brief: string, window: WindowReading): string {
   return `sideby: this account's ${windowText(window)}. Finish the current step, update the handoff brief at ${brief} (${TEMPLATE}; ${RULES}), then end your turn. sideby will start the next account from that brief.`
 }
 
+/**
+ * At the threshold while the session waits on background work (ADR-0056): sideby woke it, so it says who is speaking,
+ * and the Brief must carry the background tasks, which stop when sideby ends the session.
+ */
+export function idleThresholdMessage(brief: string, window: WindowReading): string {
+  return `sideby: this is sideby Auto Handoff, set up when this session started. While you wait on background work, this account's ${windowText(window)}. Update the handoff brief at ${brief} (${TEMPLATE}; also name each background task still running, what it is doing and where its work lives: they stop when sideby ends this session, so the next account has to pick them up; ${RULES}). Start no new background work, then end your turn. sideby will start the next account from that brief.`
+}
+
 /** At the threshold when the session cannot write a Brief: sideby puts one together from its records. */
 export function endTurnMessage(window: WindowReading): string {
   return `sideby: this account's ${windowText(window)}. Finish the current step and end your turn; sideby will start the next account and tell it what you did.`

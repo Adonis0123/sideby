@@ -763,7 +763,9 @@ export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
   )
   if (!plan.hasQuota) {
     // Without any Quota the pick is a guess, often the Account that just ran out: recommend nothing, start nothing.
-    const setup = (await rt.quotaSetups()).some((s) => s.family === family && s.plan.status === 'ready')
+    const setup = (await rt.quotaSetups()).some(
+      (s) => s.family === family && s.plan.status === 'ready' && !s.plan.upgrade,
+    )
     io.err(
       c.yellow(
         `\nno ${family} account has quota data yet, so sideby cannot tell which one has room; ${
@@ -1287,7 +1289,10 @@ async function runSetup(
     else {
       io.out(plan.message)
       if (plan.status === 'ready') {
-        io.out(`\n${setup.summary}\nChange to ${tildify(plan.file, rt.paths.home)}:\n`)
+        // An upgrade's message already says what the one added key does; the summary describes the first setup.
+        io.out(
+          `\n${plan.upgrade ? '' : `${setup.summary}\n`}Change to ${tildify(plan.file, rt.paths.home)}:\n`,
+        )
         io.out(plan.diff)
         io.out(
           c.cyan(

@@ -373,6 +373,12 @@ const QuotaSetupPlan = Type.Object({
   file: Str,
   diff: Str,
   message: Str,
+  upgrade: Type.Optional(
+    Type.Boolean({
+      description:
+        'With `ready`: the setup is already on and only an addition from a newer sideby is missing (Claude: `statusLine.refreshInterval`).',
+    }),
+  ),
 })
 
 const ShellInitFiles = Type.Array(

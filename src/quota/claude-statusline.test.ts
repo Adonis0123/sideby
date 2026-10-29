@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { lstat, mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { describe, it } from 'node:test'
-import { type FakeHome, withFakeHome } from '../../testing/index.ts'
+import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
+import { sha256 } from '../core/fs-safe.ts'
 import type { ReadContext } from '../types.ts'
 import { backupFile, claudeStatusline, unifiedDiff, wrapCommand } from './claude-statusline.ts'
 
@@ -42,7 +43,9 @@ describe('claude statusline setup', () => {
       assert.match(plan.diff, /^--- a\/~\/\.claude\/settings\.json \(statusLine only\)\n\+\+\+ b\//)
       assert.match(plan.diff, /^- +"command": "bash ~\/\.claude\/statusline-command\.sh",$/m)
       assert.match(plan.diff, /^\+ +"command": "sideby statusline-tap --orig-b64 /m)
-      assert.equal(plan.diff.split('\n').filter((l) => /^[-+][^-+]/.test(l)).length, 2)
+      assert.match(plan.diff, /^\+ +"refreshInterval": 30$/m)
+      // command and padding (it gains a comma) change, refreshInterval is added.
+      assert.equal(plan.diff.split('\n').filter((l) => /^[-+][^-+]/.test(l)).length, 5)
 
       const applied = await claudeStatusline.apply(ctx(h))
       assert.equal(applied.status, 'enabled')
@@ -51,6 +54,7 @@ describe('claude statusline setup', () => {
         type: 'command',
         command: wrapCommand('bash ~/.claude/statusline-command.sh'),
         padding: 1,
+        refreshInterval: 30,
       })
       assert.equal(wrapped.model, 'opus')
       assert.equal((await stat(file)).mode & 0o777, 0o640)
@@ -100,10 +104,83 @@ describe('claude statusline setup', () => {
       assert.equal(applied.status, 'enabled')
       assert.equal(
         await readFile(file, 'utf8'),
-        '{\n  "model": "sonnet",\n  "statusLine": {\n    "type": "command",\n    "command": "sideby statusline-tap"\n  }\n}\n',
+        '{\n  "model": "sonnet",\n  "statusLine": {\n    "type": "command",\n    "command": "sideby statusline-tap",\n    "refreshInterval": 30\n  }\n}\n',
       )
       assert.equal((await claudeStatusline.teardown(ctx(h))).ok, true)
       assert.ok((await readFile(file)).equals(Buffer.from(original)))
+    })
+  })
+
+  it('keeps a refreshInterval the user set', async () => {
+    await withFakeHome(async (h) => {
+      const file = await setup(
+        h,
+        ORIGINAL.replace('"padding": 1', '"padding": 1,\n        "refreshInterval": 5'),
+      )
+      assert.equal((await claudeStatusline.apply(ctx(h))).status, 'enabled')
+      assert.equal(JSON.parse(await readFile(file, 'utf8')).statusLine.refreshInterval, 5)
+      assert.equal((await claudeStatusline.plan(ctx(h))).status, 'enabled')
+    })
+  })
+
+  it('offers only the refresh to a status line an older sideby wrapped; teardown still restores the original', async () => {
+    await withFakeHome(async (h) => {
+      // What an older sideby left: the wrapped file without refreshInterval, and a backup naming it.
+      const old = ORIGINAL.replace(
+        '"bash ~/.claude/statusline-command.sh"',
+        JSON.stringify(wrapCommand('bash ~/.claude/statusline-command.sh')),
+      )
+      const file = await setup(h, old)
+      const bf = backupFile(ctx(h).stateDir)
+      await h.write(
+        relative(h.home, bf),
+        JSON.stringify({
+          file,
+          originalBase64: Buffer.from(ORIGINAL).toString('base64'),
+          originalHash: sha256(ORIGINAL),
+          wrappedHash: sha256(old),
+          appliedAt: NOW.toISOString(),
+        }),
+        0o600,
+      )
+      const plan = await claudeStatusline.plan(ctx(h))
+      assert.equal(plan.status, 'ready')
+      assert.equal(plan.upgrade, true)
+      assert.match(plan.message, /waits on background agents/)
+      assert.match(plan.diff, /^\+ +"refreshInterval": 30$/m)
+      assert.doesNotMatch(plan.diff, /^[-+] +"command"/m)
+
+      const before = await snapshot(h.home)
+      const applied = await claudeStatusline.apply(ctx(h))
+      assert.equal(applied.status, 'enabled')
+      assert.equal(applied.upgrade, undefined)
+      assert.deepEqual(
+        diffSnapshots(before, await snapshot(h.home)),
+        [relative(h.home, file), relative(h.home, bf)].sort(),
+      )
+      const now = await readFile(file, 'utf8')
+      assert.deepEqual(JSON.parse(now).statusLine, { ...JSON.parse(old).statusLine, refreshInterval: 30 })
+      const backup = JSON.parse(await readFile(bf, 'utf8'))
+      assert.equal(backup.wrappedHash, sha256(now))
+      assert.equal(backup.originalHash, sha256(ORIGINAL))
+      assert.equal((await claudeStatusline.plan(ctx(h))).status, 'enabled')
+
+      assert.equal((await claudeStatusline.teardown(ctx(h))).ok, true)
+      assert.equal(await readFile(file, 'utf8'), ORIGINAL)
+    })
+  })
+
+  it('adds the refresh without a backup, leaving teardown to refuse as before', async () => {
+    await withFakeHome(async (h) => {
+      const file = await setup(
+        h,
+        '{\n  "statusLine": {\n    "type": "command",\n    "command": "sideby statusline-tap"\n  }\n}\n',
+      )
+      const applied = await claudeStatusline.apply(ctx(h))
+      assert.equal(applied.status, 'enabled')
+      assert.equal(JSON.parse(await readFile(file, 'utf8')).statusLine.refreshInterval, 30)
+      await assert.rejects(lstat(backupFile(ctx(h).stateDir)))
+      assert.equal((await claudeStatusline.teardown(ctx(h))).ok, false)
     })
   })
 

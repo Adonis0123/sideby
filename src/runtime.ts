@@ -32,7 +32,7 @@ import { hostSettingsFile } from './core/edit-settings.ts'
 import type { TraceFetcher } from './core/egress.ts'
 import { UserError } from './core/errors.ts'
 import { type HandoffPlan, planHandoff } from './core/handoff.ts'
-import { handoffFindings } from './core/handoff-doctor.ts'
+import { handoffFindings, tapState } from './core/handoff-doctor.ts'
 import { type HandoffDecision, type SelectCandidate, selectNext } from './core/handoff-select.ts'
 import { identityOf } from './core/identity.ts'
 import { inboundFindings } from './core/inbound.ts'
@@ -897,7 +897,7 @@ export async function createRuntime(
           accounts: all,
           aliases: aliasRefs(config.aliases),
           ...(claude?.quotaSetup
-            ? { claudeTap: (await bindSetup(claude, claude.quotaSetup).plan()).status === 'enabled' }
+            ? { claudeTap: tapState(await bindSetup(claude, claude.quotaSetup).plan()) }
             : {}),
           home: paths.home,
         })

@@ -1,8 +1,14 @@
 // Doctor warnings for Auto Handoff (spec §3.17): only when `handoff.auto` is on, never a failure, never fixed.
 import { join } from 'node:path'
-import type { Account, Finding } from '../types.ts'
+import type { Account, Finding, QuotaSetupPlan } from '../types.ts'
 import type { HandoffSettings } from './config.ts'
 import { statOrNull } from './fs-safe.ts'
+
+/** What Claude's quota setup plan says about the tap, for `claudeTap`. */
+export function tapState(plan: QuotaSetupPlan): 'on' | 'off' | 'stale' {
+  if (plan.status === 'enabled') return 'on'
+  return plan.status === 'ready' && plan.upgrade ? 'stale' : 'off'
+}
 
 export async function handoffFindings(input: {
   settings: HandoffSettings
@@ -11,8 +17,11 @@ export async function handoffFindings(input: {
   /** Every Account on disk, to resolve `order` entries in any Family. */
   accounts: readonly Account[]
   aliases: Readonly<Record<string, string>>
-  /** Whether Claude's quota tap is on; undefined when Claude is not part of the run. */
-  claudeTap?: boolean
+  /**
+   * Claude's quota tap: on, off, or on without the refresh that keeps it current while a session idles (`stale`,
+   * ADR-0056); undefined when Claude is not part of the run.
+   */
+  claudeTap?: 'on' | 'off' | 'stale'
   home: string
 }): Promise<Finding[]> {
   const { settings: s } = input
@@ -31,12 +40,21 @@ export async function handoffFindings(input: {
   const has = (family: string) =>
     input.families.includes(family) && input.accounts.some((a) => a.family === family)
 
-  if (has('claude') && input.claudeTap === false)
+  if (has('claude') && input.claudeTap === 'off')
     out.push(
       warn(
         'claude:main',
         'handoff.no-quota-tap',
         'Auto Handoff is on, but Claude Code reports no quota to sideby, so Claude sessions never hand over',
+        'run `sideby quota setup claude` (it shows the change first)',
+      ),
+    )
+  if (has('claude') && input.claudeTap === 'stale')
+    out.push(
+      warn(
+        'claude:main',
+        'handoff.quota-refresh',
+        "Auto Handoff is on, but Claude's quota stops updating while a session waits on background agents, so such a session hands over late",
         'run `sideby quota setup claude` (it shows the change first)',
       ),
     )

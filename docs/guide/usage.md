@@ -103,7 +103,7 @@ sideby quota                      # 5h / 7d per account, with data age
 sideby quota teardown claude      # restores the original file byte for byte
 ```
 
-`setup` edits `~/.claude/settings.json`. It wraps your `statusLine.command` as `sideby statusline-tap --orig-b64 <base64 of your command>`; base64 keeps your command's quotes and spaces intact. If you have no status line, it sets `sideby statusline-tap`, which prints a short line such as `5h 72% · 7d 44%`. The original bytes go to sideby's state directory. Your status line output does not change; in our tests the extra cold start had a median of about 82 ms.
+`setup` edits `~/.claude/settings.json`. It wraps your `statusLine.command` as `sideby statusline-tap --orig-b64 <base64 of your command>`; base64 keeps your command's quotes and spaces intact. If you have no status line, it sets `sideby statusline-tap`, which prints a short line such as `5h 72% · 7d 44%`. It also sets `statusLine.refreshInterval` to 30 when you have not set one, so Claude Code re-runs the status line every 30 seconds even while a session waits on background agents and the quota stays current; a value you set is kept. If an older sideby wrapped your status line without it, `sideby quota setup claude` offers just that key (`sideby doctor` and `sideby handoff status` ask for it while Auto Handoff is on). The original bytes go to sideby's state directory. Your status line output does not change; in our tests the extra cold start had a median of about 82 ms.
 
 Because Claude Code runs the wrapper on every refresh, `setup` refuses when `sideby` is not on `PATH` or comes from the npx cache, and tells you to run `npm i -g sideby` first.
 
@@ -351,7 +351,7 @@ The same settings live under `handoff` in the config file (see the [configuratio
 | Grok Build | at the threshold, from the quota its CLI reports (see [Grok quota](#grok-quota)), and when a turn fails at the usage limit | `sideby handoff setup grok --yes`, then `sideby doctor grok --fix`; the default sandbox (`off` or `devbox`); `workspace` and `read-only` can only take over; `strict` and custom profiles take no part. A sandbox set by macOS device management is invisible to sideby |
 | pi | never; it can take over | — |
 
-A headless run (`claude -p`, `codex exec`, `grok -p`), Codex with `--remote`, or a session started without sideby never hands over. `sideby doctor` warns when Auto Handoff is on but the Claude quota tap or the Grok hook file is missing, or when `order` is empty or names an account sideby cannot find. Auto Handoff turns itself off for a run, and says so, when the `sideby` on your `PATH` is missing, comes from the npx cache, or is too old to have the hook.
+A Claude Code session that ends its turn to wait on background agents still hands over: sideby wakes it when a window reaches its level, asks it to write the brief (naming the background work still running, which stops with the session) and end its turn. Messages go only to the main conversation, never to a subagent. A headless run (`claude -p`, `codex exec`, `grok -p`), Codex with `--remote`, or a session started without sideby never hands over. `sideby doctor` warns when Auto Handoff is on but the Claude quota tap or the Grok hook file is missing, or when `order` is empty or names an account sideby cannot find. Auto Handoff turns itself off for a run, and says so, when the `sideby` on your `PATH` is missing, comes from the npx cache, or is too old to have the hook.
 
 ## Start at login
 

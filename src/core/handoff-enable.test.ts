@@ -11,6 +11,7 @@ import { grokPlugin } from '../families/grok/index.ts'
 import { createRuntime } from '../runtime.ts'
 import { applyHandoffEnable, planHandoffEnable } from './handoff-enable.ts'
 import { readRecentHandoffs } from './handoff-overview.ts'
+import { handoffStatus } from './handoff-status.ts'
 
 const all = [claudePlugin, codexPlugin, grokPlugin].map((plugin) => ({
   plugin,
@@ -62,6 +63,40 @@ describe('planHandoffEnable / applyHandoffEnable', () => {
       const again = await planHandoffEnable(await createRuntime({ env: h.env, builtins }))
       assert.equal(again.alreadyOn, true)
       assert.deepEqual(again.steps, [])
+    })
+  })
+
+  it('adds the status line refresh when the tap is on without it, and status names it until then', async () => {
+    await withFakeHome(async (h) => {
+      await setup(h)
+      await h.write(
+        '.claude/settings.json',
+        `${JSON.stringify({ statusLine: { type: 'command', command: 'sideby statusline-tap' } }, null, 2)}\n`,
+      )
+      await h.write('.config/sideby/config.json', JSON.stringify({ handoff: { auto: true } }))
+      const fresh = await createRuntime({ env: h.env, builtins })
+      const st = await handoffStatus(fresh)
+      const claude = st.families.find((f) => f.family === 'claude')!
+      assert.equal(claude.ready, false)
+      assert.match(claude.problems.join('\n'), /stops updating while a session waits on background agents/)
+      assert.ok(st.nextSteps.includes('sideby quota setup claude'))
+
+      const plan = await planHandoffEnable(fresh)
+      assert.deepEqual(
+        plan.steps.map((s) => [s.id, s.upgrade]),
+        [['quota', true]],
+      )
+      assert.match(plan.steps[0]!.diff!, /\+\s+"refreshInterval": 30/)
+      const r = await applyHandoffEnable(fresh)
+      assert.ok(r.results.every((x) => x.ok))
+      const settings = JSON.parse(await readFile(h.path('.claude/settings.json'), 'utf8'))
+      assert.deepEqual(settings.statusLine, {
+        type: 'command',
+        command: 'sideby statusline-tap',
+        refreshInterval: 30,
+      })
+      const after = await handoffStatus(await createRuntime({ env: h.env, builtins }))
+      assert.deepEqual(after.families.find((f) => f.family === 'claude')!.problems, [])
     })
   })
 

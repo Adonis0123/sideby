@@ -78,7 +78,12 @@ export async function handoffStatus(rt: Runtime): Promise<HandoffStatus> {
         .plan()
         .catch(() => null)
       if (plan?.status !== 'enabled') {
-        problems.push(`${f.title} reports no quota to sideby yet`)
+        // On, but without the refresh that keeps the reading current while a session idles (ADR-0056).
+        problems.push(
+          plan?.status === 'ready' && plan.upgrade
+            ? `${f.title}'s quota stops updating while a session waits on background agents, so it hands over late`
+            : `${f.title} reports no quota to sideby yet`,
+        )
         steps.push(`sideby quota setup ${f.id}`)
       }
     }

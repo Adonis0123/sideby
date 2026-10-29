@@ -2091,7 +2091,8 @@ const MAIN = String.raw`
   // Quota is on but no account of the Family has numbers yet: say what brings the first ones.
   function waitingForQuota(fam) {
     const setup = setupFor(fam)
-    if (!setup || setup.plan.status !== 'enabled') return false
+    // A plan that only adds the refresh (ADR-0056) means quota is already on.
+    if (!setup || !(setup.plan.status === 'enabled' || setup.plan.upgrade)) return false
     const all = S.state.accounts.filter((a) => a.family === fam && a.kind !== 'api')
     const waiting = all.some((a) => a.quota && a.quota.status === 'unavailable' && a.quota.reason === 'no-session')
     const any = all.some((a) => a.quota && a.quota.status === 'ok')
@@ -5078,7 +5079,8 @@ const MAIN = String.raw`
       if (p.status === 'enabled') body.push(h('p', null, p.message || t('qs.alreadyOn', { host: fam.title })))
       else if (p.status === 'blocked') body.push(h('p', { class: 'note note-warn' }, p.message))
       else {
-        body.push(h('p', { class: 'muted' }, qs.summary || p.message))
+        // An update adds one key to a setup that is already on; its own message says what that key does.
+        body.push(h('p', { class: 'muted' }, p.upgrade ? p.message : qs.summary || p.message))
         if (p.file) body.push(h('p', { class: 'small' }, tx('qs.changes', { file: h('code', null, p.file) })))
         if (p.diff) body.push(diffView(p.diff))
         body.push(h('p', { class: 'muted small' }, t('qs.undoHint')))
@@ -5087,7 +5089,7 @@ const MAIN = String.raw`
       }
     }
     if (!foot.length) foot.push(h('button', { class: 'btn', type: 'button', onclick: () => dlg.el.close() }, t('btn.close')))
-    setKids(dlg.el, dialogFrame(t('qs.title', { host: fam.title }), qs.family, body, foot))
+    setKids(dlg.el, dialogFrame(t(qs.plan && qs.plan.upgrade ? 'qs.titleUpdate' : 'qs.title', { host: fam.title }), qs.family, body, foot))
   }
   async function applySetup() {
     const st = qs
@@ -5101,7 +5103,9 @@ const MAIN = String.raw`
       if (r.plan.status === 'enabled') {
         const fam = st.family
         dlg.el.close()
-        toast(t('toast.quotaOn', { host: family(fam).title }), { action: { label: t('toast.undo'), run: () => undoSetup(fam) }, duration: 10000 })
+        // Teardown undoes the whole setup, not just an update's one key, so an update gets no undo here.
+        if (st.plan && st.plan.upgrade) toast(t('toast.quotaUpdated', { host: family(fam).title }))
+        else toast(t('toast.quotaOn', { host: family(fam).title }), { action: { label: t('toast.undo'), run: () => undoSetup(fam) }, duration: 10000 })
         // The first numbers arrive with the next status line refresh; poll quickly for a while to show them soon.
         S.fastUntil = Date.now() + FAST_FOR_MS
         S.fastFamily = fam
@@ -5513,7 +5517,8 @@ const MAIN = String.raw`
   }
   function hpStepTitle(step) {
     const host = step.family ? family(step.family).title : ''
-    return t('hp.step.' + step.id, { host, accounts: (step.accounts || []).join(', ') })
+    const id = step.id === 'quota' && step.upgrade ? 'quotaRefresh' : step.id
+    return t('hp.step.' + id, { host, accounts: (step.accounts || []).join(', ') })
   }
   function hpSteps(plan) {
     return h('ul', { class: 'hp-steps' }, plan.steps.map((step) => h('li', null, h('div', null,

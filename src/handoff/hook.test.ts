@@ -1,6 +1,6 @@
 // The handoff hook (spec §3.17): when it speaks to the model, when it marks a run ready, and that it never fails.
 import assert from 'node:assert/strict'
-import { readFile, utimes, writeFile } from 'node:fs/promises'
+import { readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { Readable, Writable } from 'node:stream'
 import { describe, it } from 'node:test'
@@ -12,12 +12,14 @@ import {
   FILES,
   type PlanFile,
   type ReadyFile,
+  type RunState,
   readJsonFile,
   writeJsonFile,
 } from '../core/handoff-chain.ts'
 import { writeQuotaCache } from '../families/claude/quota-cache.ts'
 import type { Env, HandoffHookEvent } from '../types.ts'
-import { decide, runHandoffHook } from './hook.ts'
+import { decide, idleWatch, runHandoffHook } from './hook.ts'
+import type { HookInput } from './reader.ts'
 
 const NOW = new Date('2026-10-09T12:00:00Z')
 
@@ -356,6 +358,148 @@ describe('handoff hook', () => {
       assert.equal(await runHandoffHook(['claude', 'Nope'], env, Readable.from(['{}']), out), 0)
       assert.deepEqual(chunks, [])
       assert.equal(await readFile(join(dir, FILES.plan), 'utf8'), '{broken')
+    })
+  })
+
+  it('says nothing to a subagent and marks nothing sent (PostToolUse with agent_id)', async () => {
+    await withFakeHome(async (h) => {
+      const { env, dir } = await setup(h)
+      await pressure(env, 99)
+      assert.deepEqual(await call(env, 'PostToolUse', { agent_id: 'a1', session_id: 's1' }), {})
+      assert.equal(await readJsonFile(join(dir, FILES.run('r1'))), null)
+      // The main conversation still gets it at its next tool call.
+      const out = (await call(env, 'PostToolUse')).output as {
+        hookSpecificOutput: { additionalContext: string }
+      }
+      assert.match(out.hookSpecificOutput.additionalContext, /end your turn/)
+    })
+  })
+})
+
+describe('handoff hook IdleWatch', () => {
+  const BUSY = {
+    background_tasks: [{ id: 't1', type: 'local_agent', status: 'running', description: 'tests' }],
+  }
+  // No real waiting: each sleep moves the clock 15 s on.
+  const fake = (opts: { parentGone?: () => boolean; onSleep?: (n: number) => Promise<void> } = {}) => {
+    let t = NOW.getTime()
+    let n = 0
+    return {
+      clock: () => new Date(t),
+      sleep: async (ms: number) => {
+        t += ms
+        n++
+        await opts.onSleep?.(n)
+      },
+      parentGone: opts.parentGone ?? (() => false),
+      id: 'w1',
+      get sleeps() {
+        return n
+      },
+    }
+  }
+  const watch = (env: Env, input: object, f = fake(), family = 'claude') =>
+    idleWatch({ family, input: input as HookInput, env, ...f })
+
+  it('exits 0 at once without background work, after replacing an earlier watch', async () => {
+    await withFakeHome(async (h) => {
+      const { env, dir } = await setup(h)
+      await pressure(env, 99)
+      await writeJsonFile(join(dir, FILES.watch('r1')), { id: 'old' })
+      const f = fake()
+      assert.deepEqual(await watch(env, { background_tasks: [] }, f), { exit: 0 })
+      assert.deepEqual(await watch(env, {}, f), { exit: 0 })
+      assert.equal(f.sleeps, 0)
+      assert.deepEqual(await readJsonFile(join(dir, FILES.watch('r1'))), { id: 'w1' })
+      assert.equal(await readJsonFile(join(dir, FILES.run('r1'))), null)
+    })
+  })
+
+  it('wakes the session when a window reaches its level under a pick plan: marks it sent, exit 2 with the message', async () => {
+    await withFakeHome(async (h) => {
+      const { env, dir, brief } = await setup(h)
+      await pressure(env, 90)
+      await writeJsonFile(join(dir, FILES.run('r1')), { prepareSentAt: NOW.toISOString(), sessionId: 's1' })
+      const f = fake({ onSleep: async (n) => (n === 3 ? pressure(env, 96) : undefined) })
+      const r = await watch(env, BUSY, f)
+      assert.equal(r.exit, 2)
+      assert.equal(f.sleeps, 3)
+      assert.match(r.message!, /sideby Auto Handoff, set up when this session started/)
+      assert.match(r.message!, /background task/)
+      assert.match(r.message!, /end your turn/)
+      assert.ok(r.message!.includes(brief))
+      assert.ok(r.message!.includes(BRIEF_DONE))
+      const state = await readJsonFile<RunState>(join(dir, FILES.run('r1')))
+      assert.equal(state?.thresholdWindow?.label, '5h')
+      assert.ok(state?.thresholdSentAt)
+      // Kept what was there.
+      assert.equal(state?.sessionId, 's1')
+      assert.ok(state?.prepareSentAt)
+    })
+  })
+
+  it('through the entry: the message goes to stderr and the exit code is 2', async () => {
+    await withFakeHome(async (h) => {
+      const { env } = await setup(h)
+      await pressure(env, 99)
+      const out: string[] = []
+      const err: string[] = []
+      const sink = (to: string[]) =>
+        new Writable({
+          write(c, _e, cb) {
+            to.push(String(c))
+            cb()
+          },
+        })
+      const code = await runHandoffHook(
+        ['claude', 'IdleWatch'],
+        env,
+        Readable.from([JSON.stringify(BUSY)]),
+        sink(out),
+        sink(err),
+        fake(),
+      )
+      assert.equal(code, 2)
+      assert.deepEqual(out, [])
+      assert.match(err.join(''), /end your turn/)
+    })
+  })
+
+  it('never wakes the session for a wait or none plan', async () => {
+    await withFakeHome(async (h) => {
+      for (const decision of ['wait', 'none'] as const) {
+        const { env, dir } = await setup(h, { decision })
+        await pressure(env, 99)
+        const r = await watch(env, BUSY, fake({ parentGone: () => false }), 'claude')
+        // It watches until time runs out (the clock moves 15 s per reading), never waking.
+        assert.deepEqual(r, { exit: 0 })
+        assert.equal((await readJsonFile<RunState>(join(dir, FILES.run('r1'))))?.thresholdSentAt, undefined)
+      }
+    })
+  })
+
+  it('ends without waking: a later watch took over, the session already handled it, a hand-over is under way, the parent is gone', async () => {
+    await withFakeHome(async (h) => {
+      const { env, dir } = await setup(h)
+      await pressure(env, 99)
+      const watchFile = join(dir, FILES.watch('r1'))
+      const superseded = fake({ onSleep: async () => writeJsonFile(watchFile, { id: 'newer' }) })
+      assert.deepEqual(await watch(env, BUSY, superseded), { exit: 0 })
+      assert.equal(await readJsonFile(join(dir, FILES.run('r1'))), null)
+
+      await writeJsonFile(join(dir, FILES.run('r1')), { thresholdSentAt: NOW.toISOString() })
+      assert.deepEqual(await watch(env, BUSY), { exit: 0 })
+      await rm(join(dir, FILES.run('r1')))
+
+      await writeJsonFile(join(dir, FILES.ready), { runId: 'r1', at: NOW.toISOString(), trigger: 'manual' })
+      assert.deepEqual(await watch(env, BUSY), { exit: 0 })
+      await rm(join(dir, FILES.ready))
+
+      assert.deepEqual(await watch(env, BUSY, fake({ parentGone: () => true })), { exit: 0 })
+      assert.equal(await readJsonFile(join(dir, FILES.run('r1'))), null)
+      // Another Family, or outside a run: nothing at all.
+      assert.deepEqual(await watch(env, BUSY, fake(), 'codex'), { exit: 0 })
+      assert.deepEqual(await watch({ ...env, SIDEBY_HANDOFF_RUN: undefined }, BUSY), { exit: 0 })
     })
   })
 })

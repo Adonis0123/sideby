@@ -52,6 +52,10 @@
         },
         "message": {
           "type": "string"
+        },
+        "upgrade": {
+          "type": "boolean",
+          "description": "With `ready`: the setup is already on and only an addition from a newer sideby is missing (Claude: `statusLine.refreshInterval`)."
         }
       }
     },
