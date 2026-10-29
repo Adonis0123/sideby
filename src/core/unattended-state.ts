@@ -1,4 +1,4 @@
-// Unattended Mode (spec §3.37, ADR-0057): whether it is on now. One pure function decides it for the CLI, the Panel and
+// Unattended Mode (spec §3.37, ADR-0058): whether it is on now. One pure function decides it for the CLI, the Panel and
 // `unattended-hook`, from the Schedule (config `unattended.schedule`), the manual state kept in
 // `<state>/unattended/override.json` and the session flag. A leaf module (Node built-ins and core/fs-safe.ts only):
 // `unattended-hook` runs it on every tool call.

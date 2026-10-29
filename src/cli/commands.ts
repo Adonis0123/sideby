@@ -4428,7 +4428,7 @@ function printUnattended(
     )
 }
 
-/** `sideby unattended …` (spec §3.37, ADR-0057): status, on and off, the Schedule, Pending Decisions and `defer`. */
+/** `sideby unattended …` (spec §3.37, ADR-0058): status, on and off, the Schedule, Pending Decisions and `defer`. */
 export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
   const [sub, ...rest] = a.positionals
   const asJson = a.flags.has('json')

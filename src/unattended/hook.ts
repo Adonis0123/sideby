@@ -1,4 +1,4 @@
-// Entry for `sideby unattended-hook <family> <event>` (spec §3.37, ADR-0057). Claude Code and Codex run it before the
+// Entry for `sideby unattended-hook <family> <event>` (spec §3.37, ADR-0058). Claude Code and Codex run it before the
 // ask tool, and Claude Code also when it is about to ask the user for a permission (`PermissionRequest`), in every
 // session sideby starts once the config has an `unattended` section. It imports only Node built-ins and leaf modules:
 // never the Runtime, a Family index or core/accounts.ts. It reads the Schedule and the manual state on every call, so

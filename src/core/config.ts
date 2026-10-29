@@ -435,7 +435,7 @@ export const ConfigSchema = Type.Object(
         {
           additionalProperties: false,
           description:
-            'Unattended Mode (spec §3.37, ADR-0057): while it is on, sessions sideby starts never stop to wait for a person. Present once the feature is used; from then on sideby adds its hook to every Claude and Codex session it starts, so turning it on later covers sessions already running. `sideby config unset unattended` stops adding it.',
+            'Unattended Mode (spec §3.37, ADR-0058): while it is on, sessions sideby starts never stop to wait for a person. Present once the feature is used; from then on sideby adds its hook to every Claude and Codex session it starts, so turning it on later covers sessions already running. `sideby config unset unattended` stops adding it.',
         },
       ),
     ),

@@ -1,4 +1,4 @@
-// The end of a stretch of Unattended Mode (spec §3.37, ADR-0057): the first sideby process that notices it emits the
+// The end of a stretch of Unattended Mode (spec §3.37, ADR-0058): the first sideby process that notices it emits the
 // plugin event `unattended.ended`. The background Panel looks every 30 seconds and other commands look when they
 // start; none of the session hooks does. `<state>/unattended/ended.json` keeps when it last looked, the stretch it saw
 // running then, the events found but not yet delivered (the outbox) and the ids of those delivered.

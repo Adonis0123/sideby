@@ -5775,7 +5775,7 @@ const MAIN = String.raw`
     swapKids(box, kids)
   }
 
-  // ---------- the Unattended page (spec §3.37, ADR-0057) ----------
+  // ---------- the Unattended page (spec §3.37, ADR-0058) ----------
   // The status in one sentence (as Android's Do Not Disturb says it) with the one action that changes it, the Schedule
   // edited in place (each change is written at once and its toast carries the undo), what sessions left for the user,
   // and where it works. The status comes with the Panel state; the Pending Decisions are read when the page opens, so

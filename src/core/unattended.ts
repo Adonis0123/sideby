@@ -1,4 +1,4 @@
-// Unattended Mode (spec §3.37, ADR-0057) for the CLI, the Runtime and the Panel: the full status, turning it on and
+// Unattended Mode (spec §3.37, ADR-0058) for the CLI, the Runtime and the Panel: the full status, turning it on and
 // off, editing the Schedule, and the hooks sideby adds to the sessions it starts. Whether it is on is decided in
 // core/unattended-state.ts; Pending Decisions are kept by core/unattended-pending.ts; the end of a stretch is noticed by
 // core/unattended-ended.ts.

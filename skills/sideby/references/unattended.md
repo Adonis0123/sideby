@@ -1,6 +1,6 @@
 # Unattended Mode: sessions that do not stop to wait for a person
 
-Unattended Mode (spec §3.37, ADR-0057) is one state for the whole computer: nobody is there to answer, so the Claude and Codex sessions sideby starts never stop to wait. While it is on, sideby's hook refuses the Host's question tool (Claude `AskUserQuestion`, Codex `request_user_input`) and tells the model to take the recommended option where the choice can be undone and to skip anything hard to undo; each refused question is kept as a **Pending Decision**. In Claude sessions it also answers "no" to every permission prompt Claude Code is about to show (even in bypass mode, and in subagents), with how to do the step without one; each refused request is kept as a Pending Decision too. Codex's own approval prompts still wait.
+Unattended Mode (spec §3.37, ADR-0058) is one state for the whole computer: nobody is there to answer, so the Claude and Codex sessions sideby starts never stop to wait. While it is on, sideby's hook refuses the Host's question tool (Claude `AskUserQuestion`, Codex `request_user_input`) and tells the model to take the recommended option where the choice can be undone and to skip anything hard to undo; each refused question is kept as a **Pending Decision**. In Claude sessions it also answers "no" to every permission prompt Claude Code is about to show (even in bypass mode, and in subagents), with how to do the step without one; each refused request is kept as a Pending Decision too. Codex's own approval prompts still wait.
 
 ## Turn it on when the user is leaving
 

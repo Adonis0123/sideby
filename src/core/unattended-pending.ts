@@ -1,4 +1,4 @@
-// Pending Decisions (spec §3.37, ADR-0057): questions the model was not allowed to ask, permission requests nobody was
+// Pending Decisions (spec §3.37, ADR-0058): questions the model was not allowed to ask, permission requests nobody was
 // there to answer, and actions it left undone, while Unattended Mode was on. One file each under `<state>/unattended/pending/` (folder 700, files 600), so writes
 // from several sessions never meet. Kept until the user marks one done, deleted 30 days after that. A leaf module
 // (Node built-ins and core/fs-safe.ts only): `unattended-hook` writes here.
