@@ -10,7 +10,7 @@ import { OUTPUT_SCHEMAS } from '../cli/json-schemas.ts'
 import { claudePlugin } from '../families/claude/index.ts'
 import { codexPlugin } from '../families/codex/index.ts'
 import { createRuntime } from '../runtime.ts'
-import { NETWORK_ENV } from './egress.ts'
+import { NETWORK_ENV, RETRY_BUDGET_MS } from './egress.ts'
 import { UserError } from './errors.ts'
 import {
   networkTarget,
@@ -97,6 +97,10 @@ describe('Launch', () => {
       const hooks = JSON.parse(await readFile(file, 'utf8')).hooks
       assert.deepEqual(Object.keys(hooks).sort(), ['PreToolUse', 'UserPromptSubmit'])
       assert.match(hooks.UserPromptSubmit[0].hooks[0].command, /network-hook claude UserPromptSubmit$/)
+      // Claude Code's own 30-second default for prompts is shorter than the check's retries, and lets the prompt through.
+      assert.equal(hooks.UserPromptSubmit[0].hooks[0].timeout, 60)
+      assert.ok(hooks.UserPromptSubmit[0].hooks[0].timeout * 1000 >= 2 * RETRY_BUDGET_MS)
+      assert.equal(hooks.PreToolUse[0].hooks[0].timeout, 60)
       assert.deepEqual(diffSnapshots(before, await snapshot(h.path('.claude-001'))), [])
     })
   })

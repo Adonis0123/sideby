@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { readdir, readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { type AddressInfo, createServer as createTcpServer, type Socket } from 'node:net'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { withFakeHome } from '../../testing/index.ts'
@@ -168,6 +168,7 @@ describe('verdict and refresh', () => {
         print: 'p1',
       })
       assert.equal(v.status, 'unknown')
+      assert.equal(v.attempts, 1, 'before a Launch one request decides')
       assert.match(v.entry.error ?? '', /refused/)
       assert.ok(!JSON.stringify(v).includes('secret'))
     })
@@ -209,6 +210,41 @@ describe('fetchTrace', () => {
       server.close()
     }
   })
+  // A proxy that accepts and then says nothing, before or after the tunnel opens: the timeout must close the client's
+  // socket, or the leftover handle keeps `network-hook` alive past the Host's hook timeout.
+  for (const stage of ['before the tunnel', 'inside the tunnel'] as const) {
+    it(`closes its connection on a timeout when the proxy goes silent ${stage}`, async () => {
+      let closed!: () => void
+      const gone = new Promise<void>((r) => {
+        closed = r
+      })
+      const held: Socket[] = []
+      const server = createTcpServer((socket) => {
+        held.push(socket)
+        socket.resume() // read, so the client's end of the connection is seen
+        socket.on('error', () => {})
+        socket.on('close', () => closed())
+        if (stage === 'inside the tunnel')
+          socket.once('data', () => socket.write('HTTP/1.1 200 Connection established\r\n\r\n'))
+      })
+      await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+      const port = (server.address() as AddressInfo).port
+      try {
+        const t0 = Date.now()
+        await assert.rejects(fetchTrace(URL_A, { HTTPS_PROXY: `http://127.0.0.1:${port}` }, 150), /timeout/)
+        let wait: NodeJS.Timeout | undefined
+        const stillOpen = new Promise((_, no) => {
+          wait = setTimeout(() => no(new Error('the client socket is still open')), 1000)
+        })
+        await Promise.race([gone, stillOpen])
+        clearTimeout(wait)
+        assert.ok(Date.now() - t0 < 1500)
+      } finally {
+        for (const s of held) s.destroy()
+        server.close()
+      }
+    })
+  }
   it('refuses a proxy kind it cannot speak', async () => {
     await assert.rejects(fetchTrace(URL_A, { ALL_PROXY: 'socks5://127.0.0.1:1080' }, 3000), /socks5 proxy/)
   })
@@ -230,5 +266,11 @@ describe('blockMessage', () => {
     const { loc: _, ...none } = entry({ error: 'no answer within 3 seconds' })
     const zh = blockMessage({ status: 'unknown', entry: none }, ['US'], { at: 'tool', zh: true })
     assert.match(zh, /没能确认网络出口（3 秒内没有回应）/)
+    const tried = { status: 'unknown' as const, entry: none, attempts: 5, triedMs: 29_600 }
+    const en = blockMessage(tried, ['US'], { at: 'prompt', zh: false })
+    assert.match(
+      en,
+      /could not tell this network's exit after 5 tries in about 30 s \(no answer within 3 seconds\)/,
+    )
   })
 })

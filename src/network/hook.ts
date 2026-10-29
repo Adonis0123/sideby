@@ -1,7 +1,8 @@
 // Entry for `sideby network-hook <family> <event>` (spec §3.35, ADR-0053). A Host runs it before every prompt and tool
 // call in a session sideby started with Network Guard on, so it imports only Node built-ins and leaf modules: never
 // the Runtime, a Family index or core/accounts.ts. Unlike `handoff-hook` it exists to stop the Host: exit 2 with the
-// reason on stderr blocks the prompt or the tool call; anything it cannot tell blocks too.
+// reason on stderr blocks the prompt or the tool call; anything it cannot tell blocks too, after asking again for up to
+// about 30 seconds (a prompt the Host made itself is not sent again once blocked).
 import { spawn } from 'node:child_process'
 import {
   blockMessage,
@@ -9,6 +10,7 @@ import {
   NETWORK_ENV,
   prefersChinese,
   refresh,
+  type Sleep,
   type TraceFetcher,
   verdict,
 } from '../core/egress.ts'
@@ -24,6 +26,8 @@ export interface NetworkHookDeps {
   fetcher?: TraceFetcher
   now?: () => Date
   print?: string
+  /** Waits between tries of a check that could not tell; tests replace it. */
+  sleep?: Sleep
   /** Starts the detached refresh; tests replace it. */
   background?: (family: string, env: Env) => void
 }
@@ -76,6 +80,7 @@ export async function runNetworkHook(
       ...common,
       allow,
       moment,
+      ...(deps.sleep ? { sleep: deps.sleep } : {}),
       background: () => (deps.background ?? startRefresh)(family, env),
     })
     if (v.status === 'ok') return 0

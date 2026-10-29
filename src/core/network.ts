@@ -132,10 +132,24 @@ export function ipChangedLine(v: Verdict, env: Env): string | undefined {
 const hookCommand = (family: string, event: string) => sidebyHookCommand('network-hook', family, event)
 const HOOK_EVENTS = ['UserPromptSubmit', 'PreToolUse'] as const
 
+/**
+ * Seconds Claude Code waits for `network-hook`. Its own default for `UserPromptSubmit` is 30, and a hook that runs out
+ * of time lets the prompt through; the check may ask again for up to `RETRY_BUDGET_MS`, so it gets twice that.
+ * Codex's default (600 seconds) is already long enough.
+ */
+export const CLAUDE_NETWORK_HOOK_TIMEOUT_S = 60
+
 /** Claude Code `hooks` entries for Network Guard, to put in a `--settings` file (alone or with Auto Handoff's). */
 export function claudeNetworkHooks(): Record<string, unknown[]> {
   const out: Record<string, unknown[]> = {}
-  for (const e of HOOK_EVENTS) out[e] = [{ hooks: [{ type: 'command', command: hookCommand('claude', e) }] }]
+  for (const e of HOOK_EVENTS)
+    out[e] = [
+      {
+        hooks: [
+          { type: 'command', command: hookCommand('claude', e), timeout: CLAUDE_NETWORK_HOOK_TIMEOUT_S },
+        ],
+      },
+    ]
   return out
 }
 

@@ -7,6 +7,7 @@ import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { networkInterfaces } from 'node:os'
 import { join } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { connect as tlsConnect } from 'node:tls'
 import { writeFileAtomic } from './fs-safe.ts'
 
@@ -30,6 +31,17 @@ export const NETWORK_ENV = {
 } as const
 
 export const TIMEOUT_MS = 3000
+/**
+ * Inside a session a check that cannot tell is asked again after these waits, before it blocks: a prompt the Host made
+ * itself (a background task's notification) is not sent again once blocked, and a short outage would drop it.
+ */
+export const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000] as const
+/**
+ * All tries of one in-session check end within this time: five requests of at most 3 seconds and the waits between
+ * them. It stays under the 60-second timeout sideby gives its Claude hooks (core/network.ts) and Codex's 600-second
+ * default.
+ */
+export const RETRY_BUDGET_MS = 30_000
 /** A result this young is used as it is. */
 export const FRESH_MS = 60_000
 /** Up to this age a tool call goes on while a detached process refreshes the result. */
@@ -62,11 +74,16 @@ export interface Verdict {
   fresh: boolean
   /** True when this call saw the address change. */
   ipChanged: boolean
+  /** Requests this call made (more than one when it asked again after a check that could not tell). */
+  attempts?: number
+  /** Time from the first request to the answer, in milliseconds. */
+  triedMs?: number
 }
 
 type Env = Record<string, string | undefined>
 
 export type TraceFetcher = (url: string, env: Env, timeoutMs: number) => Promise<string>
+export type Sleep = (ms: number) => Promise<unknown>
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex')
 
@@ -127,12 +144,17 @@ export const fetchTrace = (
     const target = new URL(url)
     const proxy = proxyFor(url, env)
     let done = false
+    // Requests and sockets this call opened. A failure (a timeout included) destroys them, so no handle outlives the
+    // call: a proxy that accepts and never answers would otherwise keep `network-hook` alive past the Host's timeout.
+    const open: { destroy(): unknown }[] = []
     const finish = (err: Error | null, body?: string) => {
       if (done) return
       done = true
       clearTimeout(timer)
-      if (err) reject(err)
-      else resolve(body ?? '')
+      if (err) {
+        for (const h of open) h.destroy()
+        reject(err)
+      } else resolve(body ?? '')
     }
     const timer = setTimeout(() => finish(new Error('timeout')), timeoutMs)
     const read = (res: import('node:http').IncomingMessage) => {
@@ -159,6 +181,7 @@ export const fetchTrace = (
         },
         read,
       )
+      open.push(req)
       req.on('error', (e) => finish(e))
       req.end()
     }
@@ -182,12 +205,16 @@ export const fetchTrace = (
       path: `${target.hostname}:443`,
       headers,
     })
+    open.push(req)
     req.on('connect', (res, socket) => {
+      open.push(socket)
       if (res.statusCode !== 200) {
         socket.destroy()
         return finish(new Error(`the proxy answered ${res.statusCode}`))
       }
+      if (done) return
       const tls = tlsConnect({ socket, servername: target.hostname })
+      open.push(tls)
       tls.on('error', (e) => finish(e))
       get(tls)
     })
@@ -291,8 +318,10 @@ export async function refresh(opts: {
 }
 
 /**
- * The verdict at `moment`: from the cache when it is young enough, else from one request. `background` starts a
- * detached refresh for the tool-call middle tier; without it that tier checks now.
+ * The verdict at `moment`: from the cache when it is young enough, else from a request. `background` starts a
+ * detached refresh for the tool-call middle tier; without it that tier checks now. Inside a session (`prompt`, `tool`)
+ * a request that cannot tell is made again after each of `RETRY_DELAYS_MS` while the tries fit in `RETRY_BUDGET_MS`;
+ * a country outside the list blocks at once. Before a Launch one request decides: the user is there to start again.
  */
 export async function verdict(opts: {
   url: string
@@ -304,18 +333,40 @@ export async function verdict(opts: {
   fetcher?: TraceFetcher
   print?: string
   background?: () => void
+  /** Waits between tries; tests replace it so they do not really wait. */
+  sleep?: Sleep
 }): Promise<Verdict> {
   const key = cacheKey(opts.url, opts.env)
   const cached = await readEntry(opts.dir, key)
   const print = opts.print ?? netPrint()
-  const now = (opts.now?.() ?? new Date()).getTime()
+  const clock = () => (opts.now?.() ?? new Date()).getTime()
+  const now = clock()
   const what = plan(cached, opts.allow, opts.moment, now, print)
   if (cached && (what === 'use' || (what === 'refresh' && opts.background))) {
     if (what === 'refresh') opts.background?.()
     return { status: judge(cached, opts.allow), entry: cached, fresh: false, ipChanged: false }
   }
-  const { entry, ipChanged } = await refresh({ ...opts, print })
-  return { status: judge(entry, opts.allow), entry, fresh: true, ipChanged }
+  let { entry, ipChanged } = await refresh({ ...opts, print })
+  let attempts = 1
+  if (opts.moment !== 'launch') {
+    for (const wait of RETRY_DELAYS_MS) {
+      if (judge(entry, opts.allow) !== 'unknown') break
+      if (clock() - now + wait + TIMEOUT_MS > RETRY_BUDGET_MS) break
+      await (opts.sleep ?? delay)(wait)
+      const again = await refresh({ ...opts, print })
+      entry = again.entry
+      ipChanged ||= again.ipChanged
+      attempts++
+    }
+  }
+  return {
+    status: judge(entry, opts.allow),
+    entry,
+    fresh: true,
+    ipChanged,
+    attempts,
+    triedMs: Math.max(0, clock() - now),
+  }
 }
 
 const NAMES_ZH: Record<string, string> = {
@@ -370,7 +421,7 @@ function reasonZh(reason: string): string {
  * `at`: `prompt`/`tool` inside a session, `launch` before one.
  */
 export function blockMessage(
-  v: Pick<Verdict, 'status' | 'entry'>,
+  v: Pick<Verdict, 'status' | 'entry' | 'attempts' | 'triedMs'>,
   allow: readonly string[],
   opts: { ref?: string; at: CheckMoment; zh: boolean },
 ): string {
@@ -378,10 +429,13 @@ export function blockMessage(
   const allowed = allow.map((c) => countryLabel(c, opts.zh)).join(opts.zh ? '、' : ', ')
   const skip = `sideby run ${ref} --ignore-network`
   const reason = v.entry.error ?? 'no answer within 3 seconds'
+  const tries = v.attempts ?? 1
+  const secs = Math.max(1, Math.round((v.triedMs ?? 0) / 1000))
   if (opts.zh) {
+    const tried = tries > 1 ? `试了 ${tries} 次（约 ${secs} 秒）仍` : ''
     const what =
       v.status === 'unknown'
-        ? `已拦截：没能确认网络出口（${reasonZh(reason)}），可能是代理没开或断网。`
+        ? `已拦截：${tried}没能确认网络出口（${reasonZh(reason)}），可能是代理没开或断网。`
         : `已拦截：现在的网络出口在${countryLabel(v.entry.loc ?? '?', true)}，不在允许的地区（${allowed}）里。`
     const next =
       opts.at === 'launch'
@@ -391,9 +445,10 @@ export function blockMessage(
           : '检查代理是否开着、节点是否正确，然后让它继续。'
     return `${what}${next}临时跳过：\`${skip}\`。`
   }
+  const tried = tries > 1 ? ` after ${tries} tries in about ${secs} s` : ''
   const what =
     v.status === 'unknown'
-      ? `Blocked: sideby could not tell this network's exit (${reason}); the proxy may be off or the network down.`
+      ? `Blocked: sideby could not tell this network's exit${tried} (${reason}); the proxy may be off or the network down.`
       : `Blocked: this network exits in ${v.entry.loc}, which is not an allowed country (${allowed}).`
   const next =
     opts.at === 'launch'

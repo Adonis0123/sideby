@@ -36,3 +36,13 @@ Options considered:
 - A node switch inside a proxy tool is caught within about 60 seconds, not at once; one tool call may pass in that window.
 - Codex sessions are covered in-session only after the user trusts the hooks once.
 - Grok, pi and Desktop Apps are not covered in v1.
+
+## Amendment (2026-10-29): ask again before blocking a session
+
+"Blocks when it cannot tell" did not consider prompts the Host makes itself. Claude Code submits a background task's completion notification as a prompt; when `UserPromptSubmit` blocks it, the notification is dropped and never sent again, while a prompt the user typed can be. Observed on 2026-10-29 with sideby 0.30.2 and Claude Code: during a network outage of about one minute, three idle sessions each had their notification blocked by a 3-second timeout and stayed idle until the user typed again.
+
+- Inside a session (`UserPromptSubmit` and `PreToolUse`), a check that cannot tell (an error, a timeout, an answer without `loc`) is asked again after waits of 1, 2, 4 and 8 seconds: at most five requests, all within 30 seconds; a try that would end past 30 seconds is not made. The first answer with a country decides. If every try fails, the hook still blocks: "cannot tell" stays a block, and the message says how many times and how long it tried.
+- A country outside the list blocks at once, without asking again. A cached `ok` result is used as before.
+- Before a Launch one request still decides: the user is at the terminal and can start again, and a Launch should not hang for half a minute. The detached refresh also makes one request.
+- The hook must be given time for this. Claude Code waits 30 seconds for a `UserPromptSubmit` command hook by default and then lets the prompt through, so sideby now sets `timeout: 60` on its Claude network hooks. Codex waits 600 seconds for a command hook without a `timeout`, which is enough.
+- Cost: during an outage a prompt or tool call waits up to about 30 seconds before it is blocked, instead of 3.

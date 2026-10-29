@@ -1,6 +1,6 @@
 # Network check: stop Claude and Codex on the wrong network
 
-Network Guard (spec §3.35, ADR-0053) checks the country a Host's requests leave from (its Egress): before sideby starts a Claude or Codex account, and before each prompt and tool call in a session sideby started. When the country is not one the user allows, or cannot be told within 3 seconds, it stops and says what to do. It guards against a proxy that stopped or a node in the wrong country. It does not make use from a region the vendor does not support allowed; say so if the user seems to expect that, and never help hide where they are (time zone, fingerprints).
+Network Guard (spec §3.35, ADR-0053) checks the country a Host's requests leave from (its Egress): before sideby starts a Claude or Codex account, and before each prompt and tool call in a session sideby started. When the country is not one the user allows, or cannot be told, it stops and says what to do; inside a session it first asks again for up to about 30 seconds. It guards against a proxy that stopped or a node in the wrong country. It does not make use from a region the vendor does not support allowed; say so if the user seems to expect that, and never help hide where they are (time zone, fingerprints).
 
 ## See where requests leave from
 
