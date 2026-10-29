@@ -1,6 +1,19 @@
 import { createHash, randomBytes } from 'node:crypto'
-import type { Stats } from 'node:fs'
-import { cp, lstat, open, readdir, readFile, readlink, realpath, rename, rm, stat } from 'node:fs/promises'
+import { constants, type Stats } from 'node:fs'
+import {
+  chmod,
+  cp,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  readlink,
+  realpath,
+  rename,
+  rm,
+  stat,
+} from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
 
 export async function lstatOrNull(p: string): Promise<Stats | null> {
@@ -122,6 +135,73 @@ export async function assertInside(root: string, target: string): Promise<void> 
     throw new Error(
       `refusing to write outside the account directory: ${target} (a parent directory is a link)`,
     )
+}
+
+/** A folder sideby would read or write through that is a link, belongs to someone else, or others can write to. */
+export class UnsafeFolderError extends Error {
+  readonly path: string
+  constructor(path: string) {
+    super(
+      `sideby will not use ${path}: it must be a real folder you own that nobody else can write to. Move or delete ${path}, then try again`,
+    )
+    this.path = path
+  }
+}
+
+/**
+ * `<root>/<parts…>`, checked one folder at a time: each must be a real folder (not a link) of the current user that
+ * group and others cannot write, else `UnsafeFolderError`. `root` itself is made when missing (with `create`) but not
+ * checked. A missing level is made (mode 700) with `create`, else the answer is null. With `private`, an existing
+ * level others can still read or enter is narrowed to 700; otherwise only a folder made here gets its mode set.
+ * `sideby send` (`<state>/messages`) and Unattended Mode (`<state>/unattended`) put every path through this first.
+ */
+export async function ownedFolder(
+  root: string,
+  parts: readonly string[],
+  opts: { create: boolean; private?: boolean },
+): Promise<string | null> {
+  if (opts.create) await mkdir(root, { recursive: true, mode: 0o700 })
+  const uid = process.getuid?.()
+  let dir = root
+  for (const part of parts) {
+    dir = join(dir, part)
+    let st = await lstat(dir).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') return null
+      throw err
+    })
+    let made = false
+    if (!st) {
+      if (!opts.create) return null
+      made = true
+      await mkdir(dir, { mode: 0o700 }).catch((err: NodeJS.ErrnoException) => {
+        if (err.code !== 'EEXIST') throw err
+        made = false
+      })
+      st = await lstat(dir)
+    }
+    if (!st.isDirectory() || (uid !== undefined && st.uid !== uid) || (st.mode & 0o022) !== 0)
+      throw new UnsafeFolderError(dir)
+    if ((made || opts.private) && (st.mode & 0o777) !== 0o700) await chmod(dir, 0o700)
+  }
+  return dir
+}
+
+/**
+ * The text of a small regular file, opened without following a link (so a link put in its place is never read);
+ * undefined when it is missing, a link, not a regular file, or larger than `max` bytes.
+ */
+export async function readSmallFile(path: string, max: number): Promise<string | undefined> {
+  let fh: Awaited<ReturnType<typeof open>> | undefined
+  try {
+    fh = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+    const st = await fh.stat()
+    if (!st.isFile() || st.size > max) return undefined
+    return await fh.readFile('utf8')
+  } catch {
+    return undefined
+  } finally {
+    await fh?.close().catch(() => {})
+  }
 }
 
 /** JSON.parse whose error never quotes the input: parse errors from Node include a slice of the text. */

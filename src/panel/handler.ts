@@ -76,11 +76,13 @@ import {
   waitingFiles,
 } from '../core/inbound.ts'
 import {
+  accountLabels,
   type LiveSession,
   type LiveSessionsResult,
   listLiveSessions,
   liveKey,
   referenceText,
+  resumeCommandFor,
   sessionCopyText,
 } from '../core/live-sessions.ts'
 import { listMessages, type MessageReceipt, sendMessage } from '../core/messages.ts'
@@ -106,6 +108,23 @@ import {
 } from '../core/themes.ts'
 import { MIN_CALLS } from '../core/tuning.ts'
 import type { TuneApplyPlan } from '../core/tuning-apply.ts'
+import {
+  onUntil,
+  setUnattendedSchedule,
+  turnUnattendedOff,
+  turnUnattendedOn,
+  type UnattendedChange,
+  type UnattendedStatus,
+  unattendedStatus,
+} from '../core/unattended.ts'
+import { checkUnattendedEnded } from '../core/unattended-ended.ts'
+import {
+  listPendingDecisions,
+  markPendingDone,
+  type PendingDecision,
+  reopenPendingDecision,
+} from '../core/unattended-pending.ts'
+import { readUnattendedConfig } from '../core/unattended-state.ts'
 import * as update from '../core/update.ts'
 import { buildId, localBuild, packageVersion } from '../core/version.ts'
 import { HOOK_FAMILIES } from '../handoff/hook.ts'
@@ -399,6 +418,37 @@ export interface PanelState {
   panel?: PanelConfig
   /** Network Guard (spec §3.35): the setting and the cached result per address; absent without Claude or Codex Accounts. */
   network?: NetworkOverview
+  /** Unattended Mode (spec §3.37): whether it is on for the computer, why, until when, the Schedule; absent when unreadable. */
+  unattended?: PanelUnattendedStatus
+}
+
+/** One Pending Decision as the Panel's Unattended page lists it, with the way back to its Session. */
+export interface PanelPendingDecision extends PendingDecision {
+  /** The Account's short name (its Alias when it has one). */
+  accountLabel?: string
+  /** The Session still runs: its label, so the Sessions page finds it. */
+  live?: { label: string; accountLabel: string }
+  /** The command that resumes the Session, from its folder when that is known; only for an id safe in a shell. */
+  resume?: string
+}
+
+/**
+ * The status as the Panel gets it: with the ids of the open Pending Decisions, so a page that marked some done and
+ * waits for the answer subtracts only those a newer status still lists. `pending` is their number.
+ */
+export type PanelUnattendedStatus = UnattendedStatus & { pendingIds: string[] }
+
+/** The Unattended page: the status and every open Pending Decision. */
+export interface PanelUnattended {
+  status: PanelUnattendedStatus
+  pending: PanelPendingDecision[]
+}
+
+/** What a change on the Unattended page did, and the request that puts back what was there. */
+export interface PanelUnattendedChange {
+  changed: boolean
+  status: PanelUnattendedStatus
+  undo?: { route: '/api/unattended/on' | '/api/unattended/off'; body: Record<string, unknown> }
 }
 
 let autostartOverride: Partial<AutostartContext> = {}
@@ -939,6 +989,15 @@ async function buildState(
   const { setupBlock, shellSetupStatus, userShell } = await import('../core/shell-setup.ts')
   const shellSt = await shellSetupStatus(userShell(rt.env), ctx.home, rt.env, rt.config.shellInitFile)
   const browser = await browserReport(rt, accounts).catch(() => undefined)
+  // The Panel's own status leaves out a `--unattended` session the server itself may run in: it shows the computer.
+  const unattended = await unattendedStatus({
+    paths: rt.paths,
+    families: [...rt.families.keys()],
+    now: ctx.now,
+    readOnly: opts.readOnly,
+  })
+    .then((st) => withPendingIds(st, rt.paths.stateDir))
+    .catch(() => undefined)
   const showBrowser = browser && (browser.families.matched.length || browser.families.openOnly.length)
   return {
     schemaVersion: 1,
@@ -982,6 +1041,68 @@ async function buildState(
     ...(rt.quotaChecks().length ? { quotaChecks: rt.quotaChecks() } : {}),
     ...(rt.config.panel && Object.keys(rt.config.panel).length ? { panel: rt.config.panel } : {}),
     ...(network ? { network } : {}),
+    ...(unattended ? { unattended } : {}),
+  }
+}
+
+const SHELL_SAFE = /^[A-Za-z0-9_@%+=:,./-]+$/
+const shellArg = (v: string) => (SHELL_SAFE.test(v) ? v : `'${v.replaceAll("'", "'\\''")}'`)
+/** A Session id a hook reported is text from the Host: only a plain one goes into a command. */
+const SAFE_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
+
+/** The `undo` command a change printed, as the request the page sends for it. */
+function undoRequest(undo: string | undefined): PanelUnattendedChange['undo'] {
+  if (undo === 'sideby unattended off') return { route: '/api/unattended/off', body: {} }
+  if (undo === 'sideby unattended on') return { route: '/api/unattended/on', body: {} }
+  const until = undo?.startsWith('sideby unattended on --until ') ? undo.slice(29) : undefined
+  return until ? { route: '/api/unattended/on', body: { until } } : undefined
+}
+
+/** A status with the ids of the open Pending Decisions, read once more (read only: nothing is deleted here). */
+async function withPendingIds(status: UnattendedStatus, stateDir: string): Promise<PanelUnattendedStatus> {
+  const ids = (await listPendingDecisions(stateDir, { prune: false })).map((d) => d.id)
+  return { ...status, pending: ids.length, pendingIds: ids }
+}
+
+async function panelChange(c: UnattendedChange, stateDir: string): Promise<PanelUnattendedChange> {
+  const undo = undoRequest(c.undo)
+  return { changed: c.changed, status: await withPendingIds(c.status, stateDir), ...(undo ? { undo } : {}) }
+}
+
+async function unattendedView(
+  rt: Runtime,
+  readOnly: boolean,
+  live: (rt: Runtime) => Promise<LiveSessionsResult>,
+): Promise<PanelUnattended> {
+  const families = [...rt.families.keys()]
+  const [status, decisions, accounts] = await Promise.all([
+    unattendedStatus({ paths: rt.paths, families, readOnly }),
+    listPendingDecisions(rt.paths.stateDir, { prune: !readOnly }),
+    rt.accounts(),
+  ])
+  const labels = accountLabels(rt, accounts)
+  const running = decisions.some((d) => d.sessionId)
+    ? (await live(rt).catch(() => ({ sessions: [], problems: [] }))).sessions
+    : []
+  const home = rt.paths.home
+  return {
+    status: { ...status, pending: decisions.length, pendingIds: decisions.map((d) => d.id) },
+    pending: decisions.map((d): PanelPendingDecision => {
+      const label = d.account ? labels.get(d.account) : undefined
+      const session = d.sessionId ? running.find((s) => s.sessionId === d.sessionId) : undefined
+      const known = d.account && accounts.some((a) => a.ref === d.account)
+      const resume =
+        d.sessionId && SAFE_SESSION_ID.test(d.sessionId) && known
+          ? resumeCommandFor(d.family, d.account!, d.sessionId)
+          : undefined
+      return {
+        ...d,
+        ...(d.cwd ? { cwd: tildify(d.cwd, home) } : {}),
+        ...(label ? { accountLabel: label } : {}),
+        ...(session ? { live: { label: session.label, accountLabel: session.accountLabel } } : {}),
+        ...(resume ? { resume: d.cwd ? `cd ${shellArg(d.cwd)} && ${resume}` : resume } : {}),
+      }
+    }),
   }
 }
 
@@ -1274,6 +1395,9 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   const getRuntime = typeof opts.runtime === 'function' ? opts.runtime : async () => opts.runtime as Runtime
   const sessionsSource = (opts as { [LIVE_SESSIONS_SOURCE]?: LiveSessionsSource })[LIVE_SESSIONS_SOURCE]
   const liveSessions = sessionsSource?.list ?? listLiveSessions
+  // A change from this page can end a stretch of Unattended Mode: the plugins hear of it now, as after the CLI.
+  const noticeUnattendedEnd = (rt: Runtime) =>
+    void checkUnattendedEnded(rt.paths, async (ctx) => void (await rt.unattendedEnded(ctx)))
   const copyText = sessionsSource?.copyText ?? sessionCopyText
   const orcaOf = (rt: Runtime) => sessionsSource?.orca ?? systemOrca(rt.env)
   const sendTo = sessionsSource?.send ?? sendMessage
@@ -2047,6 +2171,82 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const r = await editSettings(rt, account)
         const home = rt.paths.home
         return { ...r, path: tildify(r.path, home), ...(r.target ? { target: tildify(r.target, home) } : {}) }
+      },
+    },
+    // Unattended Mode (spec §3.37): the page's status and Pending Decisions. A read-only Panel reads them too.
+    '/api/unattended': {
+      writes: () => false,
+      queued: false,
+      async run() {
+        return unattendedView(await getRuntime(), readOnly, liveSessions)
+      },
+    },
+    // Turns it on now: `slotEnd`, `for` (4h, 12h) or `until` (07:30, the next time it is 07:30; or a date and time).
+    '/api/unattended/on': {
+      async run(body) {
+        const choice = {
+          ...(body.slotEnd === true ? { slotEnd: true } : {}),
+          ...(optString(body, 'for') ? { for: optString(body, 'for') } : {}),
+          ...(optString(body, 'until') ? { until: optString(body, 'until') } : {}),
+        }
+        const rt = await getRuntime()
+        const now = new Date()
+        const { schedule } = await readUnattendedConfig(rt.paths.configFile)
+        const r = onUntil(choice, schedule, now)
+        if ('error' in r) throw new HttpError(400, r.error, 'bad-time')
+        const change = await turnUnattendedOn({
+          paths: rt.paths,
+          families: [...rt.families.keys()],
+          until: r.until,
+          now,
+        })
+        noticeUnattendedEnd(rt)
+        return panelChange(change, rt.paths.stateDir)
+      },
+    },
+    // Off now; inside a Slot, a pause until that Slot ends.
+    '/api/unattended/off': {
+      async run() {
+        const rt = await getRuntime()
+        const change = await turnUnattendedOff({ paths: rt.paths, families: [...rt.families.keys()] })
+        noticeUnattendedEnd(rt)
+        return panelChange(change, rt.paths.stateDir)
+      },
+    },
+    // The whole Schedule at once: every edit on the page writes it, and its Undo writes `previous` back.
+    '/api/unattended/schedule': {
+      async run(body) {
+        if (!Array.isArray(body.schedule)) throw new HttpError(400, '"schedule" must be a list of Slots')
+        const rt = await getRuntime()
+        const r = await setUnattendedSchedule({
+          paths: rt.paths,
+          families: [...rt.families.keys()],
+          schedule: body.schedule,
+        })
+        noticeUnattendedEnd(rt)
+        return {
+          changed: r.changed,
+          status: await withPendingIds(r.status, rt.paths.stateDir),
+          previous: r.previous,
+        }
+      },
+    },
+    // Marks one Pending Decision done (or every open one with `all`), or with `done: false` opens one again.
+    '/api/unattended/pending': {
+      async run(body) {
+        const id = optString(body, 'id')
+        const all = body.all === true
+        if (!id && !all) throw new HttpError(400, '"id" or "all" is required')
+        const rt = await getRuntime()
+        try {
+          const changed =
+            body.done === false && id
+              ? [await reopenPendingDecision(rt.paths.stateDir, id)]
+              : await markPendingDone(rt.paths.stateDir, all ? 'all' : id!)
+          return { ids: changed.map((d) => d.id) }
+        } catch (err) {
+          throw new HttpError(400, (err as Error).message, 'no-pending')
+        }
       },
     },
     // Network Guard (spec §3.35): asks every address now. Only sideby's own cache changes, so a read-only Panel may.

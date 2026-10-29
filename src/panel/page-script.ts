@@ -84,6 +84,19 @@ import {
   switchFailure,
   tailInView,
   taskFindings,
+  uaDayRuns,
+  uaGroupPending,
+  uaOnChoices,
+  uaParseClock,
+  uaPickTime,
+  uaSameSlot,
+  uaShouldRead,
+  uaSlotNight,
+  uaStatusParts,
+  uaStepClock,
+  uaToggleDay,
+  uaWaitingCount,
+  uaWhen,
   updatedAge,
   widthFollower,
   widthTier,
@@ -182,6 +195,19 @@ const LOGIC = [
   windowState,
   bindingWindow,
   withPinned,
+  uaWhen,
+  uaStatusParts,
+  uaOnChoices,
+  uaPickTime,
+  uaSlotNight,
+  uaDayRuns,
+  uaToggleDay,
+  uaSameSlot,
+  uaGroupPending,
+  uaParseClock,
+  uaStepClock,
+  uaShouldRead,
+  uaWaitingCount,
 ]
   .map((fn) => fn.toString())
   .join('\n')
@@ -1224,6 +1250,7 @@ const MAIN = String.raw`
     renderUpdated()
     renderSettingsButton()
     renderUpdateButton()
+    renderUaBadge()
     const u = updState()
     $('foot-text').textContent = t(u && !u.checksOff ? 'foot.textChecks' : 'foot.text')
     // A background refresh keeps the button still; only one the viewer asked for spins it.
@@ -2943,7 +2970,7 @@ const MAIN = String.raw`
   // What each card's size menu shows while the user is choosing, by group id; dropped once a change is made.
   const tuneSel = {}
   const tp = { data: null, loading: false, error: null, at: 0 }
-  function pageFromHash() { return location.hash === '#tuning' ? 'tuning' : location.hash === '#handoff' ? 'handoff' : location.hash === '#sessions' || location.hash === '#history' || location.hash === '#live' ? 'sessions' : 'accounts' }
+  function pageFromHash() { return location.hash === '#tuning' ? 'tuning' : location.hash === '#handoff' ? 'handoff' : location.hash === '#unattended' ? 'unattended' : location.hash === '#sessions' || location.hash === '#history' || location.hash === '#live' ? 'sessions' : 'accounts' }
   let curPage = pageFromHash()
   function tuneSize(n) { return n === null || n === undefined ? t('tune.hostDefault') : tokens(n) }
   // "Default" with the size it means, only where that size is documented: Claude models with a native 1M window
@@ -3169,6 +3196,17 @@ const MAIN = String.raw`
       })
       return
     }
+    // The Unattended page also opens once its Pending Decisions are in, at its final size.
+    if (next === 'unattended' && !ua.data && !ua.error && !ua.opening && !ready) {
+      ua.opening = true
+      renderPageChrome()
+      loadUa().finally(() => {
+        ua.opening = false
+        if (seq === navSeq) setPage('unattended', true)
+        else renderPageChrome()
+      })
+      return
+    }
     if (next !== 'sessions') leaveHistory()
     curPage = next
     try { history.replaceState(null, '', next === 'accounts' ? location.pathname + location.search : '#' + (next === 'sessions' && hs.mode === 'live' ? 'live' : next)) } catch {}
@@ -3183,27 +3221,41 @@ const MAIN = String.raw`
     const canHandoff = Boolean(ahState())
     // Always offered, so the tabs do not change when the last account goes; the page has its own empty state.
     const canSessions = Boolean(S.state)
-    if (S.state && ((curPage === 'tuning' && !canTune) || (curPage === 'handoff' && !canHandoff) || (curPage === 'sessions' && !canSessions))) curPage = 'accounts'
+    if (S.state && ((curPage === 'tuning' && !canTune) || (curPage === 'handoff' && !canHandoff) || ((curPage === 'sessions' || curPage === 'unattended') && !canSessions))) curPage = 'accounts'
     const tabs = [['accounts', t('page.accounts')]]
     if (canSessions) tabs.push(['sessions', t('page.sessions')])
     if (canTune) tabs.push(['tuning', t('page.tuning')])
     if (canHandoff) tabs.push(['handoff', t('page.handoff')])
+    if (canSessions) tabs.push(['unattended', t('page.unattended')])
     nav.hidden = tabs.length < 2
     // Underline tabs: each page has its mark, the Accounts tab its count and Auto Handoff a dot while it is on.
-    const tabIcon = { accounts: 'tabAccounts', sessions: 'tabSessions', tuning: 'tabTuning', handoff: 'tabHandoff' }
+    const tabIcon = { accounts: 'tabAccounts', sessions: 'tabSessions', tuning: 'tabTuning', handoff: 'tabHandoff', unattended: 'moon' }
     // The tab counts what the list shows: Hidden Accounts (spec §3.25) are counted on the line under it.
     const nAccounts = S.state ? visibleAccounts().length : 0
     const handoffOn = Boolean(ahState() && ahState().settings.auto)
     // Redrawn only when something on it changes, so a refresh never replays the underline.
-    const navShape = JSON.stringify([lang, curPage, tabs, nAccounts, handoffOn, sp.opening, pasteCount()])
+    // Unattended Mode: a dot while it is on, and how many Pending Decisions wait.
+    const uaNow = S.state && S.state.unattended ? uaStatusParts(S.state.unattended).state === 'on' : false
+    const uaWait = uaPendingCount()
+    const navShape = JSON.stringify([lang, curPage, tabs, nAccounts, handoffOn, sp.opening, pasteCount(), uaNow, uaWait, ua.opening])
     if (nav._drawn !== navShape) {
     nav._drawn = navShape
     swapKids(nav, [h('div', { class: 'tabs', role: 'presentation' }, tabs.map(([id, label]) =>
       h('button', { class: 'tab', type: 'button', role: 'tab', 'data-key': 'tab:' + id, 'aria-selected': curPage === id ? 'true' : 'false', 'aria-busy': id === 'sessions' && sp.opening ? 'true' : null, onclick: () => setPage(id) },
-        id === 'sessions' && sp.opening ? spinner() : icon(tabIcon[id]), h('span', { class: 'tab-label', 'data-label': label }, label),
+        (id === 'sessions' && sp.opening) || (id === 'unattended' && ua.opening) ? spinner() : icon(tabIcon[id]), h('span', { class: 'tab-label', 'data-label': label }, label),
         id === 'accounts' && nAccounts ? h('span', { class: 'tab-count' }, String(nAccounts)) : null,
         id === 'handoff' && handoffOn ? h('span', { class: 'tab-dot', 'aria-label': t('ah.on') }) : null,
+        id === 'unattended' && uaNow ? h('span', { class: 'tab-dot', 'aria-label': t('ua.on') }) : null,
+        id === 'unattended' && uaWait ? h('span', { class: 'seg-badge', 'data-tip': tn('ua.waiting', uaWait), 'aria-label': tn('ua.waiting', uaWait) }, String(uaWait)) : null,
         id === 'sessions' && pasteCount() ? h('span', { class: 'seg-badge', 'data-tip': t('msgn.badge', { n: pasteCount() }), 'aria-label': t('msgn.badge', { n: pasteCount() }) }, String(pasteCount())) : null)))])
+      // In a narrow window the tabs scroll sideways: the one shown is brought into view, never the page moved.
+      const row = nav.firstChild
+      const sel = row && row.querySelector('.tab[aria-selected=true]')
+      if (sel && row.scrollWidth > row.clientWidth) {
+        const left = sel.offsetLeft - row.offsetLeft
+        if (left < row.scrollLeft) row.scrollLeft = left
+        else if (left + sel.offsetWidth > row.scrollLeft + row.clientWidth) row.scrollLeft = left + sel.offsetWidth - row.clientWidth
+      }
     }
     const away = curPage !== 'accounts' && tabs.some(([id]) => id === curPage)
     // With no account yet the empty state is the whole page: no summary, no health check.
@@ -3212,9 +3264,18 @@ const MAIN = String.raw`
     const onTune = away && curPage === 'tuning'
     const onHandoff = away && curPage === 'handoff'
     const onSessions = away && curPage === 'sessions'
+    const onUa = away && curPage === 'unattended'
     $('tuning-page').hidden = !onTune
     $('handoff-page').hidden = !onHandoff
     $('sessions-page').hidden = !onSessions
+    $('unattended-page').hidden = !onUa
+    if (onUa) {
+      // Read again when the list may have changed (a new Pending Decision) or a while after the last read; never
+      // before ua.nextAt, which a failed read puts a full refresh round away, so a failing read is not repeated at once.
+      const st = S.state && S.state.unattended
+      if (uaShouldRead({ now: Date.now(), at: ua.at, nextAt: ua.nextAt, everyMs: UA_MS, loading: Boolean(ua.loading), hasData: Boolean(ua.data), failed: Boolean(ua.error), statusCount: st ? st.pending : undefined, listCount: ua.data ? ua.data.pending.length : undefined })) loadUa()
+      renderUaPage()
+    }
     if (onSessions) {
       if (!sp.data && !sp.error) loadSessions()
       renderSessionsPage()
@@ -5714,6 +5775,586 @@ const MAIN = String.raw`
     swapKids(box, kids)
   }
 
+  // ---------- the Unattended page (spec §3.37, ADR-0057) ----------
+  // The status in one sentence (as Android's Do Not Disturb says it) with the one action that changes it, the Schedule
+  // edited in place (each change is written at once and its toast carries the undo), what sessions left for the user,
+  // and where it works. The status comes with the Panel state; the Pending Decisions are read when the page opens, so
+  // it opens at its final size. Parts that appear grow in and parts that go away shrink out (uaPatch).
+  const UA_MS = 15000
+  const UA_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+  const UA_PRESET = { name: 'Weeknights', days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '23:00', end: '08:00' }
+  const ua = { data: null, error: null, loading: null, at: 0, nextAt: 0, inflight: new Map(), opening: false, choosing: false, choice: null, time: '08:00', timeInit: '08:00', busy: false, local: null, saves: 0, rows: [], seq: 0, gone: {}, open: {}, firstUse: false, focus: null }
+  let uaSaving = Promise.resolve()
+  function uaStatusNow() { return (S.state && S.state.unattended) || null }
+  // The latest status's count, less the ones being marked done right now (the page shows them gone already).
+  function uaPendingCount() {
+    return uaWaitingCount(uaStatusNow(), [...ua.inflight].map(([id, on]) => ({ id, on })))
+  }
+  function loadUa() {
+    if (ua.loading) return ua.loading
+    ua.loading = (async () => {
+      try {
+        const d = await api('/api/unattended', {})
+        ua.data = d
+        ua.error = null
+        ua.at = Date.now()
+        ua.nextAt = ua.at + 1000
+        // What came back is newer than the state the page loaded before it.
+        uaKeepStatus(d.status)
+        for (const id of Object.keys(ua.gone)) if (!d.pending.some((x) => x.id === id)) delete ua.gone[id]
+      } catch (e) {
+        // The next try waits a full refresh round, whatever the counts say meanwhile.
+        ua.error = e
+        ua.at = Date.now()
+        ua.nextAt = ua.at + AUTO_MS
+      }
+      ua.loading = null
+      uaRedraw()
+    })()
+    return ua.loading
+  }
+  function uaKeepStatus(st) {
+    if (!st) return
+    if (S.state) S.state.unattended = st
+    if (ua.data) ua.data.status = st
+  }
+  // Everything that shows the status: the header badge, the tab and the page.
+  function uaRedraw() {
+    renderUaBadge()
+    // Draws the page too while it shows.
+    renderPageChrome()
+  }
+
+  // ---------- words ----------
+  // A moment relative to now: "08:00" today, else "tomorrow 08:00", "Mon 08:00" or "Nov 3 08:00".
+  function uaDayWord(ms, now) {
+    const w = uaWhen(ms, now)
+    if (w.day === 'today') return ''
+    if (w.day === 'tomorrow') return t('ua.tomorrow')
+    return new Date(ms).toLocaleDateString(locale(), w.day === 'week' ? { weekday: 'short' } : { month: 'short', day: 'numeric' })
+  }
+  // kind: until ("until 08:00"), back ("back on at 08:00") or next ("next: Mon 23:00"; today is said too).
+  function uaAt(kind, ms) {
+    const now = Date.now()
+    const time = uaWhen(ms, now).hhmm
+    const day = uaDayWord(ms, now) || (kind === 'next' ? t('ua.today') : '')
+    return day ? t('ua.' + kind + 'Day', { day, time }) : t('ua.' + kind + 'Today', { time })
+  }
+  // A Slot as the page calls it: its name (the preset in the page's language), else its number.
+  function uaSlotName(slot, i) {
+    if (slot && slot.name) return slot.name === UA_PRESET.name ? t('ua.presetName') : slot.name
+    return t('ua.slotN', { n: i + 1 })
+  }
+  // In the status sentence: "Slot “Weeknights”", or "Slot 2" for one without a name.
+  function uaSlotWord(slot, i) {
+    return slot.name ? t('ua.slotQuoted', { name: uaSlotName(slot, i) }) : t('ua.slotN', { n: i + 1 })
+  }
+  function uaDayNames(style) {
+    // 2024-01-01 was a Monday.
+    return UA_DAYS.map((d, i) => new Date(2024, 0, 1 + i).toLocaleDateString(locale(), { weekday: style }))
+  }
+  // The status sentence, its parts joined by dots: "On · Slot “Weeknights” · until 08:00".
+  function uaSentence(st) {
+    const p = uaStatusParts(st)
+    const schedule = st.schedule || []
+    const slotWord = p.slot !== null && schedule[p.slot] ? uaSlotWord(schedule[p.slot], p.slot) : null
+    if (p.state === 'on') return [t('ua.on'), p.byHand ? t('ua.byHand') : slotWord, p.noEnd ? t('ua.noEnd') : uaAt('until', p.until)]
+    if (p.state === 'paused') return [t('ua.paused'), p.noEnd ? t('ua.pausedOpen') : uaAt('back', p.until)]
+    return [t('ua.off'), p.next ? uaAt('next', p.next.at) : null]
+  }
+
+  // ---------- the header badge ----------
+  // "Unattended · until 08:00" while it is on, to the page in one click. It fades in and out; a refresh with the same
+  // words leaves it alone.
+  function renderUaBadge() {
+    const b = $('ua-badge')
+    const st = uaStatusNow()
+    const p = st && uaStatusParts(st)
+    const on = Boolean(p && p.state === 'on')
+    if (!on) {
+      if (b.hidden || b._leaving) return
+      b._drawn = ''
+      if (!moving()) { b.hidden = true; return }
+      const a = b.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 150, easing: 'ease-in', fill: 'forwards' })
+      b._leaving = a
+      a.finished.then(() => { if (b._leaving === a) { b.hidden = true; b._leaving = null; a.cancel() } }, () => {})
+      return
+    }
+    if (b._leaving) { b._leaving.cancel(); b._leaving = null }
+    const text = p.noEnd ? t('ua.badgeOn') : t('ua.badge', { until: uaAt('until', p.until) })
+    const shape = lang + '|' + text
+    if (b._drawn !== shape) {
+      b._drawn = shape
+      setKids(b, [icon('moon'), h('span', null, text)])
+      b.setAttribute('aria-label', text + ' · ' + t('ua.badgeTitle'))
+      b.title = t('ua.badgeTitle')
+    }
+    if (b.hidden) {
+      b.hidden = false
+      if (moving()) b.animate([{ opacity: 0, transform: 'translateY(-2px)' }, { opacity: 1, transform: 'none' }], { duration: 180, easing: 'ease-out' })
+    }
+  }
+
+  // ---------- motion ----------
+  // Like patch, and a [data-ua] part that was not there grows in while one that went away shrinks out where it was.
+  // A first draw animates nothing; reduced motion only switches.
+  function uaPatch(box, kids) {
+    // Parts still shrinking out sit outside the redraw and go back where they were, so a second draw right after
+    // the first (the answer to a change) does not cut their motion short.
+    const ghosts = [...box.querySelectorAll('[data-ua-ghost]')].map((el) => ({ el, parent: el.parentElement, next: el.nextElementSibling }))
+    for (const g of ghosts) g.el.remove()
+    const shown = Array.from(box.childNodes).some((n) => !keepsToasts(n))
+    const old = shown && moving() ? [...box.querySelectorAll('[data-ua]')].map((el) => ({ el, key: el.getAttribute('data-ua'), parent: el.parentElement, next: el.nextElementSibling })) : []
+    const before = new Set(old.map((o) => o.key))
+    patch(box, kids)
+    for (const g of ghosts.reverse()) {
+      if (!g.parent.isConnected) continue
+      if (g.next && g.next.parentElement === g.parent) g.parent.insertBefore(g.el, g.next)
+      else g.parent.append(g.el)
+    }
+    if (!old.length) return
+    const here = new Set([...box.querySelectorAll('[data-ua]')].map((x) => x.getAttribute('data-ua')))
+    for (const x of box.querySelectorAll('[data-ua]')) if (!before.has(x.getAttribute('data-ua'))) uaGrow(x)
+    // Last first, so a part that went away with the one after it goes back before that one.
+    for (const o of old.reverse()) {
+      if (here.has(o.key) || o.el.isConnected || !o.parent.isConnected) continue
+      if (o.next && o.next.parentElement === o.parent) o.parent.insertBefore(o.el, o.next)
+      else o.parent.append(o.el)
+      uaShrink(o.el)
+    }
+  }
+  function uaBox(el) {
+    const cs = getComputedStyle(el)
+    return { height: el.getBoundingClientRect().height + 'px', opacity: 1, marginTop: cs.marginTop, marginBottom: cs.marginBottom, paddingTop: cs.paddingTop, paddingBottom: cs.paddingBottom, overflow: 'hidden' }
+  }
+  const UA_FLAT = { height: '0px', opacity: 0, marginTop: '0px', marginBottom: '0px', paddingTop: '0px', paddingBottom: '0px', overflow: 'hidden' }
+  function uaGrow(el) {
+    if (!el.getBoundingClientRect().height) return
+    el.animate([UA_FLAT, uaBox(el)], { duration: 180, easing: EASE })
+  }
+  function uaShrink(el) {
+    // A part on its way out takes no clicks and is not read out.
+    el.setAttribute('inert', '')
+    el.setAttribute('aria-hidden', 'true')
+    el.setAttribute('data-ua-ghost', '')
+    el.removeAttribute('data-key')
+    folding.add(el)
+    const a = el.animate([uaBox(el), UA_FLAT], { duration: 160, easing: EASE, fill: 'forwards' })
+    const end = () => { folding.delete(el); el.remove() }
+    a.finished.then(end, end)
+  }
+
+  // ---------- turning it on and off ----------
+  function uaOpenChooser() {
+    const st = uaStatusNow()
+    if (!st) return
+    if (ua.choosing) { uaCloseChooser(); return }
+    ua.choosing = true
+    ua.choice = uaOnChoices(st.slotEnd, Date.now()).chosen
+    ua.time = ua.timeInit = '08:00'
+    ua.focus = 'ua-opt-' + ua.choice
+    renderUaPage()
+  }
+  function uaCloseChooser() {
+    ua.choosing = false
+    ua.focus = 'ua-main'
+    renderUaPage()
+  }
+  function uaPick(id, keepFocus) {
+    if (ua.choice === id) return
+    ua.choice = id
+    if (!keepFocus) ua.focus = 'ua-opt-' + id
+    renderUaPage()
+  }
+  function uaRadioKeys(e) {
+    if (e.key === 'Enter') { e.preventDefault(); uaTurnOn(); return }
+    const radios = [...document.querySelectorAll('#unattended-page .ua-radio')]
+    const i = radioStep(radios.length, radios.indexOf(e.currentTarget), e.key)
+    if (i < 0) return
+    e.preventDefault()
+    uaPick(radios[i].getAttribute('data-key').slice('ua-opt-'.length))
+  }
+  function uaChoiceBody() {
+    if (ua.choice === 'slot') return { slotEnd: true }
+    if (ua.choice === '4h' || ua.choice === '12h') return { for: ua.choice }
+    return { until: uaParseClock(ua.time) }
+  }
+  function uaPicked(now) {
+    const clock = uaParseClock(ua.time)
+    return clock ? uaPickTime(clock, now) : null
+  }
+  function uaToastFor(r) {
+    const p = uaStatusParts(r.status)
+    const text = p.state === 'on' ? (p.noEnd ? t('ua.toastOnAlways') : t('ua.toastOn', { until: uaAt('until', p.until) }))
+      : p.state === 'paused' ? (p.noEnd ? t('ua.toastPausedOpen') : t('ua.toastPaused', { back: uaAt('back', p.until) }))
+      : t('ua.toastOff')
+    toast(text, r.undo ? { key: 'ua', action: { label: t('toast.undo'), run: () => uaUndo(r.undo) }, duration: 10000 } : { key: 'ua' })
+  }
+  async function uaChange(route, body, after) {
+    if (ua.busy) return
+    const first = !(uaStatusNow() || {}).configured
+    ua.busy = true
+    renderUaPage()
+    try {
+      const r = await api(route, body)
+      if (first) ua.firstUse = true
+      if (after) after()
+      uaKeepStatus(r.status)
+      ua.focus = 'ua-main'
+      uaToastFor(r)
+    } catch (e) { toast(e.message, { kind: 'fail' }) }
+    ua.busy = false
+    uaRedraw()
+  }
+  function uaTurnOn() {
+    if (ua.choice === 'time' && !uaPicked(Date.now())) return
+    uaChange('/api/unattended/on', uaChoiceBody(), () => { ua.choosing = false })
+  }
+  function uaTurnOff() { uaChange('/api/unattended/off', {}, () => { ua.choosing = false }) }
+  async function uaUndo(undo) {
+    try {
+      const r = await api(undo.route, undo.body)
+      uaKeepStatus(r.status)
+      toast(t('ua.undone'), { key: 'ua' })
+    } catch (e) { toast(e.message, { kind: 'fail' }) }
+    uaRedraw()
+  }
+
+  // ---------- the Schedule ----------
+  // Each row keeps an id while the page shows it, so a removed Slot is the row that leaves and an edited one stays the
+  // same element (focus stays in its time field). A Schedule changed elsewhere matches rows by what they cover.
+  function uaSchedule() {
+    const st = uaStatusNow()
+    return ua.local || (st && st.schedule) || []
+  }
+  function uaRowsFor(list) {
+    const prev = ua.rows
+    let rows
+    if (prev.length === list.length) rows = list.map((slot, i) => ({ id: prev[i].id, slot }))
+    else {
+      const used = new Set()
+      rows = list.map((slot) => {
+        const same = prev.find((r) => !used.has(r.id) && uaSameSlot(r.slot, slot) && (r.slot.name || '') === (slot.name || ''))
+        const id = same ? same.id : 'n' + ++ua.seq
+        used.add(id)
+        return { id, slot }
+      })
+    }
+    ua.rows = rows
+    return rows
+  }
+  function uaSaveSchedule(next, message, opts) {
+    opts = opts || {}
+    ua.local = next.map((s) => Object.assign({}, s, { days: [...s.days] }))
+    ua.saves++
+    if (!(uaStatusNow() || {}).configured) ua.firstUse = true
+    renderUaPage()
+    uaSaving = uaSaving.then(async () => {
+      try {
+        const r = await api('/api/unattended/schedule', { schedule: next })
+        uaKeepStatus(r.status)
+        if (r.changed)
+          toast(opts.undone ? t('ua.undone') : message, opts.undone ? { key: 'ua-schedule' } : { key: 'ua-schedule', action: { label: t('toast.undo'), run: () => uaSaveSchedule(r.previous, '', { undone: true }) }, duration: 10000 })
+      } catch (e) { toast(e.message, { kind: 'fail' }) }
+      // The page shows what the config holds once every change is written; a failed one goes back.
+      if (!--ua.saves) ua.local = null
+      uaRedraw()
+    })
+  }
+  function uaEdit(id, change, message) {
+    const rows = uaRowsFor(uaSchedule())
+    const i = rows.findIndex((r) => r.id === id)
+    if (i < 0) return
+    const next = rows.map((r) => r.slot)
+    const slot = change(Object.assign({}, next[i], { days: [...next[i].days] }))
+    if (!slot) return
+    next[i] = slot
+    uaSaveSchedule(next, message)
+  }
+  function uaTimeSave(input, id, which) {
+    const rows = uaRowsFor(uaSchedule())
+    const row = rows.find((r) => r.id === id)
+    if (!row) return
+    // A field emptied or half typed goes back to what is saved; 730 or 7:30 is written as 07:30.
+    const v = uaParseClock(input.value)
+    input.value = v || row.slot[which]
+    if (!v || v === row.slot[which]) return
+    uaEdit(id, (s) => { s[which] = v; return s }, t('ua.saved'))
+  }
+  // The page's own 24-hour field (the browser's time field follows its language: 11:00 PM on a Chinese page). HH:MM
+  // typed (730, 7:30 and 07:30 all work), the arrow keys step the hour or the minute the caret is in, Enter commits.
+  // What it accepts is its pattern, so a value it cannot take is marked while typing, without a redraw.
+  const UA_CLOCK = ' *([01]?[0-9]|2[0-3])([:：.]?[0-5][0-9])? *'
+  function uaClockField(value, props, commit) {
+    return h('input', Object.assign({ type: 'text', class: 'ua-time', value, inputmode: 'numeric', maxlength: '5', autocomplete: 'off', spellcheck: 'false', placeholder: 'HH:MM', pattern: UA_CLOCK,
+      onkeydown: (e) => uaClockKeys(e, commit) }, props))
+  }
+  function uaClockKeys(e, commit) {
+    const el = e.currentTarget
+    if (e.key === 'Enter') { e.preventDefault(); commit(el); return }
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+    e.preventDefault()
+    const part = (el.selectionStart || 0) <= 2 ? 'h' : 'm'
+    const step = e.key === 'ArrowUp' ? 1 : -1
+    el.value = uaStepClock(el.value, part, step) || uaStepClock(el.getAttribute('value') || '00:00', part, step)
+    el.setSelectionRange(part === 'h' ? 0 : 3, part === 'h' ? 2 : 5)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+  function uaRemove(id) {
+    const rows = uaRowsFor(uaSchedule())
+    const i = rows.findIndex((r) => r.id === id)
+    if (i < 0) return
+    ua.rows = rows.filter((r) => r.id !== id)
+    const after = ua.rows[i] || ua.rows[i - 1]
+    ua.focus = after ? 'ua-del-' + after.id : 'ua-add'
+    uaSaveSchedule(ua.rows.map((r) => r.slot), t('ua.slotRemoved'))
+  }
+  function uaAdd(slot, message) {
+    const rows = uaRowsFor(uaSchedule())
+    const id = 'n' + ++ua.seq
+    ua.rows = rows.concat([{ id, slot }])
+    uaSaveSchedule(ua.rows.map((r) => r.slot), message)
+  }
+  // A new Slot covers the days no Slot has yet (all of them when none is left), overnight.
+  function uaNewSlot() {
+    const taken = new Set(uaSchedule().flatMap((s) => s.days))
+    const free = UA_DAYS.filter((d) => !taken.has(d))
+    return { days: free.length ? free : [...UA_DAYS], start: '23:00', end: '08:00' }
+  }
+  function uaSlotRow(r, i, names, short) {
+    const s = r.slot
+    const label = uaSlotName(s, i)
+    const off = BOOT.readOnly
+    const night = uaSlotNight(s)
+    const time = (which) => uaClockField(s[which], { disabled: off, 'data-key': 'ua-' + which + '-' + r.id,
+      'aria-label': t(which === 'start' ? 'ua.startOf' : 'ua.endOf', { slot: label }),
+      onblur: (e) => uaTimeSave(e.target, r.id, which) }, (el) => uaTimeSave(el, r.id, which))
+    return h('li', { class: 'ua-slot', 'data-key': 'ua-slot-' + r.id, 'data-ua': 'slot-' + r.id, 'data-patch': '' },
+      h('span', { class: 'ua-slot-name' }, label),
+      h('div', { class: 'ua-days', role: 'group', 'aria-label': t('ua.daysOf', { slot: label }), 'data-patch': '' }, UA_DAYS.map((d, k) => {
+        const on = s.days.includes(d)
+        const last = on && s.days.length === 1
+        return h('button', { class: 'ua-day', type: 'button', 'data-key': 'ua-day-' + r.id + '-' + d, 'aria-pressed': String(on), 'aria-label': names[k], 'data-tip': last ? t('ua.keepDay') : names[k], disabled: off || last,
+          onclick: () => uaEdit(r.id, (x) => { const days = uaToggleDay(x.days, d); return days ? Object.assign(x, { days }) : null }, t('ua.saved')) }, short[k])
+      })),
+      h('div', { class: 'ua-times', 'data-patch': '' }, time('start'), h('span', { class: 'ua-dash', 'aria-hidden': 'true' }, '–'), time('end'),
+        night ? h('span', { class: 'ua-night chip chip-sm' }, t(night === 'next' ? 'ua.overnight' : 'ua.allDay')) : null),
+      h('button', { class: 'icon-btn ua-del', type: 'button', 'data-key': 'ua-del-' + r.id, 'aria-label': t('ua.remove', { slot: label }), 'data-tip': t('ua.remove', { slot: label }), disabled: off, onclick: () => uaRemove(r.id) }, icon('x')))
+  }
+  function uaScheduleBlock() {
+    const list = uaSchedule()
+    const rows = uaRowsFor(list)
+    const names = uaDayNames('long')
+    const short = t('ua.days').split(',')
+    const hasPreset = list.some((s) => uaSameSlot(s, UA_PRESET))
+    const off = BOOT.readOnly
+    const out = [h('div', { class: 'page-sec-head' }, h('h3', { class: 'page-sec' }, t('ua.schedule')), h('p', { class: 'muted small' }, t('ua.scheduleNote')))]
+    out.push(rows.length
+      ? h('ul', { class: 'ua-slots', 'data-key': 'ua-slots', 'data-ua': 'slots', 'data-patch': '' }, rows.map((r, i) => uaSlotRow(r, i, names, short)))
+      : h('p', { class: 'note ua-empty', 'data-key': 'ua-slots-none', 'data-ua': 'slots-none' }, t('ua.scheduleEmpty')))
+    out.push(h('div', { class: 'row-actions ua-add-row', 'data-key': 'ua-add-row', 'data-patch': '' },
+      fm('ua-add', h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'ua-add', disabled: off, onclick: () => uaAdd(uaNewSlot(), t('ua.slotAdded')) }, icon('plus'), t('ua.addSlot'))),
+      hasPreset ? null : h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'ua-preset', disabled: off,
+        onclick: () => uaAdd(Object.assign({}, UA_PRESET, { days: [...UA_PRESET.days] }), t('ua.presetAdded')) }, icon('moon'), t('ua.preset'))))
+    return out
+  }
+
+  // ---------- Pending Decisions ----------
+  function uaWhenShort(iso) {
+    const ms = Date.parse(iso)
+    const now = Date.now()
+    const w = uaWhen(ms, now)
+    return w.day === 'today' ? w.hhmm : new Date(ms).toLocaleDateString(locale(), { month: 'short', day: 'numeric' }) + ' ' + w.hhmm
+  }
+  async function uaDone(ids, all) {
+    const before = uaStatusNow()
+    for (const id of ids) { ua.gone[id] = true; ua.inflight.set(id, before) }
+    uaRedraw()
+    try {
+      const r = await api('/api/unattended/pending', all ? { all: true } : { id: ids[0] })
+      const done = r.ids
+      // A status read meanwhile already counts without them; only the one from before is lowered.
+      if (before && uaStatusNow() === before) {
+        before.pending = Math.max(0, before.pending - done.length)
+        if (Array.isArray(before.pendingIds)) before.pendingIds = before.pendingIds.filter((id) => !done.includes(id))
+      }
+      for (const id of ids) ua.inflight.delete(id)
+      toast(done.length > 1 ? tn('ua.doneMany', done.length) : t('ua.doneOne'), { key: 'ua-done', duration: 10000, action: BOOT.readOnly ? undefined : { label: t('toast.undo'), run: () => uaReopen(done) } })
+    } catch (e) {
+      for (const id of ids) { delete ua.gone[id]; ua.inflight.delete(id) }
+      toast(e.message, { kind: 'fail' })
+    }
+    uaRedraw()
+  }
+  async function uaReopen(ids) {
+    try {
+      for (const id of ids) await api('/api/unattended/pending', { id, done: false })
+      for (const id of ids) delete ua.gone[id]
+      toast(t('ua.undone'), { key: 'ua-done' })
+    } catch (e) { toast(e.message, { kind: 'fail' }) }
+    await load({ silent: true })
+    await loadUa()
+  }
+  // "Back to the session": a running one is on the Sessions page; an ended one resumes with the copied command.
+  function uaBack(d) {
+    if (d.live) {
+      hs.mode = 'live'
+      sp.drawn = ''
+      setPage('sessions')
+      const find = () => {
+        const row = document.querySelector('#sessions-page [data-session="' + CSS.escape(d.sessionId) + '"]')
+        if (!row) return false
+        row.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'center' })
+        palFlash(row)
+        return true
+      }
+      // The Sessions page may still be reading its first answer.
+      let tries = 0
+      const look = () => { if (!find() && ++tries < 20) setTimeout(look, 150) }
+      requestAnimationFrame(look)
+      return
+    }
+    if (d.resume) copyText(d.resume, t('ua.resumeWhat'))
+  }
+  function uaPendingBlock(st) {
+    const off = BOOT.readOnly || Boolean(st.problem)
+    const head = h('div', { class: 'page-sec-head ua-pending-head' },
+      h('h3', { class: 'page-sec' }, t('ua.pending')),
+      h('p', { class: 'muted small' }, t('ua.pendingNote')))
+    if (ua.error && !ua.data) return [head, errorNote(ua.error, () => { ua.error = null; loadUa() })]
+    if (!ua.data) return [head, h('p', { class: 'muted' }, spinner(), ' ', t('ua.loading'))]
+    // Until the folder is fixed nothing is read; "nothing waits" would not be true.
+    if (st.problem) return [head, h('p', { class: 'note', 'data-key': 'ua-blocked' }, t('ua.pendingBlocked'))]
+    const list = ua.data.pending.filter((d) => !ua.gone[d.id])
+    if (!list.length) return [head, h('p', { class: 'note ua-empty', 'data-key': 'ua-none', 'data-ua': 'none' }, icon('check'), t('ua.pendingEmpty'))]
+    const groups = uaGroupPending(list)
+    const box = h('div', { class: 'ua-groups', 'data-key': 'ua-groups', 'data-ua': 'groups', 'data-patch': '' }, groups.map((g) => {
+      const d = g.first
+      // Kept outside a session (a defer typed in a terminal): no account or tool to name.
+      const known = d.account || (d.family && d.family !== 'unknown')
+      const who = d.accountLabel || d.account || (known ? family(d.family).title : t('ua.noSession'))
+      const where = d.cwd ? h('code', { class: 'ua-cwd' }, d.cwd) : null
+      const state = !d.sessionId ? (known ? t('ua.noSession') : null) : d.live ? t('ua.liveIn', { account: d.live.accountLabel || who }) : t('ua.ended')
+      const back = d.sessionId && (d.live || d.resume)
+        ? h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'ua-back-' + g.key, 'data-tip': d.live ? t('ua.backLive') : d.resume, onclick: () => uaBack(d) }, icon(d.live ? 'messages' : 'copy'), t('ua.back'))
+        : null
+      return h('section', { class: 'ua-group', 'data-key': 'ua-g-' + g.key, 'data-ua': 'g-' + g.key, 'data-patch': '', 'aria-label': who },
+        h('div', { class: 'ua-group-head', 'data-patch': '' },
+          h('div', { class: 'ua-group-who' }, h('b', null, who), where, state ? h('span', { class: 'muted small' }, state) : null),
+          back),
+        h('ul', { class: 'ua-items', 'data-patch': '' }, g.items.map((x) => {
+          const long = x.text.length > 280 || x.text.split('\n').length > 5
+          const open = Boolean(ua.open[x.id])
+          return h('li', { class: 'ua-item', 'data-key': 'ua-i-' + x.id, 'data-ua': 'i-' + x.id, 'data-patch': '' },
+            h('div', { class: 'ua-item-meta' },
+              h('span', { class: 'chip chip-sm' + (x.kind === 'question' ? ' chip-accent' : x.kind === 'permission' ? ' chip-warn' : '') }, t('ua.kind.' + x.kind)),
+              h('time', { class: 'muted small', datetime: x.at }, uaWhenShort(x.at)),
+              x.agentType ? h('span', { class: 'muted small' }, t('ua.agent', { type: x.agentType })) : null),
+            h('p', { class: 'ua-text' + (long && !open ? ' is-clamped' : '') }, x.text),
+            h('div', { class: 'ua-item-actions' },
+              long ? h('button', { class: 'link-btn small', type: 'button', 'data-key': 'ua-more-' + x.id, 'aria-expanded': String(open), onclick: () => { ua.open[x.id] = !open; renderUaPage() } }, t(open ? 'ua.less' : 'ua.more')) : null,
+              h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'ua-done-' + x.id, disabled: off, onclick: () => uaDone([x.id]) }, icon('check'), t('ua.done'))))
+        })))
+    }))
+    const all = list.length > 1 ? h('button', { class: 'link-btn small', type: 'button', 'data-key': 'ua-all', disabled: off, onclick: () => uaDone(list.map((x) => x.id), true) }, t('ua.allDone')) : null
+    return [h('div', { class: 'page-sec-head ua-pending-head' },
+      h('div', { class: 'ua-sec-row' }, h('h3', { class: 'page-sec' }, t('ua.pending'), ' ', h('span', { class: 'tab-count' }, String(list.length))), all),
+      h('p', { class: 'muted small' }, t('ua.pendingNote'))), box]
+  }
+
+  // ---------- the page ----------
+  function uaCoverage(st) {
+    const have = new Set(S.state.accounts.map((a) => a.family))
+    const lines = [h('li', null, t('ua.coverLine'))]
+    if (have.has('codex') && st.coverage.codex !== 'covered') lines.push(h('li', { 'data-key': 'ua-cov-codex' }, tx('ua.codexTrust', { cmd: h('code', null, '/hooks') })))
+    const other = [...have].filter((f) => f !== 'claude' && f !== 'codex').map((f) => family(f).title)
+    if (other.length) lines.push(h('li', { 'data-key': 'ua-cov-other' }, t('ua.notSupported', { hosts: other.join(t('ua.listSep')) })))
+    return [h('h3', { class: 'page-sec' }, t('ua.cover')), h('ul', { class: 'ua-cover', 'data-patch': '' }, lines)]
+  }
+  function uaChooser(st) {
+    const now = Date.now()
+    const { options } = uaOnChoices(st.slotEnd, now)
+    const picked = uaPicked(now)
+    const rows = options.map((o) => {
+      const on = ua.choice === o.id
+      const label = o.id === 'slot' ? t(st.slotNumber ? 'ua.choice.slotNow' : 'ua.choice.slotNext') : t('ua.choice.' + o.id)
+      const until = o.id === 'time' ? (picked ? picked.until : null) : o.until
+      return h('div', { class: 'ua-opt' + (on ? ' is-on' : ''), 'data-key': 'ua-row-' + o.id, 'data-patch': '', onclick: (e) => { if (!e.target.closest('input, button')) { uaPick(o.id) } } },
+        h('button', { class: 'ua-radio', type: 'button', role: 'radio', 'aria-checked': String(on), tabindex: on ? '0' : '-1', 'data-key': 'ua-opt-' + o.id, onclick: () => uaPick(o.id), onkeydown: uaRadioKeys },
+          h('span', { class: 'ua-dot', 'aria-hidden': 'true' }), label),
+        o.id === 'time' ? uaClockField(ua.timeInit, { 'data-key': 'ua-pick', 'aria-label': t('ua.pickTime'),
+          onfocus: () => uaPick('time', true),
+          oninput: (e) => { ua.time = e.target.value; ua.choice = 'time'; renderUaPage() } }, () => uaTurnOn()) : null,
+        h('span', { class: 'ua-when muted' }, until ? uaAt('until', until) : o.id === 'time' ? t('ua.pickHint') : ''))
+    })
+    const ok = !(ua.choice === 'time' && !picked)
+    return h('div', { class: 'ua-chooser', id: 'ua-chooser', 'data-key': 'ua-chooser', 'data-ua': 'chooser', 'data-patch': '', onkeydown: (e) => { if (e.key === 'Escape') { e.stopPropagation(); uaCloseChooser() } } },
+      h('div', { class: 'ua-chooser-title', id: 'ua-for' }, t('ua.for')),
+      h('div', { class: 'ua-opts', role: 'radiogroup', 'aria-labelledby': 'ua-for', 'data-patch': '' }, rows),
+      h('div', { class: 'row-actions', 'data-patch': '' },
+        h('button', { class: 'btn btn-primary', type: 'button', 'data-key': 'ua-go', disabled: ua.busy || !ok, 'aria-busy': ua.busy ? 'true' : null, onclick: uaTurnOn }, ua.busy ? spinner() : null, t('ua.turnOnGo')),
+        h('button', { class: 'btn', type: 'button', 'data-key': 'ua-cancel', disabled: ua.busy, onclick: uaCloseChooser }, t('btn.cancel'))))
+  }
+  // The Search Catalog's actions: to the page, then the chooser open, or the "Add a Slot" button shown.
+  function uaGo(what) {
+    setPage('unattended')
+    let tries = 0
+    const look = () => {
+      const box = $('unattended-page')
+      if (box.hidden || (!ua.data && !ua.error)) { if (++tries < 40) setTimeout(look, 100); return }
+      const st = uaStatusNow()
+      if (what === 'on' && st && uaStatusParts(st).state !== 'on' && !BOOT.readOnly && !st.problem) { if (!ua.choosing) uaOpenChooser(); return }
+      const el = box.querySelector(what === 'on' ? '[data-key="ua-main"]' : '[data-find="ua-add"]')
+      if (!el) return
+      el.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'center' })
+      palFlash(el)
+      if (!el.disabled) el.focus({ preventScroll: true })
+    }
+    requestAnimationFrame(look)
+  }
+  function renderUaPage() {
+    const box = $('unattended-page')
+    if (box.hidden || !S.state) return
+    const st = uaStatusNow()
+    const kids = [h('div', { class: 'section-head', 'data-key': 'ua-head' },
+      h('h2', { id: 'h-unattended' }, t('ua.title')),
+      h('div', { class: 'row-actions' },
+        // No spinner for the background reread: a refresh with the same answer redraws nothing.
+        askBridged(BOOT, window) ? null : h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'ua-ask', onclick: () => openAsk({ text: t('ai.ask.unattended') }) }, icon('bot'), t('ua.ask')))),
+      h('p', { 'data-key': 'ua-intro' }, t('ua.intro'))]
+    if (!st) {
+      kids.push(h('div', { class: 'note note-fail', role: 'alert', 'data-key': 'ua-unread' }, t('ua.unreadable'), h('button', { class: 'btn btn-sm', type: 'button', onclick: () => load({ announce: true }) }, t('btn.retry'))))
+      uaPatch(box, kids)
+      return
+    }
+    if (BOOT.readOnly) kids.push(h('p', { class: 'note', 'data-key': 'ua-ro' }, t('ua.readOnly')))
+    if (st.problem) kids.push(h('div', { class: 'note note-fail', role: 'alert', 'data-key': 'ua-problem', 'data-ua': 'problem' }, t('ua.problem', { msg: st.problem })))
+    const p = uaStatusParts(st)
+    const parts = uaSentence(st).filter(Boolean)
+    const noWrite = BOOT.readOnly || Boolean(st.problem) || ua.busy
+    // One button: on (with the chooser) while off or paused; off, or a pause inside a Slot, while on.
+    const main = p.state === 'on'
+      ? h('button', { class: 'btn', type: 'button', 'data-key': 'ua-main', disabled: noWrite, 'aria-busy': ua.busy ? 'true' : null, onclick: uaTurnOff }, ua.busy ? spinner() : null, t(p.noEnd ? 'ua.pause' : st.slotNumber ? 'ua.pauseSlot' : 'ua.turnOff'))
+      : h('button', { class: 'btn btn-primary', type: 'button', 'data-key': 'ua-main', disabled: BOOT.readOnly || Boolean(st.problem), 'aria-expanded': String(ua.choosing), 'aria-controls': 'ua-chooser', onclick: uaOpenChooser }, t('ua.turnOn'))
+    kids.push(h('div', { class: 'hp-status ua-status' + (p.state === 'on' ? ' is-on' : p.state === 'paused' ? ' is-paused' : ''), 'data-key': 'ua-status', 'data-patch': '', role: 'status' },
+      h('span', { class: 'hp-status-ic' }, icon('moon')),
+      h('div', { class: 'hp-status-text' },
+        h('b', null, parts[0], parts.length > 1 ? h('span', { class: 'ua-status-rest' }, ' · ' + parts.slice(1).join(' · ')) : null),
+        h('p', { class: 'muted' }, t(p.state === 'on' ? 'ua.onNote' : p.state === 'paused' ? 'ua.pausedNote' : 'ua.offNote'))),
+      main))
+    if (ua.choosing && p.state !== 'on') kids.push(uaChooser(st))
+    if (!st.configured || ua.firstUse) kids.push(h('p', { class: 'note ua-first', 'data-key': 'ua-first', 'data-ua': 'first' }, icon('clock'), t('ua.firstUse')))
+    kids.push(...uaScheduleBlock())
+    kids.push(...uaPendingBlock(st))
+    kids.push(...uaCoverage(st))
+    uaPatch(box, kids)
+    if (ua.focus) {
+      const el = box.querySelector('[data-key="' + CSS.escape(ua.focus) + '"]')
+      ua.focus = null
+      if (el && !el.disabled) el.focus({ preventScroll: true })
+    }
+  }
+
   // ---------- Remote Control (spec §3.22) ----------
   // Shown while some Claude settings file turns Remote Control on. "Turn all off" first lists each file, the change
   // and the accounts it reaches, in the banner itself; the toast after it carries the undo.
@@ -6014,6 +6655,8 @@ const MAIN = String.raw`
     ask: { run: () => openAsk(), ok: () => !askBridged(BOOT, window) },
     health: { run: palHealth, ok: () => Boolean(S.state && S.state.accounts.length), nav: true },
     inbound: { run: openInbound, ok: () => Boolean(S.state) },
+    'unattended-on': { run: () => uaGo('on'), ok: () => Boolean(uaStatusNow()), nav: true },
+    'unattended-add-slot': { run: () => uaGo('add'), ok: () => Boolean(uaStatusNow()), nav: true },
   }
   function palHealth() {
     setPage('accounts')
@@ -6541,7 +7184,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.network', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.network', 'ai.ask.unattended', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.tool']
   // Network Guard (spec §3.35): one dialog with the switch, the allowed countries and the newest result per address.
   // Countries are never ticked for the user, the current one included: a wrong network would allow itself.
   const NET_COMMON = ['US', 'JP', 'SG', 'GB', 'DE', 'FR', 'NL', 'CA', 'AU', 'KR', 'TW', 'HK']
@@ -8090,6 +8733,7 @@ const MAIN = String.raw`
   $('ver').disabled = !BOOT.updates
   $('ver').addEventListener('click', () => openVerPop($('ver')))
   $('update').addEventListener('click', openUpdate)
+  $('ua-badge').addEventListener('click', () => setPage('unattended'))
   $('ver-top').addEventListener('click', () => openVerPop($('ver-top')))
   $('refresh').addEventListener('click', refreshAll)
   $('ask-ai').addEventListener('click', () => openAsk())

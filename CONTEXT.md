@@ -87,6 +87,15 @@ Avoid: *tab* for a Session (one tab can run several Sessions over time), *inbox*
 
 Avoid: *rotation* (cycling through Accounts per request or on a timer; a Handoff moves on only when Quota runs low and never goes back to a full Account), *failover* (say Auto Handoff), *relay* (people use it for a third-party API endpoint).
 
+## Unattended Mode
+
+- **Unattended Mode**: a state of the whole computer in which nobody is there to answer, so sessions sideby starts never stop to wait for a person: the model is not allowed to ask questions and takes the recommended option where it can be undone, and a permission prompt Claude Code is about to show is answered with "no" and how to do the step without one. On during a Slot, when the user turns it on by hand, or for one session started with it.
+- **Schedule**: the user's list of Slots that turn Unattended Mode on and off by themselves. Empty unless the user adds one.
+- **Slot**: one entry of the Schedule: the days of the week, a start time and an end time, in the computer's own time zone. An end before the start runs past midnight and belongs to the start day.
+- **Pending Decision**: a question the model was not allowed to ask, a permission request nobody was there to answer, or an action it left undone, during Unattended Mode, kept for the user to look at once someone is back.
+
+Avoid: *window* (a Quota window), *quiet hours* (sounds like muting alerts only), *away* (sideby does not watch the keyboard).
+
 ## Updates
 
 - **Update Check**: asking the npm registry, at most once a day, which sideby version is the newest. The only question sideby sends over the network on its own; it carries no Account, path or identity. On unless the user turns it off.

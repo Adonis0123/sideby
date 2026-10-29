@@ -193,6 +193,35 @@ export const HandoffSettingsSchema = Type.Object({
 
 export type HandoffSettings = Static<typeof HandoffSettingsSchema>
 
+const CLOCK = '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+/** One Slot of Unattended Mode's Schedule (spec §3.37). Checked by hand where `unattended-hook` reads it. */
+export const UnattendedSlotSchema = Type.Object(
+  {
+    name: Type.Optional(
+      Type.String({ minLength: 1, maxLength: 60, description: 'What the Slot is called.' }),
+    ),
+    days: Type.Array(
+      Type.Union([
+        Type.Literal('mon'),
+        Type.Literal('tue'),
+        Type.Literal('wed'),
+        Type.Literal('thu'),
+        Type.Literal('fri'),
+        Type.Literal('sat'),
+        Type.Literal('sun'),
+      ]),
+      { minItems: 1, uniqueItems: true, description: 'The days it starts on.' },
+    ),
+    start: Type.String({ pattern: CLOCK, description: 'When it starts, `HH:MM` in 24-hour local time.' }),
+    end: Type.String({
+      pattern: CLOCK,
+      description:
+        'When it ends, `HH:MM`. An end before the start is the next day; an end equal to the start lasts the whole day.',
+    }),
+  },
+  { additionalProperties: false },
+)
+
 export const ConfigSchema = Type.Object(
   {
     $schema: Type.Optional(Type.String()),
@@ -391,6 +420,23 @@ export const ConfigSchema = Type.Object(
           ),
         },
         { additionalProperties: false, description: 'Network Guard (spec §3.35, ADR-0053).' },
+      ),
+    ),
+    unattended: Type.Optional(
+      Type.Object(
+        {
+          schedule: Type.Optional(
+            Type.Array(UnattendedSlotSchema, {
+              description:
+                "Slots that turn Unattended Mode on and off by themselves, in this computer's time zone. Empty by default.",
+            }),
+          ),
+        },
+        {
+          additionalProperties: false,
+          description:
+            'Unattended Mode (spec §3.37, ADR-0057): while it is on, sessions sideby starts never stop to wait for a person. Present once the feature is used; from then on sideby adds its hook to every Claude and Codex session it starts, so turning it on later covers sessions already running. `sideby config unset unattended` stops adding it.',
+        },
       ),
     ),
     browser: Type.Optional(
@@ -713,6 +759,23 @@ export function editConfigNetwork(
   opts: { dryRun?: boolean } = {},
 ): Promise<{ changed: boolean; before: NetworkConfig | undefined; after: NetworkConfig | undefined }> {
   return editConfigKey(file, 'network', 'change the setting', (current) => edit(current ?? {}), opts)
+}
+
+export type UnattendedConfig = NonNullable<Config['unattended']>
+
+/**
+ * `sideby unattended on|schedule …` (spec §3.37): changes the config `unattended` key with `edit` (see `editConfigKey`
+ * for how the file is written); `edit` gets `undefined` while the section is missing and returns null to leave it.
+ */
+export function editConfigUnattended(
+  file: string,
+  edit: (current: UnattendedConfig | undefined) => UnattendedConfig | null,
+): Promise<{
+  changed: boolean
+  before: UnattendedConfig | undefined
+  after: UnattendedConfig | undefined
+}> {
+  return editConfigKey(file, 'unattended', 'run the command', edit)
 }
 
 export type BrowserConfig = NonNullable<Config['browser']>

@@ -1,0 +1,291 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/unattended.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "on",
+    "reason",
+    "configured",
+    "schedule",
+    "pending",
+    "coverage"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "on": {
+      "type": "boolean",
+      "description": "Unattended Mode is on now."
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "slot"
+        },
+        {
+          "type": "string",
+          "const": "manual"
+        },
+        {
+          "type": "string",
+          "const": "session"
+        },
+        {
+          "type": "string",
+          "const": "paused"
+        },
+        {
+          "type": "string",
+          "const": "off"
+        }
+      ],
+      "description": "slot: a Slot of the Schedule turned it on; manual: the user did; session: only this session, started with --unattended; paused: off until the current Slot ends; off."
+    },
+    "until": {
+      "type": "string",
+      "description": "When it turns off (on), or when the pause ends (paused); ISO. Absent for a session alone, and when the Schedule covers every hour (on with no end, or paused until `on`)."
+    },
+    "slot": {
+      "type": "string",
+      "description": "The Slot it is in: its name, or its days and times when it has none."
+    },
+    "slotNumber": {
+      "type": "integer",
+      "description": "That Slot’s number in `schedule`, from 1.",
+      "minimum": 1
+    },
+    "next": {
+      "type": "object",
+      "required": [
+        "at",
+        "slot"
+      ],
+      "properties": {
+        "at": {
+          "type": "string",
+          "description": "ISO."
+        },
+        "slot": {
+          "type": "string"
+        },
+        "slotNumber": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "The next time a Slot turns it on by itself."
+    },
+    "configured": {
+      "type": "boolean",
+      "description": "The config has an `unattended` section, so sideby adds its hook to the Claude and Codex sessions it starts."
+    },
+    "schedule": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "days",
+          "start",
+          "end"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60,
+            "description": "What the Slot is called."
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "mon"
+                },
+                {
+                  "type": "string",
+                  "const": "tue"
+                },
+                {
+                  "type": "string",
+                  "const": "wed"
+                },
+                {
+                  "type": "string",
+                  "const": "thu"
+                },
+                {
+                  "type": "string",
+                  "const": "fri"
+                },
+                {
+                  "type": "string",
+                  "const": "sat"
+                },
+                {
+                  "type": "string",
+                  "const": "sun"
+                }
+              ]
+            },
+            "minItems": 1,
+            "uniqueItems": true,
+            "description": "The days it starts on."
+          },
+          "start": {
+            "type": "string",
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+            "description": "When it starts, `HH:MM` in 24-hour local time."
+          },
+          "end": {
+            "type": "string",
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+            "description": "When it ends, `HH:MM`. An end before the start is the next day; an end equal to the start lasts the whole day."
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Config `unattended.schedule`, numbered from 1."
+    },
+    "pending": {
+      "type": "integer",
+      "description": "Open Pending Decisions (`sideby unattended pending`)."
+    },
+    "coverage": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "covered"
+            },
+            {
+              "type": "string",
+              "const": "needs-trust"
+            },
+            {
+              "type": "string",
+              "const": "not-covered"
+            }
+          ]
+        }
+      },
+      "description": "Per family: covered (sessions sideby starts get the hook), needs-trust (Codex runs it once the user trusts it in /hooks), not-covered (no hook sideby can add, or the feature was never used)."
+    },
+    "slotEnd": {
+      "type": "string",
+      "description": "When `on --slot-end` would end: the end of the current or next Slot, when that is within 72 hours; ISO."
+    },
+    "manual": {
+      "type": "object",
+      "required": [
+        "mode",
+        "at"
+      ],
+      "properties": {
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "on"
+            },
+            {
+              "type": "string",
+              "const": "pause"
+            }
+          ]
+        },
+        "until": {
+          "type": "string",
+          "description": "ISO. Absent only for a pause made while the Schedule covers every hour: it lasts until `on`."
+        },
+        "at": {
+          "type": "string",
+          "description": "When the user chose it; ISO."
+        }
+      },
+      "description": "The manual state in effect now: on until, or paused until."
+    },
+    "problem": {
+      "type": "string",
+      "description": "Why sideby cannot keep its state: `<state>/unattended` is a link, someone else’s, or writable by others. Says what to do."
+    },
+    "changed": {
+      "type": "boolean",
+      "description": "Set by on, off and schedule changes: whether anything changed."
+    },
+    "undo": {
+      "type": "string",
+      "description": "The command that puts back what the change replaced."
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby unattended [on|off|schedule …] --json"
+}

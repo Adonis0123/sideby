@@ -46,7 +46,7 @@ Usage:
   sideby login <account>              sign in to an account
   sideby resume <family> [-- args]    run the host; a session resumed by id (claude --resume <id>,
                                       codex resume <id>) starts in the account that holds it
-  sideby next <family> [--dry-run] [--include-api] [--ignore-network] [-- args]
+  sideby next <family> [--dry-run] [--include-api] [--ignore-network] [--unattended] [-- args]
                                       recommend the account with the most quota left (claude, codex, grok)
                                       and start it; --dry-run only recommends
   sideby doctor [target] [--fix] [--force]
@@ -102,6 +102,9 @@ Usage:
                                       config.toml) in your editor
   sideby network [check]              stop Claude and Codex when requests would leave from a country
                                       you did not allow (network on|off|allow <CC>... [--yes])
+  sideby unattended [on|off]          nobody is here: sessions sideby starts do not stop to ask; on takes
+                                      --for 4h, --until 07:30 or --slot-end (schedule add|remove|preset weeknights,
+                                      pending [done <id>|--all], defer "<text>"); run --unattended for one session
   sideby browser [--enable [--yes]]   which Chrome browser user signed in to each account's website
                                       (read on this computer only; off until you enable it)
   sideby browser open <account> [--profile <name>]
@@ -137,9 +140,9 @@ Usage:
 Options:
   --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, remote-control, handoff,
                 families, commands, plugins, app, desktop, sessions, history, send, messages, edit, browser, update, local, ask,
-                terminal, key, try, autostart, menubar, config)
+                terminal, key, try, autostart, menubar, config, network, unattended)
   -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, commands, desktop, edit, browser,
-                autostart, menubar, config, sessions, history, send, messages
+                autostart, menubar, config, sessions, history, send, messages, network, unattended
   -v, --version show the version
 
 An <account> is <family>:<name> (claude:work) or just <name> when it is unique.
@@ -470,6 +473,43 @@ Examples:
   sideby network check
 Exit: 0 shown or changed; 10 a change was shown and waits for --yes; 1 a country code that is not one, or on with
 no country allowed; 2 malformed command line.`,
+  unattended: `sideby unattended [status] [--json]
+       sideby unattended on [--for <n>h|<n>m | --until <HH:MM|date and time> | --slot-end] [--json]
+       sideby unattended off [--json]
+       sideby unattended schedule [add --days <days> --from HH:MM --to HH:MM [--name <name>] [--at <n>]] [--json]
+       sideby unattended schedule remove <n> | preset weeknights [--json]
+       sideby unattended pending [--all] [--json]
+       sideby unattended pending done <id> | --all [--json]
+       sideby unattended defer "<text>" [--json]
+
+Unattended Mode: nobody is at the computer, so sessions sideby starts never stop to wait for a person. While it is on,
+a Claude or Codex session sideby started is not allowed to ask a question: the model takes the recommended option
+where it can be undone, and skips anything hard to undo (deleting, sending, publishing, deploying, paying). Each
+question it could not ask, and each thing it skipped (\`defer\`), is kept as a Pending Decision for when you are back.
+In Claude sessions, a permission prompt Claude Code is about to show (a command it wants a person to confirm, also in
+a subagent) is answered with "no" and how to do it without one, and kept as a Pending Decision too. Codex's own
+approval prompts are not covered.
+
+When it is on: during a Slot of the Schedule (local days and times; an end before the start is the next day), from
+\`on\` until the time you choose (at most 72 hours; without an option, until the current or next Slot ends, else 12
+hours), or for one session started with \`--unattended\` (\`sideby run <account> --unattended\`, also next, resume,
+short commands and pick commands). \`off\` outside a Slot turns it off; during a Slot it pauses until that Slot ends.
+
+It covers Claude and Codex sessions sideby starts after the first use (sideby adds its hook to them; nothing is written
+into the account folders). Codex runs the hook once you trust \`unattended-hook\` in /hooks. Grok, pi, desktop apps and
+sessions started without sideby are not covered. Pending Decisions stay on this computer; \`pending done\` marks them
+done, and they are deleted 30 days later. \`defer\` keeps a line from inside a session ("deploy left for the user").
+
+--days takes mon…sun, ranges and lists: mon-fri, sat,sun, fri-mon, weekdays, daily. Each change prints its undo.
+
+Examples:
+  sideby unattended on --until 07:30
+  sideby unattended schedule preset weeknights
+  sideby unattended schedule add --days sat,sun --from 01:00 --to 09:00 --name "Weekend nights"
+  sideby unattended pending
+  sideby unattended defer "deleting the old branch is left for the user"
+Exit: 0 shown or done; 1 no such Slot or Pending Decision; 2 a time or option it does not take (the message says
+which to use).`,
   browser: `sideby browser [--enable|--disable] [--yes] [--json]
        sideby browser open <account> [--profile <folder|name>] [--json]
        sideby browser set <account> <folder|name> [--json]
@@ -556,8 +596,12 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   run: { flags: [] },
   resume: { flags: [] },
   login: { flags: [] },
-  next: { flags: ['dry-run', 'include-api', 'json', 'ignore-network'] },
+  next: { flags: ['dry-run', 'include-api', 'json', 'ignore-network', 'unattended'] },
   network: { flags: ['json', 'yes'] },
+  unattended: {
+    flags: ['json', 'all', 'slot-end'],
+    valued: ['for', 'until', 'days', 'from', 'to', 'name', 'at'],
+  },
   new: { flags: ['api', 'json', 'next'], valued: ['alias'] },
   alias: { flags: ['json', 'yes'], valued: ['pick'] },
   doctor: { flags: ['fix', 'force', 'json'] },
@@ -701,6 +745,11 @@ export async function main(argv: string[]): Promise<number> {
     const { runNetworkHook } = await import('../network/hook.ts')
     return runNetworkHook(rest, process.env, process.stderr)
   }
+  // Unattended Mode's hook runs before every tool call it matches (spec §3.37); same fast path.
+  if (first === 'unattended-hook') {
+    const { runUnattendedHook } = await import('../unattended/hook.ts')
+    return runUnattendedHook(rest, process.env, process.stdin, { out: process.stdout, err: process.stderr })
+  }
   if (nodeTooOld()) {
     console.error(
       `sideby needs Node ${MIN_NODE.join('.')} or newer (you have ${process.versions.node}). Upgrade: https://nodejs.org, or with nvm: \`nvm install 22 && nvm alias default 22\`, then \`npm i -g sideby\` again (each Node version has its own global packages).`,
@@ -725,6 +774,7 @@ export async function main(argv: string[]): Promise<number> {
   const own = args.includes('--') ? args.slice(0, args.indexOf('--')) : args
   const wantsJson = Boolean(spec?.flags.includes('json')) && own.includes('--json')
   let notice: object | null = null
+  let ended: { emitted: Promise<void> } | undefined
   try {
     if (!spec) throw new UsageError(`unknown command "${cmd}"; run \`sideby --help\``)
     // `run` and `resume` pass everything after the account or family through to the host, with or without `--`.
@@ -762,6 +812,12 @@ export async function main(argv: string[]): Promise<number> {
     // parseArgs keeps the last value of an option; `ask --attach` may be given several times.
     if (cmd === 'ask') (parsed as import('./commands.ts').AskArgs).attach = repeatedValues(own, 'attach')
     if (cmd === 'send') (parsed as import('./commands.ts').SendArgs).images = repeatedValues(own, 'image')
+    // A stretch of Unattended Mode that ended is noticed when a command starts (spec §3.37); its plugin event runs
+    // alongside the command and is waited for before exiting.
+    if (cmd !== 'update-check' && !(cmd === 'ui' && parsed.flags.has('serve-detached'))) {
+      const { noticeUnattendedEnded } = await import('../core/unattended-ended.ts')
+      ended = await noticeUnattendedEnded(process.env)
+    }
     const cmds = await import('./commands.ts')
     if (wantsJson && noticeAllowed(cmd, parsed)) {
       notice = await jsonNoticeFor()
@@ -786,6 +842,8 @@ export async function main(argv: string[]): Promise<number> {
     } else console.error(`sideby: ${message}`)
     if (!usage && process.env.SIDEBY_DEBUG && err instanceof Error) console.error(err.stack)
     return usage ? 2 : 1
+  } finally {
+    await ended?.emitted
   }
 }
 
@@ -858,6 +916,8 @@ async function dispatch(
       return await cmds.cmdBrowser(parsed, io)
     case 'network':
       return await cmds.cmdNetwork(parsed, io)
+    case 'unattended':
+      return await cmds.cmdUnattended(parsed, io)
     case 'shell-init':
       return await cmds.cmdShellInit(parsed, io)
     case 'plugins':

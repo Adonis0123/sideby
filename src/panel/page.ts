@@ -125,6 +125,7 @@ export function renderPage(opts: PageOptions): string {
       </div>
     </div>
     <div class="top-actions">
+      <button id="ua-badge" class="btn ua-badge" type="button" hidden></button>
       <button id="update" class="btn update-btn" type="button" hidden></button>
       <button id="search-btn" class="btn" type="button" aria-haspopup="dialog" aria-label="Search"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4.2-4.2"/></svg><span class="hide-sm" data-i18n="pal.button">Search</span><kbd id="search-kbd" class="kbd-inline hide-sm" aria-hidden="true"></kbd></button>
       <button id="ask-ai" class="btn" type="button" aria-haspopup="dialog" aria-label="Let AI do it"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9h12a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2zM12 5v4M9.5 13.5v1M14.5 13.5v1"/></svg><span class="hide-sm" data-i18n="ask.button">Let AI do it</span></button>
@@ -141,6 +142,7 @@ export function renderPage(opts: PageOptions): string {
   <section id="handoff-page" class="block page" aria-labelledby="h-handoff" hidden></section>
   <section id="tuning-page" class="block page" aria-labelledby="h-tuning" hidden></section>
   <section id="sessions-page" class="block page" aria-labelledby="h-sessions" hidden></section>
+  <section id="unattended-page" class="block page" aria-labelledby="h-unattended" hidden></section>
   <section id="accounts-page" class="block" aria-labelledby="h-accounts">
     <div class="section-head acct-head"><h2 id="h-accounts"><span data-i18n="acct.title">Accounts</span><span id="acct-count" class="muted small"></span></h2><span id="updated" class="muted small" role="status">Loading…</span></div>
     <div id="toolbar" class="toolbar" hidden></div>

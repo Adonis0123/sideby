@@ -3,7 +3,7 @@
 // `sideby commands` searches it, so both find the same things. It names features only, never Accounts or Sessions.
 
 export type SearchKind = 'page' | 'setting' | 'action'
-export type PanelPage = 'accounts' | 'sessions' | 'tuning' | 'handoff'
+export type PanelPage = 'accounts' | 'sessions' | 'tuning' | 'handoff' | 'unattended'
 
 /** Where the Panel takes the user. Internal: the CLI shows `panel`, never this. */
 export type SearchTarget =
@@ -100,6 +100,25 @@ const ENTRIES: SearchEntry[] = [
     panel: { en: 'Auto Handoff page', zh: '自动接力页' },
     target: { page: 'handoff' },
     cliCommand: 'sideby handoff',
+  },
+  {
+    id: 'page.unattended',
+    kind: 'page',
+    title: { en: 'Unattended Mode', zh: '无人值守' },
+    synonyms: [
+      'unattended',
+      'away',
+      'overnight',
+      'do not disturb',
+      'pending decisions',
+      '挂机',
+      '今晚自己跑完',
+      '别问我',
+      '待你决定',
+    ],
+    panel: { en: 'Unattended page', zh: '无人值守页' },
+    target: { page: 'unattended' },
+    cliCommand: 'sideby unattended',
   },
   {
     id: 'setting.language',
@@ -271,6 +290,24 @@ const ENTRIES: SearchEntry[] = [
     panel: { en: 'Auto Handoff page', zh: '自动接力页' },
     target: { action: 'handoff-on', write: true },
     cliCommand: 'sideby handoff enable',
+  },
+  {
+    id: 'action.unattended-on',
+    kind: 'action',
+    title: { en: 'Turn on Unattended Mode now', zh: '现在开无人值守' },
+    synonyms: ['unattended on', 'go unattended', 'until morning', '现在开', '开启无人值守', '挂机到明早'],
+    panel: { en: 'Unattended page', zh: '无人值守页' },
+    target: { action: 'unattended-on', write: true },
+    cliCommand: 'sideby unattended on',
+  },
+  {
+    id: 'action.unattended-add-slot',
+    kind: 'action',
+    title: { en: 'Add an Unattended Slot', zh: '添加无人值守时段' },
+    synonyms: ['add a slot', 'unattended schedule', 'weeknights', '添加时段', '时间表', '工作日夜间'],
+    panel: at({ en: 'Unattended page', zh: '无人值守页' }, { en: 'Schedule', zh: '时间表' }),
+    target: { action: 'unattended-add-slot', write: true },
+    cliCommand: 'sideby unattended schedule add',
   },
   {
     id: 'action.network-guard',

@@ -49,6 +49,7 @@ export default {
 | `account.create.before` | before `new` (CLI or panel) writes anything | Refuse the new account with `throw api.abort(msg)`; `ctx` has `family`, `name`, `api`, the family's existing `accounts` and `config`. The CLI exits 1 and the panel shows `msg`, so say what to do instead | 10 s |
 | `account.created` | after `new` succeeds | Add files, print next steps with `ctx.log()` | 30 s |
 | `doctor.check` | for each account during Doctor | Return Findings, each optionally with a `fix()` | 10 s |
+| `unattended.ended` | when a stretch of Unattended Mode ends (a Slot or a manual `on`), seen by the background panel within 30 s or by the next sideby command; stretches that ended while sideby did not run come oldest first, at most 50 a look | Pass it on to your own notifier. Delivery is at least once: an event whose handlers did not finish (sideby was ended meanwhile) comes again, with the same `ctx.id`, so skip an id you have seen. `ctx` also has `startedAt`, `endedAt`, `reason` (`slot` or `manual`), `late: true` when it was noticed more than 12 hours after it ended, and `pending`, the Pending Decisions kept during it that are still open. It belongs to no Family: register it without a `family` filter. sideby itself sends nothing | 30 s |
 
 A Family's `logo` is the mark the panel shows on its cards and in the Tool select: one SVG path in a 24×24 view box, for example from [Simple Icons](https://simpleicons.org).
 

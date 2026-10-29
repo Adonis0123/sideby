@@ -17,7 +17,12 @@ export interface PreparedLaunch {
   notice?: string
   /** Terminal title set before the Host starts (config `accountTitle`), for example `[codex002]`. */
   title?: string
-  /** The arguments Network Guard added to `args` for its session hooks (spec §3.35); Auto Handoff merges them. */
+  /**
+   * Every argument sideby added to `args` for its own session hooks (Network Guard §3.35, Unattended Mode §3.37): one
+   * `--settings` for Claude, `-c hooks.*` for Codex. Auto Handoff merges Claude's into its own settings file.
+   */
+  sessionHookArgs?: string[]
+  /** The same as `sessionHookArgs`, set when Network Guard's hooks are among them (kept for tools that read it). */
   networkArgs?: string[]
 }
 

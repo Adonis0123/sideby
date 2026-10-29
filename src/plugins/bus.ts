@@ -5,6 +5,7 @@ export const HOOK_TIMEOUT_MS: Record<HookEvent, number> = {
   'account.create.before': 10_000,
   'account.created': 30_000,
   'doctor.check': 10_000,
+  'unattended.ended': 30_000,
 }
 
 interface Entry<E extends HookEvent> {

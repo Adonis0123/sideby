@@ -61,7 +61,7 @@ import {
   guardOn,
   ipChangedLine,
   type NetworkOverview,
-  networkHookArgs,
+  networkHookPart,
   networkOverview,
   networkSettingsLine,
 } from './core/network.ts'
@@ -80,6 +80,7 @@ import {
 } from './core/remote-control.ts'
 import { findResumeRoute } from './core/resume.ts'
 import { type LoginMember, SAME_LOGIN_FAMILIES, sameLoginGroups, sharedQuota } from './core/same-login.ts'
+import { type SessionHookPart, sessionHookArgs } from './core/session-hooks.ts'
 import { shareMeaning } from './core/share-meaning.ts'
 import {
   SHELLS,
@@ -106,6 +107,16 @@ import {
   tuneUndoInfo,
   undoTune,
 } from './core/tuning-apply.ts'
+import {
+  codexUnattendedTrustLine,
+  UNATTENDED_FAMILIES,
+  type UnattendedStatus,
+  unattendedFamilyLine,
+  unattendedHookPart,
+  unattendedSettingsLine,
+  unattendedStatus,
+} from './core/unattended.ts'
+import { UNATTENDED_ENV } from './core/unattended-state.ts'
 import { packageVersion } from './core/version.ts'
 import { withClaudeMod } from './families/claude/mod.ts'
 import { BUILTIN_PLUGINS } from './families/index.ts'
@@ -125,6 +136,7 @@ import type {
   ReadContext,
   ShareMode,
   TuningResult,
+  UnattendedEndedContext,
   UsageResult,
 } from './types.ts'
 
@@ -352,10 +364,20 @@ export interface Runtime {
     ref: string,
     userArgs: readonly string[],
     command: 'run' | 'login',
-    opts?: { aiTask?: boolean; ignoreNetwork?: boolean },
+    opts?: { aiTask?: boolean; ignoreNetwork?: boolean; unattended?: boolean },
   ): Promise<PreparedLaunch>
   /** Network Guard's state (spec §3.35): the cached result per address, or with `check` one request per address. */
   networkStatus(opts?: { check?: boolean }): Promise<NetworkOverview>
+  /**
+   * Unattended Mode (spec §3.37): whether it is on and why, until when, the Schedule, the open Pending Decisions and
+   * which Families' sessions it covers. Read fresh on every call.
+   */
+  unattendedStatus(): Promise<UnattendedStatus>
+  /**
+   * Runs every Plugin's `unattended.ended` hook for one stretch that ended; a failing Plugin affects only itself and is
+   * returned with its error.
+   */
+  unattendedEnded(ctx: UnattendedEndedContext): Promise<{ plugin: string; error: string }[]>
   /**
    * The Host and arguments `prepareLaunch` starts from, without reading the Secret File or running `launch.before`
    * hooks: what a preview may show before the user agrees to start anything.
@@ -372,7 +394,7 @@ export interface Runtime {
   resumeLaunch(
     familyId: string,
     userArgs: readonly string[],
-    opts?: { ignoreNetwork?: boolean },
+    opts?: { ignoreNetwork?: boolean; unattended?: boolean },
   ): Promise<ResumeLaunch>
   /**
    * The Account's Quota. For an Account of a Same Login (spec §3.21) it is the group's freshest reading, with `from`
@@ -512,11 +534,17 @@ export async function createRuntime(
   const ignore = new Set(config.ignore ?? [])
   const now = opts.now ?? (() => new Date())
 
+  /** Adds lines to what a Launch prints before it starts. */
+  const addNotice = (p: PreparedLaunch, lines: readonly (string | undefined)[]) => {
+    const notice = [p.notice, ...lines].filter(Boolean).join('\n')
+    if (notice) p.notice = notice
+  }
+
   /**
    * Network Guard on a prepared Launch (spec §3.35): refuses it (a UserError) when the Egress is wrong or cannot be
-   * told, and for a session (`hooks`) adds the variables and hook arguments that keep checking inside it.
+   * told, and for a session (`hooks`) adds the variables its hooks read and returns the hooks that keep checking.
    */
-  const guardPrepared = async (p: PreparedLaunch, hooks: boolean): Promise<void> => {
+  const guardPrepared = async (p: PreparedLaunch, hooks: boolean): Promise<SessionHookPart | null> => {
     const g = await guardLaunch({
       account: p.account,
       env: p.env,
@@ -527,21 +555,63 @@ export async function createRuntime(
       ...(opts.network?.print ? { print: opts.network.print } : {}),
       now,
     })
-    if (!g) return
+    if (!g) return null
     const lines = [ipChangedLine(g.verdict, p.env)]
+    let part: SessionHookPart | null = null
     if (hooks) {
       const own = p.family.id === 'claude' && hasOption(p.args, ['--settings'])
       if (own) lines.push(networkSettingsLine(p.env))
       else {
         Object.assign(p.env, g.env)
-        p.networkArgs = await networkHookArgs(p.family.id, paths.stateDir)
-        p.args = beforeDashes(p.args, p.networkArgs)
+        part = networkHookPart()
         if (p.family.id === 'codex')
           lines.push(await codexNetworkTrustLine(paths.stateDir, p.account.ref, p.env))
       }
     }
-    const notice = [p.notice, ...lines].filter(Boolean).join('\n')
-    if (notice) p.notice = notice
+    addNotice(p, lines)
+    return part
+  }
+
+  /**
+   * Unattended Mode on a session sideby starts (spec §3.37): its hook once the config has an `unattended` section, or
+   * when the run asks for it (`--unattended`, which also marks the session as on whatever the Schedule says).
+   */
+  const unattendedPrepared = async (p: PreparedLaunch, asked: boolean): Promise<SessionHookPart | null> => {
+    if (asked) p.env[UNATTENDED_ENV] = '1'
+    if (!asked && config.unattended === undefined) return null
+    if (!UNATTENDED_FAMILIES.includes(p.family.id)) {
+      if (asked) addNotice(p, [unattendedFamilyLine(p.family.id, p.env)])
+      return null
+    }
+    if (p.family.id === 'claude' && hasOption(p.args, ['--settings'])) {
+      addNotice(p, [unattendedSettingsLine(p.env)])
+      return null
+    }
+    if (p.family.id === 'codex')
+      addNotice(p, [await codexUnattendedTrustLine(paths.stateDir, p.account.ref, p.env)])
+    return unattendedHookPart()
+  }
+
+  /** Puts every session hook into the Launch's arguments: one `--settings` for Claude, `-c hooks.*` for Codex. */
+  const addSessionHooks = async (p: PreparedLaunch, list: readonly (SessionHookPart | null)[]) => {
+    const parts = list.filter((x): x is SessionHookPart => x !== null)
+    const args = await sessionHookArgs(p.family.id, paths.stateDir, parts)
+    if (!args.length) return
+    p.sessionHookArgs = args
+    if (parts.some((x) => x.id === 'network')) p.networkArgs = args
+    p.args = beforeDashes(p.args, args)
+  }
+
+  /** Network Guard and Unattended Mode on a prepared Launch, in that order; hooks only for a session (`run`). */
+  const sessionReady = async (
+    p: PreparedLaunch,
+    session: boolean,
+    o: { ignoreNetwork?: boolean; unattended?: boolean },
+  ): Promise<void> => {
+    const parts: (SessionHookPart | null)[] = []
+    if (!o.ignoreNetwork) parts.push(await guardPrepared(p, session))
+    if (session) parts.push(await unattendedPrepared(p, Boolean(o.unattended)))
+    await addSessionHooks(p, parts)
   }
 
   const familyOf = (id: string): FamilyDef => {
@@ -1131,7 +1201,10 @@ export async function createRuntime(
     async prepareLaunch(ref, userArgs, command, opts = {}) {
       // A Handoff chain can run for hours: an Account's arguments changed meanwhile apply to its next start.
       const fresh = await loadConfig(paths.configFile).catch(() => null)
-      if (fresh) config.accounts = fresh.accounts
+      if (fresh) {
+        config.accounts = fresh.accounts
+        config.unattended = fresh.unattended
+      }
       const all = await accounts()
       const inputs = launchInputs(ref, all, userArgs, command)
       const p = await prepareLaunch({
@@ -1148,9 +1221,18 @@ export async function createRuntime(
           env: p.env,
           stateDir: paths.stateDir,
         })
-      // Network Guard (spec §3.35): last, on the environment the Host gets, so the check takes the Host's route.
-      if (!opts.ignoreNetwork) await guardPrepared(p, command === 'run')
+      // Network Guard (spec §3.35) and Unattended Mode (§3.37): last, on the environment the Host gets, so the check
+      // takes the Host's route.
+      await sessionReady(p, command === 'run', opts)
       return p
+    },
+    async unattendedStatus() {
+      return unattendedStatus({ paths, families: [...families.keys()], env, now: now() })
+    },
+    async unattendedEnded(ctx) {
+      return (await bus.runIsolated('unattended.ended', '', ctx))
+        .filter((r) => r.error)
+        .map((r) => ({ plugin: r.plugin, error: r.error!.message }))
     },
     async networkStatus(o = {}) {
       return networkOverview({
@@ -1176,13 +1258,16 @@ export async function createRuntime(
           `${family.title} sessions cannot be routed; start an account yourself with \`sideby run <account> -- …\``,
         )
       const host: HostLaunch = { family, bin: family.bin, args: [...userArgs], env }
-      // The Host run unchanged still talks to its vendor: Network Guard checks it as the Main Account (spec §3.35).
+      // The Host run unchanged still talks to its vendor: Network Guard checks it as the Main Account (spec §3.35), and
+      // it is a session sideby starts, so Unattended Mode covers it (§3.37).
       const guarded = async (h: HostLaunch): Promise<HostLaunch> => {
-        if (ro.ignoreNetwork || !guardOn(config, h.env)) return h
+        const net = !ro.ignoreNetwork && guardOn(config, h.env)
+        const unattended = Boolean(ro.unattended) || config.unattended !== undefined
+        if (!net && !unattended) return h
         const main = (await accounts()).find((a) => a.family === family.id && a.isMain)
         if (!main) return h
         const p: PreparedLaunch = { ...h, account: main, args: [...h.args], env: { ...h.env } }
-        await guardPrepared(p, true)
+        await sessionReady(p, true, { ignoreNetwork: !net, ...(ro.unattended ? { unattended: true } : {}) })
         return {
           family: p.family,
           bin: p.bin,

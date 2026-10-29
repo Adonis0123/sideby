@@ -86,6 +86,19 @@ import {
   tailInView,
   taskFindings,
   taskPrompt,
+  uaDayRuns,
+  uaGroupPending,
+  uaOnChoices,
+  uaParseClock,
+  uaPickTime,
+  uaSameSlot,
+  uaShouldRead,
+  uaSlotNight,
+  uaStatusParts,
+  uaStepClock,
+  uaToggleDay,
+  uaWaitingCount,
+  uaWhen,
   updatedAge,
   widthFollower,
   widthTier,
@@ -2579,5 +2592,228 @@ describe('Handoff page actions', () => {
     ]
     assert.deepEqual(enableOutcome({ plan, results }), { kind: 'failed', step: results[1], plan })
     assert.deepEqual(enableOutcome({ plan, results: [{ ok: true }] }), { kind: 'done' })
+  })
+})
+
+describe('the Unattended page (spec §3.37)', () => {
+  const at = (y: number, mo: number, d: number, h: number, mi = 0) => new Date(y, mo - 1, d, h, mi).getTime()
+  // Thursday 2026-10-29, 15:20 local time.
+  const now = at(2026, 10, 29, 15, 20)
+
+  it('says a moment relative to today', () => {
+    assert.deepEqual(uaWhen(at(2026, 10, 29, 23, 0), now), {
+      hhmm: '23:00',
+      day: 'today',
+      weekday: 4,
+      month: 10,
+      date: 29,
+    })
+    assert.equal(uaWhen(at(2026, 10, 30, 8, 0), now).day, 'tomorrow')
+    assert.equal(uaWhen(at(2026, 11, 2, 23, 0), now).day, 'week')
+    assert.equal(uaWhen(at(2026, 11, 2, 23, 0), now).weekday, 1)
+    assert.equal(uaWhen(at(2026, 11, 5, 23, 0), now).day, 'date')
+    assert.equal(uaWhen(at(2026, 10, 28, 2, 10), now).day, 'date')
+  })
+
+  it('reads the status as the card says it', () => {
+    const until = '2026-10-30T00:00:00.000Z'
+    assert.deepEqual(uaStatusParts({ on: true, reason: 'slot', until, slotNumber: 2 }), {
+      state: 'on',
+      byHand: false,
+      slot: 1,
+      until: Date.parse(until),
+      noEnd: false,
+      next: null,
+    })
+    assert.equal(uaStatusParts({ on: true, reason: 'manual', until }).byHand, true)
+    // A Schedule covering every hour: on without an end, and a pause without one.
+    assert.equal(uaStatusParts({ on: true, reason: 'slot', slotNumber: 1 }).noEnd, true)
+    assert.deepEqual(uaStatusParts({ on: false, reason: 'paused' }).state, 'paused')
+    assert.equal(uaStatusParts({ on: false, reason: 'paused' }).noEnd, true)
+    const off = uaStatusParts({ on: false, reason: 'off', next: { at: until, slotNumber: 1 } })
+    assert.deepEqual([off.state, off.noEnd, off.next], ['off', false, { at: Date.parse(until), slot: 0 }])
+    // The Panel shows the computer: a session's own --unattended is not "on" there.
+    assert.equal(uaStatusParts({ on: true, reason: 'session' }).state, 'off')
+  })
+
+  it('offers the Slot end first when there is one, else 12 hours', () => {
+    const slotEnd = new Date(at(2026, 10, 30, 8, 0)).toISOString()
+    const withSlot = uaOnChoices(slotEnd, now)
+    assert.deepEqual(
+      withSlot.options.map((o) => o.id),
+      ['slot', '4h', '12h', 'time'],
+    )
+    assert.equal(withSlot.chosen, 'slot')
+    assert.equal(withSlot.options[0]!.until, at(2026, 10, 30, 8, 0))
+    assert.equal(withSlot.options[1]!.until, now + 4 * 3600_000)
+    const none = uaOnChoices(undefined, now)
+    assert.deepEqual(
+      none.options.map((o) => o.id),
+      ['4h', '12h', 'time'],
+    )
+    assert.equal(none.chosen, '12h')
+  })
+
+  it('reads a picked time as today when it is still ahead, else tomorrow', () => {
+    assert.deepEqual(uaPickTime('23:30', now), { until: at(2026, 10, 29, 23, 30), tomorrow: false })
+    assert.deepEqual(uaPickTime('07:30', now), { until: at(2026, 10, 30, 7, 30), tomorrow: true })
+    assert.deepEqual(uaPickTime('15:20', now), { until: at(2026, 10, 30, 15, 20), tomorrow: true })
+    assert.equal(uaPickTime('', now), null)
+    assert.equal(uaPickTime('7:30', now), null)
+    assert.equal(uaPickTime('24:00', now), null)
+  })
+
+  it('marks a Slot that ends the next day or runs all day', () => {
+    assert.equal(uaSlotNight({ start: '23:00', end: '08:00' }), 'next')
+    assert.equal(uaSlotNight({ start: '09:00', end: '09:00' }), 'whole')
+    assert.equal(uaSlotNight({ start: '01:00', end: '06:00' }), '')
+  })
+
+  it('groups days into runs and toggles a day, never leaving none', () => {
+    assert.deepEqual(uaDayRuns(['mon', 'tue', 'wed', 'thu', 'fri']), { all: false, runs: [[0, 4]] })
+    assert.deepEqual(uaDayRuns(['fri', 'sat', 'sun', 'mon']), { all: false, runs: [[4, 0]] })
+    assert.deepEqual(uaDayRuns(['mon', 'wed']), {
+      all: false,
+      runs: [
+        [0, 0],
+        [2, 2],
+      ],
+    })
+    assert.equal(uaDayRuns(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']).all, true)
+    assert.deepEqual(uaToggleDay(['fri', 'mon'], 'wed'), ['mon', 'wed', 'fri'])
+    assert.deepEqual(uaToggleDay(['mon', 'wed'], 'mon'), ['wed'])
+    assert.equal(uaToggleDay(['mon'], 'mon'), null)
+  })
+
+  it('tells the same Slot by days and times', () => {
+    const preset = { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '23:00', end: '08:00' }
+    assert.equal(uaSameSlot(preset, { ...preset, days: ['fri', 'thu', 'wed', 'tue', 'mon'] }), true)
+    assert.equal(uaSameSlot(preset, { ...preset, end: '07:00' }), false)
+    assert.equal(uaSameSlot(preset, { ...preset, days: ['mon'] }), false)
+  })
+
+  it('groups Pending Decisions by Session, newest group first and each group oldest first', () => {
+    const d = (id: string, at: string, sessionId?: string) => ({
+      id,
+      at,
+      ...(sessionId ? { sessionId } : {}),
+    })
+    const groups = uaGroupPending([
+      d('a', '2026-10-29T01:00:00Z', 's1'),
+      d('b', '2026-10-29T03:00:00Z', 's2'),
+      d('c', '2026-10-29T02:00:00Z', 's1'),
+      d('e', '2026-10-29T04:00:00Z'),
+      d('f', '2026-10-29T00:30:00Z', 's1'),
+    ])
+    assert.deepEqual(
+      groups.map((g) => [g.key, g.items.map((x) => x.id)]),
+      [
+        ['none', ['e']],
+        ['s:s2', ['b']],
+        ['s:s1', ['f', 'a', 'c']],
+      ],
+    )
+    assert.equal(groups[2]!.first.id, 'f')
+  })
+
+  it('reads a typed 24-hour time, and the field accepts exactly what it reads', () => {
+    assert.equal(uaParseClock('07:30'), '07:30')
+    assert.equal(uaParseClock('7:30'), '07:30')
+    assert.equal(uaParseClock('730'), '07:30')
+    assert.equal(uaParseClock('0730'), '07:30')
+    assert.equal(uaParseClock('2359'), '23:59')
+    assert.equal(uaParseClock('7'), '07:00')
+    assert.equal(uaParseClock('23：00'), '23:00')
+    assert.equal(uaParseClock(' 8.05 '), '08:05')
+    for (const bad of ['', '24:00', '7:60', '12345', 'ab', '7:3', '-1'])
+      assert.equal(uaParseClock(bad), null, bad)
+    // The field's `pattern` marks the same texts invalid while typing.
+    const pattern = /const UA_CLOCK = '([^']+)'/.exec(PAGE_SCRIPT)?.[1]
+    assert.ok(pattern, 'the page has the field pattern')
+    const field = new RegExp(`^(?:${pattern})$`, 'v')
+    for (const text of [
+      '07:30',
+      '7:30',
+      '730',
+      '0730',
+      '2359',
+      '7',
+      '23：00',
+      ' 8.05 ',
+      '',
+      '24:00',
+      '7:60',
+      '12345',
+      'ab',
+      '7:3',
+    ])
+      assert.equal(text === '' || field.test(text), text === '' || uaParseClock(text) !== null, text)
+  })
+
+  it('steps the hour or the minute with the arrow keys, wrapping', () => {
+    assert.equal(uaStepClock('23:00', 'h', 1), '00:00')
+    assert.equal(uaStepClock('00:00', 'h', -1), '23:00')
+    assert.equal(uaStepClock('07:59', 'm', 1), '07:00')
+    assert.equal(uaStepClock('730', 'm', -1), '07:29')
+    assert.equal(uaStepClock('nope', 'h', 1), null)
+  })
+
+  it('reads the Pending Decisions again only when due, and waits a full round after a failure', () => {
+    const base = {
+      now: 100_000,
+      at: 99_000,
+      nextAt: 100_000,
+      everyMs: 15_000,
+      loading: false,
+      hasData: true,
+      failed: false,
+      statusCount: 2,
+      listCount: 2,
+    }
+    assert.equal(
+      uaShouldRead({ ...base, hasData: false, statusCount: undefined, listCount: undefined }),
+      true,
+    )
+    assert.equal(uaShouldRead(base), false)
+    assert.equal(uaShouldRead({ ...base, statusCount: 3 }), true)
+    assert.equal(uaShouldRead({ ...base, now: 114_000 + 1000 }), true)
+    assert.equal(uaShouldRead({ ...base, loading: true, statusCount: 3 }), false)
+    // A failed read: a changed count does not make it try again before nextAt (a full refresh round later).
+    const failed = { ...base, failed: true, at: 100_000, nextAt: 120_000, statusCount: 3 }
+    assert.equal(uaShouldRead({ ...failed, now: 100_500 }), false)
+    assert.equal(uaShouldRead({ ...failed, now: 119_999 }), false)
+    assert.equal(uaShouldRead({ ...failed, now: 120_000 }), true)
+    assert.equal(uaShouldRead({ ...failed, hasData: false, listCount: undefined, now: 110_000 }), false)
+    assert.equal(uaShouldRead({ ...failed, hasData: false, listCount: undefined, now: 120_000 }), true)
+  })
+
+  it('counts what still waits, taking off a decision being marked done only once', () => {
+    const before = { pending: 2, pendingIds: ['a', 'b'] }
+    // One marked done, the request still out: the old status lists it, so it is taken off.
+    assert.equal(uaWaitingCount(before, [{ id: 'a', on: before }]), 1)
+    // A refresh lands before the request answers and already leaves it out: nothing is taken off twice.
+    const refreshed = { pending: 1, pendingIds: ['b'] }
+    assert.equal(uaWaitingCount(refreshed, [{ id: 'a', on: before }]), 1)
+    assert.equal(uaWaitingCount({ pending: 0, pendingIds: [] }, [{ id: 'a', on: before }]), 0)
+    // A status without ids takes off only the marks made on that same status.
+    const plain = { pending: 2 }
+    assert.equal(uaWaitingCount(plain, [{ id: 'a', on: plain }]), 1)
+    assert.equal(uaWaitingCount({ pending: 1 }, [{ id: 'a', on: plain }]), 1)
+    assert.equal(uaWaitingCount(null, []), 0)
+  })
+
+  it('has the words the page builds from parts', () => {
+    for (const k of ['until', 'back', 'next'])
+      for (const w of ['Today', 'Day']) assert.ok(`ua.${k}${w}` in MESSAGES.en, k + w)
+    for (const k of ['slotNow', 'slotNext', '4h', '12h', 'time'])
+      assert.ok(`ua.choice.${k}` in MESSAGES.en, k)
+    for (const k of ['question', 'deferred', 'permission']) assert.ok(`ua.kind.${k}` in MESSAGES.en, k)
+    assert.equal(
+      MESSAGES.zh['ua.untilDay']!.replace('{day}', '明天').replace('{time}', '07:30'),
+      '到明天 07:30',
+    )
+    assert.equal(MESSAGES.zh['ua.badge']!.replace('{until}', '到 08:00'), '无人值守 · 到 08:00')
+    assert.equal(MESSAGES.en['ua.days']!.split(',').length, 7)
+    assert.equal(MESSAGES.zh['ua.days']!.split(',').length, 7)
   })
 })

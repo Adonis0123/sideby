@@ -646,11 +646,58 @@ export interface HookFilter {
   family?: string
 }
 
+/** A question the model was not allowed to ask, or an action it left undone, during Unattended Mode (spec §3.37). */
+export interface PendingDecisionInfo {
+  id: string
+  /** When it was kept (ISO). */
+  at: string
+  /**
+   * `question`: the Host's ask tool was refused; `permission`: a permission request Claude Code was about to show was
+   * refused; `deferred`: the model ran `sideby unattended defer`.
+   */
+  kind: 'question' | 'permission' | 'deferred'
+  family: string
+  /** The Account the session ran as. */
+  account?: string
+  sessionId?: string
+  cwd?: string
+  /** The subagent a permission request came from, when one did (Claude Code's `agent_id`, `agent_type`). */
+  agentId?: string
+  agentType?: string
+  /** The question with its options, the tool and what it was to do, or the deferred text (at most 4000 characters). */
+  text: string
+  doneAt?: string
+}
+
+/**
+ * `unattended.ended`: one stretch of Unattended Mode, for the whole computer, has ended (spec §3.37). Emitted by the
+ * first sideby process that notices, at least once per stretch (see `id`); it belongs to no Family, so a handler with a
+ * `family` filter never gets it. sideby itself sends no notification: a Plugin may pass this on to the user's own notification tool.
+ */
+export interface UnattendedEndedContext {
+  /**
+   * The same each time this event is delivered. Delivery is at least once: an event whose delivery did not finish
+   * (sideby was ended while the plugins ran, say) is delivered again by a later look, so skip an `id` you have seen.
+   */
+  id: string
+  /** When the stretch began (ISO). */
+  startedAt: string
+  /** When it ended (ISO). */
+  endedAt: string
+  /** What turned it on: a Slot of the Schedule, or the user. */
+  reason: 'slot' | 'manual'
+  /** True when it was noticed more than twelve hours after it ended (no sideby process ran meanwhile). */
+  late?: true
+  /** The Pending Decisions kept during the stretch that are still open. */
+  pending: PendingDecisionInfo[]
+}
+
 export interface HookEvents {
   'launch.before': { ctx: LaunchContext; result: void }
   'account.create.before': { ctx: CreateBeforeContext; result: void }
   'account.created': { ctx: CreatedContext; result: void }
   'doctor.check': { ctx: DoctorContext; result: CheckResult[] | undefined }
+  'unattended.ended': { ctx: UnattendedEndedContext; result: void }
 }
 
 export type HookEvent = keyof HookEvents

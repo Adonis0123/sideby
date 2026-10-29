@@ -48,6 +48,7 @@
 | `resumeRouting` | 可选，默认关。设为 `true` 时，`shell-init` 还会生成与宿主同名的函数（`claude`、`codex`、`grok`），按 id 恢复会话时转到存有该会话的账号；见[从其他工具恢复会话](#从其他工具恢复会话)。 |
 | `display` | 你在面板里排的工具和账号顺序，以及置顶的账号：`{ "families": ["codex", "claude"], "accounts": { "claude": ["003", "main"] }, "pinned": { "claude": ["work"] } }`，写账号名，不是 ref。没写进去的按原来的顺序排在后面。由面板写入，**恢复默认顺序** 删掉顺序、保留 `pinned`。只影响显示，见 [自己排顺序](usage.zh-CN.md#自己排顺序)。 |
 | `quota.check.<family>` | 设为 `false` 就不再为这个工具做需要联网的额度查询。目前只有 Grok：每个账号最多每 15 分钟问一次它的命令行，见 [Grok 额度](usage.zh-CN.md#grok-额度)。默认开启，CI 里关闭。 |
+| `unattended.schedule` | [无人值守](usage.zh-CN.md#无人值守unattended-mode)的时间表：每个时段是 `{ "name": "Weeknights", "days": ["mon", "tue", "wed", "thu", "fri"], "start": "23:00", "end": "08:00" }`，24 小时制本机时间；`end` 早于 `start` 就是到第二天早上，相等是全天。用 `sideby unattended schedule` 修改。只要有 `unattended` 这一节，sideby 启动的 Claude、Codex 会话都会加上它的 hook；`sideby config unset unattended` 就不再加。 |
 | `extraSharedItems.<family>` | 在内置清单之外加你自己的共享项，每项要写 Share Mode（`link`、`copy`、`link-or-copy`、`link-or-local`、`local`、`local-if-api`、`info`、`json-key`）。`path` 相对于账号目录，绝对路径和 `..` 会被拒绝。 |
 
 ## Shell 函数

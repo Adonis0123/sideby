@@ -3,14 +3,14 @@
 // through the Host's own channel where it has one, or handed to the user to paste.
 import { randomBytes } from 'node:crypto'
 import { constants } from 'node:fs'
-import { chmod, lstat, mkdir, open, readdir, readFile } from 'node:fs/promises'
+import { lstat, open, readdir, readFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { tailLinesWith } from '../families/claude/session-files.ts'
 import { DELIVERERS, type Delivery } from '../families/messaging.ts'
 import type { Runtime } from '../runtime.ts'
 import type { Account } from '../types.ts'
 import { UserError } from './errors.ts'
-import { writeFileAtomic } from './fs-safe.ts'
+import { ownedFolder, UnsafeFolderError, writeFileAtomic } from './fs-safe.ts'
 import type { LiveSession } from './live-sessions.ts'
 import { type LiveSessionDeps, type ProcessInfo, processView, systemDeps } from './live-sessions-procs.ts'
 import { selectSession } from './session-select.ts'
@@ -191,32 +191,12 @@ export async function messageFolder(
   create: boolean,
 ): Promise<string | null> {
   for (const part of sub) if (!isSafeName(part)) throw unsafeFolder(join(messagesDir(stateDir), part))
-  if (create) await mkdir(stateDir, { recursive: true, mode: 0o700 })
-  const uid = process.getuid?.()
-  let dir = stateDir
-  for (const part of ['messages', ...sub]) {
-    dir = join(dir, part)
-    let st = await lstat(dir).catch((err: NodeJS.ErrnoException) => {
-      if (err.code === 'ENOENT') return null
-      throw err
-    })
-    if (!st) {
-      if (!create) return null
-      let made = true
-      await mkdir(dir, { mode: 0o700 }).catch((err: NodeJS.ErrnoException) => {
-        if (err.code !== 'EEXIST') throw err
-        made = false
-      })
-      st = await lstat(dir)
-      if (made && st.isDirectory() && !st.isSymbolicLink() && st.uid === uid) {
-        await chmod(dir, 0o700)
-        st = await lstat(dir)
-      }
-    }
-    if (!st.isDirectory() || (uid !== undefined && st.uid !== uid) || (st.mode & 0o022) !== 0)
-      throw unsafeFolder(dir)
+  try {
+    return await ownedFolder(stateDir, ['messages', ...sub], { create })
+  } catch (err) {
+    if (err instanceof UnsafeFolderError) throw unsafeFolder(err.path)
+    throw err
   }
-  return dir
 }
 
 /** The Live Session whose Host process is a parent of `pid` (the Session `sideby send` runs inside), if any. */

@@ -44,6 +44,7 @@ import {
 import { SEARCH_CATALOG, searchCatalog } from '../core/search-catalog.ts'
 import { SHELLS, type Shell, type ShellInitWrite } from '../core/shell-init.ts'
 import type { TuneApplyPlan } from '../core/tuning-apply.ts'
+import { clockText, daysText } from '../core/unattended-state.ts'
 import { MODEL_NAME } from '../families/shared/model-args.ts'
 import {
   AI_TASK_KINDS,
@@ -85,9 +86,42 @@ async function runAccount(
   ref: string,
   args: readonly string[],
   io: Io,
-  opts: { aiTask?: boolean; ignoreNetwork?: boolean } = {},
+  opts: LaunchFlags & { aiTask?: boolean } = {},
 ): Promise<number> {
   return whileRunning(rt, () => runAccountNow(rt, ref, args, io, opts))
+}
+
+/** sideby's own options on a Launch: `--ignore-network` (spec §3.35) and `--unattended` (§3.37). */
+interface LaunchFlags {
+  ignoreNetwork?: boolean
+  unattended?: boolean
+}
+
+/**
+ * Takes sideby's own `--unattended` (spec §3.37) out of the arguments `run` and `resume` pass to the Host, anywhere
+ * before `--`: no Host has an option of that name.
+ */
+export function takeUnattended(args: readonly string[]): { args: string[]; unattended: boolean } {
+  const end = args.indexOf('--')
+  const head = end === -1 ? args : args.slice(0, end)
+  if (!head.includes('--unattended')) return { args: [...args], unattended: false }
+  return {
+    args: [...head.filter((x) => x !== '--unattended'), ...(end === -1 ? [] : args.slice(end))],
+    unattended: true,
+  }
+}
+
+/** Both of sideby's own Launch options, as `run` and `resume` find them among the Host's arguments. */
+function takeLaunchFlags(args: readonly string[]): { args: string[]; flags: LaunchFlags } {
+  const net = takeIgnoreNetwork(args)
+  const un = takeUnattended(net.args)
+  return {
+    args: un.args,
+    flags: {
+      ...(net.ignoreNetwork ? { ignoreNetwork: true } : {}),
+      ...(un.unattended ? { unattended: true } : {}),
+    },
+  }
 }
 
 /**
@@ -109,7 +143,7 @@ async function runAccountNow(
   ref: string,
   args: readonly string[],
   io: Io,
-  opts: { aiTask?: boolean; ignoreNetwork?: boolean },
+  opts: LaunchFlags & { aiTask?: boolean },
 ): Promise<number> {
   const handed = await runWithHandoff(
     rt,
@@ -615,10 +649,9 @@ export async function cmdRun(a: ParsedArgs, io: Io, command: 'run' | 'login'): P
   if (command === 'login' && (extra.length || a.rest.length))
     throw new UsageError('login takes no extra arguments')
   const rt = await createRuntime()
-  const { args, ignoreNetwork } = takeIgnoreNetwork([...extra, ...a.rest])
-  const net = ignoreNetwork ? { ignoreNetwork } : {}
-  if (command === 'run' && rt.pickCommandFamily(ref) !== undefined) return runPick(rt, ref, args, io, net)
-  if (command === 'run') return runAccount(rt, ref, args, io, net)
+  const { args, flags } = takeLaunchFlags([...extra, ...a.rest])
+  if (command === 'run' && rt.pickCommandFamily(ref) !== undefined) return runPick(rt, ref, args, io, flags)
+  if (command === 'run') return runAccount(rt, ref, args, io, flags)
   return runLogin(rt, ref, io)
 }
 
@@ -660,7 +693,7 @@ async function runPick(
   name: string,
   args: readonly string[],
   io: Io,
-  opts: { ignoreNetwork?: boolean } = {},
+  opts: LaunchFlags = {},
 ): Promise<number> {
   const { choice, family } = await rt.pickChoice(name)
   if (choice.ref === null) {
@@ -687,8 +720,8 @@ export async function cmdResume(a: ParsedArgs, io: Io): Promise<number> {
   const [family, ...extra] = a.positionals
   if (!family) throw new UsageError('usage: sideby resume <family> [-- host args]')
   const rt = await createRuntime()
-  const { args, ignoreNetwork } = takeIgnoreNetwork([...extra, ...a.rest])
-  const route = await rt.resumeLaunch(family, args, ignoreNetwork ? { ignoreNetwork } : {})
+  const { args, flags } = takeLaunchFlags([...extra, ...a.rest])
+  const route = await rt.resumeLaunch(family, args, flags)
   if (route.launch.notice) io.err(c.cyan(route.launch.notice))
   if (route.newSession)
     io.err(
@@ -711,7 +744,7 @@ export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
   const [family, ...extra] = a.positionals
   if (!family || extra.length)
     throw new UsageError(
-      'usage: sideby next <family> [--dry-run] [--include-api] [--ignore-network] [-- host args]',
+      'usage: sideby next <family> [--dry-run] [--include-api] [--ignore-network] [--unattended] [-- host args]',
     )
   const includeApi = a.flags.has('include-api')
   const rt = await createRuntime()
@@ -792,7 +825,10 @@ export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
     io.out(
       c.dim('Sessions can also hand over by themselves when quota runs low: see `sideby handoff status`.'),
     )
-  return runAccount(rt, plan.pick, a.rest, io, a.flags.has('ignore-network') ? { ignoreNetwork: true } : {})
+  return runAccount(rt, plan.pick, a.rest, io, {
+    ...(a.flags.has('ignore-network') ? { ignoreNetwork: true } : {}),
+    ...(a.flags.has('unattended') ? { unattended: true } : {}),
+  })
 }
 
 export async function cmdDoctor(a: ParsedArgs, io: Io): Promise<number> {
@@ -1788,8 +1824,15 @@ export async function cmdUi(a: ParsedArgs, io: Io): Promise<number> {
   })
   if (srv.reused) return 0
   io.out(c.dim('Ctrl+C to stop'))
+  // Like the background Panel, a Panel left running notices the end of a stretch of Unattended Mode (spec §3.37).
+  const { watchUnattendedEnded } = await import('../core/unattended-ended.ts')
+  const stopWatch = watchUnattendedEnded(paths, async (ctx) => {
+    for (const f of await (await createRuntime()).unattendedEnded(ctx))
+      io.err(`sideby: [${f.plugin}] unattended.ended failed: ${f.error}`)
+  })
   await new Promise<void>((resolve) => {
     const stop = () => {
+      stopWatch()
       void srv.close().then(resolve)
     }
     process.once('SIGINT', stop)
@@ -4293,6 +4336,315 @@ export async function cmdNetwork(a: ParsedArgs, io: Io): Promise<number> {
   else if (sub !== 'check') io.out(c.dim('Check now with `sideby network check`.'))
   io.out(c.dim('Sessions started without sideby (running `claude` or `codex` directly) are not checked.'))
   return 0
+}
+
+/** The family a `defer` from inside a session comes from: its Account, else the Host's own variables. */
+function deferFamily(env: NodeJS.ProcessEnv): string {
+  const ref = env.SIDEBY_ACCOUNT
+  if (ref?.includes(':')) return ref.slice(0, ref.indexOf(':'))
+  if (env.CLAUDE_CODE_SESSION_ID || env.CLAUDECODE) return 'claude'
+  if (env.CODEX_THREAD_ID) return 'codex'
+  return 'unknown'
+}
+
+/** One line for where Unattended Mode stands now. */
+function unattendedLine(s: import('../core/unattended.ts').UnattendedStatus, now: Date): string {
+  const at = (iso: string) => clock2(iso, now)
+  const slot = s.slot ? ` · Slot "${s.slot}"` : ''
+  if (s.reason === 'slot' || s.reason === 'manual')
+    return `${c.green('on')}${s.reason === 'manual' ? ' · turned on by hand' : slot}${s.until ? ` · until ${at(s.until)}` : ' · no end: the Schedule covers every hour'}`
+  if (s.reason === 'session') return `${c.green('on')} for this session only (started with --unattended)`
+  if (s.reason === 'paused')
+    return `${c.yellow('paused')}${slot}${s.until ? ` · until ${at(s.until)}, then the Schedule goes on` : ' · until you turn it on (`sideby unattended on`)'}`
+  return `${c.dim('off')}${s.next ? ` · next ${at(s.next.at)}${s.next.slot ? ` (${s.next.slot})` : ''}` : ''}`
+}
+
+const clock2 = (iso: string, now: Date) => clockText(Date.parse(iso), now.getTime())
+
+function printSchedule(io: Io, schedule: readonly import('../core/unattended-state.ts').UnattendedSlot[]) {
+  if (!schedule.length) {
+    io.out(
+      c.dim(
+        'Schedule: empty. Add weeknights 23:00-08:00 with `sideby unattended schedule preset weeknights`.',
+      ),
+    )
+    return
+  }
+  io.out('Schedule:')
+  schedule.forEach((s, i) => {
+    const night = s.end <= s.start ? (s.end === s.start ? ' (whole day)' : ' (next day)') : ''
+    io.out(`  ${i + 1}. ${s.name ? `${s.name}  ` : ''}${daysText(s.days)} ${s.start}-${s.end}${night}`)
+  })
+}
+
+function printUnattended(
+  io: Io,
+  s: import('../core/unattended.ts').UnattendedStatus,
+  now: Date,
+  opts: { schedule?: boolean } = {},
+) {
+  io.out(`Unattended Mode: ${unattendedLine(s, now)}`)
+  if (s.problem) io.out(c.red(s.problem))
+  if (opts.schedule !== false) printSchedule(io, s.schedule)
+  if (s.pending)
+    io.out(
+      `Pending decisions: ${c.yellow(String(s.pending))} open; see them with \`sideby unattended pending\`.`,
+    )
+  if (!s.configured)
+    io.out(
+      c.cyan(
+        'Not set up yet: `sideby unattended on` or `sideby unattended schedule preset weeknights` sets it up, and Claude and Codex sessions sideby starts after that are covered.',
+      ),
+    )
+  else
+    io.out(
+      c.dim(
+        'Covers Claude sessions sideby starts (questions and permission prompts), and questions in Codex sessions once you trust `unattended-hook` in /hooks; Codex approval prompts still wait. Not Grok, pi, desktop apps or sessions started without sideby.',
+      ),
+    )
+}
+
+/** `sideby unattended …` (spec §3.37, ADR-0057): status, on and off, the Schedule, Pending Decisions and `defer`. */
+export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
+  const [sub, ...rest] = a.positionals
+  const asJson = a.flags.has('json')
+  const allow = (...names: string[]) => {
+    for (const k of a.flags.keys())
+      if (k !== 'json' && !names.includes(k))
+        throw new UsageError(
+          `--${k} does not go with \`sideby unattended ${sub ?? ''}\`; run \`sideby unattended --help\``,
+        )
+    if (a.rest.length) throw new UsageError('`sideby unattended` takes no arguments after `--`')
+  }
+  const u = await import('../core/unattended.ts')
+  const rt = await createRuntime()
+  const families = [...rt.families.keys()]
+  const paths = rt.paths
+  const now = () => rt.readContext().now
+  const { checkUnattendedEnded } = await import('../core/unattended-ended.ts')
+  // Turning it off or on may end a stretch: notice it now, not at the next command (spec §3.37).
+  const noticeEnd = () => checkUnattendedEnded(paths, async (ctx) => void (await rt.unattendedEnded(ctx)))
+  const show = (change: import('../core/unattended.ts').UnattendedChange, done: string) => {
+    if (asJson) {
+      json(io, { ...change.status, changed: change.changed, ...(change.undo ? { undo: change.undo } : {}) })
+      return 0
+    }
+    io.out(change.changed ? `${c.green('✓')} ${done}` : done)
+    printUnattended(io, change.status, now())
+    if (change.undo) io.out(c.dim(`Undo: ${change.undo}`))
+    return 0
+  }
+
+  if (sub === undefined || sub === 'status') {
+    allow()
+    if (rest.length) throw new UsageError('usage: sideby unattended [status] [--json]')
+    const s = await rt.unattendedStatus()
+    if (asJson) json(io, s)
+    else printUnattended(io, s, now())
+    return 0
+  }
+
+  if (sub === 'on') {
+    allow('for', 'until', 'slot-end')
+    if (rest.length)
+      throw new UsageError(
+        'usage: sideby unattended on [--for <n>h|<n>m | --until <HH:MM|date and time> | --slot-end]',
+      )
+    const status = await rt.unattendedStatus()
+    const value = (k: string) => {
+      const v = a.flags.get(k)
+      return typeof v === 'string' ? v : undefined
+    }
+    const r = u.onUntil(
+      {
+        ...(a.flags.has('for') ? { for: value('for') ?? '' } : {}),
+        ...(a.flags.has('until') ? { until: value('until') ?? '' } : {}),
+        ...(a.flags.has('slot-end') ? { slotEnd: true } : {}),
+      },
+      status.schedule,
+      now(),
+    )
+    if ('error' in r) throw new UsageError(r.error)
+    const change = await u.turnUnattendedOn({ paths, families, until: r.until, now: now() })
+    await noticeEnd()
+    return show(change, `Unattended Mode is on until ${clock2(new Date(r.until).toISOString(), now())}.`)
+  }
+
+  if (sub === 'off') {
+    allow()
+    if (rest.length) throw new UsageError('usage: sideby unattended off [--json]')
+    const change = await u.turnUnattendedOff({ paths, families, now: now() })
+    await noticeEnd()
+    const s = change.status
+    return show(
+      change,
+      !change.changed
+        ? s.reason === 'paused'
+          ? s.until
+            ? 'Unattended Mode is already paused until this Slot ends.'
+            : 'Unattended Mode is already paused until you turn it on.'
+          : s.reason === 'session'
+            ? 'Unattended Mode is off for the computer; this session was started with --unattended and stays on.'
+            : 'Unattended Mode is already off.'
+        : s.reason === 'paused'
+          ? s.until
+            ? 'Unattended Mode is paused until this Slot ends; the next Slot turns it on as usual.'
+            : 'Unattended Mode is paused until you turn it on: your Schedule covers every hour, so it has no end.'
+          : 'Unattended Mode is off.',
+    )
+  }
+
+  if (sub === 'schedule') {
+    const [action, ...args] = rest
+    if (action === undefined) {
+      allow()
+      const s = await rt.unattendedStatus()
+      if (asJson) json(io, s)
+      else printSchedule(io, s.schedule)
+      return 0
+    }
+    if (action === 'add') {
+      allow('days', 'from', 'to', 'name', 'at')
+      if (args.length)
+        throw new UsageError(
+          'usage: sideby unattended schedule add --days <mon-fri|sat,sun|…> --from HH:MM --to HH:MM [--name <name>]',
+        )
+      const get = (k: string) => {
+        const v = a.flags.get(k)
+        return typeof v === 'string' ? v : undefined
+      }
+      const slot = u.slotFromOptions({
+        ...(get('days') !== undefined ? { days: get('days')! } : {}),
+        ...(get('from') !== undefined ? { from: get('from')! } : {}),
+        ...(get('to') !== undefined ? { to: get('to')! } : {}),
+        ...(get('name') !== undefined ? { name: get('name')! } : {}),
+      })
+      if ('error' in slot) throw new UsageError(slot.error)
+      const at = get('at')
+      if (at !== undefined && !/^[1-9]\d{0,2}$/.test(at))
+        throw new UsageError(
+          '--at takes a position such as 1 (the first Slot); leave it out to add at the end',
+        )
+      const change = await u.addUnattendedSlot({ paths, families, slot, ...(at ? { at: Number(at) } : {}) })
+      await noticeEnd()
+      return show(change, change.changed ? 'Added the Slot.' : 'That Slot is already in the Schedule.')
+    }
+    if (action === 'remove') {
+      allow()
+      const n = args[0]
+      if (args.length !== 1 || !n || !/^[1-9]\d{0,2}$/.test(n))
+        throw new UsageError(
+          'usage: sideby unattended schedule remove <number>, the number `sideby unattended` shows (1 is the first)',
+        )
+      const change = await u.removeUnattendedSlot({ paths, families, n: Number(n) })
+      await noticeEnd()
+      return show(change, `Removed Slot ${n}.`)
+    }
+    if (action === 'preset') {
+      allow()
+      const preset = args[0] ? u.UNATTENDED_PRESETS[args[0]] : undefined
+      if (args.length !== 1 || !preset)
+        throw new UsageError(
+          `usage: sideby unattended schedule preset weeknights (Monday to Friday, 23:00 to 08:00)`,
+        )
+      const change = await u.addUnattendedSlot({ paths, families, slot: preset })
+      await noticeEnd()
+      return show(
+        change,
+        change.changed
+          ? `Added ${preset.name}: ${daysText(preset.days)} ${preset.start}-${preset.end}.`
+          : `${preset.name} is already in the Schedule.`,
+      )
+    }
+    throw new UsageError(
+      'usage: sideby unattended schedule [add --days … --from … --to … [--name …] | remove <number> | preset weeknights]',
+    )
+  }
+
+  if (sub === 'pending') {
+    const { listPendingDecisions, markPendingDone } = await import('../core/unattended-pending.ts')
+    const [action, ...args] = rest
+    if (action === 'done') {
+      allow('all')
+      const all = a.flags.has('all')
+      if (all === Boolean(args.length) || args.length > 1)
+        throw new UsageError(
+          'usage: sideby unattended pending done <id> | --all (the id is in `sideby unattended pending`)',
+        )
+      let done: import('../core/unattended-pending.ts').PendingDecision[]
+      try {
+        done = await markPendingDone(paths.stateDir, all ? 'all' : args[0]!, now())
+      } catch (err) {
+        throw new UserError((err as Error).message, { code: 'no-pending' })
+      }
+      const pending = await listPendingDecisions(paths.stateDir, { now: now() })
+      if (asJson) json(io, { done: done.map((d) => d.id), pending })
+      else
+        io.out(
+          `${c.green('✓')} marked ${done.length === 1 ? '1 decision' : `${done.length} decisions`} done; ${pending.length} still open.`,
+        )
+      return 0
+    }
+    allow('all')
+    if (action !== undefined)
+      throw new UsageError('usage: sideby unattended pending [--all] | pending done <id>|--all')
+    const pending = await listPendingDecisions(paths.stateDir, { all: a.flags.has('all'), now: now() })
+    if (asJson) {
+      json(io, { pending })
+      return 0
+    }
+    if (!pending.length) {
+      io.out('Nothing is waiting for you.')
+      return 0
+    }
+    for (const d of pending) {
+      const where = [
+        d.account ?? d.family,
+        d.kind === 'question' ? 'question' : d.kind === 'permission' ? 'needed your OK' : 'left undone',
+        d.agentType ? `subagent ${d.agentType}` : '',
+        d.doneAt ? 'done' : '',
+      ]
+        .filter(Boolean)
+        .join(' · ')
+      io.out(`${c.bold(d.id)}  ${clock2(d.at, now())}  ${c.dim(where)}`)
+      for (const line of d.text.split('\n')) io.out(`  ${line}`)
+      if (d.sessionId)
+        io.out(c.dim(`  session ${d.sessionId}${d.cwd ? ` in ${tildify(d.cwd, paths.home)}` : ''}`))
+    }
+    io.out(c.dim('Mark one done with `sideby unattended pending done <id>`, or all with `--all`.'))
+    return 0
+  }
+
+  if (sub === 'defer') {
+    allow()
+    const text = rest.join(' ').trim()
+    if (!text) throw new UsageError('usage: sideby unattended defer "<one sentence on what was left undone>"')
+    const { addPendingDecision } = await import('../core/unattended-pending.ts')
+    const env = process.env
+    const sessionId = env.CLAUDE_CODE_SESSION_ID || env.CODEX_THREAD_ID
+    const decision = await addPendingDecision(
+      paths.stateDir,
+      {
+        kind: 'deferred',
+        family: deferFamily(env),
+        ...(env.SIDEBY_ACCOUNT ? { account: env.SIDEBY_ACCOUNT } : {}),
+        ...(sessionId ? { sessionId } : {}),
+        cwd: process.cwd(),
+        text,
+      },
+      now(),
+    )
+    if (asJson) json(io, { decision })
+    else
+      io.out(
+        `${c.green('✓')} kept for the user (${decision.id}); they see it with \`sideby unattended pending\`. Go on with the rest of the task.`,
+      )
+    return 0
+  }
+
+  throw new UsageError(
+    'usage: sideby unattended [status|on|off|schedule|pending|defer]; run `sideby unattended --help`',
+  )
 }
 
 /**

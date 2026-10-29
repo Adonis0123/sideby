@@ -1300,6 +1300,75 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .hide-btn.is-on { color: var(--muted); }
 .hide-btn:disabled { opacity: .4; cursor: not-allowed; }
 
+/* Unattended Mode (spec §3.37): the status card (green while on, amber while paused), the chooser under it, the
+   Schedule's rows of day chips and times, and what sessions left for the user, grouped by session. Parts that come
+   and go are animated from the script (uaPatch); these rules only lay them out. */
+.ua-badge { gap: 6px; border-color: color-mix(in srgb, var(--ok-bar) 45%, var(--border-strong)); background: color-mix(in srgb, var(--ok-soft) 70%, var(--surface)); color: var(--ok); }
+.ua-badge .ic { width: 15px; height: 15px; }
+.ua-badge:hover { border-color: var(--ok-bar); }
+.ua-status.is-paused { border-color: color-mix(in srgb, var(--warn-bar) 40%, var(--border)); background: color-mix(in srgb, var(--warn-soft) 50%, var(--surface)); }
+.ua-status.is-paused .hp-status-ic { background: var(--warn-soft); box-shadow: none; color: var(--warn); }
+.ua-status-rest { font-weight: 500; color: var(--text); }
+.ua-chooser { max-width: 560px; margin-top: 12px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.ua-chooser-title { font-weight: var(--strong-weight); margin-bottom: 8px; }
+.ua-opts { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; }
+.ua-opt { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 10px; border-radius: calc(var(--ctl-radius) - 2px); cursor: pointer; transition: background-color .12s; }
+.ua-opt:hover { background: var(--hover); }
+.ua-opt.is-on { background: var(--accent-soft); }
+.ua-radio { display: inline-flex; align-items: center; gap: 10px; padding: 0; border: 0; background: none; color: var(--text); font: inherit; cursor: pointer; min-width: 9.5em; text-align: left; }
+.ua-radio:focus-visible { outline: var(--focus-outline); outline-offset: 3px; border-radius: 4px; }
+.ua-dot { flex: none; width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--border-strong); background: var(--surface); transition: border-color .12s, box-shadow .12s; }
+.ua-radio[aria-checked=true] .ua-dot { border-color: var(--accent); box-shadow: inset 0 0 0 3.5px var(--surface), inset 0 0 0 8px var(--accent); }
+.ua-when { margin-left: auto; font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+input.ua-time { width: 4.6em; height: var(--ctl-h-sm); padding: 0 6px; border: 1px solid var(--border-strong); border-radius: var(--ctl-radius); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; font-variant-numeric: tabular-nums; text-align: center; transition: border-color .12s, box-shadow .12s; }
+input.ua-time:hover:not(:disabled) { border-color: var(--btn-hover-border); }
+input.ua-time:focus { border-color: var(--focus); outline: none; box-shadow: var(--focus-ring); }
+input.ua-time:invalid { border-color: var(--fail); }
+input.ua-time:disabled { background: var(--surface-2); color: var(--faint); }
+input.ua-time::placeholder { color: var(--faint); }
+.ua-slots, .ua-cover, .ua-items { list-style: none; margin: 0; padding: 0; }
+.ua-slots { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.ua-slot { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; padding: 10px 12px 10px 16px; border-top: 1px solid var(--border); }
+.ua-slot:first-child { border-top: 0; }
+.ua-slot-name { min-width: 7em; font-weight: var(--strong-weight); }
+.ua-days { display: inline-flex; gap: 4px; }
+.ua-day { display: inline-grid; place-items: center; min-width: 30px; height: 30px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface); color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; transition: background-color .12s, border-color .12s, color .12s; }
+.ua-day:hover:not(:disabled) { border-color: var(--btn-hover-border); color: var(--text); }
+.ua-day[aria-pressed=true] { background: var(--accent-soft); border-color: transparent; color: var(--accent); font-weight: var(--strong-weight); }
+.ua-day:disabled { cursor: default; }
+.ua-day[aria-pressed=false]:disabled { opacity: .5; }
+.ua-day:focus-visible { outline: var(--focus-outline); outline-offset: 1px; box-shadow: var(--focus-ring); }
+.ua-times { display: inline-flex; align-items: center; gap: 6px; }
+.ua-dash { color: var(--muted); }
+.ua-night { animation: fade-in .16s ease-out; }
+.ua-del { margin-left: auto; }
+.ua-del .ic { width: 15px; height: 15px; }
+.ua-add-row { margin-top: 10px; }
+.ua-empty { gap: 8px; }
+.ua-empty .ic, .ua-first .ic { width: 15px; height: 15px; flex: none; }
+.ua-first { margin-top: 12px; }
+#unattended-page > .note:not(.ua-first, .ua-empty) { margin-bottom: 12px; }
+.ua-sec-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ua-sec-row .tab-count { margin-left: 4px; vertical-align: 1px; }
+.ua-groups { display: flex; flex-direction: column; }
+.ua-group { margin-bottom: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.ua-group-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px 10px 16px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.ua-group-who { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+.ua-cwd { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.ua-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; padding: 12px 12px 12px 16px; border-top: 1px solid var(--border); }
+.ua-item:first-child { border-top: 0; }
+.ua-item-meta { display: flex; align-items: center; gap: 8px; grid-column: 1; }
+.ua-text { grid-column: 1; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
+.ua-text.is-clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden; }
+.ua-item-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: flex-start; gap: 10px; }
+.ua-cover { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.ua-cover li::before { content: "·"; margin-right: 8px; color: var(--faint); }
+:where(:root[data-width=narrow], :root[data-width=phone]) .ua-item { grid-template-columns: minmax(0, 1fr); }
+:where(:root[data-width=narrow], :root[data-width=phone]) .ua-item-actions { grid-column: 1; grid-row: auto; }
+:where(:root[data-width=phone]) .ua-del { margin-left: 0; }
+:where(:root[data-width=phone]) .ua-badge span { display: none; }
+@media (prefers-reduced-motion: reduce) { .ua-opt, .ua-dot, .ua-day, input.ua-time { transition: none; } .ua-night { animation: none; } }
+
 /* Command Palette (spec §3.36): a search box over one list; the dialog keeps its top edge while the list changes. */
 .kbd-inline { font: 11px/16px var(--mono); color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; margin-left: 2px; }
 .dialog.dialog-pal { width: min(620px, calc(100vw - 24px)); flex-direction: column; }

@@ -1,7 +1,7 @@
 // JSON Schemas for every `--json` output. Additive changes keep schemaVersion 1; removals, renames or
 // meaning changes bump it (spec §3.9). `pnpm schemas` writes these to schemas/*.json.
 import { type TSchema, Type } from 'typebox'
-import { ConfigSchema, HandoffSettingsSchema } from '../core/config.ts'
+import { ConfigSchema, HandoffSettingsSchema, UnattendedSlotSchema } from '../core/config.ts'
 
 const Str = Type.String()
 /** Why sideby cannot do something itself (spec §3.23); `reason` keeps the English text. */
@@ -14,6 +14,27 @@ const ReasonCode = Type.Union(
 const Level = Type.Union([Type.Literal('ok'), Type.Literal('warn'), Type.Literal('fail')])
 const Kind = Type.Union([Type.Literal('subscription'), Type.Literal('api')])
 const Version = Type.Literal(1)
+
+/** One Pending Decision of Unattended Mode (spec §3.37). */
+const PendingDecision = Type.Object({
+  id: Str,
+  at: Type.String({ description: 'When it was kept; ISO.' }),
+  kind: Type.Union([Type.Literal('question'), Type.Literal('permission'), Type.Literal('deferred')], {
+    description:
+      'question: the ask tool was refused; permission: a permission request Claude Code was about to show was refused; deferred: kept with `sideby unattended defer`.',
+  }),
+  family: Str,
+  account: Type.Optional(Type.String({ description: 'The account the session ran as.' })),
+  sessionId: Type.Optional(Str),
+  cwd: Type.Optional(Str),
+  agentId: Type.Optional(Type.String({ description: 'The subagent a permission request came from.' })),
+  agentType: Type.Optional(Type.String({ description: 'Its type, such as `general-purpose`.' })),
+  text: Type.String({
+    description:
+      'The question and its options, the tool and what it was to do, or the deferred text; at most 4000 characters.',
+  }),
+  doneAt: Type.Optional(Type.String({ description: 'When it was marked done; ISO.' })),
+})
 
 /** The menu bar shortcut (`sideby menubar hotkey`, spec §3.31). */
 const hotkeyProps = {
@@ -1696,6 +1717,111 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       after: Type.Object({ guard: Type.Boolean(), allow: Type.Array(Str) }),
     },
     { title: 'sideby network on|off|allow --json' },
+  ),
+  unattended: Type.Object(
+    {
+      schemaVersion: Version,
+      on: Type.Boolean({ description: 'Unattended Mode is on now.' }),
+      reason: Type.Union(
+        [
+          Type.Literal('slot'),
+          Type.Literal('manual'),
+          Type.Literal('session'),
+          Type.Literal('paused'),
+          Type.Literal('off'),
+        ],
+        {
+          description:
+            'slot: a Slot of the Schedule turned it on; manual: the user did; session: only this session, started with --unattended; paused: off until the current Slot ends; off.',
+        },
+      ),
+      until: Type.Optional(
+        Type.String({
+          description:
+            'When it turns off (on), or when the pause ends (paused); ISO. Absent for a session alone, and when the Schedule covers every hour (on with no end, or paused until `on`).',
+        }),
+      ),
+      slot: Type.Optional(
+        Type.String({ description: 'The Slot it is in: its name, or its days and times when it has none.' }),
+      ),
+      slotNumber: Type.Optional(
+        Type.Integer({ description: 'That Slot’s number in `schedule`, from 1.', minimum: 1 }),
+      ),
+      next: Type.Optional(
+        Type.Object(
+          {
+            at: Type.String({ description: 'ISO.' }),
+            slot: Str,
+            slotNumber: Type.Optional(Type.Integer({ minimum: 1 })),
+          },
+          { description: 'The next time a Slot turns it on by itself.' },
+        ),
+      ),
+      configured: Type.Boolean({
+        description:
+          'The config has an `unattended` section, so sideby adds its hook to the Claude and Codex sessions it starts.',
+      }),
+      schedule: Type.Array(UnattendedSlotSchema, {
+        description: 'Config `unattended.schedule`, numbered from 1.',
+      }),
+      pending: Type.Integer({ description: 'Open Pending Decisions (`sideby unattended pending`).' }),
+      coverage: Type.Record(
+        Str,
+        Type.Union([Type.Literal('covered'), Type.Literal('needs-trust'), Type.Literal('not-covered')]),
+        {
+          description:
+            'Per family: covered (sessions sideby starts get the hook), needs-trust (Codex runs it once the user trusts it in /hooks), not-covered (no hook sideby can add, or the feature was never used).',
+        },
+      ),
+      slotEnd: Type.Optional(
+        Type.String({
+          description:
+            'When `on --slot-end` would end: the end of the current or next Slot, when that is within 72 hours; ISO.',
+        }),
+      ),
+      manual: Type.Optional(
+        Type.Object(
+          {
+            mode: Type.Union([Type.Literal('on'), Type.Literal('pause')]),
+            until: Type.Optional(
+              Type.String({
+                description:
+                  'ISO. Absent only for a pause made while the Schedule covers every hour: it lasts until `on`.',
+              }),
+            ),
+            at: Type.String({ description: 'When the user chose it; ISO.' }),
+          },
+          { description: 'The manual state in effect now: on until, or paused until.' },
+        ),
+      ),
+      problem: Type.Optional(
+        Type.String({
+          description:
+            'Why sideby cannot keep its state: `<state>/unattended` is a link, someone else’s, or writable by others. Says what to do.',
+        }),
+      ),
+      changed: Type.Optional(
+        Type.Boolean({ description: 'Set by on, off and schedule changes: whether anything changed.' }),
+      ),
+      undo: Type.Optional(
+        Type.String({ description: 'The command that puts back what the change replaced.' }),
+      ),
+    },
+    { title: 'sideby unattended [on|off|schedule …] --json' },
+  ),
+  'unattended-pending': Type.Object(
+    {
+      schemaVersion: Version,
+      pending: Type.Array(PendingDecision, {
+        description: 'Open Pending Decisions, oldest first; with --all the done ones too.',
+      }),
+      done: Type.Optional(Type.Array(Str, { description: '`pending done`: the ids marked done.' })),
+    },
+    { title: 'sideby unattended pending [done <id>|--all] --json' },
+  ),
+  'unattended-defer': Type.Object(
+    { schemaVersion: Version, decision: PendingDecision },
+    { title: 'sideby unattended defer "<text>" --json' },
   ),
   browser: Type.Object(
     {

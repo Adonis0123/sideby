@@ -28,8 +28,9 @@ import {
 } from './handoff-chain.ts'
 import type { HandoffDecision } from './handoff-select.ts'
 import { beforeDashes, type PreparedLaunch, runHost, sidebyBinProblem, spawnHost } from './launch.ts'
-import { withClaudeNetworkHooks, withoutArgs } from './network.ts'
+import { withoutArgs } from './network.ts'
 import { quotaPressure } from './quota-levels.ts'
+import { withClaudeSessionHooks } from './session-hooks.ts'
 
 export interface HandoffIo {
   err(line: string): void
@@ -154,9 +155,11 @@ interface Hop {
 
 export { beforeDashes }
 
-/** A Launch's arguments without Network Guard's Claude `--settings`, which would read as the user's own. */
+/** A Launch's arguments without sideby's own Claude `--settings` (its session hooks), which would read as the user's. */
 function withoutNetwork(l: PreparedLaunch): string[] {
-  return l.family.id === 'claude' ? withoutArgs(l.args, l.networkArgs ?? []) : [...l.args]
+  return l.family.id === 'claude'
+    ? withoutArgs(l.args, l.sessionHookArgs ?? l.networkArgs ?? [])
+    : [...l.args]
 }
 
 /** Whether the `sideby` on PATH has the hook entry: an older install would fail every hook call. */
@@ -205,6 +208,8 @@ export async function runWithHandoff(
     aiTask?: boolean
     /** `--ignore-network` (spec §3.35): no Launch of this run is checked. */
     ignoreNetwork?: boolean
+    /** `--unattended` (spec §3.37): every Launch of this run is unattended, whatever the Schedule says. */
+    unattended?: boolean
   } = {},
 ): Promise<number | null> {
   const grace = opts.exitGraceMs ?? EXIT_GRACE_MS
@@ -213,6 +218,7 @@ export async function runWithHandoff(
   const launchOpts = {
     ...(opts.aiTask ? { aiTask: true } : {}),
     ...(opts.ignoreNetwork ? { ignoreNetwork: true } : {}),
+    ...(opts.unattended ? { unattended: true } : {}),
   }
   const firstLaunch = await rt.prepareLaunch(ref, userArgs, 'run', launchOpts)
   const firstHandoff = firstLaunch.family.handoff
@@ -262,11 +268,13 @@ export async function runWithHandoff(
     const brief = briefPath(dir, n, account.ref)
     const extra = [...(elig.args ?? [])]
     const env = { ...launch.env }
-    // Claude takes one `--settings`: Network Guard's hooks (spec §3.35) go into Auto Handoff's file.
-    const mergeNet = canStart && account.family === 'claude' && Boolean(launch.networkArgs?.length)
+    // Claude takes one `--settings`: sideby's session hooks (Network Guard §3.35, Unattended Mode §3.37) go into Auto
+    // Handoff's file.
+    const sessionArgs = launch.sessionHookArgs ?? launch.networkArgs ?? []
+    const mergeNet = canStart && account.family === 'claude' && sessionArgs.length > 0
     if (canStart) {
       const hookArgs = (await h.hookArgs?.(hookCommand(account.family), rt.paths.stateDir)) ?? []
-      extra.push(...(mergeNet ? await withClaudeNetworkHooks(hookArgs, rt.paths.stateDir) : hookArgs))
+      extra.push(...(mergeNet ? await withClaudeSessionHooks(hookArgs, sessionArgs) : hookArgs))
       env[HANDOFF_ENV.run] = runId
       env[HANDOFF_ENV.family] = account.family
       env[HANDOFF_ENV.dir] = dir

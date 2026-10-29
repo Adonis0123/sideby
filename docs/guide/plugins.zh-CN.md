@@ -49,6 +49,7 @@ export default {
 | `account.create.before` | `new`（CLI 或面板）写入任何文件之前 | 用 `throw api.abort(msg)` 拒绝新建；`ctx` 里有 `family`、`name`、`api`、该家族已有的 `accounts` 和 `config`。CLI 以退出码 1 结束，面板显示 `msg`，所以要写明改怎么做 | 10 秒 |
 | `account.created` | `new` 成功后 | 补文件，用 `ctx.log()` 打印下一步提示 | 30 秒 |
 | `doctor.check` | 体检每个账号时 | 返回 Finding，可以附带 `fix()` | 10 秒 |
+| `unattended.ended` | 一段无人值守（时段或手动 `on`）结束时发出，由后台面板在 30 秒内或下一条 sideby 命令看到；sideby 没运行期间结束的段按先后补发，每次最多 50 个 | 转给你自己的通知工具。投递至少一次：处理没跑完的事件（比如中途 sideby 被结束）会再发一次，`ctx.id` 不变，见过的 id 跳过即可。`ctx` 里还有 `startedAt`、`endedAt`、`reason`（`slot` 或 `manual`）、结束 12 小时后才被看到时的 `late: true`，以及 `pending`：这一段里记下、还没处理的 Pending Decision。它不属于任何家族，注册时不要加 `family` 过滤。sideby 自己不发通知 | 30 秒 |
 
 家族的 `logo` 是面板在卡片和「Tool」下拉框里显示的标志：24×24 视图框里的一条 SVG path，例如取自 [Simple Icons](https://simpleicons.org)。
 

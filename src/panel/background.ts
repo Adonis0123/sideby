@@ -282,9 +282,17 @@ export async function serveDetached(opts: {
   if (processStart) rec.processStart = processStart
   await writeFile(pidFilePath(paths), `${JSON.stringify(rec, null, 2)}\n`, { mode: 0o600 })
   send({ url: srv.url, reused: false })
+  // Unattended Mode (spec §3.37): the background Panel notices a stretch that ended within 30 seconds.
+  const { watchUnattendedEnded } = await import('../core/unattended-ended.ts')
+  const stopWatch = watchUnattendedEnded(paths, async (ctx) => {
+    const rt = await opts.runtimeFactory(await envReady)
+    for (const f of await rt.unattendedEnded(ctx))
+      log(`[${new Date().toISOString()}] unattended.ended: [${f.plugin}] ${f.error}`)
+  })
   await new Promise<void>((resolve) => {
     const stop = (sig: string) => {
       log(`[${new Date().toISOString()}] ${sig}: stopping`)
+      stopWatch()
       void srv.close().finally(resolve)
     }
     process.once('SIGTERM', () => stop('SIGTERM'))

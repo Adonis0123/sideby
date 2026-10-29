@@ -2054,3 +2054,220 @@ export function enableOutcome<
   const bad = r.results.find((x) => !x.ok)
   return bad ? { kind: 'failed', step: bad, plan: r.plan } : { kind: 'done' }
 }
+
+// ---------- Unattended Mode (spec §3.37) ----------
+
+/**
+ * A moment as the Unattended page says it, relative to now in this computer's time zone: today (`08:00`), tomorrow,
+ * a weekday within the coming week (0 = Sunday, as `Date.getDay`), else a date. The page words it in its language.
+ */
+export function uaWhen(
+  atMs: number,
+  nowMs: number,
+): {
+  hhmm: string
+  day: 'today' | 'tomorrow' | 'week' | 'date'
+  weekday: number
+  month: number
+  date: number
+} {
+  const d = new Date(atMs)
+  const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const midnight = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const days = Math.round((midnight(d) - midnight(new Date(nowMs))) / 86400000)
+  const day = days === 0 ? 'today' : days === 1 ? 'tomorrow' : days > 1 && days < 7 ? 'week' : 'date'
+  return { hhmm, day, weekday: d.getDay(), month: d.getMonth() + 1, date: d.getDate() }
+}
+
+/**
+ * The status card's sentence (like Android's Do Not Disturb): on (by a Slot or by hand), paused, or off; with the
+ * Slot, when it ends or comes back, and when a Slot turns it on next. `noEnd`: the Schedule covers every hour.
+ */
+export function uaStatusParts(s: {
+  on: boolean
+  reason: string
+  until?: string
+  slotNumber?: number
+  next?: { at: string; slotNumber?: number }
+}): {
+  state: 'on' | 'paused' | 'off'
+  byHand: boolean
+  slot: number | null
+  until: number | null
+  noEnd: boolean
+  next: { at: number; slot: number | null } | null
+} {
+  const until = s.until ? Date.parse(s.until) : null
+  const state = s.on && s.reason !== 'session' ? 'on' : s.reason === 'paused' ? 'paused' : 'off'
+  return {
+    state,
+    byHand: state === 'on' && s.reason === 'manual',
+    slot: s.slotNumber ? s.slotNumber - 1 : null,
+    until,
+    noEnd: state !== 'off' && until === null,
+    next: s.next
+      ? { at: Date.parse(s.next.at), slot: s.next.slotNumber ? s.next.slotNumber - 1 : null }
+      : null,
+  }
+}
+
+/**
+ * What "Turn on now" offers (spec §3.37): until the current or next Slot ends (only when there is one within 72
+ * hours), 4 hours, 12 hours, or a time the user picks. The first is chosen; without a Slot, 12 hours.
+ */
+export function uaOnChoices(
+  slotEnd: string | undefined,
+  nowMs: number,
+): { options: { id: 'slot' | '4h' | '12h' | 'time'; until: number | null }[]; chosen: 'slot' | '12h' } {
+  const hour = 3600000
+  const options: { id: 'slot' | '4h' | '12h' | 'time'; until: number | null }[] = []
+  if (slotEnd) options.push({ id: 'slot', until: Date.parse(slotEnd) })
+  options.push(
+    { id: '4h', until: nowMs + 4 * hour },
+    { id: '12h', until: nowMs + 12 * hour },
+    { id: 'time', until: null },
+  )
+  return { options, chosen: slotEnd ? 'slot' : '12h' }
+}
+
+/**
+ * When a picked clock time (`HH:MM`) is: today when that is still ahead, else tomorrow, built from the day so a clock
+ * change in between does not move the hour (the server reads `until` the same way). Null for anything else.
+ */
+export function uaPickTime(hhmm: string, nowMs: number): { until: number; tomorrow: boolean } | null {
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(hhmm)
+  if (!m) return null
+  const now = new Date(nowMs)
+  const [y, mo, d] = [now.getFullYear(), now.getMonth(), now.getDate()]
+  const today = new Date(y, mo, d, Number(m[1]), Number(m[2])).getTime()
+  return today > nowMs
+    ? { until: today, tomorrow: false }
+    : { until: new Date(y, mo, d + 1, Number(m[1]), Number(m[2])).getTime(), tomorrow: true }
+}
+
+/** What follows a Slot's end time: `next` (it ends the next day) or `whole` (start equals end: 24 hours). */
+export function uaSlotNight(slot: { start: string; end: string }): 'next' | 'whole' | '' {
+  return slot.end === slot.start ? 'whole' : slot.end < slot.start ? 'next' : ''
+}
+
+/**
+ * A Slot's days as runs of days in a row, Monday first (0 = Monday): `[[0, 4]]` for Monday to Friday, `[[4, 0]]` for
+ * Friday to Monday; `all` when every day is in it.
+ */
+export function uaDayRuns(days: readonly string[]): { all: boolean; runs: [number, number][] } {
+  const days7 = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+  const on = days7.map((d) => days.includes(d))
+  if (on.every(Boolean)) return { all: true, runs: [] }
+  const first = on.indexOf(false)
+  const runs: [number, number][] = []
+  for (let k = 1; k <= 7; k++) {
+    const i = (first + k) % 7
+    if (!on[i]) continue
+    const last = runs[runs.length - 1]
+    if (k > 1 && on[(i + 6) % 7] && last) last[1] = i
+    else runs.push([i, i])
+  }
+  return { all: false, runs: runs.sort((a, b) => a[0] - b[0]) }
+}
+
+/** A day chip pressed: the days with it added or taken away, in week order; null when it would leave none. */
+export function uaToggleDay(days: readonly string[], day: string): string[] | null {
+  const days7 = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+  const next = days.includes(day) ? days.filter((d) => d !== day) : [...days, day]
+  return next.length ? days7.filter((d) => next.includes(d)) : null
+}
+
+/** Whether two Slots cover the same days and times (names aside). */
+export function uaSameSlot(
+  a: { days: readonly string[]; start: string; end: string },
+  b: { days: readonly string[]; start: string; end: string },
+): boolean {
+  return (
+    a.start === b.start &&
+    a.end === b.end &&
+    a.days.length === b.days.length &&
+    a.days.every((d) => b.days.includes(d))
+  )
+}
+
+/**
+ * Pending Decisions grouped by the Session that left them, the group with the newest one first and each group oldest
+ * first; those kept outside a Session (`sideby unattended defer` in a terminal) form one group without a session.
+ */
+export function uaGroupPending<D extends { id: string; at: string; sessionId?: string }>(
+  list: readonly D[],
+): { key: string; first: D; items: D[] }[] {
+  const groups = new Map<string, D[]>()
+  for (const d of [...list].sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.id.localeCompare(b.id))) {
+    const key = d.sessionId ? `s:${d.sessionId}` : 'none'
+    groups.set(key, [...(groups.get(key) ?? []), d])
+  }
+  const newest = (items: D[]) => Date.parse(items[items.length - 1]!.at)
+  return [...groups]
+    .sort(([, a], [, b]) => newest(b) - newest(a))
+    .map(([key, items]) => ({ key, first: items[0]!, items }))
+}
+
+/**
+ * A time typed into the Unattended page's 24-hour fields as `HH:MM`, or null when it is not one. Takes `7:30`,
+ * `07:30`, `730`, `0730`, `7` (07:00), and the full-width colon a Chinese input method types; the field's `pattern`
+ * accepts the same.
+ */
+export function uaParseClock(text: string): string | null {
+  const m = /^ *([01]?[0-9]|2[0-3])(?:[:：.]?([0-5][0-9]))? *$/.exec(text)
+  if (!m) return null
+  return `${m[1]!.padStart(2, '0')}:${m[2] ?? '00'}`
+}
+
+/** An arrow key in a time field: the hour or the minute one up or down, wrapping like the browser's own time field. */
+export function uaStepClock(text: string, part: 'h' | 'm', delta: number): string | null {
+  const clock = /^ *([01]?[0-9]|2[0-3])(?:[:：.]?([0-5][0-9]))? *$/.exec(text)
+  if (!clock) return null
+  let h = Number(clock[1])
+  let m = Number(clock[2] ?? 0)
+  if (part === 'h') h = (((h + delta) % 24) + 24) % 24
+  else m = (((m + delta) % 60) + 60) % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+/**
+ * Whether the Unattended page reads its Pending Decisions now: at once the first time; otherwise not before `nextAt`
+ * (a failed read puts it a full refresh round away, so a count that changed meanwhile cannot make it try again at
+ * once), then when the last read is `everyMs` old, failed, or the status counts a different number than the list.
+ */
+export function uaShouldRead(o: {
+  now: number
+  at: number
+  nextAt: number
+  everyMs: number
+  loading: boolean
+  hasData: boolean
+  failed: boolean
+  statusCount?: number
+  listCount?: number
+}): boolean {
+  if (o.loading) return false
+  if (!o.hasData && !o.failed) return true
+  if (o.now < o.nextAt) return false
+  return (
+    o.now - o.at >= o.everyMs ||
+    o.failed ||
+    (o.hasData && o.statusCount !== undefined && o.statusCount !== o.listCount)
+  )
+}
+
+/**
+ * How many Pending Decisions wait, as the Unattended tab counts them: the ones the latest status lists, less those
+ * being marked done right now (`inflight`, each with the status it was made on). A status that lists its ids
+ * subtracts only the ids it still has, so a status read after the server took a mark does not count it twice; one
+ * without ids subtracts only the marks made on that same status.
+ */
+export function uaWaitingCount(
+  status: { pending: number; pendingIds?: readonly string[] } | null | undefined,
+  inflight: readonly { id: string; on: unknown }[],
+): number {
+  if (!status) return 0
+  if (Array.isArray(status.pendingIds))
+    return status.pendingIds.filter((id) => !inflight.some((x) => x.id === id)).length
+  return Math.max(0, status.pending - inflight.filter((x) => x.on === status).length)
+}

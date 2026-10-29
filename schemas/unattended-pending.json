@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/unattended-pending.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "pending"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "pending": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "at",
+          "kind",
+          "family",
+          "text"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "description": "When it was kept; ISO."
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "question"
+              },
+              {
+                "type": "string",
+                "const": "permission"
+              },
+              {
+                "type": "string",
+                "const": "deferred"
+              }
+            ],
+            "description": "question: the ask tool was refused; permission: a permission request Claude Code was about to show was refused; deferred: kept with `sideby unattended defer`."
+          },
+          "family": {
+            "type": "string"
+          },
+          "account": {
+            "type": "string",
+            "description": "The account the session ran as."
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string",
+            "description": "The subagent a permission request came from."
+          },
+          "agentType": {
+            "type": "string",
+            "description": "Its type, such as `general-purpose`."
+          },
+          "text": {
+            "type": "string",
+            "description": "The question and its options, the tool and what it was to do, or the deferred text; at most 4000 characters."
+          },
+          "doneAt": {
+            "type": "string",
+            "description": "When it was marked done; ISO."
+          }
+        }
+      },
+      "description": "Open Pending Decisions, oldest first; with --all the done ones too."
+    },
+    "done": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "`pending done`: the ids marked done."
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby unattended pending [done <id>|--all] --json"
+}

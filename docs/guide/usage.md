@@ -275,6 +275,33 @@ While it is on, sideby checks before it starts a Claude or Codex account, and be
 - API accounts on another endpoint (DeepSeek and the like) are not checked. An `http://` proxy is supported; a SOCKS proxy cannot be checked through and is treated as "cannot tell".
 - A changed exit address in the same country is only a notice.
 
+## Unattended Mode
+
+You leave several accounts working overnight and find a session in the morning stopped on a question, or on a confirmation Claude Code shows even in bypass mode. Unattended Mode is a state of the whole computer that says nobody is there to answer. While it is on, the Claude and Codex sessions sideby starts do not stop to wait:
+
+- The model is not allowed to ask. It goes on with the recommended option where the choice can be undone, and puts the question and its choice in its final report. Anything hard to undo (deleting, sending or posting something, publishing, deploying, paying) it skips and records with `sideby unattended defer "<one sentence>"`. Each question it could not ask is kept too: these are your **Pending Decisions**.
+- In Claude sessions, a permission prompt Claude Code is about to show (such as "Dangerous rm operation not ruled out", which appears even in bypass mode, and also in background subagents) is answered with "no" before it shows. The model reads how to do the step without a prompt (literal paths, `"${VAR:?}"` for a variable in an `rm` target, plain bash, `rm` as a command of its own) or skips it and records why. Each refused request is kept as a Pending Decision too, with the subagent it came from. For a shell command it keeps only the program and the AI's own note on the step, so a password in the command is never copied; the whole command stays in the session.
+
+Turn it on when you leave, or give it a schedule:
+
+```sh
+sideby unattended on --until 07:30                # also --for 4h, or --slot-end; at most 72 hours
+sideby unattended off                             # inside a Slot: paused until that Slot ends
+sideby unattended schedule preset weeknights      # Monday to Friday, 23:00 to 08:00
+sideby unattended schedule add --days sat,sun --from 01:00 --to 09:00 --name "Weekend nights"
+sideby unattended                                 # on or off, why, until when, the next Slot
+sideby unattended pending                         # what waits for you; pending done <id> or --all
+```
+
+Each Slot of the Schedule is days, a start and an end in this computer's time zone; an end before the start is the next morning, and Slots that overlap count as one; Slots that cover every hour of the week never end, and `off` then pauses until you turn it on again. `on` without a time lasts until the current or next Slot ends, else 12 hours; when it overlaps a Slot, the later end wins. Every change prints the command that undoes it. To make one session unattended whatever the Schedule says, start it with `--unattended`: `sideby run <account> --unattended`, `sideby next <family> --unattended`, and the same after a short command or a pick command (`ccw --unattended`). Your AI can do all of this for you: tell it you are leaving for the night.
+
+- It covers the Claude and Codex sessions sideby starts after you first use it: sideby adds its hook to each of them (through `--settings` for Claude, `-c hooks` for Codex) and writes nothing into the account folders. Sessions that were already running then are not covered; neither are Grok, pi, desktop apps or `claude` and `codex` run directly. A Claude session started with its own `--settings` is not covered either.
+- Codex runs the hook only after you trust it once: type `/hooks` in that account and trust `unattended-hook`. In Codex it covers questions only (Codex asks them mostly in Plan mode); Codex's own approval prompts still wait for you, so Claude sessions gain the most.
+- The hook reads the Schedule and the manual state on every call, so a session started at 22:30 stops asking when the 23:00 Slot begins, without a restart. When the hook itself fails, the session behaves as it would without the feature.
+- Pending Decisions stay on this computer until you mark them done, and are deleted 30 days after that. When a stretch ends, sideby tells plugins once (the `unattended.ended` event, see [Plugins](plugins.md)), so a plugin can pass it on to your own notifier; sideby itself sends nothing.
+- `sideby config unset unattended` stops adding the hook to new sessions.
+- The Panel has a page of its own, **Unattended**: the status in one line ("On · Slot “Weeknights” · until 08:00"), **Turn on now** with a choice of how long (until the Slot ends, 4 hours, 12 hours, or a time you pick), the Schedule as rows of day chips and times that save as you change them (each change has **Undo**), what waits for you grouped by session with **Done** and **Back to the session**, and where it works. While it is on, the header shows **Unattended · until 08:00**.
+
 ## Remote Control
 
 Claude Code's Remote Control connects a session to claude.ai/code and the Claude mobile app, where every device signed in to that claude.ai account can read and continue it. Turning on "Enable Remote Control for all sessions" in `/config` saves `remoteControlAtStartup: true` in `settings.json`, and since accounts usually link that file to the main one, every account connects.

@@ -1,8 +1,7 @@
 // Network Guard (spec §3.35, ADR-0053): which address each Account's Egress is checked at, the check before a
 // Launch, and the hooks that keep checking inside a session sideby starts. The check itself is core/egress.ts.
 import { mkdir, readFile } from 'node:fs/promises'
-import { extname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import type { Account, Env } from '../types.ts'
 import type { Config } from './config.ts'
 import {
@@ -21,6 +20,7 @@ import {
 } from './egress.ts'
 import { UserError } from './errors.ts'
 import { writeFileAtomic } from './fs-safe.ts'
+import { type SessionHookPart, sessionHookArgs, sidebyHookCommand, withClaudeHooks } from './session-hooks.ts'
 import { inCi } from './update.ts'
 
 /** Families Network Guard covers in v1. */
@@ -129,19 +129,7 @@ export function ipChangedLine(v: Verdict, env: Env): string | undefined {
     : 'sideby: the network exit address changed since the last check (same country, nothing blocked).'
 }
 
-/**
- * The command a Host runs for the hook: this Node and this sideby by absolute path, never `sideby` by name. A
- * missing or older `sideby` on PATH would fail the hook, and a failing hook lets the Host go on.
- */
-function hookCommand(family: string, event: string): string {
-  const main = fileURLToPath(
-    new URL(`../cli/main${extname(fileURLToPath(import.meta.url))}`, import.meta.url),
-  )
-  const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
-  const safe = (s: string) => !/["\\\n]/.test(s)
-  const bin = safe(process.execPath) && safe(main) ? `${q(process.execPath)} ${q(main)}` : 'sideby'
-  return `${bin} network-hook ${family} ${event}`
-}
+const hookCommand = (family: string, event: string) => sidebyHookCommand('network-hook', family, event)
 const HOOK_EVENTS = ['UserPromptSubmit', 'PreToolUse'] as const
 
 /** Claude Code `hooks` entries for Network Guard, to put in a `--settings` file (alone or with Auto Handoff's). */
@@ -154,23 +142,23 @@ export function claudeNetworkHooks(): Record<string, unknown[]> {
 /** The file holding Network Guard's Claude hooks alone. */
 export const claudeNetworkSettings = (stateDir: string) => join(networkDir(stateDir), 'claude-settings.json')
 
+/** Network Guard's session hooks (spec §3.35), to combine with others through `sessionHookArgs`. */
+export function networkHookPart(): SessionHookPart {
+  return {
+    id: 'network',
+    claude: claudeNetworkHooks(),
+    codex: Object.fromEntries(
+      HOOK_EVENTS.map((e) => [e, [`{hooks=[{type="command",command="${hookCommand('codex', e)}"}]}`]]),
+    ),
+  }
+}
+
 /**
- * Host arguments that add Network Guard's hooks to a session: Claude through a `--settings` file sideby writes,
+ * Host arguments that add Network Guard's hooks alone to a session: Claude through a `--settings` file sideby writes,
  * Codex through `-c hooks.*`. Nothing is written into a Host directory.
  */
 export async function networkHookArgs(family: string, stateDir: string): Promise<string[]> {
-  if (family === 'claude') {
-    const file = claudeNetworkSettings(stateDir)
-    await mkdir(networkDir(stateDir), { recursive: true, mode: 0o700 })
-    await writeFileAtomic(file, `${JSON.stringify({ hooks: claudeNetworkHooks() }, null, 2)}\n`, 0o600)
-    return ['--settings', file]
-  }
-  if (family === 'codex')
-    return HOOK_EVENTS.flatMap((e) => [
-      '-c',
-      `hooks.${e}=[{hooks=[{type="command",command="${hookCommand('codex', e)}"}]}]`,
-    ])
-  return []
+  return sessionHookArgs(family, stateDir, [networkHookPart()])
 }
 
 /** The line a Claude Launch prints when the user's own `--settings` leaves no room for the session hooks. */
@@ -213,25 +201,14 @@ export async function withClaudeNetworkHooks(
   hookArgs: readonly string[],
   stateDir: string,
 ): Promise<string[]> {
-  const at = hookArgs.indexOf('--settings')
-  const file = at === -1 ? undefined : hookArgs[at + 1]
-  let settings: { hooks?: Record<string, unknown[]> } = {}
-  if (file) {
-    try {
-      settings = JSON.parse(await readFile(file, 'utf8')) as typeof settings
-    } catch {
-      settings = {}
-    }
-  }
-  const hooks: Record<string, unknown[]> = { ...(settings.hooks ?? {}) }
-  for (const [e, list] of Object.entries(claudeNetworkHooks())) hooks[e] = [...(hooks[e] ?? []), ...list]
-  const out = join(networkDir(stateDir), 'claude-settings-handoff.json')
-  await mkdir(networkDir(stateDir), { recursive: true, mode: 0o700 })
-  await writeFileAtomic(out, `${JSON.stringify({ ...settings, hooks }, null, 2)}\n`, 0o600)
-  return at === -1 ? [...hookArgs, '--settings', out] : hookArgs.map((a, i) => (i === at + 1 ? out : a))
+  return withClaudeHooks(
+    hookArgs,
+    claudeNetworkHooks(),
+    join(networkDir(stateDir), 'claude-settings-handoff.json'),
+  )
 }
 
-/** `args` without the Network Guard arguments `networkHookArgs` added (Auto Handoff merges them into its own). */
+/** `args` without one run of arguments sideby added (Auto Handoff merges its session hooks into its own file). */
 export function withoutArgs(args: readonly string[], drop: readonly string[]): string[] {
   if (!drop.length) return [...args]
   for (let i = 0; i + drop.length <= args.length; i++) {
