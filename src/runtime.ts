@@ -148,12 +148,18 @@ export interface ResumeLaunch {
   /** The session the Host arguments resume by id, when they name one. */
   sessionId?: string
   /**
-   * Set when the session lives in a non-main Account and `launch` starts that Account as `run` would, or with
-   * `newSession` the Account (main included) that started a session the Host never saved.
+   * Set when the session lives in a non-main Account and `launch` starts that Account as `run` would, with `run` the
+   * Main Account that holds it, or with `newSession` the Account (main included) that started a session the Host never
+   * saved.
    */
   account?: Account
   /** Set when the session was never saved: `launch` starts a new session in `account` without the resume (ADR-0009). */
   newSession?: true
+  /**
+   * Set when `account` is the Main Account and config `handoff.auto` is on (ADR-0058): the caller starts it exactly as
+   * `sideby run <account> -- <args>` would, so Auto Handoff applies, instead of `launch` (the Host unchanged).
+   */
+  run?: { args: string[] }
 }
 
 /** What happened to the alias asked for with a new Account. */
@@ -1282,13 +1288,19 @@ export async function createRuntime(
       if (family.selectVar && env[family.selectVar]) return { launch: await guarded(host) }
       const route = await findResumeRoute(family, await accounts(), userArgs)
       const id = route.sessionId ? { sessionId: route.sessionId } : {}
+      // In the Main Account with Auto Handoff on, start it as `sideby run` would (ADR-0058).
+      const asRun = route.account?.isMain && handoffSettings(config).auto
       if (route.neverSaved && route.account && family.withoutResume) {
         const args = family.withoutResume(userArgs)
+        if (asRun)
+          return { launch: { ...host, args }, ...id, account: route.account, newSession: true, run: { args } }
         const launch = route.account.isMain
           ? await guarded({ ...host, args })
           : await rt.prepareLaunch(route.account.ref, args, 'run', ro)
         return { launch, ...id, account: route.account, newSession: true }
       }
+      if (asRun && !route.neverSaved)
+        return { launch: host, ...id, account: route.account!, run: { args: [...userArgs] } }
       if (!route.account || route.account.isMain || route.neverSaved)
         return { launch: await guarded(host), ...id }
       return {

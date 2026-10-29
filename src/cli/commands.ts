@@ -716,12 +716,23 @@ async function runPick(
  * `sideby resume <family>`: what the Host-named shell function calls (spec §3.15). Starts the Account that holds the
  * session the arguments resume by id, a new session where a never-saved one started (ADR-0009), or the Host unchanged.
  */
-export async function cmdResume(a: ParsedArgs, io: Io): Promise<number> {
+export async function cmdResume(a: ParsedArgs, io: Io, runtime?: Runtime): Promise<number> {
   const [family, ...extra] = a.positionals
   if (!family) throw new UsageError('usage: sideby resume <family> [-- host args]')
-  const rt = await createRuntime()
+  const rt = runtime ?? (await createRuntime())
   const { args, flags } = takeLaunchFlags([...extra, ...a.rest])
   const route = await rt.resumeLaunch(family, args, flags)
+  // The Main Account under `handoff.auto` starts exactly as `sideby run` would (ADR-0058).
+  if (route.run && route.account) {
+    io.err(
+      c.dim(
+        route.newSession
+          ? `sideby: session ${route.sessionId} was never saved; starting a new session in ${route.account.ref} with Auto Handoff`
+          : `sideby: session ${route.sessionId} is in ${route.account.ref}; starting it there with Auto Handoff`,
+      ),
+    )
+    return runAccount(rt, route.account.ref, route.run.args, io, flags)
+  }
   if (route.launch.notice) io.err(c.cyan(route.launch.notice))
   if (route.newSession)
     io.err(
