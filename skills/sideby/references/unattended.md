@@ -1,6 +1,6 @@
 # Unattended Mode: sessions that do not stop to wait for a person
 
-Unattended Mode (spec §3.37, ADR-0058) is one state for the whole computer: nobody is there to answer, so the Claude and Codex sessions sideby starts never stop to wait. While it is on, sideby's hook refuses the Host's question tool (Claude `AskUserQuestion`, Codex `request_user_input`) and tells the model to take the recommended option where the choice can be undone and to skip anything hard to undo; each refused question is kept as a **Pending Decision**. In Claude sessions it also answers "no" to every permission prompt Claude Code is about to show (even in bypass mode, and in subagents), with how to do the step without one; each refused request is kept as a Pending Decision too. Codex's own approval prompts still wait.
+Unattended Mode (spec §3.37, ADR-0058) is one state for the whole computer: nobody is there to answer, so the Claude and Codex sessions sideby starts never stop to wait. While it is on, sideby's hook refuses the Host's question tool (Claude `AskUserQuestion`, Codex `request_user_input`) and tells the model to take the recommended option where the choice can be undone and to skip anything hard to undo; each refused question is kept as a **Pending Decision**. When the model ends its turn on a question written as text instead, the hook sends the session on once with the same instructions and keeps that question too. In Claude sessions it also answers "no" to every permission prompt Claude Code is about to show (even in bypass mode, and in subagents), with how to do the step without one; each refused request is kept as a Pending Decision too; and it declines MCP server forms, keeping what the server asked. Codex's own approval prompts still wait.
 
 ## Turn it on when the user is leaving
 
@@ -14,7 +14,7 @@ sideby unattended on --until 08:00 --json   # or --for 4h; at most 72 hours
 Tell the user, in one line each:
 - It covers Claude and Codex sessions sideby starts (`sideby run`, short commands, pick commands, `sideby next`, Auto Handoff, AI Tasks). Running `claude` or `codex` directly, Grok, pi and desktop apps are not covered.
 - Sessions started before the feature was first used have no hook. If `configured` was `false` before this command, the sessions already running are not covered: suggest restarting long tasks with `sideby run <account> --unattended`.
-- A Codex account runs the hook only after the user trusts it once: in that account type `/hooks` and trust `unattended-hook` (`coverage.codex` is `needs-trust`).
+- A Codex account runs the hooks only after the user trusts them once: in that account type `/hooks` and trust both `unattended-hook` entries, before a question and at the end of a turn (`coverage.codex` is `needs-trust`).
 - `sideby unattended off --json` turns it off; inside a Slot it pauses until that Slot ends.
 
 Every change prints `undo`, the command that puts back what was there.
@@ -36,6 +36,8 @@ sideby unattended schedule remove 2 --json            # the number `sideby unatt
 `sideby run <account> --unattended` (also `sideby next <family> --unattended`, `sideby resume`, short commands and pick commands) makes that one session unattended whatever the Schedule says. Give the user the command; do not start an interactive session yourself.
 
 ## When a session was refused a question or a permission
+
+While Unattended Mode is on, do not end your turn on a question either: a turn that ends on one (a `需要你拍板` line, a last line ending in `?`, "Want me to …", "要不要 …") is sent back to you once with the same instructions. End with a final report instead.
 
 The refusal tells you what to do: go on with the recommended option where it can be undone, and list the question and your choice in your final report. A refused permission means Claude Code wanted a person to confirm that step: rewrite it so it needs none (literal paths, `"${VAR:?}"` for a variable in an `rm` target, plain bash syntax, `rm` as a command of its own), or skip it. For anything hard to undo (deleting, sending or posting outside, publishing, deploying, paying), skip it and record it:
 

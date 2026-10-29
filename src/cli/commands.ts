@@ -4434,7 +4434,7 @@ function printUnattended(
   else
     io.out(
       c.dim(
-        'Covers Claude sessions sideby starts (questions and permission prompts), and questions in Codex sessions once you trust `unattended-hook` in /hooks; Codex approval prompts still wait. Not Grok, pi, desktop apps or sessions started without sideby.',
+        'Covers Claude sessions sideby starts (questions, permission prompts and MCP forms), and questions in Codex sessions once you trust both `unattended-hook` entries in /hooks; Codex approval prompts still wait. Not Grok, pi, desktop apps or sessions started without sideby.',
       ),
     )
 }

@@ -280,7 +280,9 @@ sideby network check               # 现在查一次
 睡前让几个账号跑长任务，第二天却发现会话停在一个提问上，或停在 Claude Code 连 bypass 模式也会弹的确认框上。无人值守是整台电脑的一个状态，意思是现在没人能回答。开着时，sideby 启动的 Claude 和 Codex 会话不停下来等人：
 
 - 模型不能提问。可回退的选择按推荐继续，把问题和选择写进最终汇报；删除、对外发送、发布、部署、付费这类难回退的事不做，跳过并用 `sideby unattended defer "<一句话>"` 记下。没能问出口的问题也会记下：这些就是你的 **Pending Decision（待你决定）**。
+- 模型不调提问工具、而是在回合最后写一句文字问题就停下时（「Want me to …?」「需要你拍板」「你回来后选一个」），会话会带着同样的指示再接着跑一次，问题也记成一条 Pending Decision。以做完的汇报结尾的回合照常结束。
 - 在 Claude 会话里，Claude Code 要弹出的权限确认（比如 bypass 模式下也会弹的「Dangerous rm operation not ruled out」，后台子 agent 里也一样）在弹出之前就被回答「不行」。模型会读到怎么不用确认就做完这一步（写死路径、`rm` 目标里的变量写成 `"${VAR:?}"`、普通 bash 写法、`rm` 单独一条命令），或者跳过并记下原因。每个被拒的请求也记成一条 Pending Decision，写明来自哪个子 agent。shell 命令只记程序名和 AI 自己对这一步的说明，命令里的密码不会被抄下来；整条命令留在会话里。
+- 在 Claude 会话里，MCP server 要你填的表单不弹出，直接回绝；server 问了什么记成一条 Pending Decision。
 
 离开时打开，或者给它一张时间表：
 
@@ -296,7 +298,7 @@ sideby unattended pending                         # 等你处理的事；pending
 **Schedule（时间表）** 里的每个 **Slot（时段）** 是星期几、开始和结束时间，按本机时区；结束早于开始就是到第二天早上，重叠的时段算一段；时段连起来覆盖一周每个小时时没有结束时间，这时 `off` 会一直暂停到你再打开。`on` 不带时间时开到当前或下一个时段结束，没有时段就开 12 小时；和时段重叠时取更晚的结束时间。每次改动都会打印撤销它的命令。只想让某一个会话无人值守、不管时间表时，启动时加 `--unattended`：`sideby run <account> --unattended`、`sideby next <family> --unattended`，短命令和挑选命令后面也一样（`ccw --unattended`）。这些都可以交给你的 AI：告诉它你今晚要离开就行。
 
 - 它覆盖你第一次用它之后 sideby 启动的 Claude 和 Codex 会话：sideby 给每个会话加上自己的 hook（Claude 走 `--settings`，Codex 走 `-c hooks`），不往账号文件夹里写任何东西。那之前已经在跑的会话不受影响；Grok、pi、桌面应用和直接运行的 `claude`、`codex` 也不受影响。自己传了 `--settings` 的 Claude 会话同样不受影响。
-- Codex 要你先信任一次这个 hook 才会运行它：在那个账号里输入 `/hooks`，信任 `unattended-hook`。在 Codex 里它只管提问（Codex 主要在 Plan 模式下提问）；Codex 自己的批准提示仍会等你，所以 Claude 会话受益最多。
+- Codex 要你先信任一次这些 hook 才会运行它们：在那个账号里输入 `/hooks`，信任两个 `unattended-hook`（提问前一个，回合结束时一个）。在 Codex 里它只管提问（Codex 主要在 Plan 模式下提问）；Codex 自己的批准提示仍会等你，所以 Claude 会话受益最多。
 - hook 每次调用都现读时间表和手动状态，所以 22:30 启动的会话到 23:00 时段开始时就不再提问，不用重启。hook 自己出错时，会话就像没有这个功能时一样运行。
 - Pending Decision 只存在本机，直到你标成已处理，标完 30 天后删除。一段无人值守结束时，sideby 通知插件一次（`unattended.ended` 事件，见[插件](plugins.zh-CN.md)），插件可以把它转给你自己的通知工具；sideby 自己不发任何通知。
 - `sideby config unset unattended` 之后启动的会话就不再加这个 hook。

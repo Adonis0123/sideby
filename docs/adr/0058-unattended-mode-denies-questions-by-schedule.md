@@ -38,3 +38,33 @@ Options considered:
 - While on, a Claude session cannot get a permission it would have asked for, even one the user would have granted; the step is rewritten, skipped or left in the Pending Decision list.
 - Codex questions are denied only after the user trusts the hooks once, and Codex asks only in Plan mode by default, so most of the benefit is in Claude sessions.
 - The model, not sideby, decides what "recommended" and "hard to undo" mean; the Pending Decision list is where the user checks those choices.
+
+## Amendment (2026-10-29): a turn that ends on a question written as text
+
+Refusing the ask tool did not cover a model that asks in plain text. Models often skip the tool and end their turn on a written question ("需要你拍板 …", "Want me to …?", "pick one when you are back"), and then stop; nothing caught that, so the session sat idle until someone came back. Observed on 2026-10-29 with Claude Code and Unattended Mode on: four times in one night across sessions, once right after the ask tool was refused (the model asked the same thing as text).
+
+What the Hosts offer (checked 2026-10-29):
+
+- Claude Code: a `Stop` hook gets `stop_hook_active` ("`true` when Claude Code is already continuing as a result of a stop hook") and `last_assistant_message`; `{"decision":"block","reason":…}` on stdout, or exit 2 with stderr, keeps Claude going with the reason as its next instruction, and "after stop hooks have continued the turn eight times in a row, Claude Code overrides the next block and ends the turn" (https://code.claude.com/docs/en/hooks#stop). An `Elicitation` hook can answer an MCP server's form with `{"hookSpecificOutput":{"hookEventName":"Elicitation","action":"decline"}}`; the server receives `decline` and no dialog appears; Claude Code discards the hook's `reason` (https://code.claude.com/docs/en/hooks#elicitation).
+- Codex (codex-cli 0.165.0, `codex-rs/hooks/src/events/stop.rs` and `engine/output_parser.rs` at tag `rust-v0.165.0`): `Stop` hooks get the same `stop_hook_active` and `last_assistant_message`; `"decision":"block"` with a non-empty `reason` (or exit 2 with stderr) blocks the stop and turns the reason into a continuation prompt. Hooks passed with `-c hooks.*` are trusted one by one in `/hooks`: the trusted hash covers the event, the matcher and the command (`engine/discovery.rs`). Codex has no `Elicitation` hook event.
+
+Options considered:
+
+- Block every stop while Unattended Mode is on until the model says it is done. Rejected: a finished report would be kept going for nothing, up to Claude Code's cap of eight.
+- Ask a model whether the message is a question (a prompt-based `Stop` hook). Rejected: a model call on every turn end, with no fixed answer to test.
+- Tell from the end of the message with a short list of patterns, block once, and let `stop_hook_active` end the turn the second time. Chosen.
+
+Decision:
+
+- `unattended-hook` is also injected on `Stop` (Claude `--settings`, no matcher; Codex `-c hooks.Stop`, no matcher) and, in Claude, on `Elicitation` (matcher `*`).
+- On `Stop`, while on, with `stop_hook_active` exactly `false` and the last message ending on a question (`endingQuestion` in `src/unattended/hook.ts`: code blocks, inline code and `>` quotes removed, then the last 600 characters; a line that starts with the `需要你拍板` or `Needs your decision` marker (text may follow a colon, and other paragraphs may follow it), a last line ending in `?` or `？` (or a closing list of options right after such a line), or one of `QUESTION_PATTERNS` in the last paragraph, with the paragraph before it when the last is a list, and not right after a negation such as 无需 or "no need"), it answers `{"decision":"block","reason":…}` with exit 0. The reason, in English or Chinese like the ask tool's: nobody is here, do not wait or ask again; take the recommended option where the choice can be undone and carry on to the end; skip anything hard to undo and record it with `defer`; end with a final report listing the choices and the recorded items, without asking. The question is kept as a Pending Decision of kind `question` (deduplicated). The patterns only take asks that wait for an answer, so closings such as "Let me know if you have any questions" stop normally.
+- On `Elicitation`, while on, it declines and keeps a `question` Pending Decision with the server's name and its `message` only, never the form's schema or defaults.
+- Off, `stop_hook_active` true or missing, a message that is not a question, bad input or any error: exit 0, no output, the turn ends as it would without the hook.
+- Codex accounts already told to trust the hook are told once more, since the `Stop` hook needs a trust of its own.
+
+Consequences:
+
+- A turn that ends on a question runs once more, so the model takes the recommended path and writes a report; it never loops, since the second stop has `stop_hook_active` set.
+- A finished report that happens to end on a question or a listed pattern runs once more too; the model then writes its report again. The pattern list is kept short for that reason.
+- The hook now runs at the end of every turn in a covered session (about 40 ms); with Unattended Mode off it reads two files and exits.
+- In Codex, the text-question cover works only once the user trusts the new `Stop` hook in `/hooks`.

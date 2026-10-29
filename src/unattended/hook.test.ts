@@ -11,7 +11,14 @@ import { type FakeHome, withFakeHome } from '../../testing/index.ts'
 import { resolvePaths } from '../core/paths.ts'
 import { listPendingDecisions } from '../core/unattended-pending.ts'
 import { writeUnattendedOverride } from '../core/unattended-state.ts'
-import { commandProgram, permissionText, questionText, runUnattendedHook } from './hook.ts'
+import {
+  commandProgram,
+  endingQuestion,
+  permissionText,
+  QUESTION_PATTERNS,
+  questionText,
+  runUnattendedHook,
+} from './hook.ts'
 
 const now = new Date(2026, 9, 26, 12)
 const sink = () => {
@@ -41,6 +48,19 @@ const permission = (command: string, agent?: { id: string; type: string }) =>
     tool_input: { command, description: 'Find top-level statements' },
     ...(agent ? { agent_id: agent.id, agent_type: agent.type } : {}),
   })
+
+/** A Stop as Claude Code and Codex send it at the end of a turn. */
+const stopInput = (message: string, active = false) =>
+  JSON.stringify({
+    hook_event_name: 'Stop',
+    session_id: 's1',
+    cwd: '/tmp/project',
+    stop_hook_active: active,
+    last_assistant_message: message,
+  })
+const ASKED = '改完了登录页，测试都过了。\n\n需要你拍板\n\n1. 旧接口现在删掉吗？\n2. 还是留到下个版本？'
+const REPORT =
+  'Done: the login page uses the new client and `pnpm check` passes.\n\nDeferred: publishing v0.31 (recorded with sideby unattended defer).'
 
 async function turnOn(h: FakeHome) {
   await h.write('.config/sideby/config.json', '{"unattended":{}}')
@@ -421,6 +441,219 @@ describe('unattended hook', () => {
       'Q1\n- x\n- y\n\nQ2',
     )
     assert.equal(questionText({ foo: 1 }), '{"foo":1}')
+  })
+})
+
+describe('unattended hook at the end of a turn', () => {
+  it('keeps a turn that ended on a question going once, with the reason, and keeps the question', async () => {
+    await withFakeHome(async (h) => {
+      await turnOn(h)
+      const r = await run(h, ['claude', 'Stop'], stopInput(ASKED), { SIDEBY_ACCOUNT: 'claude:work' })
+      assert.equal(r.code, 0)
+      assert.equal(r.err, '')
+      const answer = JSON.parse(r.out!)
+      assert.equal(answer.decision, 'block')
+      assert.match(answer.reason, /Nobody is here to answer/)
+      assert.match(answer.reason, /recommended option/)
+      assert.match(answer.reason, /sideby unattended defer "<one sentence>"/)
+      assert.match(answer.reason, /final report/)
+      assert.match(answer.reason, /kept your question/)
+      const [d, ...more] = await listPendingDecisions(resolvePaths(h.env).stateDir)
+      assert.equal(more.length, 0)
+      assert.equal(d?.kind, 'question')
+      assert.equal(d?.family, 'claude')
+      assert.equal(d?.account, 'claude:work')
+      assert.equal(d?.sessionId, 's1')
+      assert.equal(d?.cwd, '/tmp/project')
+      assert.equal(d?.text, '需要你拍板\n\n1. 旧接口现在删掉吗？\n2. 还是留到下个版本？')
+      // Inline code is kept as written in the Pending Decision.
+      await run(
+        h,
+        ['claude', 'Stop'],
+        stopInput('改好了。\n\n要不要改 `~/coding/sideby` 的 `network-hook`？'),
+      )
+      const texts = (await listPendingDecisions(resolvePaths(h.env).stateDir)).map((x) => x.text)
+      assert.ok(texts.includes('要不要改 `~/coding/sideby` 的 `network-hook`？'), texts.join(' | '))
+      // The same question again: kept once.
+      assert.equal(JSON.parse((await run(h, ['claude', 'Stop'], stopInput(ASKED))).out!).decision, 'block')
+      assert.equal((await listPendingDecisions(resolvePaths(h.env).stateDir)).length, 2)
+    })
+  })
+
+  it('says it in Chinese, and does the same for Codex', async () => {
+    await withFakeHome(async (h) => {
+      await turnOn(h)
+      const r = await run(h, ['codex', 'Stop'], stopInput('Want me to open the PR now?'), {
+        LANG: 'zh_CN.UTF-8',
+      })
+      assert.equal(r.code, 0)
+      const answer = JSON.parse(r.out!)
+      assert.equal(answer.decision, 'block')
+      assert.match(answer.reason, /没人能回答/)
+      assert.match(answer.reason, /最终汇报/)
+      assert.equal((await listPendingDecisions(resolvePaths(h.env).stateDir))[0]?.family, 'codex')
+    })
+  })
+
+  it('lets the turn end: already kept going once, Unattended Mode off, a finished report, bad input', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.config/sideby/config.json', '{"unattended":{}}')
+      assert.deepEqual(await run(h, ['claude', 'Stop'], stopInput(ASKED)), { code: 0, err: '' })
+      await turnOn(h)
+      assert.deepEqual(await run(h, ['claude', 'Stop'], stopInput(ASKED, true)), { code: 0, err: '' })
+      assert.deepEqual(await run(h, ['claude', 'Stop'], stopInput(REPORT)), { code: 0, err: '' })
+      assert.deepEqual(await run(h, ['claude', 'Stop'], stopInput('')), { code: 0, err: '' })
+      assert.deepEqual(await run(h, ['claude', 'Stop'], 'not json'), { code: 0, err: '' })
+      assert.deepEqual(await run(h, ['claude', 'Stop'], '[1]'), { code: 0, err: '' })
+      // No `stop_hook_active` at all: it cannot tell whether it already kept this turn going.
+      assert.deepEqual(
+        await run(h, ['claude', 'Stop'], JSON.stringify({ last_assistant_message: 'Should I go on?' })),
+        { code: 0, err: '' },
+      )
+      assert.deepEqual(await run(h, ['grok', 'Stop'], stopInput(ASKED)), { code: 0, err: '' })
+      assert.deepEqual(await listPendingDecisions(resolvePaths(h.env).stateDir), [])
+    })
+  })
+
+  it('still keeps the turn going when keeping the question fails, and says so', async () => {
+    await withFakeHome(async (h) => {
+      await turnOn(h)
+      await h.write('.local/state/sideby/unattended/pending', 'x')
+      const r = await run(h, ['claude', 'Stop'], stopInput(ASKED))
+      const answer = JSON.parse(r.out!)
+      assert.equal(answer.decision, 'block')
+      assert.match(answer.reason, /could not keep your question/)
+    })
+  })
+})
+
+describe('telling a question at the end of a message', () => {
+  it('finds the asks of both languages', () => {
+    const asks = [
+      ASKED,
+      '## 需要你拍板\n\n用 A 还是 B',
+      '**需要你拍板**：\n- 删掉旧表\n- 保留',
+      '**需要你拍板**：今天的导出卡片正式发版时，是接受这一次缓存期内显示兜底文字，还是让 claude:work 给 `director-export` 单独挂一个新地址？我建议接受：影响有时限、不丢数据，而换地址在 ChatGPT 上有已知风险。\n\n另外，sideby 待决清单里的「轻卡片改造」那条已经过时，可以忽略。',
+      'Needs your decision: ship today or wait for the review.\n\nThe rest is done.',
+      'All done except the migration.\n\nShould I run it against staging?',
+      'Tests pass. Want me to open a PR',
+      'I found two ways.\n\nWhich do you prefer:\n1. Keep the cache\n2. Drop it',
+      'Let me know which option you want.',
+      'Let me know if you would like me to push it.',
+      'Would you like me to delete the old files as well',
+      'The build is fixed (see `a?b`). Is this what you wanted? ',
+      '改好了。\n\n要不要顺便把旧配置也删了',
+      '两个方案都能用，你来决定。',
+      '你回来后选一个：\n\n1. 先发布\n2. 先补测试',
+      '部署前请确认环境变量。',
+      '这样改可以吗（不改也行）',
+      '还差最后一步，要现在推送吗？）',
+      'Two ways to go.\nWhich one?\n- Keep the cache\n- Drop it',
+    ]
+    for (const m of asks) assert.ok(endingQuestion(m), m)
+  })
+
+  it('lets a finished report end, in both languages', () => {
+    const reports = [
+      REPORT,
+      'Done. All 42 tests pass.\n\nLet me know if you have any questions.',
+      'Why did it fail? The cache key left out the locale.\n\nFixed it and added a test; `pnpm check` passes.',
+      'Fixed the regex `^a?$` and the parser:\n\n```ts\nconst ok = x?.y ?? z\n```',
+      '已完成：登录页改用新客户端，pnpm check 通过。\n\n已跳过：发布 v0.31（已用 sideby unattended defer 记下）。',
+      '为什么会失败？缓存键里少了语言。\n\n已修复并补了测试。',
+      '我按推荐选了方案 A，理由写在上面。如有问题随时告诉我。',
+      'Why did it fail?\nFixed the cache key; all tests pass.',
+      '已完成，无需你来决定。',
+      'Nothing left to do: no need to confirm anything.',
+      '全部改完，不用你确认。',
+      'Done.\n\n> Should I also delete the old branch?\n\nLeft the branch as it is.',
+      'Done; the check is below.\n\n~~~sh\nwhich node || echo "Want me to install it?"\n~~~',
+      '',
+      '   ',
+    ]
+    for (const m of reports) assert.equal(endingQuestion(m), undefined, m)
+  })
+
+  it('keeps the question as written, inline code included', () => {
+    assert.equal(
+      endingQuestion('改好了。\n\n要不要改 `~/coding/sideby` 的 `network-hook`？'),
+      '要不要改 `~/coding/sideby` 的 `network-hook`？',
+    )
+    assert.equal(
+      endingQuestion('Done.\n\nShould I run `pnpm release patch`?\r\n- yes\r\n- no'),
+      // The last paragraph is a list, so the one before it is kept too.
+      'Done.\n\nShould I run `pnpm release patch`?\n- yes\n- no',
+    )
+    assert.equal(
+      endingQuestion('**需要你拍板**：用 `~~~` 还是 `\u0060\u0060\u0060`？\n\n```sh\necho hi\n```\n\n旁注。'),
+      '**需要你拍板**：用 `~~~` 还是 `\u0060\u0060\u0060`？\n\n```sh\necho hi\n```\n\n旁注。',
+    )
+  })
+
+  it('reads only the end of a long message', () => {
+    const early = `Should I keep the old API?\n\n${'Done with the rest. '.repeat(40)}`
+    assert.equal(endingQuestion(early), undefined)
+    assert.ok(endingQuestion(`${'x'.repeat(5000)}\n\nWant me to go on?`))
+  })
+
+  it('keeps every pattern working on an example of its own', () => {
+    const examples = [
+      'want me to',
+      'should I',
+      'would you like',
+      'do you want',
+      'let me know whether',
+      'which do you prefer',
+      'your call',
+      'please confirm',
+      "when you're back",
+      'waiting for your',
+      '要不要',
+      '你来决定',
+      '等你回来',
+      '请确认',
+      '你看呢',
+    ]
+    assert.equal(examples.length, QUESTION_PATTERNS.length)
+    for (const [i, p] of QUESTION_PATTERNS.entries()) assert.match(examples[i]!, p)
+  })
+})
+
+describe('unattended hook on an MCP form', () => {
+  const form = JSON.stringify({
+    hook_event_name: 'Elicitation',
+    session_id: 's1',
+    cwd: '/tmp/project',
+    mcp_server_name: 'issue-tracker',
+    message: 'Which project key?',
+    mode: 'form',
+    requested_schema: { type: 'object', properties: { key: { type: 'string', default: 'SECRET-1' } } },
+  })
+
+  it('declines it while on and keeps what the server asked, never the form itself', async () => {
+    await withFakeHome(async (h) => {
+      await turnOn(h)
+      const r = await run(h, ['claude', 'Elicitation'], form)
+      assert.equal(r.code, 0)
+      assert.equal(r.err, '')
+      assert.deepEqual(JSON.parse(r.out!), {
+        hookSpecificOutput: { hookEventName: 'Elicitation', action: 'decline' },
+      })
+      const [d] = await listPendingDecisions(resolvePaths(h.env).stateDir)
+      assert.equal(d?.kind, 'question')
+      assert.equal(d?.text, 'MCP issue-tracker: Which project key?')
+      assert.doesNotMatch(JSON.stringify(d), /SECRET-1/)
+    })
+  })
+
+  it('leaves it to the dialog while off, on bad input, and in Codex', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.config/sideby/config.json', '{"unattended":{}}')
+      assert.deepEqual(await run(h, ['claude', 'Elicitation'], form), { code: 0, err: '' })
+      await turnOn(h)
+      assert.deepEqual(await run(h, ['claude', 'Elicitation'], 'not json'), { code: 0, err: '' })
+      assert.deepEqual(await run(h, ['codex', 'Elicitation'], form), { code: 0, err: '' })
+    })
   })
 })
 

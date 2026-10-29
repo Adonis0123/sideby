@@ -495,10 +495,10 @@ When it is on: during a Slot of the Schedule (local days and times; an end befor
 hours), or for one session started with \`--unattended\` (\`sideby run <account> --unattended\`, also next, resume,
 short commands and pick commands). \`off\` outside a Slot turns it off; during a Slot it pauses until that Slot ends.
 
-It covers Claude and Codex sessions sideby starts after the first use (sideby adds its hook to them; nothing is written
-into the account folders). Codex runs the hook once you trust \`unattended-hook\` in /hooks. Grok, pi, desktop apps and
-sessions started without sideby are not covered. Pending Decisions stay on this computer; \`pending done\` marks them
-done, and they are deleted 30 days later. \`defer\` keeps a line from inside a session ("deploy left for the user").
+It covers Claude and Codex sessions sideby starts after the first use (sideby adds its hooks to them; nothing is
+written into the account folders). Codex runs the hooks once you trust both \`unattended-hook\` entries in /hooks.
+Grok, pi, desktop apps and sessions started without sideby are not covered. Pending Decisions stay on this computer;
+\`pending done\` marks them done, and they are deleted 30 days later. \`defer\` keeps a line from inside a session ("deploy left for the user").
 
 --days takes mon…sun, ranges and lists: mon-fri, sat,sun, fri-mon, weekdays, daily. Each change prints its undo.
 
@@ -745,7 +745,7 @@ export async function main(argv: string[]): Promise<number> {
     const { runNetworkHook } = await import('../network/hook.ts')
     return runNetworkHook(rest, process.env, process.stderr)
   }
-  // Unattended Mode's hook runs before every tool call it matches (spec §3.37); same fast path.
+  // Unattended Mode's hook runs before every tool call it matches and at every turn end (spec §3.37); same fast path.
   if (first === 'unattended-hook') {
     const { runUnattendedHook } = await import('../unattended/hook.ts')
     return runUnattendedHook(rest, process.env, process.stdin, { out: process.stdout, err: process.stderr })

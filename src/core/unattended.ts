@@ -416,22 +416,27 @@ export const unattendedClock = (iso: string, now: Date, zh = false): string =>
   clockText(Date.parse(iso), now.getTime(), zh)
 
 /**
- * Unattended Mode's session hooks: before the ask tool in Claude and Codex, and on every permission request Claude
- * Code is about to show (Codex has no such event for it; its own approval prompts are not covered).
+ * Unattended Mode's session hooks: before the ask tool and when the model ends its turn (`Stop`, which keeps a turn
+ * that ended on a question going once) in Claude and Codex; and in Claude on every permission request Claude Code is
+ * about to show and every MCP server form (`Elicitation`). Codex has no such events for them; its own approval
+ * prompts are not covered.
  */
 export function unattendedHookPart(): SessionHookPart {
   const command = (family: string, event = 'PreToolUse') =>
     sidebyHookCommand('unattended-hook', family, event)
+  const claude = (event: string) => [{ type: 'command', command: command('claude', event) }]
+  const codex = (event: string) => `hooks=[{type="command",command="${command('codex', event)}"}]`
   return {
     id: 'unattended',
     claude: {
-      PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: command('claude') }] }],
-      PermissionRequest: [
-        { matcher: '*', hooks: [{ type: 'command', command: command('claude', 'PermissionRequest') }] },
-      ],
+      PreToolUse: [{ matcher: 'AskUserQuestion', hooks: claude('PreToolUse') }],
+      PermissionRequest: [{ matcher: '*', hooks: claude('PermissionRequest') }],
+      Stop: [{ hooks: claude('Stop') }],
+      Elicitation: [{ matcher: '*', hooks: claude('Elicitation') }],
     },
     codex: {
-      PreToolUse: [`{matcher="^request_user_input$",hooks=[{type="command",command="${command('codex')}"}]}`],
+      PreToolUse: [`{matcher="^request_user_input$",${codex('PreToolUse')}}`],
+      Stop: [`{${codex('Stop')}}`],
     },
   }
 }
@@ -454,7 +459,13 @@ export function unattendedFamilyLine(family: string, env: Env): string {
     : `sideby: Unattended Mode covers Claude and Codex sessions only; this ${family} session is not covered.`
 }
 
-/** Once per Codex Account: Codex runs the hook only after the user trusts it in `/hooks`. */
+/**
+ * What a Codex Account has been told about, in `codex-trust-notices.json`: its ref once told to trust the hook before
+ * questions, `<ref>#stop` once also told about the `Stop` hook (added later, and trusted on its own in `/hooks`).
+ */
+const trustNoticeKey = (ref: string): string => `${ref}#stop`
+
+/** Once per Codex Account: Codex runs the hooks only after the user trusts them in `/hooks`. */
 export async function codexUnattendedTrustLine(
   stateDir: string,
   ref: string,
@@ -468,14 +479,15 @@ export async function codexUnattendedTrustLine(
   } catch {
     // first notice
   }
-  if (seen.includes(ref)) return undefined
+  const key = trustNoticeKey(ref)
+  if (seen.includes(key)) return undefined
   try {
     await ensureUnattendedDir(stateDir)
-    await writeFileAtomic(file, `${JSON.stringify({ refs: [...seen, ref] })}\n`, 0o600)
+    await writeFileAtomic(file, `${JSON.stringify({ refs: [...seen, key] })}\n`, 0o600)
   } catch {
     // shown again next time
   }
   return prefersChinese(env)
-    ? `sideby：Codex 要先信任 hook，无人值守才拦得住它的提问：在 ${ref} 里输入 /hooks，信任 \`unattended-hook\`。`
-    : `sideby: Codex runs Unattended Mode's hook only after you trust it: in ${ref}, type /hooks and trust \`unattended-hook\`. Until then its questions are not stopped.`
+    ? `sideby：Codex 要先信任 hook，无人值守才拦得住它的提问：在 ${ref} 里输入 /hooks，信任两个 \`unattended-hook\`（提问前和回合结束时各一个）。`
+    : `sideby: Codex runs Unattended Mode's hooks only after you trust them: in ${ref}, type /hooks and trust both \`unattended-hook\` entries (before a question and at the end of a turn). Until then its questions are not stopped.`
 }

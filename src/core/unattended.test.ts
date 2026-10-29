@@ -69,8 +69,9 @@ describe('Launch', () => {
       assert.ok(at >= 0 && at < p.args.indexOf('--'), 'before the user’s own --')
       const { file, hooks } = await settingsOf(p.args)
       assert.ok(file.startsWith(`${rt.paths.stateDir}/unattended/`))
-      // Before the ask tool only (no hook on every Bash call), and on every permission request Claude Code shows.
-      assert.deepEqual(Object.keys(hooks), ['PreToolUse', 'PermissionRequest'])
+      // Before the ask tool only (no hook on every Bash call), on every permission request Claude Code shows, at
+      // the end of every turn, and on every MCP server form.
+      assert.deepEqual(Object.keys(hooks), ['PreToolUse', 'PermissionRequest', 'Stop', 'Elicitation'])
       assert.deepEqual(
         hooks.PreToolUse.map((g: { matcher: string }) => g.matcher),
         ['AskUserQuestion'],
@@ -86,6 +87,18 @@ describe('Launch', () => {
       assert.match(
         hooks.PermissionRequest[0].hooks[0].command,
         /^'.+' '.+main\.ts' unattended-hook claude PermissionRequest$/,
+      )
+      // Stop takes no matcher.
+      assert.equal(hooks.Stop.length, 1)
+      assert.equal(hooks.Stop[0].matcher, undefined)
+      assert.match(hooks.Stop[0].hooks[0].command, /^'.+' '.+main\.ts' unattended-hook claude Stop$/)
+      assert.deepEqual(
+        hooks.Elicitation.map((g: { matcher: string }) => g.matcher),
+        ['*'],
+      )
+      assert.match(
+        hooks.Elicitation[0].hooks[0].command,
+        /^'.+' '.+main\.ts' unattended-hook claude Elicitation$/,
       )
       assert.deepEqual(p.sessionHookArgs, ['--settings', file])
       assert.equal(p.networkArgs, undefined)
@@ -104,7 +117,13 @@ describe('Launch', () => {
       assert.equal(p.args.filter((a) => a === '--settings').length, 1)
       const { file, hooks } = await settingsOf(p.args)
       assert.match(file, /network\/claude-settings-unattended\.json$/)
-      assert.deepEqual(Object.keys(hooks).sort(), ['PermissionRequest', 'PreToolUse', 'UserPromptSubmit'])
+      assert.deepEqual(Object.keys(hooks).sort(), [
+        'Elicitation',
+        'PermissionRequest',
+        'PreToolUse',
+        'Stop',
+        'UserPromptSubmit',
+      ])
       const commands = hooks.PreToolUse.map((g: { hooks: { command: string }[] }) => g.hooks[0]!.command)
       assert.equal(commands.length, 2)
       assert.match(commands[0], /network-hook claude PreToolUse$/)
@@ -130,6 +149,7 @@ describe('Launch', () => {
       const { file, hooks } = await settingsOf(args)
       assert.match(file, /claude-settings-unattended-handoff\.json$/)
       assert.deepEqual(Object.keys(hooks).sort(), [
+        'Elicitation',
         'PermissionRequest',
         'PreToolUse',
         'Stop',
@@ -138,6 +158,9 @@ describe('Launch', () => {
       assert.equal(hooks.PreToolUse.length, 3)
       assert.equal(hooks.PermissionRequest.length, 1)
       assert.equal(hooks.PreToolUse[0].hooks[0].command, 'h')
+      // Auto Handoff's Stop hook first, then Unattended Mode's.
+      assert.equal(hooks.Stop.length, 2)
+      assert.match(hooks.Stop[1].hooks[0].command, /unattended-hook claude Stop$/)
       assert.deepEqual(hooks.Stop[0].hooks[0], {
         type: 'command',
         command: 'w',
@@ -157,9 +180,25 @@ describe('Launch', () => {
       assert.match(pre[0]!, /matcher="\^request_user_input\$"/)
       assert.match(pre[0]!, /unattended-hook codex PreToolUse/)
       assert.ok(p.args.some((a) => a.startsWith('hooks.UserPromptSubmit=')))
-      assert.match(p.notice ?? '', /trust `unattended-hook`/)
+      const stop = p.args.filter((a) => a.startsWith('hooks.Stop='))
+      assert.equal(stop.length, 1)
+      assert.match(
+        stop[0]!,
+        /^hooks\.Stop=\[\{hooks=\[\{type="command",command=".+unattended-hook codex Stop"\}\]\}\]$/,
+      )
+      assert.match(p.notice ?? '', /trust both `unattended-hook` entries/)
       const again = await rt.prepareLaunch('codex:main', [], 'run')
       assert.doesNotMatch(again.notice ?? '', /unattended-hook/)
+    })
+  })
+
+  it('tells a Codex account told before the Stop hook existed once more, to trust that one too', async () => {
+    await withFakeHome(async (h) => {
+      const rt = await setup(h, { unattended: {} })
+      await h.write('.local/state/sideby/unattended/codex-trust-notices.json', '{"refs":["codex:main"]}')
+      const p = await rt.prepareLaunch('codex:main', [], 'run')
+      assert.match(p.notice ?? '', /at the end of a turn/)
+      assert.doesNotMatch((await rt.prepareLaunch('codex:main', [], 'run')).notice ?? '', /unattended-hook/)
     })
   })
 

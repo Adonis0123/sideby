@@ -1742,7 +1742,7 @@ const en = {
   'ua.coverLine':
     'Only in Claude Code and Codex sessions that sideby starts. Running claude or codex yourself is not covered.',
   'ua.codexTrust':
-    'Codex: only its questions. Open {cmd} in Codex once and trust sideby’s hook; Codex’s own approval prompts still wait for you.',
+    'Codex: only its questions. Open {cmd} in Codex once and trust both of sideby’s hooks; Codex’s own approval prompts still wait for you.',
   'ua.notSupported': '{hosts}: not supported yet.',
   'ua.listSep': ', ',
   'ua.readOnly': 'Read-only view. Use sideby unattended to change it.',
@@ -3384,7 +3384,7 @@ const zh: Record<MessageKey, string> = {
   'ua.cover': '受保护范围',
   'ua.coverLine': '只对 sideby 启动的 Claude、Codex 会话生效；直接运行 claude 或 codex 的会话不受影响。',
   'ua.codexTrust':
-    'Codex：只管提问。在 Codex 里打开一次 {cmd}，信任 sideby 的 hook；Codex 自己的批准提示仍会等你。',
+    'Codex：只管提问。在 Codex 里打开一次 {cmd}，信任 sideby 的两个 hook；Codex 自己的批准提示仍会等你。',
   'ua.notSupported': '{hosts}：暂不支持。',
   'ua.listSep': '、',
   'ua.readOnly': '只读视图。修改请用 sideby unattended 命令。',

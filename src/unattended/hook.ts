@@ -1,13 +1,16 @@
 // Entry for `sideby unattended-hook <family> <event>` (spec §3.37, ADR-0058). Claude Code and Codex run it before the
-// ask tool, and Claude Code also when it is about to ask the user for a permission (`PermissionRequest`), in every
+// ask tool and when the model ends its turn (`Stop`), and Claude Code also when it is about to ask the user for a
+// permission (`PermissionRequest`) and when an MCP server asks the user to fill in a form (`Elicitation`), in every
 // session sideby starts once the config has an `unattended` section. It imports only Node built-ins and leaf modules:
 // never the Runtime, a Family index or core/accounts.ts. It reads the Schedule and the manual state on every call, so
 // a session started before a Slot stops asking once the Slot begins.
 //
 // While Unattended Mode is off it does nothing (no output, exit 0). While on, it refuses the Host's ask tool (exit 2,
-// the reason on stderr, which both Hosts hand to the model) and keeps the question as a Pending Decision; and it
-// answers Claude Code's permission requests with a denial (JSON on stdout: Claude Code does not honor exit 2 for that
-// event), keeping the request as a Pending Decision too. A failure before the decision is made does nothing: that is
+// the reason on stderr, which both Hosts hand to the model) and keeps the question as a Pending Decision; it answers
+// Claude Code's permission requests with a denial (JSON on stdout: Claude Code does not honor exit 2 for that event),
+// keeping the request as a Pending Decision too; it keeps a turn going once when the model ended it on a question
+// written as plain text (`{"decision":"block","reason":…}` on stdout), keeping the question; and it declines an MCP
+// server's form, keeping what the server asked. A failure before the decision is made does nothing: that is
 // how a session behaves without the feature (unlike `network-hook`, which blocks when it cannot tell). Once the
 // decision is to refuse, it refuses: keeping the Pending Decision and writing the reason are best effort, and their
 // failure neither allows the call nor adds any output of its own.
@@ -68,10 +71,19 @@ interface Payload {
 const text = (v: unknown, max = 4096): string | undefined =>
   typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined
 
+function parseObject(raw: string): Record<string, unknown> | undefined {
+  try {
+    const v = JSON.parse(raw) as unknown
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined
+  } catch {
+    return undefined
+  }
+}
+
 function parsePayload(raw: string): Payload | undefined {
   try {
-    const v = JSON.parse(raw) as Record<string, unknown> | null
-    if (!v || typeof v !== 'object' || typeof v.tool_name !== 'string') return undefined
+    const v = parseObject(raw)
+    if (!v || typeof v.tool_name !== 'string') return undefined
     const input =
       v.tool_input && typeof v.tool_input === 'object' ? (v.tool_input as Record<string, unknown>) : {}
     const sessionId = text(v.session_id, 256)
@@ -129,6 +141,123 @@ export function questionReason(state: UnattendedState, now: Date, zh: boolean, k
     ? 'sideby kept this question for the user to look at later'
     : 'sideby could not keep this question, so put it in your final report'
   return `Not shown: sideby's Unattended Mode is on ${when}, so nobody is here to answer, and ${keep}. Do not ask again. Where the choice can be undone, go on with the recommended option, and list the question and your choice in your final report. Do not do anything hard to undo (deleting, sending or posting anything outside, publishing, deploying, paying): skip it, record it with \`sideby unattended defer "<one sentence>"\`, and go on with the rest.`
+}
+
+/** How much of the end of the model's last message is read to tell whether it ends on a question. */
+export const QUESTION_TAIL = 600
+
+/**
+ * Ways a model asks the user in plain text, in English and Chinese, checked against the end of its last message (the
+ * last paragraph, and the one before it when the last is a list of options). Kept to asks that wait for an answer:
+ * a closing such as "Let me know if you have any questions" or "如有问题随时告诉我" is not one.
+ */
+export const QUESTION_PATTERNS: readonly RegExp[] = [
+  /\b(?:do you )?want me to\b/i,
+  /\b(?:should|shall) I\b/i,
+  /\bwould you (?:like|prefer)\b/i,
+  /\bdo you (?:want|prefer)\b/i,
+  /\blet me know (?:which|whether|what you|how you|if I should|if you(?:'d| would)? (?:like|want|prefer) me to)\b/i,
+  /\bwhich (?:one |option )?(?:do|would) you (?:prefer|like|choose|pick)\b/i,
+  /\b(?:your call|up to you)\b/i,
+  /\bplease confirm\b/i,
+  /\b(?:when|once) you(?:'re| are) back\b/i,
+  /\bwaiting (?:for|on) your\b/i,
+  /要不要|需不需要|是否要|是否需要/,
+  /你来决定|由你决定|需要你决定|你决定一下|你来定|你定一下|你拍板|你来选|你选一个|你选哪|选哪个/,
+  /等你回来|你回来后|你回来再/,
+  /请确认|请你确认|确认一下|帮我确认/,
+  /你看呢|你觉得呢|你看怎么样|可以吗|行吗|好吗/,
+]
+
+/**
+ * The marker agent rules often prescribe for a question written as text: at the start of a line, with or without
+ * `#` and emphasis, and with or without text after a colon. Finished reports do not use it.
+ */
+const DECIDE_HEADING =
+  /^[ \t]*(?:#{1,6}[ \t]*)?(?:\*\*|__)?(?:需要你拍板|Needs your decision)(?:\*\*|__)?[ \t]*(?:[:：].*)?$/im
+const LIST_LINE = /^[ \t]*(?:[-*+•]|\d+[.)、]|[A-Za-z][.)]|[（(]?[A-Za-z0-9一二三四五六七八九十][)）])[ \t]+/
+/** A question mark at the end of a line, before only closing quotes, brackets, emphasis or spaces. */
+const ENDS_ON_QUESTION = /[?？][\s*_"'”’)）\]】」』]*$/
+
+/** Words that, just before an ask, turn it into a statement ("无需你来决定", "no need to confirm"). */
+const NEGATION =
+  /(?:无需|无须|不用|不需要|不必|没必要|没有|\bno need\b|\bdon'?t need\b|\bnot\b|\bnever\b)[^.!?。！？\n]{0,6}$/i
+
+/** Whether `pattern` matches `text` somewhere that is not negated just before it. */
+function asks(pattern: RegExp, text: string): boolean {
+  for (const m of text.matchAll(new RegExp(pattern.source, `${pattern.flags.replace('g', '')}g`)))
+    if (!NEGATION.test(text.slice(Math.max(0, m.index - 16), m.index))) return true
+  return false
+}
+
+/**
+ * The part of the model's last message that asks the user something, or undefined when it does not end on a
+ * question. Code blocks (``` and ~~~), inline code and quoted lines (`> …`) are left out first, then the last
+ * {@link QUESTION_TAIL} characters are read: a line that starts with the `需要你拍板` marker (from it to the end); a last line that ends with `?`
+ * or `？`, or a list of options at the end right after such a line; or one of {@link QUESTION_PATTERNS} in the last
+ * paragraph (and the one before it when the last is a list), unless a negation comes just before it ("无需你来决定").
+ */
+export function endingQuestion(message: string): string | undefined {
+  // Judged on a copy where code and quotes are blanked out at the same length, so a span of it is the same span of
+  // the message as written: that span is what is kept for the user, inline code and all.
+  const written = message.replace(/\r\n?/g, '\n')
+  const blank = (m: string) => m.replace(/[^\n]/g, ' ')
+  const plain = written
+    .replace(/^[ \t]*(```|~~~)[\s\S]*?(?:^[ \t]*\1[^\n]*$|(?![\s\S]))/gm, blank)
+    .replace(/`[^`\n]*`/g, (m) => 'x'.repeat(m.length))
+    .replace(/^[ \t]*>.*$/gm, blank)
+  const stop = plain.trimEnd().length
+  const from = Math.max(0, stop - QUESTION_TAIL)
+  const tail = plain.slice(from, stop)
+  if (!tail.trim()) return undefined
+  const kept = (at: number) => written.slice(from + at, stop).trim()
+  const heading = DECIDE_HEADING.exec(tail)
+  if (heading) return kept(heading.index)
+  // Each paragraph with where it starts in the tail.
+  const paragraphs: { at: number; text: string }[] = []
+  let at = 0
+  for (const sep of [...tail.matchAll(/\n[ \t]*\n/g), { index: tail.length, 0: '' }]) {
+    const text = tail.slice(at, sep.index)
+    if (text.trim()) paragraphs.push({ at: at + (text.length - text.trimStart().length), text: text.trim() })
+    at = sep.index + sep[0].length
+  }
+  const last = paragraphs.at(-1)
+  if (!last) return undefined
+  const isList = last.text.split('\n').some((l) => LIST_LINE.test(l))
+  const first = isList && paragraphs.length > 1 ? paragraphs.at(-2)! : last
+  const zone = tail.slice(first.at)
+  const question = kept(first.at)
+  // The last line, or the line just before a list of options that ends the message.
+  const lines = tail.split('\n').filter((l) => l.trim())
+  let line = lines.length - 1
+  if (ENDS_ON_QUESTION.test(lines[line] ?? '')) return question
+  while (line >= 0 && LIST_LINE.test(lines[line]!)) line--
+  if (line >= 0 && line < lines.length - 1 && ENDS_ON_QUESTION.test(lines[line]!)) return question
+  if (QUESTION_PATTERNS.some((p) => asks(p, zone))) return question
+  return undefined
+}
+
+/** What the model reads when it ended its turn on a question and nobody is here to answer. */
+export function stopReason(state: UnattendedState, now: Date, zh: boolean, kept: boolean): string {
+  const until = state.until ? clockText(Date.parse(state.until), now.getTime(), zh) : undefined
+  const session = state.reason === 'session'
+  if (zh) {
+    const when = session ? '（这个会话）' : until ? `（到 ${until}）` : '（没有结束时间）'
+    const keep = kept ? 'sideby 已把你的问题记下，等用户回来看' : 'sideby 没能记下你的问题，请写进最终汇报'
+    return `没人能回答：sideby 无人值守已开启${when}，${keep}。不要等回复，也不要再问。能撤回的选择按推荐的选项继续，一直做到完。删除、对外发送或发布、部署、付费等难撤回的操作不要做：跳过它，运行 \`sideby unattended defer "<一句话>"\` 记下，再做完其余的事。最后写一份最终汇报，列出你做的每个选择和记下的每件事，不提任何问题。`
+  }
+  const when = session ? 'for this session' : until ? `until ${until}` : 'with no end set'
+  const keep = kept
+    ? 'sideby kept your question for the user to look at later'
+    : 'sideby could not keep your question, so put it in your final report'
+  return `Nobody is here to answer: sideby's Unattended Mode is on ${when}, and ${keep}. Do not wait for an answer and do not ask again. Where the choice can be undone, go on with the recommended option and carry on to the end. Do not do anything hard to undo (deleting, sending or posting anything outside, publishing, deploying, paying): skip it, record it with \`sideby unattended defer "<one sentence>"\`, and finish the rest. Then end with a final report that lists each choice you made and each item you recorded, without asking anything.`
+}
+
+/** What a declined MCP form is kept as: the server's name and what it asked, never a field's value. */
+export function elicitationText(v: Record<string, unknown>): string {
+  const server = text(v.mcp_server_name, 200)
+  const message = text(v.message, 1000)
+  return [server ? `MCP ${server}` : 'MCP', message].filter(Boolean).join(': ')
 }
 
 /** Tools whose kept summary is the file they work on, and the field it is in. */
@@ -226,11 +355,12 @@ export function permissionReason(state: UnattendedState, now: Date, kept: boolea
 }
 
 /**
- * A refusal: the reason for the model, and what to keep, if anything. `json`: the answer is a PermissionRequest
- * decision on stdout; otherwise exit 2 with the reason on stderr.
+ * A refusal: the reason for the model, and what to keep, if anything. `json`: the answer is this object on stdout
+ * with exit 0 (a PermissionRequest decision, a Stop block, an Elicitation decline); otherwise exit 2 with the reason
+ * on stderr.
  */
 interface Refusal {
-  json?: boolean
+  json?: (reason: string) => unknown
   reason: (kept: boolean) => string
   keep?: () => Promise<unknown>
 }
@@ -245,19 +375,58 @@ async function decide(
   const [family = '', event = ''] = argv
   const askTool = ASK_TOOLS[family]
   const permission = family === 'claude' && event === 'PermissionRequest'
-  if (!permission && (event !== 'PreToolUse' || !askTool)) return undefined
+  const elicitation = family === 'claude' && event === 'Elicitation'
+  const stop = Boolean(askTool) && event === 'Stop'
+  if (!permission && !elicitation && !stop && (event !== 'PreToolUse' || !askTool)) return undefined
   const paths = resolvePaths(env)
   const { schedule } = await readUnattendedConfig(paths.configFile)
   const override = await readUnattendedOverride(paths.stateDir)
   const state = unattendedState({ schedule, override, now, session: env[UNATTENDED_ENV] === '1' })
   if (!state.on) return undefined
-  const payload = parsePayload(await readInput(input))
-  if (!payload) return undefined
+  const raw = await readInput(input)
   const zh = prefersChinese(env)
   const account = text(env.SIDEBY_ACCOUNT, 256)
+  if (stop || elicitation) {
+    const v = parseObject(raw)
+    if (!v) return undefined
+    const sessionId = text(v.session_id, 256)
+    const cwd = text(v.cwd)
+    const where = {
+      family,
+      ...(account ? { account } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      ...(cwd ? { cwd } : {}),
+    }
+    if (elicitation)
+      return {
+        json: () => ({ hookSpecificOutput: { hookEventName: 'Elicitation', action: 'decline' } }),
+        reason: () => '',
+        keep: () =>
+          addPendingDecision(paths.stateDir, { kind: 'question', ...where, text: elicitationText(v) }, now, {
+            dedupe: true,
+          }),
+      }
+    // Once per stop: a turn the hook already kept going ends as the model leaves it.
+    if (v.stop_hook_active !== false) return undefined
+    const message = typeof v.last_assistant_message === 'string' ? v.last_assistant_message : ''
+    const question = endingQuestion(message)
+    if (!question) return undefined
+    return {
+      json: (reason) => ({ decision: 'block', reason }),
+      reason: (kept) => stopReason(state, now, zh, kept),
+      keep: () =>
+        addPendingDecision(paths.stateDir, { kind: 'question', ...where, text: question }, now, {
+          dedupe: true,
+        }),
+    }
+  }
+  const payload = parsePayload(raw)
+  if (!payload) return undefined
   if (permission)
     return {
-      json: true,
+      json: (message) => ({
+        hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message } },
+      }),
       reason: (kept) => permissionReason(state, now, kept),
       keep: () =>
         addPendingDecision(
@@ -301,8 +470,9 @@ async function decide(
 
 /**
  * Returns the exit code: 0 lets the Host go on, 2 refuses the tool call (the reason is written to `err`). A permission
- * request is refused with exit 0 and the decision written to `out`. Errors before the decision write nothing and
- * exit 0; once it is a refusal, it is answered as one whatever happens to the record.
+ * request, a stop on a question and an MCP form are answered with exit 0 and the decision written to `out`. Errors
+ * before the decision write nothing and exit 0; once it is a refusal, it is answered as one whatever happens to the
+ * record.
  */
 export async function runUnattendedHook(
   argv: readonly string[],
@@ -328,13 +498,10 @@ export async function runUnattendedHook(
       kept = false
     }
   if (refusal.json) {
-    const decision = { behavior: 'deny', message: refusal.reason(kept) }
     try {
-      io.out.write(
-        `${JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision } })}\n`,
-      )
+      io.out.write(`${JSON.stringify(refusal.json(refusal.reason(kept)))}\n`)
     } catch {
-      // Nothing reached Claude Code: it shows its prompt as it would without this hook.
+      // Nothing reached the Host: it goes on as it would without this hook (a prompt, a form, a stop).
     }
     return 0
   }
