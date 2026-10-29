@@ -1,4 +1,4 @@
-// `sideby resume` into the Main Account keeps Auto Handoff (spec §3.15, ADR-0058): with config `handoff.auto` on it
+// `sideby resume` into the Main Account keeps Auto Handoff (spec §3.15, ADR-0059): with config `handoff.auto` on it
 // starts the Main Account exactly as `sideby run` would; off, or with the select variable set, the Host runs unchanged.
 import assert from 'node:assert/strict'
 import { chmod, writeFile } from 'node:fs/promises'
@@ -46,7 +46,7 @@ async function resume(h: FakeHome, argv: string[], env: Record<string, string> =
 const handoffVars = (env: Record<string, string>) =>
   Object.keys(env).filter((k) => k.startsWith('SIDEBY_HANDOFF'))
 
-describe('resume into the Main Account (ADR-0058)', () => {
+describe('resume into the Main Account (ADR-0059)', () => {
   it('with handoff.auto on, starts it as `sideby run` would, with Auto Handoff', async () => {
     await withFakeHome(async (h) => {
       await setUp(h, true)

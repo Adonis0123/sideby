@@ -722,7 +722,7 @@ export async function cmdResume(a: ParsedArgs, io: Io, runtime?: Runtime): Promi
   const rt = runtime ?? (await createRuntime())
   const { args, flags } = takeLaunchFlags([...extra, ...a.rest])
   const route = await rt.resumeLaunch(family, args, flags)
-  // The Main Account under `handoff.auto` starts exactly as `sideby run` would (ADR-0058).
+  // The Main Account under `handoff.auto` starts exactly as `sideby run` would (ADR-0059).
   if (route.run && route.account) {
     io.err(
       c.dim(

@@ -1,4 +1,4 @@
-# ADR-0058: Resuming in the Main Account keeps Auto Handoff
+# ADR-0059: Resuming in the Main Account keeps Auto Handoff
 
 Status: accepted
 Date: 2026-10-29

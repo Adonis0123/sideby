@@ -156,7 +156,7 @@ export interface ResumeLaunch {
   /** Set when the session was never saved: `launch` starts a new session in `account` without the resume (ADR-0009). */
   newSession?: true
   /**
-   * Set when `account` is the Main Account and config `handoff.auto` is on (ADR-0058): the caller starts it exactly as
+   * Set when `account` is the Main Account and config `handoff.auto` is on (ADR-0059): the caller starts it exactly as
    * `sideby run <account> -- <args>` would, so Auto Handoff applies, instead of `launch` (the Host unchanged).
    */
   run?: { args: string[] }
@@ -1288,7 +1288,7 @@ export async function createRuntime(
       if (family.selectVar && env[family.selectVar]) return { launch: await guarded(host) }
       const route = await findResumeRoute(family, await accounts(), userArgs)
       const id = route.sessionId ? { sessionId: route.sessionId } : {}
-      // In the Main Account with Auto Handoff on, start it as `sideby run` would (ADR-0058).
+      // In the Main Account with Auto Handoff on, start it as `sideby run` would (ADR-0059).
       const asRun = route.account?.isMain && handoffSettings(config).auto
       if (route.neverSaved && route.account && family.withoutResume) {
         const args = family.withoutResume(userArgs)
