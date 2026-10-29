@@ -1396,9 +1396,13 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   const getRuntime = typeof opts.runtime === 'function' ? opts.runtime : async () => opts.runtime as Runtime
   const sessionsSource = (opts as { [LIVE_SESSIONS_SOURCE]?: LiveSessionsSource })[LIVE_SESSIONS_SOURCE]
   const liveSessions = sessionsSource?.list ?? listLiveSessions
-  // A change from this page can end a stretch of Unattended Mode: the plugins hear of it now, as after the CLI.
+  // A change from this page can end a stretch of Unattended Mode: the plugins hear of it now, as after the CLI. The
+  // answer waits for that (two small reads when nothing ended), but at most 1 s; a slower plugin finishes on its own.
   const noticeUnattendedEnd = (rt: Runtime) =>
-    void checkUnattendedEnded(rt.paths, async (ctx) => void (await rt.unattendedEnded(ctx)))
+    Promise.race([
+      checkUnattendedEnded(rt.paths, async (ctx) => void (await rt.unattendedEnded(ctx))),
+      new Promise<void>((resolve) => setTimeout(resolve, 1000).unref()),
+    ])
   const copyText = sessionsSource?.copyText ?? sessionCopyText
   const orcaOf = (rt: Runtime) => sessionsSource?.orca ?? systemOrca(rt.env)
   const sendTo = sessionsSource?.send ?? sendMessage
@@ -2204,7 +2208,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           until: r.until,
           now,
         })
-        noticeUnattendedEnd(rt)
+        await noticeUnattendedEnd(rt)
         return panelChange(change, rt.paths.stateDir)
       },
     },
@@ -2213,7 +2217,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       async run() {
         const rt = await getRuntime()
         const change = await turnUnattendedOff({ paths: rt.paths, families: [...rt.families.keys()] })
-        noticeUnattendedEnd(rt)
+        await noticeUnattendedEnd(rt)
         return panelChange(change, rt.paths.stateDir)
       },
     },
@@ -2227,7 +2231,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           families: [...rt.families.keys()],
           schedule: body.schedule,
         })
-        noticeUnattendedEnd(rt)
+        await noticeUnattendedEnd(rt)
         return {
           changed: r.changed,
           status: await withPendingIds(r.status, rt.paths.stateDir),
