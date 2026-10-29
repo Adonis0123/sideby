@@ -957,7 +957,26 @@ function isEntry(): boolean {
     return false
   }
 }
+// Node warns once on stderr when anything loads `node:sqlite`, which it still marks experimental. Session History uses
+// it, and a plugin may read a Host's SQLite file at load time, so the warning would follow every command.
+// The CLI drops that one warning; every other warning still reaches stderr.
+function hideSqliteWarning(): void {
+  const emit = process.emitWarning
+  process.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
+    const text = typeof warning === 'string' ? warning : warning.message
+    const opt = rest[0]
+    const type =
+      typeof opt === 'string'
+        ? opt
+        : ((opt as { type?: string } | undefined)?.type ??
+          (typeof warning === 'string' ? undefined : warning.name))
+    if (type === 'ExperimentalWarning' && /^SQLite is an experimental feature/.test(text)) return
+    ;(emit as (...a: unknown[]) => void).call(process, warning, ...rest)
+  }) as typeof process.emitWarning
+}
+
 if (isEntry()) {
+  hideSqliteWarning()
   main(process.argv.slice(2)).then(
     (code) => {
       process.exitCode = code

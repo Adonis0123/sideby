@@ -36,7 +36,7 @@ export default {
 } satisfies Plugin
 ```
 
-- Write plugins in `.ts` or `.js`. Node 22.18+ loads `.ts` from disk without a build step. The entry file is `index.ts` unless `plugin.json` sets `main`.
+- Write plugins in `.ts` or `.js`. Node 22.18+ loads `.ts` from disk without a build step. The entry file is `index.ts` unless `plugin.json` sets `main`. Node built-ins work as usual; a plugin that reads a SQLite file can import `node:sqlite`, and the CLI hides the experimental warning Node prints for it.
 - Use `import type` only. sideby passes everything a plugin needs through `api`, which keeps plugins working if sideby ships as a single binary later. Install sideby as a dev dependency (`npm i -D sideby`) to get the types; [`src/types.ts`](../../src/types.ts) is the full contract.
 - The `name` in `plugin.json` must match the exported `name`. A second plugin with the same name is reported as a conflict and not loaded.
 - `ctx.config` holds this plugin's settings from `config.plugins.<name>`, with `userConfig` defaults filled in.

@@ -525,6 +525,20 @@ describe('plugins', () => {
     return dir
   }
 
+  it("a plugin that imports node:sqlite adds no SQLite warning to a command's stderr, and other warnings still show", async () => {
+    await withFakeHome(async (h) => {
+      await writePlugin(
+        h,
+        'db-reader',
+        `import { DatabaseSync } from 'node:sqlite'\nprocess.emitWarning('db-reader: something else', 'ExperimentalWarning')\nexport default { name: 'db-reader', register() { void DatabaseSync } }\n`,
+      )
+      const r = await sideby(h, ['list', '--json'])
+      assert.equal(r.code, 0, r.err)
+      assert.doesNotMatch(r.err, /SQLite/)
+      assert.match(r.err, /ExperimentalWarning: db-reader: something else/)
+    })
+  })
+
   it('a launch.before abort stops the host and names the plugin', async () => {
     await withFakeHome(async (h) => {
       await codexMain(h)
