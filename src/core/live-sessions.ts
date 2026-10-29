@@ -37,6 +37,8 @@ export interface LiveSession {
   reference: string
   /** The Run of a local orchestrator the Session works for (spec §3.32 step 2b); set by `withRuns`, not the readers. */
   run?: SessionRun
+  /** Earlier hops' session ids, oldest first, when an Auto Handoff chain led to this Session (ADR-0057); set by `withHandoffs`. */
+  handedOverFrom?: string[]
 }
 
 export interface LiveSessionsResult {

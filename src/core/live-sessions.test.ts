@@ -356,9 +356,9 @@ describe('order and copy texts', () => {
     const a = session({ sessionId: ID1, label: 'cc002 · a · 61230c3d' })
     const b = session({ sessionId: ID2, label: 'cc002 · b · 0799701d' })
     const acc = { ref: 'claude:002', label: 'cc002' }
-    assert.equal(pickSession('61230c3d', [a, b], undefined), a)
-    assert.equal(pickSession(ID2, [a, b], undefined), b)
-    assert.equal(pickSession('cc002', [a], acc), a)
+    assert.equal(pickSession('61230c3d', [a, b], undefined).session, a)
+    assert.equal(pickSession(ID2, [a, b], undefined).session, b)
+    assert.equal(pickSession('cc002', [a], acc).session, a)
     assert.throws(
       () => pickSession('cc002', [a, b], acc),
       (e: unknown) =>

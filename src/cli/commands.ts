@@ -3284,8 +3284,11 @@ export async function cmdSessions(a: ParsedArgs, io: Io, runtime?: Runtime): Pro
   const rt = runtime ?? (await createRuntime())
   const { listLiveSessions, sessionLabel } = await import('../core/live-sessions.ts')
   const { withRuns } = await import('../core/run-link.ts')
+  const { readHandoffChains, withHandoffs } = await import('../core/session-handoffs.ts')
   const r = await listLiveSessions(rt, first ? { only: first } : {})
-  const sessions = await withRuns(rt.env, rt.paths.home, r.sessions)
+  // Where an Auto Handoff chain led to a Session, its earlier ids; the Run Link falls back to them (ADR-0057).
+  const handed = withHandoffs(await readHandoffChains(rt.paths.stateDir), r.sessions)
+  const sessions = await withRuns(rt.env, rt.paths.home, handed)
   if (a.flags.has('json')) {
     json(io, { sessions, problems: r.problems })
     return 0
@@ -3326,6 +3329,11 @@ export async function cmdSessions(a: ParsedArgs, io: Io, runtime?: Runtime): Pro
   return 0
 }
 
+/** The line that says a session id was followed along its Handoff chain (ADR-0057). */
+export function handedOverLine(from: string, label: string, doing: string): string {
+  return c.dim(`${from.slice(0, 8)} was handed over to ${label}; ${doing}`)
+}
+
 /** Prints the listing's problems to stderr unless the output is JSON. */
 const listedProblems =
   (a: ParsedArgs, io: Io) =>
@@ -3340,7 +3348,7 @@ async function sessionsOpenRun(a: ParsedArgs, args: string[], io: Io, runtime?: 
   const rt = runtime ?? (await createRuntime())
   const { selectSession } = await import('../core/session-select.ts')
   const { openRunBoard } = await import('../core/run-link.ts')
-  const { session: s } = await selectSession(rt, target, {
+  const { session: s, handedOverFrom } = await selectSession(rt, target, {
     next: { verb: 'open the run report of', command: (id) => `sideby sessions open-run ${id}` },
     onListed: listedProblems(a, io),
   })
@@ -3348,9 +3356,16 @@ async function sessionsOpenRun(a: ParsedArgs, args: string[], io: Io, runtime?: 
   const r = await openRunBoard(rt, s.sessionId)
   const board = tildify(r.board, rt.paths.home)
   if (a.flags.has('json')) {
-    json(io, { opened: true, board, sessionId: s.sessionId, label: s.label })
+    json(io, {
+      opened: true,
+      board,
+      sessionId: s.sessionId,
+      label: s.label,
+      ...(handedOverFrom ? { handedOverFrom } : {}),
+    })
     return 0
   }
+  if (handedOverFrom) io.out(handedOverLine(handedOverFrom, s.label, 'opening its run report'))
   io.out(`${c.green('✓')} opened the run report of ${c.bold(s.label)}`)
   io.out(c.dim(`  ${board}`))
   return 0
@@ -3368,13 +3383,21 @@ async function sessionsCopy(a: ParsedArgs, args: string[], io: Io, runtime?: Run
   const { sessionCopyText } = await import('../core/live-sessions.ts')
   const { copyToClipboard } = await import('../core/live-sessions-copy.ts')
   const { selectSession } = await import('../core/session-select.ts')
-  const { session: s } = await selectSession(rt, target, { onListed: listedProblems(a, io) })
+  const { session: s, handedOverFrom } = await selectSession(rt, target, { onListed: listedProblems(a, io) })
   const text = sessionCopyText(s, as, lang)
   const program = await copyToClipboard(text, rt.env)
   if (a.flags.has('json')) {
-    json(io, { copied: program !== null, as, text, sessionId: s.sessionId, label: s.label })
+    json(io, {
+      copied: program !== null,
+      as,
+      text,
+      sessionId: s.sessionId,
+      label: s.label,
+      ...(handedOverFrom ? { handedOverFrom } : {}),
+    })
     return 0
   }
+  if (handedOverFrom) io.out(handedOverLine(handedOverFrom, s.label, 'copying that one'))
   const what = as === 'reference' ? 'a reference to' : as === 'id' ? 'the id of' : 'the resume command of'
   if (program) {
     io.out(`${c.green('✓')} copied ${what} ${c.bold(s.label)}; paste it into the other AI`)
@@ -3786,6 +3809,7 @@ export async function cmdSend(a: SendArgs, io: Io): Promise<number> {
     return 0
   }
   const home = rt.paths.home
+  if (r.handedOverFrom) io.out(handedOverLine(r.handedOverFrom, r.to, 'sending there'))
   if (r.status === 'delivered') {
     io.out(`${c.green('✓')} delivered to ${c.bold(r.to)} (message ${r.id})`)
     if (r.note) io.out(c.yellow(`  ${r.note}`))
