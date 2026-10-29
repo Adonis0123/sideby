@@ -615,6 +615,12 @@ const MessageReceipt = Type.Object({
     }),
   ),
   sentAt: Str,
+  handedOverFrom: Type.Optional(
+    Type.String({
+      description:
+        'The session id that was named, when an Auto Handoff chain led from it to this target (ADR-0057).',
+    }),
+  ),
 })
 
 const IndexState = Type.Union(
@@ -1327,6 +1333,12 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
           }),
           family: Str,
           sessionId: Type.String({ description: "The host's own session id." }),
+          handedOverFrom: Type.Optional(
+            Type.Array(Str, {
+              description:
+                "When an Auto Handoff chain led to this session: the earlier hops' session ids, oldest first (ADR-0057).",
+            }),
+          ),
           title: Type.String({
             description:
               "The host's own title for the session, or its working directory name when the host gives none; may be empty.",
@@ -1411,6 +1423,12 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       board: Type.String({ description: 'The Run Board file opened, with the home folder as ~.' }),
       sessionId: Str,
       label: Type.String({ description: 'The Session Label of the session whose run report was opened.' }),
+      handedOverFrom: Type.Optional(
+        Type.String({
+          description:
+            'The session id that was named, when an Auto Handoff chain led from it to this session (ADR-0057).',
+        }),
+      ),
     },
     { title: 'sideby sessions open-run --json' },
   ),
@@ -1425,6 +1443,12 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       text: Type.String({ description: 'The text copied, also when it could not be.' }),
       sessionId: Str,
       label: Type.String({ description: 'The Session Label of the session copied.' }),
+      handedOverFrom: Type.Optional(
+        Type.String({
+          description:
+            'The session id that was named, when an Auto Handoff chain led from it to this session (ADR-0057).',
+        }),
+      ),
     },
     { title: 'sideby sessions copy --json' },
   ),

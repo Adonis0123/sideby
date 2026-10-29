@@ -10,6 +10,7 @@ import type { Runtime } from '../runtime.ts'
 import type { Env } from '../types.ts'
 import { openWithDefault } from './edit-settings.ts'
 import { UserError } from './errors.ts'
+import { earlierHops, readHandoffChains } from './session-handoffs.ts'
 
 /** One Run a Session works for, as the index names it. */
 export interface RunEntry {
@@ -230,36 +231,74 @@ export async function runsForSessions(
   const check = await boardsCheck(env, home, uid)
   if (!check) return out
   for (const id of wanted) {
-    const [first, ...rest] = await checkedRuns(index.get(id)!, check)
-    if (!first) continue
-    const others = rest.map((e) => ({
-      title: e.title,
-      ...(e.laneTitle ? { laneTitle: e.laneTitle } : {}),
-      ...(e.role ? { role: e.role } : {}),
-      board: e.board,
-    }))
-    out.set(id, { ...first, ...(others.length ? { others } : {}) })
+    const run = sessionRun(await checkedRuns(index.get(id)!, check))
+    if (run) out.set(id, run)
   }
   return out
 }
 
-/** The same Sessions, each with `run` where the Session Index ties it to a Run. */
-export async function withRuns<T extends { sessionId: string }>(
+/** The first checked entry as the Session's Run, the rest as its `others`; undefined when none checked out. */
+function sessionRun([first, ...rest]: readonly RunEntry[]): SessionRun | undefined {
+  if (!first) return undefined
+  const others = rest.map((e) => ({
+    title: e.title,
+    ...(e.laneTitle ? { laneTitle: e.laneTitle } : {}),
+    ...(e.role ? { role: e.role } : {}),
+    board: e.board,
+  }))
+  return { ...first, ...(others.length ? { others } : {}) }
+}
+
+/** A Session's own id, then the ids an Auto Handoff chain passed it from, newest first (ADR-0057). */
+const linkIds = (s: { sessionId: string; handedOverFrom?: readonly string[] }): string[] => [
+  s.sessionId,
+  ...[...(s.handedOverFrom ?? [])].reverse(),
+]
+
+/**
+ * The one rule a Run Link follows, for listing and opening alike: the entries of the first id in `ids` that has an
+ * entry whose board checks out, those that check out ordered by role, each with its board's identity at the check.
+ */
+async function linkedEntries(
+  index: Map<string, RunEntry[]>,
+  check: BoardCheck,
+  ids: readonly string[],
+): Promise<{ entry: RunEntry; id: BoardIdentity }[]> {
+  for (const sessionId of ids) {
+    const entries = index.get(sessionId)
+    if (!entries) continue
+    const ok = (await Promise.all(entries.map((e) => inspectEntry(e, check)))).filter((x) => x !== undefined)
+    if (!ok.length) continue
+    const order = byRole(ok.map((x) => x.entry))
+    return order.map((entry) => ok.find((x) => x.entry === entry)!)
+  }
+  return []
+}
+
+/**
+ * The same Sessions, each with `run` where the Session Index ties it to a Run: by its own id, else by the ids it was
+ * handed over from, newest first, so a Run Board stays linked after its coordinator moves to another Account. An id
+ * whose boards all fail the checks is passed over, as `openRunBoard` passes it over.
+ */
+export async function withRuns<T extends { sessionId: string; handedOverFrom?: readonly string[] }>(
   env: Env,
   home: string,
   sessions: T[],
   uid?: number,
 ): Promise<(T & { run?: SessionRun })[]> {
-  const runs = await runsForSessions(
-    env,
-    home,
-    sessions.map((s) => s.sessionId),
-    uid,
+  if (!sessions.length) return sessions
+  const index = await readSessionIndex(sessionIndexPath(env, home))
+  const check =
+    index && sessions.some((s) => linkIds(s).some((id) => index.has(id)))
+      ? await boardsCheck(env, home, uid)
+      : undefined
+  if (!index || !check) return sessions
+  return Promise.all(
+    sessions.map(async (s) => {
+      const run = sessionRun((await linkedEntries(index, check, linkIds(s))).map((x) => x.entry))
+      return run ? { ...s, run } : s
+    }),
   )
-  return sessions.map((s) => {
-    const run = runs.get(s.sessionId)
-    return run ? { ...s, run } : s
-  })
 }
 
 /**
@@ -276,13 +315,14 @@ export async function openRunBoard(
       'This session is not part of a run any more, or its board file is gone; ask the coordinating AI to show the board again',
       { code: 'no-run' },
     )
-  const entries = (await readSessionIndex(sessionIndexPath(rt.env, rt.paths.home)))?.get(sessionId)
-  const check = entries && (await boardsCheck(rt.env, rt.paths.home))
-  if (!entries || !check) throw gone()
-  const ok = (await Promise.all(entries.map((e) => inspectEntry(e, check)))).filter((x) => x !== undefined)
-  const first = byRole(ok.map((x) => x.entry))[0]
-  const id = ok.find((x) => x.entry === first)?.id
-  if (!first || !id) throw gone()
+  const index = await readSessionIndex(sessionIndexPath(rt.env, rt.paths.home))
+  const check = index && (await boardsCheck(rt.env, rt.paths.home))
+  if (!index || !check) throw gone()
+  // The same rule as the listing: its own id, then the ids it was handed over from, newest first (ADR-0057).
+  const earlier = earlierHops(await readHandoffChains(rt.paths.stateDir), sessionId) ?? []
+  const [picked] = await linkedEntries(index, check, linkIds({ sessionId, handedOverFrom: earlier }))
+  if (!picked) throw gone()
+  const { entry: first, id } = picked
   if (!(await stillTheBoard(first.board, check, id)))
     throw new UserError(
       'The board file changed while sideby checked it; ask the coordinating AI to show the board again',

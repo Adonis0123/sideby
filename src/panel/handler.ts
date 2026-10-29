@@ -92,6 +92,7 @@ import { tildify } from '../core/paths.ts'
 import { type RemoteControlGroup, remoteControlTodo } from '../core/remote-control.ts'
 import { openRunBoard, withRuns } from '../core/run-link.ts'
 import { SECRET_VAR_NAME, secretVarFor, setSecret } from '../core/secret-file.ts'
+import { readHandoffChains, withHandoffs } from '../core/session-handoffs.ts'
 import { SKILL_INSTALL } from '../core/skill-check.ts'
 import { launchArgs, TERMINALS } from '../core/terminal.ts'
 import {
@@ -1810,7 +1811,10 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const home = rt.paths.home
         // The Run each Session works for, only where the Session Index and its board file check out (ADR-0041).
         const [sessions, tabs] = await Promise.all([
-          withRuns(rt.env, home, listed.sessions),
+          // A Session an Auto Handoff chain led to stays linked to its Run under the earlier ids (ADR-0057).
+          readHandoffChains(rt.paths.stateDir).then((chains) =>
+            withRuns(rt.env, home, withHandoffs(chains, listed.sessions)),
+          ),
           orcaTabs(orcaOf(rt), listed.sessions),
         ])
         const problems = listed.problems

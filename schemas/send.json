@@ -91,6 +91,10 @@
         },
         "sentAt": {
           "type": "string"
+        },
+        "handedOverFrom": {
+          "type": "string",
+          "description": "The session id that was named, when an Auto Handoff chain led from it to this target (ADR-0057)."
         }
       }
     },

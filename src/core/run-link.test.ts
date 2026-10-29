@@ -204,6 +204,67 @@ describe('run links', () => {
     })
   })
 
+  it('falls back to the ids a session was handed over from, newest first, when its own id is not in the index', async () => {
+    await withFakeHome(async (h) => {
+      const b1 = await board(h, 'r1.html')
+      const b2 = await board(h, 'r2.html')
+      const OLD = '05966d31-0000-4000-8000-000000000002'
+      const MID = 'aefc5086-0000-4000-8000-000000000003'
+      await h.write(
+        `${STATE}/session-index.json`,
+        index({ [OLD]: [entry(b1, { runTitle: 'Old' })], [MID]: [entry(b2, { runTitle: 'Mid' })] }),
+      )
+      const listed = await withRuns(h.env, h.home, [
+        { sessionId: SID, handedOverFrom: [OLD, MID] },
+        { sessionId: 'y', handedOverFrom: [OLD] },
+        { sessionId: OLD },
+      ])
+      assert.deepEqual(
+        listed.map((s) => s.run?.title),
+        ['Mid', 'Old', 'Old'],
+      )
+      // openRunBoard finds the earlier ids from the Handoff chain itself.
+      await h.write('.local/state/sideby/handoffs/c1/run-mvt4ly8k-a.json', JSON.stringify({ sessionId: OLD }))
+      await h.write('.local/state/sideby/handoffs/c1/run-mvt4lz00-b.json', JSON.stringify({ sessionId: SID }))
+      const calls: string[][] = []
+      const exec = async (cmd: string, args: readonly string[]): Promise<ExecResult> => {
+        calls.push([cmd, ...args])
+        return { code: 0, stdout: '', stderr: '' }
+      }
+      const rt = await createRuntime({ env: h.env, desktop: { platform: 'darwin', exec } })
+      assert.equal((await openRunBoard(rt, SID)).board, b1)
+      assert.deepEqual(calls, [['/usr/bin/open', b1]])
+    })
+  })
+
+  it('lists and opens the same Run when the board of the newer earlier id is gone and an older one checks out', async () => {
+    await withFakeHome(async (h) => {
+      const older = await board(h, 'older.html')
+      const gone = await board(h, 'newer.html')
+      const OLD = '05966d31-0000-4000-8000-000000000004'
+      const MID = 'aefc5086-0000-4000-8000-000000000005'
+      await h.write(
+        `${STATE}/session-index.json`,
+        index({ [OLD]: [entry(older, { runTitle: 'Older' })], [MID]: [entry(gone, { runTitle: 'Newer' })] }),
+      )
+      await rm(gone)
+      const chain = '.local/state/sideby/handoffs/c1'
+      await h.write(`${chain}/run-mvt4ly8k-a.json`, JSON.stringify({ sessionId: OLD }))
+      await h.write(`${chain}/run-mvt4lyzz-b.json`, JSON.stringify({ sessionId: MID }))
+      await h.write(`${chain}/run-mvt4lz00-c.json`, JSON.stringify({ sessionId: SID }))
+      const [listed] = await withRuns(h.env, h.home, [{ sessionId: SID, handedOverFrom: [OLD, MID] }])
+      assert.equal(listed!.run?.board, older)
+      const calls: string[][] = []
+      const exec = async (cmd: string, args: readonly string[]): Promise<ExecResult> => {
+        calls.push([cmd, ...args])
+        return { code: 0, stdout: '', stderr: '' }
+      }
+      const rt = await createRuntime({ env: h.env, desktop: { platform: 'darwin', exec } })
+      assert.equal((await openRunBoard(rt, SID)).board, older)
+      assert.deepEqual(calls, [['/usr/bin/open', older]])
+    })
+  })
+
   it('opens the board found again from the index with the default program, never a path it was given', async () => {
     await withFakeHome(async (h) => {
       const good = await board(h)

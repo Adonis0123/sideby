@@ -53,7 +53,7 @@ async function setUp(h: FakeHome, run = true) {
 
 const run = (rt: Awaited<ReturnType<typeof createRuntime>>, argv: string[]) => {
   const out: string[] = []
-  return cmdSessions(parseArgs(argv, ['json']), { out: (s) => out.push(s), err: () => {} }, rt).then(
+  return cmdSessions(parseArgs(argv, ['json'], ['as']), { out: (s) => out.push(s), err: () => {} }, rt).then(
     (code) => ({ code, out: out.join('\n') }),
   )
 }
@@ -93,6 +93,76 @@ describe('sessions open-run', () => {
       )
       await assert.rejects(run(rt, ['open-run']), /usage: sideby sessions open-run <account\|session-id>/)
       assert.deepEqual(calls, [])
+    })
+  })
+})
+
+describe('handed-over session ids (ADR-0057)', () => {
+  const OLD = '05966d31-0000-4000-8000-000000000009'
+
+  /** cc002 runs SID, which an Auto Handoff chain passed the task to from OLD; only OLD is in the Session Index. */
+  async function handedOver(h: FakeHome) {
+    const r = await setUp(h, false)
+    const index = {
+      schemaVersion: 1,
+      sessions: { [OLD]: { entries: [{ runTitle: 'Run one', board: r.board, url: `file://${r.board}` }] } },
+    }
+    await h.write(sessionIndexPath(h.env, h.home).slice(h.home.length + 1), JSON.stringify(index))
+    await h.write('.local/state/sideby/handoffs/c1/run-mvt4ly8k-a.json', JSON.stringify({ sessionId: OLD }))
+    await h.write('.local/state/sideby/handoffs/c1/run-mvt4lz00-b.json', JSON.stringify({ sessionId: SID }))
+    const clip = join(h.bin, 'clip.txt')
+    await writeFile(
+      join(h.bin, 'pbcopy'),
+      `#!${process.execPath}\nlet d='';process.stdin.on('data',(c)=>d+=c).on('end',()=>require('node:fs').writeFileSync(${JSON.stringify(clip)},d))\n`,
+      { mode: 0o755 },
+    )
+    return r
+  }
+
+  it('lists the earlier ids in sessions --json and keeps the Run linked through them', async () => {
+    await withFakeHome(async (h) => {
+      const { rt } = await handedOver(h)
+      const j = await run(rt, ['--json'])
+      const data = JSON.parse(j.out) as {
+        sessions: { sessionId: string; handedOverFrom?: string[]; run?: { title: string } }[]
+      }
+      assert.ok(Value.Check(OUTPUT_SCHEMAS.sessions!, data), j.out)
+      assert.deepEqual(
+        data.sessions.map((s) => [s.sessionId, s.handedOverFrom, s.run?.title]),
+        [[SID, [OLD], 'Run one']],
+      )
+    })
+  })
+
+  it('opens the run report and copies the session an old id was handed over to, saying so first', async () => {
+    await withFakeHome(async (h) => {
+      const { board, calls, rt } = await handedOver(h)
+      const j = await run(rt, ['open-run', OLD, '--json'])
+      const data = JSON.parse(j.out) as Record<string, unknown>
+      assert.ok(Value.Check(OUTPUT_SCHEMAS['sessions-open-run']!, data), j.out)
+      assert.equal(data.sessionId, SID)
+      assert.equal(data.handedOverFrom, OLD)
+      const text = await run(rt, ['open-run', OLD.slice(0, 8)])
+      assert.match(
+        text.out.split('\n')[0]!,
+        /^05966d31 was handed over to cc002 · .*61230c3d; opening its run report$/,
+      )
+      assert.deepEqual(calls, [
+        ['/usr/bin/open', board],
+        ['/usr/bin/open', board],
+      ])
+      const c = await run(rt, ['copy', OLD, '--as', 'id', '--json'])
+      const copied = JSON.parse(c.out) as Record<string, unknown>
+      assert.ok(Value.Check(OUTPUT_SCHEMAS['sessions-copy']!, copied), c.out)
+      assert.deepEqual([copied.text, copied.handedOverFrom], [SID, OLD])
+      const ct = await run(rt, ['copy', OLD, '--as', 'id'])
+      assert.match(ct.out.split('\n')[0]!, /^05966d31 was handed over to cc002 · .*; copying that one$/)
+      // A session named by its own id says nothing about a handoff.
+      const own = JSON.parse((await run(rt, ['copy', SID, '--as', 'id', '--json'])).out) as Record<
+        string,
+        unknown
+      >
+      assert.equal('handedOverFrom' in own, false)
     })
   })
 })

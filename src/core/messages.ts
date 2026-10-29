@@ -40,6 +40,8 @@ export interface MessageReceipt {
   /** Delivered, but the target shows it only once the user approves it in its terminal (ADR-0045). */
   needsApproval?: boolean
   sentAt: string
+  /** The session id the sender named, when an Auto Handoff chain led from it to this target (ADR-0057). */
+  handedOverFrom?: string
 }
 
 export interface SendOptions {
@@ -284,7 +286,11 @@ async function sendOpened(
 ): Promise<MessageReceipt> {
   const { text, lang } = opts
   const procDeps = deps.procs ?? systemDeps(rt.env)
-  const { session: to, listed } = await selectSession(rt, target, {
+  const {
+    session: to,
+    listed,
+    handedOverFrom,
+  } = await selectSession(rt, target, {
     next: { verb: 'send to', command: (id) => `sideby send ${id} "<text>"` },
     deps: procDeps,
   })
@@ -338,7 +344,7 @@ async function sendOpened(
     // Without a receipt sideby could not follow it later, so it does not deliver it; the Message file is kept.
     receipt.status = 'paste-needed'
     receipt.note = `sideby saved the message file, but could not save its status (${(err as NodeJS.ErrnoException).code ?? (err as Error).message}). Paste the line into the session's tab`
-    return publicReceipt(receipt)
+    return { ...publicReceipt(receipt), ...(handedOverFrom ? { handedOverFrom } : {}) }
   }
   let result: { status: MessageStatus; note?: string; needsApproval?: boolean }
   try {
@@ -360,7 +366,7 @@ async function sendOpened(
     else
       receipt.note = `${receipt.note ?? 'paste the line into its tab'} (sideby also could not save the message status: ${why})`
   }
-  return publicReceipt(receipt)
+  return { ...publicReceipt(receipt), ...(handedOverFrom ? { handedOverFrom } : {}) }
 }
 
 async function deliver(

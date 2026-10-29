@@ -301,6 +301,27 @@ describe('sideby send', () => {
     })
   })
 
+  it('sends to the session an old id was handed over to, and says so in handedOverFrom', async () => {
+    await withFakeHome(async (h) => {
+      const s = await socketServer(h, '4102')
+      const procs = await machine(h, s.path)
+      const old = '05966d31-7777-4777-8777-777777777777'
+      const chain = '.local/state/sideby/handoffs/c1'
+      await h.write(`${chain}/run-mvt4ly8k-a.json`, JSON.stringify({ sessionId: old }))
+      await h.write(`${chain}/run-mvt4lz00-b.json`, JSON.stringify({ sessionId: ID_G }))
+      const rt = await createRuntime({ env: h.env })
+      const r = await sendMessage(rt, old.slice(0, 8), { text: 'x' }, depsFor(procs, s.root))
+      await s.close()
+      assert.equal(r.toSessionId, ID_G)
+      assert.equal(r.toAccount, 'grok:main')
+      assert.equal(r.handedOverFrom, old)
+      assert.equal(r.status, 'paste-needed')
+      // A session named by its own id carries no handedOverFrom.
+      const direct = await sendMessage(rt, ID_G, { text: 'y' }, depsFor(procs, s.root))
+      assert.equal('handedOverFrom' in direct, false)
+    })
+  })
+
   it('refuses anything but a screenshot up to 20 MB before writing anything', async () => {
     await withFakeHome(async (h) => {
       const s = await socketServer(h, '4102')

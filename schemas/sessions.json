@@ -44,6 +44,13 @@
             "type": "string",
             "description": "The host's own session id."
           },
+          "handedOverFrom": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "When an Auto Handoff chain led to this session: the earlier hops' session ids, oldest first (ADR-0057)."
+          },
           "title": {
             "type": "string",
             "description": "The host's own title for the session, or its working directory name when the host gives none; may be empty."
