@@ -47,7 +47,7 @@ function run(argv) {
 
   var out = ObjC.unwrap($.NSTemporaryDirectory()) + 'sideby-menubar-' + $.NSProcessInfo.processInfo.processIdentifier + '.json';
   var snap = null, task = null, handle = null, lastStart = 0, lastOk = 0, failed = false;
-  var refs = [], actions = [], footer = null, appearance = '';
+  var refs = [], actions = [], footer = null, appearance = '', manual = false;
   // The first words, before any snapshot has said which language to use.
   var zh = /^zh/i.test(lang);
   var CARD_ICON = ${JSON.stringify(FAVICON_SVG)};
@@ -91,6 +91,7 @@ function run(argv) {
   function finishSnapshot() {
     var ok = task.terminationStatus === 0;
     task = null;
+    manual = false;
     closeHandle();
     if (ok) {
       try {
@@ -235,7 +236,7 @@ function run(argv) {
   function footerText() {
     if (!snap) return LOADING;
     var l = snap.labels;
-    if (task && !lastOk) return l.refreshing;
+    if (task && (manual || !lastOk)) return l.refreshing;
     if (failed) return l.refreshFailed;
     var minutes = Math.floor((now() - lastOk) / 60);
     return minutes < 1 ? l.updatedJustNow : l.updatedMinutes.replace('{n}', String(minutes));
@@ -467,10 +468,52 @@ function run(argv) {
     if (img) mi.image = img;
     return mi;
   }
+  // The last line: when the numbers were checked, and a refresh button. A button in a view keeps the menu open, so
+  // a click shows "Refreshing…" and then the new numbers in place, as menu bar apps such as CodexBar do. ⌘R does the
+  // same through a hidden item.
+  function footerItem(menu, L, refreshTitle) {
+    var W = Math.max(280, L ? L.width : 280), H = 24;
+    var v = $.NSView.alloc.initWithFrame($.NSMakeRect(0, 0, W, H));
+    v.autoresizingMask = $.NSViewWidthSizable;
+    var clock = symbol('clock');
+    if (clock) {
+      var iv = $.NSImageView.imageViewWithImage(clock);
+      iv.frame = $.NSMakeRect(HEAD_X, (H - 14) / 2, 14, 14);
+      iv.contentTintColor = $.NSColor.secondaryLabelColor;
+      v.addSubview(iv);
+    }
+    footer = $.NSTextField.labelWithString(footerText());
+    footer.font = $.NSFont.menuFontOfSize(0);
+    footer.textColor = $.NSColor.secondaryLabelColor;
+    footer.frame = $.NSMakeRect(HEAD_TEXT_X, (H - 17) / 2, W - HEAD_TEXT_X - 44, 17);
+    v.addSubview(footer);
+    if (refreshTitle) {
+      var b = $.NSButton.alloc.initWithFrame($.NSMakeRect(W - 38, (H - 22) / 2, 26, 22));
+      b.autoresizingMask = $.NSViewMinXMargin;
+      b.bezelStyle = $.NSBezelStyleRecessed;
+      b.showsBorderOnlyWhileMouseInside = true;
+      b.image = symbol('arrow.clockwise');
+      b.imagePosition = $.NSImageOnly;
+      b.toolTip = refreshTitle + ' (⌘R)';
+      b.target = target;
+      b.action = 'refresh:';
+      v.addSubview(b);
+      var key = $.NSMenuItem.alloc.initWithTitleActionKeyEquivalent(refreshTitle, 'refresh:', 'r');
+      key.target = target;
+      key.hidden = true;
+      key.allowsKeyEquivalentWhenHidden = true;
+      menu.addItem(key);
+    }
+    var mi = $.NSMenuItem.alloc.init;
+    mi.view = v;
+    menu.addItem(mi);
+  }
+  // One menu for the item's life: a rebuild swaps its items, so an open menu shows new numbers in place.
+  var menu = $.NSMenu.alloc.init;
+  menu.autoenablesItems = false;
   function build() {
     drawTitle();
-    var menu = $.NSMenu.alloc.init;
-    menu.autoenablesItems = false;
+    menu.removeAllItems;
     refs = [];
     if (snap) {
       var L = layout(snap.sections);
@@ -498,15 +541,14 @@ function run(argv) {
         }
       });
       menu.addItem($.NSMenuItem.separatorItem);
-      footer = withImage(add(menu, footerText(), null), 'clock');
-      withImage(add(menu, snap.labels.refresh, 'refresh:', 0, 'r'), 'arrow.clockwise');
+      footerItem(menu, L, snap.labels.refresh);
       withImage(add(menu, snap.labels.openPanel, 'openPanel:', 0, 'o'), 'macwindow');
       menu.addItem($.NSMenuItem.separatorItem);
       if (hotkeyStatus === 'taken' && hotkeyWant)
         withImage(add(menu, snap.labels.hotkeyTaken.replace('{key}', hotkeyWant.label), 'openPanel:'), 'keyboard');
       withImage(add(menu, snap.labels.hide, 'hide:'), 'eye.slash');
     } else {
-      footer = withImage(add(menu, footerText(), null), 'clock');
+      footerItem(menu, null, null);
       withImage(add(menu, OPEN_PANEL, 'openPanel:', 0, 'o'), 'macwindow');
     }
     closeItem(menu);
@@ -540,14 +582,16 @@ function run(argv) {
           // The bars are pictures in the colours of the moment; redraw them when light or dark mode changes.
           if (ObjC.unwrap(app.effectiveAppearance.name) !== appearance) build();
           else drawTitle();
-          if (footer) footer.title = footerText();
+          if (footer) footer.stringValue = footerText();
         },
       },
       'refresh:': {
         types: ['void', ['id']],
         implementation: function () {
           // A manual refresh must query the Host, even if an automatic cache read is already running.
+          manual = true;
           startSnapshot(true);
+          if (footer) footer.stringValue = footerText();
         },
       },
       // A setting changed (the shortcut): read the snapshot again now, after one that is running, with no restart.
@@ -594,7 +638,8 @@ function run(argv) {
   $.NSDistributedNotificationCenter.defaultCenter.addObserverSelectorNameObject(target, 'reload:', $('${MENUBAR_RELOAD}'), $());
   build();
   startSnapshot();
-  $.NSTimer.scheduledTimerWithTimeIntervalTargetSelectorUserInfoRepeats(TICK, target, 'tick:', $(), true);
+  // Common modes: the tick also runs while the menu is open, so a refresh started there lands in place.
+  $.NSRunLoop.mainRunLoop.addTimerForMode($.NSTimer.timerWithTimeIntervalTargetSelectorUserInfoRepeats(TICK, target, 'tick:', $(), true), $.NSRunLoopCommonModes);
   app.run;
 }
 `
