@@ -495,6 +495,35 @@ it('shows every model group of a Host as its own line under the account, with it
   assert.doesNotMatch(r.groups![2]!.tip, /Gemini Models/)
 })
 
+it('keeps a plan-wide window on the account line and draws each model group under it', () => {
+  const w = (used: number, name?: string) => ({
+    ...(name ? { name } : {}),
+    label: '31d',
+    windowMinutes: 44640,
+    usedPercent: used,
+    resetsAt: at(9000),
+  })
+  const q: QuotaResult = {
+    status: 'ok',
+    windows: [w(9), w(6, 'Cursor models'), w(96, 'Other models')],
+    observedAt: NOW.toISOString(),
+    source: 'test',
+  }
+  const snap = menubarSnapshot([family('cursor', 'Cursor CLI', [sub('main', q, 'cursor')])], NOW, 'en')
+  const r = snap.sections[0]!.rows[0]!
+  assert.deepEqual(r.bars, [null, { label: '31d', percent: 9, level: 'ok' }])
+  assert.deepEqual(
+    r.groups?.map((g) => [g.label, g.bars?.map((b) => b && [b.label, b.percent])]),
+    [
+      ['Cursor', [null, ['31d', 6]]],
+      ['Other', [null, ['31d', 96]]],
+    ],
+  )
+  // The account's colour warns when one model group is nearly used up, though the plan total is low.
+  assert.notEqual(r.level, 'ok')
+  assert.match(r.tip, /31d: 9% used[^\n]*\n\nCursor models\n {3}31d: 6% used/)
+})
+
 it('writes the hover text in words: how long ago the numbers were read, and why they may be old', () => {
   const q: QuotaResult = {
     status: 'ok',

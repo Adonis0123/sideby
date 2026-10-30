@@ -228,16 +228,17 @@ function durationText(minutes: number, s: MenubarStrings): string {
 }
 
 /**
- * The model groups of a Quota whose every window covers one group (Antigravity CLI), in the order the Host lists them,
- * as the Panel shows them: each with its own windows, so the menu draws a line per group with its `5h` and `7d` bars.
- * Null when some window covers every model.
+ * The model groups of a Quota, from its windows that cover one group (Antigravity CLI's, Cursor's "Other models"), in
+ * the order the Host lists them, as the Panel shows them: each with its own windows, so the menu draws a line per group
+ * with its `5h` and `7d` bars. Windows that cover every model stay on the account's own line. Null when no window
+ * covers a single group.
  */
 export function quotaGroups(
   quota: QuotaResult,
 ): { name: string; quota: QuotaResult & { status: 'ok' } }[] | null {
-  if (quota.status !== 'ok' || !quota.windows.length || quota.windows.some((w) => !w.name)) return null
+  if (quota.status !== 'ok' || !quota.windows.some((w) => w.name)) return null
   const groups = new Map<string, QuotaWindow[]>()
-  for (const { name, ...w } of quota.windows) groups.set(name!, [...(groups.get(name!) ?? []), w])
+  for (const { name, ...w } of quota.windows) if (name) groups.set(name, [...(groups.get(name) ?? []), w])
   return [...groups].map(([name, windows]) => ({ name, quota: { ...quota, windows } }))
 }
 
@@ -340,19 +341,30 @@ function row(
   ]
   const groups = quotaGroups(quota)
   if (groups) {
-    // One line per model group under the account, each with its own 5h and 7d bars (spec §3.31).
+    // One line per model group under the account, each with its own 5h and 7d bars (spec §3.31). Windows that cover
+    // every model (Cursor's plan total) keep their bars on the account's own line.
     const drawnGroups = groups.map((g) => ({ name: g.name, d: drawn(g.quota, now, s) }))
     const groupTip = (g: (typeof drawnGroups)[number]) => [g.name, ...g.d.lines.map((l) => `   ${l}`)]
+    const all = openWindows(quota, now) ? drawn(quota, now, s) : null
     return {
       ...base,
       observedAt: quota.observedAt,
       stale,
       detail: [
+        ...(all ? [all.parts.join(' ')] : []),
         ...drawnGroups.map((g) => `${groupLabel(g.name)} ${g.d.parts.join(' ')}`),
         ...(stale ? [s.olderReading] : []),
       ].join(s.sep),
-      level: drawnGroups.reduce<QuotaLevel>((l, g) => worseLevel(l, g.d.level), 'ok'),
-      tip: [...head, '', ...drawnGroups.flatMap(groupTip), '', startTip].join('\n'),
+      level: drawnGroups.reduce<QuotaLevel>((l, g) => worseLevel(l, g.d.level), all?.level ?? 'ok'),
+      tip: [
+        ...head,
+        '',
+        ...(all ? [...all.lines, ''] : []),
+        ...drawnGroups.flatMap(groupTip),
+        '',
+        startTip,
+      ].join('\n'),
+      ...(all ? { bars: all.bars, reset: all.reset } : {}),
       groups: drawnGroups.map((g) => ({
         label: groupLabel(g.name),
         bars: g.d.bars,
