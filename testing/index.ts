@@ -76,6 +76,11 @@ export interface FakeHostOptions {
    * without a start record either way; left out, it prints nothing, as a Host whose version cannot be told.
    */
   version?: string
+  /**
+   * Treat a quota question (`claude -p /usage`, spec §3.26) like any start: record it and run `onStart`. Left out,
+   * the fake exits at once without a record or an answer, as a check that starts no session.
+   */
+  quota?: boolean
 }
 
 /**
@@ -93,6 +98,8 @@ if (process.argv.length === 3 && process.argv[2] === '--version') {
   process.stdout.write(${JSON.stringify(opts.version ? `${opts.version}\n` : '')})
   process.exit(0)
 }
+// A quota question (\`claude -p /usage\`, spec §3.26) starts no session either: no record, and no answer.
+${opts.quota ? '' : "if (process.argv[2] === '-p' && process.argv[3] === '/usage') process.exit(0)"}
 // Handlers first: tests signal the Host as soon as the start record appears.
 for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT']) process.on(s, () => { rec({ signal: s }); process.exit(${opts.sleep ? 100 : 0}) })
 rec({ argv: process.argv.slice(2), env: process.env, pid: process.pid })

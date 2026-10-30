@@ -25,7 +25,7 @@ npm i -g sideby
 sideby new claude work           # create ~/.claude-work, sharing ~/.claude's skills and hooks
 sideby login claude:work         # sign in once
 sideby run work                  # Claude Code on the work account
-sideby quota setup claude --yes  # Claude quota in the panel; undo: sideby quota teardown claude
+sideby quota setup claude --yes  # optional: live Claude quota while a session runs; undo: sideby quota teardown claude
 sideby ui --background           # every account's quota at http://127.0.0.1:17420, still there after you close the terminal
 ```
 
@@ -72,7 +72,7 @@ On macOS, the same quota sits in the menu bar (`sideby menubar on`): click or pr
 |---|---|---|---|---|
 | `CLAUDE_CONFIG_DIR` and an alias | Yes. Each terminal exports the variable. | Each directory is its own copy. They drift unless you symlink by hand. | That session's status line | One alias per account |
 | [cc-switch](https://github.com/farion1231/cc-switch) | Enabling a provider writes the host's live config, so open sessions share that switch. | Plugin settings are copied across providers as a separate step. | The active provider, from its quota endpoint | Install the desktop app |
-| sideby | Yes. `sideby run` selects the directory for that process and leaves your shell alone. | Linked to the main account. `sideby doctor --fix` repairs copies. Sign-in and sessions stay separate. | Every account, from local files. Claude needs `quota setup`. | `npm i -g sideby`, then `sideby new` and sign in |
+| sideby | Yes. `sideby run` selects the directory for that process and leaves your shell alone. | Linked to the main account. `sideby doctor --fix` repairs copies. Sign-in and sessions stay separate. | Every account, from local files and each tool's own CLI. | `npm i -g sideby`, then `sideby new` and sign in |
 
 cc-switch's docs describe that switch: it writes the live settings file ([README](https://github.com/farion1231/cc-switch#readme)). [#1105](https://github.com/farion1231/cc-switch/issues/1105) and [#2908](https://github.com/farion1231/cc-switch/issues/2908) ask for several sessions at once. [#1106](https://github.com/farion1231/cc-switch/issues/1106) is closed; the maintainer says Claude Code's "open terminal" can start one provider without changing the global config.
 
@@ -88,7 +88,7 @@ cc-switch's docs describe that switch: it writes the live settings file ([README
 | Have the panel ready in the background whenever you log in | **Settings › Startup** in the panel, or `sideby autostart on` | [Start at login](docs/guide/usage.md#start-at-login) |
 | Add an API key account (DeepSeek, a gateway, …) | `sideby new claude deepseek --api` | [API accounts](docs/guide/usage.md#api-accounts) |
 | Find and fix config drift between accounts | `sideby doctor --fix` | [Doctor](docs/guide/usage.md#doctor) |
-| See Claude quota (Codex needs no setup) | `sideby quota setup claude --yes` | [Claude quota](docs/guide/usage.md#claude-quota) |
+| See every account's quota (no setup) | `sideby quota` | [Claude quota](docs/guide/usage.md#claude-quota) |
 | Find the cheapest auto-compact size from your own sessions, and use it in one click | `sideby tune` (or the panel's Context tuning tab) | [Context tuning](docs/guide/usage.md#context-tuning) |
 | See each account's model and effort, and set them per account | `sideby model <account>` (or click the model in the panel) | [Model and effort](docs/guide/usage.md#model-and-effort) |
 | Stop Claude and Codex when your requests would leave from a country you did not allow, for example when the proxy stopped | **Settings › Network check** in the panel, or `sideby network on` | [Network check](docs/guide/usage.md#network-check) |
@@ -109,7 +109,7 @@ cc-switch's docs describe that switch: it writes the live settings file ([README
 
 | Host | Account directories | Sign-in | Quota | Usage (7 days) |
 |---|---|---|---|---|
-| Claude Code | `~/.claude`, `~/.claude-<name>` | `claude auth login` | ✓ after `quota setup claude` | ✓ |
+| Claude Code | `~/.claude`, `~/.claude-<name>` | `claude auth login` | ✓ | ✓ |
 | Codex CLI | `~/.codex`, `~/.codex-<name>` | `codex login` | ✓ | ✓ |
 | Grok Build | `~/.grok`, `~/.grok-<name>` | `grok login` | weekly, asked from the `grok` CLI | no public source |
 | pi | `~/.pi/agent`, `~/.pi-<name>/agent` | `/login` inside pi | no public source | no public source |

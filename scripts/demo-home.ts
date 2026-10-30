@@ -37,8 +37,28 @@ const now = Date.now()
 const iso = (msFromNow: number) => new Date(now + msFromNow).toISOString()
 const H = 3_600_000
 
-for (const host of ['claude', 'pi'])
-  await writeFile(join(bin, host), '#!/bin/sh\necho "demo host"\n', { mode: 0o755 })
+await writeFile(join(bin, 'pi'), '#!/bin/sh\necho "demo host"\n', { mode: 0o755 })
+// Claude Code answers sideby's quota check (`claude -p /usage`, ADR-0063) with the same fake numbers as the cached
+// status line readings below, so the Panel shows them as it does with the real CLI.
+await writeFile(
+  join(bin, 'claude'),
+  `#!${process.execPath}
+if (process.argv[3] !== '/usage') { console.log('demo host'); process.exit(0) }
+const work = /claude-work$/.test(process.env.CLAUDE_CONFIG_DIR || '')
+const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const reset = (ms) => {
+  const d = new Date(Math.ceil(ms / 3600000) * 3600000)
+  const h = d.getUTCHours() % 12 || 12
+  return 'resets ' + mon[d.getUTCMonth()] + ' ' + d.getUTCDate() + ' at ' + h + (d.getUTCHours() < 12 ? 'am' : 'pm') + ' (UTC)'
+}
+const result = [
+  'Current session: ' + (work ? 23 : 35) + '% used · ' + reset(${Math.round(now + 1.8 * H)}),
+  'Current week (all models): ' + (work ? 91 : 44) + '% used · ' + reset(${Math.round(now + 96 * H)}),
+].join('\\n')
+console.log(JSON.stringify({ type: 'result', is_error: false, num_turns: 0, total_cost_usd: 0, local_command: 'usage', result }))
+`,
+  { mode: 0o755 },
+)
 // The official Codex quota protocol, with demo numbers only (ADR-0038).
 await writeFile(
   join(bin, 'codex'),

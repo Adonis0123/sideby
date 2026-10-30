@@ -25,7 +25,7 @@ npm i -g sideby
 sideby new claude work           # 新建 ~/.claude-work，共用 ~/.claude 的 skills 和 hooks
 sideby login claude:work         # 登录一次
 sideby run work                  # 用 work 账号启动 Claude Code
-sideby quota setup claude --yes  # 在面板里显示 Claude 额度；撤回：sideby quota teardown claude
+sideby quota setup claude --yes  # 可选：会话进行中实时显示 Claude 额度；撤回：sideby quota teardown claude
 sideby ui --background           # 在 http://127.0.0.1:17420 查看所有账号的额度，关掉终端也还在
 ```
 
@@ -72,7 +72,7 @@ macOS 上，同样的额度也可以常驻状态栏（`sideby menubar on`）：�
 |---|---|---|---|---|
 | `CLAUDE_CONFIG_DIR` 加别名 | 能。每个终端自己 export。 | 每个目录各一份。不自己做软链接，过一阵就不一样了。 | 只有当前这个会话的 status line | 一个账号一条别名 |
 | [cc-switch](https://github.com/farion1231/cc-switch) | 启用一个供应商会写进宿主正在用的配置，已经打开的会话跟着变。 | 插件配置要另外复制一次。 | 当前启用的那一个，走对方的额度接口 | 装一个桌面应用 |
-| sideby | 能。`sideby run` 只给这个进程选目录，不改你的 shell。 | 链到主账号。副本用 `sideby doctor --fix` 拉齐。登录和会话各留各的。 | 所有账号，只读本地文件。Claude 要先跑 `quota setup`。 | `npm i -g sideby`，然后 `sideby new`，登录一次 |
+| sideby | 能。`sideby run` 只给这个进程选目录，不改你的 shell。 | 链到主账号。副本用 `sideby doctor --fix` 拉齐。登录和会话各留各的。 | 所有账号，读本地文件或问工具自己的命令行。 | `npm i -g sideby`，然后 `sideby new`，登录一次 |
 
 cc-switch 自己的说明是：切换时把配置写进宿主正在用的文件（[README](https://github.com/farion1231/cc-switch#readme)）。[#1105](https://github.com/farion1231/cc-switch/issues/1105) 和 [#2908](https://github.com/farion1231/cc-switch/issues/2908) 要的是同时开好几个会话。[#1106](https://github.com/farion1231/cc-switch/issues/1106) 已经关闭，维护者说 Claude Code 的「打开终端」可以用某个供应商的配置启动，而不改全局配置。
 
@@ -88,7 +88,7 @@ cc-switch 自己的说明是：切换时把配置写进宿主正在用的文件�
 | 登录电脑后面板就在后台准备好 | 面板的「设置 › 启动」，或 `sideby autostart on` | [开机启动](docs/guide/usage.zh-CN.md#开机启动) |
 | 加一个 API key 账号（DeepSeek、网关等） | `sideby new claude deepseek --api` | [API 账号](docs/guide/usage.zh-CN.md#api-账号) |
 | 找出并修复账号之间的配置漂移 | `sideby doctor --fix` | [体检](docs/guide/usage.zh-CN.md#体检doctor) |
-| 看 Claude 额度（Codex 不用设置） | `sideby quota setup claude --yes` | [Claude 额度](docs/guide/usage.zh-CN.md#claude-额度) |
+| 看每个账号的额度（不用设置） | `sideby quota` | [Claude 额度](docs/guide/usage.zh-CN.md#claude-额度) |
 | 用你自己的会话找出最省的自动压缩大小，一键使用 | `sideby tune`（或面板的「上下文调优」页签） | [上下文调优](docs/guide/usage.zh-CN.md#上下文调优) |
 | 查看每个账号的模型和 effort，并按账号设置 | `sideby model <账号>`（或在面板里点模型） | [模型与 effort](docs/guide/usage.zh-CN.md#模型与-effort) |
 | 请求要从你没允许的地区发出时（比如代理断了），拦下 Claude 和 Codex | 面板的**设置 › 网络检查**，或 `sideby network on` | [网络检查](docs/guide/usage.zh-CN.md#网络检查) |
@@ -109,7 +109,7 @@ cc-switch 自己的说明是：切换时把配置写进宿主正在用的文件�
 
 | 宿主 | 账号目录 | 登录 | 额度 | 用量（7 天） |
 |---|---|---|---|---|
-| Claude Code | `~/.claude`、`~/.claude-<name>` | `claude auth login` | ✓ 需先 `quota setup claude` | ✓ |
+| Claude Code | `~/.claude`、`~/.claude-<name>` | `claude auth login` | ✓ | ✓ |
 | Codex CLI | `~/.codex`、`~/.codex-<name>` | `codex login` | ✓ | ✓ |
 | Grok Build | `~/.grok`、`~/.grok-<name>` | `grok login` | 每周额度，由 `grok` 命令行查询 | 无公开来源 |
 | pi | `~/.pi/agent`、`~/.pi-<name>/agent` | 在 pi 里输入 `/login` | 无公开来源 | 无公开来源 |

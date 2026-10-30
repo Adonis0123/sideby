@@ -18,6 +18,7 @@ import { claudeHandoff } from './handoff.ts'
 import { CLAUDE_LAYOUT } from './layout.ts'
 import { claudeModelChoice } from './model.ts'
 import { readClaudeQuota } from './quota.ts'
+import { claudeQuotaFetch } from './quota-fetch.ts'
 import { readClaudeTuning } from './tuning.ts'
 import { readClaudeUsage } from './usage.ts'
 
@@ -135,6 +136,8 @@ export const claudeFamily: FamilyDef = {
   modelChoice: claudeModelChoice,
   identity: claudeIdentity,
   readQuota: readClaudeQuota,
+  // Newer of the two shows: the status line's reading while a session runs, else the `/usage` answer (ADR-0063).
+  fetchQuota: claudeQuotaFetch,
   readUsage: readClaudeUsage,
   readTuning: readClaudeTuning,
   quotaSetup: claudeStatusline,
