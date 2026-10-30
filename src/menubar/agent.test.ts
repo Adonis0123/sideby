@@ -200,4 +200,16 @@ describe('menu bar script', () => {
       modals,
     )
   })
+
+  it('opens on any press made after the menu closed, and starts itself again only while idle', () => {
+    // The press is compared with the close by the event's own time, so a quick second press is never dropped.
+    assert.match(MENUBAR_SCRIPT, /Number\(e\.timestamp\) > closedAt/)
+    assert.match(MENUBAR_SCRIPT, /closedAt = uptime\(\)/)
+    // launchd starts it again only after a failed exit, and never while the menu is open or a command runs.
+    const restart = MENUBAR_SCRIPT.match(/if \((.*)\) \$\.exit\((\d+)\);/)
+    assert.ok(restart)
+    assert.notEqual(restart[2], '0')
+    for (const guard of ['!menuOpen', '!task', '!actions.length', 'lastUse > 60'])
+      assert.ok(restart[1]!.includes(guard), guard)
+  })
 })

@@ -11,12 +11,18 @@ export const TICK_SECONDS = 5
 export const STALE_SECONDS = 15 * 60
 /** A snapshot still running after this is ended, so a stuck one cannot stop the refreshes. */
 export const SNAPSHOT_TIMEOUT_SECONDS = 60
+/**
+ * Hours after which an idle item starts itself again. Over many hours the menu took longer and longer to open (1.6 to
+ * 2 s after 18 hours on macOS 27, 2026-10-30, against about 0.1 s fresh), with no cause found in the script.
+ */
+export const RESTART_HOURS = 6
 /** The macOS distributed notification that makes a running item read its snapshot again (`nudgeMenubar`). */
 export const MENUBAR_RELOAD = 'dev.sideby.menubar.reload'
 
 export const MENUBAR_SCRIPT = String.raw`
 ObjC.import('Cocoa');
 ObjC.import('Carbon');
+ObjC.import('stdlib');
 function run(argv) {
   var node = argv[0], entry = argv[1];
   var SNAPSHOT = ${SNAPSHOT_SECONDS}, TICK = ${TICK_SECONDS}, STALE = ${STALE_SECONDS}, TIMEOUT = ${SNAPSHOT_TIMEOUT_SECONDS};
@@ -48,6 +54,9 @@ function run(argv) {
   var LOADING = zh ? ${JSON.stringify(MENUBAR_STRINGS.zh.loading)} : ${JSON.stringify(MENUBAR_STRINGS.en.loading)};
   var OPEN_PANEL = zh ? ${JSON.stringify(MENUBAR_STRINGS.zh.openPanel)} : ${JSON.stringify(MENUBAR_STRINGS.en.openPanel)};
   var now = function () { return Date.now() / 1000; };
+  // The clock NSEvent timestamps use.
+  var uptime = function () { return Number($.NSProcessInfo.processInfo.systemUptime); };
+  var started = now();
 
   function sideby(args) {
     var t = $.NSTask.alloc.init;
@@ -98,7 +107,7 @@ function run(argv) {
   // RegisterEventHotKey: it needs no permission, unlike watching every key press. macOS hands a press to this app as a
   // system-defined event of subtype 6 whose data1 is the key's reference. While the menu is open the key is
   // unregistered, so the press reaches the menu, where a hidden item with the same key closes it.
-  var hotkeyWant = null, hotkeyRef = 0, hotkeyBound = false, menuOpen = false, closedAt = 0;
+  var hotkeyWant = null, hotkeyRef = 0, hotkeyBound = false, menuOpen = false, closedAt = 0, lastUse = 0;
   // Whether the shortcut could be registered ('ok', 'taken', '' when off), and what the last snapshot was told: the
   // status with the shortcut it is about, so a report never lands on a shortcut changed since.
   var hotkeyStatus = '', hotkeyReported = '';
@@ -118,8 +127,8 @@ function run(argv) {
   function watchKeys() {
     if (monitor) return;
     monitor = $.NSEvent.addLocalMonitorForEventsMatchingMaskHandler($.NSEventMaskSystemDefined, function (e) {
-      // A press queued while the menu was open arrives just after it closes; it meant "close", not "open again".
-      if (e.subtype === 6 && hotkeyRef && Number(e.data1) === hotkeyRef && !menuOpen && now() - closedAt > 0.5) openMenu();
+      // A press made before the menu closed meant "close", not "open again"; any later press opens it at once.
+      if (e.subtype === 6 && hotkeyRef && Number(e.data1) === hotkeyRef && !menuOpen && Number(e.timestamp) > closedAt) openMenu();
       return e;
     });
   }
@@ -288,22 +297,27 @@ function run(argv) {
   var HEAD_X = 15, HEAD_TEXT_X = 34;
 
   // A quota window as a small rounded bar: a soft track, filled as far as it is used, coloured by level.
-  var BAR_W = 44, BAR_H = 5;
+  // Drawn once per fill and colour and kept until light or dark mode changes, so a refresh draws none again.
+  var BAR_W = 44, BAR_H = 5, bars = {}, barsDark = null;
   function bar(b, old) {
+    var d = dark(), fill = stale() || old ? 'old' : BAR[b.level] || BAR.ok, pct = Math.max(0, Math.min(100, b.percent));
+    if (d !== barsDark) { bars = {}; barsDark = d; }
+    var key = pct + fill;
+    if (bars[key]) return bars[key];
     var img = $.NSImage.alloc.initWithSize($.NSMakeSize(BAR_W, BAR_H));
     img.lockFocus;
-    hex(dark() ? '#1f2c3a' : '#e4edf4').set;
+    hex(d ? '#1f2c3a' : '#e4edf4').set;
     $.NSBezierPath.bezierPathWithRoundedRectXRadiusYRadius($.NSMakeRect(0, 0, BAR_W, BAR_H), BAR_H / 2, BAR_H / 2).fill;
-    if (b.percent > 0) {
-      (stale() || old ? $.NSColor.tertiaryLabelColor : hex(BAR[b.level] || BAR.ok)).set;
-      var w = Math.max(BAR_H, BAR_W * Math.min(100, b.percent) / 100);
+    if (pct > 0) {
+      (fill === 'old' ? $.NSColor.tertiaryLabelColor : hex(fill)).set;
+      var w = Math.max(BAR_H, BAR_W * pct / 100);
       $.NSBezierPath.bezierPathWithRoundedRectXRadiusYRadius($.NSMakeRect(0, 0, w, BAR_H), BAR_H / 2, BAR_H / 2).fill;
     }
     img.unlockFocus;
     var att = $.NSTextAttachment.alloc.init;
     att.image = img;
     att.bounds = $.NSMakeRect(0, 1.5, BAR_W, BAR_H);
-    return $.NSAttributedString.attributedStringWithAttachment(att);
+    return (bars[key] = $.NSAttributedString.attributedStringWithAttachment(att));
   }
 
   // Columns: the name, then per window its bar and percent, then the reset time. One set of tab stops lines them up
@@ -503,13 +517,16 @@ function run(argv) {
       'menuWillOpen:': { types: ['void', ['id']], implementation: function () { menuOpen = true; try { unregisterHotkey(); } catch (e) {} } },
       'menuDidClose:': {
         types: ['void', ['id']],
-        implementation: function () { menuOpen = false; closedAt = now(); try { registerHotkey(); } catch (e) {} },
+        implementation: function () { menuOpen = false; closedAt = uptime(); lastUse = now(); try { registerHotkey(); } catch (e) {} },
       },
       'closeMenu:': { types: ['void', ['id']], implementation: function () {} },
       'tick:': {
         types: ['void', ['id']],
         implementation: function () {
           actions = actions.filter(function (t) { return t.running; });
+          // After RESTART_HOURS, while nothing is open, running or just used, it ends with a failure code so launchd
+          // starts it again at once (it restarts only after a failed exit): the icon is gone for about a second.
+          if (now() - started > ${RESTART_HOURS} * 3600 && !menuOpen && !task && !actions.length && now() - lastUse > 60) $.exit(75);
           if (task && task.running && now() - lastStart > TIMEOUT) task.terminate;
           if (task && !task.running) finishSnapshot();
           lookAtIcon();

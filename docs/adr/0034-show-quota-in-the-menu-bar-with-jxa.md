@@ -44,3 +44,9 @@ The menu opens from anywhere with a shortcut (⌥⌘S by default at first, ⌥X 
 ## Amendment (2026-10-20): a default one hand presses
 
 The default becomes ⌥X (config `opt+x`). Three-key combinations such as ⌥⌘S are awkward for the left hand alone; two keys are not. Launchers agree on ⌥Space (Raycast, ChatGPT), but Alfred takes it by default, and macOS keeps ⌘Space, ⌃Space, ⌃⌥Space and ⌥⌘Space. ⌥X is the thumb on ⌥ and the index finger on X, and no common app uses it; it costs typing ≈ with ⌥X. So a shortcut now needs opt, cmd or ctrl (shift alone is still refused, `hotkey.needs-modifier`), and the Panel's list is ⌥X, ⌥Z, ⌥⌘S, ⌃⌥S. A user who set ⌥⌘S keeps it; one who never set a shortcut gets ⌥X.
+
+## Amendment (2026-10-30): a shortcut that answers at once
+
+- A press within 0.5 s of the menu closing was dropped, so pressing ⌥X again quickly did nothing. The script now compares the event's own time (`NSEvent.timestamp`) with when the menu closed: only a press made before the close is ignored.
+- On macOS 27 (2026-10-30) an item that had run for 18 hours took 1.6 to 2 s to open its menu and 0.5 to 0.7 s to close it, against about 0.1 s for a fresh process with the same snapshot; sampling showed the time in AppKit's menu row layout, and speeding up refreshes, title updates and opens did not reproduce it. Until the cause is found, the item starts itself again after 6 hours (`RESTART_HOURS`), only while its menu is closed, no command it started runs and it was not used in the last minute: it exits with a failure code, which launchd answers by starting it again (`SuccessfulExit` false). The icon is gone for about a second.
+- Quota bars are drawn once per fill and colour and reused until the appearance changes.
