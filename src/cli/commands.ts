@@ -2687,14 +2687,15 @@ export function readKeyLine(input: NodeJS.ReadStream = process.stdin): Promise<s
     throw new UserError('Run `sideby key` in a terminal or use the Panel key box.', { code: 'tty-required' })
   return new Promise((resolve, reject) => {
     const raw = input.isRaw
-    const paused = input.isPaused()
+    // A stdin nobody read yet is not paused but not flowing either; leaving it flowing keeps the process alive.
+    const flowing = input.readableFlowing === true
     let value = ''
     const finish = (error?: Error) => {
       input.off('data', onData)
       input.off('end', onEnd)
       input.off('error', onError)
       input.setRawMode(raw)
-      if (paused) input.pause()
+      if (!flowing) input.pause()
       if (error) reject(error)
       else resolve(value)
     }

@@ -416,6 +416,17 @@ it('an empty key writes nothing and says to run the command again', async () => 
   })
 })
 
+it('key input stops reading stdin afterwards, so the process can exit', async () => {
+  const { readKeyLine } = await import('./commands.ts')
+  const input = ttyInput()
+  assert.equal(input.readableFlowing, null)
+  const pending = readKeyLine(input as unknown as NodeJS.ReadStream)
+  input.write('fictional-key\r')
+  assert.equal(await pending, 'fictional-key')
+  assert.equal(input.readableFlowing, false)
+  input.destroy()
+})
+
 it('key input drops whole escape sequences and joins characters split across chunks', async () => {
   const { readKeyLine } = await import('./commands.ts')
   const input = ttyInput()
