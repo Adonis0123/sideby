@@ -174,6 +174,20 @@ export function hookEntryWorks(env: Env): Promise<boolean> {
   })
 }
 
+/** How long a Host stopped at its limit waits when its window's reset is unknown: the shortest Quota window. */
+const LIMIT_WAIT_FALLBACK_MS = 5 * 60 * 60_000
+
+/**
+ * When a Host stopped at its limit continues by itself: the reset of the window that stopped it, or, without a future
+ * one, `LIMIT_WAIT_FALLBACK_MS` from now (the hook also clears the file at the next finished turn).
+ */
+function limitUntil(ready: ReadyFile, now: Date = new Date()): string {
+  const at = ready.window ? Date.parse(ready.window.resetsAt) : Number.NaN
+  return Number.isFinite(at) && at > now.getTime()
+    ? new Date(at).toISOString()
+    : new Date(now.getTime() + LIMIT_WAIT_FALLBACK_MS).toISOString()
+}
+
 /** The decision, or `none` with the reason when sideby cannot tell (an account removed mid-chain, say). */
 async function decide(
   rt: Runtime,
@@ -346,11 +360,17 @@ export async function runWithHandoff(
         break
       }
       await rm(join(dir, FILES.ready), { force: true })
-      if (d.kind === 'wait')
+      // A session kept at its limit (or kept to wait) ends no turn until it continues, so a request would never be
+      // picked up: `waiting.json` lets `handoff ready` hand over at once (ADR-0018). A `threshold` none is still in
+      // its turns and gets none.
+      const until =
+        d.kind === 'wait' ? d.until : got.ready.trigger === 'limit' ? limitUntil(got.ready) : undefined
+      if (until)
         await writeJsonFile(join(dir, FILES.waiting), {
           runId,
-          until: d.until,
+          until,
           at: new Date().toISOString(),
+          trigger: got.ready.trigger,
         } satisfies WaitingFile)
       kept = d
     }

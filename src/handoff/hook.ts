@@ -13,6 +13,7 @@ import {
   type ReadyFile,
   type RunState,
   readJsonFile,
+  type WaitingFile,
   writeJsonFile,
 } from '../core/handoff-chain.ts'
 import { claudeHookReader } from '../families/claude/handoff-hook.ts'
@@ -149,6 +150,10 @@ export async function decide(opts: {
     // Grok also fires Stop when the session ends; only a finished turn counts.
     const reason = field(input, 'reason')
     if (reason && reason !== 'end_turn') return {}
+    // A finished turn means a Host kept at its limit has continued: a later `handoff ready` waits for the turn again.
+    const waitingFile = join(dir, FILES.waiting)
+    const held = await readJsonFile<WaitingFile>(waitingFile)
+    if (held && held.runId === runId && held.trigger === 'limit') await rm(waitingFile, { force: true })
     const request = await readJsonFile<ReadyFile>(join(dir, FILES.request))
     if (request && request.runId === runId) {
       await ready({ ...request, trigger: 'manual' })

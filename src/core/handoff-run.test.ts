@@ -101,6 +101,73 @@ describe('runWithHandoff', () => {
     })
   })
 
+  it('at the limit with no account to take over, keeps the session; `handoff ready` typed later moves on at once', async () => {
+    await withFakeHome(async (h) => {
+      const resetsAt = new Date(Date.now() + 3 * 60 * 60_000).toISOString()
+      const atLimit = LIMIT_ON_FIRST_RUN.replace(
+        "sessionId: 's1'",
+        `sessionId: 's1', window: { label: '5h', usedPercent: 100, resetsAt: '${resetsAt}' }`,
+      )
+      await fakeHost(h, 'claude', { sleep: 20, onStart: atLimit })
+      const full = (ref: string, used: number) =>
+        writeQuotaCache(cacheStateDir(h.env), ref, {
+          version: 1,
+          observedAt: new Date().toISOString(),
+          windows: [{ label: '5h', windowMinutes: 300, usedPercent: used, resetsAt }],
+        })
+      // The reset is too far to wait for, and the other account is full too: nothing can take over.
+      await full('001', 100)
+      await full('002', 100)
+      const rt = await setup(h, { auto: true, sameFamily: true, countdownSeconds: 0 })
+      const lines: string[] = []
+      const run = runWithHandoff(rt, 'cc001', [], { err: (l) => lines.push(l), stdin: terminal() })
+      const root = join(rt.paths.stateDir, 'handoffs')
+      const dir = join(root, (await waitFor(async () => (await readdir(root).catch(() => []))[0] ?? null))!)
+      const waiting = await waitFor(() => readJsonFile<WaitingFile>(join(dir, FILES.waiting)))
+      assert.equal(waiting.until, resetsAt)
+      assert.equal(waiting.trigger, 'limit')
+      // The other account's quota comes back while the session sits at its limit.
+      await full('002', 10)
+      const asked = await requestHandoff({ SIDEBY_HANDOFF_RUN: waiting.runId, SIDEBY_HANDOFF_DIR: dir })
+      assert.equal(asked?.now, true)
+      assert.equal(await run, 0)
+      const starts = (await readHostLog(h, 'claude')).filter((r) => r.argv)
+      assert.equal(starts.length, 2)
+      assert.equal(starts[1]!.env.CLAUDE_CONFIG_DIR, h.path('.claude-002'))
+      assert.match(starts[1]!.argv.at(-1)!, /because the user asked to hand over/)
+      assert.equal(await readJsonFile(join(dir, FILES.waiting)), null)
+    })
+  })
+
+  it('at the threshold with no account to take over, writes no waiting file: a request waits for the turn', async () => {
+    await withFakeHome(async (h) => {
+      const atThreshold = `${READY_ON_FIRST_RUN.replace("trigger: 'manual'", "trigger: 'threshold'")}
+if (process.env.SIDEBY_HANDOFF_DIR) fs.writeFileSync(path.join(process.env.SIDEBY_HANDOFF_DIR, 'started'), '{}')
+`
+      await fakeHost(h, 'claude', { sleep: 2, onStart: atThreshold })
+      // Only one account: nothing can take over.
+      const rt = await setup(h, { auto: true, sameFamily: true, countdownSeconds: 0 }, ['001'])
+      const lines: string[] = []
+      const run = runWithHandoff(rt, 'cc001', [], { err: (l) => lines.push(l), stdin: terminal() })
+      const root = join(rt.paths.stateDir, 'handoffs')
+      const dir = join(root, (await waitFor(async () => (await readdir(root).catch(() => []))[0] ?? null))!)
+      await waitFor(async () =>
+        (await readJsonFile(join(dir, 'chain.json'))) &&
+        (await readJsonFile(join(dir, 'started'))) &&
+        !(await readJsonFile(join(dir, FILES.ready)))
+          ? true
+          : null,
+      )
+      assert.equal(await readJsonFile(join(dir, FILES.waiting)), null)
+      const runId = (await readHostLog(h, 'claude')).find((r) => r.argv)!.env.SIDEBY_HANDOFF_RUN!
+      const asked = await requestHandoff({ SIDEBY_HANDOFF_RUN: runId, SIDEBY_HANDOFF_DIR: dir })
+      assert.equal(asked?.now, false)
+      assert.equal(await run, 0)
+      assert.equal((await readHostLog(h, 'claude')).filter((r) => r.argv).length, 1)
+      assert.ok(lines.some((l) => /claude:001 did not hand over/.test(l)))
+    })
+  })
+
   it('at the limit with a reset soon, says why once the session ends on its own', async () => {
     await withFakeHome(async (h) => {
       await fakeHost(h, 'claude', { sleep: 1, onStart: LIMIT_ON_FIRST_RUN })

@@ -381,18 +381,45 @@ describe('selectNext', () => {
       assert.equal(selectNext({ ...base, candidates: [back], used }).kind, 'none')
     })
 
-    it('stays out when its hop recorded no window, or only its ref is known', () => {
-      assert.equal(
-        selectNext({ ...base, candidates: [back], used: [left('claude:008'), left('claude:001')] }).kind,
-        'none',
-      )
+    it('with no recorded window, is picked again when its own Quota shows it ready', () => {
+      // claude:008 → 003 (handed over by hand, no window) → 008: 003's window has reset since.
+      const used = [left('claude:008', -300), left('claude:003'), left('claude:001')]
+      const back3 = acct('claude:003', { quota: quota(20) })
+      assert.deepEqual(selectNext({ ...base, candidates: [back3], used }), pick('claude:003'))
+      // Its latest hop decides: it came back with a reset window and then left again by hand.
+      const again = [left('claude:003', -60), left('claude:002', -1), left('claude:003'), left('claude:001')]
+      assert.deepEqual(selectNext({ ...base, candidates: [back3], used: again }), pick('claude:003'))
+    })
+
+    it('with no recorded window, stays out while its Quota is not known, and says why', () => {
+      const unknown = acct('claude:008', { quota: { status: 'unavailable', reason: 'no-source' } })
+      const used = [left('claude:008'), left('claude:001')]
+      const r = selectNext({ ...base, candidates: [unknown], used })
+      assert.equal(r.kind, 'none')
+      assert.equal(r.kind === 'none' && r.reason, 'no account may take over')
+      assert.deepEqual(r.kind === 'none' && r.skipped?.map((x) => x.ref), ['claude:008'])
+      // A fresh Account with unknown Quota is still picked; the used one is only named as skipped.
+      const fresh = acct('claude:002', { quota: { status: 'unavailable', reason: 'no-source' } })
+      const r2 = selectNext({ ...base, candidates: [unknown, fresh], used })
+      assert.equal(r2.kind === 'pick' && r2.ref, 'claude:002')
+      // An API account is not Quota data either.
+      const api = acct('claude:008', { kind: 'api', login: 'not-needed' })
+      const withApi = { ...base, settings: settings({ auto: true, sameFamily: true, api: true }) }
+      assert.equal(selectNext({ ...withApi, candidates: [api], used }).kind, 'none')
+    })
+
+    it('with no recorded window, stays out while full and names its reset', () => {
+      const full = acct('claude:008', { quota: quota(90, 200) })
+      const r = selectNext({ ...base, candidates: [full], used: [left('claude:008'), left('claude:001')] })
+      assert.equal(r.kind, 'none')
+      assert.deepEqual(r.kind === 'none' && r.earliestReset, { ref: 'claude:008', at: inMinutes(200) })
+    })
+
+    it('stays out when only its ref is known', () => {
       assert.equal(
         selectNext({ ...base, candidates: [back], used: ['claude:008', 'claude:001'] }).kind,
         'none',
       )
-      // Its latest hop decides: it came back and then left again with no window.
-      const again = [left('claude:008', -60), left('claude:002', -1), left('claude:008'), left('claude:001')]
-      assert.equal(selectNext({ ...base, candidates: [back], used: again }).kind, 'none')
     })
 
     it('stays out when its window reset but it is full again', () => {

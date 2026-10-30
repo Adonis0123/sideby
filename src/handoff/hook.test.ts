@@ -330,6 +330,21 @@ describe('handoff hook', () => {
     })
   })
 
+  it('clears a waiting file left at the limit once a turn finishes, but not one kept to wait after a threshold', async () => {
+    await withFakeHome(async (h) => {
+      const { env, dir } = await setup(h)
+      const waiting = { runId: 'r1', until: '2026-10-09T15:00:00Z', at: NOW.toISOString() }
+      await writeJsonFile(join(dir, FILES.waiting), { ...waiting, trigger: 'threshold' })
+      await call(env, 'Stop')
+      assert.ok(await readJsonFile(join(dir, FILES.waiting)))
+      await writeJsonFile(join(dir, FILES.waiting), { ...waiting, trigger: 'limit' })
+      await call(env, 'Stop', { reason: 'interrupted' })
+      assert.ok(await readJsonFile(join(dir, FILES.waiting)))
+      await call(env, 'Stop')
+      assert.equal(await readJsonFile(join(dir, FILES.waiting)), null)
+    })
+  })
+
   it('marks ready on StopFailure only when the Quota is used up', async () => {
     await withFakeHome(async (h) => {
       const { env, dir } = await setup(h)

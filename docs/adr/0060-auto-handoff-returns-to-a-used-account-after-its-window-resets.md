@@ -16,14 +16,23 @@ An automatic handoff (threshold, limit, the `plan.json` and Panel decisions) may
 Everything else stays:
 
 - The origin is never picked.
-- A used Account whose latest hop has no `window` (a manual handoff, a chain written by an older sideby) stays out.
+- A used Account whose latest hop has no `window` (a manual handoff, a chain written by an older sideby) stays out (changed by the amendment below: it comes back when its Quota shows it ready).
 - The Account still passes every other rule: an Account whose window reset but is again at the Takeover Limit, signed out, of another organization, or not allowed by `sameFamily` is not picked.
 - `--to` is unchanged.
 
 `selectNext` stays pure: the Runtime's `handoffDecision` takes the chain's hops (a ref, or `{ ref, window }`) and `selectNext` decides with its `now`.
+
+### Amendment, 2026-10-30: a hop with no window comes back when its Quota shows it ready
+
+Seen with Claude Code on 2026-10-30: a chain went `claude:008` → `claude:002` → `claude:003` (handed over with `sideby handoff ready`, so its hop has no `window`) → `claude:008`. When `claude:008` reached its limit, `claude:003`'s 5-hour window had reset, but its hop had no window to check, so it stayed out forever and the chain stopped although an Account had Quota.
+
+A used Account whose latest hop recorded no `window` may now be picked again when its own Quota data shows it `ready`: known pressure below the Takeover Limit (threshold − 10). It is not picked while its Quota is unknown, nor as an API account, since neither is evidence that the Account has room again; the result names it in `skipped` with that reason. A hop that recorded a window keeps the rule above, a bare ref still stays out, and the origin is never picked.
+
+The Takeover Limit is what keeps this from ping-pong: an Account hands over at the threshold and is taken back only once it is at least 10 points below it, which in practice means its window has reset.
 
 ## Consequences
 
 - A long chain can come back to its first Account after its 5-hour window resets instead of waiting for the current Account's reset.
 - A chain can now visit the same Account more than once; each visit is a hop of its own in `chain.json`.
 - Plain refs passed to `handoffDecision` (the Panel's overview) behave as before.
+- After the amendment, a chain no longer stops for good behind an Account that was handed over by hand; it can stop only while that Account's Quota is unknown, and says so.

@@ -82,11 +82,16 @@ export interface ReadyFile {
   transcriptPath?: string
 }
 
-/** The parent kept a session that hit its limit, to wait for the reset at `until` (ADR-0018). */
+/**
+ * The parent kept a session that waits for a reset at `until` (ADR-0018): it decided to wait, or the Host stopped at
+ * its limit with no account to take over. `trigger` is what made the session ready; a `limit` one is cleared by the
+ * hook at the next finished turn, since the Host has continued by then.
+ */
 export interface WaitingFile {
   runId: string
   until: string
   at: string
+  trigger?: HandoffTrigger
 }
 
 export interface ChainHop {
@@ -152,8 +157,9 @@ export async function writeJsonFile(path: string, value: unknown): Promise<void>
 /**
  * `sideby handoff ready` (spec §3.17): asks the parent to hand over after this turn. Works only inside a run sideby
  * started with Auto Handoff; `briefFile`, when given, is copied into the chain directory (mode 600); `to` is the
- * Account ref to hand over to. While the session waits for a reset (`waiting.json`, typed as `! sideby handoff ready`),
- * no turn will end to pick up a request, so it writes `ready.json` at once (`now`).
+ * Account ref to hand over to. While the session waits for a reset (`waiting.json`: the parent chose to wait, or the
+ * Host stopped at its limit with no account to take over; typed as `! sideby handoff ready`), no turn will end to pick
+ * up a request, so it writes `ready.json` at once (`now`).
  * Returns the request, or null outside such a run.
  */
 export async function requestHandoff(

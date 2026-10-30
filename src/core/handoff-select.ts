@@ -46,20 +46,29 @@ export type HandoffDecision =
  */
 export type UsedAccount = string | { ref: string; window?: { resetsAt: string } }
 
+/** What an automatic handoff does with the Accounts this chain already used (spec §3.17 "选号" 3, ADR-0060). */
+export interface UsedRule {
+  /** Left out: the origin, a bare ref, and an Account whose latest hop handed over for a window that has not reset. */
+  out: Set<string>
+  /** Back only when its own Quota data shows it ready: its latest hop recorded no window (a manual handoff, an older chain). */
+  ifReady: Set<string>
+}
+
 /**
- * The Accounts an automatic handoff leaves out (spec §3.17 "选号" 3): the origin, and every Account the chain used
- * unless its latest hop handed over for a Quota window that has reset by `now` (ADR-0060). A bare ref, or a hop with no
- * window (a manual handoff, an older chain), stays out.
+ * Sorts the Accounts this chain used by their latest hop: one that handed over for a Quota window that has reset by
+ * `now` may take over again like any other, one with no recorded window only when it is `ready`, the rest stay out.
+ * A bare ref stays out, and so does the origin.
  */
-export function stillUsed(origin: string, used: readonly UsedAccount[], now: Date): Set<string> {
-  const back = new Map<string, boolean>()
+export function stillUsed(origin: string, used: readonly UsedAccount[], now: Date): UsedRule {
+  const latest = new Map<string, 'out' | 'back' | 'ifReady'>()
   for (const u of used) {
-    if (typeof u === 'string') back.set(u, false)
-    else back.set(u.ref, u.window !== undefined && windowReset(u.window.resetsAt, now))
+    if (typeof u === 'string') latest.set(u, 'out')
+    else if (u.window === undefined) latest.set(u.ref, 'ifReady')
+    else latest.set(u.ref, windowReset(u.window.resetsAt, now) ? 'back' : 'out')
   }
-  const out = new Set([...back].flatMap(([ref, b]) => (b ? [] : [ref])))
-  out.add(origin)
-  return out
+  latest.set(origin, 'out')
+  const refs = (k: string) => new Set([...latest].flatMap(([ref, v]) => (v === k ? [ref] : [])))
+  return { out: refs('out'), ifReady: refs('ifReady') }
 }
 
 const domain = (email: string) => email.slice(email.lastIndexOf('@') + 1).toLowerCase()
@@ -119,7 +128,10 @@ export function selectNext(input: {
   settings: HandoffSettings
   /** Short command → Account ref, so lists may name either. */
   aliases: Readonly<Record<string, string>>
-  /** Accounts this chain already used, the origin included; one whose window has reset since may come back. */
+  /**
+   * Accounts this chain already used, the origin included; one whose window has reset since may come back, and one
+   * whose hop recorded no window when its Quota shows it ready.
+   */
   used: readonly UsedAccount[]
   now: Date
   /** Decide now what happens when the origin's fullest window reaches the threshold (see `waitUntil`). */
@@ -175,18 +187,26 @@ export function selectNext(input: {
   const skipped: SkippedAccount[] = list
     .filter((c) => sameLogin.has(c.ref))
     .map((c) => ({ ref: c.ref, reason: `same login as ${origin.ref}, so it shares the same quota` }))
-  const withSkipped = skipped.length ? { skipped } : {}
+  // A used Account with no recorded window comes back only on Quota data that shows it ready: not on a guess
+  // (`unknown`, an API account). It is still counted while full, so its reset can be named.
+  const unsure = (c: SelectCandidate) =>
+    used.ifReady.has(c.ref) && !['ready', 'full', 'logged-out'].includes(stateOf(c, s, now).state)
   // Could take over if the settings allowed it: another login, its Host installed and able to receive.
   const couldTake = (c: SelectCandidate) =>
-    !sameLogin.has(c.ref) && !used.has(c.ref) && c.installed && c.receive
-  const eligible = list.filter(
-    (c) =>
-      couldTake(c) &&
-      // An API account pays per request, so it gets past no vendor's limit: sameFamily does not apply to it, but it
-      // takes over only when the user allowed paying for it (`api`, ADR-0046).
-      (c.kind === 'api' ? s.api : s.sameFamily || c.family !== origin.family) &&
-      (allowed.has(c.ref) || sameOrganization(origin.identity, c.identity)),
-  )
+    !sameLogin.has(c.ref) && !used.out.has(c.ref) && !unsure(c) && c.installed && c.receive
+  const allows = (c: SelectCandidate) =>
+    // An API account pays per request, so it gets past no vendor's limit: sameFamily does not apply to it, but it
+    // takes over only when the user allowed paying for it (`api`, ADR-0046).
+    (c.kind === 'api' ? s.api : s.sameFamily || c.family !== origin.family) &&
+    (allowed.has(c.ref) || sameOrganization(origin.identity, c.identity))
+  const eligible = list.filter((c) => couldTake(c) && allows(c))
+  for (const c of list)
+    if (unsure(c) && !sameLogin.has(c.ref) && c.installed && c.receive && allows(c))
+      skipped.push({
+        ref: c.ref,
+        reason: 'this chain already used it and its quota is not known, so it is not picked again',
+      })
+  const withSkipped = skipped.length ? { skipped } : {}
   const states = eligible.map((c) => ({ c, e: stateOf(c, s, now) }))
   const first =
     states.find(({ e }) => e.state === 'ready' || e.state === 'unknown') ??
