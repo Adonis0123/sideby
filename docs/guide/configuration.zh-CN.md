@@ -79,10 +79,10 @@ sideby alias rm pi-kimi
 sideby alias add cc --pick claude --yes    # 不加 --yes 只显示会加什么
 sideby shell-init setup --yes              # 只需一次：让新终端能用短命令
 # 然后在新终端里：
-cc                                   # sideby: cc → claude:work (12% used, the most room)
+cc                                   # sideby: cc → claude:work (5h 12% used, the most room)
 ```
 
-这个工具的账号都还没有额度数据时，启动主账号，并说明原因。所有账号都满了或没登录时，不启动，并告诉你哪个账号最早恢复。API 账号不参与挑选。名字和电脑上已有的命令重名时（macOS 的 `cc` 是 C 编译器），sideby 会说明会遮住哪个命令。你的 shell rc 里如果有同名 alias（`alias cc=…`），alias 仍然优先；要用自动选号命令，先删掉那个 alias。`sideby alias list` 同时列出自动选号命令和短命令，`sideby alias rm cc` 删除。面板里，工具标题行在有了它之后显示「启动最空的账号」按钮；工具有两个账号时提议添加；设置里也有同一份列表。配置里它们在 `pickCommands` 下。
+这个工具的账号都还没有额度数据时，启动主账号，并说明原因。它选离上限最远的账号：5 小时窗口 85%，每周窗口 95%（分别是自动接力阈值减 10 和阈值本身）。所有账号都过了上限时，仍然启动剩得最多的那个，并说明（`cc → claude:lab (every claude account is past its limit, 85% of a 5-hour window or 95% of a weekly one; this one has the most left, 5h 91% used)`）。所有账号都有窗口用完或没登录时，不启动，并告诉你哪个账号最早恢复。API 账号不参与挑选。名字和电脑上已有的命令重名时（macOS 的 `cc` 是 C 编译器），sideby 会说明会遮住哪个命令。你的 shell rc 里如果有同名 alias（`alias cc=…`），alias 仍然优先；要用自动选号命令，先删掉那个 alias。`sideby alias list` 同时列出自动选号命令和短命令，`sideby alias rm cc` 删除。面板里，工具标题行在有了它之后显示「启动最空的账号」按钮；工具有两个账号时提议添加；设置里也有同一份列表。配置里它们在 `pickCommands` 下。
 
 短命令要你的 shell 配置文件加载了才存在。`sideby shell-init setup` 先显示要加到 `~/.zshrc`（或 `~/.bashrc`）的那一行，`--yes` 才加上，`--undo` 只删掉这一行；文件里已经加载了 sideby 时什么也不做。面板在你添加短命令的地方也会提供同样的操作。
 

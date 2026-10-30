@@ -24,6 +24,7 @@ import { writeFileAtomic } from './fs-safe.ts'
 import { planHandoff } from './handoff.ts'
 import { type Paths, resolvePaths } from './paths.ts'
 import { type ProbeDeps, runProbe, spawnProbe } from './probe.ts'
+import { takeoverLimits } from './quota-levels.ts'
 import {
   type AskLauncher,
   askLauncher,
@@ -61,7 +62,11 @@ export async function pickTaskAccount(
     candidates.push({ ...a, login: 'logged-in' as const, quota: await rt.quota(a, { fetch: 'never' }) })
   }
   if (!candidates.length) return { reason: 'none-signed-in' }
-  const plan = planHandoff('', candidates, rt.readContext().now)
+  // As `sideby next`: past the Takeover Limits, the Account closest to room with no window used up (a Last Resort, §3.13).
+  const plan = planHandoff('', candidates, rt.readContext().now, {
+    limits: takeoverLimits(rt.handoffSettings().threshold),
+    lastResort: true,
+  })
   const account = all.find((a) => a.ref === plan.pick)
   return account ? { account } : { reason: 'all-full' }
 }

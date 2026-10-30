@@ -42,7 +42,7 @@ The prompt lists the Findings (`code`, account, message). Run `sideby doctor <re
 
 ## quota: an account shows no quota or an error
 
-The prompt names the account and the reason. Run `sideby quota <ref> --json` and relay what it says. Common answers: Claude needs `sideby quota setup claude` (exit 10 first); a signed-out account needs the user to sign in; Grok's quota check may be off (`sideby quota check grok on`); pi and API accounts have no public quota source, which is not an error.
+The prompt names the account and the reason. Run `sideby quota <ref> --json` and relay what it says. Common answers: Claude's or Grok's quota check may be off (`sideby quota check claude on`, `sideby quota check grok on`) or failed (relay `detail`); a signed-out account needs the user to sign in; pi and API accounts have no public quota source, which is not an error.
 
 ## account: add an account
 
@@ -113,7 +113,7 @@ The prompt gives Auto Handoff as it is now, in the words of `sideby handoff stat
 
 1. Run `sideby handoff status --json` and `sideby quota --json` to see the facts as they are now.
 2. Recommend, with a reason the user can follow: a `threshold` (the quota percentage at which a session hands over; leave room before 100 so the session can finish its turn) and a `prepareAt` below it; an order per Family (`pressure`, the least used first, or a fixed `order` of accounts); and whether `sameFamily` should be on. Accounts signed in as the same login share one quota and never hand over to each other.
-3. Put accounts without quota data last, and tell the user how to make them show it (`sideby quota setup claude`, signing in, `sideby quota check grok on`).
+3. Put accounts without quota data last, and tell the user how to make them show it (signing in, `sideby quota check <family> on`). For Auto Handoff from Claude, also `sideby quota setup claude` (exit 10 first), which it reads during a session.
 4. Change settings only with `sideby handoff enable [--same-family] [--order <family>=<acct,…>] [--threshold n] [--prepare-at n]` or `sideby config set handoff.<key> <value>`. Both show the change first and exit 10; add `--yes` only after the user agrees.
 5. Run `sideby handoff status --json` again and tell the user what is still missing (`nextSteps`).
 

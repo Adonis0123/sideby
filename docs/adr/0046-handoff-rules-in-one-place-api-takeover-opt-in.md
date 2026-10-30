@@ -26,3 +26,11 @@ Auto Handoff (ADR-0010, ADR-0013, ADR-0018, ADR-0032) decides when a session han
 - With the default threshold nothing changes for `next` or Auto Handoff. With another threshold the limit moves with it: a lower threshold passes over Accounts that used to take over, a higher one lets more take over.
 - When no Account may take over, the reason names what the user could allow (`handoff.sameFamily`, `handoff.otherFamilies`, `handoff.api`), so "none" is never a dead end.
 - Config gains `otherFamilies`, `familyOrder` and `api`; the JSON outputs gain fields only, so `schemaVersion` stays 1.
+
+## Amendment (2026-10-30): a start the user asks for may go past the Takeover Limit
+
+Seen with Claude Code on 2026-10-30: every Account of a Family was between 87% and 99% used, with no window used up, and both `sideby next claude` and a Pick Command refused to start anything, saying every Account was "at its limit". The Takeover Limit exists so that an automatic takeover leaves the next Account room to work; a start the user asks for has no such reason to refuse, and the message was false.
+
+- `sideby next`, Pick Commands, the Panel's "Next" tag and the automatic pick of an AI Task use a **Last Resort** (spec §3.13): when no Subscription Account is below the Takeover Limit or without Quota data, they pick the signed-in Subscription Account with the lowest Quota Pressure under 100% (no window used up, not of the current Account's Same Login), ahead of API Accounts. The plan gains `tight: { limit }` and every output says the pick is past the limit and has the most left.
+- Nothing is started only when every such Account has a window used up, is signed out or is API only; the message then says that and names the first to come back.
+- Auto Handoff (`selectNext`, spec §3.17) keeps the Takeover Limit unchanged, and `next` still starts nothing when no Account has Quota data (`hasQuota: false`).

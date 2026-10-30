@@ -1,4 +1,4 @@
-import { quotaLevel } from '../core/quota-levels.ts'
+import { windowLevel } from '../core/quota-levels.ts'
 import { MIN_CALLS } from '../core/tuning.ts'
 import type { QuotaResult, QuotaWindow, TuningReason, TuningResult, UsageResult } from '../types.ts'
 
@@ -95,7 +95,8 @@ function windowText(w: QuotaWindow, now: Date): string {
   const label = w.name ? `${w.name} ${w.label}` : w.label
   if (Date.parse(w.resetsAt) <= now.getTime()) return `${label} reset`
   const pct = Math.round(w.usedPercent)
-  const level = quotaLevel(pct)
+  // Each window by its own levels: a weekly window warns at 85% and turns red at 95% (spec §3.26).
+  const level = windowLevel({ ...w, usedPercent: pct })
   const color = level === 'fail' ? c.red : level === 'warn' ? c.yellow : c.green
   return `${label} ${color(`${pct}%`)} ${c.dim(`→ ${clock(w.resetsAt, now)}`)}`
 }

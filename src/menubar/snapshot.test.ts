@@ -167,12 +167,13 @@ describe('menubarSnapshot', () => {
         ['main', false, 'fail'],
       ],
     )
-    assert.equal(rows[0]!.detail, '5h 20% · 7d 30% · resets in 2d 4h')
+    // The reset names its window: the one closest to its own red level (7d 30% of 95 before 5h 20% of 85).
+    assert.equal(rows[0]!.detail, '5h 20% · 7d 30% · 7d resets in 2d 4h')
     assert.deepEqual(rows[0]!.bars, [
       { label: '5h', percent: 20, level: 'ok' },
       { label: '7d', percent: 30, level: 'ok' },
     ])
-    assert.equal(rows[0]!.reset, '2d 4h')
+    assert.equal(rows[0]!.reset, '7d · in 2d 4h')
     assert.equal(rows[0]!.note, '')
     assert.equal(
       rows[1]!.tip,
@@ -205,28 +206,29 @@ describe('menubarSnapshot', () => {
   it('puts a single window in the second bar column, so long windows line up across Families', () => {
     const one: QuotaResult = {
       status: 'ok',
-      windows: [{ label: '7d', windowMinutes: 10080, usedPercent: 62, resetsAt: at(90) }],
+      windows: [{ label: '7d', windowMinutes: 10080, usedPercent: 88, resetsAt: at(90) }],
       observedAt: NOW.toISOString(),
       source: 'test',
     }
     const snap = menubarSnapshot([family('codex', 'Codex', [sub('main', one, 'codex')])], NOW, 'en')
     const r = snap.sections[0]!.rows[0]!
-    assert.deepEqual(r.bars, [null, { label: '7d', percent: 62, level: 'warn' }])
+    assert.deepEqual(r.bars, [null, { label: '7d', percent: 88, level: 'warn' }])
     assert.deepEqual(snap.sections[0]!.columns, [null, '7d'])
-    assert.equal(r.reset, '1h 30m')
+    assert.equal(r.reset, '7d · in 1h 30m')
   })
 
   it('shows the least used account when every account of a Family is past the fail level, in red', () => {
     const snap = menubarSnapshot(
-      [family('claude', 'Claude Code', [sub('main', quota(100, 50)), sub('work', quota(20, 91))])],
+      [family('claude', 'Claude Code', [sub('main', quota(100, 50)), sub('work', quota(20, 96))])],
       NOW,
       'zh',
     )
-    assert.equal(snap.title, 'Claude Code 91%')
+    assert.equal(snap.title, 'Claude Code 96%')
     assert.equal(snap.level, 'fail')
-    assert.equal(snap.headline, 'Claude Code 额度告急 · 首选 claude:work 已用 91%')
+    assert.equal(snap.headline, 'Claude Code 额度告急 · 首选 claude:work 已用 96%')
     const rows = snap.sections[0]!.rows
-    assert.equal(rows[0]!.detail, '5h 100% · 7d 50% · 2小时 5分后重置')
+    assert.equal(rows[0]!.detail, '5h 100% · 7d 50% · 5h 2小时5分后重置')
+    assert.equal(rows[0]!.reset, '5h · 2小时5分后')
     assert.deepEqual(
       rows.map((r) => [r.level, r.recommended]),
       [
@@ -234,6 +236,28 @@ describe('menubarSnapshot', () => {
         ['fail', false],
       ],
     )
+  })
+
+  it('colors a weekly window by its own levels and names it in the reset column (spec §3.26)', () => {
+    const snap = menubarSnapshot(
+      [family('claude', 'Claude Code', [sub('main', quota(43, 87)), sub('work', quota(86, 10))])],
+      NOW,
+      'en',
+    )
+    const [first, second] = snap.sections[0]!.rows
+    // main: 7d 87% is 91.6% of its limit of 95, so it is ready and picked before work, whose 5h 86% is past 85.
+    assert.equal(first!.label, 'main')
+    assert.equal(first!.recommended, true)
+    assert.deepEqual(first!.bars, [
+      { label: '5h', percent: 43, level: 'ok' },
+      { label: '7d', percent: 87, level: 'warn' },
+    ])
+    assert.equal(first!.level, 'warn', 'a weekly 87% warns but is not red')
+    assert.equal(first!.reset, '7d · in 2d 4h')
+    assert.equal(second!.level, 'fail')
+    assert.equal(second!.reset, '5h · in 2h 5m')
+    assert.equal(snap.title, 'Claude Code 87%')
+    assert.equal(snap.level, 'warn')
   })
 
   it('describes API, signed-out and quota-less accounts and leaves the title empty without any data', () => {
@@ -483,6 +507,6 @@ it('writes the hover text in words: how long ago the numbers were read, and why 
     .sections[0]!.rows[0]!.tip
   assert.match(tip, /^额度读于 25分前\n/)
   assert.match(tip, /上次检查没成功：no answer within 20 seconds/)
-  assert.match(tip, /5h：已用 40% · 1小时 30分后重置/)
+  assert.match(tip, /5h：已用 40% · 1小时30分后重置/)
   assert.doesNotMatch(tip, /\d{4}-\d{2}-\d{2}T/)
 })

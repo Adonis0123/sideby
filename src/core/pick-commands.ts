@@ -24,7 +24,13 @@ export function suggestPickName(
 
 /** What a Pick Command starts this time, or why it starts nothing. */
 export type PickChoice =
-  | { ref: string; reason: 'most-room'; pressure: number }
+  /** `pressure`: the used percent of `window`, the window closest to its own Takeover Limit. */
+  | { ref: string; reason: 'most-room'; pressure: number; window: string }
+  /**
+   * A Last Resort (spec §3.13): every Account is past its Takeover Limits (`limit` for Short Windows, `longLimit` for
+   * Long ones); this one is the furthest from them.
+   */
+  | { ref: string; reason: 'tight'; pressure: number; window: string; limit: number; longLimit: number }
   /** No Account of the Family has Quota data: the Main Account, or the Handoff pick when the main cannot start. */
   | { ref: string; reason: 'no-quota-data' }
   /** The Accounts with Quota data are full; this one has none yet. */
@@ -33,8 +39,8 @@ export type PickChoice =
 
 /**
  * Turns a Handoff plan into the Account to start (ADR-0035). With some Quota data: the pick. Without any: the Main
- * Account (`mainRef`, a Subscription Account) when it can start, else the pick. Nothing usable (all full, signed out
- * or API): nothing starts.
+ * Account (`mainRef`, a Subscription Account) when it can start, else the pick, which past the Takeover Limits is the
+ * Account with the lowest Limit Use and no window used up (`tight`). Nothing usable (every window used up, signed out or API): nothing starts.
  */
 export function choosePick(plan: HandoffPlan, mainRef: string | null): PickChoice {
   const startable = (ref: string) =>
@@ -45,8 +51,19 @@ export function choosePick(plan: HandoffPlan, mainRef: string | null): PickChoic
   if (plan.pick && plan.accounts.some((e) => e.ref === plan.pick && e.state !== 'api')) {
     const e = plan.accounts.find((x) => x.ref === plan.pick)!
     if (!plan.hasQuota) return { ref: plan.pick, reason: 'no-quota-data' }
+    // The window that decided the pick: the one closest to its own limit (a weekly 87% before a 5-hour 43%).
+    const w = e.window ?? { label: '', usedPercent: Math.round(e.pressure ?? 0) }
+    if (plan.tight && e.pressure !== null)
+      return {
+        ref: plan.pick,
+        reason: 'tight',
+        pressure: w.usedPercent,
+        window: w.label,
+        limit: plan.tight.limit,
+        longLimit: plan.tight.longLimit,
+      }
     return e.state === 'ready' && e.pressure !== null
-      ? { ref: plan.pick, reason: 'most-room', pressure: Math.round(e.pressure) }
+      ? { ref: plan.pick, reason: 'most-room', pressure: w.usedPercent, window: w.label }
       : { ref: plan.pick, reason: 'others-full' }
   }
   return {
@@ -58,9 +75,12 @@ export function choosePick(plan: HandoffPlan, mainRef: string | null): PickChoic
 }
 
 /** The line a Pick Command prints before it starts the Host. */
-export function pickLine(name: string, choice: Exclude<PickChoice, { ref: null }>): string {
-  if (choice.reason === 'most-room')
-    return `${name} → ${choice.ref} (${choice.pressure}% used, the most room)`
+export function pickLine(name: string, choice: Exclude<PickChoice, { ref: null }>, family: string): string {
+  const used = (c: { window: string; pressure: number }) =>
+    `${c.window ? `${c.window} ` : ''}${c.pressure}% used`
+  if (choice.reason === 'tight')
+    return `${name} → ${choice.ref} (every ${family} account is past its limit, ${choice.limit}% of a 5-hour window or ${choice.longLimit}% of a weekly one; this one has the most left, ${used(choice)})`
+  if (choice.reason === 'most-room') return `${name} → ${choice.ref} (${used(choice)}, the most room)`
   if (choice.reason === 'others-full')
     return `${name} → ${choice.ref} (no quota data for it yet; the accounts with data are full)`
   return `${name} → ${choice.ref} (no quota data yet; \`sideby quota\` shows why)`

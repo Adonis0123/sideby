@@ -40,7 +40,8 @@
           "ref",
           "kind",
           "state",
-          "pressure"
+          "pressure",
+          "limitUse"
         ],
         "properties": {
           "ref": {
@@ -81,7 +82,7 @@
                 "const": "logged-out"
               }
             ],
-            "description": "ready and unknown can be picked; api only with --include-api; full and logged-out never."
+            "description": "ready and unknown can be picked; api only with --include-api; logged-out never. full (a window at or past its own Takeover Limit: 5-hour windows the handoff threshold - 10, windows longer than a day the threshold) only as a Last Resort: when no subscription account is ready or unknown, the one with the lowest limitUse and no window used up, and `tight` is set."
           },
           "pressure": {
             "anyOf": [
@@ -94,9 +95,43 @@
             ],
             "description": "Used percent of the fullest window not reset yet; null without quota."
           },
+          "limitUse": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Limit Use: the percent of its own Takeover Limit that the closest window has used (a weekly 87% under 95 is 91.6); null without quota. Ready accounts rank by it, lowest first."
+          },
+          "window": {
+            "type": "object",
+            "required": [
+              "label",
+              "usedPercent",
+              "limit"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "Such as `5h` or `7d`."
+              },
+              "usedPercent": {
+                "type": "number",
+                "description": "Rounded."
+              },
+              "limit": {
+                "type": "number",
+                "description": "This window's Takeover Limit in percent."
+              }
+            },
+            "description": "The window closest to its own Takeover Limit; absent when none is open."
+          },
           "resetsAt": {
             "type": "string",
-            "description": "For full: when its last full window resets."
+            "description": "For full: when it is usable again. With a window used up, when those windows reset; otherwise when every window is under its Takeover Limit again."
           },
           "observedAt": {
             "type": "string",
@@ -118,6 +153,24 @@
       "type": "boolean",
       "description": "False when no account has quota data: the pick is then a guess, and `sideby next` does not start it (exit 1)."
     },
+    "tight": {
+      "type": "object",
+      "required": [
+        "limit",
+        "longLimit"
+      ],
+      "properties": {
+        "limit": {
+          "type": "number",
+          "description": "The Takeover Limit of 5-hour windows in percent (handoff threshold - 10)."
+        },
+        "longLimit": {
+          "type": "number",
+          "description": "The Takeover Limit of windows longer than a day in percent (the handoff threshold)."
+        }
+      },
+      "description": "Set when the pick is a Last Resort: every subscription account has a window at or past its Takeover Limit, and the pick is the one with the lowest limitUse and no window used up."
+    },
     "earliestReset": {
       "type": "object",
       "required": [
@@ -132,7 +185,7 @@
           "type": "string"
         }
       },
-      "description": "Set when nothing can be picked and some accounts are full: the first to come back."
+      "description": "Set when nothing can be picked and some accounts are full (every one has a window used up): the first to come back."
     },
     "_notice": {
       "type": "object",

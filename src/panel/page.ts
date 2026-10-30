@@ -5,7 +5,13 @@ import { createHash } from 'node:crypto'
 import { FAVICON_SVG, MARK_SVG } from '../core/brand-mark.ts'
 import { commandListForPage } from '../core/cli-commands.ts'
 import { ALIAS_NAME, RESERVED_ALIASES } from '../core/config.ts'
-import { QUOTA_FAIL_PERCENT, QUOTA_WARN_PERCENT, USAGE_DAYS } from '../core/quota-levels.ts'
+import {
+  QUOTA_FAIL_PERCENT,
+  QUOTA_LONG_FAIL_PERCENT,
+  QUOTA_LONG_WARN_PERCENT,
+  QUOTA_WARN_PERCENT,
+  USAGE_DAYS,
+} from '../core/quota-levels.ts'
 import { COMMON_ENTRIES, SEARCH_CATALOG } from '../core/search-catalog.ts'
 import { REPO_URL, SKILL_INSTALL } from '../core/skill-check.ts'
 import type { LocalBuild } from '../core/version.ts'
@@ -94,6 +100,8 @@ export function renderPage(opts: PageOptions): string {
     },
     warn: QUOTA_WARN_PERCENT,
     fail: QUOTA_FAIL_PERCENT,
+    longWarn: QUOTA_LONG_WARN_PERCENT,
+    longFail: QUOTA_LONG_FAIL_PERCENT,
     usageDays: USAGE_DAYS,
     // The alias rules of the config, so the new-account dialog checks a short command as sideby will.
     aliasPattern: ALIAS_NAME.source,

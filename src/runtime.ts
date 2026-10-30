@@ -74,7 +74,7 @@ import { type Paths, resolvePaths } from './core/paths.ts'
 import { choosePick, type PickChoice, suggestPickName } from './core/pick-commands.ts'
 import { categoryReader, type ProjectCategories } from './core/project-categories.ts'
 import { fetchedQuota, type QuotaFetchMode, quotaCheckOff, shownQuota } from './core/quota-fetch.ts'
-import { takeoverLimit } from './core/quota-levels.ts'
+import { takeoverLimits } from './core/quota-levels.ts'
 import {
   type RemoteControlChange,
   type RemoteControlGroup,
@@ -449,7 +449,8 @@ export interface Runtime {
   /** Puts back what `remoteControlOff` or `remoteControlOn` replaced, only where the key still holds what it wrote. */
   remoteControlUndo(): Promise<RemoteControlChange>
   /**
-   * Which Account of a Family to move on to (spec §3.13). Throws a UserError with code `no-quota-source`
+   * Which Account of a Family to move on to (spec §3.13), for a start the user asks for: past the Takeover Limit it
+   * falls back to the least used Account under 100% (`tight`). Throws a UserError with code `no-quota-source`
    * when the Family cannot tell, `no-accounts` when it has none.
    */
   handoff(familyId: string, opts?: { includeApi?: boolean }): Promise<HandoffPlan>
@@ -1484,9 +1485,15 @@ export async function createRuntime(
       // The current Account: the one sideby started this process from, when it belongs to this Family.
       const current = env.SIDEBY_ACCOUNT
       const from = current && list.some((a) => a.ref === current) ? current : undefined
-      // The Takeover Limit follows the user's Handoff Threshold, so `sideby next` and Auto Handoff agree on "full".
-      const fullAt = takeoverLimit(handoffSettings(config).threshold)
-      return planHandoff(f.id, candidates, readContext().now, { ...o, fullAt, ...(from ? { from } : {}) })
+      // The Takeover Limits follow the user's Handoff Threshold, so `sideby next` and Auto Handoff agree on "full".
+      // A start the user asks for may still go past them (a Last Resort, spec §3.13); Auto Handoff never does.
+      const limits = takeoverLimits(handoffSettings(config).threshold)
+      return planHandoff(f.id, candidates, readContext().now, {
+        ...o,
+        limits,
+        lastResort: true,
+        ...(from ? { from } : {}),
+      })
     },
     handoffSettings: () => handoffSettings(config),
     async handoffDecision(origin, used, opts = {}) {

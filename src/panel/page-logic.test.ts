@@ -152,6 +152,24 @@ describe('page logic', () => {
     assert.equal(windowState(w(140), NOW, 60, 85).pct, 100)
   })
 
+  it('levels a weekly window by its own, later thresholds when the page passes them (spec §3.26)', () => {
+    const long = { warn: 85, fail: 95 }
+    const w = (label: string, windowMinutes: number, u: number) => ({
+      label,
+      windowMinutes,
+      usedPercent: u,
+      resetsAt: at(1),
+    })
+    assert.equal(windowState(w('7d', 10080, 87), NOW, 60, 85, long).level, 'warn')
+    assert.equal(windowState(w('7d', 10080, 84), NOW, 60, 85, long).level, 'ok')
+    assert.equal(windowState(w('7d', 10080, 95), NOW, 60, 85, long).level, 'fail')
+    assert.equal(windowState(w('5h', 300, 87), NOW, 60, 85, long).level, 'fail')
+    assert.equal(windowState(w('7d', 10080, 87), NOW, 60, 85).level, 'fail', 'without long levels, one line')
+    // The window closest to its own red level binds: 7d 90% of 95 before 5h 80% of 85.
+    assert.equal(bindingWindow([w('5h', 300, 80), w('7d', 10080, 90)], NOW, 60, 85, long)?.label, '7d')
+    assert.equal(bindingWindow([w('5h', 300, 82), w('7d', 10080, 90)], NOW, 60, 85, long)?.label, '5h')
+  })
+
   it('shows the limit that binds first when one model group has several', () => {
     const w = (label: string, u: number, h = 1) => ({ label, usedPercent: u, resetsAt: at(h) })
     assert.equal(bindingWindow([w('7d', 56), w('5h', 100)], NOW, 60, 85)?.label, '5h')
@@ -222,6 +240,19 @@ describe('page logic', () => {
     const shared = quota(95)
     shared!.from = 'claude:main'
     assert.equal(quotaHighLevel(acct('a', { quota: shared }), NOW, 85), 'warn')
+  })
+
+  it('a weekly window warns and turns red at its own levels', () => {
+    // 7d 87%: running low (amber) from 85, red only from 95; 5h stays at 60 and 85.
+    assert.deepEqual(attentionReasons(acct('a', { quota: quota(40, 80) }), null, NOW, 60, 85), [])
+    assert.deepEqual(attentionReasons(acct('a', { quota: quota(40, 87) }), null, NOW, 60, 85), ['quota-high'])
+    assert.equal(quotaHighLevel(acct('a', { quota: quota(40, 91) }), NOW, 85, 95), 'warn')
+    assert.equal(quotaHighLevel(acct('a', { quota: quota(40, 96) }), NOW, 85, 95), 'fail')
+    assert.equal(quotaHighLevel(acct('a', { quota: quota(86, 10) }), NOW, 85, 95), 'fail')
+    assert.deepEqual(attentionWhy(acct('a', { quota: quota(40, 87) }), null, NOW, 60, 85), {
+      key: 'why.quota-high',
+      vars: { label: '7d', pct: 87, warn: 85 },
+    })
   })
 
   it('lists attention reasons, most serious first', () => {

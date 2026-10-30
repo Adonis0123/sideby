@@ -60,18 +60,37 @@ export function formatDuration(ms: number, lang: string): string {
   return zh ? `${m}分钟` : `${m}m`
 }
 
-/** One Quota window as the page draws it: percent used (0 after a reset passed) and its warning level. */
+/**
+ * A Long Window: longer than one day (weekly, a billing period), from `windowMinutes` or else a label such as `7d`.
+ * The page's copy of `isLongWindow` in core/quota-levels.ts; a test keeps the two equal.
+ */
+export function longWindow(w: { label?: string; windowMinutes?: number }): boolean {
+  let minutes = Number(w.windowMinutes)
+  if (!(Number.isFinite(minutes) && minutes > 0)) {
+    const m = /^(\d+(?:\.\d+)?)\s*([mhdw])$/i.exec(String(w.label ?? '').trim())
+    const units: Record<string, number> = { m: 1, h: 60, d: 1440, w: 10080 }
+    minutes = m ? Number(m[1]) * units[m[2]!.toLowerCase()]! : 0
+  }
+  return minutes > 1440
+}
+
+/**
+ * One Quota window as the page draws it: percent used (0 after a reset passed) and its warning level. `warn` and
+ * `fail` are a Short Window's levels; `long`, when given, a Long Window's (spec §3.26: a weekly window warns later).
+ */
 export function windowState(
-  w: { usedPercent: number; resetsAt: string },
+  w: { usedPercent: number; resetsAt: string; label?: string; windowMinutes?: number },
   now: number,
   warn: number,
   fail: number,
+  long?: { warn: number; fail: number },
 ): { pct: number; passed: boolean; level: string } {
   const reset = Date.parse(w.resetsAt)
   const passed = Number.isFinite(reset) && reset <= now
   const raw = Math.max(0, Math.min(100, Math.round(Number(w.usedPercent) || 0)))
   const pct = passed ? 0 : raw
-  const level = passed ? 'reset' : pct >= fail ? 'fail' : pct >= warn ? 'warn' : 'ok'
+  const lv = long && longWindow(w) ? long : { warn, fail }
+  const level = passed ? 'reset' : pct >= lv.fail ? 'fail' : pct >= lv.warn ? 'warn' : 'ok'
   return { pct, passed, level }
 }
 
@@ -79,15 +98,13 @@ export function windowState(
  * The window that binds first among those sharing one column (a model group with a 5-hour and a weekly limit, as
  * Antigravity CLI reports): the most used as the page draws it, the first on a tie. Undefined for none.
  */
-export function bindingWindow<W extends { usedPercent: number; resetsAt: string }>(
-  list: W[],
-  now: number,
-  warn: number,
-  fail: number,
-): W | undefined {
+export function bindingWindow<
+  W extends { usedPercent: number; resetsAt: string; label?: string; windowMinutes?: number },
+>(list: W[], now: number, warn: number, fail: number, long?: { warn: number; fail: number }): W | undefined {
+  // Closest to its own red level: a weekly 87% of 95 binds before a 5-hour 80% of 85.
+  const share = (w: W) => windowState(w, now, warn, fail).pct / (long && longWindow(w) ? long.fail : fail)
   let best: W | undefined
-  for (const w of list)
-    if (!best || windowState(w, now, warn, fail).pct > windowState(best, now, warn, fail).pct) best = w
+  for (const w of list) if (!best || share(w) > share(best)) best = w
   return best
 }
 
@@ -132,6 +149,8 @@ export function attentionReasons(
   health: { fail: number; warn: number } | null,
   now: number,
   warn: number,
+  /** A Long Window's warning level (spec §3.26); without it every window uses `warn`. */
+  longWarn: number = warn,
 ): string[] {
   const out: string[] = []
   if (a.error) out.push('error')
@@ -144,7 +163,7 @@ export function attentionReasons(
       if (w.name) continue
       const reset = Date.parse(w.resetsAt)
       if (Number.isFinite(reset) && reset <= now) continue
-      if ((Number(w.usedPercent) || 0) >= warn) {
+      if ((Number(w.usedPercent) || 0) >= (longWindow(w) ? longWarn : warn)) {
         out.push('quota-high')
         break
       }
@@ -154,17 +173,23 @@ export function attentionReasons(
 }
 
 /**
- * How serious an Account's `quota-high` is: `fail` once its fullest live window reaches `fail` (the bar turns red),
- * else `warn`, so a running-low label takes the same color as the bar it speaks about.
+ * How serious an Account's `quota-high` is: `fail` once a live window reaches its red level (`fail`, or `longFail` for
+ * a Long Window: the bar turns red), else `warn`, so a running-low label takes the same color as the bar it speaks
+ * about.
  */
-export function quotaHighLevel(a: LogicAccount, now: number, fail: number): 'warn' | 'fail' {
+export function quotaHighLevel(
+  a: LogicAccount,
+  now: number,
+  fail: number,
+  longFail: number = fail,
+): 'warn' | 'fail' {
   const q = a.quota
   if (!q || q.status !== 'ok' || !q.windows || q.from) return 'warn'
   for (const w of q.windows) {
     if (w.name) continue
     const reset = Date.parse(w.resetsAt)
     if (Number.isFinite(reset) && reset <= now) continue
-    if ((Number(w.usedPercent) || 0) >= fail) return 'fail'
+    if ((Number(w.usedPercent) || 0) >= (longWindow(w) ? longFail : fail)) return 'fail'
   }
   return 'warn'
 }
@@ -192,19 +217,25 @@ export function attentionWhy(
   health: { fail: number; warn: number } | null,
   now: number,
   warn: number,
+  longWarn: number = warn,
 ): { key: string; vars: Record<string, string | number> } | null {
-  const reason = attentionReasons(a, health, now, warn)[0]
+  const reason = attentionReasons(a, health, now, warn, longWarn)[0]
   if (!reason) return null
   if (reason !== 'quota-high') return { key: `why.${reason}`, vars: {} }
-  let top: { label: string; pct: number } | null = null
+  // The window furthest past its own warning level: a weekly window warns at `longWarn` (spec §3.26).
+  let top: { label: string; pct: number; at: number } | null = null
   for (const w of a.quota?.windows ?? []) {
     if (w.name) continue
     const reset = Date.parse(w.resetsAt)
     if (Number.isFinite(reset) && reset <= now) continue
     const pct = Number(w.usedPercent) || 0
-    if (pct >= warn && (!top || pct > top.pct)) top = { label: w.label, pct }
+    const at = longWindow(w) ? longWarn : warn
+    if (pct >= at && (!top || pct / at > top.pct / top.at)) top = { label: w.label, pct, at }
   }
-  return { key: 'why.quota-high', vars: { label: top?.label ?? '', pct: Math.round(top?.pct ?? 0), warn } }
+  return {
+    key: 'why.quota-high',
+    vars: { label: top?.label ?? '', pct: Math.round(top?.pct ?? 0), warn: top?.at ?? warn },
+  }
 }
 
 /**

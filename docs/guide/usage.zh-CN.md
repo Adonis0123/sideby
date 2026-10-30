@@ -93,13 +93,26 @@ sideby doctor --fix      # 执行安全的修复
 
 ## Claude 额度
 
-Claude Code 只把额度数据交给 status line 命令，所以需要做一次可还原的改动：
+sideby 直接问 Claude Code 每个订阅账号的额度，不用任何设置：
+
+```sh
+sideby quota claude             # 每个 Claude 账号的 5h / 7d 额度和数据时间
+sideby quota claude --refresh   # 不用上次的结果，现在再问一次
+```
+
+- sideby 用该账号自己的配置目录运行 `claude -p /usage --no-session-persistence --output-format json`，关掉你的 hook 和 MCP 服务器，工作目录是 sideby 自己的文件夹。Claude Code 用自己的登录回答，不开模型回合：2026-10-30 用 Claude Code 2.1.314 实测，这次回答不花钱，约 4 秒，不保存会话。sideby 只留下百分比和重置时间，回答里的其他内容（你的会话、skill、MCP 服务器）一概不存。
+- 每个账号最多每 15 分钟问一次。面板开着时在后台问；面板或状态栏里的**刷新**会立刻再问。
+- 只管某一个模型的每周额度（Claude Code 里的 `Current week (<模型>)`）以模型名显示，不影响选哪个账号。
+- 在面板**设置 › 额度查询**里关掉，或运行 `sideby quota check claude off`，或在配置里写 `"quota": { "check": { "claude": false } }`。CI 里不问。未登录的账号、用 API key 的账号不问。问失败时（Claude Code 版本太旧、没登录），sideby 说明原因，并保留上次的数字。
+
+### 会话进行中的实时额度
+
+会话进行时，Claude Code 每次回复后也会把额度交给 status line 命令。sideby 显示两份里较新的那份。自动接力只读这一份，所以它需要做一次可还原的改动：
 
 ```sh
 npm i -g sideby                   # status line 每次刷新都会调用 sideby
 sideby quota setup claude         # 只展示 diff，不改文件
 sideby quota setup claude --yes   # 写入改动
-sideby quota                      # 每个账号的 5h / 7d 额度和数据时间
 sideby quota teardown claude      # 把原文件逐字节还原
 ```
 
@@ -109,7 +122,7 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 
 `teardown` 只在文件仍是 `setup` 写入的样子时才还原。如果之后你改过它，`teardown` 会拒绝并给出 diff，请手动把 `statusLine.command` 改回原命令（就是 `--orig-b64` 后面那段 base64），原来没有 `statusLine` 的就整段删掉。
 
-`settings.json` 链接到主账号的账号（默认如此）共用这一次 setup。自己有一份 `settings.json` 的账号，额度显示为未开启，要等它自己的 status line 也这样包装后才有数据。Codex 的额度不用设置，见 [Codex 额度](#codex-额度)。
+`settings.json` 链接到主账号的账号（默认如此）共用这一次 setup，都能拿到 status line 的读数。自己有一份 `settings.json` 的账号，要等它自己的 status line 也这样包装后才有这份读数；在那之前仍显示 Claude Code 通过 `/usage` 报的额度。Codex 的额度不用设置，见 [Codex 额度](#codex-额度)。
 
 ### 两个目录，同一个登录
 
@@ -328,19 +341,22 @@ sideby next codex --dry-run     # 只看推荐
 sideby next claude -- --model opus  # 宿主参数放在 -- 之后
 ```
 
-`next` 按每个账号「还没重置的窗口里最满的那个」排序，启动最低的那个，并列出其余账号和没选它们的原因：
+`next` 按每个账号离自己上限有多近排序，启动离上限最远的那个，并列出其余账号和没选它们的原因：
 
 ```
    ACCOUNT        STATE       NOTE
-→  claude:work    ready       fullest window 23%
+→  claude:work    ready       closest to its limit: 7d 87% of 95%
    claude:new     unknown     no quota data yet
    claude:key     api         left out; add --include-api to use it
-   claude:main    full        back at 14:30
+   claude:lab     low         past its limit: 5h 91% of 85% (limits 85% for 5-hour, 95% for weekly windows) until 14:30
+   claude:main    full        used up; back at 16:00
 ```
 
-- 有窗口超过自动接力阈值减 10（默认 95% 时是 85%）的账号算用满，好让换过去的账号有余量干活；已过重置时间的窗口重新按 0% 算。
+- 每种窗口有自己的上限，好让换过去的账号有余量干活。5 小时窗口用到 85% 以上、或每周（及更长）窗口用到 95% 以上的账号，排在所有余量更多的账号后面。两条线都跟着自动接力阈值走：5 小时窗口比阈值低 10，更长的窗口就等于阈值。一个用满的 5 小时窗口只占一周额度的五分之一左右，所以每周用了 87% 仍够好几个 5 小时窗口干活。
+- 没过上限的账号里，离上限最远的先选。注释写出起决定作用的那个窗口：`7d 87% of 95%`。已过重置时间的窗口重新按 0% 算。
+- 所有账号都过了上限时，`next` 仍然启动剩得最多、没有窗口用完的那个，并说明：`Next: claude:lab (every claude account is past its limit (85% of a 5-hour window, 95% of a weekly one); this one has the most left, 5h 91% of 85%)`。它可能很快用完。自动接力不会这样接手。
 - 还没有额度数据的账号排在有余量的账号后面。API 账号按次花钱，加 `--include-api` 才参与。
-- 全部用满时什么都不启动，并告诉你哪个账号最先恢复。所有账号都还没有额度数据时也不启动，因为那样的推荐只是猜测：先开启额度（`sideby quota setup claude`），或用 `sideby run` 自己选。
+- 已登录的账号都有窗口用完时什么都不启动，并告诉你哪个账号最先恢复。所有账号都还没有额度数据时也不启动，因为那样的推荐只是猜测：`sideby quota claude` 会说明原因，或用 `sideby run` 自己选。
 - 新账号会开一个新会话，因为每个账号各存各的会话。可以先让旧会话写一份简短的接力说明，再贴进新会话。
 - 支持 Claude、Codex 和 Grok。pi 没有公开额度，`next pi` 会列出账号让你自己选。
 - 登录同一个身份的两个目录共用一份额度（见[两个目录，同一个登录](#两个目录同一个登录)）；在 sideby 启动的会话里运行时，`next` 不会选另一个。
@@ -366,9 +382,9 @@ sideby handoff disable --yes
 这些设置都存在 config 文件的 `handoff` 下（见[配置](configuration.zh-CN.md)的 schema）。
 
 - **什么时候。** 最满的窗口到 80%（`prepareAt`）时，会话被要求开始写接力说明并随时更新；某个窗口快用完时，它做完当前一步、更新接力说明、结束这一轮。「快用完」按窗口分别判断（`adaptive`，默认开）：会话跑完一轮后，某个窗口剩下的额度不够最近单轮最大用量的 1.5 倍时就接力，范围在 `prepareAt` 到 99% 之间。5 小时窗口里轻活能用到 97–99% 左右，重活会早一些接力；每周窗口一般在 98–99%。还没跑完一轮时，以及 `adaptive: false` 时，每个窗口都在 95%（`threshold`）接力。提示和终端会写明是哪个窗口，例如「weekly (7d) quota is at 98%, back at Sun 20:00」，不会把每周额度误当成 5 小时额度。接力说明最后一行写 `<!-- handoff brief complete -->` 才算写完；否则会再要求一次，还没写完时 sideby 保留已写的部分，再补上从会话记录里找到的内容。满了的窗口 30 分钟内就重置时（`waitIfResetWithinMinutes`），sideby 选择等待，不接力：会话保留完整上下文，额度恢复后 Claude Code 自己接着做。额度到 95% 时会话里会显示一行说明，真撞到上限时再发一个桌面通知（支持 OSC 9 或 777 的终端，如 iTerm2、WezTerm、Ghostty）。想立刻换号，就在会话里输入 `! sideby handoff ready`：`!` 让命令不经过模型直接运行，额度用完时模型没法回话。只有会话能自己续上时 sideby 才等：Claude Code 要开着「Continue automatically at usage limit」（账号 `settings.json` 里的 `autoContinueAtUsageLimit`，默认开）；写在托管设置或项目设置里的这个开关 sideby 看不到。Codex 和 Grok 从不等。
-- **交给谁。** `policy: "order"` 按你写的列表（账号或短命令，可以跨家族）；不写时选本家族余量最多的账号；开了 `otherFamilies` 再按 `familyOrder` 换其他工具（每个工具里余量多的在前）；开了 `api` 最后才是 API 账号。一条链里每个账号只用一次，除非它当初交出去时那个额度窗口已经重置（这时它重新成为候选，规则照旧）；你手动交出去的账号，等它自己的额度显示有余量（比 `threshold` 低 10 个点以上）才会回来，额度未知时不回；跳过已满和未登录的账号（用量超过 `threshold` 减 10 的也跳过，默认 95% 时是 85%），也跳过不同组织的账号（先比 organization，没有就比 email 域名），除非它写在 `crossOrganization` 里。和旧账号是同一登录的账号一律跳过，`order` 里写了也跳过：它们是同一份额度。
+- **交给谁。** `policy: "order"` 按你写的列表（账号或短命令，可以跨家族）；不写时选本家族余量最多的账号；开了 `otherFamilies` 再按 `familyOrder` 换其他工具（每个工具里余量多的在前）；开了 `api` 最后才是 API 账号。一条链里每个账号只用一次，除非它当初交出去时那个额度窗口已经重置（这时它重新成为候选，规则照旧）；你手动交出去的账号，等它自己的额度显示有余量（每个窗口都在上限以下，见[账号撞上限额时](#账号撞上限额时)）才会回来，额度未知时不回；跳过已满和未登录的账号（5 小时窗口到 `threshold` 减 10、或每周窗口到 `threshold` 的也跳过，默认 95% 时分别是 85% 和 95%），也跳过不同组织的账号（先比 organization，没有就比 email 域名），除非它写在 `crossOrganization` 里。和旧账号是同一登录的账号一律跳过，`order` 里写了也跳过：它们是同一份额度。
 - **谁可以接手。** 只开 `auto` 时，只交给你写进 `order` 的其他工具的账号。同一家厂商的两个账号之间接力（cc001 → cc002）还要写 `"sameFamily": true`。厂商可能认为这是在绕过用量限制并处理账号，风险由你承担。`"otherFamilies": true` 让本工具没有能接手的账号时，按 `familyOrder` 换其他 AI 工具。`"api": true` 让 API 账号最后接手；它们按次计费，sideby 不限制花费，请在服务商后台设上限。0.22 之前不用这个设置 API 账号也会接手；如果你开着自动接力又有 API 账号，面板和 `sideby handoff status` 会问你一次：不让它们接手，还是让它们接手。没有账号能接手时，sideby 会说开哪个设置就能有。
-- **额度窗口。** 工具给出的每个窗口都算（5 小时、每周、计费周期），最满的那个说了算；没有日额度。所有窗口用同一个阈值。
+- **额度窗口。** 工具给出的每个窗口都算（5 小时、每周、计费周期）：会话最满的那个窗口到阈值就接力，每个窗口用同一个阈值；没有日额度。谁来接手则按窗口分别判断，每周窗口的线更高（见[账号撞上限额时](#账号撞上限额时)）。
 - **接力之前。** 有 10 秒倒计时（`countdownSeconds`）；按回车留下，sideby 会在原账号里续接刚才的会话。
 - **手动接力。** 在这类会话里运行 `sideby handoff ready`（或让 agent 运行），可以加 `--brief <file>` 用你自己的接力工具写的说明；这一轮结束后下一个账号启动。会话停在额度上限时（在等重置，或撞墙时没有账号能接），不会再有一轮结束，这时在会话里输入 `! sideby handoff ready` 会立刻交接。自动接力只在这条链用过的账号当初交出去时那个额度窗口重置之后，才会回到它（手动交出去的账号：等它自己的额度显示有余量）；想早点交回去，运行 `sideby handoff ready --to <account>`。
 - **接力说明。** 放在 `~/.local/state/sideby/handoffs/<chain>/`，权限 600，不写进你的仓库；sideby 补上分支、未提交的文件和 diff 统计，从不 commit 或 stash。新会话拿到的是文件路径，不是正文。旧会话没来得及写时，sideby 从会话记录里拼一份，并注明可能不完整。
@@ -388,13 +404,13 @@ Claude Code 会话结束这一轮、停下来等后台子代理时也会接力�
 
 ## 状态栏额度
 
-在 macOS 上运行 `sideby menubar on`（或在面板「设置」里打开**在状态栏显示额度**），状态栏就会多一个 sideby 小人。各工具额度都充足时只显示小人；某个工具连最合适的账号都用到 60% 以上时，旁边出现工具名和百分比（橙色，85% 起变红），不用打开面板也能一眼看出还能不能继续干活。点开它，第一行写着用得最多的是哪个账号，下面是每个账号的额度条，点任一账号直接在终端启动，或打开面板；菜单里的**从状态栏隐藏…**（或 `sideby menubar off`）会先确认再隐藏；想找回时，在面板里把开关打开，或运行 `sideby menubar on --yes`。在任何地方按 ⌥X 打开菜单，再按一次关上。想换快捷键，在面板「设置」里打开**状态栏图标 ›**，从下拉里选一个（选「自定义…」可以自己按；不知道选哪个，点下面的「让 AI 帮我挑」，AI 会查哪些组合已被占用，推荐几个单手顺手的再替你设好）；或运行 `sideby menubar hotkey ctrl+opt+s`，`off` 关闭，`default` 用回 ⌥X。快捷键要带 ⌥、⌘ 或 ⌃，sideby 会拒绝 macOS 自己在用的组合，比如 ⌘Q、⌥⌘D。别的 App 用了同一组合时，macOS 不会告诉 sideby；按了没反应就换一个。开关是开的却看不到图标：状态栏放不下时，macOS 会把图标收进顶栏的 «（点它就能看到），sideby 的图标被收进去时面板会直接提示；面板说没在运行时，点**重新启动**；其他情况看「系统设置 › 菜单栏」和 Ice、Bartender 这类整理工具。拿不准是哪种，就打开「状态栏图标 ›」点「让 AI 帮我排查」，或运行 `sideby ask --task menubar`。开启前先显示要写的文件（`~/Library/LaunchAgents/dev.sideby.menubar.plist`），加 `--yes` 才生效。
+在 macOS 上运行 `sideby menubar on`（或在面板「设置」里打开**在状态栏显示额度**），状态栏就会多一个 sideby 小人。各工具额度都充足时只显示小人；某个工具连最合适的账号都到了提醒级别时，旁边出现工具名和百分比，不用打开面板也能一眼看出还能不能继续干活。5 小时窗口 60% 起变橙、85% 起变红；每周窗口时间长得多，85% 起变橙、95% 起变红。面板和 `sideby quota` 用同样的颜色。点开它，第一行写着用得最多的是哪个账号，下面是每个账号的额度条，最后一列写最先用完的窗口和它的重置时间（`7d · 4天17小时后`），点任一账号直接在终端启动，或打开面板；菜单里的**从状态栏隐藏…**（或 `sideby menubar off`）会先确认再隐藏；想找回时，在面板里把开关打开，或运行 `sideby menubar on --yes`。在任何地方按 ⌥X 打开菜单，再按一次关上。想换快捷键，在面板「设置」里打开**状态栏图标 ›**，从下拉里选一个（选「自定义…」可以自己按；不知道选哪个，点下面的「让 AI 帮我挑」，AI 会查哪些组合已被占用，推荐几个单手顺手的再替你设好）；或运行 `sideby menubar hotkey ctrl+opt+s`，`off` 关闭，`default` 用回 ⌥X。快捷键要带 ⌥、⌘ 或 ⌃，sideby 会拒绝 macOS 自己在用的组合，比如 ⌘Q、⌥⌘D。别的 App 用了同一组合时，macOS 不会告诉 sideby；按了没反应就换一个。开关是开的却看不到图标：状态栏放不下时，macOS 会把图标收进顶栏的 «（点它就能看到），sideby 的图标被收进去时面板会直接提示；面板说没在运行时，点**重新启动**；其他情况看「系统设置 › 菜单栏」和 Ice、Bartender 这类整理工具。拿不准是哪种，就打开「状态栏图标 ›」点「让 AI 帮我排查」，或运行 `sideby ask --task menubar`。开启前先显示要写的文件（`~/Library/LaunchAgents/dev.sideby.menubar.plist`），加 `--yes` 才生效。
 
 <img alt="sideby 状态栏下拉菜单：各工具、各账号的额度条" src="../assets/menubar.zh-CN.png" width="468">
 
 其他设置也都有命令：`sideby config get` 列出全部设置和当前值，`sideby config set panel.theme dark` 改一项（先显示改动）。
 
-菜单底部写的是最近「检查」时间。每个账号的悬停说明保留额度记录时间。记录超过一小时或查询失败，额度条变灰并标为「旧数据」；但如果记录之后这台电脑没再用过这个登录，数字照常显示，悬停说明网页或其他电脑上的用量不在内。反复检查不会使旧数据变新。Claude Code 的额度只在这个账号跑会话时更新，所以它的旧数据提示写的是开一次会话，而不是点刷新。
+菜单底部写的是最近「检查」时间。每个账号的悬停说明保留额度记录时间。记录超过一小时或查询失败，额度条变灰并标为「旧数据」；但如果记录之后这台电脑没再用过这个登录，数字照常显示，悬停说明网页或其他电脑上的用量不在内。反复检查不会使旧数据变新。sideby 问不到额度的工具（一些插件工具）只在这个账号跑会话时更新，所以它们的旧数据提示写的是开一次会话，而不是点刷新。
 
 ## 宿主说明
 
@@ -402,7 +418,7 @@ Claude Code 会话结束这一轮、停下来等后台子代理时也会接力�
 
 | 宿主 | 家族 | 测试版本 | 登录 | 额度 | 用量（近 7 天） |
 |---|---|---|---|---|---|
-| Claude Code | `claude` | 2.1.289 | `claude auth login` | status line 缓存（先跑 `quota setup claude`） | 本地会话记录 |
+| Claude Code | `claude` | 2.1.289 | `claude auth login` | 问 `claude` CLI（2.1.314，2026-10-30）；跑过 `quota setup claude` 后再加 status line 缓存 | 本地会话记录 |
 | Codex CLI | `codex` | 0.163.0 | `codex login` | 官方 CLI；本地记录备用 | 本地会话文件 |
 | Grok Build | `grok` | 1.0.60 | `grok login` | 由 `grok` 命令行查询 | 没有公开来源 |
 | pi | `pi` | 1.0.2 | 进入 pi 后执行 `/login` | 没有公开来源 | 没有公开来源 |

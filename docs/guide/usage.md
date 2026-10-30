@@ -93,13 +93,26 @@ Warnings alone exit 0; any failure exits 1.
 
 ## Claude quota
 
-Claude Code passes quota data only to its status line command, so sideby needs a one-time, reversible change:
+sideby asks Claude Code itself for each subscription account's quota, so it needs no setup:
+
+```sh
+sideby quota claude             # 5h / 7d per Claude account, with data age
+sideby quota claude --refresh   # ask again now instead of using the last answer
+```
+
+- sideby runs `claude -p /usage --no-session-persistence --output-format json` with the account's own config directory, with your hooks and MCP servers off, in a folder of sideby's own. Claude Code answers with its own login and starts no model turn: tried with Claude Code 2.1.314 on 2026-10-30, the answer cost nothing, took about 4 s and saved no session. sideby keeps only the percents and reset times; the rest of the answer (your sessions, skills, MCP servers) is never kept.
+- It asks at most every 15 minutes per account. The panel asks in the background while it is open, and **Refresh** in the panel or the menu bar asks again at once.
+- A weekly limit for one model only (`Current week (<model>)` in Claude Code) shows under that model's name and does not decide which account is picked.
+- Turn it off in the panel's **Settings › Quota checks**, with `sideby quota check claude off`, or with `"quota": { "check": { "claude": false } }` in the config. It is off in CI. A signed-out account, or one with an API key, is not asked. When an ask fails (Claude Code too old to answer, signed out), sideby says why and keeps the last numbers it had.
+
+### Live quota during a session
+
+While a session runs, Claude Code also hands its quota to the status line command after every reply. sideby shows whichever reading is newer. Auto Handoff reads only this one, so it needs a one-time, reversible change:
 
 ```sh
 npm i -g sideby                   # the status line calls `sideby` on every refresh
 sideby quota setup claude         # shows the diff, changes nothing
 sideby quota setup claude --yes   # writes the change
-sideby quota                      # 5h / 7d per account, with data age
 sideby quota teardown claude      # restores the original file byte for byte
 ```
 
@@ -109,7 +122,7 @@ Because Claude Code runs the wrapper on every refresh, `setup` refuses when `sid
 
 `teardown` writes the original back only if the file is still exactly what `setup` wrote. If you changed it since, `teardown` refuses and shows the diff; set `statusLine.command` back to your original command by hand (it is the base64 after `--orig-b64`), or delete `statusLine` if you had none.
 
-Accounts that link `settings.json` to the Main Account (the default) get quota from the same setup. An account with its own `settings.json` shows quota as not enabled until that file's status line is wrapped the same way. Codex quota needs no setup; see [Codex quota](#codex-quota).
+Accounts that link `settings.json` to the Main Account (the default) get the status line readings from the same setup. An account with its own `settings.json` gets none until that file's status line is wrapped the same way; it still shows the quota Claude Code reports through `/usage`. Codex quota needs no setup; see [Codex quota](#codex-quota).
 
 ### Two directories, one login
 
@@ -328,19 +341,22 @@ sideby next codex --dry-run     # only show the pick
 sideby next claude -- --model opus  # Host arguments go after --
 ```
 
-`next` ranks the family's accounts by their fullest quota window that has not reset yet, starts the lowest one, and lists the rest with why they were left out:
+`next` ranks the family's accounts by how close each one is to its limits, starts the one furthest from them, and lists the rest with why they were left out:
 
 ```
    ACCOUNT        STATE       NOTE
-→  claude:work    ready       fullest window 23%
+→  claude:work    ready       closest to its limit: 7d 87% of 95%
    claude:new     unknown     no quota data yet
    claude:key     api         left out; add --include-api to use it
-   claude:main    full        back at 14:30
+   claude:lab     low         past its limit: 5h 91% of 85% (limits 85% for 5-hour, 95% for weekly windows) until 14:30
+   claude:main    full        used up; back at 16:00
 ```
 
-- Accounts with a window more than 10 points below the Auto Handoff threshold (85% with the default 95%) are full, so the account you move to has room to work; a window whose reset time has passed counts as empty again.
+- Each window has its own limit, so the account you move to has room to work. A 5-hour window at 85% or more, or a weekly (or longer) window at 95% or more, puts an account behind every account with more room. Both lines move with the Auto Handoff threshold: 10 points below it for 5-hour windows, the threshold itself for longer ones. One full 5-hour window costs only about a fifth of a week, so a week at 87% still leaves several 5-hour windows of work.
+- Among the accounts under their limits, the one furthest from them goes first. The note names the window that decides: `7d 87% of 95%`. A window whose reset time has passed counts as empty again.
+- When every account is past its limit, `next` still starts the one with the most left, as long as none of its windows is used up, and says so: `Next: claude:lab (every claude account is past its limit (85% of a 5-hour window, 95% of a weekly one); this one has the most left, 5h 91% of 85%)`. It may run out soon. Auto Handoff never takes over this way.
 - Accounts without quota data yet come after the ones with known room. API accounts cost money per request, so they join only with `--include-api`.
-- When every account is full, nothing starts and sideby tells you which one comes back first. When no account has quota data yet, nothing starts either: the pick would only be a guess. Turn quota on (`sideby quota setup claude`) or choose with `sideby run`.
+- When every signed-in account has a window used up, nothing starts and sideby tells you which one comes back first. When no account has quota data yet, nothing starts either: the pick would only be a guess. `sideby quota claude` shows why, or choose with `sideby run`.
 - The new account starts a new session: each account keeps its own sessions. Ask the old session for a short handoff note and paste it in.
 - Claude, Codex and Grok; pi publishes no quota, so `next pi` lists the accounts for you to choose.
 - Two directories signed in as the same login share one quota (see [Two directories, one login](#two-directories-one-login)); run inside a session sideby started, `next` never picks the other one.
@@ -366,9 +382,9 @@ sideby handoff disable --yes
 The same settings live under `handoff` in the config file (see the [configuration](configuration.md) schema).
 
 - **When.** At 80% of the fullest window (`prepareAt`) the session is asked to start a brief and keep it current; when a window is about to run out, it finishes the current step, updates the brief and ends its turn. "About to run out" is measured per window (`adaptive`, on by default): once the session has finished a turn, a window hands over when it has less room left than 1.5 times its largest recent turn, between `prepareAt` and 99%. Light work in the 5-hour window goes on to about 97–99%, heavy work hands over earlier, and the weekly window usually at 98–99%. Before a turn is measured, and with `adaptive: false`, every window hands over at 95% (`threshold`). The messages and the terminal name the window, for example "weekly (7d) quota is at 98%, back at Sun 20:00", so a weekly hand-over is not mistaken for the 5-hour one. The brief counts as finished only when it ends with the line `<!-- handoff brief complete -->`; otherwise the session is asked once more, and then sideby keeps what it wrote and adds what it finds in the session's records. If the window resets within 30 minutes (`waitIfResetWithinMinutes`), sideby waits instead: the session keeps its context and Claude Code continues it by itself at the reset. When the quota reaches 95%, the session shows a line saying so, and a desktop notification follows when the limit is hit (terminals that support OSC 9 or 777, such as iTerm2, WezTerm and Ghostty). To move on now instead, type `! sideby handoff ready` in the session: the `!` runs it without the model, which cannot answer at the limit. sideby waits only when the session will go on by itself: for Claude Code while "Continue automatically at usage limit" (`autoContinueAtUsageLimit` in the account's `settings.json`) is on, its default; sideby does not see the setting in managed or project settings. Codex and Grok never wait.
-- **Where to.** `policy: "order"` follows your list (accounts or short commands, any family); without it sideby picks the family's account with the most room, then, with `otherFamilies`, other tools in `familyOrder` (each by most room), then, with `api`, API accounts. Each account is used once per chain, unless the quota window it handed over for has reset since (then it is a candidate again, under the same rules); an account you handed over from by hand comes back once its own quota shows room (more than 10 points below your `threshold`), not while its quota is unknown; a full or signed-out account is skipped (so is one more than 10 points below your `threshold` from full: 85% used with the default 95%), and so is an account of another organization (compared by organization, else by email domain) unless it is listed in `crossOrganization`. An account signed in as the same login as the old one is always skipped, even when `order` lists it: it has the same quota.
+- **Where to.** `policy: "order"` follows your list (accounts or short commands, any family); without it sideby picks the family's account with the most room, then, with `otherFamilies`, other tools in `familyOrder` (each by most room), then, with `api`, API accounts. Each account is used once per chain, unless the quota window it handed over for has reset since (then it is a candidate again, under the same rules); an account you handed over from by hand comes back once its own quota shows room (every window under its limit, see [When an account hits its limit](#when-an-account-hits-its-limit)), not while its quota is unknown; a full or signed-out account is skipped (so is one whose 5-hour window is 10 points below your `threshold` or whose weekly window is at your `threshold`: 85% and 95% with the default 95%), and so is an account of another organization (compared by organization, else by email domain) unless it is listed in `crossOrganization`. An account signed in as the same login as the old one is always skipped, even when `order` lists it: it has the same quota.
 - **Who may take over.** `auto` alone hands over only to accounts of other tools that you list in `order`. Moving between two accounts of the same vendor (cc001 → cc002) also needs `"sameFamily": true`. Vendors may treat that as getting past a usage limit and act on the account; the risk is yours. `"otherFamilies": true` lets other AI tools take over when this one has no account that can, in `familyOrder`. `"api": true` lets API accounts take over last; they are billed per request and sideby does not cap what they spend, so set a limit in the provider's console. Before version 0.22, API accounts took over without this setting; if you had Auto Handoff on and have API accounts, the panel and `sideby handoff status` ask you once whether to keep them out or let them take over. When no account may take over, sideby says which of these settings would allow one.
-- **Quota windows.** Every window a tool reports counts (5 hours, weekly, a billing period) and the fullest decides; there is no daily quota. One threshold applies to all windows.
+- **Quota windows.** Every window a tool reports counts (5 hours, weekly, a billing period): the session hands over when its fullest window reaches the threshold, the same for every window; there is no daily quota. Which account takes over is judged per window, with a higher line for weekly windows (see [When an account hits its limit](#when-an-account-hits-its-limit)).
 - **Before it moves.** A 10-second countdown (`countdownSeconds`); press Enter to stay, and sideby resumes the same session in the old account.
 - **By hand.** Inside such a session, run `sideby handoff ready` (or ask the agent to), optionally with `--brief <file>` from your own handoff tool; the next account starts when the turn ends. When the session sits at its usage limit (waiting for the reset, or no account could take over when it hit it), no turn will end, so typed as `! sideby handoff ready` it hands over at once. An automatic handoff goes back to an account this chain already used only once the quota window it handed over for has reset (for one you handed over from by hand: once its own quota shows room); to hand the task back sooner (say, to the first account once its quota came back), run `sideby handoff ready --to <account>`.
 - **The brief.** Kept under `~/.local/state/sideby/handoffs/<chain>/`, mode 600, never in your repository; sideby adds the branch, uncommitted files and diff stat, and never commits or stashes. The next session gets the brief's path, not its text. When the old session could not write one, sideby puts one together from the session's records, marked as possibly incomplete.
@@ -388,13 +404,13 @@ A Claude Code session that ends its turn to wait on background agents still hand
 
 ## Quota in the menu bar
 
-On macOS, run `sideby menubar on` (or turn on **Show quota in the menu bar** in the Panel's Settings) to put the sideby buddy in your menu bar. While every tool has quota left it shows just the icon; when even the best account of a tool has used 60% or more, the tool and its percent appear next to it (orange, red from 85%), so you can tell at a glance whether you can keep working. Click it to see every account's quota as small bars, with a first line that says which account is highest, start any account in your terminal, or open the panel; **Hide from Menu Bar…** in the menu (or `sideby menubar off`) hides it again, after asking; turn the switch back on in the Panel, or run `sideby menubar on --yes`, to bring it back. Press ⌥X from anywhere to open the menu, and again to close it. To pick another shortcut, open **Menu bar icon ›** in the Panel's Settings and choose one from the list (Custom… lets you press your own; not sure which, click "Let AI pick one" below it, and AI checks what is taken, recommends a few that are easy with one hand and sets the one you pick), or run `sideby menubar hotkey ctrl+opt+s`; `off` turns it off and `default` goes back to ⌥X. A shortcut needs ⌥, ⌘ or ⌃, and sideby refuses ones macOS uses, such as ⌘Q or ⌥⌘D. macOS does not say when another app uses the same keys; if pressing yours does nothing, pick another. If the switch is on but you cannot see the icon: when the menu bar is full, macOS puts icons behind « (click it to see them), and the Panel says when this happened to sideby's; when the Panel says it is not running, click **Start it again**; otherwise check System Settings › Menu Bar and any menu bar organizer such as Ice or Bartender. Not sure which? Open **Menu bar icon ›** and click **Let AI check it**, or run `sideby ask --task menubar`. Turning it on first shows the file it writes (`~/Library/LaunchAgents/dev.sideby.menubar.plist`); add `--yes` to do it.
+On macOS, run `sideby menubar on` (or turn on **Show quota in the menu bar** in the Panel's Settings) to put the sideby buddy in your menu bar. While every tool has quota left it shows just the icon; when even the best account of a tool reaches its warning level, the tool and its percent appear next to it, so you can tell at a glance whether you can keep working. A 5-hour window turns orange at 60% and red at 85%; a weekly window, which lasts much longer, turns orange at 85% and red at 95%. The panel and `sideby quota` use the same colors. Click it to see every account's quota as small bars, with the window that runs out first and its reset in the last column (`7d · in 4d 17h`), with a first line that says which account is highest, start any account in your terminal, or open the panel; **Hide from Menu Bar…** in the menu (or `sideby menubar off`) hides it again, after asking; turn the switch back on in the Panel, or run `sideby menubar on --yes`, to bring it back. Press ⌥X from anywhere to open the menu, and again to close it. To pick another shortcut, open **Menu bar icon ›** in the Panel's Settings and choose one from the list (Custom… lets you press your own; not sure which, click "Let AI pick one" below it, and AI checks what is taken, recommends a few that are easy with one hand and sets the one you pick), or run `sideby menubar hotkey ctrl+opt+s`; `off` turns it off and `default` goes back to ⌥X. A shortcut needs ⌥, ⌘ or ⌃, and sideby refuses ones macOS uses, such as ⌘Q or ⌥⌘D. macOS does not say when another app uses the same keys; if pressing yours does nothing, pick another. If the switch is on but you cannot see the icon: when the menu bar is full, macOS puts icons behind « (click it to see them), and the Panel says when this happened to sideby's; when the Panel says it is not running, click **Start it again**; otherwise check System Settings › Menu Bar and any menu bar organizer such as Ice or Bartender. Not sure which? Open **Menu bar icon ›** and click **Let AI check it**, or run `sideby ask --task menubar`. Turning it on first shows the file it writes (`~/Library/LaunchAgents/dev.sideby.menubar.plist`); add `--yes` to do it.
 
 <img alt="sideby menu bar dropdown: quota bars per tool and account" src="../assets/menubar.png" width="468">
 
 Every other setting has a command too: `sideby config get` lists them with their values, and `sideby config set panel.theme dark` changes one (it shows the change first).
 
-The menu footer says when sideby last **checked**. Each row keeps the quota observation time in its tooltip. Readings older than one hour, or whose query failed, are grey and marked **older reading**, unless this computer has not used that login since the reading: then the numbers stand, and the tooltip says that use on the web or another computer is not included. Repeated checks do not make old data current. Claude Code quota changes only when a session runs in that account, so its older readings say that instead of asking you to refresh.
+The menu footer says when sideby last **checked**. Each row keeps the quota observation time in its tooltip. Readings older than one hour, or whose query failed, are grey and marked **older reading**, unless this computer has not used that login since the reading: then the numbers stand, and the tooltip says that use on the web or another computer is not included. Repeated checks do not make old data current. A tool whose quota sideby cannot ask for (some plugin tools) changes only when a session runs in that account, so its older readings say that instead of asking you to refresh.
 
 ## Host notes
 
@@ -402,7 +418,7 @@ Tested on 2026-10-05 with the versions below. sideby starts the official binary 
 
 | Host | Family | Tested version | Sign-in | Quota | Usage (7 days) |
 |---|---|---|---|---|---|
-| Claude Code | `claude` | 2.1.289 | `claude auth login` | status line cache (after `quota setup claude`) | local session records |
+| Claude Code | `claude` | 2.1.289 | `claude auth login` | asked from the `claude` CLI (2.1.314, 2026-10-30); status line cache after `quota setup claude` | local session records |
 | Codex CLI | `codex` | 0.163.0 | `codex login` | official CLI; local fallback | local session files |
 | Grok Build | `grok` | 1.0.60 | `grok login` | asked from the `grok` CLI | no public source |
 | pi | `pi` | 1.0.2 | `/login` inside pi | no public source | no public source |

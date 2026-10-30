@@ -62,7 +62,7 @@ it('ranks signed-in subscriptions across families and respects explicit choices'
       login: loggedOut.has(a.ref) ? 'logged-out' : 'logged-in',
     })
     const pressure: Record<string, number> = { 'claude:main': 70, 'claude:work': 40, 'codex:main': 20 }
-    rt.quota = async (a) => ({
+    const quotaOf: typeof rt.quota = async (a) => ({
       status: 'ok',
       source: 'test',
       observedAt: new Date().toISOString(),
@@ -75,6 +75,7 @@ it('ranks signed-in subscriptions across families and respects explicit choices'
         },
       ],
     })
+    rt.quota = quotaOf
     const chosen = async () => {
       const p = await pickTaskAccount(rt)
       return 'account' in p ? p.account.ref : p.reason
@@ -96,6 +97,10 @@ it('ranks signed-in subscriptions across families and respects explicit choices'
     assert.equal(await chosen(), 'none-signed-in')
     loggedOut.clear()
     delete rt.config.ask
+    // Every account past the Takeover Limit: the least used one under 100% still opens the task.
+    Object.assign(pressure, { 'claude:main': 92, 'claude:work': 87, 'codex:main': 99 })
+    rt.quota = quotaOf
+    assert.equal(await chosen(), 'claude:work')
     rt.quota = async () => ({
       status: 'ok',
       source: 'test',

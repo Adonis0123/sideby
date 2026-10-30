@@ -89,6 +89,7 @@ import { listMessages, type MessageReceipt, sendMessage } from '../core/messages
 import { type AccountModel, accountModel, setAccountModel } from '../core/model-choice.ts'
 import { GUARDED_FAMILIES, type NetworkChange, type NetworkOverview, setNetwork } from '../core/network.ts'
 import { tildify } from '../core/paths.ts'
+import { takeoverLimits } from '../core/quota-levels.ts'
 import { type RemoteControlGroup, remoteControlTodo } from '../core/remote-control.ts'
 import { openRunBoard, withRuns } from '../core/run-link.ts'
 import { SECRET_VAR_NAME, secretVarFor, setSecret } from '../core/secret-file.ts'
@@ -628,6 +629,8 @@ export function handoffByFamily(
         quota: a.quota ?? { status: 'unavailable', reason: 'unrecognized' },
       })),
       now,
+      // The same plan as `sideby next`: the same Takeover Limits, and past them the least used Account (a Last Resort).
+      { limits: takeoverLimits(rt.handoffSettings().threshold), lastResort: true },
     )
     if (plan.pick && plan.hasQuota) out[id] = plan.pick
   }
@@ -1687,7 +1690,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         if (choice.ref === null)
           throw new UserError(
             choice.earliestReset
-              ? `Every ${family} account is at its limit; ${choice.earliestReset.ref} is back first.`
+              ? `Every signed-in ${family} account has used up its quota; ${choice.earliestReset.ref} is back first.`
               : `No ${family} account can be used now; sign one in first.`,
             { code: 'none-usable' },
           )
@@ -1699,7 +1702,8 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           family,
           picked: choice.ref,
           reason: choice.reason,
-          ...('pressure' in choice ? { pressure: choice.pressure } : {}),
+          ...('pressure' in choice ? { pressure: choice.pressure, window: choice.window } : {}),
+          ...('limit' in choice ? { limit: choice.limit, longLimit: choice.longLimit } : {}),
         }
       },
     },

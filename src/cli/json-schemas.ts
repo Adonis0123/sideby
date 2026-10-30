@@ -578,7 +578,8 @@ const MenubarRow = Type.Object({
     },
   ),
   reset: Type.String({
-    description: 'Until the fullest window resets, such as `4d 17h`; empty when nothing is used.',
+    description:
+      'Which window resets and how long until it does, such as `7d · in 4d 17h`: the window closest to its own red level (85% for 5 hours, 95% for longer windows). Empty when nothing is used.',
   }),
   note: Type.String({
     description: 'A no-quota explanation, or an old-reading warning beside the bars.',
@@ -958,14 +959,31 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
             ],
             {
               description:
-                'ready and unknown can be picked; api only with --include-api; full and logged-out never.',
+                'ready and unknown can be picked; api only with --include-api; logged-out never. full (a window at or past its own Takeover Limit: 5-hour windows the handoff threshold - 10, windows longer than a day the threshold) only as a Last Resort: when no subscription account is ready or unknown, the one with the lowest limitUse and no window used up, and `tight` is set.',
             },
           ),
           pressure: Type.Union([Type.Number(), Type.Null()], {
             description: 'Used percent of the fullest window not reset yet; null without quota.',
           }),
+          limitUse: Type.Union([Type.Number(), Type.Null()], {
+            description:
+              'Limit Use: the percent of its own Takeover Limit that the closest window has used (a weekly 87% under 95 is 91.6); null without quota. Ready accounts rank by it, lowest first.',
+          }),
+          window: Type.Optional(
+            Type.Object(
+              {
+                label: Type.String({ description: 'Such as `5h` or `7d`.' }),
+                usedPercent: Type.Number({ description: 'Rounded.' }),
+                limit: Type.Number({ description: "This window's Takeover Limit in percent." }),
+              },
+              { description: 'The window closest to its own Takeover Limit; absent when none is open.' },
+            ),
+          ),
           resetsAt: Type.Optional(
-            Type.String({ description: 'For full: when its last full window resets.' }),
+            Type.String({
+              description:
+                'For full: when it is usable again. With a window used up, when those windows reset; otherwise when every window is under its Takeover Limit again.',
+            }),
           ),
           observedAt: Type.Optional(
             Type.String({ description: "When the account's quota was recorded (its last session)." }),
@@ -989,11 +1007,29 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
         description:
           'False when no account has quota data: the pick is then a guess, and `sideby next` does not start it (exit 1).',
       }),
+      tight: Type.Optional(
+        Type.Object(
+          {
+            limit: Type.Number({
+              description: 'The Takeover Limit of 5-hour windows in percent (handoff threshold - 10).',
+            }),
+            longLimit: Type.Number({
+              description:
+                'The Takeover Limit of windows longer than a day in percent (the handoff threshold).',
+            }),
+          },
+          {
+            description:
+              'Set when the pick is a Last Resort: every subscription account has a window at or past its Takeover Limit, and the pick is the one with the lowest limitUse and no window used up.',
+          },
+        ),
+      ),
       earliestReset: Type.Optional(
         Type.Object(
           { ref: Str, at: Str },
           {
-            description: 'Set when nothing can be picked and some accounts are full: the first to come back.',
+            description:
+              'Set when nothing can be picked and some accounts are full (every one has a window used up): the first to come back.',
           },
         ),
       ),
@@ -2164,7 +2200,7 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     schemaVersion: Version,
     title: Type.String({
       description:
-        'The words next to the icon, such as `Codex 62%`, once the tightest tool reaches 60%; empty otherwise.',
+        'The words next to the icon, such as `Codex 62%`, once the tightest tool reaches its warning level (60% of a 5-hour window, 85% of a longer one); empty otherwise.',
     }),
     level: Type.Union(['ok', 'warn', 'fail', 'none'].map((k) => Type.Literal(k))),
     tooltip: Str,

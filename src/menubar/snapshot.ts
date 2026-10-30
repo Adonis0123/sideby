@@ -1,6 +1,13 @@
 // What the Menu Bar Item shows (spec §3.31, ADR-0034), computed here so the menu bar script only draws it.
 import type { HandoffPlan } from '../core/handoff.ts'
-import { openWindows, quotaIsStale, quotaLevel } from '../core/quota-levels.ts'
+import {
+  bindingWindow,
+  openWindows,
+  type QuotaLevel,
+  quotaIsStale,
+  windowLevel,
+  worseLevel,
+} from '../core/quota-levels.ts'
 import type { Account, FamilyLogo, LoginState, QuotaResult, QuotaWindow } from '../types.ts'
 import { fill, MENUBAR_STRINGS, type MenubarLang, type MenubarStrings } from './strings.ts'
 
@@ -37,7 +44,10 @@ export interface MenubarRow {
    * its own two bars, reset and hover text, while the account's own `bars` stay null. Null otherwise.
    */
   groups: { label: string; bars: MenubarRow['bars']; reset: string; tip: string }[] | null
-  /** How long until the fullest window resets, such as `4d 17h`; empty when nothing is used. */
+  /**
+   * Which window resets and how long until it does, such as `7d · in 4d 17h`: the window closest to its own red level
+   * (85% for 5 hours, 95% for a week), so the one that runs out first. Empty when nothing is used.
+   */
   reset: string
   /** A no-quota explanation, or an old-reading warning beside the bars. */
   note: string
@@ -106,7 +116,7 @@ export interface MenubarFamilyInput {
   title: string
   logo?: FamilyLogo | null
   /**
-   * Whether "Refresh" asks the Host for new numbers (the Family has `fetchQuota`). False for Claude Code, whose Quota
+   * Whether "Refresh" asks the Host for new numbers (the Family has `fetchQuota`). False for a Family whose Quota
    * changes only when a session runs in the account; old readings then say so. Default true.
    */
   refreshable?: boolean
@@ -238,8 +248,9 @@ function groupLabel(name: string): string {
 
 /**
  * What a Quota whose windows cover every model draws: two bar columns (the shortest window, then the fullest of the
- * others, so a third window that is used up still shows; a single window fills the second), the time until the fullest
- * resets, and one hover line per window with its use and reset.
+ * others, so a third window that is used up still shows; a single window fills the second), each colored by its own
+ * levels (a weekly window warns later, spec §3.26), which window runs out first and when it resets, and one hover line
+ * per window with its use and reset.
  */
 function drawn(quota: QuotaResult & { status: 'ok' }, now: Date, s: MenubarStrings) {
   const open = openWindows(quota, now) ?? []
@@ -249,7 +260,7 @@ function drawn(quota: QuotaResult & { status: 'ok' }, now: Date, s: MenubarStrin
   const openOf = (w: QuotaWindow) => open.find((o) => o.label === w.label)
   const bar = (w: QuotaWindow): MenubarBar => {
     const percent = Math.round(openOf(w)?.usedPercent ?? 0)
-    return { label: w.label, percent, level: quotaLevel(percent) }
+    return { label: w.label, percent, level: windowLevel({ ...w, usedPercent: percent }) }
   }
   const longer = windows
     .slice(1)
@@ -260,11 +271,11 @@ function drawn(quota: QuotaResult & { status: 'ok' }, now: Date, s: MenubarStrin
     : longer
       ? [bar(windows[0]!), longer]
       : [null, bar(windows[0]!)]
-  const fullest = open.reduce<QuotaWindow | null>(
-    (best, w) => (!best || w.usedPercent > best.usedPercent ? w : best),
-    null,
-  )
-  const reset = fullest && fullest.usedPercent > 0 ? untilText(fullest.resetsAt, now, s) : ''
+  // The window that runs out first relative to its own kind: a weekly 87% before a 5-hour 60%.
+  const fullest = bindingWindow(open) ?? null
+  const level = open.reduce<QuotaLevel>((l, w) => worseLevel(l, windowLevel(w)), 'ok')
+  const resetTime = fullest && fullest.usedPercent > 0 ? untilText(fullest.resetsAt, now, s) : ''
+  const reset = resetTime ? fill(s.resetIn, { label: fullest!.label, time: resetTime }) : ''
   const lines = windows.map((w) => {
     const o = openOf(w)
     const p = bar(w).percent
@@ -275,7 +286,9 @@ function drawn(quota: QuotaResult & { status: 'ok' }, now: Date, s: MenubarStrin
   return {
     bars,
     fullest,
+    level,
     reset,
+    resetTime,
     parts: windows.map((w) => fill(s.window, { label: w.label, p: bar(w).percent })),
     lines,
   }
@@ -329,12 +342,6 @@ function row(
   if (groups) {
     // One line per model group under the account, each with its own 5h and 7d bars (spec §3.31).
     const drawnGroups = groups.map((g) => ({ name: g.name, d: drawn(g.quota, now, s) }))
-    const fullest = drawnGroups
-      .map((g) => g.d.fullest)
-      .reduce<QuotaWindow | null>(
-        (best, w) => (w && (!best || w.usedPercent > best.usedPercent) ? w : best),
-        null,
-      )
     const groupTip = (g: (typeof drawnGroups)[number]) => [g.name, ...g.d.lines.map((l) => `   ${l}`)]
     return {
       ...base,
@@ -344,7 +351,7 @@ function row(
         ...drawnGroups.map((g) => `${groupLabel(g.name)} ${g.d.parts.join(' ')}`),
         ...(stale ? [s.olderReading] : []),
       ].join(s.sep),
-      level: quotaLevel(fullest?.usedPercent ?? 0),
+      level: drawnGroups.reduce<QuotaLevel>((l, g) => worseLevel(l, g.d.level), 'ok'),
       tip: [...head, '', ...drawnGroups.flatMap(groupTip), '', startTip].join('\n'),
       groups: drawnGroups.map((g) => ({
         label: groupLabel(g.name),
@@ -358,14 +365,14 @@ function row(
   if (openWindows(quota, now) === null) return noted(s.noData)
   const d = drawn(quota, now, s)
   const parts = [...d.parts]
-  if (d.reset) parts.push(fill(s.resets, { time: d.reset }))
+  if (d.resetTime) parts.push(fill(s.resets, { label: d.fullest!.label, time: d.resetTime }))
   if (stale) parts.push(s.olderReading)
   return {
     ...base,
     observedAt: quota.observedAt,
     stale,
     detail: parts.join(s.sep),
-    level: quotaLevel(d.fullest?.usedPercent ?? 0),
+    level: d.level,
     tip: [...head, '', ...d.lines, '', startTip].join('\n'),
     bars: d.bars,
     reset: d.reset,
@@ -446,9 +453,10 @@ function section(f: MenubarFamilyInput, now: Date, s: MenubarStrings): MenubarSe
 }
 
 /**
- * Each Family's number is the Quota Pressure of the account `sideby next` would pick, or, when every account is past
- * the fail level, the lowest of theirs; the title shows the highest of these, so it turns red when some tool has
- * nothing left to hand over to.
+ * Each Family's number is the account `sideby next` would pick, or, when every account is full, the one with the lowest
+ * Limit Use: the used percent of its window closest to its own limit, colored by that account's windows at their own
+ * levels (spec §3.26). The title shows the tightest of these by Limit Use, so it turns red when some tool has nothing
+ * left to hand over to, and a weekly window at 87% stays quiet.
  */
 export function menubarSnapshot(
   families: readonly MenubarFamilyInput[],
@@ -457,7 +465,7 @@ export function menubarSnapshot(
   hotkey: MenubarHotkey | null = null,
 ): MenubarSnapshot {
   const s = MENUBAR_STRINGS[lang]
-  let worst: { value: number; ref: string; tool: string } | null = null
+  let worst: { use: number; value: number; level: QuotaLevel; ref: string; tool: string } | null = null
   const sections: MenubarSection[] = []
   for (const f of families) {
     if (!f.accounts.length) continue
@@ -468,16 +476,28 @@ export function menubarSnapshot(
     const best = f.plan.pick
       ? f.plan.accounts.find((e) => e.ref === f.plan!.pick)
       : f.plan.accounts
-          .filter((e) => e.state === 'full' && e.pressure !== null)
-          .sort((x, y) => x.pressure! - y.pressure!)[0]
-    const value = best?.pressure ?? null
-    if (best && value !== null && (!worst || value > worst.value))
-      worst = { value, ref: best.ref, tool: f.title }
+          .filter((e) => e.state === 'full' && e.limitUse !== null)
+          .sort((x, y) => x.limitUse! - y.limitUse!)[0]
+    const use = best?.limitUse ?? null
+    if (best && use !== null && (!worst || use > worst.use)) {
+      const quota = f.accounts.find((a) => a.ref === best.ref)?.quota
+      const level = (openWindows(quota, now) ?? []).reduce<QuotaLevel>(
+        (l, w) => worseLevel(l, windowLevel(w)),
+        'ok',
+      )
+      worst = {
+        use,
+        value: best.window?.usedPercent ?? best.pressure ?? 0,
+        level,
+        ref: best.ref,
+        tool: f.title,
+      }
+    }
   }
   const values: Record<string, string | number> = worst
     ? { account: worst.ref, tool: worst.tool, p: Math.round(worst.value) }
     : {}
-  const low = worst !== null && quotaLevel(worst.value) !== 'ok'
+  const low = worst !== null && worst.level !== 'ok'
   const old = sections.some((s) => s.rows.some((r) => r.stale))
   // "Refresh" brings new numbers only for a Family that can be asked; otherwise a session in that account must run.
   const oldSays =
@@ -510,7 +530,7 @@ export function menubarSnapshot(
   return {
     schemaVersion: 1,
     title: low ? fill(s.title, values) : '',
-    level: worst && !old ? quotaLevel(worst.value) : 'none',
+    level: worst && !old ? worst.level : 'none',
     tooltip: [
       old
         ? `${s.statusOld} · ${oldSays}`
@@ -525,7 +545,7 @@ export function menubarSnapshot(
       ? {
           status: old ? s.statusOld : fill(low ? s.statusLow : s.statusOk, values),
           detail: old ? oldSays : fill(low ? s.detailLow : s.detailOk, values),
-          level: old ? 'none' : quotaLevel(worst.value),
+          level: old ? 'none' : worst.level,
         }
       : null,
     updatedAt: now.toISOString(),

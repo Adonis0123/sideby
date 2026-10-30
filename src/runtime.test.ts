@@ -147,7 +147,7 @@ describe('quota levels', () => {
     // The page gets the thresholds in its boot data and levels every window with them.
     const html = renderPage({ basePath: '', token: 't' })
     assert.ok(html.includes(`"warn":${QUOTA_WARN_PERCENT},"fail":${QUOTA_FAIL_PERCENT}`))
-    assert.match(html, /windowState\(w, now, WARN, FAIL\)/)
+    assert.match(html, /windowState\(w, now, WARN, FAIL, LONG\)/)
     // The page text comes from USAGE_DAYS; the sources must not hard-code a day count or a threshold.
     const { readFile: read } = await import('node:fs/promises')
     for (const file of ['page.ts', 'page-script.ts', 'page-logic.ts', 'i18n.ts']) {

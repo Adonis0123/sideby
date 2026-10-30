@@ -3,7 +3,7 @@
 import type { Account, AccountIdentity, LoginState, QuotaResult } from '../types.ts'
 import type { HandoffSettings } from './config.ts'
 import { type HandoffEntry, planHandoff } from './handoff.ts'
-import { takeoverLimit, windowReset } from './quota-levels.ts'
+import { takeoverLimits, windowReset } from './quota-levels.ts'
 
 export interface SelectCandidate {
   ref: string
@@ -108,11 +108,11 @@ function waitUntil(
 }
 
 /**
- * One candidate's §3.13 state; API accounts are pickable here, as the last resort. An Account at or above the
- * Takeover Limit counts as full, so the next Account starts with room to work (spec §3.17 "接力规则").
+ * One candidate's §3.13 state; API accounts are pickable here, as the last resort. An Account with a window at or
+ * above its Takeover Limit counts as full, so the next Account starts with room to work (spec §3.17 "接力规则").
  */
 function stateOf(c: SelectCandidate, s: HandoffSettings, now: Date): HandoffEntry {
-  return planHandoff(c.family, [c], now, { includeApi: true, fullAt: takeoverLimit(s.threshold) })
+  return planHandoff(c.family, [c], now, { includeApi: true, limits: takeoverLimits(s.threshold) })
     .accounts[0]!
 }
 
@@ -159,13 +159,13 @@ export function selectNext(input: {
   const used = stillUsed(origin.ref, input.used, now)
   const family = s.families[origin.family]
 
-  const fullAt = takeoverLimit(s.threshold)
+  const limits = takeoverLimits(s.threshold)
   const rank = (fam: string) =>
     planHandoff(
       fam,
       input.candidates.filter((c) => c.family === fam),
       now,
-      { includeApi: true, fullAt },
+      { includeApi: true, limits },
     ).accounts.map((e) => byRef.get(e.ref)!)
   let list: SelectCandidate[]
   if (family?.policy === 'order') {

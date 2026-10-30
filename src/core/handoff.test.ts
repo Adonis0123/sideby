@@ -1,9 +1,23 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { quotaPressure as panelPressure } from '../panel/page-logic.ts'
+import {
+  longWindow as panelLongWindow,
+  quotaPressure as panelPressure,
+  windowState as panelWindowState,
+} from '../panel/page-logic.ts'
 import type { QuotaResult } from '../types.ts'
 import { type HandoffCandidate, planHandoff } from './handoff.ts'
-import { quotaPressure } from './quota-levels.ts'
+import {
+  isLongWindow,
+  limitUse,
+  QUOTA_FAIL_PERCENT,
+  QUOTA_LONG_FAIL_PERCENT,
+  QUOTA_LONG_WARN_PERCENT,
+  QUOTA_WARN_PERCENT,
+  quotaPressure,
+  takeoverLimits,
+  windowLevel,
+} from './quota-levels.ts'
 
 const NOW = new Date('2026-10-05T12:00:00Z')
 const at = (hours: number) => new Date(NOW.getTime() + hours * 3600_000).toISOString()
@@ -198,5 +212,170 @@ describe('planHandoff', () => {
     const borrowed = { ...quota([30, 2]), from: 'claude:001' } as QuotaResult
     const plan = planHandoff('claude', [cand('main', borrowed)], NOW)
     assert.equal(plan.accounts[0]?.quotaFrom, 'claude:001')
+  })
+
+  it('a Last Resort picks the least used full Account under 100%, ahead of API, and marks the plan tight', () => {
+    const all = [
+      cand('main', quota([50, 2], [97, 50])),
+      cand('008', quota([86, 1], [40, 50])),
+      cand('003', quota([99, 3])),
+      cand('key', none, { kind: 'api', login: 'not-needed' }),
+    ]
+    const plan = planHandoff('claude', all, NOW, { lastResort: true, includeApi: true })
+    // 008's 5-hour 86% is 101.2% of its limit of 85; main's weekly 97% is 102.1% of 95.
+    assert.equal(plan.pick, 'claude:008')
+    assert.deepEqual(plan.tight, { limit: 85, longLimit: 95 })
+    assert.equal(plan.earliestReset, undefined)
+    assert.deepEqual(refs(plan), ['008:full', 'main:full', '003:full', 'key:api'])
+    // Auto Handoff's plan (no lastResort) keeps the Takeover Limit: nothing full is picked.
+    const auto = planHandoff('claude', all.slice(0, 3), NOW)
+    assert.equal(auto.pick, null)
+    assert.equal(auto.tight, undefined)
+    // An Account below the limit wins, unmarked; so does one without Quota data.
+    const ready = planHandoff('claude', [...all, cand('lab', quota([84, 2]))], NOW, { lastResort: true })
+    assert.deepEqual([ready.pick, ready.tight], ['claude:lab', undefined])
+    const fresh = planHandoff('claude', [...all, cand('new', none)], NOW, { lastResort: true })
+    assert.deepEqual([fresh.pick, fresh.tight], ['claude:new', undefined])
+  })
+
+  it('a Last Resort never starts an Account with a window used up, signed out or of the same login', () => {
+    const plan = planHandoff(
+      'claude',
+      [
+        cand('main', quota([100, 3], [90, 50])),
+        cand('001', quota([100, 1], [95, 50])),
+        cand('002', quota([20, 2]), { login: 'logged-out' }),
+      ],
+      NOW,
+      { lastResort: true },
+    )
+    assert.equal(plan.pick, null)
+    assert.equal(plan.tight, undefined)
+    // Back once the used-up 5-hour window resets, not the weekly window that is only past the limit.
+    assert.deepEqual(plan.earliestReset, { ref: 'claude:001', at: at(1) })
+    const same = planHandoff(
+      'claude',
+      [cand('main', quota([90, 2]), { sameLogin: ['claude:001'] }), cand('001', quota([88, 2]))],
+      NOW,
+      { lastResort: true, from: 'claude:main' },
+    )
+    assert.equal(same.pick, 'claude:main')
+  })
+})
+
+describe('Takeover Limits per window kind (spec §3.13, ADR-0062)', () => {
+  const entryOf = (p: ReturnType<typeof planHandoff>, name: string) =>
+    p.accounts.find((e) => e.ref === `claude:${name}`)!
+
+  it('a weekly window at 87% with the 5-hour window at 43% is ready', () => {
+    const p = planHandoff('claude', [cand('008', quota([43, 1], [87, 120]))], NOW)
+    assert.equal(p.pick, 'claude:008')
+    const e = entryOf(p, '008')
+    assert.equal(e.state, 'ready')
+    assert.equal(e.pressure, 87, 'Quota Pressure itself stays the fullest window')
+    assert.equal(e.limitUse, 91.6)
+    assert.deepEqual(e.window, { label: '7d', usedPercent: 87, limit: 95 })
+  })
+
+  it('a weekly window at 96% makes the Account full until that window resets', () => {
+    const p = planHandoff('claude', [cand('main', quota([10, 2], [96, 72]))], NOW)
+    assert.equal(p.pick, null)
+    assert.equal(entryOf(p, 'main').state, 'full')
+    assert.equal(entryOf(p, 'main').resetsAt, at(72))
+    assert.deepEqual(p.earliestReset, { ref: 'claude:main', at: at(72) })
+  })
+
+  it('a 5-hour window at 86% makes the Account full until that window resets', () => {
+    const p = planHandoff('claude', [cand('main', quota([86, 2], [50, 72]))], NOW)
+    assert.equal(entryOf(p, 'main').state, 'full')
+    assert.equal(
+      entryOf(p, 'main').resetsAt,
+      at(2),
+      'the weekly window is under its limit, so it does not wait for it',
+    )
+  })
+
+  it('ranks ready Accounts by the window closest to its own limit', () => {
+    const p = planHandoff(
+      'claude',
+      [
+        cand('a', quota([43, 1], [87, 120])),
+        cand('b', quota([80, 1], [10, 120])),
+        cand('c', quota([20, 1], [60, 120])),
+      ],
+      NOW,
+    )
+    // c: 7d 60/95 = 63.2; a: 7d 87/95 = 91.6; b: 5h 80/85 = 94.1, though b's fullest window (80) is below a's (87).
+    assert.deepEqual(refs(p), ['c:ready', 'a:ready', 'b:ready'])
+    assert.deepEqual(
+      p.accounts.map((e) => e.limitUse),
+      [63.2, 91.6, 94.1],
+    )
+  })
+
+  it('both limits follow the Handoff Threshold', () => {
+    assert.deepEqual(takeoverLimits(95), { short: 85, long: 95 })
+    assert.deepEqual(takeoverLimits(90), { short: 80, long: 90 })
+    const q = quota([30, 1], [91, 120])
+    assert.equal(planHandoff('claude', [cand('main', q)], NOW).accounts[0]!.state, 'ready')
+    assert.equal(
+      planHandoff('claude', [cand('main', q)], NOW, { limits: takeoverLimits(90) }).accounts[0]!.state,
+      'full',
+    )
+  })
+
+  it('tells a Long Window by its length: a week or a billing period, from the minutes or the label', () => {
+    assert.equal(isLongWindow({ label: '5h', windowMinutes: 300 }), false)
+    assert.equal(
+      isLongWindow({ label: '24h', windowMinutes: 1440 }),
+      false,
+      'one day is not longer than a day',
+    )
+    assert.equal(isLongWindow({ label: '7d', windowMinutes: 10080 }), true)
+    assert.equal(isLongWindow({ label: '30d', windowMinutes: 43200 }), true)
+    assert.equal(
+      isLongWindow({ label: '7d', windowMinutes: 0 }),
+      true,
+      'the label when the minutes are missing',
+    )
+    assert.equal(isLongWindow({ label: '300m' }), false)
+    assert.equal(isLongWindow({ label: 'odd' }), false)
+    const billing: QuotaResult = {
+      status: 'ok',
+      observedAt: at(-1),
+      source: 'test',
+      windows: [{ label: '30d', windowMinutes: 43200, usedPercent: 90, resetsAt: at(200) }],
+    }
+    assert.equal(limitUse(billing, NOW, takeoverLimits(95))?.window?.label, '30d')
+    assert.equal(planHandoff('grok', [cand('main', billing)], NOW).accounts[0]!.state, 'ready')
+  })
+
+  it('colors each window by its own levels, the same in the CLI, the menu bar and the Panel', () => {
+    assert.equal(windowLevel({ label: '5h', windowMinutes: 300, usedPercent: 87 }), 'fail')
+    assert.equal(windowLevel({ label: '7d', windowMinutes: 10080, usedPercent: 87 }), 'warn')
+    assert.equal(windowLevel({ label: '7d', windowMinutes: 10080, usedPercent: 84 }), 'ok')
+    assert.equal(windowLevel({ label: '7d', windowMinutes: 10080, usedPercent: 95 }), 'fail')
+    const long = { warn: QUOTA_LONG_WARN_PERCENT, fail: QUOTA_LONG_FAIL_PERCENT }
+    const shapes = [
+      { label: '5h', windowMinutes: 300 },
+      { label: '7d', windowMinutes: 10080 },
+      { label: '30d', windowMinutes: 43200 },
+      { label: '24h', windowMinutes: 1440 },
+      { label: '7d', windowMinutes: 0 },
+      { label: '2w' },
+      { label: '90m' },
+      { label: 'odd' },
+    ]
+    for (const shape of shapes) {
+      assert.equal(panelLongWindow(shape), isLongWindow(shape), JSON.stringify(shape))
+      for (const usedPercent of [0, 59, 60, 84, 85, 86, 94, 95, 100]) {
+        const w = { ...shape, usedPercent, resetsAt: at(3) }
+        assert.equal(
+          panelWindowState(w, NOW.getTime(), QUOTA_WARN_PERCENT, QUOTA_FAIL_PERCENT, long).level,
+          windowLevel(w),
+          `${JSON.stringify(shape)} at ${usedPercent}%`,
+        )
+      }
+    }
   })
 })

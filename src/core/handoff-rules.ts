@@ -5,7 +5,7 @@ import { LEVEL_MAX } from '../handoff/levels.ts'
 import type { Runtime } from '../runtime.ts'
 import type { HandoffSettings } from './config.ts'
 import { type HandoffOverview, handoffOverview } from './handoff-overview.ts'
-import { takeoverLimit } from './quota-levels.ts'
+import { takeoverLimits } from './quota-levels.ts'
 
 export type HandoffRuleId =
   | 'when'
@@ -49,7 +49,7 @@ export function handoffRules(
   ctx: { titles: Readonly<Record<string, string>>; families: readonly string[]; apiAccounts: number },
 ): HandoffRule[] {
   const title = (f: string) => ctx.titles[f] ?? f
-  const limit = takeoverLimit(s.threshold)
+  const { short: limit, long: longLimit } = takeoverLimits(s.threshold)
   const familyOrder = [
     ...new Set([...s.familyOrder.filter((f) => ctx.families.includes(f)), ...ctx.families]),
   ]
@@ -66,13 +66,13 @@ export function handoffRules(
       id: 'windows',
       params: {},
       settings: [],
-      text: 'Every quota window counts (5 hours, weekly, a billing period); the fullest one decides. No host has a daily quota.',
+      text: 'Every quota window counts (5 hours, weekly, a billing period). The session hands over when its fullest window reaches the level above. No host has a daily quota.',
     },
     {
       id: 'takeover',
-      params: { limit },
+      params: { limit, longLimit },
       settings: ['threshold'],
-      text: `An account more than ${limit}% used does not take over, so the next one starts with room to work (${s.threshold}% − 10).`,
+      text: `An account does not take over once a 5-hour window is ${limit}% used (${s.threshold}% − 10) or a weekly or longer window is ${longLimit}% used (${s.threshold}%), so the next one starts with room to work: one 5-hour window costs only about a fifth of a week. Among those that can, the one furthest from these limits goes first.`,
     },
     {
       id: 'wait',

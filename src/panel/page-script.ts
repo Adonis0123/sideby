@@ -40,6 +40,7 @@ import {
   inDisplayOrder,
   loginClusters,
   loginKey,
+  longWindow,
   maskEmail,
   matchesQuery,
   mdBlocks,
@@ -153,6 +154,7 @@ const LOGIC = [
   mergeUsage,
   messageChip,
   messageNews,
+  longWindow,
   newAccountDir,
   nextReset,
   canLeaveLocal,
@@ -219,6 +221,8 @@ const MAIN = String.raw`
   const MESSAGES = JSON.parse(document.getElementById('sideby-i18n').textContent)
   const WARN = BOOT.warn
   const FAIL = BOOT.fail
+  // A Long Window's levels (weekly, a billing period): it warns later than a 5-hour one (spec §3.26).
+  const LONG = { warn: BOOT.longWarn, fail: BOOT.longFail }
   // Quota data older than this is greyed and marked with its age.
   // Findings listed before the rest fold behind a button.
   const FINDINGS_SHOWN = 5
@@ -1226,10 +1230,10 @@ const MAIN = String.raw`
     for (const f of e.findings) { if (f.level === 'fail') fail++; else if (f.level === 'warn') warn++ }
     return { fail, warn }
   }
-  function reasonsOf(a, now) { return attentionReasons(a, healthOf(a.ref), now, WARN) }
+  function reasonsOf(a, now) { return attentionReasons(a, healthOf(a.ref), now, WARN, LONG.warn) }
   // One line on why an Account needs a look, such as "7d at 62% (warns from 60%)".
   function whyOf(a, now) {
-    const m = attentionWhy(a, healthOf(a.ref), now, WARN)
+    const m = attentionWhy(a, healthOf(a.ref), now, WARN, LONG.warn)
     if (m && m.key === 'why.not-installed' && family(a.family).brokenBin) return t('why.broken')
     return m ? t(m.key, m.vars && m.vars.label ? Object.assign({}, m.vars, { label: winTitle(m.vars.label) }) : m.vars) : ''
   }
@@ -1445,7 +1449,7 @@ const MAIN = String.raw`
   // A window's cell: percent and countdown on one line, the bar under them. The label shows where no column
   // header does (cards, narrow screens).
   function meter(w, now, stale, observedAt, withLength) {
-    const st = windowState(w, now, WARN, FAIL)
+    const st = windowState(w, now, WARN, FAIL, LONG)
     const passed = passedWindow(w, observedAt, now)
     const left = prefs.quota === 'left'
     const shown = left ? 100 - st.pct : st.pct
@@ -1520,7 +1524,7 @@ const MAIN = String.raw`
       wins.length ? cols.map((c) => {
         // A model group with several limits (Antigravity's 5-hour and weekly) shows the one that binds first.
         const same = wins.filter((x) => winKey(x) === c)
-        const w = bindingWindow(same, now, WARN, FAIL)
+        const w = bindingWindow(same, now, WARN, FAIL, LONG)
         return w ? meter(w, now, stale, q.observedAt, same.length > 1) : noMeter(winTitle(c), winShort(c))
       }) : h('div', { class: 'q-note' }, t('quota.noWindows')),
       // Old numbers keep their colours and say their age once, under the bars.
@@ -1580,7 +1584,7 @@ const MAIN = String.raw`
   }
   // A word, not only a colour (spec §3.8): what kind of look the account needs; the reason is on hover.
   function attentionWord(subject, reason) {
-    const lvl = reason === 'health-fail' ? 'fail' : reason === 'quota-high' ? quotaHighLevel(subject, Date.now(), FAIL) : 'warn'
+    const lvl = reason === 'health-fail' ? 'fail' : reason === 'quota-high' ? quotaHighLevel(subject, Date.now(), FAIL, LONG.fail) : 'warn'
     const why = whyOf(subject, Date.now())
     const word = reason === 'health-fail' ? t('att.fix') : reason === 'quota-high' ? t('att.quota') : t('att.check')
     const dot = h('span', { class: 'dot dot-' + lvl, 'aria-hidden': 'true' })
@@ -2132,7 +2136,7 @@ const MAIN = String.raw`
   // with more, the count, each one's reason on hover, and a click shows only them (as the summary card does).
   function attentionTag(needing, now) {
     // Red when one of them needs a fix or has a red quota bar, so the tag matches what the rows show.
-    const lvl = needing.some((a) => reasonsOf(a, now).includes('health-fail') || quotaHighLevel(a, now, FAIL) === 'fail') ? 'fail' : 'warn'
+    const lvl = needing.some((a) => reasonsOf(a, now).includes('health-fail') || quotaHighLevel(a, now, FAIL, LONG.fail) === 'fail') ? 'fail' : 'warn'
     if (needing.length === 1) {
       const a = needing[0]
       const label = a.name + ' · ' + whyOf(a, now)
@@ -5644,7 +5648,7 @@ const MAIN = String.raw`
     switch (r.id) {
       case 'when': return p.adaptive ? t('hp.rule.whenAdaptive', { prepare: p.prepareAt, p: p.threshold, max: p.max }) : t('hp.rule.when', { prepare: p.prepareAt, p: p.threshold })
       case 'windows': return t('hp.rule.windows')
-      case 'takeover': return t('hp.rule.takeover', { limit: p.limit, p: thr })
+      case 'takeover': return t('hp.rule.takeover', { limit: p.limit, long: p.longLimit ?? thr, p: thr })
       case 'wait': return p.minutes > 0 ? t('hp.rule.wait', { w: p.minutes }) : t('hp.rule.noWait')
       case 'sameFamily': return t(p.on ? 'hp.rule.sameOn' : 'hp.rule.sameOff')
       case 'otherFamilies': return p.on ? t('hp.rule.otherOn') : t('hp.rule.otherOff')
@@ -8140,7 +8144,7 @@ const MAIN = String.raw`
     if (BOOT.readOnly) { copyText(name, name); return }
     try {
       const r = await api('/api/pick/start', { name })
-      const why = r.reason === 'most-room' ? t('pk.why.room', { n: String(r.pressure) }) : t(r.reason === 'others-full' ? 'pk.why.othersFull' : 'pk.why.noData')
+      const why = r.reason === 'most-room' ? t('pk.why.room', { n: String(r.pressure), w: r.window ? winTitle(r.window) + ' ' : '' }) : r.reason === 'tight' ? t('pk.why.tight', { n: String(r.pressure), w: r.window ? winTitle(r.window) + ' ' : '', limit: String(r.limit), longLimit: String(r.longLimit) }) : t(r.reason === 'others-full' ? 'pk.why.othersFull' : 'pk.why.noData')
       if (r.opened) { toast(t('pk.started', { terminal: TERM_NAMES[r.terminal] || r.terminal, ref: r.picked, why })); return }
       await copyText(name, name)
       toast(r.automation ? t('login.automation', { terminal: TERM_NAMES[r.terminal] || r.terminal }) : t('login.failed'), { kind: 'info' })

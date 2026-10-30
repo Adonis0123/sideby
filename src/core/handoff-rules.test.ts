@@ -31,7 +31,11 @@ describe('handoffRules', () => {
       ],
     )
     assert.equal(rule(rs, 'takeover').params.limit, 85)
-    assert.match(rule(rs, 'takeover').text, /more than 85% used/)
+    assert.equal(rule(rs, 'takeover').params.longLimit, 95)
+    assert.match(
+      rule(rs, 'takeover').text,
+      /5-hour window is 85% used .* weekly or longer window is 95% used/,
+    )
     assert.equal(rule(rs, 'sameFamily').params.on, false)
     assert.equal(rule(rs, 'otherFamilies').text, 'Other AIs do not take over.')
     assert.match(rule(rs, 'api').text, /do not take over/)
@@ -54,6 +58,7 @@ describe('handoffRules', () => {
     })
     assert.equal(rule(rs, 'when').text, 'From 70% the session writes a handoff note. It hands over at 90%.')
     assert.equal(rule(rs, 'takeover').params.limit, 80)
+    assert.equal(rule(rs, 'takeover').params.longLimit, 90, 'the weekly limit follows the threshold too')
     assert.match(rule(rs, 'wait').text, /never waits/)
     // familyOrder first, the rest after; titles, not ids.
     assert.deepEqual(rule(rs, 'otherFamilies').params.order, ['codex', 'claude'])

@@ -27,7 +27,7 @@ Shared Items the Main Account does not have are skipped: no Finding, not counted
 | name looks like a backup (`bak`, `backup`, `old`, `tmp`) | A stray directory was picked up as an account | Suggest adding its ref to `ignore` in `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
 | `login: "not-needed"` (`key` in `sideby list`) | API account; it authenticates with `proxy.env` | Nothing to do |
 | `problems` on an account in `list --json` | A plugin failed while reading it (for example a settings file that is not valid JSON) | Show the message; the account itself still works |
-| quota `unavailable` / `not-enabled` | Claude quota source is off | Offer `sideby quota setup claude` |
+| quota `unavailable` / `not-enabled` | Quota checks for that tool are off (config `quota.check.<family>: false`) or it runs in CI | Offer `sideby quota check <family> on` |
 | quota `unavailable` / `no-session` | No session since the source was enabled | Ask the user to start one session with that account |
 | quota `unavailable` / `no-source` | pi: the Host has no public source | Nothing to fix |
 | quota `unavailable` / `fetch-failed` | Grok: its CLI could not get the quota | Follow `detail` (update Grok, `sideby login grok:<name>`), then `sideby quota grok --refresh` |

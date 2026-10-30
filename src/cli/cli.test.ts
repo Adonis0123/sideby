@@ -15,6 +15,7 @@ import {
   snapshot,
   withFakeHome,
 } from '../../testing/index.ts'
+import { quotaText } from './format.ts'
 import { OUTPUT_SCHEMAS } from './json-schemas.ts'
 
 const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url))
@@ -830,7 +831,7 @@ describe('next (Handoff, spec §3.13)', () => {
       await cache(h, 'lab', 10, 20)
       const r = await sideby(h, ['next', 'claude', '--', '--print', 'hi'])
       assert.equal(r.code, 0, r.err)
-      assert.match(r.out, /Next: claude:lab \(lowest quota pressure, 20%\)/)
+      assert.match(r.out, /Next: claude:lab \(furthest from its limits, 7d 20% of 95%\)/)
       assert.match(r.out, /handoff note/)
       const [rec] = await readHostLog(h, 'claude')
       assert.equal(rec?.env.CLAUDE_CONFIG_DIR, h.path('.claude-lab'))
@@ -859,20 +860,90 @@ describe('next (Handoff, spec §3.13)', () => {
     })
   })
 
-  it('starts nothing when every account is full and says which comes back first', async () => {
+  it('past the Takeover Limit starts the least used account under 100%, and says so (a Last Resort)', async () => {
     await withFakeHome(async (h) => {
       await claudeAccounts(h)
-      await cache(h, 'main', 95, 40, 3)
-      await cache(h, 'work', 90, 50, 1)
+      await cache(h, 'main', 92, 40, 3)
+      await cache(h, 'work', 86, 40, 1)
       await cache(h, 'lab', 99, 20, 5)
+      const j = await sideby(h, ['next', 'claude', '--json'])
+      assert.equal(j.code, 0, j.err)
+      const plan = checkSchema('next', j.out) as {
+        pick: string
+        tight?: { limit: number; longLimit: number }
+        accounts: { ref: string; state: string }[]
+        earliestReset?: unknown
+      }
+      assert.equal(plan.pick, 'claude:work')
+      assert.deepEqual(plan.tight, { limit: 85, longLimit: 95 })
+      assert.equal(plan.earliestReset, undefined)
+      // Still `full` in JSON: past the limit; the least used one comes first.
+      assert.deepEqual(
+        plan.accounts.map((a) => `${a.ref} ${a.state}`),
+        ['claude:work full', 'claude:main full', 'claude:lab full'],
+      )
+      const r = await sideby(h, ['next', 'claude', '--', '--print', 'hi'])
+      assert.equal(r.code, 0, r.err)
+      assert.match(
+        r.out,
+        /Next: claude:work \(every claude account is past its limit \(85% of a 5-hour window, 95% of a weekly one\); this one has the most left, 5h 86% of 85%\)/,
+      )
+      assert.match(r.out, /claude:main\s+low\s+past its limit: 5h 92% of 85% .* until/)
+      const [rec] = await readHostLog(h, 'claude')
+      assert.equal(rec?.env.CLAUDE_CONFIG_DIR, h.path('.claude-work'))
+    })
+  })
+
+  it('a ready account below the Takeover Limit wins, with no Last Resort marker', async () => {
+    await withFakeHome(async (h) => {
+      await claudeAccounts(h)
+      await cache(h, 'main', 92, 40)
+      await cache(h, 'work', 43, 87)
+      await cache(h, 'lab', 60, 84)
+      const j = await sideby(h, ['next', 'claude', '--json'])
+      assert.equal(j.code, 0, j.err)
+      const plan = checkSchema('next', j.out) as {
+        pick: string
+        tight?: unknown
+        accounts: { ref: string; state: string; limitUse: number | null; window?: { label: string } }[]
+      }
+      // A weekly window at 87% is under its limit of 95 (ADR-0062): work is ready, ranked by that window, 87/95.
+      // lab's weekly 84/95 (88.4) is further from its limit than work's 87/95 (91.6), so lab goes first.
+      assert.equal(plan.pick, 'claude:lab')
+      assert.equal(plan.tight, undefined)
+      assert.deepEqual(
+        plan.accounts.map((a) => [a.ref, a.state, a.limitUse, a.window?.label]),
+        [
+          ['claude:lab', 'ready', 88.4, '7d'],
+          ['claude:work', 'ready', 91.6, '7d'],
+          ['claude:main', 'full', 108.2, '5h'],
+        ],
+      )
+    })
+  })
+
+  it('starts nothing when every account has a window used up, and says which comes back first', async () => {
+    await withFakeHome(async (h) => {
+      await claudeAccounts(h)
+      await cache(h, 'main', 100, 40, 3)
+      await cache(h, 'work', 100, 90, 1)
+      await cache(h, 'lab', 100, 20, 5)
       const r = await sideby(h, ['next', 'claude'])
       assert.equal(r.code, 1)
-      assert.match(r.err, /every claude account is at its limit; claude:work is back at/)
+      assert.match(r.err, /every signed-in claude account has used up its quota; claude:work is back at/)
+      assert.match(r.out, /claude:work\s+full\s+used up; back at/)
       const j = await sideby(h, ['next', 'claude', '--json'])
       assert.equal(j.code, 1)
-      const plan = checkSchema('next', j.out) as { pick: null; earliestReset: { ref: string } }
+      const plan = checkSchema('next', j.out) as {
+        pick: null
+        tight?: unknown
+        earliestReset: { ref: string; at: string }
+      }
       assert.equal(plan.pick, null)
+      assert.equal(plan.tight, undefined)
+      // Back when its used-up 5-hour window resets, not when its 90% weekly one does.
       assert.equal(plan.earliestReset.ref, 'claude:work')
+      assert.ok(Date.parse(plan.earliestReset.at) - Date.now() < 2 * 3600_000)
       assert.deepEqual(await readHostLog(h, 'claude'), [])
     })
   })
@@ -901,7 +972,7 @@ describe('next (Handoff, spec §3.13)', () => {
   it('leaves API accounts out unless --include-api', async () => {
     await withFakeHome(async (h) => {
       await claudeAccounts(h)
-      for (const n of ['main', 'work', 'lab']) await cache(h, n, 99, 50)
+      for (const n of ['main', 'work', 'lab']) await cache(h, n, 100, 50)
       await h.write('.claude-key/proxy.env', 'ANTHROPIC_BASE_URL=https://example.invalid\n', 0o600)
       const r = await sideby(h, ['next', 'claude', '--dry-run'])
       assert.equal(r.code, 1)
@@ -909,6 +980,14 @@ describe('next (Handoff, spec §3.13)', () => {
       const api = await sideby(h, ['next', 'claude', '--dry-run', '--include-api'])
       assert.equal(api.code, 0, api.err)
       assert.match(api.out, /Next: claude:key \(API account, pay per use\)/)
+      // A subscription past the Takeover Limit but under 100% comes before an API account.
+      await cache(h, 'lab', 95, 50)
+      const tight = await sideby(h, ['next', 'claude', '--dry-run', '--include-api'])
+      assert.equal(tight.code, 0, tight.err)
+      assert.match(
+        tight.out,
+        /Next: claude:lab \(every claude account is past its limit \(85% of a 5-hour window/,
+      )
     })
   })
 
@@ -970,18 +1049,32 @@ describe('next (Handoff, spec §3.13)', () => {
       await cache(h, 'lab', 10, 20)
       const second = await sideby(h, ['run', 'cc'])
       assert.equal(second.code, 0, second.err)
-      assert.match(second.err, /cc → claude:lab \(20% used, the most room\)/)
+      assert.match(second.err, /cc → claude:lab \(7d 20% used, the most room\)/)
       const [one, two] = await readHostLog(h, 'claude')
       assert.equal(one?.env.CLAUDE_CONFIG_DIR, undefined)
       assert.deepEqual(one?.argv.slice(-2), ['--print', 'hi'])
       assert.equal(two?.env.CLAUDE_CONFIG_DIR, h.path('.claude-lab'))
-      // Every account full: nothing starts, and it says which comes back first.
-      await cache(h, 'work', 99, 50, 1)
+      // Every account past the Takeover Limit: the least used one under 100%, and the line says so.
+      await cache(h, 'work', 86, 40, 1)
       await cache(h, 'lab', 99, 20, 5)
+      const tight = await sideby(h, ['run', 'cc'])
+      assert.equal(tight.code, 0, tight.err)
+      assert.match(
+        tight.err,
+        /cc → claude:work \(every claude account is past its limit, 85% of a 5-hour window or 95% of a weekly one; this one has the most left, 5h 86% used\)/,
+      )
+      assert.equal((await readHostLog(h, 'claude'))[2]?.env.CLAUDE_CONFIG_DIR, h.path('.claude-work'))
+      // Every account with a window used up: nothing starts, and it says which comes back first.
+      await cache(h, 'main', 100, 40, 3)
+      await cache(h, 'work', 100, 50, 1)
+      await cache(h, 'lab', 100, 20, 5)
       const full = await sideby(h, ['run', 'cc'])
       assert.equal(full.code, 1)
-      assert.match(full.err, /cc: every claude account is at its limit; claude:work is back at/)
-      assert.equal((await readHostLog(h, 'claude')).length, 2)
+      assert.match(
+        full.err,
+        /cc: every signed-in claude account has used up its quota; claude:work is back at/,
+      )
+      assert.equal((await readHostLog(h, 'claude')).length, 3)
 
       // One namespace: an alias cannot take the name, and a pick command cannot take an alias's.
       const clash = await sideby(h, ['alias', 'add', 'cc', 'claude:work', '--json'])
@@ -2553,7 +2646,7 @@ describe('Panel CLI parity', () => {
       }
       for (const args of [
         ['quota', 'check', 'missing', 'on'],
-        ['quota', 'check', 'claude', 'off'],
+        ['quota', 'check', 'pi', 'off'],
         ['update', '--auto', 'maybe'],
         ['order', '--reset', 'codex'],
       ]) {
@@ -3044,4 +3137,36 @@ describe('sideby send and messages (spec §3.32 step 2)', () => {
       assert.ok(r.out.includes('修复会话标题对齐问题'))
     })
   })
+})
+
+it('colors each quota window by its own levels: a weekly 87% is yellow, a 5-hour 87% red (spec §3.26)', () => {
+  const tty = process.stdout.isTTY
+  const noColor = process.env.NO_COLOR
+  try {
+    process.stdout.isTTY = true
+    delete process.env.NO_COLOR
+    const now = new Date('2026-10-05T12:00:00Z')
+    const soon = new Date(now.getTime() + 3600_000).toISOString()
+    const text = quotaText(
+      {
+        status: 'ok',
+        observedAt: now.toISOString(),
+        source: 'test',
+        windows: [
+          { label: '5h', windowMinutes: 300, usedPercent: 87, resetsAt: soon },
+          { label: '7d', windowMinutes: 10080, usedPercent: 87, resetsAt: soon },
+          { label: '30d', windowMinutes: 43200, usedPercent: 96, resetsAt: soon },
+        ],
+      },
+      now,
+    )
+    const esc = String.fromCharCode(27)
+    assert.ok(text.includes(`5h ${esc}[31m87%`), 'red')
+    assert.ok(text.includes(`7d ${esc}[33m87%`), 'yellow')
+    assert.ok(text.includes(`30d ${esc}[31m96%`), 'red')
+  } finally {
+    process.stdout.isTTY = tty
+    if (noColor === undefined) delete process.env.NO_COLOR
+    else process.env.NO_COLOR = noColor
+  }
 })

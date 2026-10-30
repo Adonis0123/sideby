@@ -34,7 +34,7 @@ import { installHint, runHost } from '../core/launch.ts'
 import { type LoginSnapshot, loginAfterLine, loginBeforeLine } from '../core/login-check.ts'
 import { accountModel, type ModelChange, setAccountModel } from '../core/model-choice.ts'
 import { resolvePaths, tildify } from '../core/paths.ts'
-import { USAGE_DAYS } from '../core/quota-levels.ts'
+import { takeoverLimits, USAGE_DAYS } from '../core/quota-levels.ts'
 import {
   groupsToUndo,
   type RemoteControlGroup,
@@ -700,7 +700,7 @@ async function runPick(
   if (choice.ref === null) {
     const now = rt.readContext().now
     const why = choice.earliestReset
-      ? `every ${family} account is at its limit; ${choice.earliestReset.ref} is back at ${clock(choice.earliestReset.at, now)}`
+      ? `every signed-in ${family} account has used up its quota; ${choice.earliestReset.ref} is back at ${clock(choice.earliestReset.at, now)}`
       : `no ${family} account can be used now`
     const signIn = choice.signIn.length
       ? `; sign in with \`sideby login ${choice.signIn.join('` or `sideby login ')}\``
@@ -709,7 +709,7 @@ async function runPick(
     return 1
   }
   const { pickLine } = await import('../core/pick-commands.ts')
-  io.err(c.dim(`sideby: ${pickLine(name, choice)}`))
+  io.err((choice.reason === 'tight' ? c.yellow : c.dim)(`sideby: ${pickLine(name, choice, family)}`))
   return runAccount(rt, choice.ref, args, io, opts)
 }
 
@@ -766,22 +766,39 @@ export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
     return plan.pick && plan.hasQuota ? 0 : 1
   }
   const now = rt.readContext().now
+  const limits = plan.tight
+    ? { short: plan.tight.limit, long: plan.tight.longLimit }
+    : takeoverLimits(rt.handoffSettings().threshold)
+  const low = (e: (typeof plan.accounts)[number]) =>
+    e.state === 'full' && e.pressure !== null && e.pressure < 100
+  // The window closest to its own Takeover Limit, which decides the rank: "7d 87% of 95%".
+  const closest = (e: (typeof plan.accounts)[number]) =>
+    e.window
+      ? `${e.window.label} ${e.window.usedPercent}% of ${e.window.limit}%`
+      : `${Math.round(e.pressure ?? 0)}%`
   const note = (e: (typeof plan.accounts)[number]): string => {
     if (e.sameLoginAs) return `same login as ${e.sameLoginAs}, which shares its quota; skipped`
-    if (e.state === 'ready') return `fullest window ${Math.round(e.pressure ?? 0)}%`
+    if (e.state === 'ready') return `closest to its limit: ${closest(e)}`
     if (e.state === 'unknown') return 'no quota data yet'
     if (e.state === 'api')
       return includeApi ? 'API account, pay per use' : 'left out; add --include-api to use it'
-    if (e.state === 'full') return e.resetsAt ? `back at ${clock(e.resetsAt, now)}` : 'at its limit'
+    if (low(e)) {
+      const over = `past its limit: ${closest(e)} (limits ${limits.short}% for 5-hour, ${limits.long}% for weekly windows)`
+      return e.resetsAt ? `${over} until ${clock(e.resetsAt, now)}` : over
+    }
+    if (e.state === 'full') return e.resetsAt ? `used up; back at ${clock(e.resetsAt, now)}` : 'used up'
     return `signed out; sign in with \`sideby login ${e.ref}\``
   }
   const mark = { ready: c.green, unknown: c.yellow, api: c.cyan, full: c.red, 'logged-out': c.dim } as const
+  // A full Account with no window used up still has some quota: `low` in the table, and a Last Resort can start it.
+  const stateText = (e: (typeof plan.accounts)[number]): string =>
+    low(e) ? c.yellow('low') : mark[e.state](e.state === 'logged-out' ? 'signed out' : e.state)
   io.out(
     table(
       plan.accounts.map((e) => [
         e.ref === plan.pick ? c.green('→') : ' ',
         c.bold(e.ref),
-        mark[e.state](e.state === 'logged-out' ? 'signed out' : e.state),
+        stateText(e),
         c.dim(note(e)),
       ]),
       ['', 'ACCOUNT', 'STATE', 'NOTE'],
@@ -791,7 +808,7 @@ export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
     const out = plan.accounts.filter((e) => e.state === 'logged-out').map((e) => `sideby login ${e.ref}`)
     const apiLeft = !includeApi && plan.accounts.some((e) => e.state === 'api')
     const why = plan.earliestReset
-      ? `every ${family} account is at its limit; ${plan.earliestReset.ref} is back at ${clock(plan.earliestReset.at, now)}`
+      ? `every signed-in ${family} account has used up its quota; ${plan.earliestReset.ref} is back at ${clock(plan.earliestReset.at, now)}`
       : `no ${family} account can be used now`
     const same = plan.accounts.filter((e) => e.sameLoginAs).map((e) => e.ref)
     const sameNote = same.length ? `; ${same.join(', ')} share the quota of ${plan.from}` : ''
@@ -822,10 +839,12 @@ export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
   }
   const reason =
     picked.state === 'ready'
-      ? `lowest quota pressure, ${Math.round(picked.pressure ?? 0)}%`
-      : picked.state === 'unknown'
-        ? 'no account with known room; this one has no quota data yet'
-        : 'API account, pay per use'
+      ? `furthest from its limits, ${closest(picked)}`
+      : plan.tight
+        ? `every ${family} account is past its limit (${plan.tight.limit}% of a 5-hour window, ${plan.tight.longLimit}% of a weekly one); this one has the most left, ${closest(picked)}`
+        : picked.state === 'unknown'
+          ? 'no account with known room; this one has no quota data yet'
+          : 'API account, pay per use'
   io.out(`\nNext: ${c.bold(plan.pick)} (${reason}).`)
   if (a.flags.has('dry-run')) {
     io.out(`Start it with \`${runCmd}\`.`)

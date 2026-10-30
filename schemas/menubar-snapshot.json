@@ -22,7 +22,7 @@
     },
     "title": {
       "type": "string",
-      "description": "The words next to the icon, such as `Codex 62%`, once the tightest tool reaches 60%; empty otherwise."
+      "description": "The words next to the icon, such as `Codex 62%`, once the tightest tool reaches its warning level (60% of a 5-hour window, 85% of a longer one); empty otherwise."
     },
     "level": {
       "anyOf": [
@@ -563,7 +563,7 @@
                 },
                 "reset": {
                   "type": "string",
-                  "description": "Until the fullest window resets, such as `4d 17h`; empty when nothing is used."
+                  "description": "Which window resets and how long until it does, such as `7d · in 4d 17h`: the window closest to its own red level (85% for 5 hours, 95% for longer windows). Empty when nothing is used."
                 },
                 "note": {
                   "type": "string",
@@ -891,7 +891,7 @@
                         },
                         "reset": {
                           "type": "string",
-                          "description": "Until the fullest window resets, such as `4d 17h`; empty when nothing is used."
+                          "description": "Which window resets and how long until it does, such as `7d · in 4d 17h`: the window closest to its own red level (85% for 5 hours, 95% for longer windows). Empty when nothing is used."
                         },
                         "note": {
                           "type": "string",

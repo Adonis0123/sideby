@@ -1925,6 +1925,7 @@ describe('panel: Grok Bot windows (ADR-0019)', () => {
 describe('panel next tag and Same Login (spec §3.21)', () => {
   const rt = {
     families: new Map([['claude', { readQuota: async () => ({ status: 'ok', windows: [] }) }]]),
+    handoffSettings: () => ({ threshold: 95 }),
   } as unknown as Runtime
   const now = new Date('2026-10-14T10:00:00Z')
   const quota = (used: number) => ({
@@ -1956,6 +1957,14 @@ describe('panel next tag and Same Login (spec §3.21)', () => {
       now,
     )
     assert.equal(out.claude, 'claude:002')
+  })
+
+  it('tags the least used account under 100% when every one is past the Takeover Limit, as `sideby next` does', () => {
+    assert.equal(
+      handoffByFamily(rt, [acct('main', 92), acct('001', 87), acct('002', 99)], now).claude,
+      'claude:001',
+    )
+    assert.deepEqual(handoffByFamily(rt, [acct('main', 100), acct('001', 100)], now), {})
   })
 })
 

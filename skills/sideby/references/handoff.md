@@ -1,6 +1,6 @@
 # Handoff: keep working on another account
 
-Use this when the user says an account hit its 5-hour or weekly limit ("usage limit reached", "rate limited", "resets at …") and wants to keep working, or asks which account has room. sideby recommends the account of the same family with the lowest Quota Pressure (the fullest window that has not reset yet), and the user starts it. Only Auto Handoff, which the user turns on in the config, moves a running task by itself (see below).
+Use this when the user says an account hit its 5-hour or weekly limit ("usage limit reached", "rate limited", "resets at …") and wants to keep working, or asks which account has room. sideby recommends the account of the same family that is furthest from its limits (lowest `limitUse`), and the user starts it. Only Auto Handoff, which the user turns on in the config, moves a running task by itself (see below).
 
 ## Steps
 
@@ -9,11 +9,15 @@ Use this when the user says an account hit its 5-hour or weekly limit ("usage li
 
    | `state` | Meaning | Can be picked |
    |---|---|---|
-   | `ready` | Subscription account with room; `pressure` is its fullest live window in percent | Yes, lowest `pressure` first |
-   | `unknown` | No quota data yet (no session since quota was turned on, or Claude quota is off) | Yes, after `ready` |
+   | `ready` | Subscription account with every live window under its own limit. `pressure` is its fullest live window in percent; `limitUse` is the percent of its own limit that its closest window has used, and `window` names that window (`label`, `usedPercent`, `limit`) | Yes, lowest `limitUse` first |
+   | `unknown` | No quota data yet (not asked yet, quota checks are off, or the ask failed) | Yes, after `ready` |
    | `api` | API account, pay per use | Only with `--include-api` |
-   | `full` | A live window is more than 10 points below the Auto Handoff threshold (85% with the default 95%); `resetsAt` is when it is usable again | No |
+   | `full` | A live window is at or past its own Takeover Limit: a 5-hour window at the Auto Handoff threshold − 10 (85% by default), a weekly or longer window at the threshold (95% by default); `resetsAt` is when it is usable again | Only as a last resort, see below |
    | `logged-out` | Needs `sideby login <ref>` | No |
+
+   When no subscription account is `ready` or `unknown`, the pick is the `full` one with no window used up (`pressure` under 100%) and the lowest `limitUse`, ahead of API accounts, and the plan has `tight: { limit, longLimit }` (the 5-hour and the weekly limit). Tell the user every account is past its limit and the pick has the most left (for example "every claude account is past its limit; claude:008 has the most left, its 5-hour window at 88%"), so they know it may run out soon. Auto Handoff never does this.
+
+   The two limits differ because one full 5-hour window costs only about a fifth of a week: a week at 87% is still `ready` and yellow, not red. When the user asks why such an account was picked, say that.
 
    Each entry's `observedAt` says when its quota was recorded (`quotaFrom` when it was read from another account of the same login). An entry with `sameLoginAs` is signed in as the same login as the account you run in: it shares that quota and is never picked. If `hasQuota` is `false`, no account has quota data: the pick is only a guess, so say so and suggest turning quota on (see the routing table in SKILL.md) or letting the user choose.
 3. Give the user the command to run in their own terminal: `sideby next <family>` (starts the pick) or `sideby run <pick>`. Host arguments go after `--`. Do not run it yourself.
@@ -23,7 +27,7 @@ Use this when the user says an account hit its 5-hour or weekly limit ("usage li
 
 `pick` is `null` and the exit code is 1:
 
-- Every account `full`: tell the user `earliestReset.ref` comes back at `earliestReset.at`.
+- Every signed-in account has a window used up (100%): tell the user `earliestReset.ref` comes back at `earliestReset.at`.
 - Accounts `logged-out`: the user can sign in with `sideby login <ref>`.
 - Only `api` left: ask whether they want to pay per use before suggesting `sideby next <family> --include-api`.
 
@@ -31,9 +35,9 @@ Use this when the user says an account hit its 5-hour or weekly limit ("usage li
 
 - Error `code: "no-quota-source"` (pi, or a plugin family without quota): the Host publishes no quota. The message lists the family's accounts; let the user choose one for `sideby run <ref>`.
 - Error `code: "no-accounts"`: the family has no account yet; see creating accounts.
-- Many `unknown` Claude accounts: Claude quota may be off. `sideby quota --json` shows `not-enabled`; the one-time setup turns it on.
+- Many `unknown` Claude accounts: Claude quota checks may be off or failing. `sideby quota claude --json` shows `not-enabled` (turn them on with `sideby quota check claude on`) or `fetch-failed` with the next step in `detail`.
 - Host arguments the user wants (another model, say) go after `--`: `sideby next claude -- --model opus`.
-- Quota is only as fresh as each account's last session. Do not promise an account has room; say what the data shows and when it was recorded.
+- Quota is only as fresh as its `observedAt`. Do not promise an account has room; say what the data shows and when it was recorded.
 
 ## Auto Handoff (the user turns it on)
 
@@ -42,7 +46,7 @@ With config `"handoff": { "auto": true }`, a session sideby started hands its ta
 - When sideby tells you the quota is at 80%, write the handoff brief at the path it names and keep it current (do not tell the user that another account will take over; sideby decides that and says so itself): the goal, what is done, the remaining steps, key decisions and why, the files that matter. Reference specs, ADRs, commits and diffs by path; list the skills the next agent should use; never include keys, passwords or personal data.
 - When it says a window is about to run out (the message names it, such as "weekly (7d) quota is at 98%"; each window hands over at its own pace, ADR-0032), finish the current step, update the brief, and end your turn. sideby starts the next account from it.
 - End the brief with the line `<!-- handoff brief complete -->` once it is complete. Without it sideby asks once more, then adds its own records under what you wrote.
-- When a user asks why a session handed over "with 95% left": the 5-hour and weekly windows are separate, and the fullest one decides. Run `sideby quota` and read both windows.
+- When a user asks why a session handed over "with 95% left": the 5-hour and weekly windows are separate, and the fullest one decides when to hand over. Run `sideby quota` and read both windows. Which account takes over is judged per window: a 5-hour window stops it at 85%, a weekly one at 95% (with the default threshold).
 - When the user asks to hand over now, update the brief, run `sideby handoff ready` (add `--brief <file>` when the user's own handoff tool wrote one), and end your turn. Tell the user the account it prints, not what `sideby next` says: the chain goes back to an account it already used only once the quota window that account handed over for has reset, or, for an account handed over from by hand, once its own quota shows room (not while its quota is unknown). When the user names an account ("go back to cc008"), run `sideby handoff ready --to <account>`; it works for an account this chain already used. When the quota is about to run out and sideby says the session will wait for the reset, the user can move on at once by typing `! sideby handoff ready` in the session (the model cannot answer at the limit); the same works when the session hit its limit and no account could take over then, once one can. Tell them so if they ask why nothing moved.
 
 ### Turning it on for the user

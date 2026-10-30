@@ -331,13 +331,18 @@ function run(argv) {
       head: $.NSFont.systemFontOfSizeWeight(size - 2, $.NSFontWeightSemibold),
       small: $.NSFont.systemFontOfSize(size - 2),
     };
-    var nameW = 0, first = false;
+    // The reset column names its window ("7d · in 4d 17h"), so it is as wide as its longest entry.
+    var nameW = 0, first = false, resetW = width('7d · in 24d 23h', L.font);
     sections.forEach(function (s) {
       nameW = Math.max(nameW, width(s.title, L.head));
       if (s.columns[0]) first = true;
       s.rows.concat(s.more ? s.more.rows : []).forEach(function (r) {
         nameW = Math.max(nameW, width(r.label, L.font));
-        (r.groups || []).forEach(function (g) { nameW = Math.max(nameW, width(GROUP_INDENT + g.label, L.font)); });
+        if (r.reset) resetW = Math.max(resetW, width(r.reset, L.font));
+        (r.groups || []).forEach(function (g) {
+          nameW = Math.max(nameW, width(GROUP_INDENT + g.label, L.font));
+          if (g.reset) resetW = Math.max(resetW, width(g.reset, L.font));
+        });
       });
     });
     var pctW = width('100%', L.mono), x = Math.ceil(nameW) + 20, stops = [], at = [];
@@ -357,7 +362,7 @@ function run(argv) {
     L.headPara.tabStops = $(at.concat([x]).map(function (pos) {
       return $.NSTextTab.alloc.initWithTextAlignmentLocationOptions($.NSTextAlignmentLeft, pos, $());
     }));
-    L.width = x + width('24d 23h', L.font) + 70;
+    L.width = x + resetW + 70;
     return L;
   }
   function rowTitle(r, L) {

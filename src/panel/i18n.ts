@@ -697,7 +697,9 @@ const en = {
   'pk.offerNoNameShort': 'Add short command',
   'pk.namePh': 'e.g. cc',
   'pk.started': 'Opened {ref} in {terminal} ({why}).',
-  'pk.why.room': '{n}% used, most quota left',
+  'pk.why.room': '{w}{n}% used, most quota left',
+  'pk.why.tight':
+    'every account is past its limit ({limit}% of a 5-hour window, {longLimit}% of a weekly one); this one has the most left, {w}{n}% used',
   'pk.why.noData': 'no quota data yet',
   'login.opened': 'Opened {terminal}: sign in to {ref} there.',
   'login.failed': 'Could not open a terminal. Copied: paste it into your terminal and press Return.',
@@ -981,9 +983,9 @@ const en = {
     'The AI writes a handoff note at {prepare}% used. Handoff starts at {p}% used until sideby learns how fast this session spends quota, then between {prepare}% and {max}%, earlier if recent turns used a lot.',
   'hp.rule.when': 'The AI writes a handoff note at {prepare}% used. Handoff starts at {p}% used.',
   'hp.rule.windows':
-    'Every quota window counts (5 hours, weekly, a billing period): the fullest one decides. No AI has a daily quota.',
+    'Every quota window counts (5 hours, weekly, a billing period): the session hands over when its fullest window reaches the level above. No AI has a daily quota.',
   'hp.rule.takeover':
-    'Accounts already over {limit}% used will not take over, so the next account has room to work. This stays 10 points below the handoff level ({p}%).',
+    'An account will not take over once a 5-hour window is {limit}% used or a weekly window is {long}% used, so the next account has room to work. A 5-hour window costs only about a fifth of a week, so the weekly line sits higher: at the handoff level ({p}%), the 5-hour line 10 points below it. The account furthest from these lines goes first.',
   'hp.rule.wait':
     'If the quota comes back within {w} minutes and the session carries on by itself at that point (Claude Code), it waits instead of switching. Codex and Grok switch right away.',
   'hp.rule.noWait': 'It never waits for quota to come back; it switches right away.',
@@ -2422,7 +2424,9 @@ const zh: Record<MessageKey, string> = {
   'pk.offerNoNameShort': '添加短命令',
   'pk.namePh': '例如 cc',
   'pk.started': '已在 {terminal} 启动 {ref}（{why}）。',
-  'pk.why.room': '已用 {n}%，剩余额度最多',
+  'pk.why.room': '{w}已用 {n}%，剩余额度最多',
+  'pk.why.tight':
+    '所有账号都已到上限（5 小时窗口 {limit}%，每周窗口 {longLimit}%）；这个剩得最多，{w}已用 {n}%',
   'pk.why.noData': '还没有额度数据',
   'login.opened': '已打开 {terminal}，请在那里登录 {ref}。',
   'login.failed': '终端没打开，命令已复制：粘贴到你的终端，按回车。',
@@ -2687,9 +2691,9 @@ const zh: Record<MessageKey, string> = {
     '用量到 {prepare}% 时，AI 会写好接力笔记。sideby 了解本次会话的消耗速度前，会在用量到 {p}% 时接力；之后会在 {prepare}% 到 {max}% 之间接力，最近几轮用得多就更早接力。',
   'hp.rule.when': '用量到 {prepare}% 时，AI 会写好接力笔记；用量到 {p}% 时接力。',
   'hp.rule.windows':
-    '每个额度窗口都算（5 小时、每周、计费周期），以用得最多的那个为准。目前没有 AI 设日额度。',
+    '每个额度窗口都算（5 小时、每周、计费周期）：会话用得最多的窗口到上面的用量就接力。目前没有 AI 设日额度。',
   'hp.rule.takeover':
-    '用量超过 {limit}% 的账号不会接手，确保下一个账号有足够额度干活。这条线始终比接力用量（{p}%）低 10 个百分点。',
+    '5 小时窗口用到 {limit}%、或每周窗口用到 {long}% 的账号不会接手，确保下一个账号有足够额度干活。一个 5 小时窗口只占一周额度的五分之一左右，所以每周的线更高：等于接力用量（{p}%），5 小时的线比它低 10 个百分点。离这两条线最远的账号先接手。',
   'hp.rule.wait':
     '如果 {w} 分钟内额度就恢复，而且会话到时会自己继续（Claude Code），就原地等，不换号。Codex 和 Grok 直接换号。',
   'hp.rule.noWait': '不等额度恢复，直接换号。',

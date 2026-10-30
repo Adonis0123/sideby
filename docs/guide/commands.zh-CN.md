@@ -24,7 +24,7 @@
 | `sideby login <acct>` | 用该账号运行家族的登录命令，前后各说一次它登录的是谁（也用来给账号换号）；pi 会直接启动，并提示你输入 `/login` | 宿主的退出码 |
 | `sideby doctor [acct\|family] [--fix] [--force]` | 检查共享项、凭据文件权限和备份残留；`--fix` 修复安全的部分 | 0 没有 fail（允许有 warn）；1 至少一条 fail |
 | `sideby quota [acct]` | 额度和近 7 天用量 | 0 |
-| `sideby quota setup claude [--yes]` | 展示改动；加 `--yes` 才开启 Claude 额度来源 | 只展示改动时为 10；开启后为 0；无法开启或失败为 1 |
+| `sideby quota setup claude [--yes]` | 展示改动；加 `--yes` 后会话进行中也从 status line 读 Claude 额度（自动接力需要；不开也能看到额度） | 只展示改动时为 10；开启后为 0；无法开启或失败为 1 |
 | `sideby quota teardown claude` | 关闭并还原原文件 | 0；拒绝或失败为 1 |
 | `sideby tune [acct\|family]` | 用最近 7 天的会话估算每个模型最省的自动压缩阈值（Claude 给推荐值，Codex 只观测）；只读 | 0；账号或家族不存在为 1；多给参数为 2 |
 | `sideby model <acct> [<model>\|default] [--effort <level>\|default] [--yes]` | 显示这个账号启动时用的模型和 effort 及各自来源；给出改动时先展示，加 `--yes` 才保存（Claude、Codex） | 0；等待 `--yes` 为 10；值不合法或是 API 账号为 1 |
@@ -70,7 +70,7 @@
 | `sideby ask --spec - [--print] --json` | 给 Portal 用（把 sideby 和其他工具做成标签页的页面）：从 stdin 读一个 JSON 对象（最大 1MB），按它开始一个 AI Task。可以是 `{ "specVersion": 1, "prompt": …, "cwd": … }`，Portal 为别的工具写好的提示词（sideby 会再删一次像密钥的文字，并加上附件），也可以是 `{ "specVersion": 1, "native": { "task": …, "text": …, "context": … } }`，sideby 自己的任务，提示词照旧。两种都可以带 `lang`、`account`、`terminal`、`remember`、`files`。`--print` 只返回 `{ prompt, removedSecrets }` | 同 `ask`；内容不合法、超过大小、`cwd` 不是 HOME 里已有的文件夹为 1（`code` 和 `reason` 说明是哪种）；`specVersion` 不认识为 2（请更新 sideby） |
 | `sideby ask --choices --json` | 给 Portal 用：任务现在会用哪个账号（用不了时说明原因）、能用哪些账号、本机装了哪些终端以及会打开哪个 | 0 |
 | `sideby terminal [--set <id>\|--unset]` | 列出支持的终端、本机装了哪些、当前用哪个；`--set` 保存首选终端 | 0；sideby 不认识的终端为 1 |
-| `sideby menubar [on\|off] [--yes]` | 在 macOS 状态栏显示额度：sideby 小人图标；某个工具连下一个要用的账号也用到 60% 时，旁边显示工具名和百分比；点开列出每个账号的额度，点一个账号就在终端里启动它。`menubar snapshot` 打印菜单内容；`menubar start <账号>` 在终端里启动账号；`menubar hotkey [<组合键>\|off\|default]` 查看或更换打开菜单的快捷键（⌥X）。先显示要写的文件 | 0；有变化等 `--yes` 为 10；被拒绝（Windows 原生、sideby 在 npx 缓存或临时目录里、文件不是 sideby 的）为 1 |
+| `sideby menubar [on\|off] [--yes]` | 在 macOS 状态栏显示额度：sideby 小人图标；某个工具连下一个要用的账号也到了提醒级别（5 小时窗口 60%，每周窗口 85%）时，旁边显示工具名和百分比；点开列出每个账号的额度，点一个账号就在终端里启动它。`menubar snapshot` 打印菜单内容；`menubar start <账号>` 在终端里启动账号；`menubar hotkey [<组合键>\|off\|default]` 查看或更换打开菜单的快捷键（⌥X）。先显示要写的文件 | 0；有变化等 `--yes` 为 10；被拒绝（Windows 原生、sideby 在 npx 缓存或临时目录里、文件不是 sideby 的）为 1 |
 | `sideby autostart [on\|off] [--yes]` | 登录后在后台启动面板（macOS、Linux 桌面、WSL：登录 Windows 时），不打开窗口；不带 `on`/`off` 时报告开着、关着、过期了，还是被一个不是 sideby 写的文件挡住。先显示要写的文件（macOS 还有 `launchctl` 命令） | 0；有变化等 `--yes` 为 10；被拒绝（不是 macOS、sideby 在 npx 缓存或临时目录里、文件不是 sideby 的）为 1 |
 | `sideby theme [list]` / `theme use <名字>` / `theme use --undo` / `theme check <名字\|文件>` / `theme preview <名字\|文件>` / `theme import <文件> [--id <名字>] [--yes]` / `theme export <名字> [--out <文件>]` / `theme remove <名字> [--yes]` | 面板主题：列出、切换和撤销，检查亮暗两套的对比度，在运行中的面板里看一眼，把自己的主题存成 JSON 文件（只放颜色） | 完成为 0；`check` 有太淡的颜色为 1；`import` 遇到同名、`remove` 等 `--yes` 为 10；拒绝为 1；命令写错为 2 |
 | `sideby config get [<key>]` / `config set <key> <value> [--yes]` / `config unset <key> [--yes]` | 读或改任意设置，比如 `panel.theme`（`system`、`light`、`dark`）、`panel.language`（`auto`、`en`、`zh`）、`handoff.threshold`；`get` 不带 key 列出每个键、当前值和说明。值能按 JSON 解析就按 JSON，否则当文字。插件自己的配置不在这里读写 | `get` 为 0；`set`/`unset` 有变化等 `--yes` 为 10；不是键或值不对为 1；命令写错为 2 |
