@@ -33,7 +33,12 @@ import type { TraceFetcher } from './core/egress.ts'
 import { UserError } from './core/errors.ts'
 import { type HandoffPlan, planHandoff } from './core/handoff.ts'
 import { handoffFindings, tapState } from './core/handoff-doctor.ts'
-import { type HandoffDecision, type SelectCandidate, selectNext } from './core/handoff-select.ts'
+import {
+  type HandoffDecision,
+  type SelectCandidate,
+  selectNext,
+  type UsedAccount,
+} from './core/handoff-select.ts'
 import { identityOf } from './core/identity.ts'
 import { inboundFindings } from './core/inbound.ts'
 import {
@@ -452,13 +457,14 @@ export interface Runtime {
   handoffSettings(): HandoffSettings
   /**
    * Where an Auto Handoff from `origin` would go now (spec §3.17 "选号"): every Account of every Family is a
-   * candidate; `used` lists the chain's Accounts so far. `ahead` decides early what happens once the origin's fullest
+   * candidate; `used` lists the chain's Accounts so far, as refs or as its hops (an Account whose hop recorded a window
+   * that has reset since may be picked again, ADR-0060). `ahead` decides early what happens once the origin's fullest
    * window reaches the threshold, as plan.json and the Panel need. `to` names the only candidate (`handoff ready --to`);
    * `manual` (`handoff ready`) never waits for a reset.
    */
   handoffDecision(
     origin: Account,
-    used: readonly string[],
+    used: readonly UsedAccount[],
     opts?: { ahead?: boolean; to?: string; manual?: boolean },
   ): Promise<HandoffDecision>
   readContext(): ReadContext

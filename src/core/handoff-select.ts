@@ -40,6 +40,28 @@ export type HandoffDecision =
       skipped?: SkippedAccount[]
     }
 
+/**
+ * An Account this chain already used: its ref, or its hop as `chain.json` keeps it, with the Quota window that made it
+ * hand over (`ChainHop.window`).
+ */
+export type UsedAccount = string | { ref: string; window?: { resetsAt: string } }
+
+/**
+ * The Accounts an automatic handoff leaves out (spec §3.17 "选号" 3): the origin, and every Account the chain used
+ * unless its latest hop handed over for a Quota window that has reset by `now` (ADR-0060). A bare ref, or a hop with no
+ * window (a manual handoff, an older chain), stays out.
+ */
+export function stillUsed(origin: string, used: readonly UsedAccount[], now: Date): Set<string> {
+  const back = new Map<string, boolean>()
+  for (const u of used) {
+    if (typeof u === 'string') back.set(u, false)
+    else back.set(u.ref, u.window !== undefined && windowReset(u.window.resetsAt, now))
+  }
+  const out = new Set([...back].flatMap(([ref, b]) => (b ? [] : [ref])))
+  out.add(origin)
+  return out
+}
+
 const domain = (email: string) => email.slice(email.lastIndexOf('@') + 1).toLowerCase()
 
 /** Organizations when both have one, else email domains when both have one, else the same. */
@@ -97,8 +119,8 @@ export function selectNext(input: {
   settings: HandoffSettings
   /** Short command → Account ref, so lists may name either. */
   aliases: Readonly<Record<string, string>>
-  /** Accounts this chain already used, the origin included. */
-  used: readonly string[]
+  /** Accounts this chain already used, the origin included; one whose window has reset since may come back. */
+  used: readonly UsedAccount[]
   now: Date
   /** Decide now what happens when the origin's fullest window reaches the threshold (see `waitUntil`). */
   ahead?: boolean
@@ -122,7 +144,7 @@ export function selectNext(input: {
   if (until) return { kind: 'wait', until }
 
   const allowed = new Set(s.crossOrganization.map(refOf))
-  const used = new Set([origin.ref, ...input.used])
+  const used = stillUsed(origin.ref, input.used, now)
   const family = s.families[origin.family]
 
   const fullAt = takeoverLimit(s.threshold)

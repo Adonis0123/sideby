@@ -10,8 +10,18 @@ import { claudePlugin } from '../families/claude/index.ts'
 import { cacheStateDir, writeQuotaCache } from '../families/claude/quota-cache.ts'
 import { codexPlugin } from '../families/codex/index.ts'
 import { createRuntime } from '../runtime.ts'
-import { FILES, readJsonFile, requestHandoff, type WaitingFile } from './handoff-chain.ts'
-import { runWithHandoff } from './handoff-run.ts'
+import {
+  type ChainFile,
+  chainDir,
+  ensureChainDir,
+  FILES,
+  HANDOFF_ENV,
+  readJsonFile,
+  requestHandoff,
+  type WaitingFile,
+  writeJsonFile,
+} from './handoff-chain.ts'
+import { readyDecision, runWithHandoff } from './handoff-run.ts'
 
 const builtins = [claudePlugin, codexPlugin].map((plugin) => ({
   plugin,
@@ -336,6 +346,56 @@ describe('runWithHandoff', () => {
         null,
       )
       assert.deepEqual(await readHostLog(h, 'claude'), [])
+    })
+  })
+})
+
+describe('readyDecision', () => {
+  // claude:001 handed over at its 5h limit, then claude:002 at its limit; claude:003 now runs. The window 001 left for
+  // reset at `resetsAt`; 002's has not (ADR-0060).
+  async function chainOf(h: FakeHome, resetsAt: string) {
+    await fakeHost(h, 'claude', {})
+    const rt = await setup(h, { auto: true, sameFamily: true }, ['001', '002', '003'])
+    const dir = chainDir(rt.paths.stateDir, 'c1')
+    await ensureChainDir(dir)
+    const later = new Date(Date.now() + 60 * 60_000).toISOString()
+    const chain: ChainFile = {
+      hops: [
+        {
+          ref: 'claude:001',
+          startedAt: '2026-10-09T06:00:00Z',
+          trigger: 'limit',
+          window: { label: '5h', usedPercent: 100, resetsAt },
+        },
+        {
+          ref: 'claude:002',
+          startedAt: '2026-10-09T08:00:00Z',
+          trigger: 'limit',
+          window: { label: '5h', usedPercent: 100, resetsAt: later },
+        },
+        { ref: 'claude:003', startedAt: '2026-10-09T10:00:00Z' },
+      ],
+    }
+    await writeJsonFile(join(dir, FILES.chain), chain)
+    return readyDecision(rt, {
+      ...h.env,
+      [HANDOFF_ENV.run]: 'r3',
+      [HANDOFF_ENV.dir]: dir,
+      SIDEBY_ACCOUNT: 'claude:003',
+    })
+  }
+
+  it('goes back to an Account the chain used once the window it left for has reset', async () => {
+    await withFakeHome(async (h) => {
+      const d = await chainOf(h, new Date(Date.now() - 60_000).toISOString())
+      assert.deepEqual(d, { kind: 'pick', ref: 'claude:001' })
+    })
+  })
+
+  it('leaves out every used Account while their windows have not reset', async () => {
+    await withFakeHome(async (h) => {
+      const d = await chainOf(h, new Date(Date.now() + 30 * 60_000).toISOString())
+      assert.equal(d?.kind, 'none')
     })
   })
 })

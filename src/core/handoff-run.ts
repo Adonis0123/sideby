@@ -26,7 +26,7 @@ import {
   type WaitingFile,
   writeJsonFile,
 } from './handoff-chain.ts'
-import type { HandoffDecision } from './handoff-select.ts'
+import type { HandoffDecision, UsedAccount } from './handoff-select.ts'
 import { beforeDashes, type PreparedLaunch, runHost, sidebyBinProblem, spawnHost } from './launch.ts'
 import { withoutArgs } from './network.ts'
 import { quotaPressure } from './quota-levels.ts'
@@ -178,7 +178,7 @@ export function hookEntryWorks(env: Env): Promise<boolean> {
 async function decide(
   rt: Runtime,
   account: Account,
-  used: readonly string[],
+  used: readonly UsedAccount[],
   to?: string,
   manual = false,
 ): Promise<HandoffDecision> {
@@ -248,8 +248,8 @@ export async function runWithHandoff(
   const chain = newId()
   const dir = chainDir(rt.paths.stateDir, chain)
   await ensureChainDir(dir)
+  // The chain's hops so far, also what `selectNext` leaves out: each records the window that made it hand over.
   const hops: ChainFile = { hops: [] }
-  const used: string[] = []
   const own = rt.config.aliases?.[ref]
   let hop: Hop = { ref, args: [...aliasArgs(own), ...userArgs] }
   let n = 1
@@ -284,7 +284,6 @@ export async function runWithHandoff(
     const args = beforeDashes(mergeNet ? withoutNetwork(launch) : launch.args, extra)
     // Later hops carry no `--` of their own (continueArgs drops it), so the prompt goes after a fresh one.
     if (hop.prompt) args.push(...h.promptArgs(hop.prompt))
-    used.push(account.ref)
     hops.hops.push({ ref: account.ref, startedAt: new Date().toISOString() })
     await writeJsonFile(join(dir, FILES.chain), hops)
     if (launch.notice) io.err(launch.notice)
@@ -298,7 +297,7 @@ export async function runWithHandoff(
       pending = pending.then(async () => {
         try {
           // Read by the hook once the threshold is crossed, so it answers for that moment (spec §3.17 "选号" 1).
-          const d = await rt.handoffDecision(account, used, { ahead: true })
+          const d = await rt.handoffDecision(account, hops.hops, { ahead: true })
           if (stopped) return
           const plan: PlanFile = {
             runId,
@@ -341,7 +340,7 @@ export async function runWithHandoff(
         outcome = got
         break
       }
-      const d = await decide(rt, account, used, got.ready.to, got.ready.trigger === 'manual')
+      const d = await decide(rt, account, hops.hops, got.ready.to, got.ready.trigger === 'manual')
       if (d.kind === 'pick') {
         outcome = { ...got, decision: d }
         break
@@ -362,7 +361,7 @@ export async function runWithHandoff(
 
     if (outcome.kind === 'exit') {
       if (kept) io.err(`sideby: ${account.ref} did not hand over: ${explain(kept)}`)
-      else await noteUnhandedHighQuota(rt, account, used, settings.threshold, io)
+      else await noteUnhandedHighQuota(rt, account, hops.hops, settings.threshold, io)
       return outcome.code
     }
     const decision = outcome.decision
@@ -446,7 +445,7 @@ export async function runWithHandoff(
 async function noteUnhandedHighQuota(
   rt: Runtime,
   account: Account,
-  used: readonly string[],
+  used: readonly UsedAccount[],
   threshold: number,
   io: HandoffIo,
 ): Promise<void> {
@@ -479,5 +478,5 @@ export async function readyDecision(rt: Runtime, env: Env, to?: string): Promise
   }
   const account = await rt.resolve(ref)
   const chain = await readJsonFile<ChainFile>(join(dir, FILES.chain))
-  return decide(rt, account, chain?.hops.map((h) => h.ref) ?? [account.ref], to, true)
+  return decide(rt, account, chain?.hops ?? [account.ref], to, true)
 }

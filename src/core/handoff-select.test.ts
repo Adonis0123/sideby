@@ -357,6 +357,59 @@ describe('selectNext', () => {
     })
     assert.deepEqual(r, pick('claude:003'))
   })
+  describe('an Account the chain already used (ADR-0060)', () => {
+    const s = settings({ auto: true, sameFamily: true })
+    const left = (ref: string, resetsInMinutes?: number) => ({
+      ref,
+      ...(resetsInMinutes === undefined
+        ? {}
+        : { window: { label: '5h', usedPercent: 96, resetsAt: inMinutes(resetsInMinutes) } }),
+    })
+    const base = { origin, aliases: {}, now: NOW, settings: s }
+    const back = acct('claude:008', { quota: quota(20) })
+
+    it('is picked again once the window it handed over for has reset', () => {
+      const used = [left('claude:008', -1), left('claude:001')]
+      assert.deepEqual(selectNext({ ...base, candidates: [back], used }), pick('claude:008'))
+      // Exactly at the reset time counts as reset.
+      const atReset = [left('claude:008', 0), left('claude:001')]
+      assert.deepEqual(selectNext({ ...base, candidates: [back], used: atReset }), pick('claude:008'))
+    })
+
+    it('stays out while that window has not reset', () => {
+      const used = [left('claude:008', 30), left('claude:001')]
+      assert.equal(selectNext({ ...base, candidates: [back], used }).kind, 'none')
+    })
+
+    it('stays out when its hop recorded no window, or only its ref is known', () => {
+      assert.equal(
+        selectNext({ ...base, candidates: [back], used: [left('claude:008'), left('claude:001')] }).kind,
+        'none',
+      )
+      assert.equal(
+        selectNext({ ...base, candidates: [back], used: ['claude:008', 'claude:001'] }).kind,
+        'none',
+      )
+      // Its latest hop decides: it came back and then left again with no window.
+      const again = [left('claude:008', -60), left('claude:002', -1), left('claude:008'), left('claude:001')]
+      assert.equal(selectNext({ ...base, candidates: [back], used: again }).kind, 'none')
+    })
+
+    it('stays out when its window reset but it is full again', () => {
+      const full = acct('claude:008', { quota: quota(90, 200) })
+      const used = [left('claude:008', -1), left('claude:001')]
+      const r = selectNext({ ...base, candidates: [full], used })
+      assert.equal(r.kind, 'none')
+      assert.deepEqual(r.kind === 'none' && r.earliestReset, { ref: 'claude:008', at: inMinutes(200) })
+    })
+
+    it('never makes the origin a pick, even when its own recorded window has reset', () => {
+      const self = acct('claude:001', { quota: quota(10) })
+      const used = [left('claude:001', -60), left('claude:002', -1), left('claude:001')]
+      assert.equal(selectNext({ ...base, origin: self, candidates: [self], used }).kind, 'none')
+    })
+  })
+
   it('with to, picks only that Account, also one the chain already used, and says why it cannot', () => {
     const s = settings({ auto: true, sameFamily: true })
     const base = {
