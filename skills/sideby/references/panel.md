@@ -12,6 +12,16 @@ agrees), or tell the user the `panel` place, such as `Settings → General → L
 try other words. It finds features only; to find a past session use `sideby history <words> --json`
 (`references/sessions.md`).
 
+## Which commands exist
+
+When the user asks which commands sideby has ("有哪些命令", "which commands are there for quota", "what can I type"),
+run `sideby commands --json` with no words. It returns the Command List, the same list `sideby --help` prints and the
+Panel's Commands dialog shows (button next to Search, or `?`): `{ common: [id], groups: [{ id, title, commands: [{ id,
+usage, description, example, featureId, panel }] }] }`. Answer with the few commands that fit the question, each with its
+`description` and `example` (a line that runs as is; fill in the user's own account refs from `sideby list --json`).
+`featureId` and `panel` say where the same thing lives in the Panel, or are null. Group ids are an open set. For one
+command's details, run `sideby <command> --help`.
+
 ## Pinned Accounts and Display Order
 
 - `sideby order --json` returns `display` (saved `families`, `accounts`, `pinned`) and `families` in their effective order. Each family has `accounts` with `name`, `ref`, `pinned`; a family with no accounts has an empty array.

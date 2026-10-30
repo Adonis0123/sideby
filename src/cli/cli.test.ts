@@ -1446,6 +1446,56 @@ describe('setup by an agent (spec §3.16)', () => {
       assert.match(general.out, /For AI agents:/)
     })
   })
+
+  it('groups the general help by task, generated from the Command List (spec §3.38)', async () => {
+    await withFakeHome(async (h) => {
+      const r = await sideby(h, ['--help'])
+      assert.equal(r.code, 0)
+      assert.match(r.out, /\nAccounts:\n {2}sideby {30}list accounts/)
+      assert.match(r.out, /\nAuto Handoff:\n {2}sideby handoff status/)
+      assert.match(r.out, /\n {2}sideby commands +list every command by task/)
+    })
+  })
+
+  it('`sideby commands` with no words lists every command by task, the common ones first (spec §3.38)', async () => {
+    await withFakeHome(async (h) => {
+      const text = await sideby(h, ['commands'])
+      assert.equal(text.code, 0, text.err)
+      assert.match(text.out, /^Common\n {2}sideby list {2,}List your accounts/)
+      assert.ok(text.out.indexOf('\nAccounts\n') > text.out.indexOf('Common'))
+      assert.match(text.out, /sideby run <account> \[-- args\] {2,}Start the AI tool as one account/)
+
+      const r = await sideby(h, ['commands', '--json'])
+      assert.equal(r.code, 0, r.err)
+      const data = checkSchema('commands-list', r.out) as {
+        common: string[]
+        groups: {
+          id: string
+          commands: {
+            id: string
+            usage: string
+            example: string | null
+            featureId: string | null
+            panel: string | null
+          }[]
+        }[]
+      }
+      assert.equal(data.common[0], 'list')
+      assert.equal(data.groups[0]!.id, 'accounts')
+      const all = data.groups.flatMap((g) => g.commands)
+      const run = all.find((c) => c.id === 'run')!
+      assert.equal(run.example, 'sideby run claude:work')
+      const enable = all.find((c) => c.id === 'handoff.enable')!
+      assert.equal(enable.featureId, 'action.handoff-on')
+      assert.equal(enable.panel, 'Auto Handoff page')
+
+      // Words still search the Search Catalog, with the same output as before.
+      const found = await sideby(h, ['commands', 'language', '--json'])
+      assert.equal(found.code, 0)
+      const hits = checkSchema('commands', found.out) as { results: { id: string }[] }
+      assert.equal(hits.results[0]!.id, 'setting.language')
+    })
+  })
 })
 
 describe('sideby handoff (spec §3.17)', () => {

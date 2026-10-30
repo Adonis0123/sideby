@@ -11,6 +11,7 @@ English | [中文](commands.zh-CN.md)
 | `sideby hide\|unhide <family\|account>` | Hide a whole tool, or an account with its Same Login, from the panel, the menu bar and `sideby list`, or show it again. Display only: it still starts and can still take over a task | 0; 1 unknown account, or one account of a hidden tool |
 | `sideby run <acct> [-- args]` | Start the Host for one account | the Host's code; 128+n if killed by signal n |
 | `sideby new <family> <name>\|--next [--api] [--alias <short>]` | Create an account and lay out its Shared Items; `--next` picks the next free name and short command (`cc008`); `--alias` also adds a short command such as `cc008` to `aliases` | 0; 1 if partly failed or the alias was not added |
+| `sideby commands` | Every command by task, the common ones first, each with one line and an example (the Panel's Commands dialog and `sideby --help` show the same list) | 0 |
 | `sideby commands <words>` | Where a page, setting or action lives in the Panel, and the command that does the same (read-only; the Panel's Search uses the same list) | 0, also with no match |
 | `sideby families [family]` | What each Host's accounts share with the main account, where they live and how they sign in | 0 |
 | `sideby alias add <short> <acct> [-- args]` | Add a short command for an existing account, optionally with Host arguments that `sideby run` adds | 0, also when it already exists; 1 if the name is taken, invalid or the account does not exist |

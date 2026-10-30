@@ -1392,6 +1392,24 @@ input.ua-time::placeholder { color: var(--faint); }
 .pal-none { padding: 14px 10px 4px; margin: 0; }
 .pal-foot { padding: 8px 16px; border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 var(--radius) var(--radius); }
 [data-width=narrow] .pal-where, [data-width=narrow] .pal-foot { display: none; }
+.dialog.dialog-cmds { width: min(760px, calc(100vw - 24px)); flex-direction: column; }
+.cmd-list { overflow-y: auto; overscroll-behavior: contain; padding: 4px 6px 10px; height: min(62vh, 560px); }
+.cmd-intro { margin: 8px 10px 2px; }
+.cmd-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.cmd-row { display: flex; flex-direction: column; gap: 2px; padding: 7px 10px; border-top: 1px solid var(--border); }
+.cmd-row:first-child { border-top: 0; }
+.cmd-line, .cmd-ex { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cmd-usage { flex: 1; min-width: 0; color: var(--text); font-weight: var(--strong-weight); overflow-wrap: anywhere; }
+.cmd-desc { color: var(--muted); font-size: var(--small); }
+.cmd-ex { font-size: 12px; color: var(--muted); }
+.cmd-ex code { min-width: 0; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; overflow-wrap: anywhere; }
+.cmd-ex-label { flex: none; }
+.cmd-open { flex: none; font-size: var(--small); }
+.cmd-copy { flex: none; }
+.cmd-copy.is-done { color: var(--ok); }
+.cmd-none { padding: 14px 10px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.cmd-none p { margin: 0; }
+.cmd-none .link-btn { display: inline-flex; align-items: center; gap: 4px; }
 .find-flash { animation: find-flash 1.2s ease-out; border-radius: var(--ctl-radius); }
 @keyframes find-flash { 0%, 35% { box-shadow: 0 0 0 6px var(--accent-soft); background: var(--accent-soft); } to { box-shadow: 0 0 0 6px transparent; background: transparent; } }
 @media (prefers-reduced-motion: reduce) { .find-flash { animation: none; } .pal-opt { transition: none; } }

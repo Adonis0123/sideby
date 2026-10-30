@@ -1267,6 +1267,33 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     },
     { title: 'sideby commands --json' },
   ),
+  'commands-list': Type.Object(
+    {
+      schemaVersion: Version,
+      common: Type.Array(Str, { description: 'Ids of the common commands, most common first.' }),
+      groups: Type.Array(
+        Type.Object({
+          id: Type.String({ description: "A task group such as 'accounts' or 'quota'; an open set." }),
+          title: Str,
+          commands: Type.Array(
+            Type.Object({
+              id: Type.String({ description: "Stable, such as 'run' or 'handoff.enable'." }),
+              usage: Type.String({ description: 'The command line as `sideby --help` shows it.' }),
+              description: Str,
+              example: Type.Union([Str, Type.Null()]),
+              featureId: Type.Union([Str, Type.Null()], {
+                description: 'The `sideby commands <words>` result id of its place in the Panel, or null.',
+              }),
+              panel: Type.Union([Str, Type.Null()], {
+                description: 'Where it lives in the Panel, such as "Settings → General → Language", or null.',
+              }),
+            }),
+          ),
+        }),
+      ),
+    },
+    { title: 'sideby commands --json (no words): the Command List' },
+  ),
   'app-install': Type.Object(
     {
       schemaVersion: Version,

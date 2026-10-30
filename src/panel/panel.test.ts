@@ -9,6 +9,8 @@ import { describe, it } from 'node:test'
 import { asBuiltin, demoFamily, demoPlugin, seedDemoMain } from '../../testing/demo.ts'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
 import { FAVICON_SVG } from '../core/brand-mark.ts'
+import { CLI_COMMANDS, COMMAND_GROUPS } from '../core/cli-commands.ts'
+import { SEARCH_CATALOG } from '../core/search-catalog.ts'
 import { packageVersion } from '../core/version.ts'
 import type { Runtime } from '../runtime.ts'
 import { createRuntime } from '../runtime.ts'
@@ -21,7 +23,9 @@ import {
   type PanelState,
   readBudget,
 } from './handler.ts'
+import { MESSAGES } from './i18n.ts'
 import { jsonForScript, pageStyles, renderPage } from './page.ts'
+import { PAGE_SCRIPT } from './page-script.ts'
 import { isSidebyPanel, panelOwner, startPanelServer } from './server.ts'
 import { resolveTheme } from './theme.ts'
 
@@ -2634,5 +2638,40 @@ describe('start at login and settings in config (spec §3.29)', () => {
         await close(server)
       }
     })
+  })
+})
+
+describe('Command List in the Panel (spec §3.38, ADR-0061)', () => {
+  it('has a Commands button next to Search and embeds the whole list without the --help text', () => {
+    const html = renderPage({ basePath: '', token: 't', theme: resolveTheme({ colorScheme: 'light' }) })
+    assert.match(html, /id="search-btn"[\s\S]*?<\/button>\s*<button id="cmds-btn"[^>]*aria-haspopup="dialog"/)
+    const raw = /<script type="application\/json" id="sideby-commands">([^<]*)<\/script>/.exec(html)?.[1]
+    assert.ok(raw, 'the Command List is embedded')
+    const list = JSON.parse(raw) as { groups: { id: string }[]; commands: { id: string; help?: string }[] }
+    assert.equal(list.commands.length, CLI_COMMANDS.length)
+    assert.ok(list.commands.every((c) => c.help === undefined))
+    assert.deepEqual(
+      list.groups.map((g) => g.id),
+      COMMAND_GROUPS.map((g) => g.id),
+    )
+  })
+
+  it('opens the dialog from the button, the ? key and the palette', () => {
+    assert.match(PAGE_SCRIPT, /\$\('cmds-btn'\)\.addEventListener\('click', \(\) => openCommands\(\)\)/)
+    assert.match(PAGE_SCRIPT, /if \(e\.key !== '\?' \|\| e\.metaKey/)
+    assert.match(PAGE_SCRIPT, /^ {4}commands: \{ run: \(\) => openCommands\(\), ok: /m)
+    assert.ok(SEARCH_CATALOG.some((e) => 'action' in e.target && e.target.action === 'commands'))
+  })
+
+  it('has every Panel word in English and Chinese', () => {
+    for (const key of [
+      'cmds.button',
+      'cmds.title',
+      'cmds.common',
+      'cmds.copied',
+      'cmds.open',
+      'ai.ask.commands',
+    ])
+      assert.ok(MESSAGES.en[key] && MESSAGES.zh[key], key)
   })
 })

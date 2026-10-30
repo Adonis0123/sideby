@@ -10,6 +10,7 @@ import {
   setBrowserChoice,
   setBrowserSignIns,
 } from '../core/browser-profiles.ts'
+import { CLI_COMMANDS, type CliCommand, COMMAND_GROUPS, commonCommands } from '../core/cli-commands.ts'
 import { aliasAccount, aliasArgs, aliasRefs, type DisplayConfig, editConfigUpdate } from '../core/config.ts'
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import type { DoctorReport } from '../core/doctor.ts'
@@ -4686,10 +4687,63 @@ export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
  * `sideby commands <words>` (spec §3.36, ADR-0054): the Search Catalog the Panel's Command Palette searches, read-only.
  * Titles and places are in English, as every other command prints; the words may be English or Chinese.
  */
+/** One command of the Command List as `sideby commands --json` gives it (spec §3.38). */
+function commandOut(cmd: CliCommand) {
+  const place = cmd.feature ? SEARCH_CATALOG.find((e) => e.id === cmd.feature) : undefined
+  return {
+    id: cmd.id,
+    usage: cmd.usage,
+    description: cmd.summary.en,
+    example: cmd.example ?? null,
+    featureId: place?.id ?? null,
+    panel: place?.panel.en ?? null,
+  }
+}
+
+/** Rows of `command  description`; a command too long for the column gets the description on the next line. */
+function commandRows(rows: [string, string][]): string[] {
+  const col = Math.min(44, Math.max(...rows.map(([u]) => u.length)) + 2)
+  return rows.flatMap(([u, d]) =>
+    u.length + 2 <= col ? [`  ${u.padEnd(col)}${d}`] : [`  ${u}`, `  ${' '.repeat(col)}${d}`],
+  )
+}
+
+/** `sideby commands` with no words: every command by task, the common ones first, each with an example there. */
+function listCommands(a: ParsedArgs, io: Io): number {
+  const common = commonCommands()
+  if (a.flags.has('json')) {
+    json(io, {
+      common: common.map((cmd) => cmd.id),
+      groups: COMMAND_GROUPS.map((g) => ({
+        id: g.id,
+        title: g.title.en,
+        commands: CLI_COMMANDS.filter((cmd) => cmd.group === g.id).map(commandOut),
+      })).filter((g) => g.commands.length),
+    })
+    return 0
+  }
+  const out: string[] = [
+    c.bold('Common'),
+    ...commandRows(common.map((cmd) => [cmd.example ?? cmd.usage, cmd.summary.en])),
+  ]
+  for (const g of COMMAND_GROUPS) {
+    const cmds = CLI_COMMANDS.filter((cmd) => cmd.group === g.id)
+    if (cmds.length)
+      out.push('', c.bold(g.title.en), ...commandRows(cmds.map((cmd) => [cmd.usage, cmd.summary.en])))
+  }
+  out.push(
+    '',
+    c.dim(
+      '`sideby <command> --help` explains one; `sideby commands <words>` finds where a feature lives in the Panel. In the Panel: Commands, or press ?.',
+    ),
+  )
+  io.out(out.join('\n'))
+  return 0
+}
+
 export function cmdCommands(a: ParsedArgs, io: Io): number {
   const query = a.positionals.join(' ').trim()
-  if (!query)
-    throw new UsageError('usage: sideby commands <words> [--json], for example: sideby commands language')
+  if (!query) return listCommands(a, io)
   const results = searchCatalog(query, SEARCH_CATALOG).map(({ entry }) => ({
     id: entry.id,
     kind: entry.kind,

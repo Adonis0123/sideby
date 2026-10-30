@@ -1,5 +1,6 @@
 // The Panel page's inline script. Plain browser JavaScript in a string (no template literals inside, so String.raw
 // keeps it verbatim); the pure helpers from page-logic.ts are prepended so the tested code is the code that runs.
+import { filterCommands } from '../core/cli-commands.ts'
 import { groupsToAccept } from '../core/inbound.ts'
 import { quotaIsStale } from '../core/quota-levels.ts'
 import { remoteControlTodo } from '../core/remote-control.ts'
@@ -109,6 +110,7 @@ const LOGIC = [
   catalogNorm,
   catalogMatchLevel,
   searchCatalog,
+  filterCommands,
   aiTaskAccounts,
   askBridge,
   askBridged,
@@ -1267,6 +1269,7 @@ const MAIN = String.raw`
     $('ask-ai').setAttribute('aria-label', t('ask.button'))
     $('search-btn').setAttribute('aria-label', t('pal.button') + ' (' + palKey() + ')')
     $('search-kbd').textContent = palKey()
+    $('cmds-btn').setAttribute('aria-label', t('cmds.button') + ' (?)')
     const repo = $('repo')
     for (const k of ['aria-label', 'title']) repo.setAttribute(k, t('top.repo'))
     if (/^https:\/\/github\.com\//.test(BOOT.repoUrl || '')) { repo.href = BOOT.repoUrl; repo.hidden = false }
@@ -2956,8 +2959,9 @@ const MAIN = String.raw`
     // A wide dialog is wide before it opens, so it does not open narrow and then stretch.
     el.classList.toggle('dialog-wide', kind === 'settings' ? el.classList.contains('dialog-wide') : kind === 'history')
     // A dialog that grows as the user adds to it (screenshots, its result) keeps its top edge and grows downward.
-    el.classList.toggle('dialog-top', kind === 'send' || kind === 'palette')
+    el.classList.toggle('dialog-top', kind === 'send' || kind === 'palette' || kind === 'commands')
     el.classList.toggle('dialog-pal', kind === 'palette')
+    el.classList.toggle('dialog-cmds', kind === 'commands')
     if (!el.open) { el.showModal(); raiseToasts() }
   }
 
@@ -6651,6 +6655,7 @@ const MAIN = String.raw`
     'handoff-on': { run: () => setPage('handoff'), ok: () => Boolean(ahState()), nav: true },
     network: { run: openNet, ok: () => Boolean(netState()) },
     themes: { run: openThemes, ok: () => true },
+    commands: { run: () => openCommands(), ok: () => true },
     update: { run: openUpdate, ok: () => Boolean(BOOT.updates) },
     ask: { run: () => openAsk(), ok: () => !askBridged(BOOT, window) },
     health: { run: palHealth, ok: () => Boolean(S.state && S.state.accounts.length), nav: true },
@@ -6694,15 +6699,18 @@ const MAIN = String.raw`
     return Boolean(a && a.ok())
   }
   function palWhyOff(e) { return e.target.action && e.target.write && BOOT.readOnly ? t('pal.readOnly') : '' }
-  function openPalette() {
-    if (dlg.el && dlg.el.open) return
+  function openPalette(q) {
+    // The Commands dialog hands its dialog over (its "Search Panel features" row); any other open dialog stays.
+    if (dlg.el && dlg.el.open && dlg.kind !== 'commands') return
     closeMenu()
-    pal.q = ''
+    cmd.els = null
+    pal.q = typeof q === 'string' ? q : ''
     pal.sel = 0
     pal.all = false
     pal.found = palFindable()
     showDialog('palette')
     const input = h('input', { type: 'search', class: 'pal-input', role: 'combobox', 'aria-expanded': 'true', 'aria-controls': 'pal-list', 'aria-autocomplete': 'list', autocomplete: 'off', spellcheck: 'false', placeholder: t('pal.placeholder'), 'aria-label': t('pal.title') })
+    input.value = pal.q
     input.addEventListener('input', () => { pal.q = input.value; pal.sel = 0; pal.all = false; drawPalette() })
     input.addEventListener('keydown', palKeys)
     const list = h('div', { id: 'pal-list', class: 'pal-list', role: 'listbox', 'aria-label': t('pal.title') })
@@ -6803,7 +6811,8 @@ const MAIN = String.raw`
       if (pal.q) { e.preventDefault(); pal.els.input.value = ''; pal.q = ''; pal.sel = 0; drawPalette() }
     }
   }
-  function palClose() { pal.els = null; if (dlg.kind === 'palette') dlg.el.close() }
+  // Closes the palette, or the Commands dialog when its "Open in Panel" goes somewhere (both use palGo).
+  function palClose() { pal.els = null; if (dlg.kind === 'palette' || dlg.kind === 'commands') dlg.el.close() }
   // Lights a row up once it is in view, so the eye finds it; none under reduced motion.
   function palFlash(el) {
     if (REDUCED || !el) return
@@ -6822,6 +6831,7 @@ const MAIN = String.raw`
   }
   function palGo(e) {
     palRemember(e.id)
+    const from = dlg.kind
     const g = e.target
     pal.els = null
     if (g.page) { palClose(); setPage(g.page); window.scrollTo({ top: 0, behavior: REDUCED ? 'auto' : 'smooth' }); return }
@@ -6845,8 +6855,9 @@ const MAIN = String.raw`
     const a = PALETTE_ACTIONS[g.action]
     if (a.nav) palClose()
     a.run()
-    // An action that opened nothing (such as a task handed to the Portal) leaves no palette behind.
-    if (dlg.kind === 'palette') palClose()
+    // An action that opened nothing (such as a task handed to the Portal) leaves no palette or Commands dialog behind;
+    // one that opened its own dialog in their place (the palette's Commands action too) keeps it.
+    if (dlg.kind === from && (from === 'palette' || from === 'commands')) palClose()
   }
   // The words go to Session History's search box, which reads them as it does typed ones.
   function palHistory(q) {
@@ -6858,6 +6869,92 @@ const MAIN = String.raw`
     if (hs.data || hs.error) historyChanged(false)
     else saveHistFilters()
     setPage('sessions')
+  }
+
+  // ---------- Command List (spec §3.38, ADR-0061) ----------
+  // The Commands button, ? and the palette open every sideby command by task, from the Command List that
+  // sideby --help and sideby commands print too. Each row copies its command (the example when there is one, so it runs
+  // as it is); a command with a place in the Panel also goes there, through the palette's own navigation.
+  const CMDS = JSON.parse(document.getElementById('sideby-commands').textContent)
+  const cmd = { q: '', els: null, found: null }
+  function openCommands() {
+    // The palette hands its dialog over (its Commands action); any other open dialog stays.
+    if (dlg.el && dlg.el.open && dlg.kind !== 'palette') return
+    closeMenu()
+    pal.els = null
+    cmd.q = ''
+    cmd.found = palFindable()
+    showDialog('commands')
+    const input = h('input', { type: 'search', class: 'pal-input', autocomplete: 'off', spellcheck: 'false', placeholder: t('cmds.placeholder'), 'aria-label': t('cmds.placeholder'), 'aria-controls': 'cmd-list' })
+    input.addEventListener('input', () => { cmd.q = input.value; drawCommands() })
+    input.addEventListener('keydown', (e) => {
+      // Escape first empties the box, as in the palette; a second one closes.
+      if (e.key === 'Escape' && cmd.q) { e.preventDefault(); input.value = ''; cmd.q = ''; drawCommands() }
+      else if (e.key === 'ArrowDown') {
+        const b = cmd.els && cmd.els.list.querySelector('button')
+        if (b) { e.preventDefault(); b.focus() }
+      }
+    })
+    const list = h('div', { id: 'cmd-list', class: 'cmd-list' })
+    cmd.els = { input, list }
+    setKids(dlg.el, [
+      h('h2', { id: 'dlg-title', class: 'sr-only' }, t('cmds.title')),
+      h('div', { class: 'pal-head' }, icon('terminal', 'pal-ic'), input, h('kbd', { class: 'kbd-inline', 'aria-hidden': 'true' }, 'Esc')),
+      list,
+      h('div', { class: 'pal-foot muted small', 'aria-hidden': 'true' }, t('cmds.foot')),
+    ])
+    drawCommands()
+    input.focus()
+  }
+  function drawCommands() {
+    if (!cmd.els) return
+    const q = cmd.q.trim()
+    const kids = []
+    if (!q) {
+      kids.push(h('p', { class: 'cmd-intro muted small' }, t('cmds.intro')))
+      kids.push(cmdGroup(t('cmds.common'), CMDS.commands.filter((c) => c.common).sort((a, b) => a.common - b.common)))
+    }
+    const hits = filterCommands(q, CMDS.commands, CMDS.groups)
+    for (const g of CMDS.groups) {
+      const list = hits.filter((c) => c.group === g.id)
+      if (list.length) kids.push(cmdGroup(g.title[lang] || g.title.en, list))
+    }
+    if (q && !hits.length)
+      kids.push(h('div', { class: 'cmd-none' }, h('p', { class: 'muted' }, t('cmds.none', { q })),
+        h('button', { class: 'link-btn', type: 'button', onclick: () => openPalette(q) }, icon('search'), ' ', t('cmds.feature', { q }))))
+    cmd.els.list.replaceChildren(...kids)
+    cmd.els.list.scrollTop = 0
+  }
+  function cmdGroup(title, list) {
+    return h('section', { class: 'cmd-group', 'aria-label': title },
+      h('h3', { class: 'pal-group' }, title),
+      h('ul', { class: 'cmd-rows' }, list.map(cmdRow)))
+  }
+  // The copy button sits next to what it copies: the example when there is one, else the command itself.
+  function cmdCopyBtn(text) {
+    const b = h('button', { class: 'icon-btn cmd-copy', type: 'button', 'aria-label': t('cmds.copy', { text }), 'data-tip': t('btn.copy') })
+    b.append(icon('copy'))
+    b.addEventListener('click', async () => {
+      await copyText(text)
+      b.replaceChildren(icon('tick'))
+      b.classList.add('is-done')
+      b.setAttribute('data-tip', t('cmds.copied'))
+      setTimeout(() => { b.replaceChildren(icon('copy')); b.classList.remove('is-done'); b.setAttribute('data-tip', t('btn.copy')) }, 1400)
+    })
+    return b
+  }
+  function cmdRow(c) {
+    const e = c.feature ? CATALOG.entries.find((x) => x.id === c.feature) : null
+    // "Open in Panel" only where this Panel has the place now, never for this list itself.
+    const go = e && !(e.target.action === 'commands') && palAvailable(e, cmd.found) && !palWhyOff(e) ? e : null
+    const what = go ? go.title[lang] || go.title.en : ''
+    return h('li', { class: 'cmd-row' },
+      h('div', { class: 'cmd-line' },
+        h('code', { class: 'cmd-usage' }, c.usage),
+        go ? h('button', { class: 'link-btn cmd-open', type: 'button', 'aria-label': t('cmds.openLabel', { what }), onclick: () => palGo(go) }, t('cmds.open')) : null,
+        c.example ? null : cmdCopyBtn(c.usage)),
+      h('div', { class: 'cmd-desc' }, c.summary[lang] || c.summary.en),
+      c.example ? h('div', { class: 'cmd-ex' }, h('span', { class: 'cmd-ex-label' }, t('cmds.example')), h('code', null, c.example), cmdCopyBtn(c.example)) : null)
   }
 
   // ---------- start at login (spec §3.29, ADR-0029) and the Menu Bar Item (spec §3.31, ADR-0034) ----------
@@ -7184,7 +7281,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.network', 'ai.ask.unattended', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.network', 'ai.ask.unattended', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.commands', 'ai.ask.tool']
   // Network Guard (spec §3.35): one dialog with the switch, the allowed countries and the newest result per address.
   // Countries are never ticked for the user, the current one included: a wrong network would allow itself.
   const NET_COMMON = ['US', 'JP', 'SG', 'GB', 'DE', 'FR', 'NL', 'CA', 'AU', 'KR', 'TW', 'HK']
@@ -8738,12 +8835,24 @@ const MAIN = String.raw`
   $('refresh').addEventListener('click', refreshAll)
   $('ask-ai').addEventListener('click', () => openAsk())
   $('search-btn').addEventListener('click', () => openPalette())
+  $('cmds-btn').addEventListener('click', () => openCommands())
   // Cmd/Ctrl+K opens the Command Palette from anywhere and closes it again; / and Cmd/Ctrl+F stay on the account search.
   document.addEventListener('keydown', (e) => {
     if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || (e.key !== 'k' && e.key !== 'K')) return
     if (dlg.el && dlg.el.open) { if (dlg.kind === 'palette') { e.preventDefault(); palClose() } return }
     e.preventDefault()
     openPalette()
+  })
+  // ? opens the Command List (as GitHub and Linear open their shortcut lists), and closes it again; typing a ? in a
+  // field stays typing.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== '?' || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return
+    const el = e.target
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return
+    if (dlg.el && dlg.el.open) { if (dlg.kind === 'commands') { e.preventDefault(); dlg.el.close() } return }
+    if (menu.el) return
+    e.preventDefault()
+    openCommands()
   })
   // In a Portal that offers AI Tasks itself the Portal has the button; opened on its own, the Panel keeps it.
   $('ask-ai').hidden = askBridged(BOOT, window)

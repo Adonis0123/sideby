@@ -6,157 +6,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const MIN_NODE = [22, 18]
 
-const HELP = `sideby — run every AI coding account side by side
-
-Usage:
-  sideby ask [<text>] [--print]       let your AI handle a sideby task
-  sideby terminal [--set <id>|--custom <t>|--unset] choose your terminal
-  sideby key <account> [--var <NAME>] enter an API key without echo
-  sideby try <account> [--model <m>]  try the Host with a short paid request
-  sideby                              list accounts (same as \`sideby list\`)
-  sideby list --all                   also list hidden families and accounts
-  sideby run <account> [-- args]      start the host CLI for one account
-  sideby new <family> <name>|--next [--api] [--alias <short>]
-                                      create an account (families: claude, codex, grok, pi);
-                                      --next picks the next name and short command (cc008);
-                                      --alias also adds a short command such as cc008
-  sideby pin|unpin <account|short command> [--json]
-                                      pin or unpin a Same Login (at most 3 per family)
-  sideby hide|unhide <family|account> [--json]
-                                      hide a family or an account from the Panel, menu bar and list
-  sideby order [--json]               show display order, with pinned and hidden accounts marked
-  sideby order <family> <name>...     set account order within a family
-  sideby order --families <id>...     set family order
-  sideby order --reset               restore default order, keeping pins and hidden ones
-  sideby quota check <family> on|off  turn quota fetching on or off
-  sideby update --auto on|off         set Auto Update without running an update
-  sideby update --skill [--yes]       update only the installed sideby skill to this version
-  sideby commands <words>             find where a page, setting or action lives in the Panel,
-                                      and the command that does the same (read-only)
-  sideby families [family]            what each host's accounts share with the main account,
-                                      where they live and how they sign in
-  sideby alias add <short> <account> [-- args]
-                                      add a short command, optionally with host arguments
-                                      (sideby alias add pi-kimi pi:main -- --model kimi-coding/k3)
-  sideby alias add <short> --pick <family> [--yes]
-                                      add a pick command: each run starts the account with the
-                                      most quota left (sideby alias add cc --pick claude)
-  sideby alias rm <short>             remove a short command
-  sideby alias list                   list short commands and pick commands
-  sideby login <account>              sign in to an account
-  sideby resume <family> [-- args]    run the host; a session resumed by id (claude --resume <id>,
-                                      codex resume <id>) starts in the account that holds it
-  sideby next <family> [--dry-run] [--include-api] [--ignore-network] [--unattended] [-- args]
-                                      recommend the account with the most quota left (claude, codex, grok)
-                                      and start it; --dry-run only recommends
-  sideby doctor [target] [--fix] [--force]
-                                      check shared items and permissions; --fix repairs safe issues
-  sideby quota [account|family] [--refresh]
-                                      quota and 7-day token usage; --refresh asks every fetching family again now
-  sideby quota setup claude [--yes]   turn on Claude quota (shows the change first)
-  sideby quota teardown claude        undo it, restoring the original file
-  sideby tune [account|family]        estimate the cheapest auto-compact threshold per model
-                                      from your last 7 days of sessions (read-only)
-  sideby model <account> [<model>|default] [--effort <level>|default] [--yes]
-                                      show or set the model and effort sideby starts this account with
-  sideby remote-control [on|off|undo] [--yes]
-                                      whether Claude sessions connect to claude.ai by themselves;
-                                      off stops that for every account (shows the change first)
-  sideby handoff status               what Auto Handoff still needs on this machine
-  sideby handoff rules                every rule that decides when it hands over and to whom,
-                                      and where each account's work would go now
-  sideby handoff enable [--yes]       turn it on (shows the config change first); --same-family,
-                                      --order claude=codex001,cc002, --threshold n, --prepare-at n,
-                                      --other-ai [--ai-order codex,grok], --api (billed per use)
-  sideby handoff disable [--yes]      turn it off, keeping the other settings
-  sideby handoff ready [--brief <f>]  inside a session sideby started with Auto Handoff: hand over to
-                                      the next account when this turn ends (config \`handoff\`);
-                                      --to <account> names it, also one this chain already used
-  sideby handoff setup grok [--yes]   add sideby's hook file so Grok can hand over at its limit
-  sideby handoff teardown grok        remove it
-  sideby ui [--port n] [--no-open]    open the local panel
-  sideby ui --background              same, without a terminal: keeps running after this command exits
-  sideby ui --stop                    stop the background panel
-  sideby desktop <account>            open the desktop app (Claude Desktop, the Codex app) as this
-                                      account, next to the others (macOS)
-  sideby desktop grok-bot:<name>      open a Grok Bot window, a new one for a new name (macOS)
-  sideby sessions [<account>|<family>] which session each account runs now, needing you first
-  sideby sessions copy <account|session-id> [--as reference|id|resume]
-                                      copy one for another AI: a reference to its record (default),
-                                      its id or its resume command
-  sideby sessions open-run <account|session-id>
-                                      open the run report of the dispatched task that session works for
-  sideby history [<words>...]          find any past session of any account, by project, AI, time
-                                      or what was said (--project, --family, --account, --since,
-                                      --tools also searches tool output)
-  sideby history show <id>            read one session; history projects lists the projects
-  sideby history index [--clear]      the local search index: how far it is built, or delete it
-  sideby send <account|session> "<text>" [--image <path>]...
-                                      tell another session something (a screenshot too): Claude
-                                      sessions get it at once, others through a line you paste
-  sideby messages [--to <account|session>]
-                                      the messages you sent and whether each was delivered or read
-  sideby messages inbound [accept|undo] [--yes]
-                                      whether Claude sessions show messages from other sessions at once
-  sideby edit <account> [--path]      open the account's own settings file (settings.json,
-                                      config.toml) in your editor
-  sideby network [check]              stop Claude and Codex when requests would leave from a country
-                                      you did not allow (network on|off|allow <CC>... [--yes])
-  sideby unattended [on|off]          nobody is here: sessions sideby starts do not stop to ask; on takes
-                                      --for 4h, --until 07:30 or --slot-end (schedule add|remove|preset weeknights,
-                                      pending [done <id>|--all], defer "<text>"); run --unattended for one session
-  sideby browser [--enable [--yes]]   which Chrome browser user signed in to each account's website
-                                      (read on this computer only; off until you enable it)
-  sideby browser open <account> [--profile <name>]
-                                      open claude.ai, chatgpt.com or grok.com in that browser user
-  sideby browser set <account> <name> | --auto
-                                      choose that browser user yourself, or let sideby find it again
-  sideby app install [--url <url>]    add a sideby app that opens the panel (macOS, Linux)
-  sideby app uninstall                remove that app
-  sideby shell-init zsh|bash          print shell functions, e.g. eval "$(sideby shell-init zsh)"
-  sideby shell-init [zsh|bash] --write
-                                      rewrite the config's shellInitFile with them
-  sideby shell-init setup [zsh|bash] [--yes|--undo]
-                                      make new terminals load your short commands: adds one line to
-                                      ~/.zshrc (or ~/.bashrc), shown first; --undo takes it out
-  sideby plugins                      list loaded plugins and load errors
-  sideby plugins new <id>             create a local Family Plugin skeleton
-  sideby plugins check <id|path>      check a plugin and show fixes
-  sideby update [--yes]               update sideby to the newest version (shows the command first)
-  sideby autostart [on|off] [--yes]   start the panel in the background at login (macOS, Linux, WSL;
-                                      shows the file first)
-  sideby menubar [on|off] [--yes]     show quota in the macOS menu bar; click an account to start it
-  sideby menubar hotkey [<keys>|off]  show or change the shortcut that opens that menu (⌥X)
-  sideby theme [list]                 the Panel's Themes; use <name> switches, use --undo goes back, use default clears
-  sideby theme check|preview <name|file>  contrast report, or one look in the Panel without switching
-  sideby theme import <file> | export <name> | remove <name>   your own Themes (JSON, colors only)
-  sideby config get [<key>]           every setting with its value and meaning, or one setting
-  sideby config set <key> <value> [--yes]
-                                      change any setting (sideby config set panel.theme dark)
-  sideby config unset <key> [--yes]   back to the default
-  sideby local [on|off] [--yes]       for sideby developers: switch the global sideby between the
-                                      last local build (pnpm local) and the npm package
-
-Options:
-  --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, remote-control, handoff,
-                families, commands, plugins, app, desktop, sessions, history, send, messages, edit, browser, update, local, ask,
-                terminal, key, try, autostart, menubar, config, network, unattended)
-  -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, commands, desktop, edit, browser,
-                autostart, menubar, config, sessions, history, send, messages, network, unattended
-  -v, --version show the version
-
-An <account> is <family>:<name> (claude:work) or just <name> when it is unique.
-
-For AI agents:
-  Add --json and read the result; JSON Schemas ship in the package under schemas/.
-  Install the skill: npx skills add Adonis0123/sideby -g
-  Setup steps and the full contract: https://github.com/Adonis0123/sideby/blob/main/llms.txt
-  Run everything else yourself, but hand the user these as one line each: \`sideby login <account>\`
-  (browser sign-in), filling in proxy.env, and \`sideby run\` or \`sideby next\` (interactive sessions).
-  Exit 10 means a change was shown: ask the user, then run it again with --yes.
-
-Updates: once a day sideby asks the npm registry for its newest version and says so after a command.
-  Turn it off with NO_UPDATE_NOTIFIER=1 or config "update": { "check": false }; "auto": true installs by itself.`
+/** `sideby --help`, generated from the Command List (spec §3.38) so it never drifts from the Panel and `sideby commands`. */
+async function generalHelp(): Promise<string> {
+  const { cliHelp } = await import('../core/cli-commands.ts')
+  return cliHelp()
+}
 
 /** `sideby <command> --help` for the commands agents use to set up and repair accounts (spec §3.16). */
 const COMMAND_HELP: Record<string, string> = {
@@ -542,17 +396,23 @@ Examples:
   sideby browser set codex:main "Profile 7"
 Exit: 0 shown, changed, chosen or opened; 1 not macOS, Chrome not installed, no or several browser users to choose from, or
 Chrome did not open; 10 --enable/--disable without --yes; 2 malformed command line.`,
-  commands: `sideby commands <words>... [--json]
+  commands: `sideby commands [--json]
+sideby commands <words>... [--json]
 
-Find a feature of sideby by name, in English or Chinese: a page of the Panel, a setting or an action. Each result
-says where it lives in the Panel (Settings → General → Language) and the command that does the same, when there is
-one. The Panel's Search (Cmd/Ctrl+K) searches the same list. It finds features, not sessions: for those use
-\`sideby history <words>\`.
+With no words: every command, grouped by task (Accounts, Start and open, Quota and usage, ...), the common ones first,
+each with one line on what it does and an example. The Panel shows the same list under Commands (or press ?).
+
+With words: find a feature of sideby by name, in English or Chinese: a page of the Panel, a setting or an action.
+Each result says where it lives in the Panel (Settings → General → Language) and the command that does the same,
+when there is one. The Panel's Search (Cmd/Ctrl+K) searches the same list. It finds features, not sessions: for those
+use \`sideby history <words>\`.
 
 Examples:
+  sideby commands
+  sideby commands --json
   sideby commands language
   sideby commands 深色 --json
-Exit: 0, also when nothing matches; 2 no words given or malformed command line.`,
+Exit: 0, also when nothing matches; 2 malformed command line.`,
   families: `sideby families [family] [--json]
 
 For each host (built in or from a plugin): where its accounts live, the variable that selects one, how to sign
@@ -762,7 +622,7 @@ export async function main(argv: string[]): Promise<number> {
     return 0
   }
   if (first === '-h' || first === '--help' || first === 'help') {
-    console.log((rest[0] !== undefined && first === 'help' && COMMAND_HELP[rest[0]]) || HELP)
+    console.log((rest[0] !== undefined && first === 'help' && COMMAND_HELP[rest[0]]) || (await generalHelp()))
     return 0
   }
   const cmd = first === undefined || first.startsWith('--') ? 'list' : first
@@ -806,7 +666,7 @@ export async function main(argv: string[]): Promise<number> {
       }
     }
     if (parsed.flags.has('help')) {
-      console.log(COMMAND_HELP[cmd] ?? HELP)
+      console.log(COMMAND_HELP[cmd] ?? (await generalHelp()))
       return 0
     }
     // parseArgs keeps the last value of an option; `ask --attach` may be given several times.

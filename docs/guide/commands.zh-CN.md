@@ -12,6 +12,7 @@
 | `sideby run <acct> [-- args]` | 用某个账号启动宿主 | 宿主的退出码；被信号 n 终止时为 128+n |
 | `sideby next <family> [--dry-run] [--include-api] [-- args]` | 推荐剩余额度最多的账号（Claude、Codex）并启动；`--dry-run` 只推荐 | 宿主的退出码；`--dry-run` 或 `--json` 有推荐时为 0；没有可用账号、都还没有额度数据、家族没有额度来源或没有账号为 1 |
 | `sideby new <family> <name>\|--next [--api] [--alias <short>]` | 新建账号并铺好共享项；`--next` 自动选下一个空闲的名字和短命令（`cc008`）；`--alias` 同时把 `cc008` 这样的短命令加进 `aliases` | 0；部分失败或短命令没加上为 1 |
+| `sideby commands` | 按任务列出所有命令，常用的在前，每条一句说明和一个例子（面板的“命令”对话框和 `sideby --help` 用同一份列表） | 0 |
 | `sideby commands <词>` | 某个页面、设置或操作在面板哪里，以及做同一件事的命令（只读；面板的搜索用同一份列表） | 0，没有匹配也是 |
 | `sideby families [family]` | 每个宿主的账号和主账号共享什么、放在哪、怎么登录 | 0 |
 | `sideby alias add <short> <acct> [-- args]` | 给已有账号加短命令，可以带 `sideby run` 时附加的宿主参数 | 0，已存在也是 0；名字被占用、不合法或账号不存在为 1 |

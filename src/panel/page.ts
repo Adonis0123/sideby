@@ -3,6 +3,7 @@
 // i18n.ts (English and Chinese text); this module assembles them under the CSP nonce.
 import { createHash } from 'node:crypto'
 import { FAVICON_SVG, MARK_SVG } from '../core/brand-mark.ts'
+import { commandListForPage } from '../core/cli-commands.ts'
 import { ALIAS_NAME, RESERVED_ALIASES } from '../core/config.ts'
 import { QUOTA_FAIL_PERCENT, QUOTA_WARN_PERCENT, USAGE_DAYS } from '../core/quota-levels.ts'
 import { COMMON_ENTRIES, SEARCH_CATALOG } from '../core/search-catalog.ts'
@@ -128,6 +129,7 @@ export function renderPage(opts: PageOptions): string {
       <button id="ua-badge" class="btn ua-badge" type="button" hidden></button>
       <button id="update" class="btn update-btn" type="button" hidden></button>
       <button id="search-btn" class="btn" type="button" aria-haspopup="dialog" aria-label="Search"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4.2-4.2"/></svg><span class="hide-sm" data-i18n="pal.button">Search</span><kbd id="search-kbd" class="kbd-inline hide-sm" aria-hidden="true"></kbd></button>
+      <button id="cmds-btn" class="btn" type="button" aria-haspopup="dialog" aria-label="Commands (?)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l6-5-6-5M12 19h8"/></svg><span class="hide-sm" data-i18n="cmds.button">Commands</span><kbd class="kbd-inline hide-sm" aria-hidden="true">?</kbd></button>
       <button id="ask-ai" class="btn" type="button" aria-haspopup="dialog" aria-label="Let AI do it"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9h12a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2zM12 5v4M9.5 13.5v1M14.5 13.5v1"/></svg><span class="hide-sm" data-i18n="ask.button">Let AI do it</span></button>
       <a id="repo" class="icon-btn repo-link" target="_blank" rel="noopener noreferrer" aria-label="sideby on GitHub" title="sideby on GitHub" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${GITHUB_MARK}"/></svg></a>
       <button id="settings" class="btn" type="button" aria-haspopup="dialog" aria-expanded="false"${lang === 'auto' ? '' : ' hidden'}><span data-i18n="set.button">Settings</span></button>
@@ -158,6 +160,7 @@ export function renderPage(opts: PageOptions): string {
 <div id="toasts" class="toasts" aria-live="polite" popover="manual"></div>
 <script type="application/json" id="sideby-boot">${boot}</script>
 <script type="application/json" id="sideby-catalog">${jsonForScript({ entries: SEARCH_CATALOG, common: COMMON_ENTRIES })}</script>
+<script type="application/json" id="sideby-commands">${jsonForScript(commandListForPage())}</script>
 <script type="application/json" id="sideby-i18n">${jsonForScript(MESSAGES)}</script>
 <script${nonce}>${PAGE_SCRIPT}</script>
 </body>

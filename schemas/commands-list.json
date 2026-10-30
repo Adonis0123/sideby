@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/commands-list.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "common",
+    "groups"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "common": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Ids of the common commands, most common first."
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "commands"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "A task group such as 'accounts' or 'quota'; an open set."
+          },
+          "title": {
+            "type": "string"
+          },
+          "commands": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "usage",
+                "description",
+                "example",
+                "featureId",
+                "panel"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Stable, such as 'run' or 'handoff.enable'."
+                },
+                "usage": {
+                  "type": "string",
+                  "description": "The command line as `sideby --help` shows it."
+                },
+                "description": {
+                  "type": "string"
+                },
+                "example": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "featureId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The `sideby commands <words>` result id of its place in the Panel, or null."
+                },
+                "panel": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Where it lives in the Panel, such as \"Settings → General → Language\", or null."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby commands --json (no words): the Command List"
+}
