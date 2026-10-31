@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
 import { resolvePaths } from '../core/paths.ts'
 import { listPendingDecisions } from '../core/unattended-pending.ts'
+import { passingFailure, readRetryStreak } from '../core/unattended-retry.ts'
 import { writeUnattendedOverride } from '../core/unattended-state.ts'
 import {
   commandProgram,
@@ -657,6 +658,190 @@ describe('unattended hook on an MCP form', () => {
   })
 })
 
+/** A failed turn as Claude Code 2.1.316 sends it to a `StopFailure` hook. */
+const failed = (error: string, message: string, session = 's1') =>
+  JSON.stringify({
+    session_id: session,
+    cwd: '/tmp/project',
+    hook_event_name: 'StopFailure',
+    error,
+    last_assistant_message: message,
+  })
+const OVERLOADED = 'API Error: 500 Internal server error. This is a server-side issue, usually temporary'
+
+/** Runs the StopFailure hook with a fake wait that records how long it would sleep and can act meanwhile. */
+const retry = async (
+  h: FakeHome,
+  input: string,
+  o: { env?: Record<string, string>; during?: () => Promise<void>; gone?: boolean } = {},
+) => {
+  const slept: number[] = []
+  const err = sink()
+  const code = await runUnattendedHook(
+    ['claude', 'StopFailure'],
+    { ...h.env, ...o.env },
+    input,
+    { out: sink(), err },
+    {
+      now: () => now,
+      sleep: async (ms) => {
+        slept.push(ms)
+        await o.during?.()
+      },
+      parentGone: () => o.gone === true,
+    },
+  )
+  return { code, err: err.lines.join(''), slept }
+}
+
+describe('unattended hook after a turn failed for a passing reason (Turn Retry)', () => {
+  it('waits longer each time and wakes the session with exit 2, then leaves it for the user after three', async () => {
+    await withFakeHome(async (h) => {
+      await turnOn(h)
+      const stateDir = resolvePaths(h.env).stateDir
+      const first = await retry(h, failed('server_error', OVERLOADED), {
+        env: { SIDEBY_ACCOUNT: 'claude:work' },
+      })
+      assert.equal(first.code, 2)
+      assert.deepEqual(first.slept, [60_000])
+      assert.match(first.err, /failed for a passing reason \(server_error: API Error: 500/)
+      assert.match(first.err, /retry 1 of 3/)
+      assert.match(first.err, /continue the task where it stopped/)
+      assert.deepEqual(
+        (await retry(h, failed('overloaded', 'API Error: Repeated 529 Overloaded errors'))).slept,
+        [120_000],
+      )
+      const third = await retry(h, failed('rate_limit', 'API Error: Request rejected (429) · try again'))
+      assert.equal(third.code, 2)
+      assert.deepEqual(third.slept, [240_000])
+      assert.match(third.err, /retry 3 of 3/)
+      assert.deepEqual(await listPendingDecisions(stateDir), [])
+      // The fourth failure in a row is not retried: it is kept for the morning, and the streak starts over.
+      const fourth = await retry(h, failed('server_error', OVERLOADED), {
+        env: { SIDEBY_ACCOUNT: 'claude:work' },
+      })
+      assert.deepEqual(fourth, { code: 0, err: '', slept: [] })
+      const [d, ...more] = await listPendingDecisions(stateDir)
+      assert.equal(more.length, 0)
+      assert.equal(d?.kind, 'deferred')
+      assert.equal(d?.account, 'claude:work')
+      assert.equal(d?.sessionId, 's1')
+      assert.match(
+        d!.text,
+        /^The session stopped: its turn kept failing for a passing reason \(server_error: API Error: 500/,
+      )
+      assert.match(d!.text, /3 times \(after 1, 2, 4 minutes\)/)
+      assert.equal(await readRetryStreak(stateDir, 's1'), undefined)
+      assert.equal((await retry(h, failed('server_error', OVERLOADED))).code, 2)
+    })
+  })
+
+  it('starts the count again after a turn that finished, and counts each session on its own', async () => {
+    await withFakeHome(async (h) => {
+      await turnOn(h)
+      await retry(h, failed('server_error', OVERLOADED))
+      await retry(h, failed('server_error', OVERLOADED))
+      assert.deepEqual((await retry(h, failed('server_error', OVERLOADED, 's2'))).slept, [60_000])
+      // The woken turn finished: its Stop ends the streak.
+      await run(h, ['claude', 'Stop'], stopInput(REPORT))
+      assert.deepEqual((await retry(h, failed('server_error', OVERLOADED))).slept, [60_000])
+      assert.equal((await readRetryStreak(resolvePaths(h.env).stateDir, 's2'))?.count, 1)
+    })
+  })
+
+  it('wakes nothing when the wait was overtaken: the turn went on, the mode went off, or the Host is gone', async () => {
+    await withFakeHome(async (h) => {
+      await turnOn(h)
+      // Someone continued the session meanwhile and the turn finished.
+      const finished = await retry(h, failed('server_error', OVERLOADED), {
+        during: async () => {
+          await run(h, ['claude', 'Stop'], stopInput(REPORT))
+        },
+      })
+      assert.deepEqual(finished, { code: 0, err: '', slept: [60_000] })
+      // A later failure of the same session took over the wait.
+      const overtaken = await retry(h, failed('server_error', OVERLOADED), {
+        during: async () => {
+          await retry(h, failed('server_error', OVERLOADED))
+        },
+      })
+      assert.equal(overtaken.code, 0)
+      assert.equal((await retry(h, failed('server_error', OVERLOADED), { gone: true })).code, 0)
+      const off = await retry(h, failed('server_error', OVERLOADED), {
+        during: async () => {
+          await writeUnattendedOverride(resolvePaths(h.env).stateDir, {
+            mode: 'pause',
+            at: now.toISOString(),
+          })
+        },
+      })
+      assert.equal(off.code, 0)
+    })
+  })
+
+  it('does nothing while off, for a used-up Quota or a lasting error, without a session id, or on bad input', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.config/sideby/config.json', '{"unattended":{}}')
+      const none = { code: 0, err: '', slept: [] }
+      assert.deepEqual(await retry(h, failed('server_error', OVERLOADED)), none)
+      await turnOn(h)
+      assert.deepEqual(
+        await retry(h, failed('rate_limit', "You've hit your session limit · resets 3:45pm")),
+        none,
+      )
+      assert.deepEqual(await retry(h, failed('authentication_failed', 'API Error: 401')), none)
+      assert.deepEqual(await retry(h, failed('unknown', 'something odd')), none)
+      assert.deepEqual(
+        await retry(h, JSON.stringify({ error: 'server_error', last_assistant_message: 'x' })),
+        none,
+      )
+      assert.deepEqual(await retry(h, 'not json'), none)
+      // Codex has no such hook, and the entry answers only Claude's.
+      const codex = await runUnattendedHook(
+        ['codex', 'StopFailure'],
+        h.env,
+        failed('server_error', OVERLOADED),
+        {
+          out: sink(),
+          err: sink(),
+        },
+      )
+      assert.equal(codex, 0)
+      assert.deepEqual(await listPendingDecisions(resolvePaths(h.env).stateDir), [])
+    })
+  })
+
+  it('tells a passing failure from a used-up Quota by the error type and its text', () => {
+    assert.equal(passingFailure('server_error', 'API Error: Connection refused (ECONNREFUSED)'), true)
+    assert.equal(passingFailure('overloaded', 'API Error: Repeated 529 Overloaded errors'), true)
+    assert.equal(passingFailure('rate_limit', 'API Error: Rate limit reached'), true)
+    assert.equal(passingFailure('rate_limit', 'API Error: Server is temporarily limiting requests'), true)
+    assert.equal(passingFailure('unknown', 'API Error: 408 Request Timeout'), true)
+    assert.equal(passingFailure('unknown', 'API Error: socket hang up'), true)
+    assert.equal(passingFailure('rate_limit', "You've hit your weekly limit · resets Mon 12:00am"), false)
+    assert.equal(passingFailure('rate_limit', "You've hit your monthly spend limit"), false)
+    assert.equal(
+      passingFailure('rate_limit', 'Fable limit reached · continuing on Fable 5.1 uses usage credits'),
+      false,
+    )
+    assert.equal(passingFailure('rate_limit', 'Claude usage limit reached'), false)
+    assert.equal(passingFailure('billing_error', 'Credit balance is too low'), false)
+    assert.equal(passingFailure('max_output_tokens', 'x'), false)
+    assert.equal(passingFailure('unknown', 'API Error: 400 bad request'), false)
+    assert.equal(passingFailure(undefined, '500'), false)
+  })
+
+  it('says it in Chinese', async () => {
+    await withFakeHome(async (h) => {
+      await turnOn(h)
+      const r = await retry(h, failed('server_error', OVERLOADED), { env: { LANG: 'zh_CN.UTF-8' } })
+      assert.equal(r.code, 2)
+      assert.match(r.err, /暂时性的错误/)
+      assert.match(r.err, /第 1 次，最多 3 次/)
+    })
+  })
+})
+
 describe('unattended hook imports', () => {
   it('reaches only leaf modules: never the Runtime, a Family index or core/accounts.ts', async () => {
     const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -674,6 +859,7 @@ describe('unattended hook imports', () => {
       'unattended/hook.ts',
       'core/unattended-state.ts',
       'core/unattended-pending.ts',
+      'core/unattended-retry.ts',
       'core/fs-safe.ts',
       'core/paths.ts',
     ])

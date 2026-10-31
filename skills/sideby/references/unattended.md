@@ -1,6 +1,6 @@
 # Unattended Mode: sessions that do not stop to wait for a person
 
-Unattended Mode (spec §3.37, ADR-0058) is one state for the whole computer: nobody is there to answer, so the Claude and Codex sessions sideby starts never stop to wait. While it is on, sideby's hook refuses the Host's question tool (Claude `AskUserQuestion`, Codex `request_user_input`) and tells the model to take the recommended option where the choice can be undone and to skip anything hard to undo; each refused question is kept as a **Pending Decision**. When the model ends its turn on a question written as text instead, the hook sends the session on once with the same instructions and keeps that question too. In Claude sessions it also answers "no" to every permission prompt Claude Code is about to show (even in bypass mode, and in subagents), with how to do the step without one; each refused request is kept as a Pending Decision too; and it declines MCP server forms, keeping what the server asked. Codex's own approval prompts still wait.
+Unattended Mode (spec §3.37, ADR-0058) is one state for the whole computer: nobody is there to answer, so the Claude and Codex sessions sideby starts never stop to wait. While it is on, sideby's hook refuses the Host's question tool (Claude `AskUserQuestion`, Codex `request_user_input`) and tells the model to take the recommended option where the choice can be undone and to skip anything hard to undo; each refused question is kept as a **Pending Decision**. When the model ends its turn on a question written as text instead, the hook sends the session on once with the same instructions and keeps that question too. In Claude sessions it also answers "no" to every permission prompt Claude Code is about to show (even in bypass mode, and in subagents), with how to do the step without one; each refused request is kept as a Pending Decision too; and it declines MCP server forms, keeping what the server asked; and a Claude turn that failed for a passing reason (an overloaded or failing server, a dropped connection, a rate limit that is not a used-up quota) is started again after 1, 2, then 4 minutes, and after a fourth failure in a row the session is left with a Pending Decision saying why (Turn Retry, ADR-0066). Codex's own approval prompts still wait.
 
 ## Turn it on when the user is leaving
 
@@ -47,6 +47,8 @@ sideby unattended defer "deleting the old release branch is left for the user" -
 
 Then go on with the rest. Do not retry the question, and do not work around the refusal.
 
+When a note from sideby says your last turn failed for a passing reason, the session was woken to go on: check what is already done (files, commits, background work), do not redo it, and continue where the turn stopped.
+
 ## When the user is back
 
 ```sh
@@ -55,6 +57,6 @@ sideby unattended pending --json    # each question, refused permission or skipp
 sideby unattended pending done <id> --json   # or --all, once the user has dealt with them
 ```
 
-Go through the open ones with the user (a `permission` one names the tool, for Bash only the program and the model's description of the step, and `agentType` when a subagent asked; the whole command is in the session itself). A decision with a `sessionId` can be continued in its session: `sideby sessions copy <sessionId> --as resume` copies the command. Done ones are deleted 30 days later. A plugin can be told when a stretch ends through the `unattended.ended` event (`docs/guide/plugins.md`); sideby itself sends no notification.
+Go through the open ones with the user (a `deferred` one that starts "The session stopped" is a session whose turn kept failing after three retries; a `permission` one names the tool, for Bash only the program and the model's description of the step, and `agentType` when a subagent asked; the whole command is in the session itself). A decision with a `sessionId` can be continued in its session: `sideby sessions copy <sessionId> --as resume` copies the command. Done ones are deleted 30 days later. A plugin can be told when a stretch ends through the `unattended.ended` event (`docs/guide/plugins.md`); sideby itself sends no notification.
 
 The same is on the Panel's **Unattended** tab (`sideby ui`): the status with **Turn on now**, the Schedule, and the Pending Decisions with **Done**. Point the user there when they prefer clicking.

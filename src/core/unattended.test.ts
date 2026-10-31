@@ -70,8 +70,25 @@ describe('Launch', () => {
       const { file, hooks } = await settingsOf(p.args)
       assert.ok(file.startsWith(`${rt.paths.stateDir}/unattended/`))
       // Before the ask tool only (no hook on every Bash call), on every permission request Claude Code shows, at
-      // the end of every turn, and on every MCP server form.
-      assert.deepEqual(Object.keys(hooks), ['PreToolUse', 'PermissionRequest', 'Stop', 'Elicitation'])
+      // the end of every turn, on every MCP server form, and after a turn that failed for a passing reason.
+      assert.deepEqual(Object.keys(hooks), [
+        'PreToolUse',
+        'PermissionRequest',
+        'Stop',
+        'Elicitation',
+        'StopFailure',
+      ])
+      // In the background: its exit 2 wakes the session (Turn Retry), and only for errors that can be passing.
+      assert.deepEqual(
+        hooks.StopFailure.map((g: { matcher: string }) => g.matcher),
+        ['rate_limit|overloaded|server_error|unknown'],
+      )
+      assert.match(
+        hooks.StopFailure[0].hooks[0].command,
+        /^'.+' '.+main\.ts' unattended-hook claude StopFailure$/,
+      )
+      assert.equal(hooks.StopFailure[0].hooks[0].asyncRewake, true)
+      assert.equal(hooks.StopFailure[0].hooks[0].timeout, 600)
       assert.deepEqual(
         hooks.PreToolUse.map((g: { matcher: string }) => g.matcher),
         ['AskUserQuestion'],
@@ -122,6 +139,7 @@ describe('Launch', () => {
         'PermissionRequest',
         'PreToolUse',
         'Stop',
+        'StopFailure',
         'UserPromptSubmit',
       ])
       const commands = hooks.PreToolUse.map((g: { hooks: { command: string }[] }) => g.hooks[0]!.command)
@@ -153,6 +171,7 @@ describe('Launch', () => {
         'PermissionRequest',
         'PreToolUse',
         'Stop',
+        'StopFailure',
         'UserPromptSubmit',
       ])
       assert.equal(hooks.PreToolUse.length, 3)

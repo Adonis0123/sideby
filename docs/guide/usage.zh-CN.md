@@ -296,6 +296,7 @@ sideby network check               # 现在查一次
 - 模型不调提问工具、而是在回合最后写一句文字问题就停下时（「Want me to …?」「需要你拍板」「你回来后选一个」），会话会带着同样的指示再接着跑一次，问题也记成一条 Pending Decision。以做完的汇报结尾的回合照常结束。
 - 在 Claude 会话里，Claude Code 要弹出的权限确认（比如 bypass 模式下也会弹的「Dangerous rm operation not ruled out」，后台子 agent 里也一样）在弹出之前就被回答「不行」。模型会读到怎么不用确认就做完这一步（写死路径、`rm` 目标里的变量写成 `"${VAR:?}"`、普通 bash 写法、`rm` 单独一条命令），或者跳过并记下原因。每个被拒的请求也记成一条 Pending Decision，写明来自哪个子 agent。shell 命令只记程序名和 AI 自己对这一步的说明，命令里的密码不会被抄下来；整条命令留在会话里。
 - 在 Claude 会话里，MCP server 要你填的表单不弹出，直接回绝；server 问了什么记成一条 Pending Decision。
+- 在 Claude 会话里，回合因为暂时性的错误停下（服务器过载或出错、连接断了、不是额度用完的限流）时，sideby 分别等 1、2、4 分钟让它接着跑，并告诉模型先看做完了什么、从中断处继续。连续第 4 次失败就不再重试，记一条 Pending Decision 写明原因，你早上回来接着这个会话就行。额度用完的情况仍交给 Auto Handoff 或 Claude Code 自己等重置。
 
 离开时打开，或者给它一张时间表：
 

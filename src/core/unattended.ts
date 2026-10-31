@@ -11,6 +11,7 @@ import { ownedFolder, writeFileAtomic } from './fs-safe.ts'
 import type { Paths } from './paths.ts'
 import { type SessionHookPart, sidebyHookCommand } from './session-hooks.ts'
 import { listPendingDecisions } from './unattended-pending.ts'
+import { PASSING_ERRORS, RETRY_HOOK_TIMEOUT_S } from './unattended-retry.ts'
 import {
   clearUnattendedOverride,
   clockText,
@@ -418,8 +419,9 @@ export const unattendedClock = (iso: string, now: Date, zh = false): string =>
 /**
  * Unattended Mode's session hooks: before the ask tool and when the model ends its turn (`Stop`, which keeps a turn
  * that ended on a question going once) in Claude and Codex; and in Claude on every permission request Claude Code is
- * about to show and every MCP server form (`Elicitation`). Codex has no such events for them; its own approval
- * prompts are not covered.
+ * about to show, every MCP server form (`Elicitation`), and every turn that failed with an error type a passing
+ * failure can have (`StopFailure`, in the background with `asyncRewake`, so its exit 2 wakes the session: Turn Retry,
+ * ADR-0066). Codex has no such events for them; its own approval prompts and failed turns are not covered.
  */
 export function unattendedHookPart(): SessionHookPart {
   const command = (family: string, event = 'PreToolUse') =>
@@ -433,6 +435,13 @@ export function unattendedHookPart(): SessionHookPart {
       PermissionRequest: [{ matcher: '*', hooks: claude('PermissionRequest') }],
       Stop: [{ hooks: claude('Stop') }],
       Elicitation: [{ matcher: '*', hooks: claude('Elicitation') }],
+      // Waits up to 4 minutes before it wakes the session; Claude Code still enforces `timeout` on `asyncRewake`.
+      StopFailure: [
+        {
+          matcher: PASSING_ERRORS.join('|'),
+          hooks: [{ ...claude('StopFailure')[0], asyncRewake: true, timeout: RETRY_HOOK_TIMEOUT_S }],
+        },
+      ],
     },
     codex: {
       PreToolUse: [`{matcher="^request_user_input$",${codex('PreToolUse')}}`],

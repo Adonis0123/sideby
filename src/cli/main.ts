@@ -343,7 +343,9 @@ a Claude or Codex session sideby started is not allowed to ask a question: the m
 where it can be undone, and skips anything hard to undo (deleting, sending, publishing, deploying, paying). Each
 question it could not ask, and each thing it skipped (\`defer\`), is kept as a Pending Decision for when you are back.
 In Claude sessions, a permission prompt Claude Code is about to show (a command it wants a person to confirm, also in
-a subagent) is answered with "no" and how to do it without one, and kept as a Pending Decision too. Codex's own
+a subagent) is answered with "no" and how to do it without one, and kept as a Pending Decision too. A Claude turn
+that failed for a passing reason (an overloaded server, a dropped connection, a rate limit that is not a used-up
+Quota) is started again after 1, 2, then 4 minutes; after three it is kept as a Pending Decision. Codex's own
 approval prompts are not covered.
 
 When it is on: during a Slot of the Schedule (local days and times; an end before the start is the next day), from

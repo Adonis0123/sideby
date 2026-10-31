@@ -1697,7 +1697,7 @@ const en = {
   'ua.noEnd': 'stays on: your Schedule covers every hour',
   'ua.pausedOpen': 'until you turn it on again',
   'ua.onNote':
-    'Sessions sideby starts do not stop to wait for you. Questions go on with the recommended choice; a step Claude Code wants you to confirm is refused, and the session finds another way or skips it. What they skipped is listed below.',
+    'Sessions sideby starts do not stop to wait for you. Questions go on with the recommended choice; a step Claude Code wants you to confirm is refused, and the session finds another way or skips it; a Claude turn cut off by a passing server or network error is started again, up to 3 times. What they skipped is listed below.',
   'ua.offNote':
     'When it is on, sessions sideby starts do not stop to wait for you: no questions, and no prompts asking you to confirm a step.',
   'ua.pausedNote': 'Until then, sessions ask you as usual. Turn it on now to go back.',
@@ -3371,7 +3371,7 @@ const zh: Record<MessageKey, string> = {
   'ua.noEnd': '一直开着：时间表覆盖了每个小时',
   'ua.pausedOpen': '等你再打开',
   'ua.onNote':
-    'sideby 启动的会话不会停下来等你：提问按推荐继续；Claude Code 要你确认的操作直接拒绝，会话换个做法或跳过。跳过的记在下面。',
+    'sideby 启动的会话不会停下来等你：提问按推荐继续；Claude Code 要你确认的操作直接拒绝，会话换个做法或跳过；Claude 回合因为服务器或网络的暂时问题中断时，自动接着跑，最多 3 次。跳过的记在下面。',
   'ua.offNote': '开着时，sideby 启动的会话不停下来等你：不提问，也不弹要你确认的框。',
   'ua.pausedNote': '在那之前，会话照常问你。现在开就恢复。',
   'ua.turnOn': '现在开',

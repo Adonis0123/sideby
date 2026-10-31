@@ -10,12 +10,25 @@
 // Claude Code's permission requests with a denial (JSON on stdout: Claude Code does not honor exit 2 for that event),
 // keeping the request as a Pending Decision too; it keeps a turn going once when the model ended it on a question
 // written as plain text (`{"decision":"block","reason":…}` on stdout), keeping the question; and it declines an MCP
-// server's form, keeping what the server asked. A failure before the decision is made does nothing: that is
+// server's form, keeping what the server asked. In Claude it also runs in the background after a turn that failed for
+// a passing reason (`StopFailure`, `asyncRewake`): it waits, then wakes the session with exit 2 so the turn goes on, at
+// most three times in a row, and keeps a Pending Decision when that did not help (Turn Retry, ADR-0066). A failure
+// before the decision is made does nothing: that is
 // how a session behaves without the feature (unlike `network-hook`, which blocks when it cannot tell). Once the
 // decision is to refuse, it refuses: keeping the Pending Decision and writing the reason are best effort, and their
 // failure neither allows the call nor adds any output of its own.
 import { resolvePaths } from '../core/paths.ts'
 import { addPendingDecision } from '../core/unattended-pending.ts'
+import {
+  clearRetryStreak,
+  countFailure,
+  passingFailure,
+  RETRY_LIMIT,
+  readRetryStreak,
+  retryDelay,
+  retryGaveUpText,
+  retryMessage,
+} from '../core/unattended-retry.ts'
 import {
   clockText,
   readUnattendedConfig,
@@ -39,6 +52,10 @@ type Env = Record<string, string | undefined>
 
 export interface UnattendedHookDeps {
   now?: () => Date
+  /** Turn Retry's wait; a real timer by default. */
+  sleep?: (ms: number) => Promise<void>
+  /** Whether the Host that started the hook is gone (`ppid` 1 by default): nothing is left to wake. */
+  parentGone?: () => boolean
 }
 
 function prefersChinese(env: Env): boolean {
@@ -406,6 +423,8 @@ async function decide(
             dedupe: true,
           }),
       }
+    // A turn that finished ends the session's run of retried failures (Turn Retry).
+    if (family === 'claude' && sessionId) await clearRetryStreak(paths.stateDir, sessionId).catch(() => {})
     // Once per stop: a turn the hook already kept going ends as the model leaves it.
     if (v.stop_hook_active !== false) return undefined
     const message = typeof v.last_assistant_message === 'string' ? v.last_assistant_message : ''
@@ -481,6 +500,16 @@ export async function runUnattendedHook(
   io: { out: { write(s: string): unknown }; err: { write(s: string): unknown } },
   deps: UnattendedHookDeps = {},
 ): Promise<number> {
+  if (argv[0] === 'claude' && argv[1] === 'StopFailure') {
+    try {
+      const wake = await retryAfterFailure(env, input, deps)
+      if (!wake) return 0
+      io.err.write(`${wake}\n`)
+      return 2
+    } catch {
+      return 0
+    }
+  }
   let refusal: Refusal | undefined
   const now = deps.now ? deps.now() : new Date()
   try {
@@ -511,4 +540,64 @@ export async function runUnattendedHook(
     // The Host still sees exit 2 and refuses the call.
   }
   return 2
+}
+
+/** Whether Unattended Mode is on right now, read fresh from the Schedule and the manual state. */
+async function isOn(env: Env, now: Date): Promise<boolean> {
+  const paths = resolvePaths(env)
+  const { schedule } = await readUnattendedConfig(paths.configFile)
+  const override = await readUnattendedOverride(paths.stateDir)
+  return unattendedState({ schedule, override, now, session: env[UNATTENDED_ENV] === '1' }).on
+}
+
+/**
+ * Turn Retry (spec §3.37 item 6, ADR-0066), Claude's background `StopFailure` hook (`asyncRewake`): Claude Code runs it
+ * when a turn ends on an API error and ignores its output, but wakes the idle session when it exits 2, with its stderr
+ * as the model's next note (checked with Claude Code 2.1.316). While Unattended Mode is on and the failure is a
+ * passing one, it counts the failure for the session; up to `RETRY_LIMIT` in a row it waits 1, 2, then 4 minutes and
+ * returns the note that wakes the session. Past the limit it keeps a Pending Decision and wakes nothing. It returns
+ * nothing (exit 0) when the mode is off, the failure is not passing, there is no session id, or by the end of the wait
+ * the mode went off, the Host is gone, or another failure or a finished turn has taken over the session's streak.
+ */
+async function retryAfterFailure(
+  env: Env,
+  input: AsyncIterable<string | Uint8Array> | string,
+  deps: UnattendedHookDeps,
+): Promise<string | undefined> {
+  const clock = deps.now ?? (() => new Date())
+  const now = clock()
+  if (!(await isOn(env, now))) return undefined
+  const v = parseObject(await readInput(input))
+  if (!v) return undefined
+  const sessionId = text(v.session_id, 256)
+  const error = typeof v.error === 'string' ? v.error : undefined
+  const said = [text(v.last_assistant_message, 1000), text(v.error_details, 1000)].filter(Boolean).join(' ')
+  if (!sessionId || !error || !passingFailure(error, said)) return undefined
+  const paths = resolvePaths(env)
+  const streak = await countFailure(paths.stateDir, sessionId, now)
+  if (streak.count > RETRY_LIMIT) {
+    const account = text(env.SIDEBY_ACCOUNT, 256)
+    const cwd = text(v.cwd)
+    await clearRetryStreak(paths.stateDir, sessionId).catch(() => {})
+    await addPendingDecision(
+      paths.stateDir,
+      {
+        kind: 'deferred',
+        family: 'claude',
+        ...(account ? { account } : {}),
+        sessionId,
+        ...(cwd ? { cwd } : {}),
+        text: retryGaveUpText(error, text(v.last_assistant_message, 1000) ?? ''),
+      },
+      now,
+      { dedupe: true },
+    ).catch(() => {})
+    return undefined
+  }
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  await sleep(retryDelay(streak.count))
+  if ((deps.parentGone ?? (() => process.ppid === 1))()) return undefined
+  if ((await readRetryStreak(paths.stateDir, sessionId))?.token !== streak.token) return undefined
+  if (!(await isOn(env, clock()))) return undefined
+  return retryMessage(error, text(v.last_assistant_message, 1000) ?? '', streak.count, prefersChinese(env))
 }
