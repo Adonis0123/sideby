@@ -64,7 +64,7 @@ const WHY = {
 
 /** The next session's first prompt: the Brief's path only, never its text (it would show in a process list). */
 export function firstPrompt(fromRef: string, brief: string, trigger: keyof typeof WHY): string {
-  return `This task was handed over from ${fromRef} by sideby because ${WHY[trigger]}. Read ${brief} first, then continue the task it describes. If the user asks to move the task to another account (back to ${fromRef}, say), run \`sideby handoff ready --to <account>\` and end your turn.`
+  return `This task was handed over from ${fromRef} by sideby because ${WHY[trigger]}. Read ${brief} first, then continue the task it describes. The previous session may have stopped mid-step: check the working tree, git history and any remote state before you repeat an outside action such as a push, a message or a pull request, and do not repeat one that already happened. If the user asks to move the task to another account (back to ${fromRef}, say), run \`sideby handoff ready --to <account>\` and end your turn.`
 }
 
 const clock = (iso: string) =>

@@ -81,4 +81,10 @@ describe('firstPrompt', () => {
     assert.doesNotMatch(manual, /quota/)
     assert.match(manual, /sideby handoff ready --to <account>/)
   })
+
+  it('tells the new session to check what the previous one already did before repeating an outside action', () => {
+    const p = firstPrompt('claude:008', '/b.md', 'limit')
+    assert.match(p, /check the working tree, git history and any remote state/)
+    assert.match(p, /do not repeat one that already happened/)
+  })
 })
