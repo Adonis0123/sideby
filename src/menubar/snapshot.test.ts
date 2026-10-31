@@ -535,6 +535,34 @@ it('keeps a plan-wide window on the account line and draws each model group unde
   assert.match(r.tip, /31-day window: 9% used[^\n]*\n\nCursor models\n {3}31-day window: 6% used/)
 })
 
+it('gives an unused model group no line of its own under plan-wide bars, keeping it in the hover text', () => {
+  const w = (label: string, used: number, name?: string) => ({
+    ...(name ? { name } : {}),
+    label,
+    windowMinutes: label === '5h' ? 300 : 10080,
+    usedPercent: used,
+    resetsAt: at(label === '5h' ? 120 : 9000),
+  })
+  const q = (fable: number): QuotaResult => ({
+    status: 'ok',
+    windows: [w('5h', 5), w('7d', 23), w('7d', fable, 'Fable')],
+    observedAt: NOW.toISOString(),
+    source: 'test',
+  })
+  const rows = menubarSnapshot(
+    [family('claude', 'Claude Code', [sub('main', q(0)), sub('work', q(3))])],
+    NOW,
+    'en',
+  ).sections[0]!.rows
+  const by = (name: string) => rows.find((r) => r.label === name)!
+  assert.deepEqual(by('main').groups, [])
+  assert.match(by('main').tip, /Fable\n {3}7-day window: 0% used/)
+  assert.deepEqual(
+    by('work').groups?.map((g) => g.label),
+    ['Fable'],
+  )
+})
+
 it('writes the hover text in words: how long ago the numbers were read, and why they may be old', () => {
   const q: QuotaResult = {
     status: 'ok',

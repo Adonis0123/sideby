@@ -463,14 +463,19 @@ function quotaRow(
       ...(all
         ? { bars: all.bars, reset: all.reset, resetLabel: all.resetLabel, resetTime: all.resetTime }
         : {}),
-      groups: drawnGroups.map((g) => ({
-        label: groupLabel(g.name),
-        bars: g.d.bars,
-        reset: g.d.reset,
-        resetLabel: g.d.resetLabel,
-        resetTime: g.d.resetTime,
-        tip: [...head, '', ...groupTip(g), '', startTip].join('\n'),
-      })),
+      // Under an account with its own plan-wide bars, a model group nobody has used yet (Claude's Fable at 0%) gets no
+      // line of its own: it would double the list with zeros. Its numbers stay in the hover text, and its line comes
+      // back once it is used or its window passes its reset. An account made only of groups keeps every line.
+      groups: drawnGroups
+        .filter((g) => !all || (g.d.bars ?? []).some((b) => b && (b.percent > 0 || b.passed)))
+        .map((g) => ({
+          label: groupLabel(g.name),
+          bars: g.d.bars,
+          reset: g.d.reset,
+          resetLabel: g.d.resetLabel,
+          resetTime: g.d.resetTime,
+          tip: [...head, '', ...groupTip(g), '', startTip].join('\n'),
+        })),
       note: stale ? s.olderReading : '',
     }
   }
