@@ -78,6 +78,7 @@ import {
   sendResultView,
   sessionAge,
   sessionLabelParts,
+  sessionRowShape,
   shortCwd,
   sortAccounts,
   sortSessions,
@@ -2197,6 +2198,22 @@ describe('Sessions page', () => {
     assert.deepEqual(
       steadyOrder(shown, later).map((x) => x.sessionId),
       ['bbbbbbbb2', 'cccccccc3', 'aaaaaaaa1'],
+    )
+  })
+
+  it('redraws a row when only the reason a Session needs the user changes, either way', () => {
+    const asks = { ...s('aaaaaaaa1', { status: 'needs-you' }), reason: 'host-waits' }
+    const decides = { ...s('aaaaaaaa1', { status: 'needs-you' }), reason: 'pending-decision' }
+    const same = (a: Parameters<typeof sessionRowShape>[0], b: Parameters<typeof sessionRowShape>[0]) =>
+      JSON.stringify(sessionRowShape(a)) === JSON.stringify(sessionRowShape(b))
+    assert.equal(same(asks, decides), false, 'host-waits to pending-decision shows the decision button')
+    assert.equal(same(decides, asks), false, 'pending-decision to host-waits takes the button away')
+    assert.equal(same(decides, s('aaaaaaaa1', { status: 'needs-you' })), false, 'a reason that goes away')
+    assert.equal(same(decides, { ...decides }), true, 'the same answer redraws nothing')
+    assert.notEqual(
+      JSON.stringify(sessionRowShape(asks, { status: 'paste-needed' })),
+      JSON.stringify(sessionRowShape(asks)),
+      'its latest Message still counts',
     )
   })
 

@@ -908,6 +908,40 @@ export function steadyOrder<T extends LogicSession>(shown: readonly string[], li
   return rank.map((x) => x.s)
 }
 
+/**
+ * Everything a Sessions row shows except its age, as plain values: the page redraws a row only when this changes.
+ * `reason` is in it, so a Session that keeps `needs-you` for another reason (a decision instead of its Host asking)
+ * gets its button and its hint redrawn.
+ */
+export function sessionRowShape(
+  s: LogicSession & {
+    family?: string
+    reason?: string
+    guessed?: boolean
+    copy?: unknown
+    orca?: unknown
+    run?: unknown
+  },
+  msg?: { status: string; needsApproval?: boolean },
+): unknown[] {
+  return [
+    s.sessionId,
+    s.account,
+    s.accountLabel,
+    s.family,
+    s.title,
+    s.label,
+    s.status,
+    s.reason || '',
+    s.cwd,
+    s.guessed,
+    s.copy,
+    Boolean(s.orca),
+    s.run || null,
+    msg ? msg.status + (msg.needsApproval ? '+approve' : '') : '',
+  ]
+}
+
 /** How long ago a Session was last active, as a message key and count; null when it has no time at all. */
 export function sessionAge(s: LogicSession, now: number): { key: string; n?: number } | null {
   const ts = Date.parse(s.updatedAt || s.startedAt || '')

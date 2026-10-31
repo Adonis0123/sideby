@@ -77,6 +77,7 @@ import {
   sendResultView,
   sessionAge,
   sessionLabelParts,
+  sessionRowShape,
   shortCwd,
   shortSessionLabel,
   sortAccounts,
@@ -184,6 +185,7 @@ const LOGIC = [
   sendResultView,
   sessionAge,
   sessionLabelParts,
+  sessionRowShape,
   shortCwd,
   shortSessionLabel,
   sortAccounts,
@@ -3760,7 +3762,7 @@ const MAIN = String.raw`
     sp.order = list.map((s) => s.sessionId)
     // Everything a row shows except its age, which renderSessionAges keeps current in place.
     const shape = JSON.stringify([lang, hs.opening, !d && !sp.error, sp.error ? sp.error.message : '', d ? d.problems : [],
-      list.map((s) => [s.sessionId, s.account, s.accountLabel, s.family, s.title, s.label, s.status, s.cwd, s.guessed, s.copy, Boolean(s.orca), s.run || null, sp.msgs[s.sessionId] ? sp.msgs[s.sessionId].status + (sp.msgs[s.sessionId].needsApproval ? '+approve' : '') : '']), inboundShape()])
+      list.map((s) => sessionRowShape(s, sp.msgs[s.sessionId])), inboundShape()])
     if (shape === sp.drawn) { sp.pending = false; renderSessionAges(); revealSession(); return }
     if (sessionsMenuOpen()) { sp.pending = true; return }
     sp.pending = false
