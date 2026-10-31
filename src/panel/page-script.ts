@@ -3693,13 +3693,19 @@ const MAIN = String.raw`
           p.title ? h('span', { class: 'sess-title' }, p.title) : null,
           h('span', { class: 'mono sess-id' }, p.id)),
         h('div', { class: 'sess-sub muted small' },
-          h('span', { class: 'sess-status' }, h('span', { class: 'dot sess-dot', 'aria-hidden': 'true' }), t('spage.status.' + status)),
+          sessStatus(s, status),
+          s.reason === 'pending-decision' && status === 'needs-you' ? h('button', { class: 'chip chip-sm chip-warn chip-btn sess-decision', type: 'button', 'data-key': 'sess-decision-' + s.sessionId, 'data-tip': t('spage.decisionTip'), onclick: () => setPage('unattended') }, t('spage.decision'), icon('chevron')) : null,
           chip ? msgChip(chip, msg, s) : null,
           s.guessed ? h('span', { class: 'chip sess-guessed', tabindex: '0', 'data-tip': t('spage.guessedTip') }, t('spage.guessed')) : null,
           runChip(s),
           h('span', { class: 'sess-cwd' + (cwd ? ' mono' : ''), title: s.cwd && cwd !== s.cwd ? s.cwd : null }, cwd || t('spage.noCwd')),
           h('span', { class: 'sess-age', 'data-age': s.sessionId }, sessAgeText(s)))),
       h('div', { class: 'sess-actions' }, copyBtn, sendBtn, more)), liveMenu)
+  }
+  // The status, and why a Session needs the user when sideby knows (spec §3.32 step 1's table).
+  function sessStatus(s, status) {
+    const why = status === 'needs-you' && ['host-waits', 'pending-decision', 'message-to-approve', 'message-to-paste'].includes(s.reason) ? t('spage.why.' + s.reason) : null
+    return h('span', { class: 'sess-status', tabindex: why ? '0' : null, 'data-tip': why }, h('span', { class: 'dot sess-dot', 'aria-hidden': 'true' }), t('spage.status.' + status))
   }
   // The latest Message's state on a row. One that waits for a paste opens what to paste and why, so the line is never
   // only in the dialog that sent it.

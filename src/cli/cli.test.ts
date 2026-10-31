@@ -15,6 +15,7 @@ import {
   snapshot,
   withFakeHome,
 } from '../../testing/index.ts'
+import { addPendingDecision } from '../core/unattended-pending.ts'
 import { quotaText } from './format.ts'
 import { OUTPUT_SCHEMAS } from './json-schemas.ts'
 
@@ -2794,6 +2795,34 @@ describe('sideby sessions (spec §3.32)', () => {
       assert.match(
         empty.out,
         /claude:main has no running session now\. Start one with `sideby run <account>`/,
+      )
+    })
+  })
+
+  it('says a session needs you for an open Pending Decision, with where to see it, in text and --json', async () => {
+    await withFakeHome(async (h) => {
+      await claudeSessions(h, true)
+      await fakeMachine(h, [4101, 4102])
+      await addPendingDecision(join(h.env.XDG_STATE_HOME!, 'sideby'), {
+        kind: 'permission',
+        family: 'claude',
+        account: 'claude:work',
+        sessionId: ID_B,
+        text: 'Bash: git',
+      })
+      const human = await sideby(h, ['sessions'])
+      assert.equal(human.code, 0, human.err)
+      assert.match(human.out, /cc002 · release notes · 0799701d\s+needs you: a decision\s+\/work\/repo/)
+      assert.match(human.out, /cc002 · knip cleanup · 61230c3d\s+needs you\s+\/work\/repo/)
+      assert.match(human.out, /See the decisions waiting for you: sideby unattended pending/)
+      const data = checkSchema('sessions', (await sideby(h, ['sessions', '--json'])).out)
+      const list = data.sessions as { sessionId: string; status: string; reason?: string }[]
+      assert.deepEqual(
+        list.map((s) => [s.sessionId, s.status, s.reason]).sort(),
+        [
+          [ID_A, 'needs-you', 'host-waits'],
+          [ID_B, 'needs-you', 'pending-decision'],
+        ].sort(),
       )
     })
   })

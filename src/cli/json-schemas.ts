@@ -1449,8 +1449,19 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
             ['needs-you', 'busy', 'idle', 'unknown'].map((k) => Type.Literal(k)),
             {
               description:
-                '`needs-you`: it waits for the user (a permission or a question); `unknown` where the host does not say.',
+                "`needs-you`: the user has to act on it (`reason` says why); `busy` and `idle` as the host says; `unknown` where the host does not say. The first matching row of spec §3.32 step 1's status table.",
             },
+          ),
+          reason: Type.Optional(
+            Type.Union(
+              ['host-waits', 'pending-decision', 'message-to-approve', 'message-to-paste'].map((k) =>
+                Type.Literal(k),
+              ),
+              {
+                description:
+                  'Only with `needs-you`: the host waits for a permission or an answer; an open Pending Decision names the session (`sideby unattended pending`); a Message to it waits for the user to approve it in its terminal; or a Message to it waits to be pasted (`sideby messages`). New values may be added.',
+              },
+            ),
           ),
           cwd: Type.Optional(Str),
           pid: Type.Optional(Type.Integer({ description: 'The host process running it.' })),

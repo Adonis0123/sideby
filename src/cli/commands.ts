@@ -3372,6 +3372,19 @@ const SESSION_STATUS: Record<string, string> = {
   unknown: '—',
 }
 
+/** What the user does for a Session that needs them, when it is not the Host itself asking (spec §3.32 step 1). */
+const NEEDS_YOU_FOR: Record<string, string> = {
+  'pending-decision': 'a decision',
+  'message-to-approve': 'approve a message',
+  'message-to-paste': 'paste a message',
+}
+
+function sessionStatusText(s: { status: string; reason?: string }): string {
+  const why = s.reason ? NEEDS_YOU_FOR[s.reason] : undefined
+  const text = SESSION_STATUS[s.status] ?? SESSION_STATUS.unknown!
+  return s.status === 'needs-you' ? c.yellow(why ? `${text}: ${why}` : text) : text
+}
+
 /** The language of a copied Session Reference: `--lang`, else the user's locale. */
 function copyLang(a: ParsedArgs, env: Record<string, string | undefined>): 'en' | 'zh' {
   const flag = a.flags.get('lang')
@@ -3423,7 +3436,7 @@ export async function cmdSessions(a: ParsedArgs, io: Io, runtime?: Runtime): Pro
   const anyRun = sessions.some((s) => s.run)
   const rows = sessions.map((s) => [
     c.bold(sessionLabel(s.accountLabel, truncate(s.title, 40), s.sessionId)),
-    s.status === 'needs-you' ? c.yellow(SESSION_STATUS[s.status]!) : SESSION_STATUS[s.status]!,
+    sessionStatusText(s),
     s.cwd ? tildify(s.cwd, home) : '',
     s.startedAt ? clock(s.startedAt, now) : '',
     ...(anyRun
@@ -3439,6 +3452,10 @@ export async function cmdSessions(a: ParsedArgs, io: Io, runtime?: Runtime): Pro
       if (!boards.has(r.board)) boards.set(r.board, r.title)
   for (const [board, title] of boards) io.out(c.dim(`Run: ${title}  ${tildify(board, home)}`))
   if (boards.size) io.out(c.dim('Open its run report: sideby sessions open-run <account|session-id>'))
+  if (sessions.some((s) => s.reason === 'pending-decision'))
+    io.out(c.dim('See the decisions waiting for you: sideby unattended pending'))
+  if (sessions.some((s) => s.reason === 'message-to-paste' || s.reason === 'message-to-approve'))
+    io.out(c.dim('See the messages waiting for you, with the line to paste: sideby messages'))
   io.out(c.dim('Copy one for another AI: sideby sessions copy <account|session-id>'))
   return 0
 }

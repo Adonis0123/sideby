@@ -78,7 +78,28 @@
                 "const": "unknown"
               }
             ],
-            "description": "`needs-you`: it waits for the user (a permission or a question); `unknown` where the host does not say."
+            "description": "`needs-you`: the user has to act on it (`reason` says why); `busy` and `idle` as the host says; `unknown` where the host does not say. The first matching row of spec §3.32 step 1's status table."
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "host-waits"
+              },
+              {
+                "type": "string",
+                "const": "pending-decision"
+              },
+              {
+                "type": "string",
+                "const": "message-to-approve"
+              },
+              {
+                "type": "string",
+                "const": "message-to-paste"
+              }
+            ],
+            "description": "Only with `needs-you`: the host waits for a permission or an answer; an open Pending Decision names the session (`sideby unattended pending`); a Message to it waits for the user to approve it in its terminal; or a Message to it waits to be pasted (`sideby messages`). New values may be added."
           },
           "cwd": {
             "type": "string"

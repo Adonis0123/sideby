@@ -8,6 +8,13 @@ import { aliasesByAccount } from './accounts.ts'
 import { aliasArgs, aliasRefs } from './config.ts'
 import { type LiveSessionDeps, processView, systemDeps } from './live-sessions-procs.ts'
 import type { SessionRun } from './run-link.ts'
+import {
+  MESSAGES_LOOKED_AT,
+  type NeedsYouReason,
+  readAttention,
+  type SessionAttention,
+  withStatus,
+} from './session-status.ts'
 
 export type LiveSessionStatus = 'needs-you' | 'busy' | 'idle' | 'unknown'
 
@@ -22,7 +29,10 @@ export interface LiveSession {
   title: string
   /** `<accountLabel> · <title> · <first 8 of sessionId>`. */
   label: string
+  /** The first matching row of the status table (spec §3.32 step 1, `STATUS_RULES` in session-status.ts). */
   status: LiveSessionStatus
+  /** Why the Session needs the user; only with status `needs-you`. */
+  reason?: NeedsYouReason
   cwd?: string
   pid?: number
   startedAt?: string
@@ -148,6 +158,18 @@ export async function listLiveSessions(
   const problems: string[] = []
   const readable = accounts.filter((a) => liveSessionReader(a.family))
   if (!readable.length) return { sessions: [], problems }
+  // What sideby keeps for Sessions (Pending Decisions, Messages) is read beside the Hosts' files. The Messages module
+  // reaches back here to pick a target, so it is loaded only when needed.
+  const kept = readAttention(
+    rt.readContext().stateDir,
+    async () =>
+      (await import('./messages.ts')).listMessages(rt, { limit: MESSAGES_LOOKED_AT, persist: false }),
+    problems,
+  )
+  let keptNow: SessionAttention | undefined
+  const keptRead = kept.then((k) => {
+    keptNow = k
+  })
   const ctl = new AbortController()
   const procs = processView(deps ?? systemDeps(rt.env), ctl.signal)
   const found: LiveSession[] = []
@@ -184,15 +206,21 @@ export async function listLiveSessions(
   const late = new Promise<'late'>((resolve) => {
     timer = setTimeout(() => resolve('late'), deadlineMs)
   })
-  if ((await Promise.race([work.then(() => 'done' as const), late])) === 'late') {
+  const done = Promise.all([work, keptRead]).then(() => 'done' as const)
+  if ((await Promise.race([done, late])) === 'late') {
     ctl.abort()
-    problems.push(
-      `stopped looking after ${deadlineMs / 1000} s; ${[...pending].join(', ') || 'some accounts'} may run sessions that are not shown; run \`sideby sessions\` again`,
-    )
+    if (pending.size || !keptNow)
+      problems.push(
+        pending.size
+          ? `stopped looking after ${deadlineMs / 1000} s; ${[...pending].join(', ')} may run sessions that are not shown; run \`sideby sessions\` again`
+          : `stopped looking after ${deadlineMs / 1000} s; a session waiting on a decision or a message may not show as needing you; run \`sideby sessions\` again`,
+      )
   }
   clearTimeout(timer)
+  // Past the deadline, what sideby keeps counts only if it was read in time.
+  const sessions = withStatus(found, keptNow ?? { decisions: [], receipts: [] })
   // One unreadable process is met by every Account of its Family: say it once.
-  return { sessions: sortSessions([...found]), problems: [...new Set(problems)] }
+  return { sessions: sortSessions(sessions), problems: [...new Set(problems)] }
 }
 
 export type ReferenceFields = Pick<

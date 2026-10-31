@@ -7,7 +7,7 @@ For "which session is cc002 running", "cc002 现在在干嘛", "cc002 在哪个�
 Run `sideby sessions --json` (or `sideby sessions <account|family> --json` for one account or host). Each entry of `sessions` is one running session:
 
 - `label` is the Session Label, `<account> · <the host's own title> · <first 8 of the id>`, as in `cc002 · knip cleanup · 61230c3d`. Use it when you name a session to the user; sideby never invents the title.
-- `status`: `needs-you` (it waits for a permission or an answer: tell the user first), `busy`, `idle`, or `unknown` where the host does not say. Sessions that need the user come first.
+- `status`: `needs-you` (the user has to act on it: tell the user first), `busy`, `idle`, or `unknown` where the host does not say. Sessions that need the user come first. With `needs-you`, `reason` says why, so tell the user what to do: `host-waits` (it waits in its terminal for a permission or an answer), `pending-decision` (it asked something while Unattended Mode was on: show it with `sideby unattended pending --json`, see `unattended.md`), `message-to-approve` (a Message to it waits for the user to approve it in its terminal) or `message-to-paste` (a Message to it waits to be pasted: `sideby messages --to <session-id> --json` gives the line, see "Tell a session something" below).
 - `cwd`, `startedAt`, `updatedAt`, `transcript` (the path of its record), `resumeCommand`.
 - `guessed: true` means sideby could not tie a running Codex or pi program to a session and shows that account's newest session instead. Say "probably" when you report it.
 

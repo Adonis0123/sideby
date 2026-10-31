@@ -48,6 +48,7 @@ Avoid: *profile* on its own (Codex already uses it for a config layer that does 
 
 - **Session**: one conversation of a Host in one Account, known by the Host's session id. It stays in the Account that started it.
 - **Live Session**: a Session whose Host process is still running. sideby finds it from the Host's own files; where it can only guess (the newest Session of an Account), it says so.
+- **Needs You** (status `needs-you`; the Panel says *Needs you*, 需要你处理): a Live Session the user has to act on: its Host waits for an answer or an approval, a Pending Decision names it, or a Message to it waits for the user to approve or paste it (`reason` says which). A Session's status is the first matching row of one ordered table (spec §3.32 step 1, ADR-0066); Needs You rows come before what the Host says (working, idle).
 - **Session Label**: how a Session is shown wherever the user looks (tab title, status line, lists): the Account name, the Host's own title for the Session, and a short id, as in `cc002 · knip cleanup · 61230c3d`. sideby never invents the title.
 - **Session Reference**: one sentence that points another AI at a Session (its Account, Label and where its record is), ready to paste. It is what a copy button copies first.
 - **Run**: a piece of work a local orchestrator (such as the `agent-dispatch` skill) splits across several Sessions, with a Run Board: a static HTML report file in the orchestrator's state folder. sideby never starts or changes one; it only shows which Run a Live Session works for.
