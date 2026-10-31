@@ -9,6 +9,7 @@ import {
   claudeSocketOf,
   DELIVER_TIMEOUT_MS,
   messageLine,
+  PassingWriteError,
   sessionBypass,
   socketChanged,
   socketRoots,
@@ -55,9 +56,11 @@ export async function deliverClaude(req: DeliveryRequest): Promise<Delivery> {
         note: `sideby wrote it to ${to.label} but could not confirm it arrived (${err.message}).${ended ? ' The session has ended since.' : ''} It may still show up; check the session before you send it again`,
       }
     }
-    return paste(
-      `sideby could not reach ${to.label} (${(err as Error).message}); paste the line into its tab`,
-    )
+    // Nothing was written: a failure that may pass is tried again (core/messages.ts), any other is a paste.
+    return {
+      ...paste(`sideby could not reach ${to.label} (${(err as Error).message}); paste the line into its tab`),
+      ...(err instanceof PassingWriteError ? { retry: true } : {}),
+    }
   }
   if (inbound === 'accept') return { status: 'delivered' }
   const proc = await procs.get(pid)

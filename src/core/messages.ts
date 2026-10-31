@@ -79,7 +79,19 @@ export interface MessageDeps {
   timeoutMs?: number
   /** How `codex <args>` runs for Codex delivery; resolves to its exit code. */
   runCodex?: (args: readonly string[], env: NodeJS.ProcessEnv, timeoutMs: number) => Promise<number>
+  /** The wait between delivery tries; a real timer when left out. */
+  sleep?: (ms: number) => Promise<void>
 }
+
+/** How many times a delivery whose channel failed in a way that may pass is tried, the first time included. */
+export const DELIVERY_TRIES = 3
+/** The wait before the second try; each next one waits twice as long, at most `DELIVERY_RETRY_MAX_MS`. */
+export const DELIVERY_RETRY_FIRST_MS = 2_000
+export const DELIVERY_RETRY_MAX_MS = 60_000
+
+/** The wait before try `n` (2-based: the first try does not wait). */
+export const deliveryRetryDelay = (n: number): number =>
+  Math.min(DELIVERY_RETRY_MAX_MS, DELIVERY_RETRY_FIRST_MS * 2 ** Math.max(0, n - 2))
 
 /** The largest screenshot sideby copies. */
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024
@@ -379,17 +391,23 @@ async function sendOpened(
     receipt.note = `sideby saved the message file, but could not save its status (${(err as NodeJS.ErrnoException).code ?? (err as Error).message}). Paste the line into the session's tab`
     return { ...publicReceipt(receipt), ...(handedOverFrom ? { handedOverFrom } : {}) }
   }
-  let result: { status: MessageStatus; note?: string; needsApproval?: boolean }
+  let result: Delivery
   try {
     const acct = (await rt.accounts()).find((a) => a.ref === to.account)
-    result = await deliver(rt, to, acct, receipt, text, reply, procDeps, deps)
+    result = await deliverWithRetry(
+      () => deliver(rt, to, acct, receipt, text, reply, procDeps, deps),
+      to,
+      procDeps,
+      deps,
+    )
   } catch (err) {
     result = {
       status: 'paste-needed',
       note: `sideby could not deliver it (${(err as NodeJS.ErrnoException).code ?? (err as Error).message}); paste the line into its tab`,
     }
   }
-  Object.assign(receipt, result)
+  const { retry: _retry, ...outcome } = result
+  Object.assign(receipt, outcome)
   try {
     await saveReceipt(receipt)
   } catch (err) {
@@ -400,6 +418,39 @@ async function sendOpened(
       receipt.note = `${receipt.note ?? 'paste the line into its tab'} (sideby also could not save the message status: ${why})`
   }
   return { ...publicReceipt(receipt), ...(handedOverFrom ? { handedOverFrom } : {}) }
+}
+
+/**
+ * Delivers, and tries again while the channel failed in a way that may pass and took nothing (`retry`, never after a
+ * write that may have reached the session, ADR-0065): up to `DELIVERY_TRIES` times, 2 s, then 4 s apart, and not once
+ * the target's process is gone. Every try runs every check again (settings, session record, socket owner and folder).
+ * The last failure is the result, its note saying how many tries were made.
+ */
+async function deliverWithRetry(
+  once: () => Promise<Delivery>,
+  to: LiveSession,
+  procDeps: LiveSessionDeps,
+  deps: MessageDeps,
+): Promise<Delivery> {
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  let result = await once()
+  let tries = 1
+  while (result.retry && result.status === 'paste-needed' && tries < DELIVERY_TRIES) {
+    if (to.pid === undefined) break
+    const gone = await processView(procDeps)
+      .get(to.pid)
+      .then(
+        (p) => !p,
+        () => false,
+      )
+    if (gone) break
+    tries++
+    await sleep(deliveryRetryDelay(tries))
+    result = await once()
+  }
+  if (result.retry && result.status === 'paste-needed' && tries > 1 && result.note)
+    result = { ...result, note: result.note.replace(/\); paste /, `; tried ${tries} times); paste `) }
+  return result
 }
 
 async function deliver(

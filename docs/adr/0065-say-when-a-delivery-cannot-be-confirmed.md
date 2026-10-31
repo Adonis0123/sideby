@@ -24,3 +24,16 @@ ADR-0040 delivers a Message through the Host's own channel and records the outco
 A user is no longer told to paste a Message that may already be there; they look at the session first. A JSON consumer that branches on the status set sees a new value it may not handle; one that treats unknown values as "not delivered" may still paste, which is why `note` and the schema description say to check the target first.
 
 Future work: when Codex offers a read-only way to check its queue by the Message id without reading a login, a `codex queue` timeout can be split into `delivered` or `paste-needed`, and `unknown` stays only for a failed check and Claude's half write.
+
+## Amendment (2026-11-01): try again when nothing was written
+
+A Claude session that is busy for a moment (a long synchronous step, a full connection queue) can refuse or drop the connection to its message socket, or not accept it within the 3 s timeout. The receipt went straight to `paste-needed`, and the user pasted a line that a second try a few seconds later would have delivered.
+
+Decision:
+
+- A Claude socket write that fails before anything was written with `ECONNREFUSED`, `ECONNRESET`, `EAGAIN`, `ETIMEDOUT` or `EPIPE`, or with the timeout before writing, is a passing failure (`PassingWriteError` in `families/claude/messaging.ts`). The delivery returns `paste-needed` with an internal `retry` flag, never kept in the receipt.
+- `core/messages.ts` then delivers again, at most three tries in all, 2 s and then 4 s apart (doubling, capped at 60 s), and not once the target's process is gone. Every try runs every check again: the settings, the session record, the socket's owner and folder, and the identity check right before writing. When the last try fails too, the receipt is `paste-needed` and its note says how many tries were made.
+- Nothing that may already have reached the session is tried again: a write that began (`UnconfirmedWrite`) stays `unknown`. Codex is not tried again: `codex queue` exits non-zero for lasting reasons (an older Codex, a session it has not saved), sideby does not read its output (it may hold account details), so a passing failure cannot be told from a lasting one; and its timeout is already `unknown`.
+- A failed check (a socket of another user, a changed socket, `crossSessionInbound` set to `refuse`, a missing socket file) is not passing and is a paste at once, as before.
+
+Consequence: `sideby send` and the Panel's send wait up to about 6 s longer (plus up to 3 s per try that times out) before they hand over a paste; a receipt never says `delivered` twice for one Message, since only a try that wrote nothing is repeated.

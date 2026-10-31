@@ -142,9 +142,19 @@ export const messageLine = (text: string): string =>
 export class UnconfirmedWrite extends Error {}
 
 /**
+ * Nothing was written, and the failure may pass: the session refused or dropped the connection, its queue was full,
+ * or it did not answer in time. Sending again cannot deliver the line twice, so the delivery is tried again.
+ */
+export class PassingWriteError extends Error {}
+
+/** Socket errors before anything is written that a session that is busy for a moment gives. */
+const PASSING_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'EAGAIN', 'ETIMEDOUT', 'EPIPE'])
+
+/**
  * Connects to `path`, runs `verify` (a reason rejects before anything is written), writes `line`, and closes the
  * connection as soon as the line is flushed, also when the peer keeps its end open. Rejects on a refused connection
- * or after `timeoutMs`; with `UnconfirmedWrite` once the line was written and the flush did not come.
+ * or after `timeoutMs` (with `PassingWriteError` when nothing was written and it may pass); with `UnconfirmedWrite`
+ * once the line was written and the flush did not come.
  */
 export function writeToSocket(
   path: string,
@@ -165,7 +175,7 @@ export function writeToSocket(
       else resolve()
     }
     const timer = setTimeout(
-      () => finish(new Error(`it did not answer within ${timeoutMs / 1000} s`)),
+      () => finish(new PassingWriteError(`it did not answer within ${timeoutMs / 1000} s`)),
       timeoutMs,
     )
     sock.once('connect', async () => {
@@ -175,11 +185,10 @@ export function writeToSocket(
       written = true
       sock.end(line, () => finish(null))
     })
-    sock.once('error', (err: NodeJS.ErrnoException) =>
-      finish(
-        new Error(err.code === 'ECONNREFUSED' ? 'it refused the connection' : (err.code ?? err.message)),
-      ),
-    )
+    sock.once('error', (err: NodeJS.ErrnoException) => {
+      const why = err.code === 'ECONNREFUSED' ? 'it refused the connection' : (err.code ?? err.message)
+      finish(err.code && PASSING_CODES.has(err.code) ? new PassingWriteError(why) : new Error(why))
+    })
   })
 }
 

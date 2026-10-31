@@ -14,6 +14,7 @@ import {
   claudeSocketOf,
   isSocketFolderName,
   messageLine,
+  PassingWriteError,
   sessionBypass,
   socketProblem,
   socketRoots,
@@ -379,11 +380,19 @@ describe('sideby send', () => {
       await s.close()
       const procs = await machine(h, stale, { inbound: 'accept' })
       const rt = await createRuntime({ env: h.env })
-      const r = await sendMessage(rt, 'cc002', { text: 'x' }, depsFor(procs, s.root))
+      // A refused connection may pass: tried three times, 2 s then 4 s apart, before the paste.
+      const slept: number[] = []
+      const r = await sendMessage(
+        rt,
+        'cc002',
+        { text: 'x' },
+        depsFor(procs, s.root, { sleep: async (ms) => void slept.push(ms) }),
+      )
       assert.equal(r.status, 'paste-needed')
+      assert.deepEqual(slept, [2000, 4000])
       assert.match(
         r.note!,
-        /^sideby could not reach cc002 · b · 0799701d \(it refused the connection\); paste the line into its tab$/,
+        /^sideby could not reach cc002 · b · 0799701d \(it refused the connection; tried 3 times\); paste the line into its tab$/,
       )
       const slow = await sendMessage(
         rt,
@@ -402,6 +411,86 @@ describe('sideby send', () => {
         other.note!,
         /^sideby did not deliver it because its message channel folder belongs to another user on this computer;/,
       )
+    })
+  })
+
+  it('tries a delivery that failed before writing again, and delivers it once', async () => {
+    await withFakeHome(async (h) => {
+      const s = await socketServer(h, '4102')
+      const procs = await machine(h, s.path, { inbound: 'accept' })
+      const rt = await createRuntime({ env: h.env })
+      const slept: number[] = []
+      let tries = 0
+      const r = await sendMessage(
+        rt,
+        'cc002',
+        { text: 'hello again' },
+        depsFor(procs, s.root, {
+          sleep: async (ms) => void slept.push(ms),
+          write: async (path, line, ms, verify) => {
+            if (++tries < 3) throw new PassingWriteError('it refused the connection')
+            return writeToSocket(path, line, ms, verify)
+          },
+        }),
+      )
+      await s.close()
+      assert.equal(r.status, 'delivered')
+      assert.equal(r.note, undefined)
+      assert.deepEqual(slept, [2000, 4000])
+      assert.equal(s.got.length, 1)
+      assert.match(s.got[0]!, /hello again/)
+      const kept = JSON.parse(await fsp.readFile(r.file.replace(/\.md$/, '.json'), 'utf8'))
+      assert.equal(kept.status, 'delivered')
+      assert.equal('retry' in kept, false)
+    })
+  })
+
+  it('never tries again after a write that may have arrived, or once the session is gone', async () => {
+    await withFakeHome(async (h) => {
+      const s = await socketServer(h, '4102')
+      const procs = await machine(h, s.path, { inbound: 'accept' })
+      const rt = await createRuntime({ env: h.env })
+      let writes = 0
+      const slept: number[] = []
+      const half = await sendMessage(
+        rt,
+        'cc002',
+        { text: 'x' },
+        depsFor(procs, s.root, {
+          sleep: async (ms) => void slept.push(ms),
+          write: async () => {
+            writes++
+            throw new UnconfirmedWrite('it did not answer within 3 s')
+          },
+        }),
+      )
+      assert.equal(half.status, 'unknown')
+      assert.equal(writes, 1)
+      // The target's process ended after the first refusal: no second try.
+      writes = 0
+      let alive = true
+      const gone: LiveSessionDeps = {
+        ...procs,
+        processes: async () => (await procs.processes()).filter((p) => alive || p.pid !== 4102),
+      }
+      const r = await sendMessage(
+        rt,
+        'cc002',
+        { text: 'x' },
+        depsFor(gone, s.root, {
+          sleep: async (ms) => void slept.push(ms),
+          write: async () => {
+            writes++
+            alive = false
+            throw new PassingWriteError('it refused the connection')
+          },
+        }),
+      )
+      await s.close()
+      assert.equal(r.status, 'paste-needed')
+      assert.equal(writes, 1)
+      assert.deepEqual(slept, [])
+      assert.match(r.note!, /\(it refused the connection\); paste the line/)
     })
   })
 

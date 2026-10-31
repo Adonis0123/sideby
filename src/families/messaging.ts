@@ -35,6 +35,12 @@ export interface Delivery {
   note?: string
   /** The Host took it but shows it only after the user approves it in the target's terminal (ADR-0045). */
   needsApproval?: boolean
+  /**
+   * A `paste-needed` whose channel took nothing and failed in a way that may pass (a refused connection, no answer
+   * before writing): sending again cannot deliver it twice, so `core/messages.ts` tries again after a wait. Never
+   * kept in a receipt.
+   */
+  retry?: boolean
 }
 
 export const DELIVERERS: Readonly<Record<string, (req: DeliveryRequest) => Promise<Delivery>>> = {
