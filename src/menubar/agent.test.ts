@@ -183,6 +183,7 @@ describe('menu bar script', () => {
     )
     assert.deepEqual(commands.sort(), [
       "'menubar', 'off', '--yes'",
+      "'menubar', 'snapshot', '--json', '--cached', '--refreshing-since', refreshSince, '--lang', lang",
       "'menubar', 'snapshot', '--json', '--lang', lang",
       "'menubar', 'start', ref",
       "'ui', '--background'",

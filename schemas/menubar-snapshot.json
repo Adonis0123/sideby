@@ -273,6 +273,8 @@
                 "bars",
                 "groups",
                 "reset",
+                "resetLabel",
+                "resetTime",
                 "note"
               ],
               "properties": {
@@ -370,6 +372,11 @@
                                       "const": "none"
                                     }
                                   ]
+                                },
+                                "passed": {
+                                  "type": "boolean",
+                                  "const": true,
+                                  "description": "The window is past its reset time and no newer reading has come: drawn grey with `–`, its level `none`."
                                 }
                               }
                             },
@@ -413,6 +420,11 @@
                                       "const": "none"
                                     }
                                   ]
+                                },
+                                "passed": {
+                                  "type": "boolean",
+                                  "const": true,
+                                  "description": "The window is past its reset time and no newer reading has come: drawn grey with `–`, its level `none`."
                                 }
                               }
                             },
@@ -440,6 +452,8 @@
                           "label",
                           "bars",
                           "reset",
+                          "resetLabel",
+                          "resetTime",
                           "tip"
                         ],
                         "properties": {
@@ -487,6 +501,11 @@
                                                 "const": "none"
                                               }
                                             ]
+                                          },
+                                          "passed": {
+                                            "type": "boolean",
+                                            "const": true,
+                                            "description": "The window is past its reset time and no newer reading has come: drawn grey with `–`, its level `none`."
                                           }
                                         }
                                       },
@@ -530,6 +549,11 @@
                                                 "const": "none"
                                               }
                                             ]
+                                          },
+                                          "passed": {
+                                            "type": "boolean",
+                                            "const": true,
+                                            "description": "The window is past its reset time and no newer reading has come: drawn grey with `–`, its level `none`."
                                           }
                                         }
                                       },
@@ -549,6 +573,14 @@
                           "reset": {
                             "type": "string"
                           },
+                          "resetLabel": {
+                            "type": "string",
+                            "description": "The window of `reset` as the column headers name it (`5h`, `7d`); empty when the cell names none."
+                          },
+                          "resetTime": {
+                            "type": "string",
+                            "description": "When it resets (`in 4h 20m`, `tomorrow 4:59 PM`, `Wed 4:59 PM`, `Nov 11, 4:59 PM`), or what the cell says instead: every window is past its reset, refreshing, or refresh failed."
+                          },
                           "tip": {
                             "type": "string"
                           }
@@ -563,7 +595,25 @@
                 },
                 "reset": {
                   "type": "string",
-                  "description": "Which window resets and how long until it does, such as `7d · in 4d 17h`: the window closest to its own red level (85% for 5 hours, 95% for longer windows). Empty when nothing is used."
+                  "description": "Which window resets and when, such as `7d · tomorrow 4:59 PM`: the window closest to its own red level (85% for 5 hours, 95% for longer windows); `resetLabel` and `resetTime` joined. Empty when nothing is used."
+                },
+                "resetLabel": {
+                  "type": "string",
+                  "description": "The window of `reset` as the column headers name it (`5h`, `7d`); empty when the cell names none."
+                },
+                "resetTime": {
+                  "type": "string",
+                  "description": "When it resets (`in 4h 20m`, `tomorrow 4:59 PM`, `Wed 4:59 PM`, `Nov 11, 4:59 PM`), or what the cell says instead: every window is past its reset, refreshing, or refresh failed."
+                },
+                "refreshing": {
+                  "type": "boolean",
+                  "const": true,
+                  "description": "A manual refresh is asking the Host for this account and has no answer yet (`--refreshing-since`)."
+                },
+                "refreshFailed": {
+                  "type": "boolean",
+                  "const": true,
+                  "description": "This refresh asked the Host for this account and the answer failed."
                 },
                 "note": {
                   "type": "string",
@@ -601,6 +651,8 @@
                         "bars",
                         "groups",
                         "reset",
+                        "resetLabel",
+                        "resetTime",
                         "note"
                       ],
                       "properties": {
@@ -698,6 +750,11 @@
                                               "const": "none"
                                             }
                                           ]
+                                        },
+                                        "passed": {
+                                          "type": "boolean",
+                                          "const": true,
+                                          "description": "The window is past its reset time and no newer reading has come: drawn grey with `–`, its level `none`."
                                         }
                                       }
                                     },
@@ -741,6 +798,11 @@
                                               "const": "none"
                                             }
                                           ]
+                                        },
+                                        "passed": {
+                                          "type": "boolean",
+                                          "const": true,
+                                          "description": "The window is past its reset time and no newer reading has come: drawn grey with `–`, its level `none`."
                                         }
                                       }
                                     },
@@ -768,6 +830,8 @@
                                   "label",
                                   "bars",
                                   "reset",
+                                  "resetLabel",
+                                  "resetTime",
                                   "tip"
                                 ],
                                 "properties": {
@@ -815,6 +879,11 @@
                                                         "const": "none"
                                                       }
                                                     ]
+                                                  },
+                                                  "passed": {
+                                                    "type": "boolean",
+                                                    "const": true,
+                                                    "description": "The window is past its reset time and no newer reading has come: drawn grey with `–`, its level `none`."
                                                   }
                                                 }
                                               },
@@ -858,6 +927,11 @@
                                                         "const": "none"
                                                       }
                                                     ]
+                                                  },
+                                                  "passed": {
+                                                    "type": "boolean",
+                                                    "const": true,
+                                                    "description": "The window is past its reset time and no newer reading has come: drawn grey with `–`, its level `none`."
                                                   }
                                                 }
                                               },
@@ -877,6 +951,14 @@
                                   "reset": {
                                     "type": "string"
                                   },
+                                  "resetLabel": {
+                                    "type": "string",
+                                    "description": "The window of `reset` as the column headers name it (`5h`, `7d`); empty when the cell names none."
+                                  },
+                                  "resetTime": {
+                                    "type": "string",
+                                    "description": "When it resets (`in 4h 20m`, `tomorrow 4:59 PM`, `Wed 4:59 PM`, `Nov 11, 4:59 PM`), or what the cell says instead: every window is past its reset, refreshing, or refresh failed."
+                                  },
                                   "tip": {
                                     "type": "string"
                                   }
@@ -891,7 +973,25 @@
                         },
                         "reset": {
                           "type": "string",
-                          "description": "Which window resets and how long until it does, such as `7d · in 4d 17h`: the window closest to its own red level (85% for 5 hours, 95% for longer windows). Empty when nothing is used."
+                          "description": "Which window resets and when, such as `7d · tomorrow 4:59 PM`: the window closest to its own red level (85% for 5 hours, 95% for longer windows); `resetLabel` and `resetTime` joined. Empty when nothing is used."
+                        },
+                        "resetLabel": {
+                          "type": "string",
+                          "description": "The window of `reset` as the column headers name it (`5h`, `7d`); empty when the cell names none."
+                        },
+                        "resetTime": {
+                          "type": "string",
+                          "description": "When it resets (`in 4h 20m`, `tomorrow 4:59 PM`, `Wed 4:59 PM`, `Nov 11, 4:59 PM`), or what the cell says instead: every window is past its reset, refreshing, or refresh failed."
+                        },
+                        "refreshing": {
+                          "type": "boolean",
+                          "const": true,
+                          "description": "A manual refresh is asking the Host for this account and has no answer yet (`--refreshing-since`)."
+                        },
+                        "refreshFailed": {
+                          "type": "boolean",
+                          "const": true,
+                          "description": "This refresh asked the Host for this account and the answer failed."
                         },
                         "note": {
                           "type": "string",

@@ -1,5 +1,6 @@
 import { windowLevel } from '../core/quota-levels.ts'
 import { MIN_CALLS } from '../core/tuning.ts'
+import { resetWhen } from '../panel/page-logic.ts'
 import type { QuotaResult, QuotaWindow, TuningReason, TuningResult, UsageResult } from '../types.ts'
 
 const useColor = (): boolean => !process.env.NO_COLOR && Boolean(process.stdout.isTTY)
@@ -98,7 +99,8 @@ function windowText(w: QuotaWindow, now: Date): string {
   // Each window by its own levels: a weekly window warns at 85% and turns red at 95% (spec §3.26).
   const level = windowLevel({ ...w, usedPercent: pct })
   const color = level === 'fail' ? c.red : level === 'warn' ? c.yellow : c.green
-  return `${label} ${color(`${pct}%`)} ${c.dim(`→ ${clock(w.resetsAt, now)}`)}`
+  // The same words as the menu bar and the Panel (spec §3.31): a countdown under a day, then tomorrow, a weekday, a date.
+  return `${label} ${color(`${pct}%`)} ${c.dim(`resets ${resetWhen(w.resetsAt, now.getTime(), 'en')}`)}`
 }
 
 export const QUOTA_REASON: Record<string, string> = {

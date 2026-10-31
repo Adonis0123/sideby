@@ -67,6 +67,7 @@ import {
   reloadForBuild,
   remoteControlSummary,
   reorder,
+  resetWhen,
   rowBadge,
   runCodeSwap,
   saveHandoffChange,
@@ -133,6 +134,7 @@ const LOGIC = [
   fixPrompt,
   foldSkips,
   formatDuration,
+  resetWhen,
   foldToolCalls,
   highlightParts,
   historyEmpty,
@@ -1454,7 +1456,8 @@ const MAIN = String.raw`
     const left = prefs.quota === 'left'
     const shown = left ? 100 - st.pct : st.pct
     const asOf = stale ? t('quota.asOf', { ago: ago(observedAt) }) : ''
-    const reset = passed ? t('quota.resetShort') : t('quota.resetsIn', { d: formatDuration(Date.parse(w.resetsAt) - now, lang) })
+    // The same words as the menu bar and the CLI (spec §3.31): a countdown under a day, then tomorrow, a weekday, a date.
+    const reset = passed ? t('quota.resetShort') : t('quota.resetsIn', { d: resetWhen(w.resetsAt, now, lang) })
     // The wide list's column says only the model group, so the hover names which of its limits this is.
     const title = [withLength ? winTitle(w.label) : '', passed ? t('quota.resetNoData', { date: day(passed.since) }) : t('quota.resetsAt', { at: clock(w.resetsAt) }), asOf].filter(Boolean).join(' · ')
     return h('div', { class: 'meter lvl-' + st.level + (stale || passed ? ' lvl-stale' : ''), title },

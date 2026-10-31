@@ -121,8 +121,14 @@ export function shownQuota(
     ? { ...kept.quota, fetched: true, ...(kept.error ? { fetchError: kept.error } : {}) }
     : null
   const own = local?.status === 'ok' ? local : null
-  if (fetched && own)
-    return !localFallbackOnly && Date.parse(own.observedAt) > Date.parse(fetched.observedAt) ? own : fetched
+  if (fetched && own) {
+    if (localFallbackOnly || Date.parse(own.observedAt) <= Date.parse(fetched.observedAt)) return fetched
+    // A local reading (Claude's status line) sees only the plan-wide windows. Keep the fetched model-group windows it
+    // cannot see, so a group's line (such as Fable) does not come and go with whichever reading is newer.
+    const seen = new Set(own.windows.map((w) => `${w.name ?? ''}\0${w.label}`))
+    const groups = fetched.windows.filter((w) => w.name && !seen.has(`${w.name}\0${w.label}`))
+    return groups.length ? { ...own, windows: [...own.windows, ...groups] } : own
+  }
   if (fetched) return fetched
   if (own) return kept?.error ? { ...own, fetchError: kept.error } : own
   if (off) return { status: 'unavailable', reason: 'not-enabled', detail: off }

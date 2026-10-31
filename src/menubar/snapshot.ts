@@ -8,6 +8,7 @@ import {
   windowLevel,
   worseLevel,
 } from '../core/quota-levels.ts'
+import { resetDate, resetWhen } from '../panel/page-logic.ts'
 import type { Account, FamilyLogo, LoginState, QuotaResult, QuotaWindow } from '../types.ts'
 import { fill, MENUBAR_STRINGS, type MenubarLang, type MenubarStrings } from './strings.ts'
 
@@ -16,8 +17,12 @@ export type MenubarLevel = 'ok' | 'warn' | 'fail' | 'none'
 /** One quota window drawn as a small bar. */
 export interface MenubarBar {
   label: string
+  /** For a window past its reset: what it had used, drawn grey with `–` for the percent. */
   percent: number
+  /** `none` for a window past its reset. */
   level: MenubarLevel
+  /** The window's reset time has passed and no newer reading has come yet; it counts toward no level. */
+  passed?: true
 }
 
 export interface MenubarRow {
@@ -43,12 +48,29 @@ export interface MenubarRow {
    * A Host whose every limit covers one model group (Antigravity CLI): a line per group under the account, each with
    * its own two bars, reset and hover text, while the account's own `bars` stay null. Null otherwise.
    */
-  groups: { label: string; bars: MenubarRow['bars']; reset: string; tip: string }[] | null
+  groups:
+    | ({ label: string; bars: MenubarRow['bars']; tip: string } & Pick<
+        MenubarRow,
+        'reset' | 'resetLabel' | 'resetTime'
+      >)[]
+    | null
   /**
-   * Which window resets and how long until it does, such as `7d · in 4d 17h`: the window closest to its own red level
-   * (85% for 5 hours, 95% for a week), so the one that runs out first. Empty when nothing is used.
+   * Which window resets and when, such as `7d · tomorrow 4:59 PM`: the window closest to its own red level (85% for 5
+   * hours, 95% for a week), so the one that runs out first. `resetLabel` and `resetTime` joined, for readers that do
+   * not draw. Empty when nothing is used.
    */
   reset: string
+  /** The window of `reset` as the column headers name it (`5h`, `7d`); empty when the cell names no window. */
+  resetLabel: string
+  /**
+   * When it resets (`in 4h 20m`, `tomorrow 4:59 PM`, spec §3.31), or what the cell says instead: every window is past
+   * its reset, the row is refreshing, or its refresh failed.
+   */
+  resetTime: string
+  /** A manual refresh is asking the Host for this account and has no answer yet; the old bars stay. */
+  refreshing?: true
+  /** This refresh asked the Host for this account and it failed; the old bars stay. */
+  refreshFailed?: true
   /** A no-quota explanation, or an old-reading warning beside the bars. */
   note: string
 }
@@ -131,6 +153,11 @@ export interface MenubarFamilyInput {
     quota: QuotaResult
     /** The other refs of its Same Login: the same subscription, so one quota. */
     sameLogin?: readonly string[]
+    /**
+     * Where a manual refresh stands for this account (spec §3.31): `waiting` while it is asked and has not answered,
+     * `failed` when this refresh's answer failed. Left out for accounts the refresh does not ask.
+     */
+    refresh?: 'waiting' | 'failed'
     /**
      * The newest use of its login on this computer (its own and its Same Login's sessions), when known. A reading
      * older than an hour with no use since is not marked old (`quotaIsStale`).
@@ -247,26 +274,45 @@ function groupLabel(name: string): string {
   return name.replace(/\s+models$/i, '') || name
 }
 
+/** A window by its length, as hover text spells it (`5-hour window`, `7天窗口`); its label when the length is odd. */
+function windowName(w: QuotaWindow, s: MenubarStrings): string {
+  const m = Number(w.windowMinutes)
+  if (m > 0 && m % 1440 === 0) return fill(s.daysWindow, { n: m / 1440 })
+  if (m > 0 && m % 60 === 0) return fill(s.hoursWindow, { n: m / 60 })
+  return w.label
+}
+
 /**
  * What a Quota whose windows cover every model draws: two bar columns (the shortest window, then the fullest of the
  * others, so a third window that is used up still shows; a single window fills the second), each colored by its own
  * levels (a weekly window warns later, spec §3.26), which window runs out first and when it resets, and one hover line
- * per window with its use and reset.
+ * per window with its use and reset. A window past its reset keeps its old bar in grey and counts toward no level;
+ * when every window is past its reset, the reset cell says so instead of a time.
  */
-function drawn(quota: QuotaResult & { status: 'ok' }, now: Date, s: MenubarStrings) {
+function drawn(quota: QuotaResult & { status: 'ok' }, now: Date, s: MenubarStrings, lang: MenubarLang) {
   const open = openWindows(quota, now) ?? []
   const windows = quota.windows
     .filter((w) => !w.name)
     .sort((x, y) => (x.windowMinutes ?? 0) - (y.windowMinutes ?? 0))
   const openOf = (w: QuotaWindow) => open.find((o) => o.label === w.label)
   const bar = (w: QuotaWindow): MenubarBar => {
-    const percent = Math.round(openOf(w)?.usedPercent ?? 0)
+    const o = openOf(w)
+    if (!o)
+      return {
+        label: w.label,
+        percent: Math.round(Math.min(100, Math.max(0, Number(w.usedPercent) || 0))),
+        level: 'none',
+        passed: true,
+      }
+    const percent = Math.round(o.usedPercent)
     return { label: w.label, percent, level: windowLevel({ ...w, usedPercent: percent }) }
   }
+  // An open window always beats one past its reset, whatever the old reading said.
+  const weight = (b: MenubarBar) => (b.passed ? -1 : b.percent)
   const longer = windows
     .slice(1)
     .map(bar)
-    .reduce<MenubarBar | null>((best, b) => (!best || b.percent > best.percent ? b : best), null)
+    .reduce<MenubarBar | null>((best, b) => (!best || weight(b) > weight(best) ? b : best), null)
   const bars: MenubarRow['bars'] = !windows.length
     ? null
     : longer
@@ -275,22 +321,39 @@ function drawn(quota: QuotaResult & { status: 'ok' }, now: Date, s: MenubarStrin
   // The window that runs out first relative to its own kind: a weekly 87% before a 5-hour 60%.
   const fullest = bindingWindow(open) ?? null
   const level = open.reduce<QuotaLevel>((l, w) => worseLevel(l, windowLevel(w)), 'ok')
-  const resetTime = fullest && fullest.usedPercent > 0 ? untilText(fullest.resetsAt, now, s) : ''
-  const reset = resetTime ? fill(s.resetIn, { label: fullest!.label, time: resetTime }) : ''
+  const allPassed = windows.length > 0 && open.length === 0
+  const shown = fullest && fullest.usedPercent > 0 ? fullest : null
+  const resetLabel = shown ? shown.label : ''
+  const resetTime = shown ? resetWhen(shown.resetsAt, now.getTime(), lang) : allPassed ? s.resetDue : ''
+  const reset = resetLabel ? fill(s.resetIn, { label: resetLabel, time: resetTime }) : resetTime
   const lines = windows.map((w) => {
     const o = openOf(w)
-    const p = bar(w).percent
-    return o && p > 0
-      ? fill(s.windowResetsTip, { label: w.label, p, time: untilText(o.resetsAt, now, s) })
-      : fill(s.windowTip, { label: w.label, p })
+    const b = bar(w)
+    const label = windowName(w, s)
+    if (b.passed) return fill(s.windowPassedTip, { label, date: resetDate(w.resetsAt, now.getTime(), lang) })
+    return o && b.percent > 0
+      ? fill(s.windowResetsTip, {
+          label,
+          p: b.percent,
+          date: resetDate(o.resetsAt, now.getTime(), lang),
+          left: untilText(o.resetsAt, now, s),
+        })
+      : fill(s.windowTip, { label, p: b.percent })
   })
   return {
     bars,
-    fullest,
+    fullest: shown,
     level,
     reset,
+    resetLabel,
     resetTime,
-    parts: windows.map((w) => fill(s.window, { label: w.label, p: bar(w).percent })),
+    allPassed,
+    parts: windows.map((w) => {
+      const b = bar(w)
+      return b.passed
+        ? fill(s.windowPassed, { label: w.label })
+        : fill(s.window, { label: w.label, p: b.percent })
+    }),
     lines,
   }
 }
@@ -310,6 +373,31 @@ function row(
   now: Date,
   s: MenubarStrings,
   refreshable: boolean,
+  lang: MenubarLang,
+): MenubarRow {
+  const r = quotaRow(a, plan, now, s, refreshable, lang)
+  if (!a.refresh) return r
+  // A manual refresh in progress (spec §3.31): the old bars stay, and the reset cell says where the refresh stands.
+  const says = a.refresh === 'waiting' ? s.rowRefreshing : s.rowRefreshFailed
+  const flag = a.refresh === 'waiting' ? { refreshing: true as const } : { refreshFailed: true as const }
+  const cell = { reset: says, resetLabel: '', resetTime: says }
+  if (!r.bars && !r.groups) return { ...r, ...flag, note: says, detail: says }
+  return {
+    ...r,
+    ...flag,
+    ...(r.bars ? cell : {}),
+    groups: r.groups?.map((g) => ({ ...g, ...cell })) ?? null,
+    detail: [r.detail, says].filter(Boolean).join(s.sep),
+  }
+}
+
+function quotaRow(
+  a: MenubarFamilyInput['accounts'][number],
+  plan: HandoffPlan | null,
+  now: Date,
+  s: MenubarStrings,
+  refreshable: boolean,
+  lang: MenubarLang,
 ): MenubarRow {
   const recommended = Boolean(plan?.hasQuota && plan.pick === a.ref)
   const startTip = fill(s.startTip, { account: a.ref })
@@ -321,6 +409,8 @@ function row(
     bars: null,
     groups: null,
     reset: '',
+    resetLabel: '',
+    resetTime: '',
     observedAt: null,
     stale: false,
   }
@@ -339,13 +429,19 @@ function row(
     ...(quiet ? [s.quietTip] : []),
     ...(quota.fetchError ? [fill(s.fetchFailed, { error: quota.fetchError })] : []),
   ]
+  // Every window is past its reset: Refresh asks now, where the Family can be asked.
+  const due = (d: { allPassed: boolean }) => (d.allPassed && refreshable ? [s.resetDueTip] : [])
   const groups = quotaGroups(quota)
   if (groups) {
     // One line per model group under the account, each with its own 5h and 7d bars (spec §3.31). Windows that cover
     // every model (Cursor's plan total) keep their bars on the account's own line.
-    const drawnGroups = groups.map((g) => ({ name: g.name, d: drawn(g.quota, now, s) }))
-    const groupTip = (g: (typeof drawnGroups)[number]) => [g.name, ...g.d.lines.map((l) => `   ${l}`)]
-    const all = openWindows(quota, now) ? drawn(quota, now, s) : null
+    const drawnGroups = groups.map((g) => ({ name: g.name, d: drawn(g.quota, now, s, lang) }))
+    const groupTip = (g: (typeof drawnGroups)[number]) => [
+      g.name,
+      ...g.d.lines.map((l) => `   ${l}`),
+      ...due(g.d).map((l) => `   ${l}`),
+    ]
+    const all = openWindows(quota, now) ? drawn(quota, now, s, lang) : null
     return {
       ...base,
       observedAt: quota.observedAt,
@@ -359,25 +455,30 @@ function row(
       tip: [
         ...head,
         '',
-        ...(all ? [...all.lines, ''] : []),
+        ...(all ? [...all.lines, ...due(all), ''] : []),
         ...drawnGroups.flatMap(groupTip),
         '',
         startTip,
       ].join('\n'),
-      ...(all ? { bars: all.bars, reset: all.reset } : {}),
+      ...(all
+        ? { bars: all.bars, reset: all.reset, resetLabel: all.resetLabel, resetTime: all.resetTime }
+        : {}),
       groups: drawnGroups.map((g) => ({
         label: groupLabel(g.name),
         bars: g.d.bars,
         reset: g.d.reset,
+        resetLabel: g.d.resetLabel,
+        resetTime: g.d.resetTime,
         tip: [...head, '', ...groupTip(g), '', startTip].join('\n'),
       })),
       note: stale ? s.olderReading : '',
     }
   }
   if (openWindows(quota, now) === null) return noted(s.noData)
-  const d = drawn(quota, now, s)
+  const d = drawn(quota, now, s, lang)
   const parts = [...d.parts]
-  if (d.resetTime) parts.push(fill(s.resets, { label: d.fullest!.label, time: d.resetTime }))
+  if (d.fullest) parts.push(fill(s.resets, { label: d.fullest.label, time: d.resetTime }))
+  else if (d.allPassed) parts.push(s.resetDue)
   if (stale) parts.push(s.olderReading)
   return {
     ...base,
@@ -385,9 +486,11 @@ function row(
     stale,
     detail: parts.join(s.sep),
     level: d.level,
-    tip: [...head, '', ...d.lines, '', startTip].join('\n'),
+    tip: [...head, '', ...d.lines, ...due(d), '', startTip].join('\n'),
     bars: d.bars,
     reset: d.reset,
+    resetLabel: d.resetLabel,
+    resetTime: d.resetTime,
     note: stale ? s.olderReading : '',
   }
 }
@@ -402,7 +505,7 @@ function columns(rows: MenubarRow[]): MenubarSection['columns'] {
   return [at(0), at(1)]
 }
 
-function section(f: MenubarFamilyInput, now: Date, s: MenubarStrings): MenubarSection {
+function section(f: MenubarFamilyInput, now: Date, s: MenubarStrings, lang: MenubarLang): MenubarSection {
   const logo = f.logo
     ? {
         path: f.logo.path,
@@ -411,7 +514,7 @@ function section(f: MenubarFamilyInput, now: Date, s: MenubarStrings): MenubarSe
         ...(f.logo.gradients?.length ? { gradients: f.logo.gradients } : {}),
       }
     : null
-  const all = f.accounts.map((a) => ({ a, r: row(a, f.plan, now, s, f.refreshable !== false) }))
+  const all = f.accounts.map((a) => ({ a, r: row(a, f.plan, now, s, f.refreshable !== false, lang) }))
   const aside = (a: MenubarFamilyInput['accounts'][number]) => a.kind === 'api' || a.login === 'logged-out'
   // A Same Login is one quota, so one row, named like the Panel's: after the directory first in Display Order (the
   // Panel's "Set as shown name" moves one there). It is recommended when any of its directories is. The other
@@ -444,7 +547,17 @@ function section(f: MenubarFamilyInput, now: Date, s: MenubarStrings): MenubarSe
       const note = fill(s.sameLoginNote, { name: lead.a.name })
       same.push({
         ...y,
-        r: { ...y.r, bars: null, reset: '', note, detail: note, level: 'none', recommended: false },
+        r: {
+          ...y.r,
+          bars: null,
+          reset: '',
+          resetLabel: '',
+          resetTime: '',
+          note,
+          detail: note,
+          level: 'none',
+          recommended: false,
+        },
       })
     }
   }
@@ -481,7 +594,7 @@ export function menubarSnapshot(
   const sections: MenubarSection[] = []
   for (const f of families) {
     if (!f.accounts.length) continue
-    sections.push(section(f, now, s))
+    sections.push(section(f, now, s, lang))
     if (!f.plan?.hasQuota) continue
     // The plan lists the usable accounts first, least used first; past them, the least used of the full ones.
     // A pick without Quota of its own (`unknown`) says nothing about how much is left.

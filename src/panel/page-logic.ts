@@ -61,6 +61,93 @@ export function formatDuration(ms: number, lang: string): string {
 }
 
 /**
+ * When a quota window resets, in words (spec §3.31): under 24 hours a countdown (`in 4h 20m`, `4小时20分后`); else
+ * the next local calendar day (`tomorrow 4:59 PM`, `明天 16:59`), up to 6 days the weekday (`Wed 4:59 PM`, `周三
+ * 16:59`), later the date (`Nov 11, 4:59 PM`, `11月11日 16:59`) with the year when it is not this year. One rule for
+ * the menu bar, the Panel and the CLI. `timeZone` is for tests; the local zone otherwise. Times are composed by hand
+ * from numbers, so ICU's spacing (a narrow no-break space before PM) never shows.
+ */
+export function resetWhen(resetsAt: string, now: number, lang: string, timeZone?: string): string {
+  const zh = lang === 'zh'
+  const at = Date.parse(resetsAt)
+  if (!Number.isFinite(at)) return '?'
+  // Decided on the exact difference, so 23 h 59 m 30 s is still a countdown, not tomorrow's date.
+  if (at - now < 86_400_000) {
+    const minutes = Math.min(1439, Math.max(1, Math.ceil((at - now) / 60000)))
+    const h = Math.floor(minutes / 60)
+    const m = minutes % 60
+    if (zh) return h > 0 ? `${h}小时${m}分后` : `${m}分后`
+    return h > 0 ? `in ${h}h ${m}m` : `in ${m}m`
+  }
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    hourCycle: 'h23',
+  })
+  const parts = (t: number) => {
+    const p: Record<string, number> = {}
+    for (const x of fmt.formatToParts(new Date(t))) if (x.type !== 'literal') p[x.type] = Number(x.value)
+    return { y: p.year!, mo: p.month!, d: p.day!, h: p.hour! % 24, mi: p.minute! }
+  }
+  const r = parts(at)
+  const n = parts(now)
+  const dayOf = (x: { y: number; mo: number; d: number }) =>
+    Math.round(Date.UTC(x.y, x.mo - 1, x.d) / 86400000)
+  const days = dayOf(r) - dayOf(n)
+  const mm = String(r.mi).padStart(2, '0')
+  const time = zh
+    ? `${String(r.h).padStart(2, '0')}:${mm}`
+    : `${r.h % 12 || 12}:${mm} ${r.h < 12 ? 'AM' : 'PM'}`
+  if (days === 1) return zh ? `明天 ${time}` : `tomorrow ${time}`
+  const weekday = new Date(Date.UTC(r.y, r.mo - 1, r.d)).getUTCDay()
+  if (days > 1 && days <= 6)
+    return zh
+      ? `周${'日一二三四五六'.charAt(weekday)} ${time}`
+      : `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][weekday]} ${time}`
+  const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][r.mo - 1]
+  if (zh) return `${r.y !== n.y ? `${r.y}年` : ''}${r.mo}月${r.d}日 ${time}`
+  return `${month} ${r.d}${r.y !== n.y ? `, ${r.y}` : ''}, ${time}`
+}
+
+/**
+ * A reset time in full for hover text, such as `Wed, Nov 4, 4:59 PM` or `11月4日周三 16:59`, with the year when it is
+ * not this year. `timeZone` is for tests.
+ */
+export function resetDate(resetsAt: string, now: number, lang: string, timeZone?: string): string {
+  const zh = lang === 'zh'
+  const at = Date.parse(resetsAt)
+  if (!Number.isFinite(at)) return '?'
+  const p: Record<string, number> = {}
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    hourCycle: 'h23',
+  })
+  for (const x of fmt.formatToParts(new Date(at))) if (x.type !== 'literal') p[x.type] = Number(x.value)
+  const y = p.year!
+  const mo = p.month!
+  const d = p.day!
+  const h = p.hour! % 24
+  const mm = String(p.minute!).padStart(2, '0')
+  let thisYear = y
+  for (const x of fmt.formatToParts(new Date(now))) if (x.type === 'year') thisYear = Number(x.value)
+  const weekday = new Date(Date.UTC(y, mo - 1, d)).getUTCDay()
+  if (zh)
+    return `${y !== thisYear ? `${y}年` : ''}${mo}月${d}日周${'日一二三四五六'.charAt(weekday)} ${String(h).padStart(2, '0')}:${mm}`
+  const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][mo - 1]
+  const wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][weekday]
+  return `${wd}, ${month} ${d}${y !== thisYear ? `, ${y}` : ''}, ${h % 12 || 12}:${mm} ${h < 12 ? 'AM' : 'PM'}`
+}
+
+/**
  * A Long Window: longer than one day (weekly, a billing period), from `windowMinutes` or else a label such as `7d`.
  * The page's copy of `isLongWindow` in core/quota-levels.ts; a test keeps the two equal.
  */

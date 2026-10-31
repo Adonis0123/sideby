@@ -541,9 +541,29 @@ const Overview = Type.Object({
 
 const MenubarLevel = Type.Union(['ok', 'warn', 'fail', 'none'].map((k) => Type.Literal(k)))
 const MenubarBar = Type.Union([
-  Type.Object({ label: Str, percent: Type.Number(), level: MenubarLevel }),
+  Type.Object({
+    label: Str,
+    percent: Type.Number(),
+    level: MenubarLevel,
+    passed: Type.Optional(
+      Type.Literal(true, {
+        description:
+          'The window is past its reset time and no newer reading has come: drawn grey with `–`, its level `none`.',
+      }),
+    ),
+  }),
   Type.Null(),
 ])
+const ResetParts = {
+  resetLabel: Type.String({
+    description:
+      'The window of `reset` as the column headers name it (`5h`, `7d`); empty when the cell names none.',
+  }),
+  resetTime: Type.String({
+    description:
+      'When it resets (`in 4h 20m`, `tomorrow 4:59 PM`, `Wed 4:59 PM`, `Nov 11, 4:59 PM`), or what the cell says instead: every window is past its reset, refreshing, or refresh failed.',
+  }),
+}
 const MenubarRow = Type.Object({
   ref: Str,
   label: Str,
@@ -567,6 +587,7 @@ const MenubarRow = Type.Object({
           label: Str,
           bars: Type.Union([Type.Tuple([MenubarBar, MenubarBar]), Type.Null()]),
           reset: Str,
+          ...ResetParts,
           tip: Str,
         }),
       ),
@@ -579,8 +600,20 @@ const MenubarRow = Type.Object({
   ),
   reset: Type.String({
     description:
-      'Which window resets and how long until it does, such as `7d · in 4d 17h`: the window closest to its own red level (85% for 5 hours, 95% for longer windows). Empty when nothing is used.',
+      'Which window resets and when, such as `7d · tomorrow 4:59 PM`: the window closest to its own red level (85% for 5 hours, 95% for longer windows); `resetLabel` and `resetTime` joined. Empty when nothing is used.',
   }),
+  ...ResetParts,
+  refreshing: Type.Optional(
+    Type.Literal(true, {
+      description:
+        'A manual refresh is asking the Host for this account and has no answer yet (`--refreshing-since`).',
+    }),
+  ),
+  refreshFailed: Type.Optional(
+    Type.Literal(true, {
+      description: 'This refresh asked the Host for this account and the answer failed.',
+    }),
+  ),
   note: Type.String({
     description: 'A no-quota explanation, or an old-reading warning beside the bars.',
   }),

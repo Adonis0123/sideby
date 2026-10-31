@@ -444,7 +444,10 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   key: { flags: ['json'], valued: ['var'] },
   try: { flags: ['json', 'yes'], valued: ['model'] },
   autostart: { flags: ['json', 'yes', 'refresh'] },
-  menubar: { flags: ['json', 'yes', 'refresh'], valued: ['lang', 'hotkey', 'hotkey-label', 'icon'] },
+  menubar: {
+    flags: ['json', 'yes', 'refresh', 'cached'],
+    valued: ['lang', 'hotkey', 'hotkey-label', 'icon', 'refreshing-since'],
+  },
   config: { flags: ['json', 'yes'] },
   theme: { flags: ['json', 'yes', 'undo'], valued: ['id', 'out'] },
   list: { flags: ['json', 'all'] },

@@ -12,6 +12,8 @@ import {
 } from './snapshot.ts'
 import { MENUBAR_STRINGS } from './strings.ts'
 
+// Reset times are local; pin the zone so the words are the same on every machine.
+process.env.TZ = 'UTC'
 const NOW = new Date('2026-10-19T12:00:00Z')
 const at = (minutes: number) => new Date(NOW.getTime() + minutes * 60000).toISOString()
 
@@ -168,16 +170,19 @@ describe('menubarSnapshot', () => {
       ],
     )
     // The reset names its window: the one closest to its own red level (7d 30% of 95 before 5h 20% of 85).
-    assert.equal(rows[0]!.detail, '5h 20% · 7d 30% · 7d resets in 2d 4h')
+    assert.equal(rows[0]!.detail, '5h 20% · 7d 30% · 7d resets Wed 4:05 PM')
     assert.deepEqual(rows[0]!.bars, [
       { label: '5h', percent: 20, level: 'ok' },
       { label: '7d', percent: 30, level: 'ok' },
     ])
-    assert.equal(rows[0]!.reset, '7d · in 2d 4h')
+    assert.equal(rows[0]!.reset, '7d · Wed 4:05 PM')
+    // Drawn apart: the window in grey, the time in the text colour.
+    assert.equal(rows[0]!.resetLabel, '7d')
+    assert.equal(rows[0]!.resetTime, 'Wed 4:05 PM')
     assert.equal(rows[0]!.note, '')
     assert.equal(
       rows[1]!.tip,
-      'Quota read just now\n\n5h: 90% used · resets in 2h 5m\n7d: 40% used · resets in 2d 4h\n\nStart claude:main in your terminal',
+      'Quota read just now\n\n5-hour window: 90% used · resets Mon, Oct 19, 2:05 PM (in 2h 5m)\n7-day window: 40% used · resets Wed, Oct 21, 4:05 PM (in 2d 4h)\n\nStart claude:main in your terminal',
     )
   })
 
@@ -253,7 +258,7 @@ describe('menubarSnapshot', () => {
       { label: '7d', percent: 87, level: 'warn' },
     ])
     assert.equal(first!.level, 'warn', 'a weekly 87% warns but is not red')
-    assert.equal(first!.reset, '7d · in 2d 4h')
+    assert.equal(first!.reset, '7d · Wed 4:05 PM')
     assert.equal(second!.level, 'fail')
     assert.equal(second!.reset, '5h · in 2h 5m')
     assert.equal(snap.title, 'Claude Code 87%')
@@ -461,7 +466,7 @@ it('shows every model group of a Host as its own line under the account, with it
   const section = snap.sections[0]!
   const r = section.rows[0]!
   assert.equal(r.bars, null)
-  // Every limit shows, in the order the Host lists the groups; a passed reset counts as empty.
+  // Every limit shows, in the order the Host lists the groups; a window past its reset keeps its old bar, in grey.
   assert.deepEqual(
     r.groups?.map((g) => [g.label, g.bars?.map((b) => b && [b.label, b.percent])]),
     [
@@ -475,7 +480,7 @@ it('shows every model group of a Host as its own line under the account, with it
       [
         'Claude and GPT',
         [
-          ['5h', 0],
+          ['5h', 100],
           ['7d', 56],
         ],
       ],
@@ -483,15 +488,21 @@ it('shows every model group of a Host as its own line under the account, with it
     ],
   )
   assert.deepEqual(section.columns, ['5h', '7d'])
+  assert.deepEqual(r.groups![1]!.bars![0], { label: '5h', percent: 100, level: 'none', passed: true })
+  // The other window is still open, so the reset cell speaks about it.
+  assert.equal(r.groups![1]!.reset, '7d · Sun 6:00 PM')
   assert.equal(r.level, 'fail')
   // The hover text says when the numbers were read and gives each window's use and reset, by group.
   assert.match(r.tip, /^Quota read just now\n/)
   assert.match(
     r.tip,
-    /Gemini Models\n {3}5h: 53% used · resets in 2h\n {3}7d: 16% used · resets in 3d 11h 20m|Gemini Models\n {3}5h: 53% used · resets in 2h/,
+    /Gemini Models\n {3}5-hour window: 53% used · resets Mon, Oct 19, 2:00 PM \(in 2h 0m\)\n {3}7-day window: 16% used · resets Thu, Oct 22, 11:20 PM \(in 3d 11h\)/,
   )
-  assert.match(r.tip, /Claude and GPT models\n {3}5h: 0% used\n/)
-  assert.match(r.groups![2]!.tip, /Gemini 4 Argon\n {3}7d: 100% used/)
+  assert.match(
+    r.tip,
+    /Claude and GPT models\n {3}5-hour window: reset at Mon, Oct 19, 11:55 AM · new numbers/,
+  )
+  assert.match(r.groups![2]!.tip, /Gemini 4 Argon\n {3}7-day window: 100% used/)
   assert.doesNotMatch(r.groups![2]!.tip, /Gemini Models/)
 })
 
@@ -521,7 +532,7 @@ it('keeps a plan-wide window on the account line and draws each model group unde
   )
   // The account's colour warns when one model group is nearly used up, though the plan total is low.
   assert.notEqual(r.level, 'ok')
-  assert.match(r.tip, /31d: 9% used[^\n]*\n\nCursor models\n {3}31d: 6% used/)
+  assert.match(r.tip, /31-day window: 9% used[^\n]*\n\nCursor models\n {3}31-day window: 6% used/)
 })
 
 it('writes the hover text in words: how long ago the numbers were read, and why they may be old', () => {
@@ -536,6 +547,73 @@ it('writes the hover text in words: how long ago the numbers were read, and why 
     .sections[0]!.rows[0]!.tip
   assert.match(tip, /^额度读于 25分前\n/)
   assert.match(tip, /上次检查没成功：no answer within 20 seconds/)
-  assert.match(tip, /5h：已用 40% · 1小时30分后重置/)
+  assert.match(tip, /5小时窗口：已用 40% · 10月19日周一 13:30 重置（1小时30分后）/)
   assert.doesNotMatch(tip, /\d{4}-\d{2}-\d{2}T/)
+})
+
+describe('reset cell and windows past their reset (spec §3.31)', () => {
+  it('draws a window past its reset grey, leaves it out of the level, and speaks about the window still open', () => {
+    const q: QuotaResult = {
+      status: 'ok',
+      windows: [
+        { label: '5h', windowMinutes: 300, usedPercent: 97, resetsAt: at(-10) },
+        { label: '7d', windowMinutes: 10080, usedPercent: 30, resetsAt: at(3000) },
+      ],
+      observedAt: NOW.toISOString(),
+      source: 'test',
+    }
+    const r = menubarSnapshot([family('claude', 'Claude Code', [sub('main', q)])], NOW, 'en').sections[0]!
+      .rows[0]!
+    assert.deepEqual(r.bars, [
+      { label: '5h', percent: 97, level: 'none', passed: true },
+      { label: '7d', percent: 30, level: 'ok' },
+    ])
+    assert.equal(r.level, 'ok', 'a used-up window that has reset no longer colours the row')
+    assert.deepEqual([r.resetLabel, r.resetTime], ['7d', 'Wed 2:00 PM'])
+    assert.equal(r.reset, '7d · Wed 2:00 PM')
+    assert.match(r.detail, /^5h – · 7d 30% · 7d resets /)
+    assert.match(r.tip, /5-hour window: reset at Mon, Oct 19, 11:50 AM/)
+  })
+
+  it('says the reset is due once every window has passed, and that Refresh checks now only where it can', () => {
+    const q: QuotaResult = {
+      status: 'ok',
+      windows: [
+        { label: '5h', windowMinutes: 300, usedPercent: 40, resetsAt: at(-10) },
+        { label: '7d', windowMinutes: 10080, usedPercent: 30, resetsAt: at(-5) },
+      ],
+      observedAt: NOW.toISOString(),
+      source: 'test',
+    }
+    const f = family('claude', 'Claude Code', [sub('main', q)])
+    const zh = menubarSnapshot([f], NOW, 'zh').sections[0]!.rows[0]!
+    assert.equal(zh.resetLabel, '')
+    assert.equal(zh.resetTime, '已到重置时间，待更新')
+    assert.equal(zh.reset, '已到重置时间，待更新')
+    assert.ok(zh.bars!.every((b) => b?.passed))
+    assert.match(zh.tip, /点“刷新”马上检查/)
+    const en = menubarSnapshot([{ ...f, refreshable: false }], NOW, 'en').sections[0]!.rows[0]!
+    assert.equal(en.reset, 'Reset due; awaiting update')
+    assert.doesNotMatch(en.tip, /Refresh/)
+  })
+
+  it('marks rows a refresh is still asking, and rows whose answer failed, keeping their old bars', () => {
+    const f = family('codex', 'Codex', [
+      { ...sub('main', quota(20, 30), 'codex'), refresh: 'waiting' },
+      { ...sub('work', quota(10, 5), 'codex'), refresh: 'failed' },
+      { ...sub('lab', none, 'codex'), refresh: 'waiting' },
+      sub('team', quota(1, 2), 'codex'),
+    ])
+    const rows = menubarSnapshot([f], NOW, 'zh').sections[0]!.rows
+    const by = (name: string) => rows.find((r) => r.label === name)!
+    assert.equal(by('main').refreshing, true)
+    assert.equal(by('main').resetTime, '刷新中…')
+    assert.equal(by('main').resetLabel, '')
+    assert.equal(by('main').bars?.[1]?.percent, 30)
+    assert.equal(by('work').refreshFailed, true)
+    assert.equal(by('work').resetTime, '刷新失败')
+    assert.equal(by('lab').note, '刷新中…')
+    assert.equal(by('team').refreshing, undefined)
+    assert.equal(by('team').resetLabel, '7d')
+  })
 })

@@ -12,6 +12,11 @@ export const STALE_SECONDS = 15 * 60
 /** A snapshot still running after this is ended, so a stuck one cannot stop the refreshes. */
 export const SNAPSHOT_TIMEOUT_SECONDS = 60
 /**
+ * While a manual refresh runs, a cache-only snapshot (`--cached`) every this many seconds, so each account's new
+ * numbers show as soon as its answer is kept instead of all at once at the end (spec §3.31).
+ */
+export const PEEK_SECONDS = 2
+/**
  * Hours after which an idle item starts itself again. Over many hours the menu took longer and longer to open (1.6 to
  * 2 s after 18 hours on macOS 27, 2026-10-30, against about 0.1 s fresh), with no cause found in the script.
  */
@@ -25,7 +30,7 @@ ObjC.import('Carbon');
 ObjC.import('stdlib');
 function run(argv) {
   var node = argv[0], entry = argv[1];
-  var SNAPSHOT = ${SNAPSHOT_SECONDS}, TICK = ${TICK_SECONDS}, STALE = ${STALE_SECONDS}, TIMEOUT = ${SNAPSHOT_TIMEOUT_SECONDS};
+  var SNAPSHOT = ${SNAPSHOT_SECONDS}, TICK = ${TICK_SECONDS}, STALE = ${STALE_SECONDS}, TIMEOUT = ${SNAPSHOT_TIMEOUT_SECONDS}, PEEK = ${PEEK_SECONDS};
   var lang = 'en';
   try { lang = ObjC.unwrap($.NSLocale.preferredLanguages.firstObject) || 'en'; } catch (e) {}
   var app = $.NSApplication.sharedApplication;
@@ -71,10 +76,13 @@ function run(argv) {
     if (t.launchAndReturnError(null)) actions.push(t);
   }
   var forceNext = false;
+  // While a manual refresh runs: when it started (ISO, for --refreshing-since) and the cache-only snapshot in flight.
+  var refreshSince = '', peekTask = null, peekHandle = null, peekOut = out + '.peek';
   function startSnapshot(force) {
     if (task) { if (force) forceNext = true; return; }
     force = force || forceNext;
     forceNext = false;
+    if (force) refreshSince = new Date().toISOString();
     $.NSFileManager.defaultManager.createFileAtPathContentsAttributes(out, $(), $());
     hotkeyReported = hotkeyReport();
     iconReported = iconStable;
@@ -88,20 +96,61 @@ function run(argv) {
   function closeHandle() {
     if (handle) { handle.closeFile; handle = null; }
   }
+  // The snapshot a finished task wrote, or null.
+  function readSnapshot(path) {
+    try {
+      var next = JSON.parse(ObjC.unwrap($.NSString.stringWithContentsOfFileEncodingError(path, $.NSUTF8StringEncoding, null)));
+      return next && next.schemaVersion === 1 ? next : null;
+    } catch (e) { return null; }
+  }
   function finishSnapshot() {
     var ok = task.terminationStatus === 0;
     task = null;
-    manual = false;
+    // A refresh asked for while an automatic read ran starts next; it stays a manual one.
+    if (!forceNext) manual = false;
     closeHandle();
-    if (ok) {
-      try {
-        var text = ObjC.unwrap($.NSString.stringWithContentsOfFileEncodingError(out, $.NSUTF8StringEncoding, null));
-        var next = JSON.parse(text);
-        if (next && next.schemaVersion === 1) { snap = next; lastOk = now(); failed = false; hotkey(snap.hotkey); build(); return; }
-      } catch (e) {}
-    }
+    // The refresh's own result wins: a cache-only snapshot still running started before it and is dropped.
+    stopPeek();
+    var next = ok ? readSnapshot(out) : null;
+    if (next) { snap = next; lastOk = now(); failed = false; hotkey(snap.hotkey); build(); return; }
     failed = true;
+    // A cache-only snapshot may have marked rows as refreshing; nothing is refreshing any more.
+    if (snap) (snap.sections || []).forEach(function (s) {
+      s.rows.concat(s.more ? s.more.rows : []).forEach(function (r) {
+        if (!r.refreshing) return;
+        var says = snap.lang === 'zh' ? ${JSON.stringify(MENUBAR_STRINGS.zh.rowRefreshFailed)} : ${JSON.stringify(MENUBAR_STRINGS.en.rowRefreshFailed)};
+        r.refreshing = false; r.refreshFailed = true; r.reset = r.resetTime = says;
+        (r.groups || []).forEach(function (g) { g.reset = g.resetTime = says; });
+      });
+    });
     build();
+  }
+  // During a manual refresh, a cache-only snapshot that never asks a Host: accounts already answered show their new
+  // numbers, the others say they are refreshing. At most one runs at a time.
+  function peek() {
+    if (task && !task.running) { finishSnapshot(); return; }
+    if (peekTask && !peekTask.running) {
+      var ok = peekTask.terminationStatus === 0;
+      peekTask = null;
+      closePeek();
+      var next = ok && task && manual ? readSnapshot(peekOut) : null;
+      if (next) { snap = next; build(); }
+    }
+    if (peekTask || !task || !manual || !refreshSince) return;
+    $.NSFileManager.defaultManager.createFileAtPathContentsAttributes(peekOut, $(), $());
+    var t = sideby(['menubar', 'snapshot', '--json', '--cached', '--refreshing-since', refreshSince, '--lang', lang]);
+    peekHandle = $.NSFileHandle.fileHandleForWritingAtPath(peekOut);
+    t.standardOutput = peekHandle;
+    if (t.launchAndReturnError(null)) peekTask = t;
+    else closePeek();
+  }
+  function closePeek() {
+    if (peekHandle) { peekHandle.closeFile; peekHandle = null; }
+  }
+  function stopPeek() {
+    if (peekTask && peekTask.running) peekTask.terminate;
+    peekTask = null;
+    closePeek();
   }
 
   // The shortcut that toggles the menu from anywhere (config menubar.hotkey), registered with Carbon's
@@ -321,6 +370,7 @@ function run(argv) {
     return (bars[key] = $.NSAttributedString.attributedStringWithAttachment(att));
   }
 
+  var keptW = { name: 0, reset: 0, tag: 0 };
   // Columns: the name, then per window its bar and percent, then the reset time. One set of tab stops lines them up
   // across every tool; the window names sit once in each tool's header, over their column. A tool with one window
   // draws it in the second column, under the others' long window.
@@ -332,20 +382,31 @@ function run(argv) {
       head: $.NSFont.systemFontOfSizeWeight(size - 2, $.NSFontWeightSemibold),
       small: $.NSFont.systemFontOfSize(size - 2),
     };
-    // The reset column names its window ("7d · in 4d 17h"), so it is as wide as its longest entry.
-    var nameW = 0, first = false, resetW = width('7d · in 24d 23h', L.font);
+    // The reset column names its window ("7d", then "tomorrow 4:59 PM"), so it is as wide as its longest entry. While the
+    // menu is open it never gets narrower, so rows changing during a refresh do not make the menu jump.
+    // The times start at one tab stop after the widest window tag, so 7d and 31d rows line their times up.
+    var nameW = 0, first = false, tagW = width('7d', L.font), timeW = width('Wed 12:59 PM', L.font), plainW = 0;
+    function measure(r) {
+      var c = resetCell(r);
+      if (c[0]) { tagW = Math.max(tagW, width(c[0], L.font)); timeW = Math.max(timeW, width(c[1], L.font)); }
+      else plainW = Math.max(plainW, width(c[1], L.font));
+    }
     sections.forEach(function (s) {
       nameW = Math.max(nameW, width(s.title, L.head));
       if (s.columns[0]) first = true;
       s.rows.concat(s.more ? s.more.rows : []).forEach(function (r) {
         nameW = Math.max(nameW, width(r.label, L.font));
-        if (r.reset) resetW = Math.max(resetW, width(r.reset, L.font));
+        if (r.bars) measure(r);
         (r.groups || []).forEach(function (g) {
           nameW = Math.max(nameW, width(GROUP_INDENT + g.label, L.font));
-          if (g.reset) resetW = Math.max(resetW, width(g.reset, L.font));
+          measure({ reset: g.reset, resetLabel: g.resetLabel, resetTime: g.resetTime, refreshing: r.refreshing, refreshFailed: r.refreshFailed, stale: r.stale, note: g.reset });
         });
       });
     });
+    tagW = Math.ceil(tagW) + 8;
+    var resetW = Math.max(tagW + timeW, plainW);
+    if (menuOpen) { nameW = Math.max(nameW, keptW.name); resetW = Math.max(resetW, keptW.reset); tagW = Math.max(tagW, keptW.tag); }
+    keptW = { name: nameW, reset: resetW, tag: tagW };
     var pctW = width('100%', L.mono), x = Math.ceil(nameW) + 20, stops = [], at = [];
     function tab(pos) { stops.push($.NSTextTab.alloc.initWithTextAlignmentLocationOptions($.NSTextAlignmentLeft, pos, $())); }
     for (var c = 0; c < (first ? 2 : 1); c++) {
@@ -354,6 +415,7 @@ function run(argv) {
       tab(x); x += pctW + 20;
     }
     tab(x);
+    tab(x + tagW);
     L.reset = x;
     L.first = first;
     L.para = $.NSMutableParagraphStyle.alloc.init;
@@ -365,6 +427,14 @@ function run(argv) {
     }));
     L.width = x + resetW + 70;
     return L;
+  }
+  // The reset cell: [window tag, time]. The tag is drawn grey and the time in the text colour; a cell that says
+  // something else (refreshing, failed, an old reading, every window past its reset) has only grey words.
+  function resetCell(r) {
+    if (r.refreshing || r.refreshFailed) return ['', r.resetTime || r.reset || ''];
+    if (r.stale) return ['', r.note || ''];
+    if (r.resetLabel) return [r.resetLabel, r.resetTime];
+    return ['', r.reset || ''];
   }
   function rowTitle(r, L) {
     var line = $.NSMutableAttributedString.alloc.init;
@@ -378,11 +448,16 @@ function run(argv) {
       if (!i && !L.first) return;
       if (!b) { line.appendAttributedString(str('\t\t', plain)); return; }
       line.appendAttributedString(str('\t', plain));
-      line.appendAttributedString(bar(b, r.stale));
-      var c = stale() || r.stale ? color('stale') : b.level === 'ok' ? null : color(b.level);
-      line.appendAttributedString(str('\t' + b.percent + '%', attrs(c, L.mono, L.para)));
+      // A window past its reset keeps its old bar in grey, with no percent: the reading no longer says how much is used.
+      line.appendAttributedString(bar(b, r.stale || b.passed));
+      var c = stale() || r.stale || b.passed ? color('stale') : b.level === 'ok' ? null : color(b.level);
+      line.appendAttributedString(str('\t' + (b.passed ? '–' : b.percent + '%'), attrs(c, L.mono, L.para)));
     });
-    if (r.stale || r.reset) line.appendAttributedString(str('\t' + (r.stale ? r.note : r.reset), dim));
+    var cell = resetCell(r);
+    if (cell[0]) {
+      line.appendAttributedString(str('\t' + cell[0], dim));
+      line.appendAttributedString(str('\t' + cell[1], stale() ? dim : plain));
+    } else if (cell[1]) line.appendAttributedString(str('\t' + cell[1], dim));
     return line;
   }
   function accountItem(menu, r, L) {
@@ -406,7 +481,7 @@ function run(argv) {
     (r.groups || []).forEach(function (g) {
       refs.push(r.ref);
       var gi = add(menu, g.label, 'start:', refs.length);
-      gi.attributedTitle = rowTitle({ label: GROUP_INDENT + g.label, bars: g.bars, reset: g.reset, stale: r.stale, note: g.reset }, L);
+      gi.attributedTitle = rowTitle({ label: GROUP_INDENT + g.label, bars: g.bars, reset: g.reset, resetLabel: g.resetLabel, resetTime: g.resetTime, refreshing: r.refreshing, refreshFailed: r.refreshFailed, stale: r.stale, note: g.reset }, L);
       gi.image = GUTTER;
       gi.toolTip = g.tip;
     });
@@ -420,7 +495,7 @@ function run(argv) {
     line.appendAttributedString(str(s.title, attrs($.NSColor.labelColor, L.head, L.headPara)));
     var cols = L.first ? s.columns : [s.columns[1]];
     cols.forEach(function (c) { line.appendAttributedString(str('\t' + (c || ''), attrs($.NSColor.secondaryLabelColor, L.small, L.headPara))); });
-    if (s.rows.some(function (r) { return r.reset || (r.groups || []).some(function (g) { return g.reset; }); }))
+    if (s.rows.some(function (r) { return r.reset || r.refreshing || r.refreshFailed || (r.groups || []).some(function (g) { return g.reset; }); }))
       line.appendAttributedString(str('\t' + snap.labels.resetsHeader, attrs($.NSColor.secondaryLabelColor, L.small, L.headPara)));
     var W = Math.max(280, L.width), H = 24;
     var v = $.NSView.alloc.initWithFrame($.NSMakeRect(0, 0, W, H));
@@ -585,6 +660,7 @@ function run(argv) {
           if (footer) footer.stringValue = footerText();
         },
       },
+      'peek:': { types: ['void', ['id']], implementation: function () { try { peek(); } catch (e) {} } },
       'refresh:': {
         types: ['void', ['id']],
         implementation: function () {
@@ -640,6 +716,7 @@ function run(argv) {
   startSnapshot();
   // Common modes: the tick also runs while the menu is open, so a refresh started there lands in place.
   $.NSRunLoop.mainRunLoop.addTimerForMode($.NSTimer.timerWithTimeIntervalTargetSelectorUserInfoRepeats(TICK, target, 'tick:', $(), true), $.NSRunLoopCommonModes);
+  $.NSRunLoop.mainRunLoop.addTimerForMode($.NSTimer.timerWithTimeIntervalTargetSelectorUserInfoRepeats(PEEK, target, 'peek:', $(), true), $.NSRunLoopCommonModes);
   app.run;
 }
 `

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { readFile, writeFile } from 'node:fs/promises'
+import { chmod, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { promisify } from 'node:util'
@@ -120,6 +120,58 @@ describe('Codex fetched quota', () => {
       assert.equal(second.sections[0].rows[0].bars[1].percent, 0)
       assert.equal(second.sections[0].rows[0].stale, false)
       assert.equal((await readHostLog(h, 'codex')).filter((r) => r.argv).length, 4)
+    })
+  })
+  it('reads only kept answers in a cache-only snapshot, and marks what a refresh still waits for', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      await host(h, 'ok', result(42))
+      const main = new URL('../../cli/main.ts', import.meta.url).pathname
+      const run = async (...args: string[]) =>
+        JSON.parse(
+          (
+            await promisify(execFile)(process.execPath, [main, 'menubar', 'snapshot', '--json', ...args], {
+              env: h.env as NodeJS.ProcessEnv,
+            })
+          ).stdout,
+        )
+      const calls = async () => (await readHostLog(h, 'codex').catch(() => [])).filter((r) => r.argv).length
+      // Nothing kept yet: a cache-only snapshot asks no Host, so it has no quota to show.
+      const before = new Date().toISOString()
+      const empty = await run('--cached', '--refreshing-since', before)
+      assert.equal(await calls(), 0)
+      assert.equal(empty.sections[0].rows[0].refreshing, true)
+      // A refresh keeps answers; a cache-only snapshot after it shows them and asks nothing more.
+      await run('--refresh')
+      const asked = await calls()
+      assert.ok(asked > 0)
+      const done = await run('--cached', '--refreshing-since', before)
+      assert.equal(await calls(), asked)
+      assert.equal(done.sections[0].rows[0].bars[1].percent, 42)
+      assert.equal(done.sections[0].rows[0].refreshing, undefined)
+      // A refresh started after those answers still waits for them.
+      const later = await run('--cached', '--refreshing-since', new Date(Date.now() + 60_000).toISOString())
+      assert.equal(later.sections[0].rows[0].refreshing, true)
+      assert.equal(later.sections[0].rows[0].bars[1].percent, 42)
+      assert.equal(await calls(), asked)
+      // The refresh's own snapshot marks an answer that failed.
+      await host(h, 'error')
+      const failed = await run('--refresh')
+      assert.equal(failed.sections[0].rows[0].refreshFailed, true)
+      assert.equal(failed.sections[0].rows[0].refreshing, undefined)
+      // An answer the refresh could not keep is failed in its own snapshot, never still waiting.
+      await host(h, 'ok', result(50))
+      const kept = join(h.home, '.local', 'state', 'sideby', 'quota', 'codex')
+      await chmod(kept, 0o500)
+      try {
+        const unkept = await run('--refresh')
+        assert.equal(unkept.sections[0].rows[0].refreshing, undefined)
+        assert.equal(unkept.sections[0].rows[0].refreshFailed, true)
+      } finally {
+        await chmod(kept, 0o700)
+      }
+      await assert.rejects(run('--refresh', '--cached'))
+      await assert.rejects(run('--refreshing-since', before))
     })
   })
   it('labels a local fallback when a query fails before any successful fetch', async () => {

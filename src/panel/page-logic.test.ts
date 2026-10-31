@@ -67,6 +67,8 @@ import {
   reloadForBuild,
   remoteControlSummary,
   reorder,
+  resetDate,
+  resetWhen,
   rowBadge,
   runCodeSwap,
   saveHandoffChange,
@@ -134,6 +136,39 @@ const quota = (...used: number[]): LogicAccount['quota'] => ({
 })
 
 describe('page logic', () => {
+  it('says when a window resets: a countdown, tomorrow, a weekday, then the date', () => {
+    // 2026-10-31 is a Saturday; 23:30 in Shanghai, so "tomorrow" starts in 30 minutes.
+    const now = Date.parse('2026-10-31T15:30:00Z')
+    const zone = 'Asia/Shanghai'
+    const w = (iso: string, lang: string) => resetWhen(iso, now, lang, zone)
+    assert.equal(w('2026-10-31T19:50:00Z', 'en'), 'in 4h 20m')
+    assert.equal(w('2026-10-31T19:50:00Z', 'zh'), '4小时20分后')
+    assert.equal(w('2026-10-31T15:42:00Z', 'en'), 'in 12m')
+    assert.equal(w('2026-10-31T15:42:00Z', 'zh'), '12分后')
+    // Over 24 hours but on the next calendar day (Sunday 1 Nov, 23:59 local).
+    assert.equal(w('2026-11-01T15:59:00Z', 'en'), 'tomorrow 11:59 PM')
+    assert.equal(w('2026-11-01T15:59:00Z', 'zh'), '明天 23:59')
+    // 23 h 59 m 30 s is still under 24 hours: a countdown, not tomorrow's date.
+    assert.equal(w('2026-11-01T15:29:30Z', 'en'), 'in 23h 59m')
+    // Under 24 hours but across midnight stays a countdown.
+    assert.equal(w('2026-11-01T08:59:00Z', 'en'), 'in 17h 29m')
+    // Up to 6 days: the weekday (Wednesday 4 Nov, 16:59 local).
+    assert.equal(w('2026-11-04T08:59:00Z', 'en'), 'Wed 4:59 PM')
+    assert.equal(w('2026-11-04T08:59:00Z', 'zh'), '周三 16:59')
+    assert.equal(w('2026-11-06T08:00:00Z', 'en'), 'Fri 4:00 PM')
+    // Seven calendar days away is the date, though under 7 x 24 hours.
+    assert.equal(w('2026-11-06T16:01:00Z', 'en'), 'Nov 7, 12:01 AM')
+    // Later: the date, with the year only when it is another year.
+    assert.equal(w('2026-11-11T08:59:00Z', 'en'), 'Nov 11, 4:59 PM')
+    assert.equal(w('2026-11-11T08:59:00Z', 'zh'), '11月11日 16:59')
+    assert.equal(w('2027-01-08T01:05:00Z', 'en'), 'Jan 8, 2027, 9:05 AM')
+    assert.equal(w('2027-01-08T01:05:00Z', 'zh'), '2027年1月8日 09:05')
+    assert.equal(w('not a date', 'en'), '?')
+    assert.equal(resetDate('2026-11-04T08:59:00Z', now, 'en', zone), 'Wed, Nov 4, 4:59 PM')
+    assert.equal(resetDate('2026-11-04T08:59:00Z', now, 'zh', zone), '11月4日周三 16:59')
+    assert.equal(resetDate('2027-01-08T01:05:00Z', now, 'en', zone), 'Fri, Jan 8, 2027, 9:05 AM')
+  })
+
   it('formats countdowns with a fixed shape in both languages', () => {
     assert.equal(formatDuration(30_000, 'en'), '<1m')
     assert.equal(formatDuration(12 * 60_000, 'en'), '12m')

@@ -451,9 +451,10 @@ export interface Runtime {
   /**
    * Which Account of a Family to move on to (spec §3.13), for a start the user asks for: past the Takeover Limit it
    * falls back to the least used Account under 100% (`tight`). Throws a UserError with code `no-quota-source`
-   * when the Family cannot tell, `no-accounts` when it has none.
+   * when the Family cannot tell, `no-accounts` when it has none. `fetch` is as for `quota`; `never` reads only the kept
+   * answers (the menu bar's cache-only snapshot, spec §3.31).
    */
-  handoff(familyId: string, opts?: { includeApi?: boolean }): Promise<HandoffPlan>
+  handoff(familyId: string, opts?: { includeApi?: boolean; fetch?: QuotaFetchMode }): Promise<HandoffPlan>
   /** The config `handoff` settings with every default filled in (spec §3.17). */
   handoffSettings(): HandoffSettings
   /**
@@ -1467,7 +1468,7 @@ export async function createRuntime(
           code: 'no-accounts',
         })
       // Login state, Quota and Same Login (spec §3.21): no model or Host lookups are needed to rank.
-      const [quotas, groups] = await Promise.all([quotasOf(list), groupsOf(list)])
+      const [quotas, groups] = await Promise.all([quotasOf(list, o.fetch), groupsOf(list)])
       const candidates = await Promise.all(
         list.map(async (a) => {
           const peers = groups.get(a.ref)

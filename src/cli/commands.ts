@@ -34,7 +34,9 @@ import { installHint, runHost } from '../core/launch.ts'
 import { type LoginSnapshot, loginAfterLine, loginBeforeLine } from '../core/login-check.ts'
 import { accountModel, type ModelChange, setAccountModel } from '../core/model-choice.ts'
 import { resolvePaths, tildify } from '../core/paths.ts'
+import { type QuotaFetchMode, quotaCheckOff } from '../core/quota-fetch.ts'
 import { takeoverLimits, USAGE_DAYS } from '../core/quota-levels.ts'
+import { quotaStoreFile, readQuotaStore } from '../core/quota-store.ts'
 import {
   groupsToUndo,
   type RemoteControlGroup,
@@ -53,6 +55,7 @@ import {
   hiddenIn,
   inDisplayOrder,
   pinnedIn,
+  resetWhen,
   suggestAlias,
   suggestName,
   withPinned,
@@ -700,7 +703,7 @@ async function runPick(
   if (choice.ref === null) {
     const now = rt.readContext().now
     const why = choice.earliestReset
-      ? `every signed-in ${family} account has used up its quota; ${choice.earliestReset.ref} is back at ${clock(choice.earliestReset.at, now)}`
+      ? `every signed-in ${family} account has used up its quota; ${choice.earliestReset.ref} is back ${resetWhen(choice.earliestReset.at, now.getTime(), 'en')}`
       : `no ${family} account can be used now`
     const signIn = choice.signIn.length
       ? `; sign in with \`sideby login ${choice.signIn.join('` or `sideby login ')}\``
@@ -784,9 +787,10 @@ export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
       return includeApi ? 'API account, pay per use' : 'left out; add --include-api to use it'
     if (low(e)) {
       const over = `past its limit: ${closest(e)} (limits ${limits.short}% for 5-hour, ${limits.long}% for weekly windows)`
-      return e.resetsAt ? `${over} until ${clock(e.resetsAt, now)}` : over
+      return e.resetsAt ? `${over}; resets ${resetWhen(e.resetsAt, now.getTime(), 'en')}` : over
     }
-    if (e.state === 'full') return e.resetsAt ? `used up; back at ${clock(e.resetsAt, now)}` : 'used up'
+    if (e.state === 'full')
+      return e.resetsAt ? `used up; back ${resetWhen(e.resetsAt, now.getTime(), 'en')}` : 'used up'
     return `signed out; sign in with \`sideby login ${e.ref}\``
   }
   const mark = { ready: c.green, unknown: c.yellow, api: c.cyan, full: c.red, 'logged-out': c.dim } as const
@@ -808,7 +812,7 @@ export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
     const out = plan.accounts.filter((e) => e.state === 'logged-out').map((e) => `sideby login ${e.ref}`)
     const apiLeft = !includeApi && plan.accounts.some((e) => e.state === 'api')
     const why = plan.earliestReset
-      ? `every signed-in ${family} account has used up its quota; ${plan.earliestReset.ref} is back at ${clock(plan.earliestReset.at, now)}`
+      ? `every signed-in ${family} account has used up its quota; ${plan.earliestReset.ref} is back ${resetWhen(plan.earliestReset.at, now.getTime(), 'en')}`
       : `no ${family} account can be used now`
     const same = plan.accounts.filter((e) => e.sameLoginAs).map((e) => e.ref)
     const sameNote = same.length ? `; ${same.join(', ')} share the quota of ${plan.from}` : ''
@@ -2925,8 +2929,15 @@ async function lastLocalUse(rt: Runtime, list: readonly Account[]): Promise<stri
   return Number.isFinite(newest) ? new Date(newest).toISOString() : undefined
 }
 
-/** What the Menu Bar Item lists (spec §3.31): each Family's accounts in Display Order, with its Handoff ranking. */
-async function menubarFamilies(rt: Runtime) {
+/**
+ * What the Menu Bar Item lists (spec §3.31): each Family's accounts in Display Order, with its Handoff ranking. `fetch`
+ * `never` reads only the kept answers (the script's cache-only snapshots during a refresh). With `since` (when a manual
+ * refresh started, ms), each account that refresh asks says whether its answer is still to come or failed.
+ */
+async function menubarFamilies(
+  rt: Runtime,
+  o: { fetch?: QuotaFetchMode; since?: number; final?: boolean } = {},
+) {
   // Hidden Families and Accounts (spec §3.25) stay out of the menu and its percent; a Same Login is hidden whole.
   const display = rt.displayOrder()
   const every = displayOrdered(await rt.accounts(), rt)
@@ -2936,14 +2947,26 @@ async function menubarFamilies(rt: Runtime) {
   return Promise.all(
     ids.map(async (id) => {
       const f = rt.families.get(id)!
-      const plan = f.readQuota || f.fetchQuota ? await rt.handoff(id).catch(() => null) : null
+      const plan =
+        f.readQuota || f.fetchQuota ? await rt.handoff(id, { fetch: o.fetch }).catch(() => null) : null
       const now = rt.readContext().now.getTime()
+      // Whether the refresh asks this Family at all: the same rule as `refreshQuota` and `ownQuota`.
+      const asks = o.since !== undefined && Boolean(f.fetchQuota) && !quotaCheckOff(f.id, rt.config, rt.env)
       const list = await Promise.all(
         accounts
           .filter((x) => x.family === id)
           .map(async (x) => {
-            const quota = await rt.quota(x)
+            const quota = await rt.quota(x, { fetch: o.fetch })
             const sameLogin = await rt.sameLogin(x)
+            const login = x.kind === 'api' ? ('not-needed' as const) : (await rt.status(x)).login
+            let refresh: 'waiting' | 'failed' | undefined
+            if (asks && x.kind === 'subscription' && login !== 'logged-out') {
+              const kept = await readQuotaStore(quotaStoreFile(rt.paths.stateDir, x.family, x.name))
+              const attempted = kept ? Date.parse(kept.attemptedAt) : Number.NaN
+              // The refresh's own snapshot has nothing left waiting: an answer it could not keep counts as failed.
+              if (!(attempted >= o.since!)) refresh = o.final ? 'failed' : 'waiting'
+              else if (kept?.error) refresh = 'failed'
+            }
             // Usage is read only for a reading over an hour old, to tell whether this computer used the login since.
             const old = quota.status === 'ok' && now - Date.parse(quota.observedAt) > 3600_000
             const lastUseAt = old
@@ -2953,9 +2976,10 @@ async function menubarFamilies(rt: Runtime) {
               ref: x.ref,
               name: x.name,
               kind: x.kind,
-              login: x.kind === 'api' ? ('not-needed' as const) : (await rt.status(x)).login,
+              login,
               quota,
               sameLogin,
+              ...(refresh ? { refresh } : {}),
               ...(lastUseAt ? { lastUseAt } : {}),
             }
           }),
@@ -2982,13 +3006,18 @@ export async function cmdMenubar(a: ParsedArgs, io: Io): Promise<number> {
   if (action === 'snapshot') {
     const reported = a.flags.get('hotkey') as string | undefined
     const icon = a.flags.get('icon') as string | undefined
+    const sinceFlag = a.flags.get('refreshing-since') as string | undefined
+    const since = sinceFlag === undefined ? undefined : Date.parse(sinceFlag)
+    const cached = a.flags.has('cached')
     if (
       extra !== undefined ||
+      (cached && a.flags.has('refresh')) ||
+      (since !== undefined && (!cached || !Number.isFinite(since))) ||
       (reported !== undefined && reported !== 'ok' && reported !== 'taken') ||
       (icon !== undefined && icon !== 'visible' && icon !== 'hidden')
     )
       throw new UsageError(
-        'usage: sideby menubar snapshot [--refresh] [--lang en|zh] [--hotkey ok|taken [--hotkey-label <label>]] [--icon visible|hidden] [--json]',
+        'usage: sideby menubar snapshot [--refresh | --cached [--refreshing-since <ISO time>]] [--lang en|zh] [--hotkey ok|taken [--hotkey-label <label>]] [--icon visible|hidden] [--json]',
       )
     const { menubarHotkey, menubarLang, menubarSnapshot } = await import('../menubar/snapshot.ts')
     const rt = await createRuntime()
@@ -3018,8 +3047,18 @@ export async function cmdMenubar(a: ParsedArgs, io: Io): Promise<number> {
       rt.config.panel?.language,
       (a.flags.get('lang') as string | undefined) ?? rt.env.LANG,
     )
-    if (a.flags.has('refresh')) await rt.refreshQuota()
-    const snap = menubarSnapshot(await menubarFamilies(rt), rt.readContext().now, lang, hotkey)
+    // A refresh asks every account now; its own snapshot then marks the ones whose answer failed. A cache-only snapshot
+    // (`--cached`, which the menu bar script runs every 2 s during a refresh) never asks a Host.
+    let refreshedSince: number | undefined
+    if (a.flags.has('refresh')) {
+      refreshedSince = Date.now()
+      await rt.refreshQuota()
+    }
+    const families = await menubarFamilies(
+      rt,
+      cached ? { fetch: 'never', since } : { since: refreshedSince, final: true },
+    )
+    const snap = menubarSnapshot(families, rt.readContext().now, lang, hotkey)
     if (wantJson) json(io, snap)
     else {
       io.out(snap.title ? `${snap.title}  ${c.dim(snap.tooltip)}` : snap.tooltip)

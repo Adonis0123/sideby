@@ -888,7 +888,7 @@ describe('next (Handoff, spec §3.13)', () => {
         r.out,
         /Next: claude:work \(every claude account is past its limit \(85% of a 5-hour window, 95% of a weekly one\); this one has the most left, 5h 86% of 85%\)/,
       )
-      assert.match(r.out, /claude:main\s+low\s+past its limit: 5h 92% of 85% .* until/)
+      assert.match(r.out, /claude:main\s+low\s+past its limit: 5h 92% of 85% .*; resets /)
       const [rec] = await readHostLog(h, 'claude')
       assert.equal(rec?.env.CLAUDE_CONFIG_DIR, h.path('.claude-work'))
     })
@@ -930,8 +930,8 @@ describe('next (Handoff, spec §3.13)', () => {
       await cache(h, 'lab', 100, 20, 5)
       const r = await sideby(h, ['next', 'claude'])
       assert.equal(r.code, 1)
-      assert.match(r.err, /every signed-in claude account has used up its quota; claude:work is back at/)
-      assert.match(r.out, /claude:work\s+full\s+used up; back at/)
+      assert.match(r.err, /every signed-in claude account has used up its quota; claude:work is back /)
+      assert.match(r.out, /claude:work\s+full\s+used up; back /)
       const j = await sideby(h, ['next', 'claude', '--json'])
       assert.equal(j.code, 1)
       const plan = checkSchema('next', j.out) as {
@@ -1070,10 +1070,7 @@ describe('next (Handoff, spec §3.13)', () => {
       await cache(h, 'lab', 100, 20, 5)
       const full = await sideby(h, ['run', 'cc'])
       assert.equal(full.code, 1)
-      assert.match(
-        full.err,
-        /cc: every signed-in claude account has used up its quota; claude:work is back at/,
-      )
+      assert.match(full.err, /cc: every signed-in claude account has used up its quota; claude:work is back /)
       assert.equal((await readHostLog(h, 'claude')).length, 3)
 
       // One namespace: an alias cannot take the name, and a pick command cannot take an alias's.
