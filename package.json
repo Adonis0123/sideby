@@ -47,6 +47,7 @@
   },
   "files": [
     "dist",
+    "assets/brand",
     "schemas",
     "skills",
     "mods/claude/.claude-plugin",

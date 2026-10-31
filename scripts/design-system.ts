@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { copyFileSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { FAVICON_SVG, ICON_SVG } from '../src/core/brand-mark.ts'
+import { FAVICON_SVG, ICON_SVG, markPng } from '../src/core/brand-mark.ts'
 import { pageStyles, tokenStyles } from '../src/panel/page-styles.ts'
 import { type PanelThemeTokens, resolveTheme, THEME_TOKENS } from '../src/panel/theme.ts'
 import { BUILTIN_THEMES } from '../src/panel/themes.ts'
@@ -294,7 +294,7 @@ export function buildTokens(notes: Notes, ref = gitRef()) {
       paths: {
         tokens: ['src/panel/themes.ts', 'src/panel/theme.ts', 'src/panel/page-styles.ts'],
         fonts: [],
-        assets: ['src/core/brand-mark.ts', 'docs/assets/banner.jpg'],
+        assets: ['src/core/brand-mark.ts', 'assets/brand', 'docs/assets/banner.jpg'],
         docs: ['design-system/README.md', 'design-system/notes.json', 'design-system/components'],
       },
       components: {
@@ -320,6 +320,7 @@ export function build(out = OUT_DIR): void {
   writeFileSync(join(out, 'components/bundle.css'), bundleCss())
   writeFileSync(join(out, 'assets/Logos/sideby-mark.svg'), ICON_SVG)
   writeFileSync(join(out, 'assets/Logos/sideby-favicon.svg'), FAVICON_SVG)
+  writeFileSync(join(out, 'assets/Logos/sideby-mark.png'), markPng(1024))
   copyFileSync(join(ROOT, 'docs/assets/banner.jpg'), join(out, 'assets/Logos/sideby-banner.jpg'))
 }
 

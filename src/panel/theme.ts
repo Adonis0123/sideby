@@ -72,7 +72,10 @@ export interface PanelThemeTokens {
   warnBar?: string
   failBar?: string
   track?: string
-  /** The sideby mark in the page header; `logoColor` stays the brand blue whatever the Theme unless set. */
+  /**
+   * The tile behind the sideby mark in the page header. `logoColor` no longer colours the mark, which is a painting
+   * (ADR-0064); it is kept so existing Themes and Portals still load.
+   */
   logoBg?: string
   logoColor?: string
   logoBorder?: string

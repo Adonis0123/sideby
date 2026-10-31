@@ -1,45 +1,27 @@
-// The outro mark of the README demo (docs/assets/demo.html), drawn from src/core/brand-mark.ts. Each buddy sits in
-// its own group (.h0 behind, .h1 in front) so the scene slides them in, over a light halo that keeps the ink outline
-// visible on the dark stage. `node scripts/demo-mark.ts` writes it between the mark:start and mark:end comments;
-// scripts/demo-mark.test.ts fails while demo.html holds another one. Retake the GIF afterwards.
+// The outro mark of the README demo (docs/assets/demo.html), from src/core/brand-mark.ts (ADR-0064): the painted Sai
+// on the Panel's light logo tile, in one group (.h1) that the scene slides in. The tile keeps the painting's ink
+// outline visible on the dark stage. `node scripts/demo-mark.ts` writes it between the mark:start and mark:end
+// comments; scripts/demo-mark.test.ts fails while demo.html holds another one. Retake the GIF afterwards.
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import {
-  buddyShapes,
-  buddySvg,
-  MARK,
-  MARK_COLORS,
-  MARK_OUTLINE,
-  type PlacedBuddy,
-} from '../src/core/brand-mark.ts'
+import { MARK_INSET, MARK_TILE, markDataUri } from '../src/core/brand-mark.ts'
 
 export const DEMO_HTML = join(resolve(import.meta.dirname, '..'), 'docs/assets/demo.html')
 const START = '<!-- mark:start -->'
 const END = '<!-- mark:end -->'
-/** How much wider than its outline the halo is, in a buddy's 64-unit grid. */
-const HALO = 4
-
-/** The buddy's silhouette in the light colour, outlines widened, drawn under the buddy. */
-function halo(b: PlacedBuddy): string {
-  const { paths, above } = buddyShapes(b)
-  const light = MARK_COLORS.light
-  const shapes = [...paths, ...above]
-    .map((s) => {
-      const fill = s.fill === 'none' ? ' fill="none"' : ''
-      const width = s.width ? ` stroke-width="${s.width + HALO}"` : ''
-      return `<path d="${s.d}"${fill}${width}/>`
-    })
-    .join('')
-  return `<g transform="translate(${b.x} ${b.y}) scale(${b.scale})" stroke="${light}" stroke-width="${MARK.placedLine + HALO}" fill="${light}" stroke-linecap="round" stroke-linejoin="round">${shapes}</g>`
-}
-
-const buddy = (cls: string, b: PlacedBuddy) =>
-  `<g class="${cls}">${halo(b)}<g ${MARK_OUTLINE}>${buddySvg(b, MARK.placedLine)}</g></g>`
+/** The tile in the outro's viewBox (-4 9 72 51.4): a 48-unit square, centred, with the Panel tile's radius. */
+const TILE = { x: 8, y: 10.7, size: 48 }
 
 /** The markup that goes between the markers. */
 export function outroMark(): string {
-  return buddy('h0', MARK.back) + buddy('h1', MARK.front)
+  const r = (TILE.size * 10) / 40
+  const inset = TILE.size * MARK_INSET
+  const art = TILE.size - 2 * inset
+  return (
+    `<g class="h1"><rect x="${TILE.x}" y="${TILE.y}" width="${TILE.size}" height="${TILE.size}" rx="${r}" fill="${MARK_TILE}"/>` +
+    `<image x="${TILE.x + inset}" y="${TILE.y + inset}" width="${art}" height="${art}" href="${markDataUri(256)}"/></g>`
+  )
 }
 
 /** What demo.html holds between the markers; null without them. */

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
-import { BAI, mirrorPath, SAI } from '../src/core/brand-mark.ts'
+import { markDataUri } from '../src/core/brand-mark.ts'
 import { DEMO_HTML, markBetweenMarkers, outroMark } from './demo-mark.ts'
 
 describe('the demo outro mark', () => {
@@ -14,16 +14,11 @@ describe('the demo outro mark', () => {
     )
   })
 
-  it('puts the back buddy (Bai) in .h0 and the front one (Sai) in .h1, each with its props and a light halo', () => {
+  it('is the painted Sai on the light logo tile, in the .h1 group the scene slides in', () => {
     const svg = outroMark()
-    const [h0 = '', h1 = ''] = svg.split('<g class="h1">')
-    assert.match(h0, /^<g class="h0">/)
-    assert.ok(h0.includes(mirrorPath(BAI.above[0]!.d)), 'Bai wears the antenna (mirrored, as in the mark)')
-    assert.ok(h0.includes(mirrorPath(BAI.behind[0]!.d)), 'Bai wears the battery')
-    assert.ok(h1.includes(SAI.above[0]!.d), 'Sai wears the crown')
-    assert.ok(h1.includes('#e0685a'), 'Sai wears the red cape')
-    for (const part of [h0, h1]) assert.match(part, /stroke="#f6f0e5"[^>]*stroke-width="7\.6"/)
-    assert.ok(!svg.includes('M30 27 L34 29.31'), 'the old forehead chevron is gone')
+    assert.match(svg, /^<g class="h1"><rect [^>]*fill="#e5f2fb"\/><image [^>]*href="data:image\/png;base64,/)
+    assert.ok(svg.includes(markDataUri(256)), 'the painting is the 256 px one')
+    assert.ok(!svg.includes('class="h0"'), 'the second buddy of the old mark is gone')
   })
 
   it('reads the markers from demo.html', () => {

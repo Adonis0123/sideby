@@ -89,7 +89,7 @@ src/
 ├── panel/        createPanelHandler, the standalone server, the inline page and theme.ts (host theme tokens);
 │                 page-logic.ts suggestName/suggestAlias also pick the name and short command for `new --next`
 │                 background.ts runs the server detached (`ui --background`, `--stop`)
-├── desktop/      `sideby app install|uninstall`: macOS app bundle, Linux .desktop entry, icon drawn in pure Node
+├── desktop/      `sideby app install|uninstall`: macOS app bundle, Linux .desktop entry, icon composited in pure Node
 ├── runtime.ts    createRuntime(): shared services for CLI and panel
 ├── types.ts      public plugin contract (Plugin, PluginApi, FamilyDef, Finding, ...)
 └── index.ts      library entry: createPanelHandler and plugin types
@@ -97,6 +97,7 @@ testing/          fake HOME, fake Host binaries, snapshots; also published as `s
 schemas/          generated JSON Schemas for config and every `--json` output
 skills/sideby/    Agent Skill shipped in the package: SKILL.md routes to references/*.md; metadata.version = package version
 scripts/          local.ts (`pnpm local`, Local Build, ADR-0024), release.ts (`pnpm release`), leak-check.sh, demo-home.ts, record-demo.ts (README demo GIF; demo-mark.ts writes its outro mark from brand-mark.ts), shoot-panel.ts (README screenshots), chrome.ts (shared by both), readme-assets.ts (run by `preversion`; manifest.ts formats what its `--mark` writes), sync-skill-version.ts (run by `npm version`), write-build-id.ts (run by `pnpm build`), pin-english-npm-readme.ts (run by `prepublishOnly`, so the npm readme is README.md), design-system.ts (`pnpm design-system`: the Design System's files from the code, into `design-system/dist/`)
+assets/brand/     the painted mark (Sai, ADR-0064) as PNGs, shipped in the package; core/brand-mark.ts reads them
 docs/             adr/, specs/, plans/, verification/, guide/ (user guide, English and .zh-CN.md), assets/ (README banner and screenshots), release.md
 ```
 

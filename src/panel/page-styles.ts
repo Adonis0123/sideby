@@ -12,11 +12,11 @@ const colorDecls = (tokens: PanelThemeTokens) =>
     .join('; ')
 
 // Colors defined from other tokens, before each scheme's Theme colors so a Theme can set them; repeated in both schemes so they follow that scheme's base colors. Dark mode keeps
-// the logo tile light: the mark's ink outline (core/brand-mark.ts) needs a light ground. The mark's body stays the brand
-// blue whatever the Theme (ADR-0050).
+// the logo tile light: the painted mark (core/brand-mark.ts, ADR-0064) is drawn for a light ground. `--logo-fg` no longer
+// colours the mark (it is a painting); it stays the brand blue so Themes that set it keep working (ADR-0050).
 const DERIVED_COLORS = `
   --btn-text: var(--text); --btn-hover-text: var(--accent); --check: var(--focus);
-  --logo-bg: var(--surface-2); --logo-fg: #3f8fc4; /* design-system-ignore: the mark's body keeps the brand blue (ADR-0050) */ --logo-line: var(--border);
+  --logo-bg: var(--surface-2); --logo-fg: #3f8fc4; /* design-system-ignore: the brand blue (ADR-0050); the painted mark keeps its own colours (ADR-0064) */ --logo-line: var(--border);
   --focus-outline: 2px solid var(--focus); --focus-ring: none;
   --scrim: color-mix(in srgb, var(--text) 40%, transparent);`
 // The usage chart (--spark) takes the main button's hue at a readable lightness, keeping its chroma: a black-and-white
@@ -105,8 +105,8 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .ver-pill.has-update { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 .ver-pill.has-update::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .logo { display: inline-flex; flex: none; width: 40px; height: 40px; border-radius: 10px; background: var(--logo-bg); box-shadow: inset 0 0 0 1px var(--logo-line); }
-/* desktop/icon.ts draws the same two half discs for the app icon. */
-.logo svg { display: block; width: 100%; height: 100%; fill: var(--logo-fg); }
+/* The painted mark (core/brand-mark.ts), 3 px in from the tile's edge; desktop/icon.ts lays the app icon out the same way. */
+.logo img { display: block; width: 100%; height: 100%; padding: 7.5%; box-sizing: border-box; object-fit: contain; }
 .top-actions { display: flex; align-items: center; gap: 8px; }
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
 .section-head > div:first-child { min-width: 0; }

@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { asBuiltin, demoFamily, demoPlugin, seedDemoMain } from '../../testing/demo.ts'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
-import { FAVICON_SVG } from '../core/brand-mark.ts'
+import { FAVICON_SVG, ICON_SVG, markDataUri } from '../core/brand-mark.ts'
 import { CLI_COMMANDS, COMMAND_GROUPS } from '../core/cli-commands.ts'
 import { SEARCH_CATALOG } from '../core/search-catalog.ts'
 import { packageVersion } from '../core/version.ts'
@@ -2002,7 +2002,13 @@ describe('panel updates (spec §3.23, ADR-0021)', () => {
       try {
         const icon = await request(on.port, 'GET', '/icon.svg', { host: `127.0.0.1:${on.port}` })
         assert.equal(icon.status, 200)
-        assert.match(icon.text, /^<svg xmlns=.*#f2b35e.*#3f8fc4/s)
+        assert.equal(icon.text, ICON_SVG)
+        // The painted Sai (ADR-0064): the PNG inside the SVG as a data: image, which an <img> or a tab icon may load.
+        assert.match(
+          icon.text,
+          /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 128 128"[^>]*><image href="data:image\/png;base64,/,
+        )
+        assert.ok(icon.text.includes(markDataUri(128)))
         const page = await request(on.port, 'GET', '/', { host: `127.0.0.1:${on.port}` })
         // The link changes with the mark, so a browser fetches a new favicon after an Update changes it.
         const v = createHash('sha256').update(FAVICON_SVG).digest('hex').slice(0, 10)
@@ -2013,6 +2019,9 @@ describe('panel updates (spec §3.23, ADR-0021)', () => {
         const fav = await request(on.port, 'GET', `/favicon.svg?v=${v}`, { host: `127.0.0.1:${on.port}` })
         assert.equal(fav.status, 200)
         assert.equal(fav.text, FAVICON_SVG)
+        assert.ok(fav.text.includes(markDataUri(64)), 'the favicon is the painted Sai')
+        // The header logo is the painting inline, a data: image the page's CSP allows (img-src 'self' data:).
+        assert.ok(page.text.includes(`<span class="logo" aria-hidden="true"><img src="${markDataUri(128)}"`))
         // The running version stays in sight in the header and opens the dialog with "Check for updates" (spec §3.23).
         assert.match(
           page.text,

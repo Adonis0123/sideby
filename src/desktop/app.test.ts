@@ -9,7 +9,7 @@ import { inflateSync } from 'node:zlib'
 import { Value } from 'typebox/value'
 import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
 import { OUTPUT_SCHEMAS } from '../cli/json-schemas.ts'
-import { highlights, MARK, MARK_VIEWBOX, type PlacedBuddy } from '../core/brand-mark.ts'
+import { MARK_TILE, markDataUri, markPng } from '../core/brand-mark.ts'
 import { UserError } from '../core/errors.ts'
 import {
   type AppContext,
@@ -20,7 +20,15 @@ import {
   type Runner,
   uninstallApp,
 } from './app.ts'
-import { APP_MARKER, encodeIcns, ICONSET, iconPng, iconSvg } from './icon.ts'
+import {
+  APP_MARKER,
+  decodePng as decodeAny,
+  encodeIcns,
+  ICONSET,
+  iconPng,
+  iconSvg,
+  markRect,
+} from './icon.ts'
 
 const MAIN = fileURLToPath(new URL('../cli/main.ts', import.meta.url))
 const NODE = '/opt/node/bin/node'
@@ -60,7 +68,7 @@ function ctx(h: FakeHome, platform: NodeJS.Platform, calls: string[][] = []): Ap
 }
 
 describe('app icon', () => {
-  it('draws the two buddies with antialiased edges at every iconset size', () => {
+  it('lays the painted mark over the light tile, antialiased, at every iconset size', () => {
     assert.deepEqual(
       ICONSET.map((i) => i.size),
       [16, 32, 32, 64, 128, 256, 256, 512, 512, 1024],
@@ -69,33 +77,35 @@ describe('app icon', () => {
     assert.deepEqual([width, height], [256, 256])
     assert.deepEqual(text, [`Software\0${APP_MARKER}`])
     assert.deepEqual(px(0, 0), [0, 0, 0, 0], 'outside the tile is transparent')
-    const tile = [0xe5, 0xf2, 0xfb, 255]
-    // The tile is 824/1024 of the canvas, centred, and MARK_VIEWBOX (mark units) fills it; a buddy's 64-unit grid is
-    // placed in mark units by its translate and scale (core/brand-mark.ts).
+    const tile = [1, 3, 5].map((i) => Number.parseInt(MARK_TILE.slice(i, i + 2), 16)).concat(255)
+    // The tile is 824/1024 of the canvas, centred, with a radius of a quarter of its side.
     const side = (256 * 824) / 1024
     const off = (256 - side) / 2
-    const at = (b: PlacedBuddy, gx: number, gy: number) =>
-      px(
-        Math.floor(off + ((b.x + b.scale * gx - MARK_VIEWBOX.x) * side) / MARK_VIEWBOX.size),
-        Math.floor(off + ((b.y + b.scale * gy - MARK_VIEWBOX.y) * side) / MARK_VIEWBOX.size),
-      )
-    assert.deepEqual(at(MARK.back, 32, 36), [0xf2, 0xb3, 0x5e, 255], 'the back buddy is amber')
-    assert.deepEqual(at(MARK.front, 32, 36), [0x3f, 0x8f, 0xc4, 255], 'the front buddy is blue')
-    assert.deepEqual(at(MARK.front, 22, 42), [0x1e, 0x2a, 0x44, 255], 'an eye of the front buddy is ink')
-    assert.deepEqual(at(MARK.back, 42, 42), [0x1e, 0x2a, 0x44, 255], 'an eye of the back buddy is ink')
-    assert.deepEqual(at(MARK.back, 48, 12), tile, 'above the back buddy, beside its antenna, is the tile')
-    const hl = highlights(MARK.front.look)[0]!
-    assert.deepEqual(at(MARK.front, hl.cx, hl.cy), [0xf6, 0xf0, 0xe5, 255], 'an eye highlight is light')
-    // 3 px inside the tile's corner arc (radius a quarter of the tile) on the diagonal.
     const corner = Math.floor(off + (side / 4) * (1 - Math.SQRT1_2) + 3)
-    assert.deepEqual(px(corner, corner), tile, 'inside the rounded corner is the tile')
+    assert.deepEqual(
+      px(corner, corner),
+      tile,
+      'inside the rounded corner, clear of the painting, is the tile',
+    )
     assert.deepEqual(px(corner - 6, corner - 6)[3], 0, 'outside the rounded corner is transparent')
     const edge = Array.from({ length: 256 }, (_, y) => px(25, y)[3]!)
     assert.ok(
       edge.some((a) => a > 0 && a < 255),
       'the rounded corner is antialiased',
     )
+    // The painting fills the tile less its inset; its centre is Sai's blue body, not the tile.
+    const r = markRect(256)
+    assert.ok(r.x > off && r.w < side, 'the painting sits inside the tile')
+    const [cr, cg, cb, ca] = px(Math.floor(r.x + r.w / 2), Math.floor(r.y + r.w * 0.55))
+    assert.equal(ca, 255)
+    assert.ok(cb! > cr! + 60 && cb! > cg!, `the centre of the painting is blue, got ${[cr, cg, cb]}`)
     for (const { size } of ICONSET) assert.equal(decodePng(iconPng(size)).width, size)
+  })
+
+  it('decodes the painted mark it ships', () => {
+    const { width, height, rgba } = decodeAny(markPng(64))
+    assert.deepEqual([width, height], [64, 64])
+    assert.equal(rgba[3], 0, 'the painting has a transparent background')
   })
 
   it('writes an ICNS container and an SVG with the marker', () => {
@@ -103,7 +113,8 @@ describe('app icon', () => {
     assert.equal(icns.toString('latin1', 0, 4), 'icns')
     assert.equal(icns.readUInt32BE(4), icns.length)
     assert.equal(icns.toString('latin1', 8, 12), 'icp4')
-    assert.match(iconSvg(), new RegExp(`<svg[^]*${APP_MARKER}[^]*fill="#f2b35e"[^]*fill="#3f8fc4"`))
+    assert.match(iconSvg(), new RegExp(`<svg[^]*${APP_MARKER}[^]*fill="${MARK_TILE}"`))
+    assert.ok(iconSvg().includes(`href="${markDataUri(1024)}"`), 'the SVG holds the painting')
   })
 })
 

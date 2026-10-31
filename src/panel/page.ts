@@ -2,7 +2,7 @@
 // sibling modules: page-styles.ts (tokens and CSS), page-script.ts (behaviour, with page-logic.ts helpers) and
 // i18n.ts (English and Chinese text); this module assembles them under the CSP nonce.
 import { createHash } from 'node:crypto'
-import { FAVICON_SVG, MARK_SVG } from '../core/brand-mark.ts'
+import { FAVICON_SVG, MARK_IMG } from '../core/brand-mark.ts'
 import { commandListForPage } from '../core/cli-commands.ts'
 import { ALIAS_NAME, RESERVED_ALIASES } from '../core/config.ts'
 import {
@@ -127,7 +127,7 @@ export function renderPage(opts: PageOptions): string {
 <header class="top">
   <div class="top-in">
     <div class="brand">
-      <span class="logo" aria-hidden="true">${MARK_SVG}</span>
+      <span class="logo" aria-hidden="true">${MARK_IMG}</span>
       <div>
         <div class="title-row"><h1>sideby</h1><button id="ver-top" class="ver-pill" type="button" aria-haspopup="dialog" aria-expanded="false" hidden></button></div>
         <p class="tagline" data-i18n="top.tagline">Every AI coding account, side by side.</p>

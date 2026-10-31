@@ -1,7 +1,7 @@
 // The Menu Bar Item's process (spec §3.31, ADR-0034): JXA run by the system's `osascript`, with no compiled code. It
 // draws what `sideby menubar snapshot --json` says and turns clicks into sideby commands; it reads no other file and
 // decides nothing itself. Arguments: the Node binary and the sideby entry the LaunchAgent recorded.
-import { FAVICON_SVG, MENUBAR_ICON_SVG } from '../core/brand-mark.ts'
+import { MENUBAR_ICON_PNG } from '../core/brand-mark.ts'
 import { MENUBAR_STRINGS } from './strings.ts'
 
 /** Seconds between two snapshots, and between two looks at a running one. */
@@ -38,9 +38,10 @@ function run(argv) {
   var item = $.NSStatusBar.systemStatusBar.statusItemWithLength($.NSVariableStatusItemLength);
   // Keeps the place a user drags it to with Command held, such as out from under the notch.
   item.autosaveName = 'dev.sideby.menubar';
-  // Sai, the sideby buddy, in colour (core/brand-mark.ts); a system gauge, drawn as a template, where this macOS cannot read SVG.
-  var icon = $.NSImage.alloc.initWithData($(${JSON.stringify(MENUBAR_ICON_SVG)}).dataUsingEncoding($.NSUTF8StringEncoding));
-  if (!icon || icon.isNil() || !icon.isValid) {
+  // Sai, the painted sideby buddy, in colour (core/brand-mark.ts); a system gauge, drawn as a template, if it cannot load.
+  var MARK_PNG = ${JSON.stringify(MENUBAR_ICON_PNG)};
+  var icon = pngImage(MARK_PNG, 18);
+  if (!icon) {
     icon = $.NSImage.imageWithSystemSymbolNameAccessibilityDescription('gauge.with.needle', 'sideby');
     if (icon && !icon.isNil()) icon.template = true;
   }
@@ -55,7 +56,6 @@ function run(argv) {
   var refs = [], actions = [], footer = null, appearance = '', manual = false;
   // The first words, before any snapshot has said which language to use.
   var zh = /^zh/i.test(lang);
-  var CARD_ICON = ${JSON.stringify(FAVICON_SVG)};
   var LOADING = zh ? ${JSON.stringify(MENUBAR_STRINGS.zh.loading)} : ${JSON.stringify(MENUBAR_STRINGS.en.loading)};
   var OPEN_PANEL = zh ? ${JSON.stringify(MENUBAR_STRINGS.zh.openPanel)} : ${JSON.stringify(MENUBAR_STRINGS.en.openPanel)};
   var now = function () { return Date.now() / 1000; };
@@ -318,6 +318,15 @@ function run(argv) {
     img.template = template;
     return img;
   }
+  // A base64 PNG at size×size points; null when macOS cannot read it.
+  function pngImage(b64, size) {
+    var data = $.NSData.alloc.initWithBase64EncodedStringOptions($(b64), 0);
+    if (!data || data.isNil()) return null;
+    var img = $.NSImage.alloc.initWithData(data);
+    if (!img || img.isNil() || !img.isValid) return null;
+    img.size = $.NSMakeSize(size, size);
+    return img;
+  }
   function symbol(name) {
     var img = $.NSImage.imageWithSystemSymbolNameAccessibilityDescription(name, name);
     return img && !img.isNil() ? img : null;
@@ -518,7 +527,7 @@ function run(argv) {
     var W = Math.max(280, L.width), H = 50;
     var v = $.NSView.alloc.initWithFrame($.NSMakeRect(0, 0, W, H));
     v.autoresizingMask = $.NSViewWidthSizable;
-    var icon = svgImage(CARD_ICON, 30, false);
+    var icon = pngImage(MARK_PNG, 30);
     if (icon) {
       var iv = $.NSImageView.imageViewWithImage(icon);
       iv.frame = $.NSMakeRect(14, 10, 30, 30);

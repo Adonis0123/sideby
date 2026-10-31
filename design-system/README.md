@@ -46,7 +46,7 @@ Use the Panel's classes from `components/bundle.css` (its real stylesheet): `btn
 
 ## Iconography
 
-- The mark is two buddies side by side (`assets/Logos/sideby-mark.svg`), on a light 40px tile (`logo-bg`, 10px radius), even in dark mode. Below about 24px use `sideby-favicon.svg`. The mark keeps its colors whatever the Theme; only the front buddy's body follows `logo-fg`.
+- The mark is the painted Sai, one buddy in ink and watercolour (`assets/Logos/sideby-mark.png`, or `sideby-mark.svg`), on a light 40px tile (`logo-bg`, 10px radius, 3px inset), even in dark mode. Below about 24px use `sideby-favicon.svg`. The mark keeps its colors whatever the Theme; `logo-fg` no longer colours it.
 - UI icons are 15px inline stroke SVGs (`stroke: currentColor`, width 2, round caps and joins, no fill), colored like the text beside them.
 
 ## Not synced

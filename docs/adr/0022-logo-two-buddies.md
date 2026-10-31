@@ -1,6 +1,6 @@
 # ADR 0022: The logo is two buddies side by side
 
-Date: 2026-10-16 · Status: accepted
+Date: 2026-10-16 · Status: superseded by ADR-0064
 
 Supersedes the drawing of ADR-0020.
 

@@ -2339,8 +2339,8 @@ const MAIN = String.raw`
   function emptyState() {
     const fams = S.state.families.slice().sort((x, y) => Number(y.installed) - Number(x.installed))
     return h('div', { class: 'empty' },
-      // The header's mark, cloned (page.ts draws it from core/brand-mark.ts).
-      h('span', { class: 'logo', 'aria-hidden': 'true' }, document.querySelector('.brand .logo svg')?.cloneNode(true) ?? null),
+      // The header's mark, cloned (page.ts takes it from core/brand-mark.ts).
+      h('span', { class: 'logo', 'aria-hidden': 'true' }, document.querySelector('.brand .logo img')?.cloneNode(true) ?? null),
       h('h3', null, t('empty.title')),
       h('p', { class: 'muted' }, t('empty.body')),
       fams.length ? h('ul', { class: 'host-list' }, fams.map((f) => h('li', null, badge(f.id, 'sm'), h('span', null, f.title),

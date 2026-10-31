@@ -33,9 +33,9 @@
     "warn-bar": "Quota bar fill, running out; stale dot, attention dots.",
     "fail-bar": "Quota bar fill, used up; error dots.",
     "track": "Empty part of a quota bar. Source pairs that miss: ok-bar, warn-bar and fail-bar on track are under 3:1 in the light themes (1.4–2.9:1) — always show the percentage beside a bar, colored warn/fail at those levels, so state never rests on the bar color alone.",
-    "logo-bg": "The 40px tile behind the sideby mark in the page header. Stays light in dark mode: the mark's ink outline needs a light ground.",
+    "logo-bg": "The 40px tile behind the sideby mark in the page header. Stays light in dark mode: the painted mark is made for a light ground.",
     "logo-line": "Inset 1px ring of the logo tile (none in dark mode).",
-    "logo-fg": "Body of the front (blue) buddy in the mark. The brand blue whatever the Theme (ADR-0050); a Portal may set it with logoColor."
+    "logo-fg": "The brand blue (ADR-0050). It no longer colours the mark, which is a painting (ADR-0064); kept so Themes and Portals that set logoColor still load."
   },
   "type": {
     "title": {

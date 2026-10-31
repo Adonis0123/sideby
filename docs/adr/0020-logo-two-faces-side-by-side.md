@@ -1,6 +1,6 @@
 # ADR 0020: The logo is two faces side by side
 
-Date: 2026-10-16 · Status: superseded by ADR-0022
+Date: 2026-10-16 · Status: superseded by ADR-0022, then ADR-0064
 
 ## Context
 
