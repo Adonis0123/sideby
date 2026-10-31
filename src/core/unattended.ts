@@ -420,7 +420,7 @@ export const unattendedClock = (iso: string, now: Date, zh = false): string =>
  * Unattended Mode's session hooks: before the ask tool and when the model ends its turn (`Stop`, which keeps a turn
  * that ended on a question going once) in Claude and Codex; and in Claude on every permission request Claude Code is
  * about to show, every MCP server form (`Elicitation`), and every turn that failed on an API error (`StopFailure`, in the background with `asyncRewake`, so its exit 2 wakes the session: Turn Retry,
- * ADR-0066). Codex has no such events for them; its own approval prompts and failed turns are not covered.
+ * ADR-0067). Codex has no such events for them; its own approval prompts and failed turns are not covered.
  */
 export function unattendedHookPart(): SessionHookPart {
   const command = (family: string, event = 'PreToolUse') =>

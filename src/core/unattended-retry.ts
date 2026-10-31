@@ -1,4 +1,4 @@
-// Turn Retry (spec §3.37 item 6, ADR-0066): while Unattended Mode is on, a Claude turn that ended on a passing failure
+// Turn Retry (spec §3.37 item 6, ADR-0067): while Unattended Mode is on, a Claude turn that ended on a passing failure
 // (an overloaded or failing server, a rate limit that is not a used-up Quota, a dropped or refused connection) is
 // started again by `unattended-hook`'s background `StopFailure` entry, at most `RETRY_LIMIT` times in a row per
 // session, each after a longer wait. A leaf module (Node built-ins and core/fs-safe.ts only): the hook imports it.

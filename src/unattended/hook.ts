@@ -12,7 +12,7 @@
 // written as plain text (`{"decision":"block","reason":…}` on stdout), keeping the question; and it declines an MCP
 // server's form, keeping what the server asked. In Claude it also runs in the background after a turn that failed for
 // a passing reason (`StopFailure`, `asyncRewake`): it waits, then wakes the session with exit 2 so the turn goes on, at
-// most three times in a row, and keeps a Pending Decision when that did not help (Turn Retry, ADR-0066). A failure
+// most three times in a row, and keeps a Pending Decision when that did not help (Turn Retry, ADR-0067). A failure
 // before the decision is made does nothing: that is
 // how a session behaves without the feature (unlike `network-hook`, which blocks when it cannot tell). Once the
 // decision is to refuse, it refuses: keeping the Pending Decision and writing the reason are best effort, and their
@@ -557,7 +557,7 @@ async function isOn(env: Env, now: Date): Promise<boolean> {
 }
 
 /**
- * Turn Retry (spec §3.37 item 6, ADR-0066), Claude's background `StopFailure` hook (`asyncRewake`): Claude Code runs it
+ * Turn Retry (spec §3.37 item 6, ADR-0067), Claude's background `StopFailure` hook (`asyncRewake`): Claude Code runs it
  * when a turn ends on an API error and ignores its output, but wakes the idle session when it exits 2, with its stderr
  * as the model's next note (checked with Claude Code 2.1.316). While Unattended Mode is on and the failure is a
  * passing one, it counts the failure for the session; up to `RETRY_LIMIT` in a row it waits 1, 2, then 4 minutes and

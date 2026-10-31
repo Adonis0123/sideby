@@ -1,4 +1,4 @@
-# ADR-0066: Unattended Mode starts a turn that failed for a passing reason again
+# ADR-0067: Unattended Mode starts a turn that failed for a passing reason again
 
 Status: accepted
 Date: 2026-11-01
