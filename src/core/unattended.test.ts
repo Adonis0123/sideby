@@ -78,11 +78,9 @@ describe('Launch', () => {
         'Elicitation',
         'StopFailure',
       ])
-      // In the background: its exit 2 wakes the session (Turn Retry), and only for errors that can be passing.
-      assert.deepEqual(
-        hooks.StopFailure.map((g: { matcher: string }) => g.matcher),
-        ['rate_limit|overloaded|server_error|unknown'],
-      )
+      // In the background: its exit 2 wakes the session (Turn Retry). No matcher: every failure ends an earlier wait.
+      assert.equal(hooks.StopFailure.length, 1)
+      assert.equal(hooks.StopFailure[0].matcher, undefined)
       assert.match(
         hooks.StopFailure[0].hooks[0].command,
         /^'.+' '.+main\.ts' unattended-hook claude StopFailure$/,

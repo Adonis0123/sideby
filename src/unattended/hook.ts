@@ -396,11 +396,19 @@ async function decide(
   const stop = Boolean(askTool) && event === 'Stop'
   if (!permission && !elicitation && !stop && (event !== 'PreToolUse' || !askTool)) return undefined
   const paths = resolvePaths(env)
+  // A turn that finished ends the session's run of retried failures (Turn Retry), whether Unattended Mode is on or
+  // not: a wait left from earlier must never wake a session whose turn is already done.
+  let early: string | undefined
+  if (stop && family === 'claude') {
+    early = await readInput(input)
+    const sessionId = text(parseObject(early)?.session_id, 256)
+    if (sessionId) await clearRetryStreak(paths.stateDir, sessionId).catch(() => {})
+  }
   const { schedule } = await readUnattendedConfig(paths.configFile)
   const override = await readUnattendedOverride(paths.stateDir)
   const state = unattendedState({ schedule, override, now, session: env[UNATTENDED_ENV] === '1' })
   if (!state.on) return undefined
-  const raw = await readInput(input)
+  const raw = early ?? (await readInput(input))
   const zh = prefersChinese(env)
   const account = text(env.SIDEBY_ACCOUNT, 256)
   if (stop || elicitation) {
@@ -423,8 +431,6 @@ async function decide(
             dedupe: true,
           }),
       }
-    // A turn that finished ends the session's run of retried failures (Turn Retry).
-    if (family === 'claude' && sessionId) await clearRetryStreak(paths.stateDir, sessionId).catch(() => {})
     // Once per stop: a turn the hook already kept going ends as the model leaves it.
     if (v.stop_hook_active !== false) return undefined
     const message = typeof v.last_assistant_message === 'string' ? v.last_assistant_message : ''
@@ -566,14 +572,19 @@ async function retryAfterFailure(
 ): Promise<string | undefined> {
   const clock = deps.now ?? (() => new Date())
   const now = clock()
-  if (!(await isOn(env, now))) return undefined
   const v = parseObject(await readInput(input))
   if (!v) return undefined
   const sessionId = text(v.session_id, 256)
+  if (!sessionId) return undefined
+  const paths = resolvePaths(env)
   const error = typeof v.error === 'string' ? v.error : undefined
   const said = [text(v.last_assistant_message, 1000), text(v.error_details, 1000)].filter(Boolean).join(' ')
-  if (!sessionId || !error || !passingFailure(error, said)) return undefined
-  const paths = resolvePaths(env)
+  // A later failure that is not retried (a used-up Quota, a lasting error) or comes while the mode is off still
+  // takes over the session: the wait an earlier failure left must not wake it.
+  if (!error || !passingFailure(error, said) || !(await isOn(env, now))) {
+    await clearRetryStreak(paths.stateDir, sessionId).catch(() => {})
+    return undefined
+  }
   const streak = await countFailure(paths.stateDir, sessionId, now)
   if (streak.count > RETRY_LIMIT) {
     const account = text(env.SIDEBY_ACCOUNT, 256)

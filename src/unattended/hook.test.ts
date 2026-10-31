@@ -766,6 +766,32 @@ describe('unattended hook after a turn failed for a passing reason (Turn Retry)'
         },
       })
       assert.equal(overtaken.code, 0)
+      // A later failure that is not retried (a used-up Quota, a lasting error) still takes over the wait.
+      for (const [error, message] of [
+        ['rate_limit', "You've hit your session limit · resets 3:45pm"],
+        ['authentication_failed', 'API Error: 401'],
+      ])
+        assert.equal(
+          (
+            await retry(h, failed('server_error', OVERLOADED), {
+              during: async () => {
+                await retry(h, failed(error!, message!))
+              },
+            })
+          ).code,
+          0,
+        )
+      // The turn finished while the mode was paused, and the mode came back before the wait ended.
+      const stateDir = resolvePaths(h.env).stateDir
+      const pausedStop = await retry(h, failed('server_error', OVERLOADED), {
+        during: async () => {
+          await writeUnattendedOverride(stateDir, { mode: 'pause', at: now.toISOString() })
+          await run(h, ['claude', 'Stop'], stopInput(REPORT))
+          await turnOn(h)
+        },
+      })
+      assert.deepEqual(pausedStop, { code: 0, err: '', slept: [60_000] })
+      assert.equal(await readRetryStreak(stateDir, 's1'), undefined)
       assert.equal((await retry(h, failed('server_error', OVERLOADED), { gone: true })).code, 0)
       const off = await retry(h, failed('server_error', OVERLOADED), {
         during: async () => {

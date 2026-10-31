@@ -24,10 +24,7 @@ export const RETRY_HOOK_TIMEOUT_S = 600
 /** The wait before retry `n` (1-based). */
 export const retryDelay = (n: number): number => RETRY_FIRST_MS * 2 ** (Math.max(1, n) - 1)
 
-/**
- * The `StopFailure` error types (Claude Code's hook `error` field) that can be a passing failure. Also the hook's
- * matcher, so Claude Code starts the hook for nothing else (`|` is the only separator it takes for this event).
- */
+/** The `StopFailure` error types (Claude Code's hook `error` field) that can be a passing failure. */
 export const PASSING_ERRORS: readonly string[] = ['rate_limit', 'overloaded', 'server_error', 'unknown']
 
 /**

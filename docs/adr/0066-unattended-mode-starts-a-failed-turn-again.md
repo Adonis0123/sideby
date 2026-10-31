@@ -19,12 +19,12 @@ Reference practice: agent runners that resume work after a passing failure retry
 
 ## Decision
 
-- `unattended-hook` is also injected on Claude's `StopFailure`, with matcher `rate_limit|overloaded|server_error|unknown` (the error types a passing failure can have), `asyncRewake: true` and `timeout: 600`. It runs in the background, so Claude Code does not wait for it.
+- `unattended-hook` is also injected on Claude's `StopFailure`, with no matcher (every failed turn reaches it), `asyncRewake: true` and `timeout: 600`. It runs in the background, so Claude Code does not wait for it.
 - While Unattended Mode is on, a failure is passing when its type is `overloaded` or `server_error`; `rate_limit` unless its text says a Quota, plan limit, spend cap or credits are used up (`hit your`, `usage limit`, `spend limit`, `credit balance`, `usage credits`, `limit reached` but not `rate limit reached`); `unknown` only when its text names a timeout, a 408/429/5xx status or a dropped connection (`passingFailure` in `core/unattended-retry.ts`). A used-up Quota stays with Auto Handoff or `autoContinueAtUsageLimit`.
 - For a passing failure it counts the failure in the session's streak (`<state>/unattended/retries/<hash of the session id>.json`, `{ count, token, at }`, folder checked like `pending/`). For the first three in a row it waits 1, 2, then 4 minutes, and exits 2 with a note to the model: the turn failed for a passing reason, check what is already done, do not redo it, continue where it stopped (English or Chinese, by `LANG`). Before it wakes the session it checks again that Unattended Mode is still on, that its parent (the Host) is still there, and that its token is still the streak's: a later failure of the same session, or a finished turn, takes the wait over.
-- A finished turn ends the streak: the `Stop` hook, which already runs at every turn end, removes the session's file. A streak older than six hours starts again from one.
+- A later turn ends the streak, so an earlier wait never wakes a session that has moved on: the `Stop` hook, which already runs at every turn end, removes the session's file whether Unattended Mode is on or off, and so does a `StopFailure` that is not retried (another error type, a used-up Quota, or the mode is off). A streak older than six hours starts again from one.
 - The fourth failure in a row wakes nothing: it keeps a Pending Decision of kind `deferred` with the error and the waits, so the user sees in the morning that the session stopped and why, and ends the streak.
-- Off, any other error type or text, no session id, bad input or any problem: exit 0 and nothing else, as without the hook.
+- Off, any other error type or text, no session id, bad input or any problem: exit 0 and nothing else (beyond ending the session's streak), as without the hook.
 
 ## Consequences
 
