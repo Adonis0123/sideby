@@ -183,19 +183,21 @@ yet: sideby copies one line to the clipboard ("Read the message sideby kept for 
 tab to paste it into. A Claude session in bypass permission mode holds the message until you approve it in its
 terminal (about 5 minutes); \`sideby messages inbound accept\` makes it show them at once.
 Screenshots: PNG, JPEG, GIF or WebP, up to 20 MB each. Run it inside a session and the message names that session as
-the sender. --lang chooses the language of the line to paste (default: your locale).
+the sender and ends with a Reply line the other AI can answer with. "Not confirmed" means sideby handed it over but
+could not tell whether it arrived: look at that session before you send it again. --lang chooses the language of the line to paste (default: your locale).
 
 Examples:
   sideby send cc002 "the tests pass now, go ahead and release"
   sideby send 61230c3d "this is the error I see" --image ~/Desktop/shot.png
   sideby send codex:team "read the plan in docs/plan.md" --json
-Exit: 0 delivered or kept for pasting; 1 no such running session, several to choose from, or a screenshot sideby
+Exit: 0 delivered, not confirmed, or kept for pasting; 1 no such running session, several to choose from, or a screenshot sideby
 refuses; 2 malformed command line.`,
   messages: `sideby messages [--to <account|session>] [--limit <n>] [--json]
        sideby messages inbound [accept|undo] [--yes] [--json]
 
 List the messages you sent with \`sideby send\`, newest first: to which session, and how far each got (delivered,
-read once it shows in the target's record, or needs paste).
+read once it shows in the target's record, needs paste, or Not confirmed: it may still show up, so check the session
+before you send it again).
 
 inbound shows, for each Claude account, its crossSessionInbound setting: accept shows a message from another session
 at once; hold, or no setting in a session in bypass permission mode, waits for you to approve it and drops it after

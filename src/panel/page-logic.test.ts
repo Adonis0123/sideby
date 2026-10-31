@@ -50,6 +50,7 @@ import {
   mergeUsage,
   messageChip,
   messageNews,
+  messageToCheck,
   networkTaskFacts,
   newAccountDir,
   nextReset,
@@ -2366,6 +2367,43 @@ describe('send to a session (spec §3.32 step 2)', () => {
         'msgn.show',
       ])
         assert.ok(MESSAGES[lang][key], `${key} ${lang}`)
+  })
+
+  it('shows a Message that could not be confirmed as a warning, never as a paste to do (ADR-0065)', () => {
+    const unknown = sendResultView(
+      { status: 'unknown', pasteText: 'Read /m.md', note: ' It may still show up. ' },
+      true,
+    )
+    assert.deepEqual(unknown, {
+      kind: 'unknown',
+      key: 'send.unknown',
+      pasteText: 'Read /m.md',
+      reason: 'It may still show up.',
+      hint: '',
+      jump: false,
+    })
+    // A status this page does not know is not taken as "stored" with its paste request.
+    assert.equal(sendResultView({ status: 'later-status', pasteText: 'Read /m.md' }, true).kind, 'unknown')
+    assert.deepEqual(messageChip('unknown'), { key: 'send.chip.unknown', tone: 'warn' })
+    assert.equal(messageToCheck('unknown'), true)
+    assert.equal(messageToCheck('paste-needed'), true)
+    for (const st of ['delivered', 'read', 'stored', undefined]) assert.equal(messageToCheck(st), false)
+    // Announced once: polling the same answer again says nothing more.
+    const to = 'cc002 · knip cleanup · 61230c3d'
+    const before = { s1: { id: 'a1', status: 'stored', to } }
+    const after = { s1: { id: 'a1', status: 'unknown', to } }
+    assert.deepEqual(messageNews(before, after), [
+      { kind: 'unknown', sessionId: 's1', id: 'a1', to: 'cc002 · knip cleanup', from: '' },
+    ])
+    assert.deepEqual(messageNews(after, after), [])
+    assert.deepEqual(messageNews(after, { s1: { id: 'a1', status: 'read', to } }), [
+      { kind: 'read', sessionId: 's1', id: 'a1', to: 'cc002 · knip cleanup', from: '' },
+    ])
+    for (const lang of ['en', 'zh'] as const)
+      for (const key of ['send.chip.unknown', 'send.unknown', 'send.unknownCaution', 'msgn.unknown'])
+        assert.ok(MESSAGES[lang][key], `${key} ${lang}`)
+    assert.equal(MESSAGES.en['send.chip.unknown'], 'Not confirmed')
+    assert.equal(MESSAGES.zh['send.chip.unknown'], '未确认送达')
   })
 
   it('refuses a file that is not an image, is over 20 MB, or is one too many', () => {

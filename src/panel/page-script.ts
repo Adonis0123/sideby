@@ -50,6 +50,7 @@ import {
   mergeUsage,
   messageChip,
   messageNews,
+  messageToCheck,
   networkTaskFacts,
   newAccountDir,
   nextReset,
@@ -156,6 +157,7 @@ const LOGIC = [
   mergeUsage,
   messageChip,
   messageNews,
+  messageToCheck,
   longWindow,
   newAccountDir,
   nextReset,
@@ -3500,10 +3502,10 @@ const MAIN = String.raw`
   // "asked" numbers each reading and "applied" is the newest one used, so an answer that comes back late never
   // replaces a newer one; "own" holds the ids this Panel sent, never announced.
   const mn = { base: null, at: 0, loading: false, asked: 0, applied: 0, own: new Set() }
-  // Running Sessions whose latest Message waits for a paste, for the count on the Sessions tab.
+  // Running Sessions whose latest Message waits for a paste or could not be confirmed, for the count on the Sessions tab.
   function pasteCount() {
     if (!sp.data) return 0
-    return sp.data.sessions.filter((s) => sp.msgs[s.sessionId] && sp.msgs[s.sessionId].status === 'paste-needed').length
+    return sp.data.sessions.filter((s) => sp.msgs[s.sessionId] && messageToCheck(sp.msgs[s.sessionId].status)).length
   }
   function noteMessages(latest, seq) {
     if (seq < mn.applied) return
@@ -3522,6 +3524,11 @@ const MAIN = String.raw`
       if (n.kind === 'approve') {
         // Held until the user approves it in that terminal; the way out is to receive directly from now on.
         toast(t('msgn.approve', { to: n.to || t('msgn.aSession') }), { kind: 'info', key: 'msg-' + n.sessionId, keep: true, duration: 12000, action: BOOT.readOnly ? null : { label: t('inb.go'), run: openInbound } })
+        continue
+      }
+      if (n.kind === 'unknown') {
+        // It may still arrive, so nothing is copied and nothing waits: "View" opens the row's chip with the reason (ADR-0065).
+        toast(t('msgn.unknown', { to: n.to || t('msgn.aSession') }), { kind: 'info', key: 'msg-' + n.sessionId, action: { label: t('msgn.show'), run: () => showSession(n.sessionId, true) } })
         continue
       }
       const key = n.kind === 'read' ? 'msgn.read' : n.kind === 'paste' ? 'msgn.paste' : n.from ? 'msgn.newFrom' : 'msgn.new'
@@ -3705,6 +3712,22 @@ const MAIN = String.raw`
         const go = h('button', { class: 'btn btn-sm btn-primary', type: 'button', disabled: BOOT.readOnly }, t('inb.go'))
         go.addEventListener('click', () => { closeMenu(false); openInbound() })
         return [msg.note ? h('p', { class: 'small muted' }, msg.note) : null, h('div', { class: 'pop-actions' }, go)]
+      }))
+      return btn
+    }
+    // Not confirmed (ADR-0065): why, and the line only with the warning that a paste may deliver it twice.
+    if (chip.key === 'send.chip.unknown') {
+      const btn = h('button', { class: cls + ' sess-msg-paste', type: 'button', 'aria-haspopup': 'dialog', 'data-key': 'sess-msg-' + s.sessionId }, t(chip.key), icon('chevron'))
+      btn.addEventListener('click', () => openPopover(btn, 'sess-paste', t(chip.key), () => {
+        const out = [msg.note ? h('p', { class: 'small muted' }, msg.note) : null]
+        if (msg.pasteText) {
+          const area = h('textarea', { class: 'sess-copy-text mono', readonly: true, rows: '3', 'aria-label': t('send.copyLine') })
+          area.value = msg.pasteText
+          const copy = h('button', { class: 'btn btn-sm', type: 'button' }, icon('copy'), h('span', null, t('send.copyLine')))
+          copy.addEventListener('click', () => sessCopy(copy, msg.pasteText, () => { closeMenu(true); toast(t('toast.copied', { text: msg.pasteText })) }))
+          out.push(h('p', { class: 'small' }, t('send.unknownCaution')), area, h('div', { class: 'pop-actions' }, copy))
+        }
+        return out
       }))
       return btn
     }
@@ -4851,7 +4874,7 @@ const MAIN = String.raw`
       const r = await api('/api/sessions/send', { sessionId: mine.s.sessionId, text, attachments: ready.map((f) => f.id), lang })
       ready.forEach((f) => { f.sent = true })
       mine.result = r
-      ownMessage(mine.s.sessionId, { id: r.message.id, status: r.message.status, sentAt: r.message.sentAt, to: r.message.to, ...(r.message.status === 'paste-needed' ? { pasteText: r.message.pasteText } : {}), ...(r.message.note ? { note: r.message.note } : {}) })
+      ownMessage(mine.s.sessionId, { id: r.message.id, status: r.message.status, sentAt: r.message.sentAt, to: r.message.to, ...(messageToCheck(r.message.status) ? { pasteText: r.message.pasteText } : {}), ...(r.message.note ? { note: r.message.note } : {}) })
       renderSessionsPage()
     } catch (e) { mine.error = e }
     dlg.busy = false
@@ -4870,7 +4893,7 @@ const MAIN = String.raw`
     const v = sendResultView(r.message, Boolean(r.orca))
     const out = []
     if (v.kind === 'done') out.push(h('div', { class: 'note note-ok', role: 'status' }, icon('tick'), h('span', null, t(v.key, { name }))))
-    else out.push(h('div', { class: 'note' + (v.kind === 'paste' || v.kind === 'approve' ? ' note-warn' : ''), role: 'status' }, h('b', null, t(v.key, { name })), v.reason ? h('span', { class: 'note-line' }, v.reason) : null))
+    else out.push(h('div', { class: 'note' + (v.kind === 'paste' || v.kind === 'approve' || v.kind === 'unknown' ? ' note-warn' : ''), role: 'status' }, h('b', null, t(v.key, { name })), v.reason ? h('span', { class: 'note-line' }, v.reason) : null))
     if (v.hint) out.push(h('p', { class: 'note note-warn small' }, v.hint))
     if (v.kind === 'approve' && !BOOT.readOnly)
       out.push(h('div', { class: 'pop-actions' }, h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: openInbound }, t('inb.go'))))
@@ -4880,6 +4903,13 @@ const MAIN = String.raw`
       out.push(h('div', { class: 'send-line' }, h('code', { class: 'send-line-text' }, v.pasteText),
         h('div', { class: 'send-line-actions' }, copy,
           v.jump ? h('button', { class: 'btn btn-sm', type: 'button', onclick: () => jumpToOrca(sd.s) }, icon('link'), t('send.jump')) : null)))
+    }
+    // Not confirmed: the line is there for when it never shows up, never the next step, and never copied by itself.
+    if (v.kind === 'unknown' && v.pasteText) {
+      const copy = h('button', { class: 'btn btn-sm', type: 'button' }, icon('copy'), t('send.copyLine'))
+      copy.addEventListener('click', () => sessCopy(copy, v.pasteText, () => toast(t('send.copied', { name }))))
+      out.push(h('p', { class: 'small muted' }, t('send.unknownCaution')),
+        h('div', { class: 'send-line' }, h('code', { class: 'send-line-text' }, v.pasteText), h('div', { class: 'send-line-actions' }, copy)))
     }
     return out
   }

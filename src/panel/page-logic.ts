@@ -939,13 +939,15 @@ export interface LogicMessage {
  * What the "Send to it" dialog shows after a send: `done` (the Host took it; `hint` is any note, shown as a yellow
  * hint), `approve` (it took it, but the target shows it only once the user approves it there; `reason` says how, ADR-0045),
  * `paste` (the user pastes `pasteText`; `reason` says why, `jump` offers the
- * target's Orca tab) or `stored` (kept as a file only; `pasteText` for reference). `key` is the headline's message key.
+ * target's Orca tab), `stored` (kept as a file only; `pasteText` for reference) or `unknown` (sideby could not tell if
+ * it arrived, ADR-0065: `reason` says why, and `pasteText` is offered only with a caution, never as the next step).
+ * A status this page does not know is shown as `unknown`, never as a request to paste. `key` is the headline's key.
  */
 export function sendResultView(
   m: LogicMessage,
   orca: boolean,
 ): {
-  kind: 'done' | 'approve' | 'paste' | 'stored'
+  kind: 'done' | 'approve' | 'paste' | 'stored' | 'unknown'
   key: string
   pasteText: string
   reason: string
@@ -974,7 +976,9 @@ export function sendResultView(
       hint: '',
       jump: Boolean(orca && pasteText),
     }
-  return { kind: 'stored', key: 'send.stored', pasteText, reason: note, hint: '', jump: false }
+  if (m.status === 'stored')
+    return { kind: 'stored', key: 'send.stored', pasteText, reason: note, hint: '', jump: false }
+  return { kind: 'unknown', key: 'send.unknown', pasteText, reason: note, hint: '', jump: false }
 }
 
 /** The chip a Sessions row shows for the latest Message to it, or null when there is none worth showing. */
@@ -987,7 +991,17 @@ export function messageChip(
   if (status === 'delivered') return { key: 'send.chip.delivered', tone: 'accent' }
   if (status === 'read') return { key: 'send.chip.read', tone: 'ok' }
   if (status === 'paste-needed') return { key: 'send.chip.paste', tone: 'warn' }
+  // Given to the channel, but never confirmed (ADR-0065).
+  if (status === 'unknown') return { key: 'send.chip.unknown', tone: 'warn' }
   return null
+}
+
+/**
+ * Whether a Session's latest Message asks the user to look: it waits for a paste, or it could not be confirmed. The
+ * Sessions tab counts running Sessions for which this holds.
+ */
+export function messageToCheck(status: string | undefined): boolean {
+  return status === 'paste-needed' || status === 'unknown'
 }
 
 /** The latest Message to one Session, as `/api/sessions/messages` gives it (`PanelMessageStatus` in handler.ts). */
@@ -1007,12 +1021,13 @@ export function shortSessionLabel(label: string | undefined): string {
   return parts.join(' · ')
 }
 
-export type MessageNewsKind = 'new' | 'approve' | 'read' | 'paste'
+export type MessageNewsKind = 'new' | 'approve' | 'read' | 'paste' | 'unknown'
 
 /**
  * What changed between two readings of the latest Messages, for the Panel's notices (spec §3.32): `new` (a Message
  * reached a Session), `approve` (it reached one that shows it only once the user approves it, ADR-0045), `read` (its
- * Session read it) or `paste` (it waits for the user to paste it). The first reading (`before` null) only sets the
+ * Session read it), `paste` (it waits for the user to paste it) or `unknown` (sideby could not confirm it arrived,
+ * ADR-0065; announced once, as the status never changes by itself). The first reading (`before` null) only sets the
  * baseline, so opening the Panel announces nothing that was already there.
  */
 export function messageNews(
@@ -1031,13 +1046,15 @@ export function messageNews(
     const kind: MessageNewsKind | null =
       m.status === 'paste-needed'
         ? 'paste'
-        : fresh
-          ? m.status === 'delivered' && m.needsApproval
-            ? 'approve'
-            : 'new'
-          : m.status === 'read'
-            ? 'read'
-            : null
+        : m.status === 'unknown'
+          ? 'unknown'
+          : fresh
+            ? m.status === 'delivered' && m.needsApproval
+              ? 'approve'
+              : 'new'
+            : m.status === 'read'
+              ? 'read'
+              : null
     if (kind)
       out.push({ kind, sessionId, id: m.id, to: shortSessionLabel(m.to), from: shortSessionLabel(m.from) })
   }

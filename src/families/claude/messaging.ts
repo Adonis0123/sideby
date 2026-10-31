@@ -136,9 +136,15 @@ export const messageLine = (text: string): string =>
   `${JSON.stringify({ type: 'user', message: { role: 'user', content: text } })}\n`
 
 /**
+ * The line was handed to the socket and its end sent, but the flush was never confirmed (a timeout or an error after
+ * that point): the session may have read it, so the outcome is unknown (ADR-0065), unlike a failure before writing.
+ */
+export class UnconfirmedWrite extends Error {}
+
+/**
  * Connects to `path`, runs `verify` (a reason rejects before anything is written), writes `line`, and closes the
  * connection as soon as the line is flushed, also when the peer keeps its end open. Rejects on a refused connection
- * or after `timeoutMs`.
+ * or after `timeoutMs`; with `UnconfirmedWrite` once the line was written and the flush did not come.
  */
 export function writeToSocket(
   path: string,
@@ -148,13 +154,14 @@ export function writeToSocket(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let done = false
+    let written = false
     const sock = createConnection({ path })
     const finish = (err: Error | null) => {
       if (done) return
       done = true
       clearTimeout(timer)
       sock.destroy()
-      if (err) reject(err)
+      if (err) reject(written ? new UnconfirmedWrite(err.message) : err)
       else resolve()
     }
     const timer = setTimeout(
@@ -165,6 +172,7 @@ export function writeToSocket(
       const changed = verify ? await verify().catch((e: Error) => e.message) : null
       if (changed) return finish(new Error(changed))
       if (done) return
+      written = true
       sock.end(line, () => finish(null))
     })
     sock.once('error', (err: NodeJS.ErrnoException) =>

@@ -21,12 +21,17 @@ export interface DeliveryRequest {
   pasteText: string
   /** A fresh look at the processes. */
   procs: ProcessView
+  /**
+   * Whether the target's process is gone by now, from another fresh look (for after a delivery that could not be
+   * confirmed); a failed look counts as still running.
+   */
+  ended: () => Promise<boolean>
   deps: MessageDeps
 }
 
 export interface Delivery {
   status: MessageStatus
-  /** Plain-language note: why paste is needed, or what the target must still do. */
+  /** Plain-language note: why paste is needed, what the target must still do, or why it could not be confirmed. */
   note?: string
   /** The Host took it but shows it only after the user approves it in the target's terminal (ADR-0045). */
   needsApproval?: boolean

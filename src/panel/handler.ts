@@ -217,9 +217,9 @@ export interface PanelMessageStatus {
   /** The target's Session Label, and the sender's when sideby could tell it, for the Panel's message notices. */
   to: string
   from?: string
-  /** For `paste-needed`: the line to paste into the target's tab. */
+  /** For `paste-needed`: the line to paste into the target's tab; for `unknown`, the same line behind a click (ADR-0065). */
   pasteText?: string
-  /** Why a paste is needed, or what the target must still do. */
+  /** Why a paste is needed, what the target must still do, or why the delivery could not be confirmed. */
   note?: string
   /** Delivered, but the target shows it only once the user approves it in its terminal (ADR-0045). */
   needsApproval?: true
@@ -2055,7 +2055,13 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         if (images.some((f) => f.kind !== 'image')) throw new HttpError(415, IMAGE_ONLY)
         const session = (await liveSessions(rt)).sessions.find((s) => s.sessionId === id)
         if (!session) throw new HttpError(404, 'This session is no longer running; refresh the list.')
-        const receipt = await sendTo(rt, id, { text, images: images.map((f) => f.path), lang })
+        // The person at the Panel sends it, never a Session the server happens to run under.
+        const receipt = await sendTo(rt, id, {
+          text,
+          images: images.map((f) => f.path),
+          lang,
+          fromUser: true,
+        })
         // The Message has its own copies now; the staged ones would only wait a day to be cleared.
         await removeStaged(rt.paths, ids).catch(() => 0)
         // Only a Message the user pastes needs the way to the target's tab.
@@ -2083,7 +2089,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
             sentAt: m.sentAt,
             to: m.to,
             ...(m.from ? { from: m.from } : {}),
-            ...(m.status === 'paste-needed' ? { pasteText: m.pasteText } : {}),
+            ...(m.status === 'paste-needed' || m.status === 'unknown' ? { pasteText: m.pasteText } : {}),
             ...(m.note ? { note: m.note } : {}),
             ...(m.needsApproval ? { needsApproval: true as const } : {}),
           }

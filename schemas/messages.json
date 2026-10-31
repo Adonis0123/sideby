@@ -63,9 +63,13 @@
               {
                 "type": "string",
                 "const": "paste-needed"
+              },
+              {
+                "type": "string",
+                "const": "unknown"
               }
             ],
-            "description": "stored: kept as a file only; delivered: the host's own channel took it; read: it shows in the target's record; paste-needed: the user pastes pasteText into the target."
+            "description": "stored: kept as a file only; delivered: the host's own channel took it; read: it shows in the target's record; paste-needed: the user pastes pasteText into the target; unknown: the channel was given it but never confirmed it (ADR-0065), so it may still arrive: check the target before sending or pasting again. unknown becomes read when the id shows in the target's record and never changes by itself otherwise."
           },
           "file": {
             "type": "string",
@@ -84,7 +88,7 @@
           },
           "note": {
             "type": "string",
-            "description": "Why a paste is needed, or that the target must approve it (bypass mode)."
+            "description": "Why a paste is needed, that the target must approve it (bypass mode), or why the delivery could not be confirmed."
           },
           "needsApproval": {
             "type": "boolean",

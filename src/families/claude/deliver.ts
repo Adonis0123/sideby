@@ -12,6 +12,7 @@ import {
   sessionBypass,
   socketChanged,
   socketRoots,
+  UnconfirmedWrite,
   writeToSocket,
 } from './messaging.ts'
 
@@ -46,6 +47,14 @@ export async function deliverClaude(req: DeliveryRequest): Promise<Delivery> {
       () => socketChanged(sock.path, checked.identity),
     )
   } catch (err) {
+    if (err instanceof UnconfirmedWrite) {
+      // Written, but never confirmed: a paste on top of it could reach the session twice.
+      const ended = await req.ended()
+      return {
+        status: 'unknown',
+        note: `sideby wrote it to ${to.label} but could not confirm it arrived (${err.message}).${ended ? ' The session has ended since.' : ''} It may still show up; check the session before you send it again`,
+      }
+    }
     return paste(
       `sideby could not reach ${to.label} (${(err as Error).message}); paste the line into its tab`,
     )

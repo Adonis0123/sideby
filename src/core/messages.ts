@@ -15,8 +15,12 @@ import type { LiveSession } from './live-sessions.ts'
 import { type LiveSessionDeps, type ProcessInfo, processView, systemDeps } from './live-sessions-procs.ts'
 import { selectSession } from './session-select.ts'
 
-/** stored: kept as a file only; delivered: the Host's channel accepted it; read: the target Session shows it; paste-needed: the user must paste `pasteText` into the target. */
-export type MessageStatus = 'stored' | 'delivered' | 'read' | 'paste-needed'
+/**
+ * stored: kept as a file only; delivered: the Host's channel accepted it; read: the target Session shows it;
+ * paste-needed: the user must paste `pasteText` into the target; unknown: the channel was given it but never said
+ * whether it took it, so it may still show up (ADR-0065): check the target before sending again.
+ */
+export type MessageStatus = 'stored' | 'delivered' | 'read' | 'paste-needed' | 'unknown'
 
 export interface MessageReceipt {
   /** Short id, also written into the delivered text so it can be found in the target's record. */
@@ -50,6 +54,8 @@ export interface SendOptions {
   images?: readonly string[]
   /** Sender Session id when known (the CLI detects it from its parent Host process). */
   fromSessionId?: string
+  /** The user sends it (the Panel): no sender Session is looked for, so it carries no Reply line. */
+  fromUser?: boolean
   lang?: 'en' | 'zh'
 }
 
@@ -226,18 +232,30 @@ export function pasteLine(id: string, file: string, screenshots: number, lang: '
   return `Read the message sideby kept for you at ${file} (sideby message ${id})${screenshots ? ' and the screenshots it lists' : ''}.`
 }
 
-/** The text a Claude session receives: who sent it, the text, then one line per screenshot so it can read them. */
+/** The line that tells the receiving AI how to answer a sender sideby identified: `sideby send <its full id>`. */
+export const replyLine = (senderSessionId: string): string => `Reply: sideby send ${senderSessionId} "<text>"`
+
+/**
+ * The text a Claude session receives: who sent it, the text, one line per screenshot so it can read them, then the
+ * Reply line when the sender is a Session sideby identified.
+ */
 export function deliveredText(
   id: string,
   from: string | undefined,
   text: string,
   attachments: readonly string[],
+  reply?: string,
 ) {
   const head = `sideby message ${id} ${from ? `from ${from}` : 'from the user via sideby'}`
-  return [head, ...(text ? [text] : []), ...attachments.map((a) => `Screenshot: ${a}`)].join('\n')
+  return [
+    head,
+    ...(text ? [text] : []),
+    ...attachments.map((a) => `Screenshot: ${a}`),
+    ...(reply ? [reply] : []),
+  ].join('\n')
 }
 
-function messageFile(r: MessageReceipt, text: string): string {
+function messageFile(r: MessageReceipt, text: string, reply: string | undefined): string {
   const lines = [
     `# sideby message ${r.id}`,
     '',
@@ -248,6 +266,7 @@ function messageFile(r: MessageReceipt, text: string): string {
     text,
   ]
   if (r.attachments.length) lines.push('', 'Screenshots:', ...r.attachments.map((a) => `- ${a}`))
+  if (reply) lines.push('', reply)
   return `${lines.join('\n')}\n`
 }
 
@@ -272,7 +291,12 @@ export async function sendMessage(
   const lang = opts.lang ?? 'en'
   const images = await openImages(paths)
   try {
-    return await sendOpened(rt, target, { text, lang, images, fromSessionId: opts.fromSessionId }, deps)
+    return await sendOpened(
+      rt,
+      target,
+      { text, lang, images, fromSessionId: opts.fromSessionId, fromUser: opts.fromUser === true },
+      deps,
+    )
   } finally {
     await Promise.all(images.map((i) => i.fh.close().catch(() => {})))
   }
@@ -281,7 +305,13 @@ export async function sendMessage(
 async function sendOpened(
   rt: Runtime,
   target: string,
-  opts: { text: string; lang: 'en' | 'zh'; images: OpenImage[]; fromSessionId: string | undefined },
+  opts: {
+    text: string
+    lang: 'en' | 'zh'
+    images: OpenImage[]
+    fromSessionId: string | undefined
+    fromUser: boolean
+  },
   deps: MessageDeps,
 ): Promise<MessageReceipt> {
   const { text, lang } = opts
@@ -295,7 +325,8 @@ async function sendOpened(
     deps: procDeps,
   })
   let from: LiveSession | undefined
-  if (opts.fromSessionId) from = listed.sessions.find((s) => s.sessionId === opts.fromSessionId)
+  if (opts.fromUser) from = undefined
+  else if (opts.fromSessionId) from = listed.sessions.find((s) => s.sessionId === opts.fromSessionId)
   else {
     const all = await processView(procDeps)
       .list()
@@ -335,7 +366,9 @@ async function sendOpened(
     sentAt,
     ...(to.transcript ? { transcript: to.transcript } : {}),
   }
-  await writeFileAtomic(file, messageFile(receipt, text), 0o600)
+  // Only a sender sideby knows exactly gets a way to answer: a guessed one may be the wrong session.
+  const reply = from && !from.guessed ? replyLine(from.sessionId) : undefined
+  await writeFileAtomic(file, messageFile(receipt, text, reply), 0o600)
 
   // From here on the Message is safe: whatever goes wrong, the user gets the line to paste.
   try {
@@ -349,7 +382,7 @@ async function sendOpened(
   let result: { status: MessageStatus; note?: string; needsApproval?: boolean }
   try {
     const acct = (await rt.accounts()).find((a) => a.ref === to.account)
-    result = await deliver(rt, to, acct, receipt, text, procDeps, deps)
+    result = await deliver(rt, to, acct, receipt, text, reply, procDeps, deps)
   } catch (err) {
     result = {
       status: 'paste-needed',
@@ -375,6 +408,7 @@ async function deliver(
   acct: Account | undefined,
   r: Stored,
   text: string,
+  reply: string | undefined,
   procDeps: LiveSessionDeps,
   deps: MessageDeps,
 ): Promise<Delivery> {
@@ -394,15 +428,23 @@ async function deliver(
       status: 'paste-needed',
       note: `${NO_CHANNEL[to.family] ?? `${rt.families.get(to.family)?.title ?? to.family} cannot receive messages directly`}; paste the line into its terminal tab`,
     }
+  const pid = to.pid
   return family({
     rt,
     to,
-    pid: to.pid,
+    pid,
     acct,
-    text: deliveredText(r.id, r.from, text, r.attachments),
+    text: deliveredText(r.id, r.from, text, r.attachments, reply),
     pasteText: r.pasteText,
     // A fresh look at the processes: the screenshots were copied since the listing, and the session may have ended.
     procs: processView(procDeps),
+    ended: () =>
+      processView(procDeps)
+        .get(pid)
+        .then(
+          (p) => !p,
+          () => false,
+        ),
     deps,
   })
 }
@@ -418,10 +460,13 @@ async function saveReceipt(r: Stored, path = receiptPath(r.file)): Promise<void>
   await writeFileAtomic(path, `${JSON.stringify(r, null, 2)}\n`, 0o600)
 }
 
+/** The statuses whose Message may still show in the target's record, so it is looked for there. */
+const READ_CHECKED: ReadonlySet<MessageStatus> = new Set(['delivered', 'paste-needed', 'unknown'])
+
 /** How long after sending a held Message counts as dropped: Claude Code's five minutes plus one of margin. */
 export const APPROVAL_EXPIRED_MS = 6 * 60_000
 
-const STATUSES: readonly string[] = ['stored', 'delivered', 'read', 'paste-needed']
+const STATUSES: readonly string[] = ['stored', 'delivered', 'read', 'paste-needed', 'unknown']
 const optStr = (v: unknown) => v === undefined || typeof v === 'string'
 
 /**
@@ -447,7 +492,8 @@ function validReceipt(raw: unknown, dir: string, path: string): Stored | null {
 }
 
 /**
- * Messages sideby kept, newest first, with their current status (re-checks `delivered` for `read`). A `read` found
+ * Messages sideby kept, newest first, with their current status (re-checks `delivered`, `paste-needed` and `unknown`
+ * for `read`; an `unknown` one never turns into anything else by itself, ADR-0065). A `read` found
  * is saved into the receipt unless `persist` is false (a read-only Panel only computes it).
  */
 export async function listMessages(
@@ -498,7 +544,7 @@ export async function listMessages(
   list = list.slice(0, opts.limit ?? 20)
   const now = rt.readContext().now.getTime()
   for (const { r, path } of list) {
-    if ((r.status !== 'delivered' && r.status !== 'paste-needed') || !r.transcript) continue
+    if (!READ_CHECKED.has(r.status) || !r.transcript) continue
     const seen = await tailLinesWith(r.transcript, `sideby message ${r.id}`).catch(() => [])
     let changed = false
     if (seen.length) {

@@ -3,10 +3,11 @@
 import assert from 'node:assert/strict'
 import fsp from 'node:fs/promises'
 import { describe, it } from 'node:test'
-import { type FakeHome, withFakeHome } from '../../../testing/index.ts'
+import { type FakeHome, fakeHost, withFakeHome } from '../../../testing/index.ts'
 import type { LiveSessionDeps, ProcessInfo } from '../../core/live-sessions-procs.ts'
 import { type MessageDeps, sendMessage } from '../../core/messages.ts'
 import { createRuntime } from '../../runtime.ts'
+import { CodexQueueTimeout, runCodex } from './deliver.ts'
 
 const START = Date.UTC(2026, 9, 20, 2, 14, 43)
 const ID_T = '01a15823-5555-4555-8555-555555555555'
@@ -127,6 +128,55 @@ describe('sideby send to a Codex session', () => {
       assert.equal(ended.status, 'paste-needed')
       assert.match(ended.note!, /stopped running; start it again/)
       assert.equal(calls.length, 0)
+    })
+  })
+
+  it('says it cannot confirm, without asking for a paste, when `codex queue` started and timed out', async () => {
+    await withFakeHome(async (h) => {
+      const procs = await machine(h)
+      const rt = await createRuntime({ env: h.env })
+      const slow = recorder(new CodexQueueTimeout('Codex did not answer in time'))
+      const r = await sendMessage(rt, ID_T, { text: TEXT }, { procs, ...slow.deps })
+      assert.equal(r.status, 'unknown')
+      assert.match(r.note!, /could not confirm that .* got it: `codex queue` did not finish within 20 s\./)
+      assert.match(r.note!, /check the session before you send it again$/)
+      assert.doesNotMatch(r.note!, /paste|has ended/i)
+      // The line is kept for later, and the receipt is saved as unknown.
+      assert.match(r.pasteText, new RegExp(`sideby message ${r.id}`))
+      const kept = JSON.parse(await fsp.readFile(r.file.replace(/\.md$/, '.json'), 'utf8'))
+      assert.equal(kept.status, 'unknown')
+      // The session ended while Codex was asked: still unknown, and the note says so.
+      let gone = false
+      const ending = { ...procs, processes: async () => (gone ? [] : procs.processes()) }
+      const ended = await sendMessage(
+        rt,
+        ID_T,
+        { text: TEXT },
+        {
+          procs: ending,
+          selfPid: 999_999,
+          runCodex: async () => {
+            gone = true
+            throw new CodexQueueTimeout('Codex did not answer in time')
+          },
+        },
+      )
+      assert.equal(ended.status, 'unknown')
+      assert.match(ended.note!, /The session has ended since\./)
+    })
+  })
+
+  it('tells a queue that started and hung from one that could not start', async () => {
+    await withFakeHome(async (h) => {
+      await fakeHost(h, 'codex', { sleep: 5 })
+      await assert.rejects(runCodex(['queue'], h.env, 300), (e) => e instanceof CodexQueueTimeout)
+      const empty = await h.mkdir('empty-bin')
+      await assert.rejects(
+        runCodex(['queue'], { ...h.env, PATH: empty }, 300),
+        (e) => !(e instanceof CodexQueueTimeout) && /Codex is not on PATH/.test((e as Error).message),
+      )
+      await fakeHost(h, 'codex', { exitCode: 3 })
+      assert.equal(await runCodex(['queue'], h.env, 5000), 3)
     })
   })
 })

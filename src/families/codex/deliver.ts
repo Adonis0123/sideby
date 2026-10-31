@@ -11,7 +11,16 @@ export const QUEUE_TIMEOUT_MS = 20_000
 /** How long the queue process gets to end after SIGTERM before it is sent SIGKILL. */
 const KILL_GRACE_MS = 2_000
 
-/** Runs `codex <args>` and resolves to its exit code; its output is ignored, as it may hold account details. */
+/**
+ * `codex queue` started but did not finish in time: it may already have queued the line, so the outcome is unknown
+ * (ADR-0065), unlike a start failure or a non-zero exit, which mean it did not.
+ */
+export class CodexQueueTimeout extends Error {}
+
+/**
+ * Runs `codex <args>` and resolves to its exit code; its output is ignored, as it may hold account details. Rejects
+ * with `CodexQueueTimeout` when the process started and did not end within `timeoutMs`, else with a plain Error.
+ */
 export function runCodex(
   args: readonly string[],
   env: NodeJS.ProcessEnv,
@@ -19,6 +28,10 @@ export function runCodex(
 ): Promise<number> {
   return new Promise((resolve, reject) => {
     const child = spawn('codex', args, { cwd: tmpdir(), env, stdio: 'ignore' })
+    let started = false
+    child.once('spawn', () => {
+      started = true
+    })
     const timer = setTimeout(() => {
       // Only this short-lived queue process is ended (by its own pid), never a Codex session.
       child.kill('SIGTERM')
@@ -29,7 +42,8 @@ export function runCodex(
             process.kill(pid, 'SIGKILL')
           } catch {}
       }, KILL_GRACE_MS).unref()
-      reject(new Error('Codex did not answer in time'))
+      const why = 'Codex did not answer in time'
+      reject(started ? new CodexQueueTimeout(why) : new Error(why))
     }, timeoutMs)
     child.once('error', (err: NodeJS.ErrnoException) => {
       clearTimeout(timer)
@@ -69,6 +83,14 @@ export async function deliverCodex(req: DeliveryRequest): Promise<Delivery> {
       deps.timeoutMs ?? QUEUE_TIMEOUT_MS,
     )
   } catch (err) {
+    if (err instanceof CodexQueueTimeout) {
+      // It may have queued the line already; a paste on top of it could reach the session twice.
+      const ended = await req.ended()
+      return {
+        status: 'unknown',
+        note: `sideby could not confirm that ${to.label} got it: \`codex queue\` did not finish within ${(deps.timeoutMs ?? QUEUE_TIMEOUT_MS) / 1000} s.${ended ? ' The session has ended since.' : ''} It may still show up; check the session before you send it again`,
+      }
+    }
     return {
       status: 'paste-needed',
       note: `sideby could not send it to ${to.label} (${(err as Error).message}); paste the line into its terminal tab`,

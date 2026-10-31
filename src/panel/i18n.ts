@@ -1234,6 +1234,12 @@ const en = {
   'send.chip.approve': 'Waits for approval',
   'send.approve': '{name} got it, but shows it only after you approve it in its terminal',
   'msgn.approve': '{to} got a message but holds it until you approve it in its terminal',
+  'send.chip.unknown': 'Not confirmed',
+  'send.unknown':
+    'sideby could not confirm that {name} got it. It may still show up: look at the session before you send it again.',
+  'send.unknownCaution':
+    'Paste this line only if the message never shows up there. If both arrive, the session gets it twice.',
+  'msgn.unknown': 'sideby could not confirm that {to} got the message',
   'inb.title': 'Receiving messages',
   'inb.explain':
     'A Claude session can show a message from another session right away, or hold it until you approve it in its terminal. A held message is dropped after about 5 minutes.',
@@ -1260,7 +1266,7 @@ const en = {
   'inb.allSet': 'Every account already receives messages directly.',
   'inb.readOnly': 'This Panel is read-only. Run sideby messages inbound accept, or ask your AI to do it.',
   'msgn.show': 'Show',
-  'msgn.badge': '{n} waiting for you to paste into their tab',
+  'msgn.badge': '{n} with a message to check',
   'tune.title': 'Context tuning',
   'tune.intro':
     'Looks at how you used this over the last {days} days and estimates what auto-compact size would use the fewest tokens. It is only an estimate, and nothing changes until you press Use.',
@@ -2926,6 +2932,10 @@ const zh: Record<MessageKey, string> = {
   'send.chip.approve': '等批准',
   'send.approve': '{name} 已收到，但要你在它的终端里批准后才会显示',
   'msgn.approve': '{to} 收到一条消息，要你在它的终端里批准后才会显示',
+  'send.chip.unknown': '未确认送达',
+  'send.unknown': 'sideby 没法确认 {name} 收到了。它可能稍后才出现：再发一次前，先去那个会话看看。',
+  'send.unknownCaution': '只有那边一直没出现这条消息时，才粘贴这句。两边都到的话，它会收到两次。',
+  'msgn.unknown': 'sideby 没法确认 {to} 收到了这条消息',
   'inb.title': '接收消息',
   'inb.explain':
     'Claude 会话收到别的会话发来的消息时，可以直接显示，也可以先等你在终端里批准。等批准的消息约 5 分钟没人批准就会被丢掉。',
@@ -2951,7 +2961,7 @@ const zh: Record<MessageKey, string> = {
   'inb.allSet': '所有账号都已经直接接收消息。',
   'inb.readOnly': '这个 Panel 是只读的。请运行 sideby messages inbound accept，或让你的 AI 来做。',
   'msgn.show': '查看',
-  'msgn.badge': '有 {n} 个会话等你把消息粘贴过去',
+  'msgn.badge': '有 {n} 个会话的消息要你看一下',
   'tune.title': '上下文调优',
   'tune.intro':
     '看看你最近 {days} 天的用法，估算「自动压缩」设成多少最省 token。这只是估算；你点「使用」之前，sideby 不会改任何设置。',

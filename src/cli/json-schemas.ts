@@ -630,17 +630,20 @@ const MessageReceipt = Type.Object({
     Type.String({ description: 'The Session Label of the session that sent it, when sideby could tell.' }),
   ),
   status: Type.Union(
-    ['stored', 'delivered', 'read', 'paste-needed'].map((k) => Type.Literal(k)),
+    ['stored', 'delivered', 'read', 'paste-needed', 'unknown'].map((k) => Type.Literal(k)),
     {
       description:
-        "stored: kept as a file only; delivered: the host's own channel took it; read: it shows in the target's record; paste-needed: the user pastes pasteText into the target.",
+        "stored: kept as a file only; delivered: the host's own channel took it; read: it shows in the target's record; paste-needed: the user pastes pasteText into the target; unknown: the channel was given it but never confirmed it (ADR-0065), so it may still arrive: check the target before sending or pasting again. unknown becomes read when the id shows in the target's record and never changes by itself otherwise.",
     },
   ),
   file: Type.String({ description: "The Message file (mode 600) in sideby's state folder." }),
   attachments: Type.Array(Str, { description: 'Screenshots copied next to the Message file.' }),
   pasteText: Type.String({ description: 'One line that tells the target AI to read the Message file.' }),
   note: Type.Optional(
-    Type.String({ description: 'Why a paste is needed, or that the target must approve it (bypass mode).' }),
+    Type.String({
+      description:
+        'Why a paste is needed, that the target must approve it (bypass mode), or why the delivery could not be confirmed.',
+    }),
   ),
   needsApproval: Type.Optional(
     Type.Boolean({

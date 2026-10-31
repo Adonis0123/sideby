@@ -17,6 +17,7 @@ import {
   sessionBypass,
   socketProblem,
   socketRoots,
+  UnconfirmedWrite,
   writeToSocket,
 } from '../families/claude/messaging.ts'
 import { createRuntime } from '../runtime.ts'
@@ -223,12 +224,30 @@ describe('sideby send', () => {
       const procs = await machine(h, s.path, { inbound: 'accept' })
       const rt = await createRuntime({ env: h.env })
       const r = await sendMessage(rt, ID_B, { text: 'hi' }, depsFor(procs, s.root, { selfPid: 6001 }))
+      // The Panel sends as the user, whatever process the server runs under: no sender, no Reply line.
+      const user = await sendMessage(
+        rt,
+        ID_B,
+        { text: 'hi', fromUser: true },
+        depsFor(procs, s.root, { selfPid: 6001 }),
+      )
+      // A sender that is only a guess (pi's newest session) is named, but given no Reply line: it may be another one.
+      const guessed = await sendMessage(rt, ID_B, { text: 'hi', fromSessionId: ID_P }, depsFor(procs, s.root))
       await s.close()
       assert.equal(r.from, 'cc001 · a · 61230c3d')
-      assert.match(
+      // A sender sideby knows exactly gets the line to answer with, in the delivered text and the kept file.
+      const reply = `Reply: sideby send ${ID_A} "<text>"`
+      assert.equal(
         JSON.parse(s.got[0]!).message.content,
-        new RegExp(`^sideby message ${r.id} from cc001 · a · 61230c3d\nhi$`),
+        `sideby message ${r.id} from cc001 · a · 61230c3d\nhi\n${reply}`,
       )
+      assert.ok((await fsp.readFile(r.file, 'utf8')).endsWith(`hi\n\n${reply}\n`))
+      assert.equal(user.from, undefined)
+      assert.match(guessed.from ?? '', /01a11fc9/)
+      for (const [i, m] of [user, guessed].entries()) {
+        assert.doesNotMatch(JSON.parse(s.got[i + 1]!).message.content, /Reply:/)
+        assert.doesNotMatch(await fsp.readFile(m.file, 'utf8'), /Reply:/)
+      }
       await assert.rejects(
         sendMessage(rt, 'cc001', { text: 'hi' }, depsFor(procs, s.root, { selfPid: 6001 })),
         (e: Error) => e instanceof UserError && e.code === 'same-session',
@@ -475,9 +494,20 @@ describe('the message socket checks', () => {
       const qp = join(s.dir, 'q.sock')
       await new Promise<void>((r) => quiet.listen(qp, r))
       const t0 = Date.now()
+      // The line was handed over before the time ran out, so the outcome is unknown, not a refusal.
       await assert.rejects(
         writeToSocket(qp, messageLine('x'.repeat(16 * 1024 * 1024)), 200),
-        /did not answer within 0\.2 s/,
+        (e) => e instanceof UnconfirmedWrite && /did not answer within 0\.2 s/.test(e.message),
+      )
+      // A failed check before writing is an ordinary refusal.
+      await assert.rejects(
+        writeToSocket(
+          qp,
+          messageLine('x'),
+          2000,
+          async () => 'its message channel changed while sending (send again)',
+        ),
+        (e) => !(e instanceof UnconfirmedWrite) && /changed while sending/.test((e as Error).message),
       )
       assert.ok(Date.now() - t0 < 2000)
       for (const c of held) c.destroy()
@@ -656,6 +686,44 @@ describe('bypass and the read receipt', () => {
       )
       assert.equal((await listMessages(rt, { limit: 1 })).length, 1)
       const kept = JSON.parse(await fsp.readFile(one.file.replace(/\.md$/, '.json'), 'utf8'))
+      assert.equal(kept.status, 'read')
+    })
+  })
+
+  it('keeps a written but unconfirmed Message unknown, with no paste asked, until its id shows', async () => {
+    await withFakeHome(async (h) => {
+      const s = await socketServer(h, '4102')
+      const procs = await machine(h, s.path, { inbound: 'accept' })
+      let clock = new Date('2026-10-31T08:00:00Z')
+      const rt = await createRuntime({ env: h.env, now: () => clock })
+      const half = depsFor(procs, s.root, {
+        write: () => Promise.reject(new UnconfirmedWrite('it did not answer within 3 s')),
+      })
+      const r = await sendMessage(rt, 'cc002', { text: 'first' }, half)
+      await s.close()
+      assert.equal(r.status, 'unknown')
+      assert.match(
+        r.note!,
+        /^sideby wrote it to cc002 · b · 0799701d but could not confirm it arrived \(it did not answer within 3 s\)\./,
+      )
+      assert.doesNotMatch(r.note!, /paste|has ended/i)
+      assert.match(r.pasteText, new RegExp(`sideby message ${r.id}`))
+      // No time turns it into anything else: an hour later it is still unknown.
+      clock = new Date('2026-10-31T09:00:00Z')
+      assert.deepEqual(
+        (await listMessages(rt)).map((m) => [m.id, m.status]),
+        [[r.id, 'unknown']],
+      )
+      const transcript = h.path(`.claude-002/projects/-work-b/${ID_B}.jsonl`)
+      await fsp.appendFile(
+        transcript,
+        `${JSON.stringify({ type: 'user', message: { content: deliveredText(r.id, undefined, 'first', []) } })}\n`,
+      )
+      assert.deepEqual(
+        (await listMessages(rt)).map((m) => [m.id, m.status]),
+        [[r.id, 'read']],
+      )
+      const kept = JSON.parse(await fsp.readFile(r.file.replace(/\.md$/, '.json'), 'utf8'))
       assert.equal(kept.status, 'read')
     })
   })

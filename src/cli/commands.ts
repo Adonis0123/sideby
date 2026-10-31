@@ -3929,6 +3929,11 @@ export async function cmdSend(a: SendArgs, io: Io): Promise<number> {
     if (r.note) io.out(c.yellow(`  ${r.note}`))
     if (r.needsApproval)
       io.out(`  To receive messages without approving each one: ${c.bold('sideby messages inbound accept')}`)
+  } else if (r.status === 'unknown') {
+    // Not copied: it may already be there, and a paste on top would deliver it twice (ADR-0065).
+    io.out(`${c.yellow('●')} sideby could not confirm that ${c.bold(r.to)} got message ${r.id}`)
+    // The note says why, and ends with the same advice.
+    io.out(`  ${r.note ?? UNCONFIRMED_ADVICE}`)
   } else {
     io.out(`${c.yellow('●')} kept message ${r.id} for ${c.bold(r.to)}; it needs a paste`)
     if (r.note) io.out(`  ${r.note}`)
@@ -3948,7 +3953,10 @@ const MESSAGE_STATUS: Record<string, string> = {
   delivered: 'delivered',
   read: 'read',
   'paste-needed': 'needs paste',
+  unknown: 'Not confirmed',
 }
+
+const UNCONFIRMED_ADVICE = 'It may still show up: look at that session before you send it again.'
 
 /**
  * `sideby messages [--to <account|session>] [--limit <n>]`: the Messages sideby kept and how far each got;
@@ -3984,7 +3992,7 @@ export async function cmdMessages(a: ParsedArgs, io: Io, runtime?: Runtime): Pro
   const rows = list.map((m) => [
     clock(m.sentAt, now),
     c.bold(m.to),
-    m.status === 'paste-needed'
+    m.status === 'paste-needed' || m.status === 'unknown'
       ? c.yellow(MESSAGE_STATUS[m.status]!)
       : m.needsApproval
         ? c.yellow('waits for approval')
@@ -4002,6 +4010,12 @@ export async function cmdMessages(a: ParsedArgs, io: Io, runtime?: Runtime): Pro
     io.out('')
     io.out(`${c.yellow('Paste this line into')} ${c.bold(m.to)}${m.note ? c.dim(` (${m.note})`) : ''}:`)
     io.out(`  ${m.pasteText}`)
+  }
+  if (list.some((m) => m.status === 'unknown')) {
+    io.out('')
+    io.out(
+      `${c.yellow('Some messages are not confirmed:')} sideby could not tell if they arrived. ${UNCONFIRMED_ADVICE}`,
+    )
   }
   if (list.some((m) => m.needsApproval)) {
     io.out('')

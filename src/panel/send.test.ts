@@ -182,9 +182,10 @@ describe('panel "Send to it"', () => {
           lang: 'zh',
         })
         assert.equal(r.status, 200, JSON.stringify(r.body))
+        // Sent as the user: the Panel never names a sender Session, so the Message carries no Reply line.
         assert.deepEqual(
           f.calls.map((c) => [c.target, c.opts]),
-          [[SID, { text: 'run the tests again', images: [], lang: 'zh' }]],
+          [[SID, { text: 'run the tests again', images: [], lang: 'zh', fromUser: true }]],
         )
         const m = r.body.message as MessageReceipt
         assert.equal(m.status, 'delivered')
