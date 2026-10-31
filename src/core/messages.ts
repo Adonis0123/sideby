@@ -395,7 +395,7 @@ async function sendOpened(
   } catch (err) {
     // The Message file is kept; only its status could not be recorded. Still hand the user what to do.
     const why = (err as NodeJS.ErrnoException).code ?? (err as Error).message
-    if (receipt.status !== 'paste-needed') receipt.note = `sideby could not save the message status (${why})`
+    if (receipt.status === 'delivered') receipt.note = `sideby could not save the message status (${why})`
     else
       receipt.note = `${receipt.note ?? 'paste the line into its tab'} (sideby also could not save the message status: ${why})`
   }

@@ -166,6 +166,36 @@ describe('sideby send to a Codex session', () => {
     })
   })
 
+  it('keeps the advice to check first when the unknown receipt cannot be saved', async () => {
+    await withFakeHome(async (h) => {
+      const procs = await machine(h)
+      const rt = await createRuntime({ env: h.env })
+      const folder = h.path(`.local/state/sideby/messages/${ID_T}`)
+      let r: Awaited<ReturnType<typeof sendMessage>>
+      try {
+        r = await sendMessage(
+          rt,
+          ID_T,
+          { text: TEXT },
+          {
+            procs,
+            selfPid: 999_999,
+            runCodex: async () => {
+              // Queued, perhaps; then the folder turns read-only, so the final receipt write fails.
+              await fsp.chmod(folder, 0o500)
+              throw new CodexQueueTimeout('Codex did not answer in time')
+            },
+          },
+        )
+      } finally {
+        await fsp.chmod(folder, 0o700)
+      }
+      assert.equal(r.status, 'unknown')
+      assert.match(r.note!, /check the session before you send it again/)
+      assert.match(r.note!, /could not save the message status: EACCES/)
+    })
+  })
+
   it('tells a queue that started and hung from one that could not start', async () => {
     await withFakeHome(async (h) => {
       await fakeHost(h, 'codex', { sleep: 5 })

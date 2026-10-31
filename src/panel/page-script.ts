@@ -4907,7 +4907,7 @@ const MAIN = String.raw`
     // Not confirmed: the line is there for when it never shows up, never the next step, and never copied by itself.
     if (v.kind === 'unknown' && v.pasteText) {
       const copy = h('button', { class: 'btn btn-sm', type: 'button' }, icon('copy'), t('send.copyLine'))
-      copy.addEventListener('click', () => sessCopy(copy, v.pasteText, () => toast(t('send.copied', { name }))))
+      copy.addEventListener('click', () => sessCopy(copy, v.pasteText, () => toast(t('send.copiedUnknown', { name }))))
       out.push(h('p', { class: 'small muted' }, t('send.unknownCaution')),
         h('div', { class: 'send-line' }, h('code', { class: 'send-line-text' }, v.pasteText), h('div', { class: 'send-line-actions' }, copy)))
     }
