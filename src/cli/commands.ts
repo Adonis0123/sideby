@@ -4478,11 +4478,11 @@ function unattendedLine(s: import('../core/unattended.ts').UnattendedStatus, now
   const at = (iso: string) => clock2(iso, now)
   const slot = s.slot ? ` · Slot "${s.slot}"` : ''
   if (s.reason === 'slot' || s.reason === 'manual')
-    return `${c.green('on')}${s.reason === 'manual' ? ' · turned on by hand' : slot}${s.until ? ` · until ${at(s.until)}` : ' · no end: the Schedule covers every hour'}`
+    return `${c.green('on')}${s.until ? ` · until ${at(s.until)}` : ' · no end: the Schedule covers every hour'}${s.reason === 'manual' ? ' · turned on by hand' : slot}`
   if (s.reason === 'session') return `${c.green('on')} for this session only (started with --unattended)`
   if (s.reason === 'paused')
-    return `${c.yellow('paused')}${slot}${s.until ? ` · until ${at(s.until)}, then the Schedule goes on` : ' · until you turn it on (`sideby unattended on`)'}`
-  return `${c.dim('off')}${s.next ? ` · next ${at(s.next.at)}${s.next.slot ? ` (${s.next.slot})` : ''}` : ''}`
+    return `${c.yellow('paused')}${s.until ? ` · back on at ${at(s.until)}` : ' · until you turn it on (`sideby unattended on`)'}${slot}`
+  return `${c.dim('off')}${s.next ? ` · turns on at ${at(s.next.at)}${s.next.slot ? ` (Slot "${s.next.slot}")` : ''}` : ''}`
 }
 
 const clock2 = (iso: string, now: Date) => clockText(Date.parse(iso), now.getTime())

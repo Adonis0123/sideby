@@ -2931,7 +2931,7 @@ describe('the Unattended page (spec §3.37)', () => {
     for (const k of ['question', 'deferred', 'permission']) assert.ok(`ua.kind.${k}` in MESSAGES.en, k)
     assert.equal(
       MESSAGES.zh['ua.untilDay']!.replace('{day}', '明天').replace('{time}', '07:30'),
-      '到明天 07:30',
+      '到 明天 07:30',
     )
     assert.equal(MESSAGES.zh['ua.badge']!.replace('{until}', '到 08:00'), '无人值守 · 到 08:00')
     assert.equal(MESSAGES.en['ua.days']!.split(',').length, 7)

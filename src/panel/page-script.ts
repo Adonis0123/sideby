@@ -5907,7 +5907,8 @@ const MAIN = String.raw`
     const p = uaStatusParts(st)
     const schedule = st.schedule || []
     const slotWord = p.slot !== null && schedule[p.slot] ? uaSlotWord(schedule[p.slot], p.slot) : null
-    if (p.state === 'on') return [t('ua.on'), p.byHand ? t('ua.byHand') : slotWord, p.noEnd ? t('ua.noEnd') : uaAt('until', p.until)]
+    // State first, then the one time that matters (until when, or when it comes on), then why.
+    if (p.state === 'on') return [t('ua.on'), p.noEnd ? t('ua.noEnd') : uaAt('until', p.until), p.byHand ? t('ua.byHand') : slotWord]
     if (p.state === 'paused') return [t('ua.paused'), p.noEnd ? t('ua.pausedOpen') : uaAt('back', p.until)]
     return [t('ua.off'), p.next ? uaAt('next', p.next.at) : null]
   }
