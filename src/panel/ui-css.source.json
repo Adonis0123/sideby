@@ -1,0 +1,11 @@
+{
+  "commit": "975a5950e85604b26d57910f5a5b6e04692e4fd6",
+  "dirty": true,
+  "flavor": "inline",
+  "theme": "teal",
+  "components": [
+    "base",
+    "dropdown-menu"
+  ],
+  "copiedAt": "2026-11-01"
+}

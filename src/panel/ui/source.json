@@ -1,0 +1,12 @@
+{
+  "from": "adonis-brand/design-system",
+  "commit": "975a5950e85604b26d57910f5a5b6e04692e4fd6",
+  "dirty": true,
+  "flavor": "html",
+  "components": [
+    "base",
+    "dropdown-menu",
+    "tokens"
+  ],
+  "copiedAt": "2026-11-01"
+}

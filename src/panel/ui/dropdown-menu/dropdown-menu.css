@@ -1,0 +1,83 @@
+/* 下拉菜单。HTML 版用 popover 属性（按钮 popovertarget 打开），React 版用 Radix DropdownMenu。
+   两种写法共用下面的类。菜单项高 28px，高亮是 --hover 底；单选项选中是淡彩底加彩色字，不用实心块（README 原则 4）。
+   宽度由调用方给（HTML 版 width、React 版 width 或 style），最高 480px 或 70vh，超出在菜单里滚动。
+   [data-force] 只给状态矩阵定格展示用，站点代码不要写。 */
+.ui-menu {
+  z-index: 50;
+  min-width: 180px;
+  max-width: calc(100vw - 16px);
+  max-height: min(480px, 70vh, var(--radix-dropdown-menu-content-available-height, 70vh));
+  padding: 4px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--shadow-popover);
+  font-size: 13px;
+  outline: none;
+}
+/* HTML 版：贴着触发按钮下方弹出（Anchor Positioning）；不支持的浏览器沿用 popover 默认的居中 */
+@supports (position-area: block-end) {
+  .ui-menu[popover] { inset: auto; margin: 4px 0; position-area: block-end span-inline-end; position-try-fallbacks: flip-block, flip-inline; }
+}
+
+.ui-menu-label { padding: 8px 8px 4px; font-size: 12px; font-weight: 500; color: var(--muted-foreground); }
+.ui-menu-separator { height: 1px; margin: 4px -4px; border: 0; background: var(--border); }
+.ui-menu-group { display: block; }
+
+.ui-menu-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+}
+.ui-menu-item > svg { width: 16px; height: 16px; flex: none; color: var(--muted-foreground); }
+/* 勾选项：左侧留 16px 放勾 */
+.ui-menu-item-inset { padding-left: 28px; }
+.ui-menu-indicator { position: absolute; left: 8px; display: inline-flex; width: 14px; height: 14px; color: var(--accent-foreground); }
+.ui-menu-indicator > svg { width: 14px; height: 14px; }
+.ui-menu-item[aria-checked="false"] .ui-menu-indicator { visibility: hidden; }
+.ui-menu-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* 右侧次要文字，例如日期、数量：灰字、等宽数字、不换行 */
+.ui-menu-meta { flex: none; margin-left: auto; padding-left: 16px; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted-foreground); }
+.ui-menu-shortcut { margin-left: auto; font-family: inherit; padding-left: 16px; font-size: 12px; letter-spacing: 0.04em; color: var(--muted-foreground); }
+
+/* 高亮：鼠标悬停、键盘聚焦（Radix 给 data-highlighted）都用同一层底色 */
+.ui-menu-item:is(:hover, :focus-visible, [data-highlighted], [data-force="hover"], [data-force="focus"]):not(:disabled, [data-disabled], [aria-disabled="true"]) { background: var(--hover); }
+.ui-menu-item:is(:active, [data-force="active"]):not(:disabled, [data-disabled], [aria-disabled="true"]) { background: var(--active); }
+/* 单选项选中：淡彩底加彩色字，次要文字一起变色；悬停和按下逐级加深一点 */
+.ui-menu-item[role="menuitemradio"]:is([aria-checked="true"], [data-force="checked"]) { background: var(--accent); color: var(--accent-foreground); }
+.ui-menu-item[role="menuitemradio"]:is([aria-checked="true"], [data-force="checked"]) .ui-menu-meta { color: var(--accent-foreground); }
+.ui-menu-item[role="menuitemradio"][aria-checked="true"]:is(:hover, [data-highlighted]) { background: var(--accent-hover); }
+.ui-menu-item[role="menuitemradio"][aria-checked="true"]:active { background: var(--accent-active); }
+/* 键盘聚焦额外描一圈 ring，和其他控件的聚焦一致 */
+.ui-menu-item:is(:focus-visible, [data-force="focus"]) { box-shadow: inset 0 0 0 1px var(--ring); }
+
+/* 危险项：红字，高亮时淡红底 */
+.ui-menu-item-danger, .ui-menu-item-danger > svg { color: var(--danger-text); }
+.ui-menu-item-danger:is(:hover, :focus-visible, [data-highlighted], [data-force="hover"], [data-force="focus"]):not(:disabled, [data-disabled], [aria-disabled="true"]) { background: var(--danger-soft); }
+.ui-menu-item-danger:is(:active, [data-force="active"]):not(:disabled, [data-disabled], [aria-disabled="true"]) { background: var(--danger-soft-hover); }
+.ui-menu-item-danger:is(:focus-visible, [data-force="focus"]) { box-shadow: inset 0 0 0 1px var(--danger); }
+
+/* 禁用：灰字，不加底（同 ghost 按钮） */
+.ui-menu-item:is(:disabled, [data-disabled], [aria-disabled="true"], [data-force="disabled"]) { background: transparent; color: var(--disabled-foreground); cursor: not-allowed; }
+.ui-menu-item:is(:disabled, [data-disabled], [aria-disabled="true"], [data-force="disabled"]) :is(svg, .ui-menu-shortcut) { color: var(--disabled-foreground); }
+
+.ui-menu:is(:popover-open, [data-state="open"]) { animation: ui-menu-in var(--duration-fast) var(--ease-out); }
+@keyframes ui-menu-in { from { opacity: 0; transform: translateY(-2px); } }
+@media (prefers-reduced-motion: reduce) { .ui-menu:is(:popover-open, [data-state="open"]) { animation: none; } }

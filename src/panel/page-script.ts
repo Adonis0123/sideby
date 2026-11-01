@@ -84,6 +84,7 @@ import {
   shortCwd,
   shortSessionLabel,
   sortAccounts,
+  sortMenu,
   sortSessions,
   steadyOrder,
   stripSecrets,
@@ -112,6 +113,9 @@ import {
   windowState,
   withPinned,
 } from './page-logic.ts'
+// The component library's dropdown menu, copied by the brand repo's add script (--html into ui/); do not edit it.
+import { CHECK, menuItem, menuScript } from './ui/dropdown-menu/dropdown-menu.html.ts'
+import { cn, esc } from './ui/lib/cn.ts'
 
 const LOGIC = [
   quotaIsStale,
@@ -187,6 +191,7 @@ const LOGIC = [
   saveHandoffChange,
   enableOutcome,
   reorder,
+  sortMenu,
   rowBadge,
   sendBlock,
   sendFileProblem,
@@ -229,6 +234,14 @@ const LOGIC = [
 ]
   .map((fn) => fn.toString())
   .join('\n')
+
+// The menu item markup of the component library, so the pickers (selectMenu) draw the same items as its other pages.
+const MENU_LIB = [
+  `const CHECK = ${JSON.stringify(CHECK)}`,
+  `const esc = ${esc.toString()}`,
+  cn.toString(),
+  menuItem.toString(),
+].join('\n')
 
 const MAIN = String.raw`
   const BOOT = JSON.parse(document.getElementById('sideby-boot').textContent)
@@ -417,6 +430,91 @@ const MAIN = String.raw`
     if (kid === null || kid === undefined || kid === false) return
     if (Array.isArray(kid)) { for (const k of kid) add(el, k); return }
     el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)))
+  }
+  // A picker in place of a native select: a field-like button that opens the component library's single-choice menu
+  // (menuItem; menuScript moves focus with Up, Down, Home and End, and puts the checked item in view; Enter picks, Esc
+  // closes). It keeps the select interface the page uses: h('option') children (also through replaceChildren), .value,
+  // a 'change' event (or an onchange prop), hidden, disabled and focus(). id, data-key and aria-label go on the button,
+  // so a <label for> still names and opens it. Beyond a select: an h('optgroup', { label }) puts a heading over its
+  // options, an h('hr') a line between items, data-meta grey words at an option's end and data-button shorter or longer
+  // words on the button than in the menu. An option with data-action (and data-icon) is an action, not a choice: it
+  // never holds the check or changes .value, and fires an 'action' event (or the onaction prop) with its value. An
+  // option with data-placeholder ("Add account…") is not a choice either: its words show, greyed, on the button while
+  // nothing is picked (.value ''), and it is not in the menu, so nothing there is checked.
+  let selectSeq = 0
+  function selectMenu(props, ...kids) {
+    const p = Object.assign({}, props)
+    const id = 'select-menu-' + (++selectSeq)
+    const onchange = p.onchange
+    const onaction = p.onaction
+    delete p.onchange
+    delete p.onaction
+    const text = h('span', { class: 'select-text' })
+    const btn = h('button', Object.assign(p, { type: 'button', class: 'select-btn' + (p.class ? ' ' + p.class : ''), popovertarget: id, 'aria-haspopup': 'menu' }), text)
+    const list = h('div', { popover: 'auto', id, role: 'menu', class: 'ui-menu', 'aria-label': p['aria-label'] || null })
+    const wrap = h('span', { class: 'select-wrap' }, btn, list)
+    let opts = []
+    let cur = ''
+    let drawn = ''
+    let placeholder = ''
+    // Only the choices carry aria-checked: a heading, a line or an action never shows the check.
+    const mark = () => {
+      for (const it of list.querySelectorAll('[role="menuitemradio"]')) it.setAttribute('aria-checked', String(it.getAttribute('data-value') === cur))
+      const on = opts.find((o) => o.value === cur)
+      text.textContent = on ? on.button : placeholder
+      btn.classList.toggle('is-placeholder', !on && Boolean(placeholder))
+    }
+    const setOptions = (nodes) => {
+      opts = []
+      placeholder = ''
+      const parts = []
+      const walk = (n) => {
+        if (Array.isArray(n)) n.forEach(walk)
+        else if (!n || !n.tagName) return
+        else if (n.tagName === 'OPTGROUP') { parts.push('<div class="ui-menu-label" role="presentation">' + esc(n.label) + '</div>'); walk(Array.from(n.children)) }
+        else if (n.tagName === 'OPTION' && n.hasAttribute('data-placeholder')) placeholder = n.textContent
+        else if (n.tagName === 'HR') parts.push('<hr class="ui-menu-separator" role="separator">')
+        else if (n.tagName === 'OPTION' && n.hasAttribute('data-action')) {
+          const ic = n.getAttribute('data-icon')
+          parts.push(menuItem({ label: n.textContent, icon: ic ? icon(ic).outerHTML : undefined, attrs: 'data-action="' + esc(n.value) + '"' }, id))
+        } else if (n.tagName === 'OPTION') {
+          const o = { value: n.value, label: n.textContent, button: n.getAttribute('data-button') || n.textContent, selected: n.hasAttribute('selected') }
+          opts.push(o)
+          parts.push(menuItem({ label: o.label, meta: n.getAttribute('data-meta') || undefined, radio: true, checked: false, attrs: 'data-value="' + esc(o.value) + '"' }, id))
+        }
+      }
+      walk(nodes)
+      const pre = opts.find((o) => o.selected) || (placeholder ? null : opts[0])
+      cur = pre ? pre.value : ''
+      // Same items, same markup: the open menu keeps its elements (and its focus) when a refresh brings the same options.
+      const html = parts.join('')
+      if (html !== drawn) { list.innerHTML = html; drawn = html }
+      mark()
+    }
+    // As in a select, a value no option has selects nothing.
+    Object.defineProperty(wrap, 'value', { get: () => cur, set: (v) => { const s = String(v); cur = opts.some((o) => o.value === s) ? s : ''; mark() } })
+    Object.defineProperty(wrap, 'disabled', { get: () => btn.disabled, set: (v) => { btn.disabled = Boolean(v) } })
+    wrap.replaceChildren = (...nodes) => setOptions(nodes)
+    wrap.focus = (o) => btn.focus(o)
+    if (onchange) wrap.addEventListener('change', onchange)
+    if (onaction) wrap.addEventListener('action', onaction)
+    // Picking an item closes the menu (its popovertargetaction); a new value fires 'change' on the wrapper, as a select
+    // does. The click stops here: the library's own radio script would otherwise check the clicked item after a
+    // 'change' handler has set another value (2026-11-02: "Arrange order…" kept the check while the sort read "My order").
+    list.addEventListener('click', (e) => {
+      const act = e.target.closest('[data-action]')
+      if (act && !act.disabled) { wrap.dispatchEvent(new CustomEvent('action', { detail: act.getAttribute('data-action') })); return }
+      const it = e.target.closest('[role="menuitemradio"]')
+      if (!it || it.disabled) return
+      e.stopPropagation()
+      if (it.getAttribute('data-value') === cur) return
+      cur = it.getAttribute('data-value')
+      mark()
+      wrap.dispatchEvent(new Event('change', { bubbles: true }))
+      mark()
+    })
+    setOptions(kids)
+    return wrap
   }
   function dots(parts) {
     const out = []
@@ -1128,6 +1226,7 @@ const MAIN = String.raw`
     ]
   }
   // A Main-only Family (ADR-0047) has no other Account to create.
+  function aliasItem(a) { return BOOT.readOnly ? null : { icon: 'terminal', label: t('menu.setAlias'), hint: (a.aliases || [])[0], run: () => openAlias(a) } }
   function likeItem(a) { return BOOT.readOnly || family(a.family).mainOnly ? null : { icon: 'userPlus', label: t('menu.like'), run: () => openCreate({ family: a.family, api: a.kind === 'api' }) } }
   // Grouped by what the user wants to do: open, copy, manage. A Same Login row (ADR-0026) passes its other
   // directories: the menu is the one of the directory the row is named after, and each other directory is one item
@@ -1150,7 +1249,7 @@ const MAIN = String.raw`
     const items = [pinItem(a), ...hideItems(a),
       opens.length ? '-' : null, opens.length ? { header: t('menu.groupOpen') } : null, ...opens,
       '-', { header: t('menu.groupCopy') }, run, ...(fold ? [fold] : more),
-      '-', { header: t('menu.groupManage') }, signInItem, key, ...dirTools(a), likeItem(a),
+      '-', { header: t('menu.groupManage') }, signInItem, key, aliasItem(a), ...dirTools(a), likeItem(a),
       ...(dirs.length ? ['-', { header: t('menu.groupOtherDirs') }, ...dirs.map((d) => d.item)] : [])]
     back.sub = items
     for (const d of dirs) d.up.sub = items
@@ -1379,17 +1478,15 @@ const MAIN = String.raw`
       e.preventDefault()
       if (tb.search.value) { tb.search.value = ''; ui.query = ''; renderAccounts() } else tb.search.blur()
     })
-    tb.family = h('select', { class: 'tb-select', 'aria-label': t('tb.family') })
+    tb.family = selectMenu({ class: 'tb-select', 'aria-label': t('tb.family') })
     tb.family.addEventListener('change', () => { prefs.family = tb.family.value; savePrefs(); renderAccounts() })
-    // "Arrange order…" is not a sort: it opens the arrange mode (spec §3.25), and the sort shows "my order".
-    tb.sort = h('select', { class: 'tb-select', 'aria-label': t('tb.sort') },
-      CHOICES.sort.map((v) => h('option', { value: v }, t('sort.' + v))),
-      BOOT.readOnly ? null : h('option', { value: 'arrange' }, t('sort.arrange')))
-    tb.sort.value = prefs.sort
+    // "Arrange order and pins…" is an action under the sorts, not a sort: it opens the arrange mode (spec §3.25), and
+    // the sort then reads "My order".
+    tb.sort = selectMenu({ class: 'tb-select', 'aria-label': t('tb.sort'), onaction: startArrange }, sortOptions())
     tb.sort.addEventListener('change', () => {
       const v = tb.sort.value
       // "My order" before any order of one's own would show nothing new: it opens the arrange mode instead.
-      if (v === 'arrange' || (v === 'manual' && !ordered() && !BOOT.readOnly)) { startArrange(); return }
+      if (v === 'manual' && !ordered() && !BOOT.readOnly) { startArrange(); return }
       if (ui.arrange) endArrange()
       prefs.sort = v
       savePrefs()
@@ -1405,6 +1502,14 @@ const MAIN = String.raw`
     ])
     renderFamilyFilter()
     if (hadFocus) tb.search.focus()
+  }
+  // The sort menu's items (page-logic.ts, sortMenu): redrawn with the list, so "Not set" follows the saved order.
+  function sortOptions() {
+    const items = sortMenu(CHOICES.sort, prefs.sort, ordered(), BOOT.readOnly)
+    const choices = items.filter((e) => e.kind === 'choice').map((e) => h('option', { value: e.value, selected: e.checked ? '' : undefined, 'data-meta': e.meta ? t(e.meta) : undefined, 'data-button': t('sort.button', { choice: t(e.key) }) }, t(e.key)))
+    const label = items.find((e) => e.kind === 'label')
+    const action = items.find((e) => e.kind === 'action')
+    return [h('optgroup', { label: t(label.key) }, choices)].concat(action ? [h('hr'), h('option', { value: action.value, 'data-action': '', 'data-icon': 'grip' }, t(action.key))] : [])
   }
   // "Display": the view settings people change rarely, one popover instead of three buttons in the toolbar.
   // "Hide emails" shows once any account has one.
@@ -2581,7 +2686,7 @@ const MAIN = String.raw`
         pinMark(a),
         h('span', { class: 'name', title: a.name }, a.name),
         loginMark(ms),
-        aliasText(a),
+        aliasText(a, accountTitle(a).aliases),
         hiddenMark(hidden && !famHidden(fam))))),
       h('div', { class: 'arrange-tools' },
         // In a hidden Family the row keeps its eye, greyed, so the columns stay in line; the group's eye shows it again.
@@ -2735,6 +2840,7 @@ const MAIN = String.raw`
   }
   function renderAccounts() {
     closeMenu()
+    if (tb.sort) tb.sort.replaceChildren(...sortOptions())
     const box = $('accounts')
     const count = $('acct-count')
     if (!S.state) {
@@ -3090,7 +3196,7 @@ const MAIN = String.raw`
     if (g.current && !g.outOfRange) sizes.add(g.current)
     const key = (v) => (v === null ? 'default' : String(v))
     const chosen = tuneSel[g.id] !== undefined ? tuneSel[g.id] : key(g.current)
-    const sel = h('select', { 'aria-label': t('tune.setting') },
+    const sel = selectMenu({ 'aria-label': t('tune.setting') },
       h('option', { value: 'default' }, t('tune.hostDefaultLong')),
       [...sizes].sort((x, y) => x - y).map((v) => h('option', { value: String(v) }, tokens(v) + (pick && v === pick.threshold ? ' (' + t('tune.suggestedTag') + ')' : ''))))
     sel.value = chosen
@@ -4055,9 +4161,9 @@ const MAIN = String.raw`
       ev.preventDefault()
       if (e.q.value) { e.q.value = ''; clearTimeout(hs.debounce); hs.q = ''; historyChanged(false) } else e.q.blur()
     })
-    e.since = h('select', { class: 'tb-select' })
+    e.since = selectMenu({ class: 'tb-select' })
     e.since.addEventListener('change', () => { hs.since = e.since.value; historyChanged(true) })
-    e.family = h('select', { class: 'tb-select' })
+    e.family = selectMenu({ class: 'tb-select' })
     e.family.addEventListener('change', () => {
       hs.family = e.family.value
       // An Account of another AI would match nothing: it is dropped before the lists are asked for again.
@@ -4065,7 +4171,7 @@ const MAIN = String.raw`
       relabelHistory(e)
       historyChanged(true)
     })
-    e.account = h('select', { class: 'tb-select' })
+    e.account = selectMenu({ class: 'tb-select' })
     e.account.addEventListener('change', () => { hs.account = e.account.value; historyChanged(true) })
     e.tools = h('input', { type: 'checkbox' })
     e.tools.addEventListener('change', () => {
@@ -5353,7 +5459,7 @@ const MAIN = String.raw`
   function ahFamily(fam) {
     const o = ah.form.orders[fam]
     const f = family(fam)
-    const policy = h('select', { 'aria-label': t('ah.order', { host: f.title }), disabled: BOOT.readOnly },
+    const policy = selectMenu({ 'aria-label': t('ah.order', { host: f.title }), disabled: BOOT.readOnly },
       h('option', { value: 'pressure' }, t('ah.byQuota')), h('option', { value: 'order' }, t('ah.myOrder')))
     policy.value = o.policy
     policy.addEventListener('change', () => ahEdit((form) => { form.orders[fam].policy = policy.value }))
@@ -5369,7 +5475,7 @@ const MAIN = String.raw`
       const free = S.state.accounts.filter((a) => !taken.has(a.ref) && !(a.aliases || []).some((n) => taken.has(n)))
       if (!o.order.length) kids.push(h('p', { class: 'note note-warn' }, t('ah.emptyOrder')))
       if (free.length && !BOOT.readOnly) {
-        const pick = h('select', { 'aria-label': t('ah.add') }, h('option', { value: '' }, t('ah.add') + '…'), free.map((a) => h('option', { value: a.ref }, accountLabel(a.ref))))
+        const pick = selectMenu({ 'aria-label': t('ah.add') }, h('option', { value: '', 'data-placeholder': '' }, t('ah.add') + '…'), free.map((a) => h('option', { value: a.ref }, accountLabel(a.ref))))
         pick.addEventListener('change', () => { if (pick.value) ahEdit((form) => { form.orders[fam].order.push(pick.value) }) })
         kids.push(h('div', { class: 'ah-add' }, pick))
       }
@@ -5519,7 +5625,7 @@ const MAIN = String.raw`
     const list = h('datalist', { id: 'md-models' }, mi.models.map((m) => h('option', { value: m })))
     const model = h('input', { type: 'text', list: 'md-models', autocomplete: 'off', spellcheck: 'false', placeholder: t('md.default') + ' (' + t('md.decides', { host }) + ')', disabled: BOOT.readOnly })
     model.value = mi.sideby.model || ''
-    const effort = h('select', { disabled: BOOT.readOnly }, h('option', { value: '' }, t('md.default') + ' (' + t('md.decides', { host }) + ')'), mi.efforts.map((e) => h('option', { value: e }, e)))
+    const effort = selectMenu({ disabled: BOOT.readOnly }, h('option', { value: '' }, t('md.default') + ' (' + t('md.decides', { host }) + ')'), mi.efforts.map((e) => h('option', { value: e }, e)))
     effort.value = mi.sideby.effort || ''
     const changed = () => { md.preview = null; md.error = null; renderModel() }
     model.addEventListener('input', () => { if (md.preview) changed() })
@@ -7151,7 +7257,7 @@ const MAIN = String.raw`
     const opts = HOTKEY_PRESETS.map((k) => [k, hotkeyLabel(k) + (k === HOTKEY_PRESETS[0] ? t('hk.isDefault') : '')])
     if (v.enabled && HOTKEY_PRESETS.indexOf(v.keys) < 0) opts.unshift([v.keys, v.label])
     opts.push(['off', t('hk.offOption')], ['custom', t('hk.custom')])
-    return h('select', { class: 'hk-select', 'data-key': 'hk-select', 'aria-label': t('hk.label'), disabled: hk.busy,
+    return selectMenu({ class: 'hk-select', 'data-key': 'hk-select', 'aria-label': t('hk.label'), disabled: hk.busy,
       onchange: (e) => {
         const val = e.target.value
         hk.error = ''
@@ -7341,6 +7447,7 @@ const MAIN = String.raw`
     else if (dlg.kind === 'setup' && qs) renderSetup()
     else if (dlg.kind === 'tune' && tuneState) renderTune()
     else if (dlg.kind === 'model' && md) { md.form = null; renderModel() }
+    else if (dlg.kind === 'alias' && al) renderAlias()
     else if (dlg.kind === 'browser') renderBrowser()
     else if (dlg.kind === 'update' && up) renderUpdate()
     else if (dlg.kind === 'rc') renderRc()
@@ -7787,8 +7894,8 @@ const MAIN = String.raw`
     }
     const rows = []
     if (choices.length) {
-      const sel = h('select', { id: 'ak-account', 'aria-label': t('ask.account') },
-        ak.account ? null : h('option', { value: '' }, t('ask.chooseAccount')),
+      const sel = selectMenu({ id: 'ak-account', 'aria-label': t('ask.account') },
+        ak.account ? null : h('option', { value: '', 'data-placeholder': '' }, t('ask.chooseAccount')),
         choices.map((a) => h('option', { value: a.ref }, a.ref + (a.kind === 'api' ? ' · API' : ''))))
       sel.value = ak.account || ''
       sel.addEventListener('change', () => { ak.account = sel.value || null; ak.accountChanged = Boolean(sel.value); renderAsk() })
@@ -7796,7 +7903,7 @@ const MAIN = String.raw`
     }
     const installed = ak.terms ? ak.terms.installed : []
     if (installed.length && ak.account) {
-      const sel = h('select', { id: 'ak-term', 'aria-label': t('ask.terminal') }, installed.map((id) => h('option', { value: id }, termName(id))))
+      const sel = selectMenu({ id: 'ak-term', 'aria-label': t('ask.terminal') }, installed.map((id) => h('option', { value: id }, termName(id))))
       sel.value = ak.terminal || installed[0]
       sel.addEventListener('change', () => { ak.terminal = sel.value; ak.terminalChanged = true; renderAsk() })
       rows.push(h('label', { class: 'field', for: 'ak-term' }, h('span', null, t('ask.terminal')), sel))
@@ -8038,7 +8145,7 @@ const MAIN = String.raw`
       const name = (id) => { const f = d.terminals.find((x) => x.id === id); return f ? f.name : id }
       if (!d.installed.length) body.push(h('p', { class: 'note' }, t('term.none')))
       else {
-        const sel = h('select', { id: 'tm-pick', disabled: tm.busy, 'aria-label': t('term.pick') },
+        const sel = selectMenu({ id: 'tm-pick', disabled: tm.busy, 'aria-label': t('term.pick') },
           h('option', { value: '' }, t('term.auto')),
           d.installed.map((id) => h('option', { value: id }, name(id))))
         sel.value = d.preferred && d.installed.includes(d.preferred) ? d.preferred : ''
@@ -8336,6 +8443,98 @@ const MAIN = String.raw`
     if (pk.error) body.push(errorNote(pk.error, null))
     setKids(dlg.el, dialogFrame(t('pk.title'), null, body, [h('button', { class: 'btn', type: 'button', onclick: () => dlg.el.close() }, t('btn.close'))]))
   }
+  // Short commands of one Account (spec §3.13): add one, rename or remove it. A terminal that loads shell-init picks
+  // the change up at its next prompt, so the page says that instead of "open a new terminal".
+  let al = null
+  function openAlias(a) {
+    al = { ref: a.ref, family: a.family, editing: (a.aliases || []).length ? null : '', draft: null, busy: false, error: null }
+    showDialog('alias')
+    renderAlias()
+    const el = document.getElementById('al-name')
+    if (el) el.focus()
+  }
+  function alAccount() { return S.state && S.state.accounts.find((x) => x.ref === al.ref) }
+  async function alSave(name, replaces) {
+    al.busy = true
+    al.error = null
+    renderAlias()
+    try {
+      const r = await api('/api/alias/set', replaces ? { account: al.ref, name, replaces } : { account: al.ref, name })
+      al.editing = null
+      al.draft = null
+      const later = S.state.shellSetup && !S.state.shellSetup.loaded
+      pickToast([r], t((replaces ? 'al.renamed' : 'al.added') + (later ? 'Setup' : ''), { name, old: replaces }))
+      await load({ silent: true })
+    } catch (e) { al.error = e }
+    if (!al) return
+    al.busy = false
+    if (dlg.kind === 'alias') renderAlias()
+  }
+  async function alRemove(name) {
+    al.busy = true
+    al.error = null
+    renderAlias()
+    try {
+      const r = await api('/api/alias/remove', { name })
+      const back = r.account ? Object.assign({ account: r.account, name }, r.args ? { args: r.args } : {}) : null
+      toast(t('al.removed', { name }), back ? { action: { label: t('ss.undo'), run: async () => { try { await api('/api/alias/set', back); await load({ silent: true }); if (dlg.kind === 'alias') renderAlias() } catch (e) { toast(e.message, { kind: 'fail' }) } } } } : undefined)
+      await load({ silent: true })
+    } catch (e) { al.error = e }
+    if (!al) return
+    al.busy = false
+    if (dlg.kind === 'alias') renderAlias()
+  }
+  // The field is built per render, but keeps what was typed in al.draft; Enter saves.
+  function alEditor(replaces) {
+    const input = h('input', { id: 'al-name', type: 'text', class: 'mono', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', maxlength: '64', placeholder: t('al.namePh'), disabled: al.busy, 'aria-describedby': 'al-name-hint' })
+    input.value = al.draft !== null ? al.draft : replaces || ''
+    const go = h('button', { class: 'btn btn-sm btn-primary', type: 'button' }, t(replaces ? 'pk.save' : 'pk.add'))
+    const hint = h('p', { class: 'field-hint', id: 'al-name-hint' }, t('al.hint'))
+    // The same rule as the config (ALIAS_NAME), said in words while typing, so a bad name never reaches the server.
+    const ok = (n) => /^[A-Za-z_][A-Za-z0-9_-]*$/.test(n)
+    const sync = () => {
+      const n = input.value.trim()
+      const bad = Boolean(n) && !ok(n)
+      hint.textContent = t(bad ? 'al.badName' : 'al.hint')
+      hint.className = bad ? 'field-error' : 'field-hint'
+      input.classList.toggle('invalid', bad)
+      input.setAttribute('aria-invalid', bad ? 'true' : 'false')
+      go.disabled = al.busy || !n || bad || n === replaces
+    }
+    const save = () => { const n = input.value.trim(); if (n && ok(n) && n !== replaces) alSave(n, replaces) }
+    input.addEventListener('input', () => { al.draft = input.value; sync() })
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save() } })
+    go.addEventListener('click', save)
+    sync()
+    return [
+      h('label', { class: 'field', for: 'al-name' }, h('span', null, t('al.nameLabel')), input),
+      hint,
+      h('div', { class: 'actions' }, go,
+        replaces || (alAccount() && (alAccount().aliases || []).length) ? h('button', { class: 'btn btn-sm btn-ghost', type: 'button', disabled: al.busy, onclick: () => { al.editing = null; al.draft = null; renderAlias() } }, t('btn.cancel')) : null),
+    ]
+  }
+  function renderAlias() {
+    if (!al || dlg.kind !== 'alias') return
+    const a = alAccount()
+    if (!a) { dlg.el.close(); return }
+    const names = a.aliases || []
+    const body = [h('p', { class: 'muted small' }, t('al.intro', { ref: a.ref }))]
+    for (const n of names) {
+      if (al.editing === n) { body.push(h('div', { class: 'pk-row' }, alEditor(n))); continue }
+      const args = (a.aliasArgs || {})[n]
+      body.push(h('div', { class: 'pk-row' },
+        h('p', { class: 'small' }, h('code', { class: 'mono' }, n + (args ? ' → ' + args.join(' ') : ''))),
+        h('div', { class: 'actions' },
+          h('button', { class: 'btn btn-sm', type: 'button', disabled: al.busy, onclick: () => copyText(n) }, icon('copy'), t('al.copy')),
+          h('button', { class: 'btn btn-sm btn-ghost', type: 'button', disabled: al.busy || al.editing !== null, onclick: () => { al.editing = n; al.draft = null; renderAlias(); const el = document.getElementById('al-name'); if (el) el.focus() } }, t('pk.rename')),
+          h('button', { class: 'btn btn-sm btn-ghost', type: 'button', disabled: al.busy, onclick: () => alRemove(n) }, t('pk.remove')))))
+    }
+    if (al.editing === '') body.push(h('div', { class: 'pk-row' }, alEditor(null)))
+    else if (al.editing === null) body.push(h('div', { class: 'actions' }, h('button', { class: 'btn btn-sm', type: 'button', disabled: al.busy, onclick: () => { al.editing = ''; al.draft = null; renderAlias(); const el = document.getElementById('al-name'); if (el) el.focus() } }, t(names.length ? 'al.addAnother' : 'pk.add'))))
+    body.push(shellSetupNote() || h('p', { class: 'muted small' }, t('al.live')))
+    if (al.error) body.push(errorNote(al.error, null))
+    setKids(dlg.el, dialogFrame(t('al.title', { ref: a.ref }), a.family, body, [h('button', { class: 'btn', type: 'button', onclick: () => dlg.el.close() }, t('btn.close'))]))
+  }
   // New terminals load short commands only through one line in the shell's rc file (ADR-0036). Where a short command
   // is added and that line is missing, say so and offer to add it: the line and the file shown are the preview.
   let ssBusy = false
@@ -8353,7 +8552,8 @@ const MAIN = String.raw`
     renderShellSetupHosts()
   }
   function renderShellSetupHosts() {
-    if (dlg.kind === 'pick' && pk) renderPick()
+    if (dlg.kind === 'alias' && al) renderAlias()
+    else if (dlg.kind === 'pick' && pk) renderPick()
     else if (dlg.kind === 'create' && nf && nf.result) renderCreate()
   }
   function shellSetupNote() {
@@ -8944,7 +9144,7 @@ const MAIN = String.raw`
   $('accounts').addEventListener('drop', onDrop)
   // Escape leaves the arrange mode, as "Done" does, unless a menu or dialog takes it first.
   document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || e.defaultPrevented || !ui.arrange || menu.el || (dlg.el && dlg.el.open) || e.target.closest('input, select, textarea')) return
+    if (e.key !== 'Escape' || e.defaultPrevented || !ui.arrange || menu.el || (dlg.el && dlg.el.open) || e.target.closest('input, select, textarea, .ui-menu')) return
     endArrange()
   })
   $('settings').addEventListener('click', () => openPopover($('settings'), 'settings', t('set.button'), settingsPop, 'end'))
@@ -8970,4 +9170,4 @@ const MAIN = String.raw`
 `
 
 /** The page script: the tested helpers, then the page logic, in one strict-mode function. */
-export const PAGE_SCRIPT = `(() => {\n  'use strict'\n${LOGIC}\n${MAIN}})()\n`
+export const PAGE_SCRIPT = `(() => {\n  'use strict'\n${LOGIC}\n${MENU_LIB}\n${MAIN}\n${menuScript}\n})()\n`

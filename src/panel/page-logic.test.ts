@@ -84,6 +84,7 @@ import {
   sessionRowShape,
   shortCwd,
   sortAccounts,
+  sortMenu,
   sortSessions,
   steadyOrder,
   stripSecrets,
@@ -3014,5 +3015,56 @@ describe('the Unattended page (spec §3.37)', () => {
     assert.equal(MESSAGES.zh['ua.badge']!.replace('{until}', '到 08:00'), '无人值守 · 到 08:00')
     assert.equal(MESSAGES.en['ua.days']!.split(',').length, 7)
     assert.equal(MESSAGES.zh['ua.days']!.split(',').length, 7)
+  })
+})
+
+describe('sortMenu', () => {
+  const SORTS = ['pressure', 'name', 'recent', 'manual']
+  const choices = (m: ReturnType<typeof sortMenu>) => m.filter((e) => e.kind === 'choice')
+
+  it('checks the current sort only, never the arrange action', () => {
+    const m = sortMenu(SORTS, 'manual', true, false)
+    assert.deepEqual(
+      choices(m)
+        .filter((e) => e.checked)
+        .map((e) => e.value),
+      ['manual'],
+    )
+    const action = m.find((e) => e.kind === 'action')
+    assert.deepEqual(action, { kind: 'action', value: 'arrange', key: 'sort.arrange' })
+    assert.ok(!('checked' in action!))
+  })
+
+  it('puts the label first and the action last, apart from the choices', () => {
+    const m = sortMenu(SORTS, 'pressure', true, false)
+    assert.deepEqual(
+      m.map((e) => e.kind),
+      ['label', 'choice', 'choice', 'choice', 'choice', 'separator', 'action'],
+    )
+  })
+
+  it('says "Not set" on my order while there is no order of one\'s own', () => {
+    const meta = (ordered: boolean) =>
+      choices(sortMenu(SORTS, 'pressure', ordered, false)).find((e) => e.value === 'manual')?.meta
+    assert.equal(meta(false), 'sort.notSet')
+    assert.equal(meta(true), undefined)
+  })
+
+  it('has no arrange action in a read-only Panel', () => {
+    const m = sortMenu(SORTS, 'name', false, true)
+    assert.ok(!m.some((e) => e.kind === 'action' || e.kind === 'separator'))
+  })
+
+  it('checks nothing for an unknown sort', () => {
+    assert.ok(!choices(sortMenu(SORTS, 'arrange', true, false)).some((e) => e.checked))
+  })
+
+  it('has every word it names in both languages', () => {
+    for (const lang of ['en', 'zh'] as const) {
+      const keys = sortMenu(SORTS, 'manual', false, false).flatMap((e) =>
+        e.kind === 'separator' ? [] : e.kind === 'choice' && e.meta ? [e.key, e.meta] : [e.key],
+      )
+      for (const k of [...keys, 'sort.button']) assert.ok(MESSAGES[lang][k], `${lang} ${k}`)
+    }
   })
 })

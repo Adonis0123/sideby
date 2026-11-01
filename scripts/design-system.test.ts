@@ -37,10 +37,10 @@ describe('the Design System built from code', () => {
     const title = tokens.type.groups[0]?.styles.find((s) => s.name === 'title')
     assert.deepEqual(
       { size: title?.fontSize, weight: title?.fontWeight, lh: title?.lineHeight, ls: title?.letterSpacing },
-      { size: '22px', weight: 750, lh: 1.3, ls: '-0.02em' },
+      { size: '20px', weight: 600, lh: 1.3, ls: '-0.02em' },
     )
     const pill = tokens.type.groups[1]?.styles.find((s) => s.name === 'version-pill')
-    assert.deepEqual([pill?.fontSize, pill?.lineHeight, pill?.fontWeight], ['11.5px', '18px', 500])
+    assert.deepEqual([pill?.fontSize, pill?.lineHeight, pill?.fontWeight], ['11px', '18px', 500])
   })
 
   it('names the selector to fix when a rule is gone', () => {
@@ -51,13 +51,14 @@ describe('the Design System built from code', () => {
     const css = bundleCss()
     const [support = '', ...rest] = css.split('\n')
     assert.ok(pageStyles().endsWith(rest.join('\n')), 'the rules as the Panel has them')
-    assert.match(support, /^:root \{ .*--font-size: 14px;.*--focus-outline: 2px solid var\(--focus\);.* \}$/)
+    assert.match(support, /^:root \{ .*--font: .*--focus-outline: 2px solid var\(--focus\);.* \}$/)
     const declared = new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]))
     const tokenVar = tokenVars()
     for (const t of tokens.color.tokens) assert.ok(tokenVar.has(`--${t.name}`))
-    // --qr and --dot are set per element by page-script.ts.
+    // --qr and --dot are set per element by page-script.ts; --radix-* is set by Radix on the component library's React
+    // menu and falls back in the HTML one the Panel uses (ui-css.ts).
     for (const m of css.matchAll(/var\((--[a-z0-9-]+)/g))
-      if (m[1] !== '--qr' && m[1] !== '--dot')
+      if (m[1] !== '--qr' && m[1] !== '--dot' && !m[1]!.startsWith('--radix-'))
         assert.ok(declared.has(m[1]) || tokenVar.has(m[1]!), `${m[1]} is defined`)
     assert.ok(!/:root \{[^}]*--accent:/.test(css), 'never overrides a token the system sets')
   })

@@ -46,4 +46,16 @@ describe('page script scope', () => {
       'these names are declared twice in the top scope; the later declaration replaces the earlier one',
     )
   })
+
+  // aliasText(a, list) reads list.length first; called with the account alone it throws, and the arrange mode, which
+  // draws every row through it, never opened (2026-11-02, v0.35.0: "Arrange order…" did nothing).
+  it('passes the short command list to every aliasText call', () => {
+    const calls = [...PAGE_SCRIPT.matchAll(/aliasText\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g)].map((m) => m[1]!)
+    assert.ok(calls.length >= 2, `found the aliasText calls (${calls.length})`)
+    assert.deepEqual(
+      calls.filter((args) => args.split(',').length < 2),
+      [],
+      'these aliasText calls miss the list of short commands',
+    )
+  })
 })

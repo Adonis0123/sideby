@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!dist", "!schemas", "!**/fixtures"]
+    "includes": ["**", "!dist", "!schemas", "!**/fixtures", "!src/panel/ui", "!src/panel/ui-css.source.json"]
   },
   "formatter": {
     "enabled": true,

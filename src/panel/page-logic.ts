@@ -2485,3 +2485,31 @@ export function uaWaitingCount(
     return status.pendingIds.filter((id) => !inflight.some((x) => x.id === id)).length
   return Math.max(0, status.pending - inflight.filter((x) => x.on === status).length)
 }
+
+export type SortMenuEntry =
+  | { kind: 'label'; key: string }
+  | { kind: 'choice'; value: string; key: string; checked: boolean; meta?: string }
+  | { kind: 'separator' }
+  | { kind: 'action'; value: string; key: string }
+
+/**
+ * The toolbar's sort menu (spec §3.25): a "Sort by" label, one radio choice per sort with the current one checked,
+ * then, apart, the action that opens the arrange mode. The action is never a choice, so it can never hold the check.
+ * "My order" says "Not set" while there is no order of one's own, as picking it then opens the arrange mode. A
+ * read-only Panel has no action. Entries carry i18n keys, not words.
+ */
+export function sortMenu(
+  sorts: readonly string[],
+  current: string,
+  ordered: boolean,
+  readOnly: boolean,
+): SortMenuEntry[] {
+  const out: SortMenuEntry[] = [{ kind: 'label', key: 'sort.by' }]
+  for (const value of sorts) {
+    const choice: SortMenuEntry = { kind: 'choice', value, key: `sort.${value}`, checked: value === current }
+    if (value === 'manual' && !ordered) choice.meta = 'sort.notSet'
+    out.push(choice)
+  }
+  if (!readOnly) out.push({ kind: 'separator' }, { kind: 'action', value: 'arrange', key: 'sort.arrange' })
+  return out
+}
