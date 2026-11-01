@@ -7,9 +7,11 @@ import { MESSAGES } from './i18n.ts'
 import { renderPage } from './page.ts'
 import {
   AI_TASK_KINDS,
+  accountTitle,
   aiTaskAccounts,
   aliasArgsOf,
   aliasIssue,
+  aliasPrefix,
   askCopy,
   attentionReasons,
   attentionWhy,
@@ -54,6 +56,7 @@ import {
   networkTaskFacts,
   newAccountDir,
   nextReset,
+  orderedAliases,
   panelFixes,
   panelHint,
   panelLang,
@@ -104,6 +107,7 @@ import {
   uaWaitingCount,
   uaWhen,
   updatedAge,
+  vendorAlias,
   widthFollower,
   widthTier,
   windowState,
@@ -524,6 +528,80 @@ describe('short command for a new account', () => {
       ['002', ['cc002']],
     ])
     assert.equal(suggestAlias(mixed, 'claude', 'work'), 'ccwork')
+  })
+
+  it("names an API account's short command after its Vendor, with the Family's prefix and never a made-up one", () => {
+    const claude = fam('claude', [
+      ['main', []],
+      ['001', ['cc001']],
+      ['002', ['cc002']],
+      // A vendor-named alias does not end in its Account's name, so it does not change the prefix.
+      ['010', ['cc-kimi']],
+    ])
+    const dashed = fam('cursor', [['002', ['cur-002']]])
+    const under = fam('grok', [['001', ['gk_001']]])
+    const none = fam('pi', [['main', ['pi001']]])
+    const all = [...claude, ...dashed, ...under, ...none]
+    assert.equal(aliasPrefix(all, 'claude'), 'cc')
+    assert.equal(vendorAlias(all, 'claude', 'ds'), 'cc-ds')
+    assert.equal(vendorAlias(all, 'claude', ' kimi '), 'cc-kimi')
+    // A prefix that already ends in a dash or underscore gets no second one.
+    assert.equal(vendorAlias(all, 'cursor', 'glm'), 'cur-glm')
+    assert.equal(vendorAlias(all, 'grok', 'relay'), 'gk-relay')
+    // No pattern, no slug: nothing to offer.
+    assert.equal(vendorAlias(all, 'pi', 'kimi'), '')
+    assert.equal(vendorAlias(all, 'codex', 'ds'), '')
+    assert.equal(vendorAlias(all, 'claude', ''), '')
+    // The slug is used as given; the alias rules then say what is wrong with it.
+    const rules: [string, string[]] = [ALIAS_NAME.source, [...RESERVED_ALIASES]]
+    const bad = vendorAlias(all, 'claude', 'deep seek')
+    assert.equal(bad, 'cc-deep seek')
+    assert.equal(aliasIssue(bad, ...rules, {}, 'claude:011'), 'pattern')
+    assert.equal(aliasIssue('cc-kimi', ...rules, { 'cc-kimi': 'claude:010' }, 'claude:011'), 'taken')
+  })
+
+  it('lists every short command of an account, plain ones first, and names an API account by its own', () => {
+    const pi: LogicAccount = {
+      family: 'pi',
+      name: 'main',
+      ref: 'pi:main',
+      isMain: true,
+      kind: 'subscription',
+      aliases: ['pi-glm', 'pi-kimi', 'pi001'],
+      aliasArgs: { 'pi-glm': ['--model', 'zai/glm-5'], 'pi-kimi': ['--model', 'kimi-coding/k3:high'] },
+    }
+    assert.deepEqual(orderedAliases(pi), ['pi001', 'pi-glm', 'pi-kimi'])
+    // A subscription account keeps its name; all its short commands follow it.
+    assert.deepEqual(accountTitle(pi), {
+      title: 'main',
+      byAlias: false,
+      aliases: ['pi001', 'pi-glm', 'pi-kimi'],
+    })
+
+    const api = (aliases: string[], aliasArgs: Record<string, string[]> = {}): LogicAccount => ({
+      family: 'claude',
+      name: '010',
+      ref: 'claude:010',
+      kind: 'api',
+      aliases,
+      aliasArgs,
+    })
+    assert.deepEqual(accountTitle(api(['cc-kimi'])), { title: 'cc-kimi', byAlias: true, aliases: [] })
+    assert.deepEqual(
+      accountTitle(api(['cc-kimi-fast', 'cc-kimi'], { 'cc-kimi-fast': ['--model', 'k3-turbo'] })),
+      {
+        title: 'cc-kimi',
+        byAlias: true,
+        aliases: ['cc-kimi-fast'],
+      },
+    )
+    // Without a short command, or with only ones that add arguments, the name stays.
+    assert.deepEqual(accountTitle(api([])), { title: '010', byAlias: false, aliases: [] })
+    assert.deepEqual(accountTitle(api(['cc-k3'], { 'cc-k3': ['--model', 'k3'] })), {
+      title: '010',
+      byAlias: false,
+      aliases: ['cc-k3'],
+    })
   })
 
   it('checks an alias with the config rules', () => {

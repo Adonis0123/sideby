@@ -789,14 +789,12 @@ export function fixPrompt(
 }
 
 /**
- * A short command to offer for a new Account `name` of a Family, from the config aliases of its existing Accounts:
- * an alias that is a prefix plus its Account's name (`cc001` for `claude:001`) gives the prefix, the most common
- * one wins (then the longer, then the first alphabetically), and the offer is that prefix plus `name` (`cc008`).
- * Aliases that do not end in their Account's name (`codex001` for `codex:main`) are ignored. Empty when no
- * pattern shows, or without a name. The caller still checks the result like any alias.
+ * The prefix a Family's short commands put before their Account's name, from the config aliases of its Accounts: an
+ * alias that is a prefix plus its Account's name (`cc001` for `claude:001`) gives the prefix, and the most common one
+ * wins (then the longer, then the first alphabetically). Aliases that do not end in their Account's name (`codex001`
+ * for `codex:main`, `cc-ds` for `claude:011`) are ignored. Empty when no pattern shows.
  */
-export function suggestAlias(accounts: LogicAccount[], family: string, name: string): string {
-  if (!name) return ''
+export function aliasPrefix(accounts: LogicAccount[], family: string): string {
   const counts: Record<string, number> = {}
   for (const a of accounts) {
     if (a.family !== family) continue
@@ -806,10 +804,57 @@ export function suggestAlias(accounts: LogicAccount[], family: string, name: str
         counts[prefix] = (counts[prefix] || 0) + 1
       }
   }
-  const best = Object.keys(counts).sort(
-    (x, y) => (counts[y] || 0) - (counts[x] || 0) || y.length - x.length || (x < y ? -1 : x > y ? 1 : 0),
-  )[0]
-  return best ? best + name : ''
+  return (
+    Object.keys(counts).sort(
+      (x, y) => (counts[y] || 0) - (counts[x] || 0) || y.length - x.length || (x < y ? -1 : x > y ? 1 : 0),
+    )[0] || ''
+  )
+}
+
+/**
+ * A short command to offer for a new Subscription Account `name` of a Family: its alias prefix (`aliasPrefix`) plus
+ * `name` (`cc008`). Empty when no pattern shows, or without a name. The caller still checks the result like any alias.
+ */
+export function suggestAlias(accounts: LogicAccount[], family: string, name: string): string {
+  if (!name) return ''
+  const prefix = aliasPrefix(accounts, family)
+  return prefix ? prefix + name : ''
+}
+
+/**
+ * A short command to offer for a new API Account of a Family that calls `vendor` (its Vendor Slug, used as given): the
+ * Family's alias prefix, a dash and the slug (`cc-ds`), so the name says what the Account calls rather than a number.
+ * A prefix that already ends in a dash or underscore (`cc-` from `cc-001`) gets no second one. Empty without a slug,
+ * or when the Family's short commands show no prefix: sideby never invents one. The caller still checks the result
+ * like any alias (an invalid or taken slug fails there).
+ */
+export function vendorAlias(accounts: LogicAccount[], family: string, vendor: string): string {
+  const slug = String(vendor || '').trim()
+  if (!slug) return ''
+  const prefix = aliasPrefix(accounts, family).replace(/[-_]+$/, '')
+  return prefix ? prefix + '-' + slug : ''
+}
+
+/**
+ * An Account's short commands in the order the Panel lists them: those that only start it (`pi001`) first, then those
+ * that add Host arguments (`pi-glm`, `pi-kimi`), each group in name order.
+ */
+export function orderedAliases(a: LogicAccount): string[] {
+  const all = (a.aliases || []).slice().sort((x, y) => (x < y ? -1 : x > y ? 1 : 0))
+  return all.filter((x) => !aliasArgsOf(a, x)).concat(all.filter((x) => aliasArgsOf(a, x)))
+}
+
+/**
+ * What names an Account in its row or card. An API Account with a short command that adds no arguments is named by
+ * it (`cc-kimi`): the short command says which Vendor it calls, its name is only a number, and its ref stays in the
+ * line under the title. Every other Account keeps its name. `aliases`: the short commands shown after the title, in
+ * `orderedAliases` order.
+ */
+export function accountTitle(a: LogicAccount): { title: string; byAlias: boolean; aliases: string[] } {
+  const all = orderedAliases(a)
+  const plain = a.kind === 'api' ? all.filter((x) => !aliasArgsOf(a, x))[0] : undefined
+  if (plain) return { title: plain, byAlias: true, aliases: all.filter((x) => x !== plain) }
+  return { title: a.name, byAlias: false, aliases: all }
 }
 
 /**

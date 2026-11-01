@@ -322,6 +322,9 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .ident-name { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; row-gap: 3px; }
 .ident-name .name { font-weight: var(--strong-weight); font-size: var(--font-size); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .ident-name .alias { color: var(--muted); font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+/* Every short command of an Account, in one line that ends in an ellipsis when a card is too narrow. */
+.ident-name .aliases { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.ident-name .aliases .alias + .alias { margin-left: 6px; }
 .ident-email { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
 .email-btn, .model-btn { all: unset; cursor: pointer; border-radius: 4px; }
 .model-btn:hover { color: var(--text); text-decoration: underline dotted; }
@@ -757,6 +760,14 @@ select:is(:hover, :focus) { --chevron: var(--text); }
 .check-row { display: flex; align-items: flex-start; gap: 8px; }
 .check-row .check { flex: 1; }
 .check-row .tip { margin-top: 12px; }
+/* A field that belongs to a choice above it (the Vendor under "API key"): it grows in when the choice is made and
+   folds away when it is undone, instead of snapping the dialog. */
+.reveal { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows .18s ease, opacity .18s ease, visibility 0s .18s; }
+.reveal.is-open { grid-template-rows: 1fr; opacity: 1; visibility: visible; transition: grid-template-rows .18s ease, opacity .18s ease; }
+/* The side and bottom padding keep a focused input's outline inside the clipped box. */
+.reveal > .reveal-in { min-height: 0; overflow: hidden; margin: 0 -4px; padding: 0 4px 4px; }
+.reveal > .reveal-in > .field { padding-top: 12px; }
+@media (prefers-reduced-motion: reduce) { .reveal, .reveal.is-open { transition: none; } }
 .check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--ctl-radius); transition: border-color .12s, background-color .12s; }
 .check:hover { border-color: var(--btn-hover-border); }
 .check:has(input:checked) { background: var(--accent-soft); border-color: transparent; }

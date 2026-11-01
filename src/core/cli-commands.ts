@@ -78,8 +78,8 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
   {
     id: 'new',
     group: 'accounts',
-    usage: 'sideby new <family> <name>|--next [--api] [--alias <short>]',
-    help: 'create an account (families: claude, codex, grok, pi); --next picks the next name and short command (cc008); --alias also adds a short command such as cc008',
+    usage: 'sideby new <family> <name>|--next [--api [--vendor <slug>]] [--alias <short>]',
+    help: "create an account (families: claude, codex, grok, pi); --next picks the next name and short command (cc008); --api --vendor ds names an API account's short command after its vendor (cc-ds); --alias also adds a short command such as cc008",
     summary: { en: 'Create an account; --next picks the name for you', zh: '新建账号；--next 自动起名' },
     example: 'sideby new claude --next',
     common: 4,

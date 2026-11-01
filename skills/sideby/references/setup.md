@@ -9,7 +9,7 @@ For "install sideby", "set up another Claude account", "add cc008", "配置一�
 5. **Create.**
    - The user gave no name, or said "cc00x" / "the next one": `sideby new <family> --next --json`. It picks the next number (`008` after `001`…`007`) and, when existing short commands show a pattern (`cc007` for `claude:007`), adds the next one (`cc008`). Read `suggestion`: `aliasProblem` means that short command was taken and left out; tell the user.
    - The user gave a name: `sideby new <family> <name> --json`; a short command they named: add `--alias <short>`.
-   - An API account (DeepSeek, a gateway, …): add `--api`.
+   - An API account (DeepSeek, a gateway, …): add `--api --vendor <slug>`. Its short command is named after the vendor (`cc-ds`), never numbered. Take the vendor from the user's words or docs link, ask only if neither says, and use the slugs in `accounts.md` ("API accounts"): `ds`, `glm`, `kimi`, `qwen`, `api` for the Host's own official API, `relay` for a gateway. Without `--vendor` no short command is added (`suggestion.aliasHint` says so).
    - A short command the user did not ask for and no pattern suggests: none. Do not invent a prefix.
 6. **user: sign in or fill in the key.**
    - Subscription account: `sideby login <ref>`. It opens the Host's sign-in in their browser. For pi it starts pi; they type `/login`.

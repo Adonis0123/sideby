@@ -21,21 +21,25 @@ const COMMAND_HELP: Record<string, string> = {
   try: 'sideby try <account> [--model <model>] [--yes] [--json]\nSend a short request through the Host. This spends a few tokens. Exit 10 waits for --yes.\n<account> may be a short command; its arguments apply as in sideby run. --model tries another model once.',
   plugins:
     'sideby plugins [--json]\nsideby plugins new <id> [--json]\nsideby plugins check <id|path> [--json]\nPlugins run as you, with your permissions. Only load plugins you trust.',
-  new: `sideby new <family> <name> [--api] [--alias <short>] [--json]
-sideby new <family> --next [--api] [--alias <short>] [--json]
+  new: `sideby new <family> <name> [--api [--vendor <slug>]] [--alias <short>] [--json]
+sideby new <family> --next [--api [--vendor <slug>]] [--alias <short>] [--json]
 
 Create an account directory (~/.claude-<name>, ~/.codex-<name>, ~/.grok-<name>, ~/.pi-<name>/agent) and link or
 copy the main account's shared items into it. \`sideby families <family>\` lists them.
 
   --next          pick the name: the next number after the highest numbered account (001…007 → 008), else work;
                   without --alias, also add a short command that follows your existing ones (cc007 → cc008)
-  --api           API account: also writes an empty proxy.env template (mode 600) for the user to fill in
+  --api           API account: also writes an empty proxy.env template (mode 600) for the user to fill in;
+                  it gets no numbered short command
+  --vendor <slug> with --api: the vendor it calls, in a few letters (ds, kimi, glm); without --alias, the short
+                  command is your prefix and the vendor (cc-ds), so it says what it calls
   --alias <short> add a short command for it to the config (it becomes a shell function)
 
 Examples:
   sideby new claude --next --json        # ~/.claude-008 plus cc008 when cc001…cc007 exist
   sideby new claude work                 # ~/.claude-work
   sideby new claude deepseek --api       # then the user fills in ~/.claude-deepseek/proxy.env
+  sideby new claude --next --api --vendor ds --json   # ~/.claude-009 plus cc-ds when cc001… exist
 
 Writes: the account directory; the config \`aliases\` and every \`shellInitFile\` when a short command is added.
 Next: the user signs in with \`sideby login <account>\` (subscription) or fills in proxy.env (API).
@@ -469,7 +473,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
     flags: ['json', 'all', 'slot-end'],
     valued: ['for', 'until', 'days', 'from', 'to', 'name', 'at'],
   },
-  new: { flags: ['api', 'json', 'next'], valued: ['alias'] },
+  new: { flags: ['api', 'json', 'next'], valued: ['alias', 'vendor'] },
   alias: { flags: ['json', 'yes'], valued: ['pick'] },
   doctor: { flags: ['fix', 'force', 'json'] },
   quota: { flags: ['json', 'yes', 'refresh'] },

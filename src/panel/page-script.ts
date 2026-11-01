@@ -6,9 +6,11 @@ import { quotaIsStale } from '../core/quota-levels.ts'
 import { remoteControlTodo } from '../core/remote-control.ts'
 import { catalogMatchLevel, catalogNorm, searchCatalog } from '../core/search-catalog.ts'
 import {
+  accountTitle,
   aiTaskAccounts,
   aliasArgsOf,
   aliasIssue,
+  aliasPrefix,
   askBridge,
   askBridged,
   askCopy,
@@ -54,6 +56,7 @@ import {
   networkTaskFacts,
   newAccountDir,
   nextReset,
+  orderedAliases,
   panelFixes,
   panelHint,
   panelLang,
@@ -103,6 +106,7 @@ import {
   uaWaitingCount,
   uaWhen,
   updatedAge,
+  vendorAlias,
   widthFollower,
   widthTier,
   windowState,
@@ -124,6 +128,10 @@ const LOGIC = [
   taskFindings,
   aliasArgsOf,
   aliasIssue,
+  aliasPrefix,
+  orderedAliases,
+  accountTitle,
+  vendorAlias,
   attentionReasons,
   attentionWhy,
   quotaHighLevel,
@@ -1620,12 +1628,12 @@ const MAIN = String.raw`
     if (k === 'api') return h('span', { class: 'tag tag-warn', title: t('tip.api.body') }, t('acct.api'))
     return null
   }
-  // The short command, as quiet text after the name; every alias and its arguments are on hover.
-  function aliasText(a) {
-    const all = a.aliases || []
-    if (!all.length) return null
-    const lines = all.map((x) => { const args = aliasArgsOf(a, x); return x + ' · ' + (args ? t('acct.aliasArgs', { args: args.join(' ') }) : t('acct.alias')) })
-    return h('span', { class: 'alias', title: lines.join('\n') }, all[0])
+  // An Account's short commands, as quiet text after its title: those that only start it first, then those with Host
+  // arguments; each says on hover what it adds. A card too narrow for all of them ends in an ellipsis.
+  function aliasText(a, list) {
+    if (!list.length) return null
+    const line = (x) => { const args = aliasArgsOf(a, x); return x + ' · ' + (args ? t('acct.aliasArgs', { args: args.join(' ') }) : t('acct.alias')) }
+    return h('span', { class: 'aliases', title: list.map(line).join('\n') }, list.map((x) => h('span', { class: 'alias', title: line(x) }, x)))
   }
   // A Same Login row (spec §3.21) gets a link mark after the name; what it means is on hover.
   function loginMark(members) {
@@ -1637,11 +1645,13 @@ const MAIN = String.raw`
   // opts.linked: the directories a card marks as one login without speaking for them (its badge stays its own).
   function nameLine(a, members, opts) {
     const o = opts || {}
+    // An API Account with a short command is named by it (cc-kimi); its ref is in the line under it.
+    const named = accountTitle(a)
     return h('div', { class: 'ident-name' },
       pinSlot(a),
-      h('span', { class: 'name', title: a.name }, a.name),
+      h('span', { class: 'name', title: named.byAlias ? t('acct.titleAlias', { alias: named.title, ref: a.ref }) : a.name }, named.title),
       loginMark(o.linked || members),
-      aliasText(a),
+      aliasText(a, named.aliases),
       hiddenMark(isHidden(a) && !famHidden(a.family)),
       statusBadge(a, members))
   }
@@ -4949,7 +4959,7 @@ const MAIN = String.raw`
     const ready = fams.filter((f) => familyStatus(f) === 'ready')
     const pick = prefill && ready.some((f) => f.id === prefill.family) ? prefill.family : prefs.family && ready.some((f) => f.id === prefs.family) ? prefs.family : ready.length ? ready[0].id : ''
     // name / alias: what the user typed, or null while the field shows the suggestion (an emptied alias stays empty).
-    nf = { fams, family: pick, api: Boolean(prefill && prefill.api), name: null, alias: null, creating: false, result: null, error: null, els: {} }
+    nf = { fams, family: pick, api: Boolean(prefill && prefill.api), vendor: '', name: null, alias: null, creating: false, result: null, error: null, els: {} }
     showDialog('create')
     renderCreate()
     if (nf.els.name) { nf.els.name.focus(); nf.els.name.select() }
@@ -4965,10 +4975,13 @@ const MAIN = String.raw`
     if (S.state && S.state.accounts.some((a) => a.ref === nf.family + ':' + name)) return t('nf.exists', { ref: nf.family + ':' + name })
     return ''
   }
-  // The short command offered for the typed name: the Family's alias pattern (cc001… gives cc008), if it is usable.
+  // The short command offered for the typed name: for an API account the Family's prefix and the Vendor (cc-ds), shown
+  // even when it cannot be used so the error under it says why; otherwise the Family's alias pattern (cc001… gives
+  // cc008), if it is usable. An API account never gets a numbered one.
   function aliasSuggestion() {
     const name = nf.els.name.value.trim()
     if (!nf.family || !name || nameProblem()) return ''
+    if (nf.api) return vendorAlias(S.state.accounts, nf.family, nf.vendor)
     const sug = suggestAlias(S.state.accounts, nf.family, name)
     return sug && !aliasIssue(sug, BOOT.aliasPattern, BOOT.reservedAliases, S.state.configAliases, nf.family + ':' + name) ? sug : ''
   }
@@ -4995,18 +5008,31 @@ const MAIN = String.raw`
     e.alias = h('input', { id: 'nf-alias', name: 'alias', type: 'text', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', placeholder: t('nf.aliasPh'), maxlength: '64', 'aria-describedby': 'nf-alias-hint nf-alias-err', 'aria-invalid': 'false' })
     e.aliasHint = h('p', { class: 'field-hint', id: 'nf-alias-hint' })
     e.aliasErr = h('p', { class: 'field-error', id: 'nf-alias-err', role: 'alert' })
-    e.api = h('input', { id: 'nf-api', type: 'checkbox', 'aria-label': t('nf.api') })
+    e.api = h('input', { id: 'nf-api', type: 'checkbox', 'aria-label': t('nf.api'), 'aria-controls': 'nf-vendor-field' })
     e.api.checked = nf.api
+    e.vendor = h('input', { id: 'nf-vendor', name: 'vendor', type: 'text', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', placeholder: t('nf.vendorPh'), maxlength: '32', 'aria-describedby': 'nf-vendor-hint' })
+    e.vendor.value = nf.vendor
+    // Grows in under "API key" when it is ticked; inert while folded, so Tab skips it.
+    e.vendorField = h('div', { class: 'reveal' + (nf.api ? ' is-open' : ''), id: 'nf-vendor-field', inert: nf.api ? undefined : true },
+      h('div', { class: 'reveal-in' }, h('div', { class: 'field' },
+        h('label', { class: 'field', for: 'nf-vendor' }, h('span', null, t('nf.vendor')), e.vendor),
+        h('p', { class: 'field-hint', id: 'nf-vendor-hint' }, t('nf.vendorHint')))))
     e.suggest = h('p', { class: 'field-hint', id: 'nf-sug' })
     e.error = h('p', { class: 'field-error', id: 'nf-err', role: 'alert' })
     e.preview = h('dl', { class: 'preview' })
     e.submit = h('button', { class: 'btn btn-primary', type: 'submit', form: 'nf-form', 'aria-label': t('nf.create') }, t('nf.create'))
     e.name.addEventListener('input', () => { nf.name = e.name.value; followAlias(); validateCreate(); renderPreview() })
     e.alias.addEventListener('input', () => { nf.alias = e.alias.value; validateCreate(); renderPreview() })
+    e.vendor.addEventListener('input', () => { nf.vendor = e.vendor.value; followAlias(); validateCreate(); renderPreview() })
     e.api.addEventListener('change', () => {
       nf.api = e.api.checked
+      e.vendorField.classList.toggle('is-open', nf.api)
+      e.vendorField.inert = !nf.api
       // A refusal was about the old choice; the hint under it no longer applies.
       if (e.errNote) { e.errNote.remove(); e.errNote = null; nf.error = null }
+      followAlias()
+      validateCreate()
+      renderPreview()
     })
     const cards = nf.fams.map((f) => {
       const st = familyStatus(f)
@@ -5034,10 +5060,13 @@ const MAIN = String.raw`
           h('span', { class: 'fam-text' }, h('span', { class: 'fam-title' }, t('ask.otherTool')), h('span', { class: 'fam-sub' }, t('ask.otherToolSub')))))),
       h('div', { class: 'field' }, h('label', { class: 'field', for: 'nf-name' }, h('span', null, t('nf.name')), e.name), e.suggest),
       // The first screen asks only for the tool and a name; the rest waits behind "More options".
+      // "API key" comes before the short command: its Vendor names the short command (cc-ds).
       h('details', { class: 'more-opts', open: nf.api || Boolean(nf.alias) || Boolean(nf.error) || undefined },
         h('summary', null, t('nf.more')),
+        h('div', null,
+          h('div', { class: 'check-row' }, h('label', { class: 'check' }, e.api, h('span', null, h('b', null, t('nf.api')), h('span', { class: 'muted small' }, t('nf.apiHint')))), tip('api')),
+          e.vendorField),
         h('div', { class: 'field' }, h('label', { class: 'field', for: 'nf-alias' }, h('span', null, t('nf.alias'), ' ', h('span', { class: 'muted small' }, t('nf.optional'))), e.alias), e.aliasHint, e.aliasErr),
-        h('div', { class: 'check-row' }, h('label', { class: 'check' }, e.api, h('span', null, h('b', null, t('nf.api')), h('span', { class: 'muted small' }, t('nf.apiHint')))), tip('api')),
         e.preview),
       e.error,
       e.errNote = nf.error ? errorNote(nf.error, create, nf.error.code === 'create-refused' && !nf.api ? t('nf.refusedApi') : null) : null,
@@ -5066,9 +5095,18 @@ const MAIN = String.raw`
     e.alias.classList.toggle('invalid', Boolean(aliasMsg))
     e.alias.setAttribute('aria-invalid', String(Boolean(aliasMsg)))
     e.aliasErr.textContent = aliasMsg
-    e.aliasHint.textContent = alias && alias === aliasSuggestion() ? t('nf.aliasSuggested', { host: family(nf.family).title }) : t('nf.aliasHint')
+    e.aliasHint.textContent = aliasHintText(alias)
     if (!nf.creating) e.submit.disabled = Boolean(msg) || Boolean(aliasMsg) || !name || !nf.family
     return msg || aliasMsg
+  }
+  // What the line under the short command says: where a suggestion came from, or, for an API account without a
+  // Vendor yet, that typing one gives cc-<vendor>.
+  function aliasHintText(alias) {
+    const host = nf.family ? family(nf.family).title : ''
+    if (alias && alias === aliasSuggestion()) return t(nf.api ? 'nf.aliasVendor' : 'nf.aliasSuggested', { host })
+    const example = nf.api && nf.family ? vendorAlias(S.state.accounts, nf.family, '<' + t('nf.vendorWord') + '>') : ''
+    if (example && !alias && !nf.vendor.trim()) return t('nf.aliasVendorTip', { example })
+    return t('nf.aliasHint')
   }
   function renderPreview() {
     const name = nf.els.name.value.trim()

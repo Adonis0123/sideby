@@ -1206,10 +1206,15 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       shellInitFiles: Type.Optional(ShellInitFiles),
       suggestion: Type.Optional(
         Type.Object(
-          { name: Str, alias: Type.Optional(Str), aliasProblem: Type.Optional(Str) },
+          {
+            name: Str,
+            alias: Type.Optional(Str),
+            aliasProblem: Type.Optional(Str),
+            aliasHint: Type.Optional(Str),
+          },
           {
             description:
-              'Only with `--next`: the picked name, the short command that follows the existing pattern, or why that short command was left out.',
+              'Only with `--next` or `--vendor`: the name, the short command suggested for it (the existing pattern, `cc008`, for a subscription account; the prefix and the vendor, `cc-ds`, for an API account with `--vendor`), why that short command was left out (`aliasProblem`), or, when none was suggested, how to get one (`aliasHint`, such as an API account without `--vendor`).',
           },
         ),
       ),

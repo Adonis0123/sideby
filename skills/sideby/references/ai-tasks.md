@@ -57,7 +57,7 @@ The prompt names the account and the reason. Run `sideby quota <ref> --json` and
 sideby ships no list of vendors, addresses or model names. Take every fact from the vendor's own documentation and the Host's own docs or `--help`, and tell the user which page you used. Do not use blog posts, other tools' preset lists or your memory for an address or a model name.
 
 1. From the docs (or the link the user gave), find: the address for the Family's API format (Claude Code needs an Anthropic-compatible address, Codex an OpenAI-compatible one), the variable the key goes in, and the model names, if the Host needs one.
-2. `sideby new <family> --next --api --json`. It creates `proxy.env` (mode 600) in the new account.
+2. `sideby new <family> --next --api --vendor <slug> --json`, with the vendor's slug from `accounts.md` ("API accounts": `ds`, `glm`, `kimi`, `qwen`, `api`, `relay`). It creates `proxy.env` (mode 600) in the new account and the short command `<prefix>-<slug>` (`cc-ds`); read `suggestion` for why there is none.
 3. Set every variable except the key: show the user the lines you will add to `proxy.env` and add them after they agree. Do not read the file's other lines, and never write a key into it.
 4. Tell the user to run `sideby key <ref>` in their own terminal (or click **Enter key** in the Panel). Add `--var <NAME>` when the key belongs in a variable other than the Family's default. Wait until they say it is done.
 5. Offer `sideby try <ref> --json`: it exits 10 and says which command it runs and that it costs a few tokens. After they agree, run it with `--yes`. Exit 0 means the Host answered. On 1, read the Host's message it shows and check the mistakes below.

@@ -7,10 +7,20 @@ Check the name first: `^[a-z0-9][a-z0-9-]{0,31}$`, and not already taken (`sideb
 ```sh
 sideby new claude work               # subscription account: ~/.claude-work
 sideby new claude deepseek --api     # API account: ~/.claude-deepseek with a proxy.env template (mode 600)
+sideby new claude --next --api --vendor ds   # API account 009 with the short command cc-ds (cc001… exist)
 sideby new claude 008 --alias cc008  # also adds the short command cc008 to config aliases
 ```
 
 Only pass `--alias` when the user wants a short command. To continue their numbering (`cc001`…`cc007` for `claude:001`…`claude:007`), use `sideby new claude --next --json` instead of a name: it picks `008` and `cc008` the same way the panel does (see `setup.md`). An invalid, reserved or taken alias is refused before anything is created (error `code: "alias-invalid"`). If `alias.added` is false in `--json`, the account exists but the alias is missing: tell the user the message, do not edit the config by hand.
+
+### API accounts: name the short command after the vendor
+
+An API account's short command says which vendor it calls (`cc-ds`, `cc-kimi`), not a number: the user tells them apart by vendor, and the name stays right when the model changes. The account name stays numbered (`claude:009`).
+
+- Find the Vendor: from the user's words or the docs link they gave; ask only when neither says.
+- Pass it as `--vendor <slug>` with `--api`. Use these slugs: `ds` (DeepSeek), `glm` (Zhipu GLM / Z.ai), `kimi` (Moonshot Kimi), `qwen` (Alibaba Qwen / Bailian), `api` (the Host's own official API, such as Anthropic's for Claude Code), `relay` (a gateway or relay in front of several vendors). Another vendor: a short lowercase name the user would recognise (`minimax`, `doubao`).
+- Name by vendor, not model: `cc-kimi`, not `cc-k3`. Several models of one vendor are one account with extra short commands that pass `--model` (below, `pi-kimi`), not more accounts.
+- `sideby new` builds the short command from the prefix of the user's numbered ones (`cc` from `cc001`) and the slug. Read `suggestion`: `alias` is what it added; `aliasProblem` means it was taken or invalid (a second DeepSeek account: offer `cc-ds2` with `sideby alias add`); `aliasHint` means none was added (no `--vendor`, or no prefix to build from) and says how to add one. Never invent a prefix.
 
 Then:
 

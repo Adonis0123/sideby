@@ -58,6 +58,7 @@ import {
   resetWhen,
   suggestAlias,
   suggestName,
+  vendorAlias,
   withPinned,
 } from '../panel/page-logic.ts'
 import { createRuntime, type Runtime, UnknownFamilyError } from '../runtime.ts'
@@ -533,27 +534,52 @@ export interface NewSuggestion {
   alias?: string
   /** Why the alias the pattern suggests was left out (taken, reserved); the Account is created without it. */
   aliasProblem?: string
+  /** No short command was suggested, and how to get one (an API Account without `--vendor`, or no prefix to use). */
+  aliasHint?: string
 }
 
 /**
- * `new --next`: the next name of a Family, and a short command following the pattern of its existing aliases,
- * from the same helpers the Panel uses (spec §3.16).
+ * `new --next` and `new --vendor`: the name (the next one of the Family with `--next`), and a short command from the
+ * same helpers the Panel uses (spec §3.16). A Subscription Account follows the pattern of the Family's aliases
+ * (`cc008`); an API Account is named after its Vendor (`cc-ds`) and never gets a numbered one.
  */
-async function suggestNew(rt: Runtime, family: string, alias: string | undefined): Promise<NewSuggestion> {
+async function suggestNew(
+  rt: Runtime,
+  family: string,
+  opts: { name?: string; alias?: string; api: boolean; vendor?: string },
+): Promise<NewSuggestion> {
   if (!(await rt.familyInfo()).some((f) => f.id === family))
     throw new UnknownFamilyError(`unknown family "${family}"; run \`sideby families\` to see them`)
   const all = await rt.accounts()
   const mine = all.filter((x) => x.family === family)
-  const name = suggestName(mine.map((x) => x.name))
-  if (alias !== undefined) return { name }
+  const name = opts.name ?? suggestName(mine.map((x) => x.name))
+  if (opts.alias !== undefined) return { name }
   const byRef = aliasesByAccount(aliasRefs(rt.config.aliases), all)
-  const offer = suggestAlias(
-    mine.map((x) => ({ family: x.family, name: x.name, ref: x.ref, aliases: byRef.get(x.ref) ?? [] })),
-    family,
-    name,
-  )
-  if (!offer) return { name }
-  const problem = rt.aliasProblem(offer, `${family}:${name}`)
+  const logic = mine.map((x) => ({
+    family: x.family,
+    name: x.name,
+    ref: x.ref,
+    aliases: byRef.get(x.ref) ?? [],
+  }))
+  const ref = `${family}:${name}`
+  if (opts.api && opts.vendor === undefined) {
+    const example = vendorAlias(logic, family, '<slug>')
+    return example
+      ? {
+          name,
+          aliasHint: `API accounts get a short command named after their vendor: add \`--vendor <slug>\` for ${example}, or run \`sideby alias add ${example} ${ref}\` later`,
+        }
+      : { name }
+  }
+  const offer = opts.api ? vendorAlias(logic, family, opts.vendor ?? '') : suggestAlias(logic, family, name)
+  if (!offer)
+    return opts.api
+      ? {
+          name,
+          aliasHint: `your ${family} short commands show no prefix to put before ${opts.vendor}: add one with \`sideby alias add <short> ${ref}\``,
+        }
+      : { name }
+  const problem = rt.aliasProblem(offer, ref)
   return problem ? { name, aliasProblem: `${offer}: ${problem}` } : { name, alias: offer }
 }
 
@@ -563,14 +589,27 @@ export async function cmdNew(a: ParsedArgs, io: Io): Promise<number> {
   if (!family || (next ? given !== undefined : !given) || a.positionals.length > 2)
     throw new UsageError(
       next
-        ? 'usage: sideby new <family> --next [--api] [--alias <short-command>]; --next picks the name, so leave it out'
-        : 'usage: sideby new <family> <name> [--api] [--alias <short-command>], or `--next` instead of <name>',
+        ? 'usage: sideby new <family> --next [--api [--vendor <slug>]] [--alias <short-command>]; --next picks the name, so leave it out'
+        : 'usage: sideby new <family> <name> [--api [--vendor <slug>]] [--alias <short-command>], or `--next` instead of <name>',
     )
   const givenAlias = a.flags.get('alias')
+  const givenVendor = a.flags.get('vendor')
+  const vendor = typeof givenVendor === 'string' ? givenVendor.trim() : undefined
+  if (vendor !== undefined && !a.flags.has('api'))
+    throw new UsageError(
+      '--vendor names the vendor an API account calls; add --api (usage: sideby new <family> --next --api --vendor <slug>)',
+    )
+  if (vendor === '') throw new UsageError('--vendor needs a short name for the vendor, such as ds (DeepSeek)')
   const rt = await createRuntime()
-  const suggestion = next
-    ? await suggestNew(rt, family, typeof givenAlias === 'string' ? givenAlias : undefined)
-    : undefined
+  const suggestion =
+    next || vendor !== undefined
+      ? await suggestNew(rt, family, {
+          ...(next ? {} : { name: given }),
+          ...(typeof givenAlias === 'string' ? { alias: givenAlias } : {}),
+          api: a.flags.has('api'),
+          ...(vendor !== undefined ? { vendor } : {}),
+        })
+      : undefined
   const name = suggestion?.name ?? given!
   const alias = typeof givenAlias === 'string' ? givenAlias : suggestion?.alias
   const res = await rt.createAccount(family, name, {
@@ -606,6 +645,10 @@ export async function cmdNew(a: ParsedArgs, io: Io): Promise<number> {
   for (const e of res.hookErrors) io.err(c.red(`  ${e.message}`))
   if (res.alias?.added) io.out(`${c.green('✓')} short command ${c.bold(res.alias.name)} (in a new shell)`)
   else if (res.alias) io.out(`  ${c.red('✗')} ${res.alias.message}`)
+  else if (suggestion?.aliasHint)
+    io.out(
+      `  ${c.dim('·')} no short command yet. ${suggestion.aliasHint[0]?.toUpperCase()}${suggestion.aliasHint.slice(1)}`,
+    )
   printShellInitWrites(io, res.shellInitFiles ?? [], home)
   io.out('\nNext:')
   for (const n of res.nextSteps) io.out(`  ${n}`)

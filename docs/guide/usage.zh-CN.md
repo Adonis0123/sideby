@@ -62,6 +62,8 @@ sideby run deepseek
 
 `proxy.env` 用的是 dotenv 的一个子集：`KEY=VALUE`、可选的 `export ` 前缀、单双引号、`#` 注释，以及 `$NAME` / `${NAME}`。引用只能指向同一文件前面已定义的变量，或 `HOME`、`USER`、`LOGNAME`、`TMPDIR`、`XDG_*_HOME` 这几个位置变量。其他 shell 变量一律不读，也不支持命令替换。里面的变量只进入这次启动的宿主进程。文件权限不是 600 时，sideby 拒绝启动，并提示执行 `chmod 600`。
 
+短命令按厂商起名，不用编号：其他 Claude 短命令以 `cc` 开头（`cc001`、`cc002`）时，`sideby new claude --next --api --vendor ds` 会加上 `cc-ds`，`cc-ds` 和 `cc-kimi` 一眼就能分清。面板新建账号对话框勾上 API 后会让你填厂商。同一个账号想换着用几个模型，加带参数的短命令，不必多建账号（`sideby alias add pi-kimi pi:main -- --model kimi-coding/k3`）。
+
 API 账号不需要登录：登录态是 `not-needed`，在 `sideby list` 的 LOGIN 列显示为 `key`。
 
 pi 是例外。pi 的任何账号都可以放一个 `proxy.env` 来加载 provider key，所以 sideby 启动时会加载它，但这个账号仍按订阅账号处理，用 `/login` 登录。

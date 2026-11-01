@@ -1524,6 +1524,90 @@ describe('setup by an agent (spec §3.16)', () => {
     })
   })
 
+  it('new --api names the short command after the vendor, and never gives an API account a numbered one', async () => {
+    await withFakeHome(async (h) => {
+      await claudeMain(h)
+      for (const n of ['001', '002'])
+        assert.equal((await sideby(h, ['new', 'claude', n, '--alias', `cc${n}`])).code, 0)
+
+      // --vendor: the Family's prefix and the slug.
+      const ds = await sideby(h, ['new', 'claude', '--next', '--api', '--vendor', 'ds', '--json'])
+      assert.equal(ds.code, 0, ds.out + ds.err)
+      const d = checkSchema('new', ds.out)
+      assert.deepEqual(d.suggestion, { name: '003', alias: 'cc-ds' })
+      assert.deepEqual(d.alias, { name: 'cc-ds', added: true })
+      assert.equal((d.account as { kind: string }).kind, 'api')
+
+      // Without --vendor: no short command, and the hint says how to get one.
+      const plain = await sideby(h, ['new', 'claude', '--next', '--api', '--json'])
+      assert.equal(plain.code, 0, plain.out)
+      const p = checkSchema('new', plain.out)
+      const sug = p.suggestion as { name: string; alias?: string; aliasHint?: string }
+      assert.equal(sug.name, '004')
+      assert.equal(sug.alias, undefined)
+      assert.match(
+        sug.aliasHint as string,
+        /--vendor <slug>.*cc-<slug>.*sideby alias add cc-<slug> claude:004/,
+      )
+      assert.equal(p.alias, undefined)
+      const text = await sideby(h, ['new', 'claude', '--next', '--api'])
+      assert.match(
+        text.out,
+        /no short command yet\. API accounts get a short command named after their vendor/,
+      )
+
+      // A taken or invalid slug is reported; the Account is still created, without a short command.
+      const taken = checkSchema(
+        'new',
+        (await sideby(h, ['new', 'claude', '--next', '--api', '--vendor', 'ds', '--json'])).out,
+      )
+      assert.match((taken.suggestion as { aliasProblem: string }).aliasProblem, /^cc-ds: /)
+      assert.equal(taken.alias, undefined)
+      const bad = checkSchema(
+        'new',
+        (await sideby(h, ['new', 'claude', 'kimi', '--api', '--vendor', 'Ki mi', '--json'])).out,
+      )
+      assert.match((bad.suggestion as { aliasProblem: string }).aliasProblem, /^cc-Ki mi: /)
+      assert.ok((await stat(h.path('.claude-kimi'))).isDirectory())
+
+      // An explicit name works with --vendor too.
+      const named = checkSchema(
+        'new',
+        (await sideby(h, ['new', 'claude', 'moon', '--api', '--vendor', 'kimi', '--json'])).out,
+      )
+      assert.deepEqual(named.suggestion, { name: 'moon', alias: 'cc-kimi' })
+
+      // The subscription path still follows the numbering.
+      const sub = checkSchema('new', (await sideby(h, ['new', 'claude', '--next', '--json'])).out)
+      assert.equal(
+        (sub.suggestion as { alias: string }).alias,
+        `cc${(sub.suggestion as { name: string }).name}`,
+      )
+
+      // --vendor without --api is a usage error and creates nothing.
+      const noApi = await sideby(h, ['new', 'claude', 'x1', '--vendor', 'ds'])
+      assert.equal(noApi.code, 2)
+      assert.match(noApi.err, /add --api/)
+      assert.equal(await stat(h.path('.claude-x1')).catch(() => null), null)
+    })
+  })
+
+  it('new --api --vendor gives no short command when the Family has no prefix to use', async () => {
+    await withFakeHome(async (h) => {
+      await claudeMain(h)
+      const r = checkSchema(
+        'new',
+        (await sideby(h, ['new', 'claude', '--next', '--api', '--vendor', 'ds', '--json'])).out,
+      )
+      const sug = r.suggestion as { alias?: string; aliasHint?: string }
+      assert.equal(sug.alias, undefined)
+      assert.match(sug.aliasHint as string, /no prefix to put before ds/)
+      assert.equal(r.alias, undefined)
+      const config = await readFile(h.path('.config/sideby/config.json'), 'utf8').catch(() => '{}')
+      assert.equal(JSON.parse(config).aliases?.['cc-ds'], undefined)
+    })
+  })
+
   it('prints help for one command, and the general help with agent guidance otherwise', async () => {
     await withFakeHome(async (h) => {
       const one = await sideby(h, ['new', '--help'])

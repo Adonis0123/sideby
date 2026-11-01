@@ -62,6 +62,8 @@ sideby run deepseek
 
 `proxy.env` uses a small dotenv subset (`KEY=VALUE`, optional `export `, quotes, `#` comments, and `$NAME` / `${NAME}` referring to a key set earlier in the same file or to `HOME`, `USER`, `LOGNAME`, `TMPDIR` or an `XDG_*_HOME` location; no other shell variable is read and there is no command substitution). Its variables reach only the launched Host process. sideby refuses to start unless the file's mode is exactly 600 and tells you to run `chmod 600`.
 
+Name its short command after the vendor, not a number: `sideby new claude --next --api --vendor ds` adds `cc-ds` when your other Claude short commands start with `cc` (`cc001`, `cc002`), so you can tell `cc-ds` from `cc-kimi` at a glance. The panel's new-account dialog asks for the vendor when you tick the API option. For one account with several models, add short commands with arguments instead of more accounts (`sideby alias add pi-kimi pi:main -- --model kimi-coding/k3`).
+
 An API account needs no sign-in: its login state is `not-needed`, shown as `key` in the LOGIN column of `sideby list`.
 
 pi is the exception. pi can keep a `proxy.env` in any account to load provider keys, so sideby loads the file at launch but still treats the account as a subscription account that signs in with `/login`.
