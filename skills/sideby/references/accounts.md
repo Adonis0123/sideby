@@ -49,6 +49,8 @@ To start one account with fixed Host arguments, such as another model, put them 
 
 - `status: "exists"` means it was already there.
 - A refusal names the next step (`sideby alias rm <short>` first).
+- To give a short command another name ("把 cc-relay 改成 relay"): `sideby alias rename <old> <new> --json`; it keeps the account and its arguments. In the Panel it is the account menu, "Set short command…".
+- Changes take effect in terminals that are already open: a shell that loads `sideby shell-init` reloads its short commands at its next prompt, so tell the user to press Enter once and type the new name. Only a terminal started before sideby had this needs to be reopened.
 - Entry points that need environment variables are not aliases: leave them in the user's shell rc.
 - Do not edit `aliases` in the config by hand.
 

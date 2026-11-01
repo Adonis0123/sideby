@@ -1,12 +1,13 @@
 // Short commands: writing config aliases and keeping the shell-init files in sync (Panel and `new --alias`).
 import assert from 'node:assert/strict'
 import { chmod, readFile, stat, symlink } from 'node:fs/promises'
+import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { asBuiltin, demoPlugin, seedDemoMain } from '../../testing/demo.ts'
 import { withFakeHome } from '../../testing/index.ts'
 import { createRuntime } from '../runtime.ts'
 import { addConfigAlias, ConfigError, loadConfig, removeConfigAlias } from './config.ts'
-import { SHELL_INIT_HEADER, shellInitScript, writeShellInitFile } from './shell-init.ts'
+import { SHELL_INIT_HEADER, shellInitGeneration, shellInitScript, writeShellInitFile } from './shell-init.ts'
 
 const CONFIG = '.config/sideby/config.json'
 
@@ -248,5 +249,77 @@ describe('Runtime createAccount with an alias', () => {
         ['demo:main', 'demo:work'],
       )
     })
+  })
+})
+
+describe('renameAlias and the Shell Init Stamp', () => {
+  const rtFor = (env: NodeJS.ProcessEnv) => createRuntime({ env, builtins: [asBuiltin(demoPlugin())] })
+
+  it('gives an alias a new name with the same Account and arguments, and stamps the new generation', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const value = { account: 'demo:main', args: ['--model', 'k'] }
+      await h.write(CONFIG, JSON.stringify({ aliases: { dmk: value, dm: 'demo:main' } }))
+      const rt = await rtFor(h.env)
+      const r = await rt.renameAlias('dmk', 'dm-k')
+      assert.equal(r.status, 'renamed')
+      assert.equal(r.renamedFrom, 'dmk')
+      assert.equal(r.account, 'demo:main')
+      assert.deepEqual(r.args, ['--model', 'k'])
+      assert.deepEqual(JSON.parse(await readFile(h.path(CONFIG), 'utf8')).aliases, {
+        dm: 'demo:main',
+        'dm-k': value,
+      })
+      // The stamp holds the generation the fresh script carries, so open terminals reload exactly once.
+      const stamp = (await readFile(join(rt.paths.stateDir, 'shell-init.stamp'), 'utf8')).trim()
+      const script = await (await rtFor(h.env)).shellInitScript('zsh')
+      assert.ok(script.includes(`__sideby_gen='${stamp}'`), script)
+      assert.match(script, /^function dm-k \{/m)
+      assert.doesNotMatch(script, /^function dmk \{/m)
+    })
+  })
+
+  it('refuses a missing alias, a pick command and a name another Account has', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      await h.write(
+        CONFIG,
+        JSON.stringify({ aliases: { dm: 'demo:main', other: 'demo:work' }, pickCommands: { dp: 'demo' } }),
+      )
+      const rt = await rtFor(h.env)
+      await assert.rejects(rt.renameAlias('nope', 'dm2'), /no short command "nope"/)
+      await assert.rejects(rt.renameAlias('dp', 'dp2'), /is a pick command/)
+      await assert.rejects(rt.renameAlias('dm', 'other'), /already starts/)
+      await assert.rejects(rt.renameAlias('dm', 'dm'), /already the name/)
+      assert.deepEqual(JSON.parse(await readFile(h.path(CONFIG), 'utf8')).aliases, {
+        dm: 'demo:main',
+        other: 'demo:work',
+      })
+    })
+  })
+})
+
+describe('shellInitScript reload hook', () => {
+  it('adds a prompt hook per shell that reads the stamp and unsets only the functions it defined', () => {
+    const zsh = shellInitScript([], { cc001: 'claude:001' }, [], {
+      shell: 'zsh',
+      stampFile: '/s/shell-init.stamp',
+    })
+    const gen = shellInitGeneration([], { cc001: 'claude:001' })
+    assert.match(
+      zsh,
+      new RegExp(`^__sideby_gen='${gen}'; __sideby_seen='${gen}'; __sideby_fns='cc001'$`, 'm'),
+    )
+    assert.match(zsh, /read -r g < '\/s\/shell-init\.stamp'/)
+    assert.match(zsh, /eval "\$\(command sideby shell-init zsh 2>\/dev\/null\)"/)
+    assert.match(zsh, /^autoload -Uz add-zsh-hook 2>\/dev\/null && add-zsh-hook precmd __sideby_reload$/m)
+    const bash = shellInitScript([], { cc001: 'claude:001' }, [], {
+      shell: 'bash',
+      stampFile: '/s/shell-init.stamp',
+    })
+    assert.match(bash, /PROMPT_COMMAND="__sideby_reload/)
+    assert.notEqual(gen, shellInitGeneration([], { cc002: 'claude:001' }))
+    // Without a stamp file there is no hook, as before.
+    assert.doesNotMatch(shellInitScript([], { cc001: 'claude:001' }), /__sideby/)
   })
 })

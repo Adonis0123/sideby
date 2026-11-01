@@ -64,6 +64,7 @@ Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique
 | Explain or change the handoff rules ("接力规则", "什么时候换号", "让 Codex 接 Claude", "别用 API 账号接力") | `sideby handoff rules --json`, `sideby config set handoff.<key> <value>` or `sideby handoff enable --other-ai/--api --json` (exit 10 first) | `references/handoff.md` |
 | Sign an account in again or switch it to another login ("换个账号登录", "两个目录登录的是同一个号", "sign claude:work in with another account") | `sideby list --json` (`identity`, `sameLogin`), then give the user `sideby login <ref>` | `references/accounts.md` |
 | Create an account with a given name, an API account, or a short command | `sideby new`, `sideby alias add` | `references/accounts.md` |
+| Rename or remove a short command ("把别名 cc-relay 改成 relay") | `sideby alias rename <old> <new> --json`, `sideby alias rm <short> --json` | `references/accounts.md` |
 | One command that always starts the account with the most quota left ("加个 cc", "自动挑额度最多的账号启动", "start whichever has room") | `sideby alias add <short> --pick <family> --json` (exit 10 first), `sideby alias list --json` | `references/accounts.md` |
 | Short commands say "command not found" in a new terminal ("cc 用不了", "短命令不生效") | `sideby shell-init setup --json` (exit 10 first) | `references/setup.md` |
 | Do something in sideby as an AI Task (the first message came from sideby or the Panel's "Let AI do it") | follow the task it names | `references/ai-tasks.md` |
@@ -85,7 +86,7 @@ Read only the reference the task needs.
 
 ## Launching and the panel
 
-`eval "$(sideby shell-init zsh)"` defines one function per account (`sideby-claude-work`) plus the config `aliases` and `pickCommands`. Users who source a file instead set config `shellInitFile` (for example `{ "zsh": "~/.config/sideby/shell-init.zsh" }`); `new` and `alias add|rm` keep it current, and `sideby shell-init zsh --write` rewrites it. New functions work in a new shell.
+`eval "$(sideby shell-init zsh)"` defines one function per account (`sideby-claude-work`) plus the config `aliases` and `pickCommands`. Users who source a file instead set config `shellInitFile` (for example `{ "zsh": "~/.config/sideby/shell-init.zsh" }`); `new` and `alias add|rename|rm` keep it current, and `sideby shell-init zsh --write` rewrites it. Open terminals pick up the change at their next prompt.
 
 When a terminal manager such as Orca reopens a pane with a bare `claude --resume <id>` (or `codex resume <id>`, `grok --resume <id>`) and the Host says `No conversation found`, the session lives in another account. Suggest config `"resumeRouting": true` followed by `sideby shell-init --write` (or a new shell with `eval`): `shell-init` then defines Host-named functions that call `sideby resume <family>`, which starts the account holding that session. For a one-off, find it with `ls -d ~/.claude*/projects/*/<id>.jsonl` and run `sideby run <ref> -- --resume <id>`. When no account has that file, the session was opened but never got a message, so there is nothing to resume: `ls -d ~/.claude*/session-env/<id>` names the account that started it, and with routing on `sideby resume` starts a new session there by itself.
 

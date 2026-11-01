@@ -64,6 +64,8 @@ sideby run deepseek
 
 Name its short command after the vendor, not a number: `sideby new claude --next --api --vendor ds` adds `cc-ds` when your other Claude short commands start with `cc` (`cc001`, `cc002`), so you can tell `cc-ds` from `cc-kimi` at a glance. The panel's new-account dialog asks for the vendor when you tick the API option. For one account with several models, add short commands with arguments instead of more accounts (`sideby alias add pi-kimi pi:main -- --model kimi-coding/k3`).
 
+To rename or remove a short command, open the account's menu in the panel and choose "Set short command…", or run `sideby alias rename cc-relay relay`. Terminals that are already open pick up the change at their next prompt: press Enter once, then type the new name.
+
 An API account needs no sign-in: its login state is `not-needed`, shown as `key` in the LOGIN column of `sideby list`.
 
 pi is the exception. pi can keep a `proxy.env` in any account to load provider keys, so sideby loads the file at launch but still treats the account as a subscription account that signs in with `/login`.
@@ -163,7 +165,7 @@ With quota, `sideby next grok` ranks Grok accounts too, and Auto Handoff starts 
 
 ## Your own order
 
-In the panel, open **Settings** and choose **Account order and pins** (or pick **Arrange order…** at the end of the sort menu). A bar appears over the list and the rows get short: drag a tool's group or an account by its grip (⋮⋮), or use the ↑ and ↓ buttons. Each move is saved at once; click **Done** (or press Escape) when you are finished, and **Undo** in the message puts back the order you started from. With the keyboard, tab to a grip and press `↑` / `↓` (`Home` / `End` for first and last).
+In the panel, open **Settings** and choose **Account order and pins** (or pick **Arrange order and pins…** at the end of the sort menu). A bar appears over the list and the rows get short: drag a tool's group or an account by its grip (⋮⋮), or use the ↑ and ↓ buttons. Each move is saved at once; click **Done** (or press Escape) when you are finished, and **Undo** in the message puts back the order you started from. With the keyboard, tab to a grip and press `↑` / `↓` (`Home` / `End` for first and last).
 
 - After arranging, the sort shows **My order**; the other sorts (by quota, name, last use) still work and keep your order for later. Tool groups stay in your order whatever the sort.
 - Accounts move only within their tool. Two directories of one login are one row and move together.

@@ -91,8 +91,11 @@ import {
   SHELLS,
   type Shell,
   type ShellInitWrite,
+  shellInitGeneration,
   shellInitScript,
+  shellInitStampFile,
   writeShellInitFile,
+  writeShellInitStamp,
 } from './core/shell-init.ts'
 import {
   groupSuggestion,
@@ -179,8 +182,13 @@ export interface AliasResult {
 export interface AliasEditResult {
   ok: boolean
   alias: string
-  /** `confirm`: a Pick Command would hide a command on PATH, so nothing was written until the user agrees. */
-  status: 'added' | 'exists' | 'removed' | 'absent' | 'confirm'
+  /**
+   * `confirm`: a Pick Command would hide a command on PATH, so nothing was written until the user agrees.
+   * `renamed`: `alias` is the new name and `renamedFrom` the old one.
+   */
+  status: 'added' | 'exists' | 'removed' | 'absent' | 'confirm' | 'renamed'
+  /** The old name, for `renamed`. */
+  renamedFrom?: string
   /** `pick` for a Pick Command, `account` for an Alias; absent for `absent`. */
   kind?: 'account' | 'pick'
   /** The Account ref the alias starts (for `rm`, started before it was removed). */
@@ -343,6 +351,11 @@ export interface Runtime {
   /** Removes a short command from the config, then rewrites every `shellInitFile`. */
   removeAlias(alias: string): Promise<AliasEditResult>
   /**
+   * Gives an Alias a new name: the new one starts the same Account with the same arguments, then the old one is
+   * removed and every `shellInitFile` rewritten. Refuses a Pick Command, a missing alias and a taken name.
+   */
+  renameAlias(from: string, to: string): Promise<AliasEditResult>
+  /**
    * Adds a Pick Command (spec §3.13, ADR-0035), then rewrites every `shellInitFile`. Without `opts.yes` it only
    * returns `confirm`, with the command on PATH the name would hide, and writes nothing. Refuses a name taken by an
    * Alias or another Family.
@@ -365,7 +378,10 @@ export interface Runtime {
   aliasProblem(alias: string, ref: string): string | null
   /** What `sideby shell-init <shell>` prints, from the Accounts on disk and the config aliases. */
   shellInitScript(shell: Shell): Promise<string>
-  /** Rewrites the configured `shellInitFile` of each shell (all configured ones by default). */
+  /**
+   * Rewrites the configured `shellInitFile` of each shell (all configured ones by default), and the Shell Init Stamp
+   * that makes open terminals reload their short commands (spec §3.13).
+   */
   writeShellInitFiles(shells?: readonly Shell[]): Promise<ShellInitWrite[]>
   /**
    * `opts.aiTask`: the Launch is an AI Task's (spec §3.28), so the Family's `aiTaskArgs` removes every permission
@@ -823,6 +839,23 @@ export async function createRuntime(
     }
   }
 
+  // What the shell functions are made of; the script and the Shell Init Stamp both come from it.
+  const shellInitInputs = async () => {
+    const list = await accounts()
+    // Routing helps only a Family that can route and has somewhere else to route to (spec §3.15).
+    const routes = config.resumeRouting
+      ? [...families.values()]
+          .filter(
+            (f) =>
+              f.selectVar &&
+              f.resumedSession &&
+              f.sessionWrittenAt &&
+              list.some((a) => a.family === f.id && !a.isMain),
+          )
+          .map((f) => ({ family: f.id, bin: f.bin, selectVar: f.selectVar! }))
+      : []
+    return { list, aliases: { ...config.aliases, ...config.pickCommands }, routes }
+  }
   const aliasEdit = async (
     alias: string,
     status: AliasEditResult['status'],
@@ -1077,6 +1110,30 @@ export async function createRuntime(
       config.aliases = r.aliases
       return aliasEdit(alias, r.status, r.aliases[alias])
     },
+    async renameAlias(from, to) {
+      if (from === to) throw new UserError(`"${to}" is already the name`, { code: 'alias-invalid' })
+      if (rt.pickCommandFamily(from) !== undefined)
+        throw new UserError(
+          `"${from}" is a pick command; rename it with \`sideby alias add ${to} --pick <family>\`, then \`sideby alias rm ${from}\``,
+          { code: 'alias-invalid' },
+        )
+      const before = ownAlias(from)
+      if (before === undefined)
+        throw new UserError(`no short command "${from}" in the config; see \`sideby alias list\``, {
+          code: 'alias-invalid',
+        })
+      const added = await rt.addAlias(to, aliasAccount(before), aliasArgs(before))
+      if (added.status !== 'added')
+        throw new UserError(
+          `"${to}" already starts ${aliasAccount(before)}; remove "${from}" with \`sideby alias rm ${from}\``,
+          {
+            code: 'alias-invalid',
+          },
+        )
+      const r = await removeConfigAlias(paths.configFile, from)
+      config.aliases = r.aliases
+      return { ...(await aliasEdit(to, 'renamed', before)), renamedFrom: from }
+    },
     async removeAlias(alias) {
       const pickFamily = rt.pickCommandFamily(alias)
       if (pickFamily !== undefined) {
@@ -1181,21 +1238,9 @@ export async function createRuntime(
         return `alias "${alias}" already starts ${taken}; pick another name`
       return null
     },
-    async shellInitScript() {
-      const list = await accounts()
-      // Routing helps only a Family that can route and has somewhere else to route to (spec §3.15).
-      const routes = config.resumeRouting
-        ? [...families.values()]
-            .filter(
-              (f) =>
-                f.selectVar &&
-                f.resumedSession &&
-                f.sessionWrittenAt &&
-                list.some((a) => a.family === f.id && !a.isMain),
-            )
-            .map((f) => ({ family: f.id, bin: f.bin, selectVar: f.selectVar! }))
-        : []
-      return shellInitScript(list, { ...config.aliases, ...config.pickCommands }, routes)
+    async shellInitScript(shell) {
+      const { list, aliases, routes } = await shellInitInputs()
+      return shellInitScript(list, aliases, routes, { shell, stampFile: shellInitStampFile(paths.stateDir) })
     },
     async writeShellInitFiles(shells = SHELLS) {
       // Another process may have changed the other kind of short command since this Runtime read the config: write
@@ -1210,6 +1255,12 @@ export async function createRuntime(
         const file = config.shellInitFile?.[shell]
         if (file) out.push(await writeShellInitFile(shell, file, paths.home, await rt.shellInitScript(shell)))
       }
+      // Open terminals reload on their next prompt; a stamp that cannot be written only means they wait for a new one.
+      const { list, aliases, routes } = await shellInitInputs()
+      await writeShellInitStamp(
+        shellInitStampFile(paths.stateDir),
+        shellInitGeneration(list, aliases, routes),
+      ).catch(() => {})
       return out
     },
     async prepareLaunch(ref, userArgs, command, opts = {}) {

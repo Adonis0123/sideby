@@ -643,7 +643,8 @@ export async function cmdNew(a: ParsedArgs, io: Io): Promise<number> {
       `  ${c.dim('·')} nothing to share yet: ${notInMain.map((x) => x.item).join(', ')} ${notInMain.length === 1 ? 'is' : 'are'} not in the main account (add ${notInMain.length === 1 ? 'it' : 'them'} there; \`sideby doctor\` then says what to do)`,
     )
   for (const e of res.hookErrors) io.err(c.red(`  ${e.message}`))
-  if (res.alias?.added) io.out(`${c.green('✓')} short command ${c.bold(res.alias.name)} (in a new shell)`)
+  if (res.alias?.added)
+    io.out(`${c.green('✓')} short command ${c.bold(res.alias.name)} (at your next prompt)`)
   else if (res.alias) io.out(`  ${c.red('✗')} ${res.alias.message}`)
   else if (suggestion?.aliasHint)
     io.out(
@@ -2414,7 +2415,7 @@ export async function cmdBrowser(a: ParsedArgs, io: Io): Promise<number> {
 export async function cmdAlias(a: ParsedArgs, io: Io): Promise<number> {
   const [sub, alias, target, ...more] = a.positionals
   const usage =
-    'usage: sideby alias add <short-command> <account> [-- host args]  |  sideby alias add <short-command> --pick <family> [--yes]  |  sideby alias rm <short-command>  |  sideby alias list'
+    'usage: sideby alias add <short-command> <account> [-- host args]  |  sideby alias add <short-command> --pick <family> [--yes]  |  sideby alias rename <old> <new>  |  sideby alias rm <short-command>  |  sideby alias list'
   const pick = a.flags.get('pick')
   if (sub === 'list' && alias === undefined && pick === undefined) return aliasList(a, io)
   const addPick =
@@ -2423,13 +2424,22 @@ export async function cmdAlias(a: ParsedArgs, io: Io): Promise<number> {
     sub === 'add' && pick === undefined && alias !== undefined && target !== undefined && more.length === 0
   const rm =
     sub === 'rm' && pick === undefined && alias !== undefined && target === undefined && a.rest.length === 0
-  if (!add && !rm && !addPick) throw new UsageError(usage)
+  const rename =
+    sub === 'rename' &&
+    pick === undefined &&
+    alias !== undefined &&
+    target !== undefined &&
+    !more.length &&
+    !a.rest.length
+  if (!add && !rm && !addPick && !rename) throw new UsageError(usage)
   const rt = await createRuntime()
-  const res = addPick
-    ? await rt.addPickCommand(alias, pick, { yes: a.flags.has('yes') })
-    : add
-      ? await rt.addAlias(alias, target, a.rest)
-      : await rt.removeAlias(alias)
+  const res = rename
+    ? await rt.renameAlias(alias, target)
+    : addPick
+      ? await rt.addPickCommand(alias, pick, { yes: a.flags.has('yes') })
+      : add
+        ? await rt.addAlias(alias, target, a.rest)
+        : await rt.removeAlias(alias)
   if (a.flags.has('json')) {
     json(io, res)
     return res.status === 'confirm' ? 10 : res.ok ? 0 : 1
@@ -2454,9 +2464,10 @@ export async function cmdAlias(a: ParsedArgs, io: Io): Promise<number> {
         : ''
   const what = res.kind === 'pick' ? 'pick command' : 'short command'
   const said = {
-    added: `${c.green('✓')} ${what} ${c.bold(res.alias)}${starts} (in a new shell)`,
+    added: `${c.green('✓')} ${what} ${c.bold(res.alias)}${starts} (at your next prompt)`,
     exists: `${c.green('✓')} ${what} ${c.bold(res.alias)}${starts} was already in the config`,
     removed: `${c.green('✓')} removed ${what} ${c.bold(res.alias)}${starts}`,
+    renamed: `${c.green('✓')} renamed ${what} ${res.renamedFrom} to ${c.bold(res.alias)}${starts} (open terminals pick it up at their next prompt)`,
     absent: `${c.dim('·')} no short command ${res.alias} in the config; nothing to remove`,
   }
   io.out(said[res.status])

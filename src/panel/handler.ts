@@ -1725,6 +1725,29 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return rt.removeAlias(name)
       },
     },
+    // An Alias for one Account: add one, or give one a new name (`replaces`); the page names the Account by ref.
+    '/api/alias/set': {
+      async run(body) {
+        const name = optString(body, 'name')?.trim()
+        const account = optString(body, 'account')
+        const replaces = optString(body, 'replaces')
+        if (!name || !account) throw new HttpError(400, 'enter a name and pick an account')
+        const rt = await getRuntime()
+        const args = Array.isArray(body.args)
+          ? body.args.filter((x): x is string => typeof x === 'string')
+          : []
+        return replaces ? rt.renameAlias(replaces, name) : rt.addAlias(name, account, args)
+      },
+    },
+    '/api/alias/remove': {
+      async run(body) {
+        const name = optString(body, 'name')
+        if (!name) throw new HttpError(400, '"name" is required')
+        const rt = await getRuntime()
+        if (rt.pickCommandFamily(name) !== undefined) throw new HttpError(400, `"${name}" is a pick command`)
+        return rt.removeAlias(name)
+      },
+    },
     // `sideby shell-init setup` (ADR-0036): the page has shown the line and the file; undo takes out only that line.
     '/api/shell-init/setup': {
       async run(body) {

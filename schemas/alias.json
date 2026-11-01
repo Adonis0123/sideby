@@ -41,9 +41,17 @@
         {
           "type": "string",
           "const": "confirm"
+        },
+        {
+          "type": "string",
+          "const": "renamed"
         }
       ],
-      "description": "`confirm` (exit 10): the pick command would hide a command on PATH, so nothing was written; run again with `--yes`."
+      "description": "`confirm` (exit 10): the pick command would hide a command on PATH, so nothing was written; run again with `--yes`. `renamed` (`alias rename`): `alias` is the new name."
+    },
+    "renamedFrom": {
+      "type": "string",
+      "description": "The old name, for `renamed`."
     },
     "kind": {
       "anyOf": [

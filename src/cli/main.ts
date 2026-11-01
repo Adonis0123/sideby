@@ -46,6 +46,7 @@ Next: the user signs in with \`sideby login <account>\` (subscription) or fills 
 Exit: 0 done; 1 invalid name or alias, directory exists, or partly failed; 2 malformed command line.`,
   alias: `sideby alias add <short> <account> [-- host args] [--json]
 sideby alias add <short> --pick <family> [--yes] [--json]
+sideby alias rename <old> <new> [--json]
 sideby alias rm <short> [--json]
 sideby alias list [--json]
 
@@ -61,10 +62,12 @@ Examples:
   sideby alias add cc008 claude:008
   sideby alias add pi-kimi pi:main -- --model kimi-coding/k3
   sideby alias add cc --pick claude      # says first if cc hides a command (exit 10)
+  sideby alias rename cc-relay relay      # same account and arguments, new name
   sideby alias rm cc008
 
-Writes: the config \`aliases\` or \`pickCommands\` and every \`shellInitFile\`. New shell functions work in a
-new shell, or after eval "$(sideby shell-init zsh)" (put that line in ~/.zshrc once).
+Writes: the config \`aliases\` or \`pickCommands\`, every \`shellInitFile\` and the stamp open terminals watch.
+A shell that loads eval "$(sideby shell-init zsh)" (\`sideby shell-init setup\` adds that line once) picks up
+the change at its next prompt; a shell started before this version needs a new terminal once.
 Exit: 0 done (also when it already exists or is absent); 1 invalid, reserved or taken; 2 malformed;
 10 a pick command would hide a command on PATH, run again with --yes.`,
   login: `sideby login <account>

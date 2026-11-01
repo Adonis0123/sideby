@@ -1242,12 +1242,14 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
           Type.Literal('removed'),
           Type.Literal('absent'),
           Type.Literal('confirm'),
+          Type.Literal('renamed'),
         ],
         {
           description:
-            '`confirm` (exit 10): the pick command would hide a command on PATH, so nothing was written; run again with `--yes`.',
+            '`confirm` (exit 10): the pick command would hide a command on PATH, so nothing was written; run again with `--yes`. `renamed` (`alias rename`): `alias` is the new name.',
         },
       ),
+      renamedFrom: Type.Optional(Type.String({ description: 'The old name, for `renamed`.' })),
       kind: Type.Optional(
         Type.Union([Type.Literal('account'), Type.Literal('pick')], {
           description: '`pick` for a Pick Command (`--pick`), `account` for a short command of one Account.',
