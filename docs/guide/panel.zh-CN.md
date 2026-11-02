@@ -157,6 +157,8 @@ createServer(async (req, res) => {
 
 `ask: { bridge: 'postMessage' }` 给自己提供 AI 任务的页面用。面板嵌在你页面的 iframe 里时，会隐藏自己的「让 AI 帮我」按钮；每个发起 AI 任务的地方（「问 AI 为什么」「让 AI 修复」、配账号、配终端等）不再打开面板自己的对话框，而是向 `window.parent` 发 `{ type: 'local-tools:ask', version: 1, preset, native: { task, text, context }, text }`，目标 origin 是面板自己的 origin。你的页面显示自己的对话框，用 `sideby ask --spec -` 开始任务，`native` 部分原样传过去（见[命令](commands.zh-CN.md)）；要显示的账号和终端用 `sideby ask --choices --json` 取。包里的 `ai-tasks.json` 列出 sideby 的任务，以及中英两套标题、提示语和示例。不传 `ask`，或面板不在 iframe 里时，面板照旧打开自己的对话框。传其他值会在创建 handler 时抛 `TypeError`。
 
+你的页面改了面板也显示的东西（比如通过 `sideby` CLI 做的自家无人值守开关），在改动生效后向面板的 iframe 发 `{ type: 'local-tools:refresh', version: 1 }`，目标 origin 是面板的 origin（`frame.contentWindow.postMessage(message, origin)`）。面板收到后立刻重读状态，不用等下一轮 20 秒刷新。它只接受自己父页面、同一 origin 发来的这条消息，消息本身不改任何东西。
+
 `<basePath>/icon.svg` 提供 sideby 标志（面板自己的 favicon 用 `<basePath>/favicon.svg`，小尺寸版，只有蓝色那个小伙伴）。在你自己的标签页或菜单里直接引用它，不要另存一份，这样换了新标志，你的页面跟着下一个 sideby 版本更新。
 
 `lang`（`'auto'`、`'en'` 或 `'zh'`）让面板语言和你的页面一致。设为 `'en'` 或 `'zh'` 时，它优先于面板里选过的语言，并隐藏面板「设置」里的语言选项；面板里选过的语言仍然保存着，改回 `'auto'` 后照常生效。`'auto'`（默认）先用面板里选过的语言，再看浏览器语言。其他值会在创建 handler 时抛出 `TypeError`。handler 只在创建时读一次 `lang`：要切换语言，就重新创建 handler。

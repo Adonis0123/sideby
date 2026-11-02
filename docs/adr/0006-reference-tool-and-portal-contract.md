@@ -56,6 +56,14 @@ ADR-0030 adds `ask?: { bridge: 'postMessage' }`, added like every other option (
 
 sideby does not rely on this alone. Its own side keeps such requests short: it answers once the new package is installed and leaves slower follow-ups (the sideby skill) to the new code, a background Panel restarts last, and a lock whose holder stopped touching it is free within two minutes even when the holding process lives on. The CSP and the Host, Origin and token checks do not change.
 
+## Amendment (2026-11-02): the Portal asks the Panel to refresh
+
+A Portal can show controls of its own for something the Panel shows too (an Unattended Mode switch in its menu, say) that change sideby's state through the CLI. The Panel in the frame only reads its state every 20 seconds, on focus and when the tab comes back, and a click in the Portal's page is none of those, so the two disagreed for up to 20 seconds.
+
+- The Panel listens for `{ type: 'local-tools:refresh', version: 1 }` posted by its frame's parent at the Panel's own origin, and then reads its state at once (and the Unattended page its list). Messages from anything but `window.parent`, from another origin, of another type or version are ignored; a Panel opened on its own listens to nothing.
+- The message only starts a read: it carries no data and can change nothing. It needs no handler option, like every other addition here it is compatible, and the CSP and the Host, Origin and token checks do not change.
+- What any Portal that changes sideby's state outside the Panel should do: post that message to the Panel's frame with the Panel's origin as the target, after the change has landed.
+
 ## Why not the others
 
 - **One package for every tool, sideby as a plugin of it**: one install, but sideby's published scope would change and one failing tool would break the others.

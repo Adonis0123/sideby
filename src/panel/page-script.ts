@@ -64,6 +64,7 @@ import {
   panelPrefs,
   passedWindow,
   pinnedIn,
+  portalRefresh,
   quotaAskable,
   quotaHighLevel,
   quotaPressure,
@@ -119,6 +120,7 @@ import { cn, esc } from './ui/lib/cn.ts'
 
 const LOGIC = [
   quotaIsStale,
+  portalRefresh,
   catalogNorm,
   catalogMatchLevel,
   searchCatalog,
@@ -9167,6 +9169,14 @@ const MAIN = String.raw`
   setInterval(tick, 1000)
   document.addEventListener('visibilitychange', wake)
   window.addEventListener('focus', wake)
+  // A Portal that changed something the Panel shows says so (ADR-0006): read the state now instead of at the next
+  // round, and the Unattended page its list too, so the Portal's switch and this page never disagree for long.
+  window.addEventListener('message', (e) => {
+    if (!portalRefresh(e, window)) return
+    ua.nextAt = 0
+    ua.at = 0
+    if (S.state && !conn.lost) load({ silent: true })
+  })
 `
 
 /** The page script: the tested helpers, then the page logic, in one strict-mode function. */

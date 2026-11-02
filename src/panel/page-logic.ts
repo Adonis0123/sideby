@@ -1463,6 +1463,22 @@ export function askBridge(
 }
 
 /**
+ * Whether a `message` event asks the Panel to read its state again (ADR-0006, 2026-11-02 amendment): the Portal around
+ * it changed something the Panel shows (its own Unattended switch, say) and posted
+ * `{ type: 'local-tools:refresh', version: 1 }`. Only the frame's own parent at the Panel's own origin counts; a Panel
+ * opened on its own has no parent to listen to. The message only triggers a read, never a change.
+ */
+export function portalRefresh(
+  event: { source: unknown; origin: string; data: unknown },
+  win: { parent: unknown; location: { origin: string } },
+): boolean {
+  if (!win.parent || win.parent === win || event.source !== win.parent) return false
+  if (event.origin !== win.location.origin) return false
+  const d = event.data as { type?: unknown; version?: unknown } | null
+  return Boolean(d && typeof d === 'object' && d.type === 'local-tools:refresh' && d.version === 1)
+}
+
+/**
  * The "Attached files" section of a Task Prompt (spec §3.28 "附件"), in `lang` (`zh`, otherwise English): one line
  * per file with its absolute path and kind, plus how to look at a video. Empty without files. `heading` goes before
  * the section title, so a prompt with Markdown headings (`## `, a Task Spec from a Portal) gets one of its level.
