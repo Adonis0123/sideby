@@ -9,11 +9,13 @@ import {
   type CheckMoment,
   NETWORK_ENV,
   prefersChinese,
+  readNetworkConfig,
   refresh,
   type Sleep,
   type TraceFetcher,
   verdict,
 } from '../core/egress.ts'
+import { resolvePaths } from '../core/paths.ts'
 
 export const NETWORK_HOOK_COMMAND = 'sideby network-hook'
 
@@ -58,9 +60,13 @@ export async function runNetworkHook(
   const [family = '', event = ''] = argv
   const url = env[NETWORK_ENV.url]
   const dir = env[NETWORK_ENV.dir]
-  const allow = (env[NETWORK_ENV.allow] ?? '').split(',').filter(Boolean)
   // Not a session sideby started with Network Guard (the hook was copied somewhere): nothing to guard.
   if (!url || !dir) return 0
+  // The switch and the list as config says now, so turning the check off or allowing a country in the Panel or with
+  // `sideby network` reaches sessions already running. When config cannot be read, the list the session started with.
+  const current = await readNetworkConfig(resolvePaths(env).configFile)
+  if (current && !current.guard) return 0
+  const allow = current?.allow ?? (env[NETWORK_ENV.allow] ?? '').split(',').filter(Boolean)
   const common = {
     url,
     env,

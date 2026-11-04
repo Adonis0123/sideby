@@ -30,6 +30,32 @@ export const NETWORK_ENV = {
   dir: 'SIDEBY_NETWORK_DIR',
 } as const
 
+/**
+ * Config `network` as the file says now, read by hand (no schema) so a running session follows the Panel and
+ * `sideby network on|off|allow`: `guard` is false when the switch is off or no country is allowed. Undefined when the
+ * file cannot be read or is not JSON; the caller then keeps what the session was started with.
+ */
+export async function readNetworkConfig(
+  configFile: string,
+): Promise<{ guard: boolean; allow: string[] } | undefined> {
+  // The config may be a link a dotfiles manager keeps; reading through it is fine.
+  let config: unknown
+  try {
+    const text = await readFile(configFile, 'utf8')
+    if (text.length > 4 * 1024 * 1024) return undefined
+    config = JSON.parse(text)
+  } catch {
+    return undefined
+  }
+  if (!config || typeof config !== 'object') return undefined
+  const section = (config as { network?: unknown }).network
+  const net = section && typeof section === 'object' ? (section as { guard?: unknown; allow?: unknown }) : {}
+  const allow = Array.isArray(net.allow)
+    ? net.allow.filter((c): c is string => typeof c === 'string' && /^[A-Z]{2}$/.test(c))
+    : []
+  return { guard: net.guard === true && allow.length > 0, allow }
+}
+
 export const TIMEOUT_MS = 3000
 /**
  * Inside a session a check that cannot tell is asked again after these waits, before it blocks: a prompt the Host made

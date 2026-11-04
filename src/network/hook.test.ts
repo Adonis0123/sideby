@@ -1,7 +1,7 @@
 // `sideby network-hook` (spec §3.35): blocks with exit 2 and a reason, lets the Host go on with exit 0, and imports
 // only leaf modules. Requests go through a fake fetcher.
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -39,6 +39,8 @@ const sessionEnv = (dir: string, allow = 'US,JP') => ({
   [NETWORK_ENV.url]: 'https://api.anthropic.com/cdn-cgi/trace',
   [NETWORK_ENV.allow]: allow,
   [NETWORK_ENV.dir]: dir,
+  // Config is read from here (absent unless a test writes it), never from the real HOME.
+  XDG_CONFIG_HOME: join(dir, 'config'),
   SIDEBY_LABEL: 'cc008',
   LANG: 'zh_CN.UTF-8',
 })
@@ -67,6 +69,36 @@ describe('network hook', () => {
       )
       assert.match(bad.lines.join(''), /香港（HK）/)
       assert.match(bad.lines.join(''), /sideby run cc008 --ignore-network/)
+    })
+  })
+
+  it('follows config as it is now: off lets everything through, a newly allowed country passes', async () => {
+    await withFakeHome(async (h) => {
+      const env = sessionEnv(h.path('net'), 'US')
+      const configFile = join(env.XDG_CONFIG_HOME, 'sideby', 'config.json')
+      await mkdir(dirname(configFile), { recursive: true })
+      await writeFile(configFile, JSON.stringify({ network: { allow: ['US'] } }))
+      const off = sink()
+      assert.equal(
+        await runNetworkHook(['claude', 'UserPromptSubmit'], env, off, { fetcher: trace('HK'), print: 'p' }),
+        0,
+      )
+      assert.deepEqual(off.lines, [])
+      await writeFile(configFile, JSON.stringify({ network: { guard: true, allow: ['US', 'SG'] } }))
+      const sg = sink()
+      assert.equal(
+        await runNetworkHook(['claude', 'PreToolUse'], env, sg, { fetcher: trace('SG'), print: 'p' }),
+        0,
+      )
+      const hk = sink()
+      assert.equal(
+        await runNetworkHook(['claude', 'PreToolUse'], { ...env, [NETWORK_ENV.dir]: h.path('net-hk') }, hk, {
+          fetcher: trace('HK'),
+          print: 'p',
+        }),
+        2,
+      )
+      assert.match(hk.lines.join(''), /新加坡（SG）/)
     })
   })
 
@@ -210,7 +242,7 @@ describe('network hook imports', () => {
     }
     await walk(join(root, 'network/hook.ts'))
     assert.ok(seen.has(join(root, 'core/egress.ts')), 'the walk follows imports')
-    const allowed = new Set(['network/hook.ts', 'core/egress.ts', 'core/fs-safe.ts'])
+    const allowed = new Set(['network/hook.ts', 'core/egress.ts', 'core/fs-safe.ts', 'core/paths.ts'])
     assert.deepEqual(
       [...seen].map((f) => relative(root, f)).filter((f) => !allowed.has(f)),
       [],
