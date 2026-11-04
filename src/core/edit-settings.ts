@@ -1,13 +1,15 @@
 // Opens an Account's Host settings file in the user's editor (spec §3.30, ADR-0033). sideby reads none of the file:
 // it checks that the file is there and, for a link, where it really is and which Accounts share it. Every program
 // it runs goes through `DesktopDeps.exec`, so tests start nothing.
-import { realpath } from 'node:fs/promises'
-import { isAbsolute, join } from 'node:path'
+import { access, constants, realpath } from 'node:fs/promises'
+import { dirname, isAbsolute, join } from 'node:path'
 import type { Runtime } from '../runtime.ts'
 import type { FamilyDef } from '../types.ts'
+import { EDITORS, type EditorChoice } from './config.ts'
 import { depsFor } from './desktop-app.ts'
 import { UserError } from './errors.ts'
 import { lstatOrNull } from './fs-safe.ts'
+import { which } from './launch.ts'
 
 export interface EditSettingsResult {
   schemaVersion: 1
@@ -25,7 +27,51 @@ export interface EditSettingsResult {
   opened: boolean
   /** The program and arguments that opened it. */
   command?: string[]
+  /** What opened it: `system` (the default program) or the editor from config `editor` or `--with`. */
+  editor?: EditorChoice
 }
+
+/**
+ * How sideby starts each editor (ADR-0033 amendment): on macOS the command line inside its app bundle, then the
+ * command on PATH, then `open -a <app>`; elsewhere the command on PATH, then the system's default program.
+ */
+export const EDITOR_APPS: Record<
+  Exclude<EditorChoice, 'system'>,
+  {
+    title: string
+    app: string
+    command: string
+    bundled: string
+    /** The command line's arguments; without it just the file. */
+    args?: (file: string) => string[]
+  }
+> = {
+  // Cursor 3.x opens a lone file in its Agent Window and shows nothing of it; `--classic` with the file's folder
+  // opens a classic editor window on that file.
+  cursor: {
+    title: 'Cursor',
+    app: 'Cursor',
+    command: 'cursor',
+    bundled: 'Contents/Resources/app/bin/cursor',
+    args: (file) => ['--classic', dirname(file), file],
+  },
+  vscode: {
+    title: 'VS Code',
+    app: 'Visual Studio Code',
+    command: 'code',
+    bundled: 'Contents/Resources/app/bin/code',
+  },
+  windsurf: {
+    title: 'Windsurf',
+    app: 'Windsurf',
+    command: 'windsurf',
+    bundled: 'Contents/Resources/app/bin/windsurf',
+  },
+  zed: { title: 'Zed', app: 'Zed', command: 'zed', bundled: 'Contents/MacOS/cli' },
+}
+
+export const isEditor = (v: unknown): v is EditorChoice =>
+  typeof v === 'string' && (EDITORS as readonly string[]).includes(v)
 
 /** The Family's settings file when it names a relative path that stays inside the account directory. */
 export function hostSettingsFile(def: Pick<FamilyDef, 'settingsFile'> | undefined): string | undefined {
@@ -45,8 +91,11 @@ async function realOrNull(path: string): Promise<string | null> {
 export async function editSettings(
   rt: Runtime,
   ref: string,
-  opts: { open?: boolean } = {},
+  /** `editor` is a one-off choice (`--with`); without it config `editor`, else `system`. */
+  opts: { open?: boolean; editor?: EditorChoice } = {},
 ): Promise<EditSettingsResult> {
+  if (opts.editor !== undefined && !isEditor(opts.editor))
+    throw new UserError(`the editor must be one of ${EDITORS.join(', ')}`, { code: 'bad-editor' })
   const account = await rt.resolve(ref)
   const def = rt.families.get(account.family)
   const file = hostSettingsFile(def)
@@ -81,7 +130,49 @@ export async function editSettings(
     sharedWith,
   }
   if (opts.open === false) return { ...base, opened: false }
-  return { ...base, opened: true, command: await openWithDefault(rt, real) }
+  const configured = rt.config.editor
+  const editor = opts.editor ?? (isEditor(configured) ? configured : 'system')
+  const command = await openWithEditor(rt, real, editor)
+  // On Linux and WSL an editor that is not on PATH falls back to the default program: say so.
+  const fellBack = command[0] === 'xdg-open' || command[0]?.endsWith('/cmd.exe')
+  return { ...base, opened: true, command, editor: fellBack ? 'system' : editor }
+}
+
+const executable = (path: string) =>
+  access(path, constants.X_OK).then(
+    () => true,
+    () => false,
+  )
+
+/**
+ * Opens `file` with `editor` (ADR-0033 amendment); `system` is `openWithDefault`. Each way is tried in turn until one
+ * exits 0: on macOS the editor's own command line in its app bundle (in `DesktopDeps.appDirs`), then the command on
+ * PATH, then `open -a <app> <file>`; elsewhere the command on PATH, then the system's default program. Returns the
+ * command that opened it, or throws what to do instead.
+ */
+export async function openWithEditor(rt: Runtime, file: string, editor: EditorChoice): Promise<string[]> {
+  if (editor === 'system') return openWithDefault(rt, file)
+  const e = EDITOR_APPS[editor]
+  const deps = depsFor(rt)
+  const tries: string[] = []
+  if (deps.platform === 'darwin')
+    for (const dir of deps.appDirs) {
+      const cli = join(dir, `${e.app}.app`, e.bundled)
+      if (await executable(cli)) tries.push(cli)
+    }
+  const onPath = await which(e.command, rt.env)
+  if (onPath && !tries.includes(onPath)) tries.push(onPath)
+  const cliArgs = e.args ? e.args(file) : [file]
+  for (const cmd of tries) if ((await deps.exec(cmd, cliArgs)).code === 0) return [cmd, ...cliArgs]
+  if (deps.platform === 'darwin') {
+    const args = ['-a', e.app, file]
+    if ((await deps.exec('/usr/bin/open', args)).code === 0) return ['/usr/bin/open', ...args]
+    throw new UserError(
+      `${e.title} could not open the file; install ${e.title}, choose another editor (\`sideby config set editor system\`), or open ${file} yourself`,
+      { code: 'open-failed' },
+    )
+  }
+  return openWithDefault(rt, file)
 }
 
 /**

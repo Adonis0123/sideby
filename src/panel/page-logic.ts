@@ -1463,6 +1463,35 @@ export function askBridge(
 }
 
 /**
+ * Whether "Open settings.json" hands the file to the Portal around the Panel (spec §3.30, ADR-0033 amendment):
+ * createPanelHandler was given `open: { bridge: 'postMessage' }` and the page sits in a frame. A Panel opened on its
+ * own is its own parent; its server opens the file.
+ */
+export function openBridged(boot: { open?: { bridge?: string } | null }, win: { parent: unknown }): boolean {
+  return boot.open?.bridge === 'postMessage' && Boolean(win.parent) && win.parent !== win
+}
+
+/**
+ * Hands a file to the Portal around the Panel when `openBridged` says so: posts
+ * `{ type: 'local-tools:open', version: 1, path }` (an absolute path, never the file's content) to the parent with the
+ * Panel's own origin as the target, and says it did. Otherwise, or for a path that is not absolute, posts nothing and
+ * returns false.
+ */
+export function openBridge(
+  boot: { open?: { bridge?: string } | null },
+  path: unknown,
+  win: {
+    parent: { postMessage(message: unknown, targetOrigin: string): void } | null
+    location: { origin: string }
+  },
+): boolean {
+  if (!openBridged(boot, win) || !win.parent) return false
+  if (typeof path !== 'string' || !/^(\/|[A-Za-z]:[\\/])/.test(path)) return false
+  win.parent.postMessage({ type: 'local-tools:open', version: 1, path }, win.location.origin)
+  return true
+}
+
+/**
  * Whether a `message` event asks the Panel to read its state again (ADR-0006, 2026-11-02 amendment): the Portal around
  * it changed something the Panel shows (its own Unattended switch, say) and posted
  * `{ type: 'local-tools:refresh', version: 1 }`. Only the frame's own parent at the Panel's own origin counts; a Panel

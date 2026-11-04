@@ -20,6 +20,8 @@ sideby ui --no-open    # 只打印地址
 
 **设置**把只需设一次的东西分成几组：外观（明暗、主题、语言）、启动、账号与额度、让 AI 帮我。明暗和语言存在 sideby 的配置里，所以 `sideby config set panel.theme dark` 也能改。「启动」里的「登录后在后台启动 sideby」（macOS、Linux 桌面，以及 WSL，在 WSL 里叫「登录 Windows 后在后台启动 sideby」）会在每次登录时启动面板，不打开窗口，打开面板时就是最新状态。打开或关闭时，先显示要写入或删除的文件和要运行的命令，你确认后才生效。终端里用 `sideby autostart on|off` 也一样。macOS 上的「在状态栏显示额度」会在状态栏放一个 sideby 小人图标，同样先预览再生效；面板第一次显示额度时会提示一次。终端里用 `sideby menubar on|off`。开着时，没在运行会直接写出来并给「重新启动」；下面的「状态栏图标 ›」点进去是它自己的对话框：上面是打开菜单的快捷键（从下拉里选 ⌥X、⌥Z、⌥⌘S、⌃⌥S 或关闭，想自己按就选「自定义…」；终端里用 `sideby menubar hotkey`），下面是「看不到图标？」，列出三种原因（状态栏放不下被 macOS 收进顶栏的 «、在「系统设置 › 菜单栏」里被关掉、被 Ice 或 Bartender 这类整理工具收起来）。图标被收进 « 时，开关下方会直接提示，并给「让 AI 帮我排查」，开一个 AI 任务替你找原因。
 
+「通用」里的「设置文件用什么打开」决定账号菜单里「打开 settings.json」用什么打开：「默认程序」（系统默认程序），或 Cursor、VS Code、Windsurf、Zed。默认程序只弹出窗口、没打开文件时选你的编辑器；当前版本的 Cursor 在 macOS 上作为默认文本编辑器时只显示它的 Agents 窗口。它就是配置 `editor`，所以 `sideby config set editor cursor` 也能改，`sideby edit` 也照它来。
+
 ## 主题
 
 **设置 › 主题**选面板的颜色。内置五套，底色都是同一种冷灰，只有强调色不同：**青绿**（默认）、**叶绿**、**阿根廷蓝**、**Claude 橙**和 **Codex 墨黑**（像 Codex 应用一样黑白）。原来的晴空现在叫阿根廷蓝。它们排成一行色点：点一个色点，或用方向键在这一行里移动，就换过去。正在用的色点外面有一圈同色细环，鼠标移上去会显示名字。颜色平滑过渡、不刷新页面，底部提示里可以**撤销**。色点下面，**自选主色**把按钮、链接和额度条换成你挑的颜色；**让 AI 帮我配色**把一句话（比如“像 Notion 一样素净”）交给你自己的 AI：它写一套主题，先在面板里给你看，你同意后才换上。
@@ -156,6 +158,8 @@ createServer(async (req, res) => {
 `updates`（默认 `true`）会在面板页头显示当前版本，有新版本时显示「新版本」标签，以及带「检查更新」、「更新」按钮和自动更新开关的更新对话框（见[更新](configuration.zh-CN.md#更新)）。从这里发起的更新会安装新包；从已安装的包加载 sideby 的页面会自己换上新版本（前提是它每次检查新代码时，都重新找一次 `sideby` 命令所在的包），面板提示刷新页面。你的页面换上新代码时，要等旧 handler 把手上的请求答完再停掉它（上限以分钟计，不要几秒）：发起更新的那个请求就是其中之一。你的页面自己管理 sideby 版本时传 `updates: false`：面板不再显示任何更新相关内容，并拒绝 `/api/update*`。
 
 `ask: { bridge: 'postMessage' }` 给自己提供 AI 任务的页面用。面板嵌在你页面的 iframe 里时，会隐藏自己的「让 AI 帮我」按钮；每个发起 AI 任务的地方（「问 AI 为什么」「让 AI 修复」、配账号、配终端等）不再打开面板自己的对话框，而是向 `window.parent` 发 `{ type: 'local-tools:ask', version: 1, preset, native: { task, text, context }, text }`，目标 origin 是面板自己的 origin。你的页面显示自己的对话框，用 `sideby ask --spec -` 开始任务，`native` 部分原样传过去（见[命令](commands.zh-CN.md)）；要显示的账号和终端用 `sideby ask --choices --json` 取。包里的 `ai-tasks.json` 列出 sideby 的任务，以及中英两套标题、提示语和示例。不传 `ask`，或面板不在 iframe 里时，面板照旧打开自己的对话框。传其他值会在创建 handler 时抛 `TypeError`。
+
+`open: { bridge: 'postMessage' }` 给自己打开文件、并让用户在页面上选好打开方式的页面用。面板嵌在你页面的 iframe 里时，账号的「打开 settings.json」只向面板服务端要文件的真实位置（链接文件给出它指向的文件），然后向 `window.parent` 发 `{ type: 'local-tools:open', version: 1, path }`，目标 origin 是面板自己的 origin；`path` 是文件的绝对路径，从不带文件内容。你的页面负责打开并提示结果，只接受来自自己 iframe、同 origin、`path` 为绝对路径的消息。面板照旧提示还有哪些账号共用这个文件。不传 `open`，或面板不在 iframe 里时，由面板服务端按配置 `editor` 打开。传其他值会在创建 handler 时抛 `TypeError`；旧版 sideby 不认识这个选项，会忽略它，自己打开文件。
 
 你的页面改了面板也显示的东西（比如通过 `sideby` CLI 做的自家无人值守开关），在改动生效后向面板的 iframe 发 `{ type: 'local-tools:refresh', version: 1 }`，目标 origin 是面板的 origin（`frame.contentWindow.postMessage(message, origin)`）。面板收到后立刻重读状态，不用等下一轮 20 秒刷新。它只接受自己父页面、同一 origin 发来的这条消息，消息本身不改任何东西。
 

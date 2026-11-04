@@ -1,5 +1,6 @@
 // HTTP handler for the local Panel. Mountable under any basePath; standalone and embedded use the same rules.
 import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { realpath } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { aliasesByAccount, startArgsOf } from '../core/accounts.ts'
 import {
@@ -52,7 +53,10 @@ import {
   aliasArgs,
   aliasRefs,
   type DisplayConfig,
+  EDITORS,
+  type EditorChoice,
   editConfigPanel,
+  editConfigPath,
   editConfigTerminal,
   editConfigUpdate,
   type HandoffSettings,
@@ -60,7 +64,7 @@ import {
   type PanelConfig,
 } from '../core/config.ts'
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
-import { editSettings } from '../core/edit-settings.ts'
+import { editSettings, isEditor } from '../core/edit-settings.ts'
 import { UserError } from '../core/errors.ts'
 import { planHandoff } from '../core/handoff.ts'
 import { applyHandoffEnable, type EnablePlan, planHandoffEnable } from '../core/handoff-enable.ts'
@@ -188,6 +192,15 @@ export interface PanelHandlerOptions {
    * dialog. Checked when the handler is created: anything else throws a TypeError.
    */
   ask?: { bridge: 'postMessage' }
+  /**
+   * How the Panel's "Open settings.json" opens the file (spec §3.30, ADR-0033 amendment). `{ bridge: 'postMessage' }`
+   * is for a Portal that opens files itself, with an app the user chose there: inside a frame, the item asks the
+   * Panel's server only where the file really is and posts `{ type: 'local-tools:open', version: 1, path }` (the
+   * absolute path of the real file, never its content) to `window.parent`, with the Panel's own origin as the target
+   * origin; the Portal opens it. Without it, or opened on its own, the Panel's server opens the file (config `editor`).
+   * Checked when the handler is created: anything else throws a TypeError.
+   */
+  open?: { bridge: 'postMessage' }
 }
 
 /**
@@ -244,15 +257,16 @@ export interface PanelSession extends LiveSession {
   orca?: true
 }
 
-function resolveAsk(ask: unknown): { bridge: 'postMessage' } | undefined {
-  if (ask === undefined) return undefined
+/** The `ask` and `open` options: `{ bridge: 'postMessage' }` or left out; anything else is a TypeError. */
+function resolveBridge(name: 'ask' | 'open', value: unknown): { bridge: 'postMessage' } | undefined {
+  if (value === undefined) return undefined
   if (
-    !ask ||
-    typeof ask !== 'object' ||
-    (ask as { bridge?: unknown }).bridge !== 'postMessage' ||
-    Object.keys(ask).length !== 1
+    !value ||
+    typeof value !== 'object' ||
+    (value as { bridge?: unknown }).bridge !== 'postMessage' ||
+    Object.keys(value).length !== 1
   )
-    throw new TypeError('panel ask must be { bridge: "postMessage" } or left out')
+    throw new TypeError(`panel ${name} must be { bridge: "postMessage" } or left out`)
   return { bridge: 'postMessage' }
 }
 
@@ -387,6 +401,8 @@ export interface PanelState {
   configAliases?: Record<string, string>
   /** The config `pickCommands`, name → Family (spec §3.13, ADR-0035). */
   pickCommands?: Record<string, string>
+  /** Config `editor`: what "Open settings.json" opens the file with (spec §3.30); `system` when not set. */
+  editor?: EditorChoice
   /**
    * Family → the Pick Command the page offers to add: a Family with two or more Subscription Accounts and none yet,
    * with the command on PATH the name would hide; `name: null` when no default name is free (the user types one).
@@ -1021,6 +1037,7 @@ async function buildState(
     ...(history ? { history } : {}),
     ...(rt.config.aliases ? { configAliases: aliasRefs(rt.config.aliases) } : {}),
     ...(rt.config.pickCommands ? { pickCommands: { ...rt.config.pickCommands } } : {}),
+    editor: isEditor(rt.config.editor) ? rt.config.editor : 'system',
     ...(Object.keys(pickOffers).length ? { pickOffers } : {}),
     shellSetup: { ...shellSt, rc: tildify(shellSt.rc, ctx.home), block: setupBlock(shellSt.shell) },
     ...(Object.keys(handoff).length ? { handoff } : {}),
@@ -1392,7 +1409,8 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   const theme = resolveTheme(opts.theme)
   const lang = resolveLang(opts.lang)
   const updates = opts.updates !== false
-  const ask = resolveAsk(opts.ask)
+  const ask = resolveBridge('ask', opts.ask)
+  const openBridge = resolveBridge('open', opts.open)
   const token = randomBytes(32).toString('base64url')
   const serial = writeQueue()
   const readings: Readings = new Map()
@@ -2202,16 +2220,42 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         }
       },
     },
-    // Opens the Account's Host settings file with the system's default program (spec §3.30, ADR-0033). It reads none
-    // of the file but starts a program, so a read-only Panel refuses it (writes defaults to true).
+    // Opens the Account's Host settings file with config `editor`, else the system's default program (spec §3.30,
+    // ADR-0033). It reads none of the file but starts a program, so a read-only Panel refuses it (writes defaults to
+    // true). `open: false` (the open bridge) starts nothing and adds `realPath`, the real file's absolute path, for the
+    // Portal to open.
     '/api/account/edit-settings': {
       async run(body) {
         const account = optString(body, 'account')
         if (!account) throw new HttpError(400, '"account" is required')
+        if (body.open !== undefined && typeof body.open !== 'boolean')
+          throw new HttpError(400, '"open" must be true or false')
         const rt = await getRuntime()
-        const r = await editSettings(rt, account)
+        const open = body.open !== false
+        const r = await editSettings(rt, account, { open })
         const home = rt.paths.home
-        return { ...r, path: tildify(r.path, home), ...(r.target ? { target: tildify(r.target, home) } : {}) }
+        return {
+          ...r,
+          path: tildify(r.path, home),
+          ...(r.target ? { target: tildify(r.target, home) } : {}),
+          // The file's real path even when the account directory itself is a link (only then is `target` unset).
+          ...(open ? {} : { realPath: await realpath(r.path) }),
+        }
+      },
+    },
+    // The editor "Open settings.json" uses: config `editor` (spec §3.30); `system` or null removes the key.
+    '/api/editor': {
+      async run(body) {
+        const editor = body.editor
+        if (editor !== null && !isEditor(editor))
+          throw new HttpError(400, `"editor" must be one of ${EDITORS.join(', ')} or null`)
+        const rt = await getRuntime()
+        const chosen = editor === null || editor === 'system' ? undefined : editor
+        const r = await editConfigPath(rt.paths.configFile, 'editor', chosen)
+        // A Panel given one Runtime keeps using it: the next open and /api/state read the new choice from it.
+        if (chosen === undefined) delete rt.config.editor
+        else rt.config.editor = chosen
+        return { changed: r.changed, editor: r.after ?? 'system' }
       },
     },
     // Unattended Mode (spec §3.37): the page's status and Pending Decisions. A read-only Panel reads them too.
@@ -2709,6 +2753,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
                   lang,
                   updates,
                   ...(ask ? { ask } : {}),
+                  ...(openBridge ? { open: openBridge } : {}),
                   ...(panel ? { panel } : {}),
                 }),
           )

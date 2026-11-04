@@ -56,6 +56,8 @@ import {
   networkTaskFacts,
   newAccountDir,
   nextReset,
+  openBridge,
+  openBridged,
   orderedAliases,
   panelFixes,
   panelHint,
@@ -121,6 +123,8 @@ import { cn, esc } from './ui/lib/cn.ts'
 const LOGIC = [
   quotaIsStale,
   portalRefresh,
+  openBridge,
+  openBridged,
   catalogNorm,
   catalogMatchLevel,
   searchCatalog,
@@ -1210,12 +1214,42 @@ const MAIN = String.raw`
     if (!file || !a.dir || BOOT.readOnly) return null
     return { icon: 'file', label: t('menu.editSettings', { file }), hint: a.dir + '/' + file, run: () => editSettings(a, file) }
   }
+  // In a Portal that opens files itself (createPanelHandler's open bridge), the server only says where the real file
+  // is and the Portal opens it with the app chosen there, and says so; otherwise the server opens it (config editor).
   async function editSettings(a, file) {
     try {
-      const r = await api('/api/account/edit-settings', { account: a.ref })
-      toast(t('edit.opened', { ref: a.ref, file }))
+      const bridged = openBridged(BOOT, window)
+      const r = await api('/api/account/edit-settings', bridged ? { account: a.ref, open: false } : { account: a.ref })
+      if (bridged) { if (!openBridge(BOOT, r.realPath, window)) throw new Error(t('edit.noPath')) }
+      else toast(t(r.editor && r.editor !== 'system' ? 'edit.openedWith' : 'edit.opened', { ref: a.ref, file, app: editorName(r.editor) }))
       if (r.sharedWith && r.sharedWith.length) toast(t('edit.shared', { names: r.sharedWith.map(refName).join(', ') }), { kind: 'info', duration: 8000 })
     } catch (e) { toast(t('edit.failed', { ref: a.ref, file, msg: e.message }), { kind: 'fail' }) }
+  }
+  // config editor (spec §3.30): the choices of the Settings row, in the order of EDITORS.
+  const EDITOR_CHOICES = [['system', ''], ['cursor', 'Cursor'], ['vscode', 'VS Code'], ['windsurf', 'Windsurf'], ['zed', 'Zed']]
+  function editorName(id) { const c = EDITOR_CHOICES.find((x) => x[0] === id); return c && c[1] ? c[1] : t('set.editor.system') }
+  let editorSaving = null
+  function editorNow() { return editorSaving || (S.state && S.state.editor) || 'system' }
+  async function setEditor(v) {
+    if (v === editorNow()) return
+    editorSaving = v
+    refreshSettings()
+    try {
+      const r = await api('/api/editor', { editor: v })
+      if (S.state) S.state.editor = r.editor
+      toast(t('set.editor.saved', { app: editorName(r.editor) }))
+    } catch (e) { toast(t('set.saveFailed', { msg: e.message }), { kind: 'fail' }) }
+    editorSaving = null
+    refreshSettings()
+  }
+  // The Settings row. In a Portal that opens files itself, the Portal's own choice opens them here, so the row says so.
+  function editorRow() {
+    const label = t('set.editor')
+    const cur = editorNow()
+    return h('div', { class: 'set-row set-stack' },
+      h('div', { class: 'set-text' }, h('span', { class: 'set-label' }, label), h('span', { class: 'set-hint' }, t(openBridged(BOOT, window) ? 'set.editor.portal' : 'set.editor.hint'))),
+      h('div', { class: 'seg', role: 'group', 'aria-label': label }, EDITOR_CHOICES.map(([v, text]) =>
+        h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === cur), disabled: Boolean(editorSaving), onclick: () => setEditor(v) }, text || t('set.editor.system')))))
   }
   // What the login does, whichever directory: the browser, signing in, the email, a new account like it.
   function loginItems(a) {
@@ -6721,6 +6755,7 @@ const MAIN = String.raw`
     const link = (...args) => setLink(leave, ...args)
     const general = [...lookRows(), fm('themes', link(t('th.title'), themeLabel(), '', openThemes, true)), fm('autostart', autostartRow('autostart'))]
     if (!BOOT.readOnly) general.push(fm('terminal', link(t('term.title'), '', '', openTerminals, true)))
+    if (!BOOT.readOnly && S.state) general.push(fm('editor', editorRow()))
     // The menu bar switch shows only where it works (macOS); while its state loads it waits, unseen.
     const bar = []
     if (li.menubar.status && li.menubar.status.supported) {

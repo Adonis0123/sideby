@@ -218,11 +218,16 @@ Examples:
   sideby messages inbound accept --yes
 Exit: 0 listed or changed; 1 a file could not be changed or nothing was changed; 10 a change was shown and waits for --yes; 2 malformed
 command line.`,
-  edit: `sideby edit <account> [--path] [--json]
+  edit: `sideby edit <account> [--path] [--with <editor>] [--json]
 
 Open the account's own settings file in your editor: settings.json for claude and pi accounts, config.toml for codex
-and grok accounts. It opens with the system's default program (the default text editor on macOS, the Windows default
-program on WSL, xdg-open on other Linux). --path only prints where the file is.
+and grok accounts. By default it opens with the system's default program (the default text editor on macOS, the
+Windows default program on WSL, xdg-open on other Linux). Config editor (cursor, vscode, windsurf or zed; system is
+the default) opens it in that editor instead, through the editor's own command line; --with <editor> does so once.
+--path only prints where the file is.
+
+If your default text editor shows a window of its own but not the file (current Cursor shows its Agents window),
+choose the editor: sideby config set editor cursor.
 
 sideby reads nothing of the file and never changes it; your editor does. When the file is a link (accounts that
 share their settings with the main account), it says where the real file is and which accounts the change affects.
@@ -230,9 +235,10 @@ A missing file is not created: the message says how to get one.
 
 Examples:
   sideby edit claude:work
+  sideby edit claude:work --with vscode
   sideby edit cc008 --path
 Exit: 0 opened (or printed with --path); 1 no settings file, the family names none, or it could not be opened; 2
-malformed command line.`,
+malformed command line or an unknown editor.`,
   autostart: `sideby autostart [on|off] [--yes] [--json]
 
 Start the panel in the background when you log in, so it already shows fresh quota when you open it. It never
@@ -497,7 +503,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   },
   send: { flags: ['json'], valued: ['image', 'lang'] },
   messages: { flags: ['json', 'yes'], valued: ['to', 'limit'] },
-  edit: { flags: ['json', 'path'] },
+  edit: { flags: ['json', 'path'], valued: ['with'] },
   browser: { flags: ['json', 'enable', 'disable', 'yes', 'auto'], valued: ['profile'] },
   'shell-init': { flags: ['write', 'yes', 'undo', 'json'] },
   plugins: { flags: ['json'] },

@@ -2442,7 +2442,15 @@ describe('sideby edit (spec §3.30)', () => {
       const missing = await sideby(h, ['edit', 'claude:empty', '--json'])
       assert.equal(missing.code, 1)
       assert.equal(checkSchema('error', missing.out).code, 'settings-missing')
-      assert.match((await sideby(h, ['edit', '--help'])).out, /sideby edit <account> \[--path\]/)
+      assert.match(
+        (await sideby(h, ['edit', '--help'])).out,
+        /sideby edit <account> \[--path\] \[--with <editor>\]/,
+      )
+      // An unknown editor is a usage error before anything opens; a known one passes with --path, which opens nothing.
+      const bad = await sideby(h, ['edit', 'claude:main', '--with', 'notepad'])
+      assert.equal(bad.code, 2)
+      assert.match(bad.err, /--with takes one of system, cursor, vscode, windsurf, zed/)
+      assert.equal((await sideby(h, ['edit', 'claude:main', '--with', 'zed', '--path'])).code, 0)
     })
   })
 })
