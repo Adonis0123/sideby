@@ -1,6 +1,7 @@
 // `sideby network-hook` (spec §3.35): blocks with exit 2 and a reason, lets the Host go on with exit 0, and imports
 // only leaf modules. Requests go through a fake fetcher.
 import assert from 'node:assert/strict'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { describe, it } from 'node:test'
@@ -35,15 +36,24 @@ const fakeTime = (start = Date.parse('2026-10-29T00:00:00Z')) => {
   }
 }
 
-const sessionEnv = (dir: string, allow = 'US,JP') => ({
-  [NETWORK_ENV.url]: 'https://api.anthropic.com/cdn-cgi/trace',
-  [NETWORK_ENV.allow]: allow,
-  [NETWORK_ENV.dir]: dir,
-  // Config is read from here (absent unless a test writes it), never from the real HOME.
-  XDG_CONFIG_HOME: join(dir, 'config'),
-  SIDEBY_LABEL: 'cc008',
-  LANG: 'zh_CN.UTF-8',
-})
+/** A session started with Network Guard on, and config that still says so (tests change it to see the hook follow). */
+const sessionEnv = (dir: string, allow = 'US,JP') => {
+  // Config is read from here, never from the real HOME.
+  const config = join(dir, 'config')
+  mkdirSync(join(config, 'sideby'), { recursive: true })
+  writeFileSync(
+    join(config, 'sideby', 'config.json'),
+    JSON.stringify({ network: { guard: true, allow: allow.split(',') } }),
+  )
+  return {
+    [NETWORK_ENV.url]: 'https://api.anthropic.com/cdn-cgi/trace',
+    [NETWORK_ENV.allow]: allow,
+    [NETWORK_ENV.dir]: dir,
+    XDG_CONFIG_HOME: config,
+    SIDEBY_LABEL: 'cc008',
+    LANG: 'zh_CN.UTF-8',
+  }
+}
 
 describe('network hook', () => {
   it('does nothing outside a session sideby started with Network Guard', async () => {
@@ -99,6 +109,56 @@ describe('network hook', () => {
         2,
       )
       assert.match(hk.lines.join(''), /新加坡（SG）/)
+    })
+  })
+
+  it('makes no request in CI, and follows a large config that says off', async () => {
+    await withFakeHome(async (h) => {
+      const env = sessionEnv(h.path('net'), 'US')
+      let asked = 0
+      const fetcher = async () => {
+        asked++
+        return 'loc=HK\n'
+      }
+      assert.equal(
+        await runNetworkHook(['claude', 'PreToolUse'], { ...env, CI: 'true' }, sink(), { fetcher }),
+        0,
+      )
+      assert.equal(asked, 0)
+      const configFile = join(env.XDG_CONFIG_HOME, 'sideby', 'config.json')
+      await writeFile(
+        configFile,
+        `${JSON.stringify({ network: { allow: ['US'] } })}${' '.repeat(5 * 1024 * 1024)}`,
+      )
+      assert.equal(await runNetworkHook(['claude', 'PreToolUse'], env, sink(), { fetcher, print: 'p' }), 0)
+      assert.equal(asked, 0)
+    })
+  })
+
+  it('treats a missing config as off, and keeps the started-with list when config is not JSON', async () => {
+    await withFakeHome(async (h) => {
+      const env = sessionEnv(h.path('net'), 'US')
+      const configFile = join(env.XDG_CONFIG_HOME, 'sideby', 'config.json')
+      await writeFile(configFile, '{ not json')
+      const broken = sink()
+      assert.equal(
+        await runNetworkHook(['claude', 'UserPromptSubmit'], env, broken, {
+          fetcher: trace('HK'),
+          print: 'p',
+        }),
+        2,
+      )
+      assert.match(broken.lines.join(''), /美国（US）/)
+      const gone = sink()
+      const noConfig = { ...env, XDG_CONFIG_HOME: h.path('no-config') }
+      assert.equal(
+        await runNetworkHook(['claude', 'UserPromptSubmit'], noConfig, gone, {
+          fetcher: trace('HK'),
+          print: 'p',
+        }),
+        0,
+      )
+      assert.deepEqual(gone.lines, [])
     })
   })
 

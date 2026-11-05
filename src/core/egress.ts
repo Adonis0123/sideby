@@ -30,21 +30,28 @@ export const NETWORK_ENV = {
   dir: 'SIDEBY_NETWORK_DIR',
 } as const
 
+const set = (v: string | undefined) => v !== undefined && v !== '' && v !== '0' && v.toLowerCase() !== 'false'
+
+/** True in CI, where a notice is noise and a check is a request nobody reads. */
+export const inCi = (env: Record<string, string | undefined>): boolean =>
+  set(env.CI) || set(env.CONTINUOUS_INTEGRATION) || set(env.BUILD_NUMBER)
+
 /**
  * Config `network` as the file says now, read by hand (no schema) so a running session follows the Panel and
- * `sideby network on|off|allow`: `guard` is false when the switch is off or no country is allowed. Undefined when the
- * file cannot be read or is not JSON; the caller then keeps what the session was started with.
+ * `sideby network on|off|allow`: `guard` is false when the switch is off or no country is allowed, and when there is no
+ * config file (as for every other reader, no file means the defaults, where the check is off). Undefined when the file
+ * exists but cannot be read or is not JSON; the caller then keeps what the session was started with.
  */
 export async function readNetworkConfig(
   configFile: string,
 ): Promise<{ guard: boolean; allow: string[] } | undefined> {
-  // The config may be a link a dotfiles manager keeps; reading through it is fine.
+  // The config may be a link a dotfiles manager keeps; reading through it is fine. No size limit: every other config
+  // reader takes the whole file, and a limit would turn a large config that says "off" into the started-with list.
   let config: unknown
   try {
-    const text = await readFile(configFile, 'utf8')
-    if (text.length > 4 * 1024 * 1024) return undefined
-    config = JSON.parse(text)
-  } catch {
+    config = JSON.parse(await readFile(configFile, 'utf8'))
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { guard: false, allow: [] }
     return undefined
   }
   if (!config || typeof config !== 'object') return undefined
@@ -469,7 +476,12 @@ export function blockMessage(
         : opts.at === 'prompt'
           ? '检查代理是否开着、节点是否正确，然后重新发送这条消息。'
           : '检查代理是否开着、节点是否正确，然后让它继续。'
-    return `${what}${next}临时跳过：\`${skip}\`。`
+    // Inside a session `--ignore-network` only helps a new one; turning the check off reaches this one at once.
+    const skipZh =
+      opts.at === 'launch'
+        ? `临时跳过：\`${skip}\`。`
+        : `不想检查了：运行 \`sideby network off --yes\`，正在运行的会话也会马上放行；只跳过一次就新开会话：\`${skip}\`。`
+    return `${what}${next}${skipZh}`
   }
   const tried = tries > 1 ? ` after ${tries} tries in about ${secs} s` : ''
   const what =
@@ -482,5 +494,9 @@ export function blockMessage(
       : opts.at === 'prompt'
         ? 'Check that the proxy is on and the node is right, then send the message again.'
         : 'Check that the proxy is on and the node is right, then let it continue.'
-  return `${what} ${next} To skip once: \`${skip}\`.`
+  const skipEn =
+    opts.at === 'launch'
+      ? `To skip once: \`${skip}\`.`
+      : `To stop checking, run \`sideby network off --yes\`; sessions already running follow it at once. To skip once, start a new session: \`${skip}\`.`
+  return `${what} ${next} ${skipEn}`
 }

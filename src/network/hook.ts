@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process'
 import {
   blockMessage,
   type CheckMoment,
+  inCi,
   NETWORK_ENV,
   prefersChinese,
   readNetworkConfig,
@@ -62,6 +63,8 @@ export async function runNetworkHook(
   const dir = env[NETWORK_ENV.dir]
   // Not a session sideby started with Network Guard (the hook was copied somewhere): nothing to guard.
   if (!url || !dir) return 0
+  // In CI Network Guard makes no request (AGENTS.md, spec §3.35), also when a session's variables reach it there.
+  if (inCi(env)) return 0
   // The switch and the list as config says now, so turning the check off or allowing a country in the Panel or with
   // `sideby network` reaches sessions already running. When config cannot be read, the list the session started with.
   const current = await readNetworkConfig(resolvePaths(env).configFile)
