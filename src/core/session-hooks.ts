@@ -2,6 +2,7 @@
 // with each other and with Auto Handoff's (§3.17). Claude Code takes one `--settings`, so every part goes into one file
 // sideby writes in its state folder; Codex takes `-c hooks.<event>=[…]`, where a second value for the same event would
 // replace the first, so the entries of one event go into one value. Nothing is written into a Host directory.
+import { realpathSync } from 'node:fs'
 import { mkdir, readFile } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -22,11 +23,27 @@ export interface SessionHookPart {
 /**
  * The command a Host runs for a hook entry: this Node and this sideby by absolute path, never `sideby` by name. A
  * missing or older `sideby` on PATH would fail the hook, and a failing hook lets the Host go on.
+ *
+ * The path is the one this process was started by (`argv1`, such as the global `bin/sideby` link) when it leads to
+ * this sideby's entry, and the entry's real path otherwise. Node resolves links in `import.meta.url`, so the real path
+ * names one installed copy: a session started from a Local Build (`pnpm local`) would keep running that copy after
+ * `pnpm local --off` or an update. The started-by path follows whatever sideby is installed there now.
  */
-export function sidebyHookCommand(entry: string, family: string, event: string): string {
-  const main = fileURLToPath(
+export function sidebyHookCommand(
+  entry: string,
+  family: string,
+  event: string,
+  argv1: string | undefined = process.argv[1],
+): string {
+  const real = fileURLToPath(
     new URL(`../cli/main${extname(fileURLToPath(import.meta.url))}`, import.meta.url),
   )
+  let main = real
+  try {
+    if (argv1 && realpathSync(argv1) === realpathSync(real)) main = argv1
+  } catch {
+    // a started-by path that does not resolve: the real path
+  }
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
   const safe = (s: string) => !/["\\\n]/.test(s)
   const bin = safe(process.execPath) && safe(main) ? `${q(process.execPath)} ${q(main)}` : 'sideby'
