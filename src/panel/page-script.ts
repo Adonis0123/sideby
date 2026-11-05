@@ -14,6 +14,7 @@ import {
   askBridge,
   askBridged,
   askCopy,
+  askPermissionNote,
   attentionReasons,
   attentionWhy,
   autostartNote,
@@ -129,6 +130,7 @@ const LOGIC = [
   askBridge,
   askBridged,
   askCopy,
+  askPermissionNote,
   quotaAskable,
   stripSecrets,
   taskFindings,
@@ -7912,10 +7914,10 @@ const MAIN = String.raw`
     }
     if (rows.length) out.push(h('div', { class: 'ask-pick' }, rows))
     if (ak.account) {
-      // Families whose AI Tasks start with permission checks on (ADR-0031) say so after the confirm line.
+      // After the confirm line: the checks stay on (ADR-0031), or the Account's own arguments are used (ADR-0070).
       const acct = S.state && S.state.accounts.find((x) => x.ref === ak.account)
-      const safe = acct && family(acct.family).aiTaskSafe
-      out.push(h('p', { class: 'small' }, t('ask.confirm', { terminal: termName(ak.terminal || 'terminal'), ref: ak.account }) + (safe ? ' ' + t('ask.safe') : '')))
+      const note = acct ? askPermissionNote(S.state, acct.family) : null
+      out.push(h('p', { class: 'small' }, t('ask.confirm', { terminal: termName(ak.terminal || 'terminal'), ref: ak.account }) + (note ? ' ' + t(note) : '')))
     }
     return out
   }

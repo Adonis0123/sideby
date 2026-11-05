@@ -1423,6 +1423,20 @@ export function askCopy(
 }
 
 /**
+ * The message key the AI dialog adds after its confirm line for an Account of `family` (ADR-0031, ADR-0070): with
+ * config `ask.permissions: account` every AI Task starts with the Account's own arguments, so its checks may be off;
+ * otherwise a Family whose checks stay on says so, and any other Family adds nothing.
+ */
+export function askPermissionNote(
+  state: { aiTaskPermissions?: string; families?: { id: string; aiTaskSafe?: boolean }[] } | null,
+  family: string,
+): 'ask.accountArgs' | 'ask.safe' | null {
+  if (!state) return null
+  if (state.aiTaskPermissions === 'account') return 'ask.accountArgs'
+  return (state.families || []).some((f) => f.id === family && f.aiTaskSafe) ? 'ask.safe' : null
+}
+
+/**
  * Whether the Panel hands its AI Tasks to the Portal around it (ADR-0030): createPanelHandler was given
  * `ask: { bridge: 'postMessage' }` and the page sits in a frame. A Panel opened on its own is its own parent; it keeps
  * its header "Let AI do it" button and its own dialog. The page decides this when it loads.

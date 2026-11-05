@@ -703,6 +703,17 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
     feature: 'setting.terminal',
   },
   {
+    id: 'ask.permissions',
+    group: 'settings',
+    usage: 'sideby ask --permissions [checked|account] [--yes]',
+    help: "keep AI Tasks' permission checks on (checked, the default) or start them with the account's own arguments",
+    summary: {
+      en: "Keep AI Tasks' permission checks on, or use the account's own arguments",
+      zh: '让 AI 任务保持权限检查，或改用账号自己的参数',
+    },
+    example: 'sideby ask --permissions',
+  },
+  {
     id: 'update',
     group: 'settings',
     usage: 'sideby update [--yes]',

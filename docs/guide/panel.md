@@ -107,7 +107,11 @@ The rules the AI follows: it shows you a change before making it and waits for y
 
 The terminal starts in a folder of sideby's own, so the AI does not read one of your projects along the way.
 
-**The AI keeps its permission checks on.** An AI Task starts the account as `sideby run` would, except that it leaves out any argument in your account settings that skips the Host's permission checks. Claude Code starts in its auto mode: no routine questions, but risky actions such as running downloaded code, force pushes or deleting files you already had are checked first. Codex drops `--dangerously-bypass-approvals-and-sandbox` (`--yolo`) and follows your own Codex settings. Other tools start unchanged. Your own `sideby run` sessions keep every argument. Everything here also works without the panel: `sideby ask "add a DeepSeek API account"` (see [Commands](commands.md)).
+**The AI keeps its permission checks on.** An AI Task starts the account as `sideby run` would, except that it leaves out any argument in your account settings that skips the Host's permission checks. Claude Code starts in its auto mode: no routine questions, but risky actions such as running downloaded code, force pushes or deleting files you already had are checked first. Codex drops `--dangerously-bypass-approvals-and-sandbox` (`--yolo`) and follows your own Codex settings. Other tools start unchanged. Your own `sideby run` sessions keep every argument.
+
+If you want AI Tasks to start exactly like your own sessions, including a permission bypass you put in an account's arguments, run `sideby ask --permissions account`: it shows the change, and `--yes` saves config `ask.permissions`. sideby then adds nothing (no auto mode) and removes nothing, and the AI dialog says that the checks may be off. `sideby ask --permissions checked --yes` turns the checks back on. The panel has no switch for this on purpose.
+
+Everything here also works without the panel: `sideby ask "add a DeepSeek API account"` (see [Commands](commands.md)).
 
 ## Panel app
 

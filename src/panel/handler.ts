@@ -49,6 +49,8 @@ import {
   setBrowserSignIns,
 } from '../core/browser-profiles.ts'
 import {
+  type AiTaskPermissions,
+  aiTaskPermissions,
   aliasArgs,
   aliasRefs,
   type DisplayConfig,
@@ -311,7 +313,10 @@ export type PanelFamily = FamilyInfo & {
   keyAlways?: boolean
   /** What "Try it" runs (`sideby try`): the Host and the probe arguments; absent when it cannot be tried. */
   tryCommand?: string[]
-  /** AI Tasks start this Host with its permission checks on (`aiTaskArgs`, ADR-0031), so the AI dialog says so. */
+  /**
+   * AI Tasks start this Host with its permission checks on (`aiTaskArgs`, ADR-0031), so the AI dialog says so. Absent
+   * while config `ask.permissions` is `account` (ADR-0070).
+   */
   aiTaskSafe?: true
   /** "Refresh" can ask the Host for its Quota (`fetchQuota`); without it old numbers wait for a session (spec §3.31). */
   quotaRefresh?: true
@@ -319,6 +324,7 @@ export type PanelFamily = FamilyInfo & {
 
 function keyFacts(
   def: FamilyDef,
+  permissions: AiTaskPermissions,
 ): Pick<PanelFamily, 'keyVar' | 'keyAlways' | 'tryCommand' | 'aiTaskSafe' | 'quotaRefresh'> {
   let keyVar: string | null = null
   try {
@@ -328,7 +334,7 @@ function keyFacts(
     keyVar,
     ...(def.secretFileMeansApi === false ? { keyAlways: true } : {}),
     ...(def.probe ? { tryCommand: [def.bin, ...def.probe.args] } : {}),
-    ...(def.aiTaskArgs ? { aiTaskSafe: true as const } : {}),
+    ...(def.aiTaskArgs && permissions === 'checked' ? { aiTaskSafe: true as const } : {}),
     ...(def.fetchQuota ? { quotaRefresh: true as const } : {}),
   }
 }
@@ -378,6 +384,8 @@ export interface PanelState {
   readOnly: boolean
   generatedAt: string
   families: PanelFamily[]
+  /** Config `ask.permissions` when it is `account` (ADR-0070): AI Tasks start with the Account's own arguments. */
+  aiTaskPermissions?: 'account'
   accounts: PanelAccount[]
   pluginErrors: { where: string; message: string }[]
   quotaSetups: { family: string; summary: string; plan: QuotaSetupPlan }[]
@@ -1003,6 +1011,7 @@ async function buildState(
     .then((st) => withPendingIds(st, rt.paths.stateDir))
     .catch(() => undefined)
   const showBrowser = browser && (browser.families.matched.length || browser.families.openOnly.length)
+  const permissions = aiTaskPermissions(rt.config)
   return {
     schemaVersion: 1,
     version: opts.version,
@@ -1013,8 +1022,10 @@ async function buildState(
       const def = rt.families.get(f.id)
       const logo = def?.logo
       const g = f.brokenBin ? { ...f, brokenBin: tildify(f.brokenBin, ctx.home) } : f
-      return { ...g, ...(logo ? { logo } : {}), ...(def ? keyFacts(def) : {}) }
+      return { ...g, ...(logo ? { logo } : {}), ...(def ? keyFacts(def, permissions) : {}) }
     }),
+    // Config `ask.permissions: account` (ADR-0070): AI Tasks start with the Account's own arguments.
+    ...(permissions === 'account' ? { aiTaskPermissions: 'account' as const } : {}),
     accounts: list,
     pluginErrors: rt.pluginErrors.map((e) => ({ where: e.where, message: e.message })),
     quotaSetups,

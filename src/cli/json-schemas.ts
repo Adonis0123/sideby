@@ -2213,6 +2213,26 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     },
     { title: 'sideby ask --choices --json' },
   ),
+  'ask-permissions': Type.Object(
+    {
+      schemaVersion: Version,
+      permissions: Type.String({
+        enum: ['checked', 'account'],
+        description:
+          "Config `ask.permissions` now (ADR-0070): `checked` (the default) keeps the Host's permission checks on in AI Tasks; `account` starts them with the Account's own arguments, as `sideby run` does.",
+      }),
+      file: Type.String({ description: 'The config file, with `~` for the home folder.' }),
+      changed: Type.Optional(Type.Boolean({ description: 'With a value: the setting would change.' })),
+      applied: Type.Optional(
+        Type.Boolean({
+          description: 'False when only the change was shown; run again with --yes (exit 10).',
+        }),
+      ),
+      before: Type.Optional(Type.String({ enum: ['checked', 'account'] })),
+      after: Type.Optional(Type.String({ enum: ['checked', 'account'] })),
+    },
+    { title: 'sideby ask --permissions [checked|account] [--yes] --json' },
+  ),
   terminal: Type.Object({
     schemaVersion: Version,
     preferred: Type.Union([Str, Type.Null()]),

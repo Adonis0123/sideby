@@ -1,6 +1,6 @@
 # 0031. AI Tasks start Hosts without bypassing permissions
 
-Date: 2026-10-18 · Status: accepted · Amends ADR-0027
+Date: 2026-10-18 · Status: accepted, amended by ADR-0070 (config `ask.permissions`) · Amends ADR-0027
 
 ## Context
 

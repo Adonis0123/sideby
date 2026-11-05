@@ -303,6 +303,13 @@ export const ConfigSchema = Type.Object(
                 'The account AI Tasks start (`<family>:<name>` or a short command); sideby picks one without it.',
             }),
           ),
+          permissions: Type.Optional(
+            Type.String({
+              enum: ['checked', 'account'],
+              description:
+                "How AI Tasks start the Host (ADR-0070). `checked` (the default) removes the arguments that switch the Host's permission checks off and starts Claude Code in its auto mode (ADR-0031); `account` starts it with the Account's own arguments exactly as `sideby run` does, including a permission bypass you put there. Change it with `sideby ask --permissions`.",
+            }),
+          ),
         },
         { additionalProperties: false, description: 'AI Tasks (spec §3.28).' },
       ),
@@ -942,9 +949,47 @@ export function editConfigTerminal(file: string, patch: { preferred?: string; cu
     return Object.keys(next).length ? next : undefined
   })
 }
+/** Saves (or with no account removes) config `ask.account`, keeping the other `ask` keys. */
 export function editConfigAsk(file: string, account?: string) {
-  return editConfigKey(file, 'ask', 'run `sideby ask`', () => (account ? { account } : undefined))
+  return editConfigKey(file, 'ask', 'run `sideby ask`', (current) => {
+    const next = { ...current }
+    if (account) next.account = account
+    else delete next.account
+    return Object.keys(next).length ? next : undefined
+  })
 }
+
+export type AiTaskPermissions = 'checked' | 'account'
+
+/** Config `ask.permissions` (ADR-0070): how AI Tasks start the Host; `checked` when it is not set. */
+export function aiTaskPermissions(config: Pick<Config, 'ask'>): AiTaskPermissions {
+  return config.ask?.permissions === 'account' ? 'account' : 'checked'
+}
+
+/**
+ * `sideby ask --permissions` (ADR-0070): sets config `ask.permissions`; `checked`, the default, removes the key, and
+ * an empty `ask` goes away with it. With `dryRun`, shows the change without writing.
+ */
+export function editConfigAskPermissions(
+  file: string,
+  value: AiTaskPermissions,
+  opts: { dryRun?: boolean } = {},
+): Promise<{ changed: boolean; before: AskConfig | undefined; after: AskConfig | undefined }> {
+  return editConfigKey(
+    file,
+    'ask',
+    'run `sideby ask --permissions`',
+    (current) => {
+      const next: AskConfig = { ...current }
+      if (value === 'account') next.permissions = 'account'
+      else delete next.permissions
+      return Object.keys(next).length ? next : undefined
+    },
+    opts,
+  )
+}
+
+export type AskConfig = NonNullable<Config['ask']>
 
 export type PanelConfig = NonNullable<Config['panel']>
 

@@ -80,6 +80,14 @@
         "account": {
           "type": "string",
           "description": "The account AI Tasks start (`<family>:<name>` or a short command); sideby picks one without it."
+        },
+        "permissions": {
+          "type": "string",
+          "enum": [
+            "checked",
+            "account"
+          ],
+          "description": "How AI Tasks start the Host (ADR-0070). `checked` (the default) removes the arguments that switch the Host's permission checks off and starts Claude Code in its auto mode (ADR-0031); `account` starts it with the Account's own arguments exactly as `sideby run` does, including a permission bypass you put there. Change it with `sideby ask --permissions`."
         }
       },
       "additionalProperties": false,
