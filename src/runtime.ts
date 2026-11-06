@@ -11,6 +11,7 @@ import {
   type AliasValue,
   addConfigAlias,
   addConfigPickCommand,
+  aiTaskPermissions,
   aliasAccount,
   aliasArgs,
   aliasProblem,
@@ -385,7 +386,7 @@ export interface Runtime {
   writeShellInitFiles(shells?: readonly Shell[]): Promise<ShellInitWrite[]>
   /**
    * `opts.aiTask`: the Launch is an AI Task's (spec §3.28), so the Family's `aiTaskArgs` removes every permission
-   * bypass from it (ADR-0031). `sideby run` never sets it.
+   * bypass from it (ADR-0031), unless config `ask.permissions` is `account` (ADR-0070). `sideby run` never sets it.
    */
   prepareLaunch(
     ref: string,
@@ -1269,12 +1270,14 @@ export async function createRuntime(
       if (fresh) {
         config.accounts = fresh.accounts
         config.unattended = fresh.unattended
+        config.ask = fresh.ask
       }
       const all = await accounts()
       const inputs = launchInputs(ref, all, userArgs, command)
       const p = await prepareLaunch({
         ...inputs,
-        ...(opts.aiTask ? { aiTask: true } : {}),
+        // Config `ask.permissions: account` (ADR-0070): the AI Task keeps the Account's own arguments, as `run` does.
+        ...(opts.aiTask && aiTaskPermissions(config) === 'checked' ? { aiTask: true } : {}),
         label: launchLabel(ref, inputs.account, all),
         baseEnv: env,
         bus,

@@ -258,9 +258,13 @@ describe('blockMessage', () => {
     assert.match(zh, /美国（US）、日本（JP）/)
     assert.match(zh, /重新发送这条消息/)
     assert.match(zh, /sideby run cc008 --ignore-network/)
+    assert.match(zh, /sideby network off --yes/)
     const en = blockMessage(v, ['US'], { ref: 'cc008', at: 'launch', zh: false })
     assert.match(en, /exits in HK/)
     assert.match(en, /start again/)
+    assert.doesNotMatch(en, /network off/)
+    const tool = blockMessage(v, ['US'], { ref: 'cc008', at: 'tool', zh: false })
+    assert.match(tool, /run `sideby network off --yes`; sessions already running follow it at once/)
   })
   it('says it could not tell when there is no country', () => {
     const { loc: _, ...none } = entry({ error: 'no answer within 3 seconds' })

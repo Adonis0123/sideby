@@ -44,6 +44,7 @@
 | `pickCommands` | 自动选号命令：短名到家族的映射（`{ "cc": "claude" }`）。每次运行启动这个家族额度最多的账号，都没有额度数据时启动主账号。与 `aliases` 共用一套名字；用 `sideby alias add <短名> --pick <family>` 添加。 |
 | `shellInitFile` | 可选，`{ "zsh": …, "bash": … }`，绝对路径或以 `~/` 开头。sideby 每次新增账号、新增或删除别名（`sideby new`、`sideby alias`、面板）后，都用 `sideby shell-init <shell>` 的输出重写这些文件，source 它的 shell 就能用上新命令。不是 `shell-init` 写的文件，它不会覆盖。 |
 | `accountTitle` | 可选，默认关。设为 `true` 时，启动账号会把终端标签页标题设成 `[<短命令或 ref>]`，并用 `-c tui.terminal_title=[]` 启动 Codex，让它保留这个标题（你的参数里自己设了 `tui.terminal_title` 时不加）。其他宿主可能换成自己的标题；见[在会话里显示是哪个账号](usage.zh-CN.md#在会话里显示是哪个账号)。 |
+| `ask.permissions` | 可选，默认 `"checked"`。AI Task（面板的「让 AI 帮我」、`sideby ask`）怎样启动账号：`"checked"` 去掉跳过宿主权限检查的参数，Claude Code 用 auto 模式启动；`"account"` 像 `sideby run` 一样用账号自己的参数，包括你放进去的跳过权限检查的参数。用 `sideby ask --permissions account` 改（先显示改动，加 `--yes` 才保存）。见[让 AI 帮我](panel.zh-CN.md#让-ai-帮我)。 |
 | `claudeMod` | 可选，默认开。sideby 启动 Claude Code 账号（2.1.287 及以上，不是 `-p`）时加 `--plugin-dir`，带上 sideby 的 mod：提示框上方显示 Session Label，收到消息时弹提示，多一个 `/sessions` 面板。设为 `false` 时不带。sideby 对每个装好的 claude 只问一次 `claude --version`，答案存在它的状态目录里。 |
 | `editor` | 可选，默认 `system`。`sideby edit` 和面板的「打开 settings.json」用什么打开账号的设置文件：`system` 用系统默认程序；`cursor`、`vscode`、`windsurf`、`zed` 通过编辑器自己的命令行启动它（macOS 先用应用里自带的那个，再用 PATH 上的命令，最后 `open -a`）。默认程序只弹出窗口、没打开文件时（当前版本的 Cursor 作为默认文本编辑器时只显示它的 Agents 窗口），选你的编辑器。面板里在「设置 › 设置文件用什么打开」改；`sideby edit --with <编辑器>` 只这一次用某个编辑器。 |
 | `resumeRouting` | 可选，默认关。设为 `true` 时，`shell-init` 还会生成与宿主同名的函数（`claude`、`codex`、`grok`），按 id 恢复会话时转到存有该会话的账号；见[从其他工具恢复会话](#从其他工具恢复会话)。 |

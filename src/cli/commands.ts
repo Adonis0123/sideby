@@ -12,12 +12,15 @@ import {
 } from '../core/browser-profiles.ts'
 import { CLI_COMMANDS, type CliCommand, COMMAND_GROUPS, commonCommands } from '../core/cli-commands.ts'
 import {
+  aiTaskPermissions,
   aliasAccount,
   aliasArgs,
   aliasRefs,
   type DisplayConfig,
   EDITORS,
+  editConfigAskPermissions,
   editConfigUpdate,
+  loadConfig,
 } from '../core/config.ts'
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import type { DoctorReport } from '../core/doctor.ts'
@@ -2642,6 +2645,9 @@ export async function cmdAsk(a: AskArgs, io: Io, runtime?: Runtime): Promise<num
     }
   }
   if (a.flags.has('spec') || a.flags.has('choices')) return cmdAskSpec(a, io, runtime)
+  if (a.flags.has('permissions')) return cmdAskPermissions(a, io, runtime)
+  if (a.flags.has('yes'))
+    throw new UsageError('--yes goes with `sideby ask --permissions checked|account`; a task needs no --yes.')
   const rt = runtime ?? (await createRuntime())
   const task = String(a.flags.get('task') ?? 'free')
   if (!AI_TASK_KINDS.includes(task as AiTaskKind))
@@ -2672,9 +2678,14 @@ export async function cmdAsk(a: AskArgs, io: Io, runtime?: Runtime): Promise<num
   return result.opened ? 0 : 1
 }
 
-/** What `sideby ask` prints once the terminal opened; a Family with `aiTaskArgs` adds that its checks stay on. */
+/**
+ * What `sideby ask` prints once the terminal opened: with config `ask.permissions: account` that the Host gets the
+ * Account's own arguments (ADR-0070); otherwise a Family with `aiTaskArgs` adds that its checks stay on (ADR-0031).
+ */
 async function openedLine(rt: Runtime, result: { terminal: string | null; account: string | null }) {
   const line = `Opened ${result.terminal} for ${result.account}.`
+  if (aiTaskPermissions(rt.config) === 'account')
+    return `${line} ${c.yellow("It starts with the account's own arguments, so its permission checks may be off.")}`
   const family = result.account
     ? await rt.resolve(result.account).then(
         (a) => rt.families.get(a.family),
@@ -2685,6 +2696,68 @@ async function openedLine(rt: Runtime, result: { terminal: string | null; accoun
     ? `${line} Its permission checks stay on, so risky actions are checked first.`
     : line
 }
+
+/**
+ * `sideby ask --permissions [checked|account] [--yes]` (ADR-0070): shows config `ask.permissions`, or changes it after
+ * showing the change (exit 10 without `--yes`, in both directions).
+ */
+async function cmdAskPermissions(a: AskArgs, io: Io, runtime?: Runtime): Promise<number> {
+  const usage =
+    'Use `sideby ask --permissions [checked|account] [--yes] [--json]` on its own, without a task or its text.'
+  const others = [...a.flags.keys()].filter((f) => f !== 'permissions' && f !== 'yes' && f !== 'json')
+  const [value, ...more] = a.positionals
+  if (others.length || more.length || a.rest.length || a.attach?.length) throw new UsageError(usage)
+  if (value !== undefined && value !== 'checked' && value !== 'account')
+    throw new UsageError(
+      `Choose \`checked\` (permission checks stay on, the default) or \`account\` (the account's own arguments): sideby ask --permissions account`,
+    )
+  const paths = runtime?.paths ?? resolvePaths()
+  const file = tildify(paths.configFile, paths.home)
+  const wantJson = a.flags.has('json')
+  if (value === undefined) {
+    if (a.flags.has('yes')) throw new UsageError(usage)
+    const now = aiTaskPermissions(await loadConfig(paths.configFile))
+    if (wantJson) json(io, { permissions: now, file })
+    else {
+      io.out(`AI Tasks: ${PERMISSION_WORDS[now]} (ask.permissions = ${now}).`)
+      io.out(
+        c.cyan(
+          now === 'checked'
+            ? "To start them with the account's own arguments instead: `sideby ask --permissions account`."
+            : 'To turn the permission checks back on: `sideby ask --permissions checked`.',
+        ),
+      )
+    }
+    return 0
+  }
+  const yes = a.flags.has('yes')
+  const r = await editConfigAskPermissions(paths.configFile, value, { dryRun: !yes })
+  const before = aiTaskPermissions({ ask: r.before })
+  const after = aiTaskPermissions({ ask: r.after })
+  const applied = r.changed && yes
+  if (wantJson)
+    json(io, { permissions: applied ? after : before, changed: r.changed, applied, file, before, after })
+  else if (!r.changed) io.out(`Nothing to change: AI Tasks already ${PERMISSION_WORDS[after]}.`)
+  else if (!applied) {
+    io.out(`Change to ${file}: ask.permissions ${before} → ${after}`)
+    io.out(
+      after === 'account'
+        ? c.yellow(
+            "AI Tasks (the Panel's Ask AI, `sideby ask`, Task Specs) will start each account with its own arguments, as `sideby run` does, including any that switch the permission checks off (such as Claude Code's --dangerously-skip-permissions). sideby adds no --permission-mode auto.",
+          )
+        : c.dim(
+            'AI Tasks will leave out the arguments that switch the permission checks off, and Claude Code starts in its auto mode.',
+          ),
+    )
+    io.out(c.cyan(`Apply it with \`sideby ask --permissions ${after} --yes\`.`))
+  } else io.out(`${c.green('✓')} AI Tasks now ${PERMISSION_WORDS[after]}.`)
+  return r.changed && !yes ? 10 : 0
+}
+
+const PERMISSION_WORDS = {
+  checked: 'keep the permission checks on',
+  account: "start with the account's own arguments, so the permission checks may be off",
+} as const
 
 /**
  * `sideby ask --spec - [--print]` and `sideby ask --choices` (ADR-0030): the AI Tasks a Portal starts. The Task Spec

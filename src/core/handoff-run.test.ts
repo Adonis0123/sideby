@@ -246,6 +246,34 @@ if (process.env.SIDEBY_HANDOFF_DIR) fs.writeFileSync(path.join(process.env.SIDEB
     })
   })
 
+  for (const permissions of ['checked', 'account'] as const)
+    it(`an AI Task with ask.permissions ${permissions} starts every Account it hands over to the same way (ADR-0070)`, async () => {
+      await withFakeHome(async (h) => {
+        await fakeHost(h, 'claude', { sleep: 20, onStart: READY_ON_FIRST_RUN })
+        const rt = await setup(h, { auto: true, sameFamily: true, countdownSeconds: 0 })
+        const bypass = { args: ['--dangerously-skip-permissions'] }
+        await h.write(
+          '.config/sideby/config.json',
+          JSON.stringify({
+            aliases: { cc001: 'claude:001' },
+            accounts: { 'claude:001': bypass, 'claude:002': bypass },
+            handoff: { auto: true, sameFamily: true, countdownSeconds: 0 },
+            ...(permissions === 'account' ? { ask: { permissions } } : {}),
+          }),
+        )
+        const io = { err: () => {}, stdin: terminal() }
+        const code = await runWithHandoff(rt, 'cc001', ['hi'], io, { aiTask: true })
+        assert.equal(code, 0)
+        const starts = (await readHostLog(h, 'claude')).filter((r) => r.argv)
+        assert.equal(starts.length, 2)
+        for (const s of starts) {
+          const before = s.argv.includes('--') ? s.argv.slice(0, s.argv.indexOf('--')) : s.argv
+          assert.equal(before.includes('--dangerously-skip-permissions'), permissions === 'account')
+          assert.equal(before.join(' ').includes('--permission-mode auto'), permissions === 'checked')
+        }
+      })
+    })
+
   it('hands over to the account a manual request names, not the first in line', async () => {
     await withFakeHome(async (h) => {
       const toThree = READY_ON_FIRST_RUN.replace("sessionId: 's1'", "sessionId: 's1', to: 'claude:003'")

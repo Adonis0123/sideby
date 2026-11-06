@@ -13,6 +13,7 @@ import {
   aliasIssue,
   aliasPrefix,
   askCopy,
+  askPermissionNote,
   attentionReasons,
   attentionWhy,
   autostartNote,
@@ -1475,6 +1476,24 @@ describe('fileSize', () => {
     assert.equal(fileSize(300 * 1024), '300 KB')
     assert.equal(fileSize(1.25 * 1024 * 1024), '1.3 MB')
     assert.equal(fileSize(150 * 1024 * 1024), '150 MB')
+  })
+})
+
+describe('askPermissionNote (ADR-0031, ADR-0070)', () => {
+  const families = [{ id: 'claude', aiTaskSafe: true }, { id: 'grok' }]
+  it('says the checks stay on only for a Family that keeps them on', () => {
+    assert.equal(askPermissionNote({ families }, 'claude'), 'ask.safe')
+    assert.equal(askPermissionNote({ families }, 'grok'), null)
+    assert.equal(askPermissionNote(null, 'claude'), null)
+  })
+  it("says every AI Task starts with the account's own arguments when the setting is account", () => {
+    const state = { aiTaskPermissions: 'account', families: [{ id: 'claude' }, { id: 'grok' }] }
+    assert.equal(askPermissionNote(state, 'claude'), 'ask.accountArgs')
+    assert.equal(askPermissionNote(state, 'grok'), 'ask.accountArgs')
+    for (const key of ['ask.safe', 'ask.accountArgs']) {
+      assert.ok(MESSAGES.en[key], key)
+      assert.ok(MESSAGES.zh[key], key)
+    }
   })
 })
 

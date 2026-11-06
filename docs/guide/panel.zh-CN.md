@@ -109,7 +109,11 @@ AI 要守的规则：改东西之前先给你看改动，等你同意；从不�
 
 终端从 sideby 自己的一个目录开始，AI 不会顺手读你的某个项目。
 
-**AI 的权限检查保持开启。** AI Task 像 `sideby run` 一样启动账号，只是去掉账号设置里跳过宿主权限检查的参数。Claude Code 用它的 auto 模式启动：日常操作不打断你，但运行下载来的代码、force push、删掉你原有的文件这类有风险的操作会先经过检查。Codex 去掉 `--dangerously-bypass-approvals-and-sandbox`（`--yolo`），按你自己的 Codex 设置来。其他工具照旧启动。你自己用 `sideby run` 开的会话，参数一个不少。这些不用面板也能做：`sideby ask "帮我加一个 DeepSeek API 账号"`（见[命令](commands.zh-CN.md)）。
+**AI 的权限检查保持开启。** AI Task 像 `sideby run` 一样启动账号，只是去掉账号设置里跳过宿主权限检查的参数。Claude Code 用它的 auto 模式启动：日常操作不打断你，但运行下载来的代码、force push、删掉你原有的文件这类有风险的操作会先经过检查。Codex 去掉 `--dangerously-bypass-approvals-and-sandbox`（`--yolo`），按你自己的 Codex 设置来。其他工具照旧启动。你自己用 `sideby run` 开的会话，参数一个不少。
+
+想让 AI Task 和你自己的会话一模一样启动（包括你放在账号参数里的跳过权限检查的参数），运行 `sideby ask --permissions account`：它先显示要改什么，加 `--yes` 才保存 config `ask.permissions`。之后 sideby 什么也不加（不加 auto 模式），也什么都不去掉，AI 对话框会说权限检查可能是关着的。`sideby ask --permissions checked --yes` 把检查打开回来。面板上特意不放这个开关。
+
+这些不用面板也能做：`sideby ask "帮我加一个 DeepSeek API 账号"`（见[命令](commands.zh-CN.md)）。
 
 ## 面板应用
 

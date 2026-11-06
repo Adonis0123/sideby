@@ -513,6 +513,32 @@ describe('AI Task routes', () => {
     })
   })
 
+  it('says in the state when AI Tasks start with the account arguments, and keeps that setting when an account is picked (ADR-0070)', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      await h.write('.config/sideby/config.json', JSON.stringify({ ask: { permissions: 'account' } }))
+      const s = await serve(h, { calls: [], code: 0 })
+      try {
+        const state = JSON.parse(
+          (await request(s.port, 'GET', '/api/state', { host: `127.0.0.1:${s.port}` })).text,
+        )
+        assert.equal(state.aiTaskPermissions, 'account')
+        assert.equal(state.families.find((f: { id: string }) => f.id === 'claude').aiTaskSafe, undefined)
+        await post(s.port, '/api/ask', { account: 'claude:main' }, s.good)
+        const config = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8'))
+        assert.deepEqual(config.ask, { permissions: 'account', account: 'claude:main' })
+        await h.write('.config/sideby/config.json', JSON.stringify({ ask: { permissions: 'checked' } }))
+        const checked = JSON.parse(
+          (await request(s.port, 'GET', '/api/state', { host: `127.0.0.1:${s.port}` })).text,
+        )
+        assert.equal(checked.aiTaskPermissions, undefined)
+        assert.equal(checked.families.find((f: { id: string }) => f.id === 'claude').aiTaskSafe, true)
+      } finally {
+        await s.close()
+      }
+    })
+  })
+
   it('tries an account with the Host and hides the key in what it printed', async () => {
     await withFakeHome(async (h) => {
       await seed(h)

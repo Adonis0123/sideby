@@ -11,8 +11,17 @@ You are inside such a session when the first message came from sideby and names 
 - Never sign in for the user. Tell them to click **Sign in** on the account in the Panel, or to run `sideby login <ref>` in their own terminal.
 - Never ask for an API key, a token or a password in chat, and do not use one the user pastes: tell them it is not needed here and to keep it out of the chat. A key goes in with `sideby key <ref>`, which the user runs in their own terminal (or **Enter key** in the Panel); it reads the key without showing it.
 - Do not run `sideby ask` to start another AI Task yourself.
-- sideby started this session with the Host's permission checks on (ADR-0031): it left out any permission bypass in the account's arguments, and Claude Code runs in auto mode, which checks risky actions first. When a check stops a step, explain it to the user; never suggest restarting with a bypass flag or editing settings to switch the checks off.
+- By default sideby started this session with the Host's permission checks on (ADR-0031): it left out any permission bypass in the account's arguments, and Claude Code runs in auto mode, which checks risky actions first. When a check stops a step, explain it to the user; never suggest restarting with a bypass flag, editing settings to switch the checks off, or `sideby ask --permissions account` (see [AI Task permissions](#ai-task-permissions)). When the user set `ask.permissions` to `account`, the session got the account's own arguments, so the checks may be off: ask before every change all the same.
 - Say what you changed when you finish.
+
+## AI Task permissions
+
+Config `ask.permissions` decides how every AI Task starts the account (ADR-0070). `checked`, the default, leaves out the arguments that skip the Host's permission checks and starts Claude Code in auto mode. `account` starts it with the account's own arguments, exactly as `sideby run` does, including a bypass such as `--dangerously-skip-permissions`; sideby adds no auto mode. The Panel has no switch for it on purpose.
+
+- Read it with `sideby ask --permissions --json` (`{ permissions, file }`).
+- Change it only when the user asks for it in their own words ("let AI Tasks skip permission prompts like my own sessions", "让 AI 任务也用我账号的参数", "AI 任务别再加 auto 模式"). Run `sideby ask --permissions account --json`: it exits 10 with `before` and `after`. Tell the user plainly that AI Tasks will then start with their account's own arguments and may run without permission checks, and add `--yes` only after a clear yes.
+- `sideby ask --permissions checked --json` turns the checks back on; it also exits 10 first. Offer it when the user is unhappy with what an AI Task did without asking.
+- Never switch it to `account` to get past a check that stopped you, and never suggest it as a fix.
 
 ## Attached files
 

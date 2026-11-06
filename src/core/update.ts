@@ -7,7 +7,7 @@ import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Env } from '../types.ts'
 import { afterInstall, runSkillUpdate } from './after-install.ts'
-import { fetchTrace, proxyFor } from './egress.ts'
+import { fetchTrace, inCi, proxyFor } from './egress.ts'
 import { writeFileAtomic } from './fs-safe.ts'
 import { processAlive, takeFileLock } from './lock.ts'
 import type { Paths } from './paths.ts'
@@ -304,9 +304,8 @@ export function sameLine(from: string, to: string): boolean {
 
 const set = (v: string | undefined) => v !== undefined && v !== '' && v !== '0' && v.toLowerCase() !== 'false'
 
-/** True in CI, where a notice is noise and a check is a request nobody reads. */
-export const inCi = (env: Env): boolean =>
-  set(env.CI) || set(env.CONTINUOUS_INTEGRATION) || set(env.BUILD_NUMBER)
+// `inCi` lives in core/egress.ts, a leaf module `network-hook` may import.
+export { inCi }
 
 type UpdateSettings = { update?: { check?: boolean; auto?: boolean } }
 
