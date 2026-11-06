@@ -52,6 +52,10 @@
       },
       "description": "The program and arguments that opened the file."
     },
+    "editor": {
+      "type": "string",
+      "description": "What opened it: `system` (the default program) or the editor from config `editor` or `--with`."
+    },
     "_notice": {
       "type": "object",
       "properties": {

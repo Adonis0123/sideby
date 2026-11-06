@@ -74,6 +74,17 @@
       "additionalProperties": false,
       "description": "The terminal AI Tasks open in (spec §3.28)."
     },
+    "editor": {
+      "type": "string",
+      "enum": [
+        "system",
+        "cursor",
+        "vscode",
+        "windsurf",
+        "zed"
+      ],
+      "description": "The editor `sideby edit` and the Panel open an account’s settings file with: `system` (the default) uses the system’s default program; `cursor`, `vscode`, `windsurf` and `zed` start that editor."
+    },
     "ask": {
       "type": "object",
       "properties": {

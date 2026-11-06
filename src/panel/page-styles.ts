@@ -896,6 +896,12 @@ ${UI_CSS}
 .pop-settings { width: 340px; }
 .set-group { display: flex; flex-direction: column; gap: 8px; }
 .set-check .set-label { white-space: normal; }
+/* A row whose choices need the full width (the editor for settings files): the words on top, the choices below. */
+.set-stack { flex-direction: column; align-items: flex-start; gap: 8px; }
+/* Five choices do not fit a phone's width on one line: they wrap as whole buttons instead of breaking their labels. */
+.set-stack .seg { flex-wrap: wrap; height: auto; max-width: 100%; }
+.set-stack .seg-btn { height: calc(var(--ctl-h-sm) - 10px); white-space: nowrap; }
+.set-stack .seg { max-width: 100%; overflow-x: auto; }
 .set-link .menu-label { flex: 1 1 auto; min-width: 0; white-space: normal; line-height: 1.3; }
 .set-link { height: auto; min-height: 32px; padding-top: 8px; padding-bottom: 8px; }
 .set-link .chip { flex: none; }

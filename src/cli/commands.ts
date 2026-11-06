@@ -17,13 +17,14 @@ import {
   aliasArgs,
   aliasRefs,
   type DisplayConfig,
+  EDITORS,
   editConfigAskPermissions,
   editConfigUpdate,
   loadConfig,
 } from '../core/config.ts'
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import type { DoctorReport } from '../core/doctor.ts'
-import { editSettings } from '../core/edit-settings.ts'
+import { EDITOR_APPS, editSettings, isEditor } from '../core/edit-settings.ts'
 import { UserError } from '../core/errors.ts'
 import { requestHandoff } from '../core/handoff-chain.ts'
 import { handoffOverview } from '../core/handoff-overview.ts'
@@ -2286,19 +2287,29 @@ export async function cmdDesktop(a: ParsedArgs, io: Io): Promise<number> {
   return 0
 }
 
-/** `sideby edit <account> [--path]`: the Account's Host settings file in the user's editor (spec §3.30, ADR-0033). */
+/**
+ * `sideby edit <account> [--path] [--with <editor>]`: the Account's Host settings file in the user's editor (spec §3.30,
+ * ADR-0033).
+ */
 export async function cmdEdit(a: ParsedArgs, io: Io): Promise<number> {
   const [ref, ...extra] = a.positionals
-  if (!ref || extra.length || a.rest.length) throw new UsageError('usage: sideby edit <account> [--path]')
+  const usage = 'usage: sideby edit <account> [--path] [--with <editor>]'
+  if (!ref || extra.length || a.rest.length) throw new UsageError(usage)
+  const editor = a.flags.get('with')
+  if (editor !== undefined && !isEditor(editor))
+    throw new UsageError(`--with takes one of ${EDITORS.join(', ')}; ${usage}`)
   const rt = await createRuntime()
-  const r = await editSettings(rt, ref, { open: !a.flags.has('path') })
+  const r = await editSettings(rt, ref, { open: !a.flags.has('path'), ...(editor ? { editor } : {}) })
   if (a.flags.has('json')) {
     json(io, r)
     return 0
   }
   const home = rt.paths.home
   if (!r.opened) io.out(r.target ?? r.path)
-  else io.out(`${c.green('✓')} opened ${c.bold(r.ref)}'s ${r.file} with your default program`)
+  else
+    io.out(
+      `${c.green('✓')} opened ${c.bold(r.ref)}'s ${r.file} with ${r.editor && r.editor !== 'system' ? EDITOR_APPS[r.editor].title : 'your default program'}`,
+    )
   if (r.opened || r.target)
     io.out(
       c.dim(

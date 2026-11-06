@@ -222,6 +222,13 @@ export const UnattendedSlotSchema = Type.Object(
   { additionalProperties: false },
 )
 
+/**
+ * What `sideby edit` and the Panel's "Open settings.json" open the file with (spec §3.30, ADR-0033): `system` is the
+ * system's default program; the others are editors sideby starts through their own command line.
+ */
+export const EDITORS = ['system', 'cursor', 'vscode', 'windsurf', 'zed'] as const
+export type EditorChoice = (typeof EDITORS)[number]
+
 export const ConfigSchema = Type.Object(
   {
     $schema: Type.Optional(Type.String()),
@@ -293,6 +300,13 @@ export const ConfigSchema = Type.Object(
         },
         { additionalProperties: false, description: 'The terminal AI Tasks open in (spec §3.28).' },
       ),
+    ),
+    editor: Type.Optional(
+      Type.String({
+        enum: [...EDITORS],
+        description:
+          'The editor `sideby edit` and the Panel open an account’s settings file with: `system` (the default) uses the system’s default program; `cursor`, `vscode`, `windsurf` and `zed` start that editor.',
+      }),
     ),
     ask: Type.Optional(
       Type.Object(

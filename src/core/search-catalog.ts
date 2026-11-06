@@ -166,6 +166,15 @@ const ENTRIES: SearchEntry[] = [
     cliCommand: 'sideby terminal',
   },
   {
+    id: 'setting.editor',
+    kind: 'setting',
+    title: { en: 'Open settings files in', zh: '设置文件用什么打开' },
+    synonyms: ['editor', 'cursor', 'vscode', 'vs code', 'zed', 'windsurf', 'settings.json', '编辑器'],
+    panel: at(SET, GENERAL),
+    target: { settings: 'general', find: 'editor' },
+    cliCommand: 'sideby config set editor cursor',
+  },
+  {
     id: 'setting.menubar',
     kind: 'setting',
     title: { en: 'Show quota in the menu bar', zh: '在状态栏显示额度' },

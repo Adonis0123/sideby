@@ -53,6 +53,11 @@ export interface PageOptions {
    * hides the header button; opened on its own, the Panel keeps both.
    */
   ask?: { bridge: 'postMessage' }
+  /**
+   * createPanelHandler's `open`: with the bridge, inside a frame, "Open settings.json" posts the file's real path to
+   * the Portal, which opens it; opened on its own, the Panel's server opens it.
+   */
+  open?: { bridge: 'postMessage' }
   /** Config `panel` (spec §3.29): the theme and language saved for the Panel. */
   panel?: { theme?: string; language?: string }
 }
@@ -90,6 +95,7 @@ export function renderPage(opts: PageOptions): string {
     readOnly: Boolean(opts.readOnly),
     updates: opts.updates !== false,
     ask: opts.ask ?? null,
+    open: opts.open ?? null,
     colorScheme: theme.colorScheme,
     lang,
     panel: opts.panel ?? {},

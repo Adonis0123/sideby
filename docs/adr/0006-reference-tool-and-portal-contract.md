@@ -64,6 +64,10 @@ A Portal can show controls of its own for something the Panel shows too (an Unat
 - The message only starts a read: it carries no data and can change nothing. It needs no handler option, like every other addition here it is compatible, and the CSP and the Host, Origin and token checks do not change.
 - What any Portal that changes sideby's state outside the Panel should do: post that message to the Panel's frame with the Panel's origin as the target, after the change has landed.
 
+## Amendment (2026-11-04): a Portal opens settings files
+
+ADR-0033's amendment adds `open?: { bridge: 'postMessage' }`, added like every other option (compatible) and checked when the handler is created. With it, a Panel inside a frame posts `{ type: 'local-tools:open', version: 1, path }` (an absolute path, never file content) to `window.parent` at its own origin when the user opens an account's settings file, for a Portal that opens files with an app the user chose there. The CSP and the Host, Origin and token checks do not change.
+
 ## Why not the others
 
 - **One package for every tool, sideby as a plugin of it**: one install, but sideby's published scope would change and one failing tool would break the others.

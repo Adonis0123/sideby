@@ -127,7 +127,7 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
   {
     id: 'edit',
     group: 'accounts',
-    usage: 'sideby edit <account> [--path]',
+    usage: 'sideby edit <account> [--path] [--with <editor>]',
     help: "open the account's own settings file (settings.json, config.toml) in your editor",
     summary: {
       en: "Open an account's own settings file in your editor",

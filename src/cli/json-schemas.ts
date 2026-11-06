@@ -1776,6 +1776,12 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       command: Type.Optional(
         Type.Array(Str, { description: 'The program and arguments that opened the file.' }),
       ),
+      editor: Type.Optional(
+        Type.String({
+          description:
+            'What opened it: `system` (the default program) or the editor from config `editor` or `--with`.',
+        }),
+      ),
     },
     { title: 'sideby edit --json' },
   ),
