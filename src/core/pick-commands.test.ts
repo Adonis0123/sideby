@@ -98,3 +98,14 @@ test('the pick: most room with data, the main account without any data, nothing 
   // No subscription main (the main directory is an API account): no fallback to it, and never an API pick.
   assert.equal(choosePick(plan([e('claude:main', 'api')], 'claude:main', false), null).ref, null)
 })
+
+test('an Expired Login is neither the fallback main account nor started, and is named to sign in (ADR-0071)', () => {
+  const skip = { reason: 'login-expired' as const, command: 'sideby login claude:main' }
+  const main = { ...e('claude:main', 'unknown'), skip }
+  // Without quota data the main account would start; expired, it does not.
+  const none = choosePick(plan([main], null, false), 'claude:main')
+  assert.equal(none.ref, null)
+  assert.deepEqual(none.ref === null ? none.signIn : [], ['claude:main'])
+  const other = choosePick(plan([e('claude:work', 'unknown'), main], 'claude:work', false), 'claude:main')
+  assert.equal(other.ref, 'claude:work')
+})

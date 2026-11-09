@@ -60,6 +60,7 @@ import {
   prepareLaunch,
   which,
 } from './core/launch.ts'
+import { loginMarkFile, readLoginMark, writeLoginMark } from './core/login-mark.ts'
 import { memoStore } from './core/memo-store.ts'
 import {
   codexNetworkTrustLine,
@@ -74,8 +75,15 @@ import {
 import { type Paths, resolvePaths } from './core/paths.ts'
 import { choosePick, type PickChoice, suggestPickName } from './core/pick-commands.ts'
 import { categoryReader, type ProjectCategories } from './core/project-categories.ts'
-import { fetchedQuota, type QuotaFetchMode, quotaCheckOff, shownQuota } from './core/quota-fetch.ts'
+import {
+  fetchedQuota,
+  loginProblemOf,
+  type QuotaFetchMode,
+  quotaCheckOff,
+  shownQuota,
+} from './core/quota-fetch.ts'
 import { takeoverLimits } from './core/quota-levels.ts'
+import { quotaStoreFile, readQuotaStore } from './core/quota-store.ts'
 import {
   type RemoteControlChange,
   type RemoteControlGroup,
@@ -138,6 +146,7 @@ import type {
   AccountIdentity,
   Env,
   FamilyDef,
+  LoginProblem,
   LoginState,
   QuotaResult,
   QuotaSetup,
@@ -265,6 +274,11 @@ export interface AccountStatus extends Account {
   hostInstalled: boolean
   /** `not-needed` for API Accounts, which authenticate with their Secret File. */
   login: LoginState | 'not-needed'
+  /**
+   * Set when the Account is signed in but its Host has reported that the login expired (an Expired Login, ADR-0071).
+   * Only for Subscription Accounts of a Family that can tell.
+   */
+  loginProblem?: LoginProblem
   model?: string
   /** Who the Account is signed in as (email, organization), when its Family can tell. */
   identity?: AccountIdentity
@@ -444,6 +458,13 @@ export interface Runtime {
   setDisplayOrder(display: DisplayConfig | undefined): Promise<DisplayConfig>
   /** The other Accounts signed in as the same login as this one (spec §3.21), in discovery order; empty when none. */
   sameLogin(account: Account): Promise<string[]>
+  /** The Account's Expired Login (ADR-0071), or undefined when it has none or its Family cannot tell. */
+  loginProblem(account: Account): Promise<LoginProblem | undefined>
+  /**
+   * After a sign-in that sideby started finished with exit 0 (ADR-0071 Q9): remembers when, and asks the Account's
+   * Quota once when Quota checks are on, so a good answer clears an Expired Login. Returns what is left of it.
+   */
+  afterLogin(account: Account): Promise<{ loginProblem?: LoginProblem; checked: boolean }>
   usage(account: Account): Promise<UsageResult>
   /** Estimated Compaction Threshold per model for one Account (spec §3.18); read-only. */
   tuning(account: Account): Promise<TuningResult>
@@ -772,6 +793,34 @@ export async function createRuntime(
     }
   }
 
+  /**
+   * An Expired Login (ADR-0071): only for a signed-in Subscription Account of a Family that reads its Host's login
+   * records. A reader that throws counts as nothing known.
+   */
+  const loginProblemFor = async (
+    a: Account,
+    login?: LoginState | 'not-needed',
+  ): Promise<LoginProblem | undefined> => {
+    const f = families.get(a.family)
+    if (!f?.readLoginEvents || a.kind === 'api') return undefined
+    if ((login ?? (await loginOf(a))) !== 'logged-in') return undefined
+    const ctx = readContext()
+    await memos.ready()
+    let events: Awaited<ReturnType<NonNullable<FamilyDef['readLoginEvents']>>> | undefined
+    try {
+      events = await f.readLoginEvents(a, ctx)
+    } catch {
+      events = undefined
+    } finally {
+      memos.saveSoon()
+    }
+    const [kept, mark] = await Promise.all([
+      f.fetchQuota ? readQuotaStore(quotaStoreFile(ctx.stateDir, a.family, a.name)) : null,
+      readLoginMark(loginMarkFile(ctx.stateDir, a.family, a.name)),
+    ])
+    return loginProblemOf(a.ref, events, kept, mark)
+  }
+
   /** A Family's one-time setup bound to this Runtime; a setup that throws is reported, never crashes the caller. */
   const bindSetup = (f: FamilyDef, setup: QuotaSetup): BoundQuotaSetup => {
     // The message is the error's own text; setup implementations must not put file contents into it.
@@ -958,11 +1007,14 @@ export async function createRuntime(
         readIdentity(f, account),
         peersOf(account).catch(() => []),
       ])
+      const loginProblem =
+        account.kind === 'api' ? undefined : await loginProblemFor(account, login ?? 'unknown')
       return {
         ...account,
         familyTitle: f.title,
         hostInstalled: installed !== null,
         login: account.kind === 'api' ? 'not-needed' : (login ?? 'unknown'),
+        ...(loginProblem ? { loginProblem } : {}),
         ...(model ? { model } : {}),
         ...(identity ? { identity } : {}),
         ...(peers.length ? { sameLogin: peers.map((p) => p.ref) } : {}),
@@ -1004,6 +1056,7 @@ export async function createRuntime(
           // Messages held in bypass permission mode (spec §3.32 step 2): the arguments the Account starts with.
           ...(await inboundFindings(a, startArgs(a))),
         ],
+        loginProblem: (a: Account) => loginProblemFor(a),
       }
       // Auto Handoff warnings (spec §3.17) join the general Findings; they never fail Doctor.
       const all = await accounts()
@@ -1411,6 +1464,17 @@ export async function createRuntime(
     async sameLogin(account) {
       return (await peersOf(account)).map((a) => a.ref)
     },
+    loginProblem: (account) => loginProblemFor(account),
+    async afterLogin(account) {
+      const f = familyOf(account.family)
+      const ctx = readContext()
+      await writeLoginMark(loginMarkFile(ctx.stateDir, account.family, account.name), ctx.now).catch(() => {})
+      const checked =
+        account.kind !== 'api' && Boolean(f.fetchQuota) && quotaCheckOff(f.id, config, env) === null
+      if (checked) await ownQuota(account, 'force').catch(() => undefined)
+      const loginProblem = await loginProblemFor(account)
+      return { ...(loginProblem ? { loginProblem } : {}), checked }
+    },
     async usage(account) {
       const f = familyOf(account.family)
       if (!f.readUsage) return { status: 'unavailable', reason: 'no-source' }
@@ -1526,12 +1590,15 @@ export async function createRuntime(
       const candidates = await Promise.all(
         list.map(async (a) => {
           const peers = groups.get(a.ref)
+          const login = await loginOf(a)
+          const loginProblem = await loginProblemFor(a, login)
           return {
             ref: a.ref,
             name: a.name,
             isMain: a.isMain,
             kind: a.kind,
-            login: await loginOf(a),
+            login,
+            ...(loginProblem ? { loginProblem } : {}),
             quota: quotas.get(a.ref)!,
             ...(peers ? { sameLogin: peers } : {}),
           }
@@ -1564,6 +1631,7 @@ export async function createRuntime(
             loginOf(a),
             readIdentity(f, a),
           ])
+          const loginProblem = await loginProblemFor(a, login)
           let receive = false
           try {
             receive = Boolean(
@@ -1580,6 +1648,7 @@ export async function createRuntime(
             isMain: a.isMain,
             kind: a.kind,
             login,
+            ...(loginProblem ? { loginProblem } : {}),
             quota,
             ...(identity ? { identity } : {}),
             ...(peers ? { sameLogin: peers } : {}),

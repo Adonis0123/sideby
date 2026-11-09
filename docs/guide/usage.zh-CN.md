@@ -140,6 +140,17 @@ Claude Code 每次刷新都会运行这个包装命令，所以 `sideby` 不在 
 
 想给其中一个换成别的账号，在面板里它那一行点 **换个账号登录**，或者运行 `sideby login <account>`（例如 `sideby login codex:team`）。在工具里做不到：Codex 没有 `/login`，任务运行时 `/logout` 也被禁用。浏览器通常会直接用已经登录的账号，所以授权前先在浏览器里退出那个账号，或者把登录链接放到无痕窗口打开。sideby 开始前会说这个目录现在登录的是谁，结束后说它有没有换成自己的登录，还是同一个。它不会先退出原来的登录：中途放弃时旧登录还在。
 
+### 登录已过期
+
+Claude Code 的登录可能已经过期，但账号看起来仍是已登录：下一次会话里 Claude Code 会回答 `Login reached its time limit · Please run /login`。sideby 从这个账号自己的会话记录（最新 20 个会话的末尾部分）和额度查询里发现它，从不读 token：
+
+- `sideby list` 的 LOGIN 列显示 `expired`，表后多一行 ``claude:work: sign-in expired; sign in again with `sideby login claude:work` ``；`--json` 带 `loginProblem: { "kind": "expired", "since": … }`。
+- `sideby doctor` 报 warn `login.expired`，给出同一条命令；`--fix` 修不了它，只有 warn 时退出码仍是 0。
+- 面板在那一行标 **登录已过期**，旁边是 **重新登录**（在你的终端里打开 `sideby login <账号>`）；只要有账号过期，顶部就有一条横幅。两个目录同一个登录合成一行时，会写明是哪个目录过期。状态栏在该账号旁标 **⚠ 登录已过期**。
+- `sideby next`、挑选命令（pick command）、面板推荐和自动接力在它恢复前都跳过它。
+
+账号下一次会话成功或额度查询成功后，标记自动消失。`sideby login`（或 **重新登录**）正常结束后，如果额度查询开着，sideby 立刻查一次这个账号的额度，并打印 `claude:work is signed in again`；否则面板显示 **已重新登录，等待确认**，直到下一次会话确认。只有 Claude Code 自己说 “Login reached its time limit” 才算，会话里和额度查询的回答里都一样：只有 `/login` 提示、“Not logged in” 或 “Invalid API key” 不算过期。API 账号从不检查，目前只检查 Claude Code。
+
 ## Codex 额度
 
 sideby 每 15 分钟向官方 Codex CLI 查询当前额度，不创建会话。面板和状态栏的「刷新」会立即再查一次，也可以运行 `sideby quota codex --refresh --json`。用 `sideby quota check codex off --json` 或面板「设置 › 额度查询」关闭；CI 中不查询。

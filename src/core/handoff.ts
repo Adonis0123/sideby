@@ -1,6 +1,6 @@
 // Handoff (spec §3.13): which Account of one Family to move on to when the current one runs low. Pure:
 // the Runtime gathers login states and Quota, this ranks them. sideby recommends; a person starts it.
-import type { Account, LoginState, QuotaResult, QuotaWindow } from '../types.ts'
+import type { Account, LoginProblem, LoginState, QuotaResult, QuotaWindow } from '../types.ts'
 import {
   DEFAULT_TAKEOVER_LIMITS,
   limitOf,
@@ -19,9 +19,18 @@ export interface HandoffCandidate {
   isMain: boolean
   kind: Account['kind']
   login: LoginState | 'not-needed'
+  /** Its Expired Login (ADR-0071): such an Account is never picked. */
+  loginProblem?: LoginProblem
   quota: QuotaResult
   /** The other Accounts of its Same Login (spec §3.21). */
   sameLogin?: readonly string[]
+}
+
+/** Why an Account that could otherwise be picked is left out, and the command that fixes it (ADR-0071). */
+export interface HandoffSkip {
+  reason: 'login-expired'
+  /** The command that signs it in again: `sideby login <ref>`. */
+  command: string
 }
 
 export interface HandoffEntry {
@@ -52,6 +61,8 @@ export interface HandoffEntry {
    * never picked.
    */
   sameLoginAs?: string
+  /** Set when the Account is never picked for a reason its state does not show: its login expired (ADR-0071). */
+  skip?: HandoffSkip
 }
 
 export interface HandoffPlan {
@@ -99,7 +110,10 @@ function lastReset(quota: QuotaResult, now: Date, level: (w: QuotaWindow) => num
 
 /** A full Subscription Account a Last Resort may start: no window used up (pressure under 100). */
 const lastResortOk = (e: HandoffEntry) =>
-  e.state === 'full' && !e.sameLoginAs && e.pressure !== null && e.pressure < 100
+  e.state === 'full' && !blocked(e) && e.pressure !== null && e.pressure < 100
+
+/** An entry that can never be picked whatever its state: the current Account's Same Login, or an Expired Login. */
+export const blocked = (e: HandoffEntry): boolean => Boolean(e.sameLoginAs || e.skip)
 
 function entry(c: HandoffCandidate, now: Date, limits: TakeoverLimits, lastResort: boolean): HandoffEntry {
   const pressure = quotaPressure(c.quota, now)
@@ -123,6 +137,23 @@ function entry(c: HandoffCandidate, now: Date, limits: TakeoverLimits, lastResor
   }
   if (c.kind === 'api') return { ...base, state: 'api' }
   if (c.login === 'logged-out') return { ...base, state: 'logged-out' }
+  return withSkip(c, stateOfQuota(c, base, pressure, now, limits, lastResort))
+}
+
+function withSkip(c: HandoffCandidate, e: HandoffEntry): HandoffEntry {
+  return c.loginProblem?.kind === 'expired'
+    ? { ...e, skip: { reason: 'login-expired', command: `sideby login ${c.ref}` } }
+    : e
+}
+
+function stateOfQuota(
+  c: HandoffCandidate,
+  base: Omit<HandoffEntry, 'state'>,
+  pressure: number | null,
+  now: Date,
+  limits: TakeoverLimits,
+  lastResort: boolean,
+): HandoffEntry {
   if (pressure === null) return { ...base, state: 'unknown' }
   // Full once any window reaches its own Takeover Limit: 85 for a Short Window, 95 for a Long one by default.
   const level = (w: QuotaWindow) => limitOf(w, limits)
@@ -164,15 +195,16 @@ export function planHandoff(
     })
     .sort(
       (a, b) =>
-        // A Same Login partner of the current Account can never be picked, so it goes with the others that cannot.
-        Number(Boolean(a.sameLoginAs)) - Number(Boolean(b.sameLoginAs)) ||
+        // A Same Login partner of the current Account or an Expired Login can never be picked, so it goes with the
+        // others that cannot.
+        Number(blocked(a)) - Number(blocked(b)) ||
         rank(a) - rank(b) ||
         (a.state === 'ready' || rank(a) === 1.5 ? a.limitUse! - b.limitUse! : 0) ||
         (a.state === 'full' ? resetTime(a) - resetTime(b) || 0 : 0) ||
         tie(a, b),
     )
   const usable = (e: HandoffEntry) =>
-    !e.sameLoginAs &&
+    !blocked(e) &&
     (e.state === 'ready' ||
       e.state === 'unknown' ||
       (opts.lastResort && lastResortOk(e)) ||
@@ -183,7 +215,7 @@ export function planHandoff(
   const plan: HandoffPlan = { family, ...(current ? { from: current.ref } : {}), pick, accounts, hasQuota }
   if (picked?.state === 'full') plan.tight = { limit: limits.short, longLimit: limits.long }
   if (pick === null) {
-    const first = accounts.find((e) => e.state === 'full' && e.resetsAt)
+    const first = accounts.find((e) => e.state === 'full' && e.resetsAt && !e.skip)
     if (first?.resetsAt) plan.earliestReset = { ref: first.ref, at: first.resetsAt }
   }
   return plan

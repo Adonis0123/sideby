@@ -5,7 +5,7 @@
 Start read-only:
 
 ```sh
-sideby list --json        # accounts: ref, family, kind (subscription|api), dir, login, identity.email, model, hostInstalled, problems
+sideby list --json        # accounts: ref, family, kind (subscription|api), dir, login, loginProblem, identity.email, model, hostInstalled, problems
 sideby doctor --json      # findings: level ok|warn|fail, account, item, code, message, hint, fixable
 sideby quota --json       # per account: quota windows (5h, 7d, usedPercent, resetsAt, observedAt) and 7-day tokens
 sideby plugins --json     # loaded plugins (setting names only, never values) and load errors
@@ -26,6 +26,7 @@ Shared Items the Main Account does not have are skipped: no Finding, not counted
 | `warn` `skill.outdated` (in `general`) | The installed sideby skill is for another sideby version | Offer `sideby update` (it updates the skill; see `update.md`) |
 | name looks like a backup (`bak`, `backup`, `old`, `tmp`) | A stray directory was picked up as an account | Suggest adding its ref to `ignore` in `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json` |
 | `login: "not-needed"` (`key` in `sideby list`) | API account; it authenticates with `proxy.env` | Nothing to do |
+| `loginProblem: { kind: "expired" }` in `list --json`, `warn` `login.expired` in `doctor` (`expired` in `sideby list`) | An Expired Login: the account is still signed in on disk, but its Host said the login expired (Claude Code: "Login reached its time limit") and nothing has worked since. `sideby next`, Auto Handoff and pick commands skip it | Give the user `sideby login <ref>` (see `accounts.md`, "Sign in again after an expired login"); `doctor --fix` cannot fix it |
 | `problems` on an account in `list --json` | A plugin failed while reading it (for example a settings file that is not valid JSON) | Show the message; the account itself still works |
 | quota `unavailable` / `not-enabled` | Quota checks for that tool are off (config `quota.check.<family>: false`) or it runs in CI | Offer `sideby quota check <family> on` |
 | quota `unavailable` / `no-session` | No session since the source was enabled | Ask the user to start one session with that account |
@@ -34,6 +35,10 @@ Shared Items the Main Account does not have are skipped: no Finding, not counted
 | quota `unavailable` / `api-account` | API accounts have no quota | Nothing to fix |
 | quota `unavailable` / `unrecognized` | Host changed its file format | Report it; suggest filing an issue with the Host version |
 | host not installed | Accounts exist but the CLI is missing | Point to the Host's install docs; do not install it unasked |
+
+### Whose sign-in expired
+
+For "which login expired" or a session that says "Login reached its time limit · Please run /login": run `sideby list --json` and name every account with `loginProblem.kind: "expired"`, with `loginProblem.since` (when its Host reported it). Only Claude Code subscription accounts are checked for now; API accounts never are. Only the Host's own words "Login reached its time limit" count, in a session or in a quota check's answer; a `/login` hint, "Not logged in" or "Invalid API key" alone is not an expired login (a quota check that says "Not logged in" shows as `fetch-failed` with `sideby login <ref>` in `detail`). `loginProblem.signedInAt` means the user already signed in again and sideby waits for the next session or quota check to confirm it. Then follow `accounts.md` to sign it in again.
 
 Quota is only as fresh as each account's last session; `observedAt` says when it was recorded. A window whose `resetsAt` has passed has reset.
 

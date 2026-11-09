@@ -1,6 +1,6 @@
 // Pick Commands (spec §3.13, ADR-0035): a short command bound to a Family that starts the Account a Handoff would
 // pick, or the Main Account when no Account of the Family has Quota data.
-import type { HandoffPlan } from './handoff.ts'
+import { blocked, type HandoffPlan } from './handoff.ts'
 
 /** The name offered for a built-in Family when its Aliases follow no pattern; pi gets none (`pi` is the Host). */
 export const DEFAULT_PICK_NAMES: Readonly<Record<string, string>> = { claude: 'cc', codex: 'cx', grok: 'gk' }
@@ -35,6 +35,7 @@ export type PickChoice =
   | { ref: string; reason: 'no-quota-data' }
   /** The Accounts with Quota data are full; this one has none yet. */
   | { ref: string; reason: 'others-full' }
+  /** `signIn`: the Accounts to sign in, signed out or with an Expired Login (ADR-0071). */
   | { ref: null; reason: 'none-usable'; earliestReset?: { ref: string; at: string }; signIn: string[] }
 
 /**
@@ -44,9 +45,7 @@ export type PickChoice =
  */
 export function choosePick(plan: HandoffPlan, mainRef: string | null): PickChoice {
   const startable = (ref: string) =>
-    plan.accounts.some(
-      (e) => e.ref === ref && !e.sameLoginAs && (e.state === 'ready' || e.state === 'unknown'),
-    )
+    plan.accounts.some((e) => e.ref === ref && !blocked(e) && (e.state === 'ready' || e.state === 'unknown'))
   if (!plan.hasQuota && mainRef && startable(mainRef)) return { ref: mainRef, reason: 'no-quota-data' }
   if (plan.pick && plan.accounts.some((e) => e.ref === plan.pick && e.state !== 'api')) {
     const e = plan.accounts.find((x) => x.ref === plan.pick)!
@@ -70,7 +69,9 @@ export function choosePick(plan: HandoffPlan, mainRef: string | null): PickChoic
     ref: null,
     reason: 'none-usable',
     ...(plan.earliestReset ? { earliestReset: plan.earliestReset } : {}),
-    signIn: plan.accounts.filter((e) => e.state === 'logged-out').map((e) => e.ref),
+    signIn: plan.accounts
+      .filter((e) => e.state === 'logged-out' || e.skip?.reason === 'login-expired')
+      .map((e) => e.ref),
   }
 }
 

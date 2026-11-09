@@ -152,6 +152,30 @@
                   }
                 ]
               },
+              "loginProblem": {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "message"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "expired"
+                  },
+                  "since": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "signedInAt": {
+                    "type": "string",
+                    "description": "When a sign-in sideby started finished after `since`, with nothing confirming it yet: the Panel says the sign-in finished and waits for confirmation."
+                  }
+                },
+                "description": "An Expired Login (ADR-0071): the account is signed in (`login` stays `logged-in`) but its host has reported that the login expired, with no later successful turn or quota answer. `since` is when the host reported it, `message` is sideby's own sentence. Absent when the login is not known to be expired; only Claude Code accounts are checked for now."
+              },
               "model": {
                 "type": "string"
               },

@@ -40,6 +40,33 @@ export interface FamilyLayout {
 export type LoginState = 'logged-in' | 'logged-out' | 'unknown'
 
 /**
+ * A Subscription Account whose login file is still there but whose Host has reported that the login no longer works
+ * (an Expired Login, ADR-0071). `kind` is a closed set; `message` is sideby's own sentence, never the Host's text.
+ */
+export interface LoginProblem {
+  kind: 'expired'
+  /** When the Host reported it (ISO time), not when a token ends. */
+  since?: string
+  message: string
+  /**
+   * When a sign-in that sideby started finished after `since` (ISO time) but nothing has confirmed it yet: no later
+   * successful turn or Quota answer. The Panel then says the sign-in finished and waits for confirmation.
+   */
+  signedInAt?: string
+}
+
+/**
+ * What a Family's Host last wrote about its login (ADR-0071), as times only: never the Host's text, a token or a
+ * credential. sideby compares them with its own Quota answers to decide whether a login has expired.
+ */
+export interface LoginEvents {
+  /** The newest record in which the Host said the login expired (ISO time). */
+  expiredAt?: string
+  /** The newest record that shows the login working, such as a successful model turn (ISO time). */
+  workingAt?: string
+}
+
+/**
  * A Family's mark for the Panel: one SVG path in a 24x24 view box, drawn inline. sideby checks it when the
  * Plugin registers; an invalid logo is dropped with a plugin error and the Panel shows the Family's initials.
  */
@@ -254,6 +281,13 @@ export interface FamilyDef {
    */
   keepTitle?: { args: string[]; key: string }
   loginState?(account: Account): Promise<LoginState>
+  /**
+   * When the Host last said this Account's login expired, and when it last showed it working, from the Host's own
+   * records only (ADR-0071): never a token, the Keychain or an expiry field of a credential file. Called only for a
+   * signed-in Subscription Account; an error counts as nothing known. Without it the Family's logins never show as
+   * expired.
+   */
+  readLoginEvents?(account: Account, ctx: ReadContext): Promise<LoginEvents>
   model?(account: Account): Promise<string | undefined>
   /** Choosing the model and effort an Account starts with, as Host arguments (spec §3.19, ADR-0014). */
   modelChoice?: FamilyModelChoice
@@ -479,7 +513,16 @@ export type QuotaResult =
       /** Set by sideby: why the latest `fetchQuota` attempt failed, while this older reading stays on show. */
       fetchError?: string
     }
-  | { status: 'unavailable'; reason: QuotaUnavailableReason; detail?: string }
+  | {
+      status: 'unavailable'
+      reason: QuotaUnavailableReason
+      detail?: string
+      /**
+       * Set by a `fetchQuota` answer that clearly says the login expired or asks for a new sign-in (ADR-0071). A
+       * generic failure leaves it out.
+       */
+      loginExpired?: true
+    }
 
 export interface TokenTotals {
   inputTokens: number

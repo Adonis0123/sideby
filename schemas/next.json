@@ -144,6 +144,24 @@
           "sameLoginAs": {
             "type": "string",
             "description": "The current account (`from`), when this one is signed in as the same login: it shares that quota and is never picked."
+          },
+          "skip": {
+            "type": "object",
+            "required": [
+              "reason",
+              "command"
+            ],
+            "properties": {
+              "reason": {
+                "type": "string",
+                "const": "login-expired"
+              },
+              "command": {
+                "type": "string",
+                "description": "The command that fixes it: `sideby login <account>`."
+              }
+            },
+            "description": "Set when the account is never picked for a reason its state does not show: `login-expired`, its sign-in expired (ADR-0071)."
           }
         }
       },

@@ -243,6 +243,8 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 /* A Same Login (spec §3.21, ADR-0026): one row; opened, a short line per directory. */
 .login-mark { display: inline-flex; flex: none; color: var(--muted); cursor: help; }
 .login-mark .ic { width: 13px; height: 13px; }
+/* An Expired Login (ADR-0071): the word, then "Sign in again" beside it. */
+.exp-badge { display: inline-flex; align-items: center; gap: 6px; flex: none; }
 .login-detail { flex-direction: column; gap: 8px; }
 .login-detail .rd-note { margin: 0; }
 .login-detail > .rd-browser { flex-direction: row; align-items: center; gap: 16px; }

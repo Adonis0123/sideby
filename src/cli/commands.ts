@@ -479,13 +479,15 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
     const rows = shown.map((s) => [
       `${c.bold(s.ref)}${sameMark(s.sameLogin)}${s.hidden ? ` ${c.dim('(hidden)')}` : ''}`,
       s.isMain ? 'main' : s.kind === 'api' ? c.cyan('api') : 'sub',
-      s.login === 'logged-in'
-        ? c.green('✓')
-        : s.login === 'not-needed'
-          ? c.dim('key')
-          : s.login === 'logged-out'
-            ? c.yellow('login needed')
-            : c.dim('?'),
+      s.loginProblem?.kind === 'expired'
+        ? c.yellow('expired')
+        : s.login === 'logged-in'
+          ? c.green('✓')
+          : s.login === 'not-needed'
+            ? c.dim('key')
+            : s.login === 'logged-out'
+              ? c.yellow('login needed')
+              : c.dim('?'),
       s.identity?.email ?? c.dim('—'),
       s.model ?? c.dim('—'),
       s.hostInstalled
@@ -507,6 +509,9 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
       )
     if (shown.some((s) => s.sameLogin?.length))
       io.out(c.dim('\n= <account>: signed in as the same login as that account, so they share one quota.'))
+    // An Expired Login (ADR-0071): the login file is there, but the Host said it no longer works.
+    for (const s of shown.filter((x) => x.loginProblem?.kind === 'expired'))
+      io.out(c.yellow(`\n${s.ref}: sign-in expired; sign in again with \`sideby login ${s.ref}\``))
     if (hiddenCount) io.out(hiddenLine)
     io.out(c.dim('\nsideby run <account>  ·  sideby new <family> <name>  ·  sideby quota  ·  sideby ui'))
   }
@@ -737,12 +742,41 @@ async function runLogin(rt: Runtime, ref: string, io: Io): Promise<number> {
   if (prepared.notice) io.err(c.cyan(prepared.notice))
   const hint = before && loginBeforeLine(account.ref, before)
   if (hint) io.err(c.dim(`sideby: ${hint}`))
+  const expired = await rt.loginProblem(account).catch(() => undefined)
   const code = await whileRunning(rt, () => runHost(prepared))
+  if (code === 0 && expired) await confirmLogin(rt, account, io)
   if (!before) return code
   const after = await loginSnapshot(rt, account).catch(() => undefined)
   const result = after && loginAfterLine(account.ref, before, after)
   if (result) io.err((result.ok ? c.green : c.yellow)(`sideby: ${result.line}`))
   return code
+}
+
+/**
+ * After a sign-in that ended with exit 0 for an Account with an Expired Login (ADR-0071 Q9): ask its Quota once, so a
+ * good answer clears the state; say whether it did, or that sideby waits for the next session or Quota answer.
+ */
+export async function confirmLogin(rt: Runtime, account: Account, io: Io): Promise<void> {
+  let r: Awaited<ReturnType<Runtime['afterLogin']>>
+  try {
+    r = await rt.afterLogin(account)
+  } catch (err) {
+    io.err(
+      c.yellow(
+        `sideby: sign-in finished, but sideby could not confirm it (${(err as Error)?.message ?? String(err)}); ${account.ref} shows as expired until its next session or quota check confirms it`,
+      ),
+    )
+    return
+  }
+  if (!r.loginProblem) io.err(c.green(`sideby: ${account.ref} is signed in again`))
+  else
+    io.err(
+      c.dim(
+        `sideby: sign-in finished; ${account.ref} shows as expired until its next session or quota check confirms it${
+          r.checked ? '' : ' (quota checks are off)'
+        }`,
+      ),
+    )
 }
 
 /** A Pick Command (spec §3.13, ADR-0035): start the Account with the most room, else the Main Account, and say which. */
@@ -835,6 +869,8 @@ export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
       : `${Math.round(e.pressure ?? 0)}%`
   const note = (e: (typeof plan.accounts)[number]): string => {
     if (e.sameLoginAs) return `same login as ${e.sameLoginAs}, which shares its quota; skipped`
+    if (e.skip?.reason === 'login-expired')
+      return `sign-in expired; skipped, sign in with \`${e.skip.command}\``
     if (e.state === 'ready') return `closest to its limit: ${closest(e)}`
     if (e.state === 'unknown') return 'no quota data yet'
     if (e.state === 'api')
@@ -850,7 +886,11 @@ export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
   const mark = { ready: c.green, unknown: c.yellow, api: c.cyan, full: c.red, 'logged-out': c.dim } as const
   // A full Account with no window used up still has some quota: `low` in the table, and a Last Resort can start it.
   const stateText = (e: (typeof plan.accounts)[number]): string =>
-    low(e) ? c.yellow('low') : mark[e.state](e.state === 'logged-out' ? 'signed out' : e.state)
+    e.skip?.reason === 'login-expired'
+      ? c.yellow('expired')
+      : low(e)
+        ? c.yellow('low')
+        : mark[e.state](e.state === 'logged-out' ? 'signed out' : e.state)
   io.out(
     table(
       plan.accounts.map((e) => [
@@ -863,7 +903,9 @@ export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
     ),
   )
   if (!plan.pick) {
-    const out = plan.accounts.filter((e) => e.state === 'logged-out').map((e) => `sideby login ${e.ref}`)
+    const out = plan.accounts
+      .filter((e) => e.state === 'logged-out' || e.skip?.reason === 'login-expired')
+      .map((e) => `sideby login ${e.ref}`)
     const apiLeft = !includeApi && plan.accounts.some((e) => e.state === 'api')
     const why = plan.earliestReset
       ? `every signed-in ${family} account has used up its quota; ${plan.earliestReset.ref} is back ${resetWhen(plan.earliestReset.at, now.getTime(), 'en')}`
@@ -3102,7 +3144,8 @@ async function menubarFamilies(
           .map(async (x) => {
             const quota = await rt.quota(x, { fetch: o.fetch })
             const sameLogin = await rt.sameLogin(x)
-            const login = x.kind === 'api' ? ('not-needed' as const) : (await rt.status(x)).login
+            const st = x.kind === 'api' ? null : await rt.status(x)
+            const login = st ? st.login : ('not-needed' as const)
             let refresh: 'waiting' | 'failed' | undefined
             if (asks && x.kind === 'subscription' && login !== 'logged-out') {
               const kept = await readQuotaStore(quotaStoreFile(rt.paths.stateDir, x.family, x.name))
@@ -3121,6 +3164,7 @@ async function menubarFamilies(
               name: x.name,
               kind: x.kind,
               login,
+              ...(st?.loginProblem?.kind === 'expired' ? { loginExpired: true as const } : {}),
               quota,
               sameLogin,
               ...(refresh ? { refresh } : {}),

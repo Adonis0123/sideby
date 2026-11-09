@@ -163,6 +163,43 @@ describe('Claude quota from /usage (ADR-0063)', () => {
     }
   })
 
+  it('marks only an answer with a known expiry phrase as an Expired Login (ADR-0071, Q10)', () => {
+    const q = claudeUsageAnswer(
+      answer('Login reached its time limit · Please run /login', { is_error: true }),
+      acct('work'),
+      NOW,
+    )
+    assert.equal(q.status === 'unavailable' && q.loginExpired, true)
+    for (const text of [
+      'Not logged in · Please run /login',
+      'Please run /login',
+      'Invalid API key · Please run /login',
+      'Invalid API key · Login reached its time limit',
+    ]) {
+      for (const extra of [{ is_error: true }, {}]) {
+        const r = claudeUsageAnswer(answer(text, extra), acct('work'), NOW)
+        assert.equal(r.status === 'unavailable' && r.loginExpired, undefined, text)
+      }
+    }
+    const other = claudeUsageAnswer('nope', acct('work'), NOW)
+    assert.equal(other.status === 'unavailable' && other.loginExpired, undefined)
+  })
+
+  it('never takes a model reply that quotes the phrase for an expiry; a Host error result with it still is', () => {
+    const phrase = 'Login reached its time limit · Please run /login'
+    const reply = claudeUsageAnswer(
+      answer(`You asked about "${phrase}"`, { num_turns: 1, is_error: false, local_command: undefined }),
+      acct('work'),
+      NOW,
+    )
+    assert.equal(reply.status === 'unavailable' && reply.loginExpired, undefined)
+    assert.match(reply.status === 'unavailable' ? reply.detail! : '', /cannot report quota/)
+    const turnError = claudeUsageAnswer(answer(phrase, { num_turns: 1, is_error: true }), acct('work'), NOW)
+    assert.equal(turnError.status === 'unavailable' && turnError.loginExpired, undefined)
+    const host = claudeUsageAnswer(answer(phrase, { is_error: true }), acct('work'), NOW)
+    assert.equal(host.status === 'unavailable' && host.loginExpired, true)
+  })
+
   it('asks each subscription Account without a session and keeps only the Quota', async () => {
     await withFakeHome(async (h) => {
       await seed(h)

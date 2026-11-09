@@ -645,3 +645,37 @@ describe('reset cell and windows past their reset (spec §3.31)', () => {
     assert.equal(by('team').resetLabel, '7d')
   })
 })
+
+it('marks an account whose sign-in expired and never recommends it (ADR-0071)', () => {
+  const expired = { ...sub('main', quota(5, 5)), loginExpired: true as const }
+  const f = family('claude', 'Claude Code', [expired, sub('work', quota(40, 10))])
+  f.plan = planHandoff(
+    'claude',
+    f.accounts.map((a) => ({
+      ...a,
+      isMain: a.name === 'main',
+      ...(a.loginExpired ? { loginProblem: { kind: 'expired' as const, message: 'x' } } : {}),
+    })),
+    NOW,
+  )
+  for (const lang of ['en', 'zh'] as const) {
+    const rows = menubarSnapshot([f], NOW, lang).sections[0]!.rows
+    const main = rows.find((r) => r.label === 'main')!
+    assert.equal(main.note, MENUBAR_STRINGS[lang].loginExpired)
+    assert.equal(main.recommended, false)
+    assert.equal(rows.find((r) => r.label === 'work')!.recommended, true)
+  }
+})
+
+it('keeps a Same Login row’s quota when its first directory’s sign-in expired (ADR-0071)', () => {
+  const first = { ...sub('main', quota(30, 20)), sameLogin: ['claude:001'], loginExpired: true as const }
+  const second = { ...sub('001', quota(30, 20)), sameLogin: ['claude:main'] }
+  const sec = menubarSnapshot([family('claude', 'Claude Code', [first, second])], NOW, 'en').sections[0]!
+  const shown = sec.rows.find((r) => r.label === '001')!
+  assert.ok(shown.bars, 'the shared quota stays on show')
+  assert.equal(
+    sec.rows.some((r) => r.label === 'main'),
+    false,
+  )
+  assert.equal(sec.more!.rows.find((r) => r.label === 'main')!.note, MENUBAR_STRINGS.en.loginExpired)
+})

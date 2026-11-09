@@ -1,7 +1,15 @@
 // When sideby calls a Family's `fetchQuota`, and what it shows from the answer (spec §3.26, ADR-0025): the last answer
 // is kept per Account, asked again only when it is older than the Family's `everyMinutes` or the user refreshes, one
 // fetch per Account at a time, 20 seconds at most; the newer of the kept answer and the local reading is shown.
-import type { Account, Env, QuotaFetch, QuotaResult, ReadContext } from '../types.ts'
+import type {
+  Account,
+  Env,
+  LoginEvents,
+  LoginProblem,
+  QuotaFetch,
+  QuotaResult,
+  ReadContext,
+} from '../types.ts'
 import {
   keptQuota,
   type QuotaStoreEntry,
@@ -70,11 +78,21 @@ async function runFetch(
   }
   if (answer?.status === 'unavailable') error = answer.detail ?? answer.reason
   const quota = answer?.status === 'ok' ? keptQuota(answer) : kept?.quota
+  const attemptedAt = new Date().toISOString()
+  // An answer that asks for a new sign-in marks the login expired; a good answer clears it; any other failure keeps
+  // what was known (ADR-0071).
+  const loginExpiredAt =
+    answer?.status === 'unavailable' && answer.loginExpired === true
+      ? attemptedAt
+      : answer?.status === 'ok'
+        ? undefined
+        : kept?.loginExpiredAt
   const entry: QuotaStoreEntry = {
     version: 1,
-    attemptedAt: new Date().toISOString(),
+    attemptedAt,
     ...(quota ? { quota } : {}),
     ...(error ? { error } : {}),
+    ...(loginExpiredAt ? { loginExpiredAt } : {}),
   }
   await writeQuotaStore(file, entry).catch(() => {})
   return entry
@@ -105,6 +123,36 @@ export async function fetchedQuota(
   run.catch(() => {})
   if (kept) return kept
   return Promise.race([run, sleep(FIRST_WAIT_MS)]).then((e) => e ?? kept)
+}
+
+/**
+ * The Expired Login of a signed-in Subscription Account (ADR-0071), from what its Host wrote (`events`) and the kept
+ * Quota answer: expired when the newest sign that the login expired is newer than every sign that it works (a
+ * successful turn, a good Quota answer). `signedInAt` is when a sign-in sideby started last finished.
+ */
+export function loginProblemOf(
+  ref: string,
+  events: LoginEvents | undefined,
+  kept: QuotaStoreEntry | null,
+  signedInAt?: string,
+): LoginProblem | undefined {
+  const t = (s: string | undefined) => (s ? Date.parse(s) : Number.NaN)
+  const newest = (...xs: (string | undefined)[]) => {
+    let best: string | undefined
+    for (const x of xs) if (Number.isFinite(t(x)) && (!best || t(x) > t(best))) best = x
+    return best
+  }
+  const expired = newest(events?.expiredAt, kept?.loginExpiredAt)
+  if (!expired) return undefined
+  const working = newest(events?.workingAt, kept?.quota?.observedAt)
+  if (working && t(working) >= t(expired)) return undefined
+  const since = new Date(t(expired)).toISOString()
+  return {
+    kind: 'expired',
+    since,
+    message: `sign-in expired; run \`sideby login ${ref}\` to sign in again`,
+    ...(signedInAt && t(signedInAt) > t(expired) ? { signedInAt } : {}),
+  }
 }
 
 /**

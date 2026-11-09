@@ -48,6 +48,7 @@ Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique
 | See every session from inside Claude Code ("在这里看所有会话", "show my sessions in Claude Code"), or turn off the label line and `/sessions` pane sideby adds to Claude Code ("关掉 sideby 的横带", "turn off the sideby mod") | tell the user to type `/sessions`; `sideby config set claudeMod false --json` (or `true`) | `references/sessions.md` |
 | Know what accounts share and what stays separate | `sideby families <family> --json` | `references/sharing.md` |
 | See accounts, health, quota and usage | `sideby list --json`, `sideby doctor --json`, `sideby quota --json` | `references/diagnose.md` |
+| Check whose sign-in expired ("which login expired", "哪个账号登录过期了", "登录过期", "Login reached its time limit", "Please run /login") | `sideby list --json` (`loginProblem`), `sideby doctor --json` (`login.expired`) | `references/diagnose.md` |
 | Pin accounts or arrange their Display Order | `sideby order --json`, `sideby pin <ref> --json`, `sideby unpin <ref> --json` | `references/panel.md` |
 | Hide or show a tool or an account in the lists ("too many shown", "hide pi") | `sideby hide <family\|ref> --json`, `sideby unhide <family\|ref> --json`, `sideby list --all` | `references/panel.md` |
 | Turn quota checks on or off, or fix outdated Codex/Grok quota | `sideby quota check <family> on|off --json`, `sideby quota [family] --refresh --json` | `references/quota.md` |
@@ -63,6 +64,7 @@ Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique
 | Turn on Auto Handoff ("自动接力", "自动交接", "hand over when quota runs low"), see what it still needs, hand this session over now, or pick an account with room for a subtask | `sideby handoff status --json`, `sideby handoff enable --json` (exit 10 first), `sideby handoff ready`, `sideby next <family> --json` | `references/handoff.md` |
 | Explain or change the handoff rules ("接力规则", "什么时候换号", "让 Codex 接 Claude", "别用 API 账号接力") | `sideby handoff rules --json`, `sideby config set handoff.<key> <value>` or `sideby handoff enable --other-ai/--api --json` (exit 10 first) | `references/handoff.md` |
 | Sign an account in again or switch it to another login ("换个账号登录", "两个目录登录的是同一个号", "sign claude:work in with another account") | `sideby list --json` (`identity`, `sameLogin`), then give the user `sideby login <ref>` | `references/accounts.md` |
+| Sign in again an account whose sign-in expired ("re-login cc003", "重新登录 cc003", "登录过期了帮我重新登录") | `sideby list --json` (`loginProblem`), then give the user `sideby login <ref>` | `references/accounts.md` |
 | Create an account with a given name, an API account, or a short command | `sideby new`, `sideby alias add` | `references/accounts.md` |
 | Rename or remove a short command ("把别名 cc-relay 改成 relay") | `sideby alias rename <old> <new> --json`, `sideby alias rm <short> --json` | `references/accounts.md` |
 | One command that always starts the account with the most quota left ("加个 cc", "自动挑额度最多的账号启动", "start whichever has room") | `sideby alias add <short> --pick <family> --json` (exit 10 first), `sideby alias list --json` | `references/accounts.md` |

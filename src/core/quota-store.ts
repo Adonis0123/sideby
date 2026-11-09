@@ -16,6 +16,11 @@ export interface QuotaStoreEntry {
   quota?: FetchedQuota
   /** Why the latest fetch failed, when it did. */
   error?: string
+  /**
+   * When a fetch answered that the login expired (ADR-0071). Kept through later generic failures, dropped by the next
+   * good answer.
+   */
+  loginExpiredAt?: string
 }
 
 export function quotaStoreFile(stateDir: string, family: string, name: string): string {
@@ -72,6 +77,9 @@ export async function readQuotaStore(file: string): Promise<QuotaStoreEntry | nu
     attemptedAt: e.attemptedAt,
     ...(quota ? { quota } : {}),
     ...(typeof e.error === 'string' ? { error: e.error } : {}),
+    ...(typeof e.loginExpiredAt === 'string' && Number.isFinite(Date.parse(e.loginExpiredAt))
+      ? { loginExpiredAt: e.loginExpiredAt }
+      : {}),
   }
 }
 

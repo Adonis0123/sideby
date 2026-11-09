@@ -1,6 +1,6 @@
 import { readdir } from 'node:fs/promises'
 import type { HookBus } from '../plugins/bus.ts'
-import type { Account, CheckResult, FamilyDef, Finding, FixResult } from '../types.ts'
+import type { Account, CheckResult, FamilyDef, Finding, FixResult, LoginProblem } from '../types.ts'
 import { looksLikeBackup, mainDirOf } from './accounts.ts'
 import { lstatOrNull, permBits, statOrNull } from './fs-safe.ts'
 import { inspectSecretFile } from './secret-file.ts'
@@ -47,6 +47,22 @@ export interface DoctorInput {
    * counted in `shared`; a result's `fix` runs with the others under `--fix` and must stay within what it checked.
    */
   extraChecks?: (account: Account) => Promise<CheckResult[]>
+  /** An Account's Expired Login (ADR-0071), for every Account, the Main Account too; a throw counts as none. */
+  loginProblem?: (account: Account) => Promise<LoginProblem | undefined>
+}
+
+/** The warning for an Expired Login (ADR-0071): only a new sign-in fixes it, so `--fix` never touches it. */
+export function loginExpiredFinding(account: Account, problem: LoginProblem): Finding {
+  return {
+    level: 'warn',
+    account: account.ref,
+    item: 'login',
+    code: 'login.expired',
+    message: `${account.ref}: its sign-in has expired${problem.since ? ` (reported ${problem.since})` : ''}`,
+    hint: `sign in again with \`sideby login ${account.ref}\``,
+    source: 'core',
+    fixable: false,
+  }
 }
 
 const BACKUP_ENTRY = /(\.bak|backup|\.tmp)/i
@@ -131,6 +147,9 @@ async function checkAccount(input: DoctorInput, family: FamilyDef, account: Acco
         )
     }
   }
+
+  const expired = await input.loginProblem?.(account).catch(() => undefined)
+  if (expired?.kind === 'expired') findings.push(loginExpiredFinding(account, expired))
 
   if (account.secretFile) {
     const state = await inspectSecretFile(account.secretFile)

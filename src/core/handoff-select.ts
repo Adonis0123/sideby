@@ -1,6 +1,6 @@
 // Which Account an Auto Handoff moves on to (spec §3.17 "选号"). Pure: the Runtime gathers every Account's login,
 // Quota and identity, this decides. Each Account's state and the pressure ranking come from `planHandoff` (§3.13).
-import type { Account, AccountIdentity, LoginState, QuotaResult } from '../types.ts'
+import type { Account, AccountIdentity, LoginProblem, LoginState, QuotaResult } from '../types.ts'
 import type { HandoffSettings } from './config.ts'
 import { type HandoffEntry, planHandoff } from './handoff.ts'
 import { takeoverLimits, windowReset } from './quota-levels.ts'
@@ -12,6 +12,8 @@ export interface SelectCandidate {
   isMain: boolean
   kind: Account['kind']
   login: LoginState | 'not-needed'
+  /** Its Expired Login (ADR-0071): such an Account never takes over. */
+  loginProblem?: LoginProblem
   quota: QuotaResult
   identity?: AccountIdentity
   /** The other Accounts of its Same Login (spec §3.21); they share its Quota. */
@@ -187,13 +189,21 @@ export function selectNext(input: {
   const skipped: SkippedAccount[] = list
     .filter((c) => sameLogin.has(c.ref))
     .map((c) => ({ ref: c.ref, reason: `same login as ${origin.ref}, so it shares the same quota` }))
+  // An Expired Login cannot start a session, so it never takes over (ADR-0071).
+  const expired = (c: SelectCandidate) => c.loginProblem?.kind === 'expired'
+  for (const c of list)
+    if (expired(c) && !sameLogin.has(c.ref) && c.ref !== origin.ref)
+      skipped.push({
+        ref: c.ref,
+        reason: `its sign-in has expired; run \`sideby login ${c.ref}\` to use it again`,
+      })
   // A used Account with no recorded window comes back only on Quota data that shows it ready: not on a guess
   // (`unknown`, an API account). It is still counted while full, so its reset can be named.
   const unsure = (c: SelectCandidate) =>
     used.ifReady.has(c.ref) && !['ready', 'full', 'logged-out'].includes(stateOf(c, s, now).state)
   // Could take over if the settings allowed it: another login, its Host installed and able to receive.
   const couldTake = (c: SelectCandidate) =>
-    !sameLogin.has(c.ref) && !used.out.has(c.ref) && !unsure(c) && c.installed && c.receive
+    !sameLogin.has(c.ref) && !expired(c) && !used.out.has(c.ref) && !unsure(c) && c.installed && c.receive
   const allows = (c: SelectCandidate) =>
     // An API account pays per request, so it gets past no vendor's limit: sameFamily does not apply to it, but it
     // takes over only when the user allowed paying for it (`api`, ADR-0046).
@@ -251,6 +261,8 @@ function refusal(
   if (target.ref === origin.ref) return 'it is the account this session runs in'
   if (origin.sameLogin?.includes(target.ref))
     return `it is the same login as ${origin.ref}, so it shares the same quota`
+  if (target.loginProblem?.kind === 'expired')
+    return `its sign-in has expired; run \`sideby login ${target.ref}\` first`
   if (!target.installed) return 'its host is not installed'
   if (!target.receive) return 'it cannot take over a task'
   if (!s.sameFamily && target.family === origin.family && target.kind !== 'api')

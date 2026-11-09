@@ -150,6 +150,8 @@ export interface MenubarFamilyInput {
     name: string
     kind: Account['kind']
     login: LoginState | 'not-needed'
+    /** Its sign-in expired (an Expired Login, ADR-0071): marked in its row, never recommended. */
+    loginExpired?: true
     quota: QuotaResult
     /** The other refs of its Same Login: the same subscription, so one quota. */
     sameLogin?: readonly string[]
@@ -417,6 +419,7 @@ function quotaRow(
   const noted = (note: string): MenubarRow => ({ ...base, detail: note, note, level: 'none' })
   if (a.kind === 'api') return noted(s.api)
   if (a.login === 'logged-out') return noted(s.signedOut)
+  if (a.loginExpired) return { ...noted(s.loginExpired), tip: fill(s.loginExpiredTip, { account: a.ref }) }
   const quota = a.quota
   if (quota.status !== 'ok') return noted(s.noData)
   const stale = quotaIsStale(quota, now.getTime(), a.lastUseAt)
@@ -532,7 +535,9 @@ function section(f: MenubarFamilyInput, now: Date, s: MenubarStrings, lang: Menu
     const peers = new Set(x.a.sameLogin ?? [])
     const group = all.filter((y) => y === x || (peers.has(y.a.ref) && !aside(y.a) && !done.has(y.a.ref)))
     for (const y of group) done.add(y.a.ref)
-    const lead = x
+    // The shared Quota stays on show: a directory whose sign-in expired does not lead the row while another works
+    // (ADR-0071); it is listed in the submenu with its mark.
+    const lead = group.find((y) => !y.a.loginExpired) ?? x
     const others = group.filter((y) => y !== lead)
     shown.push(
       others.length
@@ -549,7 +554,7 @@ function section(f: MenubarFamilyInput, now: Date, s: MenubarStrings, lang: Menu
         : lead,
     )
     for (const y of others) {
-      const note = fill(s.sameLoginNote, { name: lead.a.name })
+      const note = y.a.loginExpired ? s.loginExpired : fill(s.sameLoginNote, { name: lead.a.name })
       same.push({
         ...y,
         r: {

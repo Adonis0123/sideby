@@ -128,6 +128,24 @@ const Account = Type.Object({
   secretFile: Type.Optional(Str),
 })
 
+const LoginProblemSchema = Type.Object(
+  {
+    kind: Type.Literal('expired'),
+    since: Type.Optional(Str),
+    message: Str,
+    signedInAt: Type.Optional(
+      Type.String({
+        description:
+          'When a sign-in sideby started finished after `since`, with nothing confirming it yet: the Panel says the sign-in finished and waits for confirmation.',
+      }),
+    ),
+  },
+  {
+    description:
+      "An Expired Login (ADR-0071): the account is signed in (`login` stays `logged-in`) but its host has reported that the login expired, with no later successful turn or quota answer. `since` is when the host reported it, `message` is sideby's own sentence. Absent when the login is not known to be expired; only Claude Code accounts are checked for now.",
+  },
+)
+
 const AccountStatus = Type.Intersect([
   Account,
   Type.Object({
@@ -139,6 +157,7 @@ const AccountStatus = Type.Intersect([
       Type.Literal('unknown'),
       Type.Literal('not-needed'),
     ]),
+    loginProblem: Type.Optional(LoginProblemSchema),
     model: Type.Optional(Str),
     identity: Type.Optional(
       Type.Object(
@@ -1035,6 +1054,18 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
               description:
                 'The current account (`from`), when this one is signed in as the same login: it shares that quota and is never picked.',
             }),
+          ),
+          skip: Type.Optional(
+            Type.Object(
+              {
+                reason: Type.Literal('login-expired'),
+                command: Type.String({ description: 'The command that fixes it: `sideby login <account>`.' }),
+              },
+              {
+                description:
+                  'Set when the account is never picked for a reason its state does not show: `login-expired`, its sign-in expired (ADR-0071).',
+              },
+            ),
           ),
         }),
         { description: 'Every account of the family, best first.' },

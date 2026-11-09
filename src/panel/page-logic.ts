@@ -30,6 +30,8 @@ export interface LogicAccount {
   }
   /** The other Accounts of its Same Login (spec §3.21). */
   sameLogin?: string[]
+  /** Its Expired Login (ADR-0071). */
+  loginProblem?: { kind: string; since?: string; signedInAt?: string }
   usage?: LogicUsage
 }
 
@@ -227,7 +229,8 @@ export function quotaPressure(a: LogicAccount, now: number): number {
 }
 
 /**
- * Why an Account needs a look, most serious first: `error`, `health-fail`, `signed-out`, `not-installed`,
+ * Why an Account needs a look, most serious first: `error`, `health-fail`, `signed-out`, `login-expired` (ADR-0071),
+ * `not-installed`,
  * `quota-high` (a live window at or over the warning level), `health-warn`. Empty when all is well. A Quota read from
  * another Account of the same login (`quota.from`, spec §3.21) is that Account's warning, so it counts once per group.
  */
@@ -243,6 +246,7 @@ export function attentionReasons(
   if (a.error) out.push('error')
   if (health && health.fail > 0) out.push('health-fail')
   if (a.login === 'logged-out' && a.kind !== 'api') out.push('signed-out')
+  else if (a.loginProblem?.kind === 'expired' && a.kind !== 'api') out.push('login-expired')
   if (a.hostInstalled === false) out.push('not-installed')
   const q = a.quota
   if (q && q.status === 'ok' && q.windows && !q.from)
@@ -283,15 +287,31 @@ export function quotaHighLevel(
 
 /**
  * The one status badge an account row shows after its name (spec §3.27), most important first: `health-fail`
- * (needs fixing), `quota-high` (running low), the other attention labels (`signed-out`, `not-installed`,
+ * (needs fixing; an Expired Login, `login-expired`, before it), `quota-high` (running low), the other attention labels (`signed-out`, `not-installed`,
  * `health-warn`), then `next` (recommended) and last `api`. Null when none applies. `reasons` are attentionReasons'.
  */
 export function rowBadge(reasons: string[], opts: { next?: boolean; api?: boolean }): string | null {
-  for (const r of ['health-fail', 'quota-high', 'signed-out', 'not-installed', 'health-warn'])
+  // An Expired Login comes first: the account cannot start, so its quota or health says little (ADR-0071).
+  for (const r of [
+    'login-expired',
+    'health-fail',
+    'quota-high',
+    'signed-out',
+    'not-installed',
+    'health-warn',
+  ])
     if (reasons.includes(r)) return r
   if (opts.next) return 'next'
   if (opts.api) return 'api'
   return null
+}
+
+/**
+ * The Accounts whose sign-in expired (ADR-0071), API Accounts never, in the order given: what the Panel's summary
+ * banner names. Its content changes only when this list does, so a refresh with the same answer redraws nothing.
+ */
+export function expiredLogins<T extends LogicAccount>(accounts: readonly T[]): T[] {
+  return accounts.filter((a) => a.kind !== 'api' && a.loginProblem?.kind === 'expired')
 }
 
 /**

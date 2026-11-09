@@ -16,6 +16,7 @@ import {
 import { claudeAiTaskArgs } from './ai-task.ts'
 import { claudeHandoff } from './handoff.ts'
 import { CLAUDE_LAYOUT } from './layout.ts'
+import { readClaudeLoginEvents } from './login-events.ts'
 import { claudeModelChoice } from './model.ts'
 import { readClaudeQuota } from './quota.ts'
 import { claudeQuotaFetch } from './quota-fetch.ts'
@@ -132,6 +133,8 @@ export const claudeFamily: FamilyDef = {
     hint: 'Opens the browser to sign this account in to Claude (`claude auth login`).',
   },
   loginState,
+  // An Expired Login (ADR-0071): the transcripts' own records, never a token or `expiresAt`.
+  readLoginEvents: readClaudeLoginEvents,
   model,
   modelChoice: claudeModelChoice,
   identity: claudeIdentity,

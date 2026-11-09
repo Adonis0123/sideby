@@ -140,6 +140,17 @@ Usage (tokens) still counts per directory. Nothing is moved or deleted; keep bot
 
 To give one of them a login of its own, click **Use another account** on its line in the panel, or run `sideby login <account>` (for example `sideby login codex:team`). You cannot do it inside the tool: Codex has no `/login`, and its `/logout` is blocked while a task runs. Your browser usually signs in as the login it already has, so before you approve, sign out of that login in the browser, or open the sign-in link in a private window. sideby says who the directory is signed in as before you start, and afterwards whether it now has its own login or is still the same one. Nothing is signed out first: if you give up halfway, the old login stays.
 
+### Sign-in expired
+
+A Claude Code login can expire while the account still looks signed in: Claude Code then answers `Login reached its time limit · Please run /login` in the next session. sideby notices this from the account's own session records (the last part of its 20 newest sessions) and from its quota check, never from a token:
+
+- `sideby list` shows `expired` in the LOGIN column and a line ``claude:work: sign-in expired; sign in again with `sideby login claude:work` ``; `--json` has `loginProblem: { "kind": "expired", "since": … }`.
+- `sideby doctor` warns `login.expired` with the same command; `--fix` cannot fix it, and warnings alone still exit 0.
+- The panel marks the row **Sign-in expired** with **Sign in again** beside it (it opens `sideby login <account>` in your terminal), and shows one banner at the top while any account is expired. In a row for two directories of one login it names the expired directory. The menu bar marks the account **⚠ sign-in expired**.
+- `sideby next`, pick commands, the panel's recommendation and Auto Handoff skip it until it works again.
+
+It clears by itself after the account's next successful session or quota check. After `sideby login` (or **Sign in again**) ends well, sideby checks that account's quota once, when quota checks are on, and prints `claude:work is signed in again`; otherwise the panel says **Sign-in finished, waiting for confirmation** until the next session confirms it. Only Claude Code's own words "Login reached its time limit" count, in a session or in the quota check's answer: a `/login` hint, "Not logged in" or "Invalid API key" alone does not. API accounts are never checked, and only Claude Code is checked for now.
+
 ## Codex quota
 
 sideby asks the official Codex CLI for current quota every 15 minutes, without starting a conversation. **Refresh** in the Panel or menu bar, or `sideby quota codex --refresh --json`, asks again now. Turn checks off with `sideby quota check codex off --json` or the Panel's **Settings › Quota checks**; CI never queries.

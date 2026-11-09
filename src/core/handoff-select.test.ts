@@ -536,3 +536,38 @@ describe('sameOrganization', () => {
     assert.equal(byPressure.kind === 'pick' && byPressure.ref, 'claude:002')
   })
 })
+
+describe('selectNext and an Expired Login (ADR-0071)', () => {
+  const expired = { kind: 'expired' as const, message: 'sign-in expired' }
+  it('skips it with the command that fixes it and picks the next one', () => {
+    const r = selectNext({
+      origin,
+      candidates: [
+        origin,
+        acct('claude:002', { quota: quota(1), loginProblem: expired }),
+        acct('claude:003', { quota: quota(30) }),
+      ],
+      settings: settings({ auto: true, sameFamily: true }),
+      aliases: {},
+      used: [],
+      now: NOW,
+    })
+    assert.equal(r.kind, 'pick')
+    assert.equal(r.kind === 'pick' && r.ref, 'claude:003')
+    assert.match(JSON.stringify(r.kind === 'pick' ? r.skipped : []), /sideby login claude:002/)
+  })
+
+  it('refuses a handoff named to it', () => {
+    const r = selectNext({
+      origin,
+      candidates: [origin, acct('claude:002', { loginProblem: expired })],
+      settings: settings({ auto: true, sameFamily: true }),
+      aliases: {},
+      used: [],
+      now: NOW,
+      to: 'claude:002',
+    })
+    assert.equal(r.kind, 'none')
+    assert.match(r.kind === 'none' ? r.reason : '', /expired.*sideby login claude:002/)
+  })
+})

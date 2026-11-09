@@ -650,6 +650,7 @@ export function handoffByFamily(
         isMain: a.isMain,
         kind: a.kind,
         login: a.login ?? 'unknown',
+        ...(a.loginProblem ? { loginProblem: a.loginProblem } : {}),
         quota: a.quota ?? { status: 'unavailable', reason: 'unrecognized' },
       })),
       now,

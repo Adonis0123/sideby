@@ -379,3 +379,27 @@ describe('Takeover Limits per window kind (spec §3.13, ADR-0062)', () => {
     }
   })
 })
+
+describe('planHandoff and an Expired Login (ADR-0071)', () => {
+  const expired = { kind: 'expired' as const, since: at(-2), message: 'sign-in expired' }
+  it('never picks it, even with the most room, and says how to fix it', () => {
+    const plan = planHandoff(
+      'claude',
+      [cand('main', quota([5, 3]), { loginProblem: expired }), cand('work', quota([40, 3]))],
+      NOW,
+    )
+    assert.equal(plan.pick, 'claude:work')
+    const e = plan.accounts.find((x) => x.ref === 'claude:main')!
+    assert.deepEqual(e.skip, { reason: 'login-expired', command: 'sideby login claude:main' })
+    assert.equal(e.state, 'ready')
+    assert.equal(plan.accounts.at(-1)?.ref, 'claude:main')
+  })
+
+  it('picks nothing when every account has an Expired Login, also as a Last Resort', () => {
+    const plan = planHandoff('claude', [cand('main', quota([95, 3]), { loginProblem: expired })], NOW, {
+      lastResort: true,
+    })
+    assert.equal(plan.pick, null)
+    assert.equal(plan.earliestReset, undefined)
+  })
+})

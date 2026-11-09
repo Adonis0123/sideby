@@ -41,6 +41,15 @@ Two directories signed in as the same login share one quota (`sameLogin` in `sid
 
 A running session of that account keeps its old login until it is restarted.
 
+## Sign in again after an expired login
+
+An account with `loginProblem.kind: "expired"` in `sideby list --json` (an Expired Login) still has its login file, but its Host said the login expired. sideby never picks it for `sideby next`, Auto Handoff or a pick command until it works again.
+
+1. Name the account and when it expired (`loginProblem.since`).
+2. Give the user one line to run in their own terminal: `sideby login <ref>` (Claude Code: `! sideby login <ref>`), or tell them to click **Sign in again** on that account in the Panel (it opens the same command in their terminal).
+3. When the sign-in ends well and quota checks are on, sideby asks that account's quota once; a good answer clears the state and sideby prints `<ref> is signed in again`. Otherwise it clears after the account's next successful session or quota check, and the Panel shows "Sign-in finished, waiting for confirmation" meanwhile.
+4. Check `sideby list --json` afterwards: `loginProblem` is gone.
+
 ## Short commands (aliases)
 
 For an account that already exists: `sideby alias add <short> <ref> --json`.

@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { ownedFolder } from '../../core/fs-safe.ts'
 import type { Account, QuotaFetch, QuotaFetchContext, QuotaResult, QuotaWindow } from '../../types.ts'
+import { saysLoginExpired } from './login-events.ts'
 
 /**
  * Hooks off and no MCP servers: a quota check is no session, so the user's hooks (notifications, loggers) must not
@@ -161,6 +162,21 @@ export function claudeUsageAnswer(answer: unknown, account: Account, now: number
   const windows = local ? usageQuota(text, now) : null
   if (windows)
     return { status: 'ok', windows, observedAt: new Date(now).toISOString(), source: QUOTA_FETCH_SOURCE }
+  // Only an answer with a known expiry phrase is an Expired Login (ADR-0071, Q10); a `/login` hint, "Not logged in" or
+  // an API key problem alone is not.
+  // A model turn is never read for sign-in words: its text may merely quote them (it is not a local /usage either).
+  if (typeof a.num_turns === 'number' && a.num_turns > 0)
+    return failed(
+      'this Claude Code version cannot report quota through /usage; update Claude Code, then refresh',
+    )
+  // Only Claude Code's own error result counts as an expiry.
+  if (a.is_error === true && saysLoginExpired(text) && !/invalid api key/i.test(text))
+    return {
+      status: 'unavailable',
+      reason: 'fetch-failed',
+      detail: `Claude Code says the sign-in expired; run \`sideby login ${account.ref}\`, then refresh`,
+      loginExpired: true,
+    }
   if (/not logged in|please (?:run )?\/login|please log ?in/i.test(text))
     return failed(`Claude Code is not signed in; run \`sideby login ${account.ref}\`, then refresh`)
   if (/using your API key|API usage billing/i.test(text))

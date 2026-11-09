@@ -25,6 +25,7 @@ import {
   codeSwapOutcome,
   dotsKeepKeyboard,
   enableOutcome,
+  expiredLogins,
   fileSize,
   fixPrompt,
   foldSkips,
@@ -145,6 +146,7 @@ const LOGIC = [
   accountTitle,
   vendorAlias,
   attentionReasons,
+  expiredLogins,
   attentionWhy,
   quotaHighLevel,
   autostartNote,
@@ -1473,7 +1475,7 @@ const MAIN = String.raw`
       if (rs.length) need++
       for (const r of rs) counts[r] = (counts[r] || 0) + 1
     }
-    const order = ['error', 'health-fail', 'signed-out', 'not-installed', 'quota-high', 'health-warn']
+    const order = ['error', 'health-fail', 'signed-out', 'login-expired', 'not-installed', 'quota-high', 'health-warn']
     // Who needs a look, by name: counting reasons beside a count of accounts made numbers that did not add up. One name
     // and a count, as two names did not fit the card.
     const needing = list.filter((a) => reasonsOf(a, now).length)
@@ -1762,14 +1764,62 @@ const MAIN = String.raw`
   function statusBadge(a, members) {
     const subject = attentionSubject(a)
     const next = members ? members.some(isNext) : isNext(a)
-    const k = rowBadge(reasonsOf(subject, Date.now()), { next, api: a.kind === 'api' })
-    if (k === 'health-fail' || k === 'quota-high' || k === 'health-warn') return attentionWord(subject, k)
+    // A Same Login row speaks for every directory in it: an expired one is named (ADR-0071).
+    const expired = expiredLogins(members || [a])
+    const reasons = reasonsOf(subject, Date.now())
+    if (expired.length && !reasons.includes('login-expired')) reasons.push('login-expired')
+    const k = rowBadge(reasons, { next, api: a.kind === 'api' })
+    if (k === 'login-expired') return expiredBadge(expired, Boolean(members && members.length > 1), a.ref)
+    const now = k === 'health-fail' || k === 'quota-high' || k === 'health-warn' ? attentionWord(subject, k) : otherBadge(a, k)
+    const leaving = expiredBadgeLeaving(a.ref)
+    return leaving ? [leaving, now] : now
+  }
+  function otherBadge(a, k) {
     if (k === 'signed-out')
       return h('button', { class: 'tag tag-fail tag-btn', type: 'button', title: t('acct.signInHint'), 'aria-label': t('acct.signedOutLabel', { ref: a.ref }), onclick: (e) => { e.stopPropagation(); signIn(a) } }, h('span', { class: 'dot dot-fail', 'aria-hidden': 'true' }), t('acct.signedOut'))
     if (k === 'not-installed') return h('span', { class: 'tag tag-warn' }, t(family(a.family).brokenBin ? 'acct.broken' : 'acct.notInstalled'))
     if (k === 'next') return nextTag(a)
     if (k === 'api') return h('span', { class: 'tag tag-warn', title: t('tip.api.body') }, t('acct.api'))
     return null
+  }
+  // An Expired Login (ADR-0071): a word, and "Sign in again" beside it, which opens the sign-in in the terminal. In a
+  // Same Login row the word names every expired directory, each with its own button. After a sign-in sideby started it
+  // says it waits for confirmation. row is the ref of the row it sits in, so it can shrink away when it goes.
+  function expiredBadge(list, named, row) {
+    const waiting = list.every((m) => m.loginProblem && m.loginProblem.signedInAt)
+    const why = list.map((m) => {
+      const p = m.loginProblem || {}
+      const since = p.since ? t('acct.expiredSince', { time: clock(p.since) }) : ''
+      return p.signedInAt ? t('acct.expiredWaitingHint', { ref: m.ref }) : t('acct.expiredHint', { ref: m.ref, since })
+    }).join('\n')
+    const word = waiting ? t('acct.expiredWaiting') : named ? t('acct.expiredIn', { name: list.map((m) => m.name).join(', ') }) : t('acct.expired')
+    const todo = BOOT.readOnly ? [] : list.filter((m) => !(m.loginProblem && m.loginProblem.signedInAt))
+    const btn = (m) => h('button', { class: 'link-btn small', type: 'button', title: t('exp.signInRef', { ref: m.ref }), onclick: (e) => { e.stopPropagation(); signIn(m) } }, todo.length > 1 ? t('acct.signInName', { name: m.name }) : t('acct.signInAgain'))
+    // It grows in once; the class goes after that, so a refresh with the same answer keeps this element.
+    return h('span', { class: 'exp-badge', 'data-row': row, 'data-enter': 'exp-' + list.map((m) => m.ref).join(','), onanimationend: (e) => e.currentTarget.classList.remove('enter') },
+      h('span', { class: 'tag tag-warn', title: why, 'aria-label': why }, h('span', { class: 'dot dot-warn', 'aria-hidden': 'true' }), word),
+      todo.map(btn))
+  }
+  // The badge a row showed before its sign-in works again: kept for one more render while it fades and narrows to
+  // nothing (180 ms, none under reduced motion), then the next render drops it.
+  function expiredBadgeLeaving(row) {
+    if (REDUCED) return null
+    const old = document.querySelector('.exp-badge[data-row="' + CSS.escape(row) + '"]')
+    if (!old || old.dataset.gone) return null
+    if (old.dataset.leaving) return old
+    old.dataset.leaving = '1'
+    old.removeAttribute('data-enter')
+    old.classList.remove('enter')
+    old.style.pointerEvents = 'none'
+    old.style.overflow = 'hidden'
+    old.style.whiteSpace = 'nowrap'
+    const w = old.offsetWidth
+    setTimeout(() => {
+      if (!old.isConnected) return
+      old.animate([{ opacity: 1, maxWidth: w + 'px', marginLeft: '0px' }, { opacity: 0, maxWidth: '0px', marginLeft: '-8px' }], { duration: 180, easing: 'ease-in-out', fill: 'forwards' })
+      setTimeout(() => { old.dataset.gone = '1'; renderAccounts() }, 190)
+    }, 0)
+    return old
   }
   // An Account's short commands, as quiet text after its title: those that only start it first, then those with Host
   // arguments; each says on hover what it adds. A card too narrow for all of them ends in an ellipsis.
@@ -7511,7 +7561,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.network', 'ai.ask.unattended', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.commands', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.expired', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.network', 'ai.ask.unattended', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.commands', 'ai.ask.tool']
   // Network Guard (spec §3.35): one dialog with the switch, the allowed countries and the newest result per address.
   // Countries are never ticked for the user, the current one included: a wrong network would allow itself.
   const NET_COMMON = ['US', 'JP', 'SG', 'GB', 'DE', 'FR', 'NL', 'CA', 'AU', 'KR', 'TW', 'HK']
@@ -8663,6 +8713,8 @@ const MAIN = String.raw`
       if (inbBanner) out.push(inbBanner)
       const nb = netBanner()
       if (nb) out.push(nb)
+      const eb = expiredBanner()
+      if (eb) out.push(eb)
       const errs = S.state.pluginErrors
       if (errs.length) out.push(h('div', { class: 'banner banner-warn', role: 'status' }, h('div', null,
         h('b', null, tn('banner.plugins', errs.length) + ' '), t('banner.pluginsHint'),
@@ -8670,6 +8722,39 @@ const MAIN = String.raw`
     }
     patch($('banners'), out)
     growInboundBanner()
+    growExpiredBanner()
+  }
+  // One banner while any Account's sign-in has expired (ADR-0071), on the Accounts page. Its text and button change
+  // only when the list of expired Accounts does, so a refresh with the same answer redraws nothing. It grows in when it
+  // appears and shrinks away when the last one is signed in again.
+  const exb = { el: undefined }
+  function expiredBanner() {
+    const list = S.state ? expiredLogins(visibleAccounts()).filter((a) => !(a.loginProblem && a.loginProblem.signedInAt)) : []
+    if (curPage !== 'accounts' || !list.length) return expiredBannerKept()
+    const refs = list.map((a) => a.ref)
+    const attrs = { class: 'banner banner-warn', role: 'status', 'data-key': 'exp-banner' }
+    const text = h('div', null, tn('exp.banner', refs.length, { refs: refList(refs) }))
+    if (BOOT.readOnly) return h('div', attrs, text)
+    return h('div', attrs, text,
+      h('div', { class: 'banner-actions' },
+        list.slice(0, 3).map((a, i) => h('button', { class: 'btn btn-sm' + (i === 0 ? ' btn-primary' : ''), type: 'button', onclick: () => signIn(a) }, list.length > 1 ? t('exp.signInRef', { ref: a.ref }) : t('exp.signIn')))))
+  }
+  function expiredBannerKept() {
+    const old = $('banners').querySelector('[data-key="exp-banner"]')
+    if (!old || old.dataset.gone || REDUCED) return null
+    // Another render while it shrinks keeps it, so it is not cut short.
+    if (old.dataset.leaving) return old
+    old.dataset.leaving = '1'
+    old.style.pointerEvents = 'none'
+    old.animate(bannerFrames(old).reverse(), { duration: 180, easing: 'ease-in-out', fill: 'forwards' })
+    setTimeout(() => { old.dataset.gone = '1'; renderBanners() }, 180)
+    return old
+  }
+  function growExpiredBanner() {
+    const el = $('banners').querySelector('[data-key="exp-banner"]:not([data-leaving])')
+    if (el === exb.el) return
+    if (el && exb.el !== undefined && !REDUCED) el.animate(bannerFrames(el), { duration: 180, easing: 'ease-out' })
+    exb.el = el
   }
 
   // ---------- loading ----------
