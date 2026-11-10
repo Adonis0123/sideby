@@ -2537,6 +2537,43 @@ describe('sideby update (spec §3.23)', () => {
     })
   })
 
+  it('a full update whose skill update fails says why in the JSON (skillMessage)', async () => {
+    await withFakeHome(async (h) => {
+      // In this process: a child runs from the source checkout, which sideby never updates itself.
+      const { cmdUpdate } = await import('./commands.ts')
+      const { parseArgs } = await import('./args.ts')
+      const { bindUpdateDeps } = await import('../core/update.ts')
+      await h.write('.agents/skills/sideby/SKILL.md', '---\nname: sideby\nmetadata:\n  version: 0.0.1\n---\n')
+      const unbind = bindUpdateDeps({
+        fetch: (async () => new Response(JSON.stringify({ latest: '99.0.0' }))) as typeof fetch,
+        packageDir: async () => join(h.home, '.nvm/versions/node/v22/lib/node_modules/sideby'),
+        writable: async () => true,
+        alive: () => false,
+        // The install succeeds; the skills tool fails.
+        exec: async (file) => ({ code: file === 'npx' ? 1 : 0, output: '' }),
+        appInstalled: async () => false,
+        autostartInstalled: async () => false,
+      })
+      const env = process.env
+      const { SIDEBY_NO_UPDATE_NOTIFIER: _off, ...fake } = h.env
+      process.env = fake as NodeJS.ProcessEnv
+      const out: string[] = []
+      try {
+        const code = await cmdUpdate(parseArgs(['--yes', '--json'], ['json', 'yes']), {
+          out: (s) => out.push(s),
+          err: () => {},
+        })
+        assert.equal(code, 0, out.join('\n'))
+      } finally {
+        process.env = env
+        unbind()
+      }
+      const data = checkSchema('update', out.join('\n'))
+      assert.deepEqual([data.updated, data.skillUpdated], [true, false])
+      assert.match(String(data.skillMessage), /run it yourself/)
+    })
+  })
+
   it('reports a registry it cannot reach as an error with what to do', async () => {
     await withFakeHome(async (h) => {
       const r = await sideby(h, ['update', '--json'], { SIDEBY_UPDATE_REGISTRY: 'http://127.0.0.1:9' })

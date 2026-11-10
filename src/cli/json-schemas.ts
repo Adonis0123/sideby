@@ -2158,6 +2158,12 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
           description: 'The skill was updated too (true) or that failed (false); absent when not tried.',
         }),
       ),
+      skillMessage: Type.Optional(
+        Type.String({
+          description:
+            'Set with `skillUpdated` after an Update: when it is false, why the skill update failed and what to run instead; when true, that the skill was updated.',
+        }),
+      ),
       output: Type.Optional(Type.String({ description: 'What the failed install command printed.' })),
     },
     { title: 'sideby update --json' },

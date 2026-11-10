@@ -2496,6 +2496,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           restartedPanel: r.restartedPanel,
           refreshedApp: r.refreshedApp,
           ...(r.skillUpdated === undefined ? {} : { skillUpdated: r.skillUpdated }),
+          ...(r.skillMessage === undefined ? {} : { skillMessage: r.skillMessage }),
           ...(r.skillSyncStarted === undefined ? {} : { skillSyncStarted: r.skillSyncStarted }),
         }
       },

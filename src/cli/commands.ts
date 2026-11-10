@@ -2130,6 +2130,7 @@ export async function cmdUpdate(a: ParsedArgs, io: Io): Promise<number> {
       ...(r.refreshedAutostart === undefined ? {} : { refreshedAutostart: r.refreshedAutostart }),
       skill: SKILL_INSTALL,
       ...(r.skillUpdated === undefined ? {} : { skillUpdated: r.skillUpdated }),
+      ...(r.skillMessage === undefined ? {} : { skillMessage: r.skillMessage }),
       ...(r.ok ? {} : { output: r.output }),
     })
     return r.ok ? 0 : 1
