@@ -12,7 +12,7 @@ sideby unattended on --until 08:00 --json   # or --for 4h; at most 72 hours
 ```
 
 Tell the user, in one line each:
-- It covers Claude and Codex sessions sideby starts (`sideby run`, short commands, pick commands, `sideby next`, Auto Handoff, AI Tasks). Running `claude` or `codex` directly, Grok, pi and desktop apps are not covered.
+- It covers Claude and Codex sessions sideby starts (`sideby run`, short commands, pick commands, `sideby next`, Auto Handoff, AI Tasks). Running `claude` or `codex` directly, Grok, pi and desktop apps are not covered. A terminal manager that starts the Host itself (Orca, for example) is covered once its Claude command is `sideby resume claude --` (configuration guide, "Resuming from other tools"); in Orca that is Settings → Agents → Claude → the command field.
 - Sessions started before the feature was first used have no hook. If `configured` was `false` before this command, the sessions already running are not covered: suggest restarting long tasks with `sideby run <account> --unattended`.
 - A Codex account runs the hooks only after the user trusts them once: in that account type `/hooks` and trust both `unattended-hook` entries, before a question and at the end of a turn (`coverage.codex` is `needs-trust`).
 - `sideby unattended off --json` turns it off; inside a Slot it pauses until that Slot ends.

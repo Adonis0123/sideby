@@ -107,6 +107,8 @@ function claude { local a; if [ -z "${CLAUDE_CONFIG_DIR-}" ]; then for a in "$@"
 
 `sideby resume` 找出账号目录里存有这个会话 id 的账号（Claude 是 `projects/*/<id>.jsonl`，Codex 是 `sessions/**/rollout-*-<id>.jsonl`，Grok 是 `sessions/*/<id>/`），像 `sideby run` 一样启动它。Claude 会话打开后没发过消息时没有这个文件：哪个账号都没有它时，`sideby resume` 再找起过它的账号（`session-env/<id>/`），去掉 `--resume <id>`，在那个账号开一个新会话，并在 stderr 说明。其他情况原样运行宿主，包括 `--continue`、按标题恢复、会话在主账号里。例外：开了 `handoff.auto` 时，主账号里的会话按 `sideby run` 启动，终端管理器重开标签页后 Auto Handoff 照样生效。sideby 启动的宿主已经设了选择变量，不会被二次路由。`alias claude='claude --dangerously-skip-permissions'` 这样的 alias 照常生效。只有参数里有会话 id 形状的命令才经过 sideby（多约 140 ms），其他宿主命令直接运行。sideby 不复制、不移动会话。
 
+这个函数只管在 shell 里敲的、带会话 id 的命令，所以终端管理器新开的窗格仍然不经 sideby 启动宿主，无人值守和 Network Guard 都管不到它。要让每次启动都经过 sideby，把终端管理器里这个宿主的启动命令设成 `sideby resume <family> --`。在 Orca 里：打开 Settings → Agents，展开 Claude，在命令输入框填 `sideby resume claude --`。Orca 1.4.254 会把这条命令放在它自己的参数前面，重开窗格时的 `--resume <id>` 也一样；于是新会话在主账号里带着 sideby 的 hook 启动，恢复的会话在存有它的账号里启动。清空输入框即可恢复原样。
+
 ## 更新
 
 sideby 每天向 npm registry 查一次自己的最新版本（一次 `GET https://registry.npmjs.org/-/package/sideby/dist-tags`，不带任何关于你或你的账号的信息）。有新版本时：
