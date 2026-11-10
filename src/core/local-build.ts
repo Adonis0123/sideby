@@ -30,9 +30,10 @@ export const devDir = (env: Env) =>
   join(env.XDG_DATA_HOME || join(env.HOME || homedir(), '.local', 'share'), 'sideby-dev')
 
 /**
- * The environment to ask npm for its global prefix in. A pnpm script gets pnpm's own `--dir` (`pnpm -C <dir> …`) as
- * `npm_config_dir` and `npm_config_prefix`, and npm would answer with that directory; npm reads the user's real
- * setting from its config files and from `NPM_CONFIG_PREFIX` without them.
+ * The environment to ask npm for its global prefix in, and to install a global package in. A pnpm script gets pnpm's
+ * own `--dir` (`pnpm -C <dir> …`) as `npm_config_dir` and `npm_config_prefix`, and npm would answer with, and install
+ * into, that directory; npm reads the user's real setting from its config files and from `NPM_CONFIG_PREFIX` without
+ * them.
  */
 export function npmEnv(env: Env): Env {
   if (!env.npm_config_user_agent?.startsWith('pnpm/')) return env
@@ -265,8 +266,9 @@ export async function switchLocal(
       } else {
         const want = latest ?? 'latest'
         await rm(globalPkg(d), { force: true })
+        // Without pnpm's `--dir`: from `pnpm -C <checkout> local --off` npm would install into the checkout.
         const r = await runProgram('npm', ['install', '-g', `sideby@${want}`], {
-          env,
+          env: npmEnv(env),
           ...(opts.onOutput ? { onOutput: opts.onOutput } : {}),
         })
         if (r.code !== 0) {

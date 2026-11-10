@@ -6,6 +6,7 @@ import { lstat, mkdir, readFile, readlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
+import type { Env } from '../types.ts'
 import { globalPkg, type LocalDirs, linkGlobal, localStatus, pkgDir, switchLocal } from './local-build.ts'
 import { resolvePaths } from './paths.ts'
 import { bindUpdateDeps } from './update.ts'
@@ -203,6 +204,37 @@ describe('Local Build switch', () => {
       const r = await switchLocal(resolvePaths(h.env), d, 'npm', h.env)
       assert.equal(r.ok, true)
       assert.deepEqual(ran, ['npm install -g sideby@0.16.0', 'sideby update --skill --yes'])
+    })
+  })
+
+  it("installs into npm's own global prefix from a pnpm script, not into pnpm's --dir", async () => {
+    await withFakeHome(async (h) => {
+      const d = dirsOf(h)
+      machine('0.16.0')
+      const envs = new Map<string, Env>()
+      bindUpdateDeps({
+        exec: async (file, args, opts) => {
+          envs.set([file, ...args].join(' '), opts.env)
+          return { code: 0, output: '' }
+        },
+      })
+      await pkgAt(globalPkg(d), '0.15.0')
+      await pkgAt(pkgDir(d), '0.16.0', localBuild)
+      await linkGlobal(d)
+      // What `pnpm -C <checkout> local --off` gives its script.
+      const env = {
+        ...h.env,
+        npm_config_user_agent: 'pnpm/10.0.0 npm/? node/v22.18.0 darwin arm64',
+        npm_config_prefix: h.path('checkout'),
+        npm_config_dir: h.path('checkout'),
+      }
+      const r = await switchLocal(resolvePaths(h.env), d, 'npm', env)
+      assert.equal(r.ok, true)
+      const install = envs.get('npm install -g sideby@0.16.0')
+      assert.ok(install, 'the install ran')
+      assert.equal('npm_config_prefix' in install, false)
+      assert.equal('npm_config_dir' in install, false)
+      assert.equal(install.HOME, h.home, 'the rest of the environment stays')
     })
   })
 
