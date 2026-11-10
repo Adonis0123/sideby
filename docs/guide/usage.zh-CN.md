@@ -238,7 +238,7 @@ sideby desktop grok-bot        # Grok Bot 自己的默认窗口（grok-bot:main�
 - 新窗口一开始没有登录。在里面用你想给这个窗口的账号登录，登录时先关掉其他 Grok Bot 窗口：浏览器可能把登录结果送回别的窗口。
 - sideby 按 Grok Bot 最后写下的状态显示窗口是否已登录，但不显示登录的是哪个账号：要知道这个就得读登录文件。起一个能分清的名字。
 - 每个新窗口的数据放在 `~/Library/Application Support/sideby/grok-bot/<名字>/`。`sideby desktop grok-bot:<名字> --remove --yes`（或面板里的 **删除**）删掉这个目录，也就是退出这个窗口的登录、删掉它在这台 Mac 上的数据。先退出那个窗口。主窗口是 Grok Bot 自己的，不能删。
-- sideby 用 Grok Bot 现在认的 `--user-data-dir` 打开它，并清掉会盖过它的 `SAND_DATA_ROOT`、`SAND_USER_DATA_DIR`。以后的 Grok Bot 版本可能会改。
+- sideby 打开 Grok Bot 时把 `SAND_USER_DATA_DIR` 设成这个窗口的目录（Grok Bot 0.79.3 认它），同时带上旧版本认的 `--user-data-dir`；你自己环境里的 `SAND_DATA_ROOT`、`SAND_USER_DATA_DIR` 会把窗口指到别处，所以先清掉。以后的 Grok Bot 版本可能会改。
 
 ## 在哪个浏览器登录过
 

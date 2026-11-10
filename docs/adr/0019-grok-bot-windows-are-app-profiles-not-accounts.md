@@ -17,7 +17,7 @@ Options:
 ## Decision
 
 - An App Profile is one Grok Bot window: ref `grok-bot:<name>`, data in `~/Library/Application Support/sideby/grok-bot/<name>/` (mode 700); `grok-bot:main` is the app's default data. macOS only, internal definition (not in `FamilyDef`).
-- `sideby desktop grok-bot:<name>` creates the folder when it is missing and opens `open -n -a <app> --args --user-data-dir=<folder>`, with `SAND_DATA_ROOT`, `SAND_USER_DATA_DIR`, `SIDEBY_*` and agent-session variables cleared. A running window is brought to the front, as in ADR-0015.
+- `sideby desktop grok-bot:<name>` creates the folder when it is missing and opens `open -n -a <app> --env SAND_USER_DATA_DIR=<folder> --args --user-data-dir=<folder>` (the variable since 2026-11-10, see below), with the caller's `SAND_DATA_ROOT`, `SAND_USER_DATA_DIR`, `SIDEBY_*` and agent-session variables cleared. A running window is brought to the front, as in ADR-0015.
 - `--remove --yes` deletes a non-main Profile's folder, only when its window is closed and the folder is a real directory inside sideby's folder. Without `--yes` it only says what would go (exit 10).
 - The signed-in state comes from the app's own `desktop-status.json` (`signedIn`, a boolean next to a version, a pid and a start time). Which account is signed in is not shown: finding out would mean reading credentials.
 - `sideby list` and the Panel show the Profiles in their own Grok Bot group, with a button to open another.
@@ -32,3 +32,7 @@ Options:
 ## Real-app check (2026-10-16, Grok Bot 0.71.2)
 
 With the main window running on `~/.grokbot`, a second instance started with `--user-data-dir` showed its own sign-in screen, kept its data root in `<folder>/sand-data`, wrote its own `desktop-status.json`, and left `~/.grokbot` unchanged. Opening it again brought that window to the front instead of starting a third.
+
+## Real-app check (2026-11-10, Grok Bot 0.79.3)
+
+0.79.3 sets userData back to the app's default at startup, so `--user-data-dir` alone no longer isolates: with the main window running, the new instance lost the single-instance lock and quit at once with exit code 0, while `open` reported success. Started with `open -n -a <app> --env SAND_USER_DATA_DIR=<folder> --args --user-data-dir=<folder>`, the instance stayed up, wrote its data and `desktop-status.json` to `<folder>`, and kept the flag on its command line, which is how sideby finds the window.

@@ -150,7 +150,15 @@ describe('app profiles: opening', () => {
       assert.equal(r.createdAppData, true)
       assert.equal((await stat(data)).mode & 0o777, 0o700)
       const call = opens(fake)[0]!
-      assert.deepEqual(call.args, ['-n', '-a', app, '--args', `--user-data-dir=${data}`])
+      assert.deepEqual(call.args, [
+        '-n',
+        '-a',
+        app,
+        '--env',
+        `SAND_USER_DATA_DIR=${data}`,
+        '--args',
+        `--user-data-dir=${data}`,
+      ])
       for (const v of ['SAND_DATA_ROOT', 'SAND_USER_DATA_DIR', 'SIDEBY_ACCOUNT', 'CLAUDE_CODE_SESSION_ID'])
         assert.equal(call.env?.[v], undefined, v)
       assert.equal(call.env?.LANG, 'en_US.UTF-8')
