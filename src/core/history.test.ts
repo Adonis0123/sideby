@@ -14,10 +14,12 @@ import {
   historyProjects,
   historyShow,
   projectsNamed,
+  recency,
   scanToolOutput,
   searchHistory,
   snippetOf,
   syncHistory,
+  titleBoost,
 } from './history.ts'
 import { ProjectResolver } from './history-project.ts'
 
@@ -296,9 +298,82 @@ describe('Session History', () => {
       assert.deepEqual(ids(await searchHistory(rt, { q: 'login' }, { wait: true })), [A, C])
       assert.deepEqual(ids(await searchHistory(rt, { q: 'login form' })), [C])
       assert.deepEqual(ids(await searchHistory(rt, { q: 'login 暗色' })), [])
-      assert.deepEqual(ids(await searchHistory(rt, { q: 'widgets' })), [A])
+      const lifted = await searchHistory(rt, { q: 'widgets' })
+      assert.deepEqual(ids(lifted), [A])
+      // Only the subagent said it: the snippet is what the subagent said, so the row shows why it is listed.
+      assert.match(lifted.sessions[0]!.snippet ?? '', /widgets/)
       // The script also says "login", and shows only with scripts.
       assert.deepEqual(ids(await searchHistory(rt, { q: 'login', scripts: true })), [A, C, S].sort())
+    })
+  })
+
+  it('puts a match in the title before a newer session that only mentions the words', async () => {
+    await withHistory(async (h, rt, { web }) => {
+      const OLD = '0ld00000-0000-4000-8000-000000000006'
+      const NEW = 'new00000-0000-4000-8000-000000000007'
+      await h.write(
+        `.claude/projects/-code-web/${OLD}.jsonl`,
+        jsonl(
+          claudeTurns(OLD, web, [['rework the billing exporter', 'Done, the file is smaller now.']], () =>
+            ago(45 * DAY),
+          ),
+        ),
+      )
+      await h.write(
+        `.claude/projects/-code-web/${NEW}.jsonl`,
+        jsonl(
+          claudeTurns(
+            NEW,
+            web,
+            [
+              [
+                'why is the nightly job slow',
+                'It waits for the billing exporter. The billing exporter is slow.',
+              ],
+            ],
+            () => ago(DAY),
+          ),
+        ),
+      )
+      const r = await searchHistory(rt, { q: 'billing exporter' }, { wait: true })
+      assert.deepEqual(
+        r.sessions.map((x) => x.sessionId),
+        [OLD, NEW],
+      )
+      // Without the word in a title, the newer of two like matches still comes first.
+      const said = await searchHistory(rt, { q: 'fixed' })
+      assert.deepEqual(
+        said.sessions.map((x) => x.sessionId),
+        [A, C],
+      )
+    })
+  })
+
+  it('finds a short word through the filters, in a subagent too', async () => {
+    await withHistory(async (h, rt, { app }) => {
+      await h.write(
+        `.claude/projects/-code-app/${A}/subagents/agent-x2.jsonl`,
+        jsonl([
+          {
+            type: 'user',
+            sessionId: A,
+            isSidechain: true,
+            cwd: app,
+            timestamp: ago(MIN),
+            message: { content: '找一下蓝鲸在哪' },
+          },
+        ]),
+      )
+      const week = await searchHistory(rt, { q: '蓝鲸', since: '7d' }, { wait: true })
+      assert.deepEqual(ids(week), [A])
+      assert.match(week.sessions[0]!.snippet ?? '', /蓝鲸/)
+      assert.deepEqual(ids(await searchHistory(rt, { q: '蓝鲸', account: 'claude:main' })), [A])
+      assert.deepEqual(ids(await searchHistory(rt, { q: '蓝鲸', family: 'codex' })), [])
+      // Twenty days old: outside the week, inside the month, with and without a letter in the word.
+      assert.deepEqual(ids(await searchHistory(rt, { q: '暗色', since: '7d' })), [])
+      assert.deepEqual(ids(await searchHistory(rt, { q: '暗色', since: '30d' })), [B])
+      assert.deepEqual(ids(await searchHistory(rt, { q: 'UI', since: '30d' })), [B])
+      assert.deepEqual(ids(await searchHistory(rt, { q: 'ui', since: '7d' })), [])
     })
   })
 
@@ -761,5 +836,31 @@ describe('snippetOf', () => {
     assert.doesNotMatch(snip, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/)
     const before = snippetOf(`${'😀'.repeat(30)}word`, ['word'])!
     assert.doesNotMatch(before, /^…[\uDC00-\uDFFF]/)
+  })
+
+  it('shows the place where the words stand together, not the first place one of them stands', () => {
+    const text = `alpha alone at the start. ${'filler '.repeat(40)}then alpha meets beta here. ${'filler '.repeat(40)}`
+    const snip = snippetOf(text, ['alpha', 'beta'])!
+    assert.match(snip, /alpha meets beta/)
+    // Words that never come near each other: the first one found.
+    assert.match(snippetOf(`gamma first ${'x '.repeat(200)} delta last`, ['delta', 'gamma'])!, /gamma first/)
+    assert.equal(snippetOf('nothing to see', ['absent']), undefined)
+  })
+})
+
+describe('search score', () => {
+  it('lifts a title by how much of the query it holds', () => {
+    assert.equal(titleBoost('Fix the Login Page', ['login', 'page'], 'login page'), 8)
+    assert.equal(titleBoost('Page of the login form', ['login', 'page'], 'login page'), 5)
+    assert.equal(titleBoost('Login form', ['login', 'page'], 'login page'), 2)
+    assert.equal(titleBoost('Dark mode', ['login', 'page'], 'login page'), 1)
+    assert.equal(titleBoost('登录页按钮', ['登录页'], ' 登录页 '), 8)
+  })
+
+  it('halves a score at 30 days and never drops it to nothing', () => {
+    assert.equal(recency(0), 1)
+    assert.equal(recency(-5), 1)
+    assert.equal(recency(30 * DAY), 0.5)
+    assert.ok(recency(365 * DAY) > 0.07)
   })
 })

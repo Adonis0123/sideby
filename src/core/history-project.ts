@@ -83,10 +83,21 @@ export function projectNames(paths: Iterable<string>): Map<string, string> {
     }
     const parts = list.map((p) => p.split(/[\\/]+/).filter(Boolean))
     const tail = (seg: string[], n: number) => seg.slice(-n).join('/')
+    // How many of these Projects end with each tail of `n` folders, counted once per `n`.
+    const tails = new Map<number, Map<string, number>>()
+    const shared = (seg: string[], n: number): boolean => {
+      let count = tails.get(n)
+      if (!count) {
+        count = new Map()
+        for (const o of parts) count.set(tail(o, n), (count.get(tail(o, n)) ?? 0) + 1)
+        tails.set(n, count)
+      }
+      return count.get(tail(seg, n))! > 1
+    }
     for (const [i, p] of list.entries()) {
       const seg = parts[i]!
       let n = 2
-      while (n < seg.length && parts.some((o, j) => j !== i && tail(o, n) === tail(seg, n))) n++
+      while (n < seg.length && shared(seg, n)) n++
       out.set(p, tail(seg, n))
     }
   }

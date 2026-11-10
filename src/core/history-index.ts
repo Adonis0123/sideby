@@ -91,6 +91,8 @@ export interface Match {
   id: number
   /** Higher is better; 1 for a match that has no FTS rank (short words only). */
   relevance: number
+  /** The title of the Session the match stands for (the parent's, for a match in a subagent Session). */
+  title: string
 }
 
 const COLS = `id, account, account_label AS accountLabel, family, session_id AS sessionId, path, cwd, project,
@@ -478,15 +480,10 @@ export class HistoryIndex {
     return { sql: parts.length ? parts.join(' AND ') : '1', args }
   }
 
-  /**
-   * Sessions that match every word (in title, place, prompts or replies) and the filters. Words of three characters
-   * or more go through the trigram index and are ranked by bm25 (title and place before prompts before replies);
-   * shorter ones are matched with LIKE. Subagent Sessions count for their parent (filters then apply to the parent).
-   */
-  match(words: string[], f: Filters): Match[] {
+  /** The conditions on `text` that make a row match every word, and the expression that ranks it. */
+  #textConds(words: string[]): { conds: string[]; args: string[]; rank: string } {
     const longs = words.filter(long)
-    const shorts = words.filter((w) => !long(w))
-    const args: (string | number)[] = []
+    const args: string[] = []
     const conds: string[] = []
     let rank = '1.0'
     if (longs.length) {
@@ -494,27 +491,64 @@ export class HistoryIndex {
       args.push(longs.map(phrase).join(' '))
       rank = '-bm25(text, 6.0, 4.0, 2.0, 1.0)'
     }
-    for (const w of shorts) {
-      conds.push(
-        "(text.title LIKE ? ESCAPE '\\' OR text.place LIKE ? ESCAPE '\\' OR text.prompts LIKE ? ESCAPE '\\' OR text.replies LIKE ? ESCAPE '\\')",
-      )
-      const l = like(w)
-      args.push(l, l, l, l)
+    for (const w of words.filter((x) => !long(x))) {
+      // LIKE ignores case for ASCII letters only, so a word without one matches the same rows through instr(),
+      // which reads the text about twice as fast.
+      if (/[a-z]/i.test(w)) {
+        conds.push(
+          "(text.title LIKE ? ESCAPE '\\' OR text.place LIKE ? ESCAPE '\\' OR text.prompts LIKE ? ESCAPE '\\' OR text.replies LIKE ? ESCAPE '\\')",
+        )
+        const l = like(w)
+        args.push(l, l, l, l)
+      } else {
+        conds.push(
+          '(instr(text.title, ?) OR instr(text.place, ?) OR instr(text.prompts, ?) OR instr(text.replies, ?))',
+        )
+        args.push(w, w, w, w)
+      }
     }
+    return { conds, args, rank }
+  }
+
+  /**
+   * Sessions that match every word (in title, place, prompts or replies) and the filters. Words of three characters
+   * or more go through the trigram index and are ranked by bm25 (title and place before prompts before replies);
+   * shorter ones are matched with LIKE. Subagent Sessions count for their parent (filters then apply to the parent).
+   */
+  match(words: string[], f: Filters): Match[] {
+    const { conds, args, rank } = this.#textConds(words)
     // Lift a matching subagent Session to its parent, and apply the filters to whichever row stands for it.
     const where = this.#where(f, (n) => `coalesce(p.${n}, s.${n})`)
+    const lift = `LEFT JOIN sessions p ON s.parent != '' AND p.account = s.account AND p.session_id = s.parent AND p.parent = ''`
+    // With short words only there is no index to ask, and LIKE reads every row's text: read only the rows the
+    // filters keep.
+    const scoped = conds.length > 0 && !words.some(long) && where.sql !== '1'
+    const scope = scoped ? `text.rowid IN (SELECT s.id FROM sessions s ${lift} WHERE ${where.sql}) AND ` : ''
     return this.#q(
-      `WITH hits(id, rel) AS MATERIALIZED (SELECT text.rowid, ${rank} FROM text WHERE ${conds.join(' AND ') || '1'})
-       SELECT coalesce(p.id, s.id) AS id, max(h.rel) AS relevance
+      `WITH hits(id, rel) AS MATERIALIZED (SELECT text.rowid, ${rank} FROM text WHERE ${scope}${conds.join(' AND ') || '1'})
+       SELECT coalesce(p.id, s.id) AS id, max(h.rel) AS relevance, coalesce(p.title, s.title) AS title
        FROM hits h JOIN sessions s ON s.id = h.id
-       LEFT JOIN sessions p ON s.parent != '' AND p.account = s.account AND p.session_id = s.parent AND p.parent = ''
+       ${lift}
        WHERE ${where.sql} GROUP BY 1`,
     )
-      .all(...args, ...where.args)
+      .all(...(scoped ? where.args : []), ...args, ...where.args)
       .map((r) => {
-        const m = r as { id: number; relevance: number }
-        return { id: m.id, relevance: Math.max(m.relevance, 1e-6) }
+        const m = r as { id: number; relevance: number; title: string }
+        return { id: m.id, relevance: Math.max(m.relevance, 1e-6), title: m.title }
       })
+  }
+
+  /** The newest subagent Session of `parent` whose own text matches every word: where a snippet comes from then. */
+  childMatch(parent: Pick<SessionRow, 'account' | 'sessionId'>, words: string[]): number | undefined {
+    const { conds, args } = this.#textConds(words)
+    if (!conds.length) return undefined
+    const r = this.#q(
+      // CROSS JOIN keeps this order: the few subagent Sessions first, then the text of each.
+      `SELECT c.id FROM sessions c CROSS JOIN text
+       WHERE c.parent = ? AND c.account = ? AND c.parent != '' AND text.rowid = c.id AND ${conds.join(' AND ')}
+       ORDER BY c.updated_at DESC LIMIT 1`,
+    ).get(parent.sessionId, parent.account, ...args) as { id: number } | undefined
+    return r?.id
   }
 
   /** Top-level Sessions matching the filters, newest first. */

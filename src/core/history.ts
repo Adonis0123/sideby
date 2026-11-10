@@ -132,7 +132,8 @@ export interface HistoryQuery {
 }
 
 const DAY = 86_400_000
-const HALF_LIFE = 7 * DAY
+/** How old a Session is when its age has halved its search score; older ones go on falling, more slowly. */
+const RECENCY = 30 * DAY
 const SYNC_EVERY_MS = 5_000
 const PARSE_AT_ONCE = 4
 
@@ -635,26 +636,63 @@ export function projectsNamed(names: ReadonlyMap<string, string>, p: string): st
 const SAFE = /^[\w@%+=:,./-]+$/
 const shq = (v: string) => (SAFE.test(v) ? v : `'${v.replaceAll("'", "'\\''")}'`)
 
-/** A snippet of `text` around the first of `words` it contains, about 40 characters each side. */
+const SNIPPET_SPAN = 80
+/** Occurrences looked at per word: enough to find a place where the words meet, bounded for a long text. */
+const SNIPPET_SEEK = 40
+
+/**
+ * A snippet of `text`, about 40 characters each side of what was searched: the first place where the most of
+ * `words` stand within 80 characters of each other, so two words show together when the text has them together.
+ */
 export function snippetOf(text: string, words: string[]): string | undefined {
   if (!text || !words.length) return undefined
-  let at = -1
-  let len = 0
-  for (const w of words) {
-    // Matched in the text itself: lowercasing can change its length and move every position after it.
-    const m = new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'iu').exec(text)
-    if (m && (at < 0 || m.index < at)) {
-      at = m.index
-      len = m[0].length
+  // Matched in the text itself: lowercasing can change its length and move every position after it.
+  const found = words.map((w) => {
+    const re = new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu')
+    const at: { index: number; end: number }[] = []
+    // One word needs only its first place.
+    const seek = words.length > 1 ? SNIPPET_SEEK : 1
+    for (let m = re.exec(text); m && at.length < seek; m = re.exec(text)) {
+      at.push({ index: m.index, end: m.index + m[0].length })
+      if (!m[0].length) re.lastIndex++
     }
+    return at
+  })
+  let best: { at: number; end: number; words: number } | undefined
+  for (const start of found.flat().sort((x, y) => x.index - y.index)) {
+    let n = 0
+    let end = start.end
+    for (const at of found) {
+      const near = at.find((o) => o.index >= start.index && o.end <= start.index + SNIPPET_SPAN)
+      if (!near) continue
+      n++
+      end = Math.max(end, near.end)
+    }
+    if (!best || n > best.words) best = { at: start.index, end, words: n }
+    if (n === words.length) break
   }
-  if (at < 0) return undefined
-  let start = Math.max(0, at - 40)
+  if (!best) return undefined
+  let start = Math.max(0, best.at - 40)
   if (start > 0 && /[\uDC00-\uDFFF]/.test(text[start]!)) start--
-  const end = start + cutText(text.slice(start), at - start + len + 40).length
+  const end = start + cutText(text.slice(start), best.end - start + 40).length
   const body = text.slice(start, end).replace(/\s+/g, ' ').trim()
   return `${start > 0 ? '…' : ''}${body}${end < text.length ? '…' : ''}`
 }
+
+/**
+ * How much a match in the title lifts a Session: the whole query in the title most, then every word, then a share
+ * of the words. A title is what people remember a Session by, and bm25 over trigrams hardly tells it from a mention.
+ */
+export function titleBoost(title: string, words: string[], query: string): number {
+  const t = title.toLowerCase()
+  const n = words.filter((w) => t.includes(w.toLowerCase())).length
+  if (!n) return 1
+  if (t.includes(query.trim().toLowerCase())) return 8
+  return n === words.length ? 5 : 1 + (2 * n) / words.length
+}
+
+/** The share of a search score a Session keeps at its age: half at 30 days, a third at 60, never nothing. */
+export const recency = (ageMs: number): number => 1 / (1 + Math.max(0, ageMs) / RECENCY)
 
 const NAMES = new WeakMap<HistoryIndex, { version: number; names: Map<string, string> }>()
 
@@ -793,7 +831,10 @@ async function search(
       const outline = idx.outlineOf(hits.map((h) => h.id))
       items = hits.flatMap((h) => {
         const o = outline.get(h.id)
-        return o ? [{ ...o, score: h.relevance * 0.5 ** (Math.max(0, now - o.updatedAt) / HALF_LIFE) }] : []
+        if (!o) return []
+        return [
+          { ...o, score: h.relevance * titleBoost(h.title, words, q.q ?? '') * recency(now - o.updatedAt) },
+        ]
       })
     } else items = idx.outline(f).map((o) => ({ ...o, score: o.updatedAt }))
     if (group === 'none') {
@@ -836,8 +877,16 @@ async function search(
   const sessions = rows.map((r) => {
     let snippet: string | undefined
     if (words.length && idx.keepText) {
-      const t = idx.text(r.id)
-      snippet = snippetOf(t.prompts, words) ?? snippetOf(t.replies, words)
+      const of = (id: number) => {
+        const t = idx.text(id)
+        return snippetOf(t.prompts, words) ?? snippetOf(t.replies, words)
+      }
+      snippet = of(r.id)
+      // Matched by a subagent Session only: show what that one said, so the row says why it is listed.
+      if (!snippet) {
+        const child = idx.childMatch(r, words)
+        if (child !== undefined) snippet = of(child)
+      }
     }
     const out = toSession(rt, r, labels, names, {
       children: children.get(r.id) ?? 0,
