@@ -10,7 +10,7 @@
 //
 // Programs run through the machine the caller passes (update.ts's swappable `UpdateDeps`), so tests start nothing.
 import type { Env } from '../types.ts'
-import { SKILL_UPDATE } from './skill-check.ts'
+import { SKILL_INSTALL, SKILL_UPDATE } from './skill-check.ts'
 import type { SkillUpdatePlan, UpdateDeps } from './update.ts'
 
 /**
@@ -31,9 +31,16 @@ export async function runSkillUpdate(
   const r = await m
     .exec(file, args, { env, ...(onOutput ? { onOutput } : {}) })
     .catch((e: unknown) => ({ code: 1, output: e instanceof Error ? e.message : String(e) }))
-  return r.code === 0
-    ? { ok: true, message: 'updated the sideby skill' }
-    : { ok: false, message: `\`${plan.command}\` failed (exit ${r.code}); run it yourself to see why` }
+  if (r.code !== 0)
+    return { ok: false, message: `\`${plan.command}\` failed (exit ${r.code}); run it yourself to see why` }
+  // The skills tool exits 0 when its install record does not list the skill: it changed nothing, and the skill is
+  // as old as before.
+  if (/No installed skills found/i.test(r.output))
+    return {
+      ok: false,
+      message: `the skills tool does not list the sideby skill as one it installed, so it updated nothing; run \`${SKILL_INSTALL}\` to install the current one`,
+    }
+  return { ok: true, message: 'updated the sideby skill' }
 }
 
 export interface AfterInstallOptions {

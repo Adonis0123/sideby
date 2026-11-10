@@ -11,6 +11,7 @@ import { autostartInstalled, PANEL_AGENT } from './autostart.ts'
 import { resolvePaths } from './paths.ts'
 import {
   afterCommandPlan,
+  applySkillOnly,
   applySkillUpdate,
   applyUpdate,
   autoPending,
@@ -476,6 +477,29 @@ describe('Update and Auto Update', () => {
       const r = await applyUpdate(resolvePaths(h.env), plan, h.env)
       assert.deepEqual([r.ok, r.skillUpdated], [true, false])
       assert.match(r.skillMessage ?? '', /run it yourself/)
+    })
+  })
+  it('reports a skill the skills tool did not find as not updated, though the tool exits 0', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.agents/skills/sideby/SKILL.md', skill(CURRENT))
+      // What `skills update` prints when its install record does not list the skill.
+      const output = 'No installed skills found matching: sideby\n'
+      machine(h, {
+        exec: async (file, _args, opts) => {
+          if (file !== 'npx') return { code: 0, output: '' }
+          opts.onOutput?.(output)
+          return { code: 0, output }
+        },
+      })
+      const plan = await planUpdate(resolvePaths(h.env), envWithChecks(h))
+      const r = await applyUpdate(resolvePaths(h.env), plan, h.env)
+      assert.deepEqual([r.ok, r.skillUpdated], [true, false])
+      assert.match(r.skillMessage ?? '', /run `npx skills add Adonis0123\/sideby -g`/)
+      // The same answer for the skill alone, with the output streamed to the caller.
+      const shown: string[] = []
+      const alone = await applySkillOnly(resolvePaths(h.env), plan.skill, h.env, (t) => shown.push(t))
+      assert.deepEqual([alone?.ok, alone?.message], [false, r.skillMessage])
+      assert.deepEqual(shown, [output])
     })
   })
 
