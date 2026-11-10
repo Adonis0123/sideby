@@ -51,7 +51,8 @@ export class ProjectResolver {
   async #find(cwd: string | undefined, hostRoot?: string): Promise<Project> {
     if (!cwd || !isAbsolute(cwd)) return { path: hostRoot ?? cwd ?? '', gone: false }
     if ((await kind(cwd)) !== 'dir') {
-      const root = hostRoot && isAbsolute(hostRoot) ? hostRoot : cwd
+      // resolve() drops a trailing separator (Grok records `<repo>/`), so it groups with the live folder's Project.
+      const root = resolve(hostRoot && isAbsolute(hostRoot) ? hostRoot : cwd)
       const main =
         (await kind(join(root, '.git'))) === 'file' ? await worktreeMain(join(root, '.git')) : undefined
       return { path: main ?? root, gone: true }

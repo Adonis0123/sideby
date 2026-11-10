@@ -49,6 +49,8 @@ describe('ProjectResolver', () => {
       const gone = h.path('code/removed/sub')
       assert.deepEqual(await r.resolve(gone), { path: gone, gone: true })
       assert.deepEqual(await r.resolve(gone, repo), { path: repo, gone: true })
+      // A trailing separator on the Host's root is dropped, so it matches the live folder's Project.
+      assert.deepEqual(await r.resolve(gone, `${repo}/`), { path: repo, gone: true })
       // The Host's root is itself a worktree: folded too.
       assert.deepEqual(await r.resolve(h.path('code/app-wt/gone'), h.path('code/app-wt')), {
         path: repo,

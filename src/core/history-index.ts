@@ -10,7 +10,7 @@ import { cutText } from '../families/shared/history-text.ts'
 import { UserError } from './errors.ts'
 
 /** Bumped whenever the tables or what a reader stores changes; an older database is dropped and rebuilt. */
-const SCHEMA = 3
+const SCHEMA = 4
 
 type Sqlite = typeof import('node:sqlite')
 let sqlite: Promise<Sqlite | undefined> | undefined
