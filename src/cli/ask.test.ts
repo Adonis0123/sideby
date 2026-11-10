@@ -274,6 +274,30 @@ it("ask --run finds and runs a task the Panel wrote under another state folder, 
     assert.equal(record.env.XDG_STATE_HOME, h.path('panel-state'))
   })
 })
+it('ask --run gives the Host no XDG variable for a task the Panel wrote under the default folders', async () => {
+  await withFakeHome(async (h) => {
+    await h.write('.claude/settings.json', '{}')
+    await fakeHost(h, 'claude')
+    // The Panel runs with no XDG variable; the terminal that opens names folders of its own.
+    const { XDG_CONFIG_HOME: _config, XDG_STATE_HOME: _state, ...panelEnv } = h.env
+    const rt = await createRuntime({ env: panelEnv })
+    const id = await writeTask(
+      { kind: 'prompt', account: 'claude:main', prompt: 'hi', cwd: await taskWorkDir(rt.paths) },
+      rt.paths,
+    )
+    const terminalEnv = {
+      ...panelEnv,
+      XDG_CONFIG_HOME: h.path('terminal-config'),
+      XDG_STATE_HOME: h.path('terminal-state'),
+    }
+    assert.equal((await cli(h, ['ask', '--run', id, '--state-dir', rt.paths.stateDir], terminalEnv)).code, 0)
+    const record = (await readHostLog(h, 'claude'))[0]!
+    assert.equal(record.env.HOME, h.home)
+    // Set, they would move where other tools in the session keep their files.
+    assert.equal(record.env.XDG_CONFIG_HOME, undefined)
+    assert.equal(record.env.XDG_STATE_HOME, undefined)
+  })
+})
 it('ask --run refuses a --state-dir that is not a private folder of this user', async () => {
   await withFakeHome(async (h) => {
     await h.write('.claude/settings.json', '{}')

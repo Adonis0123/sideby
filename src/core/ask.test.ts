@@ -9,12 +9,14 @@ import { createRuntime } from '../runtime.ts'
 import {
   pickTaskAccount,
   readTask,
+  taskEnv,
   taskWorkDir,
   terminals,
   tryAccount,
   tryPreview,
   writeTask,
 } from './ask.ts'
+import { resolvePaths } from './paths.ts'
 
 it('keeps tasks private, consumes once, and rejects invalid or stale files', async () => {
   await withFakeHome(async (h) => {
@@ -259,4 +261,53 @@ it('try previews without launch.before hooks and runs them exactly once when it 
     assert.deepEqual(seen, [['claude', '--x', '-p', 'Reply with OK', '--from-hook']])
     assert.deepEqual(result.command, seen[0])
   })
+})
+
+it('taskEnv names an XDG folder only when the task was written outside the default', () => {
+  const kind = 'prompt' as const
+  const base = { kind, account: 'claude:main', cwd: '/fake/home', home: '/fake/home' }
+  const byDefault = {
+    ...base,
+    configDir: '/fake/home/.config/sideby',
+    stateDir: '/fake/home/.local/state/sideby',
+  }
+  // The Panel ran with the defaults: the session gets no XDG variable, whatever the terminal has.
+  assert.deepEqual(taskEnv(byDefault, { HOME: '/other', PATH: '/bin' }), { HOME: '/fake/home', PATH: '/bin' })
+  assert.deepEqual(
+    taskEnv(byDefault, { HOME: '/other', XDG_CONFIG_HOME: '/other/config', XDG_STATE_HOME: '/other/state' }),
+    { HOME: '/fake/home' },
+  )
+  // A terminal that names the same folders itself keeps its own setting.
+  const same = { XDG_CONFIG_HOME: '/fake/home/.config', XDG_STATE_HOME: '/fake/home/.local/state' }
+  assert.deepEqual(taskEnv(byDefault, { HOME: '/fake/home', ...same }), { HOME: '/fake/home', ...same })
+  // Also when it spells them another way: a trailing slash, a `.` segment.
+  assert.deepEqual(
+    taskEnv(byDefault, {
+      HOME: '/fake/home',
+      XDG_CONFIG_HOME: '/fake/home/.config/',
+      XDG_STATE_HOME: '/fake/home/./.local/state',
+    }),
+    { HOME: '/fake/home', ...same },
+  )
+  // Folders elsewhere are named, each on its own.
+  assert.deepEqual(
+    taskEnv(
+      { ...byDefault, stateDir: '/fake/state/sideby' },
+      { HOME: '/other', XDG_CONFIG_HOME: '/other/config' },
+    ),
+    { HOME: '/fake/home', XDG_STATE_HOME: '/fake/state' },
+  )
+  assert.deepEqual(
+    taskEnv(
+      { ...base, configDir: '/fake/config/sideby', stateDir: '/fake/state/sideby' },
+      { HOME: '/other' },
+    ),
+    { HOME: '/fake/home', XDG_CONFIG_HOME: '/fake/config', XDG_STATE_HOME: '/fake/state' },
+  )
+  // What it leaves out resolves to the folders the task names.
+  const paths = resolvePaths(taskEnv(byDefault, { HOME: '/other', XDG_STATE_HOME: '/other/state' }))
+  assert.deepEqual([paths.configDir, paths.stateDir], [byDefault.configDir, byDefault.stateDir])
+  // A task without the Panel's paths changes nothing.
+  const env = { HOME: '/other', XDG_STATE_HOME: '/other/state' }
+  assert.equal(taskEnv({ kind, account: 'claude:main', cwd: '/fake/home' }, env), env)
 })

@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, mkdtemp, open, readdir, realpath, rm, stat, unlink } from 'node:fs/promises'
 import { userInfo } from 'node:os'
-import { dirname, isAbsolute, join, sep } from 'node:path'
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { MODEL_NAME, takeFlag } from '../families/shared/model-args.ts'
 import { AI_TASK_KINDS, type AiTaskKind, stripSecrets, taskPrompt } from '../panel/page-logic.ts'
 import type { Runtime } from '../runtime.ts'
@@ -215,14 +215,26 @@ export async function taskHostArgs(rt: Runtime, task: TaskFile): Promise<string[
   return [...images, family?.promptArg ? `${family.promptArg}=${prompt}` : prompt]
 }
 
-/** `env` with the HOME and XDG folders the task was written under, so the Runtime sees what the Panel saw. */
+/**
+ * `env` with the HOME and XDG folders the task was written under, so the Runtime sees what the Panel saw. A folder at
+ * its default place under that HOME gets no variable (paths.ts reads an unset one as the default): the whole session
+ * inherits this, and other tools change where they keep their files once an XDG variable is set. Only a value the
+ * terminal already has for that same folder stays.
+ */
 export function taskEnv(task: TaskFile, env: Env): Env {
   if (!task.home || !task.configDir || !task.stateDir) return env
+  const { XDG_CONFIG_HOME: config, XDG_STATE_HOME: state, ...rest } = env
+  const configBase = dirname(task.configDir)
+  const stateBase = dirname(task.stateDir)
+  // The same folder however the terminal spells it (`…/state/`, `…/./state`), not the same string.
+  const sameDir = (a: string, b: string) => isAbsolute(a) && resolve(a) === resolve(b)
+  const named = (dir: string, byDefault: string, had: string | undefined) =>
+    !sameDir(byDefault, dir) || (had !== undefined && sameDir(had, dir))
   return {
-    ...env,
+    ...rest,
     HOME: task.home,
-    XDG_CONFIG_HOME: dirname(task.configDir),
-    XDG_STATE_HOME: dirname(task.stateDir),
+    ...(named(configBase, join(task.home, '.config'), config) ? { XDG_CONFIG_HOME: configBase } : {}),
+    ...(named(stateBase, join(task.home, '.local', 'state'), state) ? { XDG_STATE_HOME: stateBase } : {}),
   }
 }
 export async function readTask(
