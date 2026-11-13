@@ -1810,6 +1810,14 @@ const en = {
   'adv.betasWarn':
     "This file sets {v}, which turns off Claude Code's experimental features, the advisor among them. Choosing a model offers to remove it.",
   'adv.betasNote': "Removing it also turns Claude Code's other experimental features back on.",
+  'adv.apiUsedBy': 'Also used by API accounts {refs}',
+  'adv.apiNote':
+    'API accounts {refs} use this file too, and their gateway may need the variable. From now on sideby gives it to them when it starts them (a value in their proxy.env still wins):',
+  'adv.apiAlready':
+    'API accounts {refs} already get this variable from sideby when it starts them, so they keep it.',
+  'adv.apiOn':
+    'sideby turns off experimental features for API accounts when it starts them ({v}=1). To stop that, run: sideby config set claude.apiBetasOff false',
+  'adv.apiOff': 'sideby does not add {v} for API accounts.',
   'adv.removed': 'removed',
   'adv.confirmUse': 'Use {m}',
   'adv.confirmOff': 'Turn off',
@@ -3627,6 +3635,13 @@ const zh: Record<MessageKey, string> = {
   'adv.betasWarn':
     '这个文件设了 {v}，它会关掉 Claude Code 的实验功能，顾问也在其中。选模型时 sideby 会提议删掉它。',
   'adv.betasNote': '删掉它也会重新打开 Claude Code 的其他实验功能。',
+  'adv.apiUsedBy': '同时被 API 账号 {refs} 使用',
+  'adv.apiNote':
+    'API 账号 {refs} 也用这个文件，它们的网关可能需要这个变量。之后 sideby 启动它们时会自动带上（proxy.env 里写了的话以它为准）：',
+  'adv.apiAlready': 'API 账号 {refs} 已经由 sideby 在启动时带上这个变量，不受影响。',
+  'adv.apiOn':
+    'sideby 启动 API 账号时会关掉实验功能（{v}=1）。不想这样，运行：sideby config set claude.apiBetasOff false',
+  'adv.apiOff': 'sideby 启动 API 账号时不会额外带上 {v}。',
   'adv.removed': '删除',
   'adv.confirmUse': '改用 {m}',
   'adv.confirmOff': '确认关闭',

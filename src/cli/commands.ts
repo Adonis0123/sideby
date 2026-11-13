@@ -1305,11 +1305,17 @@ export async function cmdAdvisor(a: ParsedArgs, io: Io, runtime?: Runtime): Prom
   const restart =
     'Restart sessions that are already running; sessions started with plain `claude` get it only where Anthropic has turned the advisor on.'
 
+  const apiBetasLine = (on: boolean) =>
+    on
+      ? `  API accounts get ${BETAS_VAR} from sideby: yes (config claude.apiBetasOff; \`sideby config set claude.apiBetasOff false\` stops it)`
+      : `  API accounts get ${BETAS_VAR} from sideby: no`
+
   if (!action) {
     if (wantJson) {
       out({
         groups: show(status.groups),
         unlock: status.unlock,
+        apiBetasOff: status.apiBetasOff,
         ...(status.envOff ? { envOff: status.envOff } : {}),
       })
       return 0
@@ -1329,12 +1335,20 @@ export async function cmdAdvisor(a: ParsedArgs, io: Io, runtime?: Runtime): Prom
             `    env.${BETAS_VAR} is set here: it turns off Claude Code's experimental features, the advisor too. \`sideby advisor <model>\` offers to remove it.`,
           ),
         )
+      if (g.apiAccounts?.length)
+        io.out(
+          c.dim(
+            `    Also used by API accounts ${g.apiAccounts.join(', ')}${g.betasOff ? `; if sideby removes the variable here, it gives it to them when it starts them` : ''}`,
+          ),
+        )
     }
     io.out(
       status.unlock
         ? `  Unlocked when sideby starts Claude: yes (${ADVISOR_UNLOCK_VAR}=1)`
         : '  Unlocked when sideby starts Claude: no (Claude Code shows /advisor only where Anthropic has turned it on)',
     )
+    if (status.apiBetasOff || status.groups.some((g) => g.apiAccounts?.length))
+      io.out(apiBetasLine(status.apiBetasOff))
     if (status.envOff)
       io.out(
         c.yellow(
@@ -1395,17 +1409,26 @@ export async function cmdAdvisor(a: ParsedArgs, io: Io, runtime?: Runtime): Prom
     accountRef = checkAdvisorAccount(await rt.resolve(accountFlag)).ref
     scope = advisorScope(status.groups, accountRef)
   }
-  const plan = choice ? advisorPlan(scope, choice, status.unlock) : null
+  const plan = choice ? advisorPlan(scope, choice, status) : null
   const todo = plan ? plan.todo : advisorGroupsToUndo(status.groups)
   if (!todo.length && !plan?.unlock) {
     // Only what was read: writing here would act on a file the user never saw in a preview.
     const r = advisorNothingToDo(choice ?? 'undo', scope)
-    if (wantJson) out({ applied: false, groups: show(scope), unlock: status.unlock, message: r.message })
+    if (wantJson)
+      out({
+        applied: false,
+        groups: show(scope),
+        unlock: status.unlock,
+        apiBetasOff: status.apiBetasOff,
+        message: r.message,
+      })
     else io.out(tilde(r.message, home))
     return 1
   }
   const name = choice && choice !== 'off' ? choice[0]!.toUpperCase() + choice.slice(1) : ''
   const verb = choice === 'off' ? 'turn it off' : choice ? `use ${name}` : 'undo'
+  // Undo turns config claude.apiBetasOff back only while it is on and every file it was turned on for comes back.
+  const apiBack = !plan && status.apiBetasOff && todo.some((g) => g.undoApiBetas)
   if (!yes) {
     if (wantJson)
       out({
@@ -1414,7 +1437,10 @@ export async function cmdAdvisor(a: ParsedArgs, io: Io, runtime?: Runtime): Prom
         ...(plan?.skipped.length ? { skipped: show(plan.skipped) } : {}),
         ...(plan ? { unlocks: plan.unlock } : {}),
         ...(plan?.betas.length ? { removesBetas: true } : {}),
+        ...(plan?.apiAccounts.length ? { apiAccounts: plan.apiAccounts, apiBetasOn: plan.apiBetas } : {}),
+        ...(apiBack ? { apiBetasBack: true } : {}),
         unlock: status.unlock,
+        apiBetasOff: status.apiBetasOff,
         message: `Run again with --yes to ${verb}.`,
       })
     else {
@@ -1431,13 +1457,35 @@ export async function cmdAdvisor(a: ParsedArgs, io: Io, runtime?: Runtime): Prom
         if (g.state !== choice) io.out(`  ${file}: advisorModel ${advisorValue(g)} -> ${to}`)
         if (plan?.betas.includes(g)) io.out(`  ${file}: env.${BETAS_VAR} ${g.betasValue} -> removed`)
         io.out(c.dim(`    used by ${g.accounts.join(', ')}`))
+        if (g.apiAccounts?.length && (plan ? plan.betas.includes(g) : g.undoApiBetas))
+          io.out(c.dim(`    and by API accounts ${g.apiAccounts.join(', ')}`))
       }
       if (plan?.betas.length)
         io.out(
           c.yellow(
-            `  ${BETAS_VAR} turns off Claude Code's experimental features, the advisor among them; removing it also turns the others back on.`,
+            `  ${BETAS_VAR} turns off Claude Code's experimental features, the advisor among them; removing it also turns the others back on for subscription accounts.`,
           ),
         )
+      if (plan?.apiAccounts.length) {
+        const names = plan.apiAccounts.join(', ')
+        if (plan.apiBetas) {
+          io.out('  sideby config: claude.apiBetasOff false -> true')
+          io.out(
+            c.dim(
+              `    sideby gives ${BETAS_VAR}=1 to ${names} when it starts them, so a gateway that rejects experimental headers keeps working. A value in their proxy.env still wins.`,
+            ),
+          )
+        } else
+          io.out(
+            c.dim(
+              `  ${names} already get ${BETAS_VAR}=1 from sideby (config claude.apiBetasOff), so they keep it.`,
+            ),
+          )
+      }
+      if (apiBack) {
+        io.out('  sideby config: claude.apiBetasOff true -> as before')
+        io.out(c.dim(`    The settings file sets ${BETAS_VAR} for the API accounts again.`))
+      }
       for (const g of plan?.skipped ?? [])
         io.out(c.dim(`  Not changed: ${g.accounts.join(', ')}: ${tilde(g.reason ?? '', home)}`))
       if (plan?.unlock) {
@@ -1469,11 +1517,14 @@ export async function cmdAdvisor(a: ParsedArgs, io: Io, runtime?: Runtime): Prom
       results,
       ...(choice ? { unlocked: r.unlocked } : {}),
       unlock: status.unlock || r.unlocked,
+      apiBetasOff: r.apiBetas ?? status.apiBetasOff,
       message: tilde(r.message, home),
     })
   else {
     for (const x of results) io.out(`  ${x.ok ? c.green('ok') : c.red('failed')} ${x.file}: ${x.message}`)
     if (r.unlocked) io.out(`  ${c.green('ok')} sideby config: advisor.unlock true`)
+    if (r.apiBetas !== undefined)
+      io.out(`  ${c.green('ok')} sideby config: claude.apiBetasOff ${r.apiBetas ? 'true' : 'back as before'}`)
     io.out(tilde(r.message, home))
   }
   return r.ok ? 0 : 1

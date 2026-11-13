@@ -4,7 +4,7 @@ import { constants as osConstants } from 'node:os'
 import { delimiter, join } from 'node:path'
 import type { HookBus } from '../plugins/bus.ts'
 import type { Account, Env, FamilyDef } from '../types.ts'
-import { unlockAdvisorEnv } from './advisor.ts'
+import { apiBetasEnv, unlockAdvisorEnv } from './advisor.ts'
 import { lstatOrNull, realpathOrNull } from './fs-safe.ts'
 import { readSecretFile } from './secret-file.ts'
 
@@ -159,10 +159,14 @@ export async function prepareLaunch(
     label?: string
     /** Config `advisor.unlock` (spec §3.41, ADR-0074): unlock Claude Code's advisor in a Claude subscription session. */
     advisorUnlock?: boolean
+    /** Config `claude.apiBetasOff` (spec §3.41, ADR-0074): a Claude API Account gets `BETAS_VAR=1`. */
+    apiBetasOff?: boolean
   },
 ): Promise<PreparedLaunch> {
   const { account, family } = opts
   const env = accountEnv(family, account, opts.baseEnv)
+  // Before the Secret File, so the Account's own proxy.env still decides; a value already in the environment stays.
+  if (opts.apiBetasOff) apiBetasEnv(env, family.id, account)
   if (account.secretFile) Object.assign(env, await readSecretFile(account.secretFile, opts.baseEnv))
   // The Secret File may not move the Account: its directory always wins.
   if (!account.isMain && family.selectVar) env[family.selectVar] = account.dir

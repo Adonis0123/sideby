@@ -2339,6 +2339,53 @@ describe('advisor (spec §3.41)', () => {
       assert.match(JSON.parse(api.out).error, /API account.*subscription account/)
     })
   })
+  it('names the API accounts that share the file and turns config claude.apiBetasOff on and back with it', async () => {
+    await withFakeHome(async (h) => {
+      const BETAS = 'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS'
+      const before = `${JSON.stringify({ env: { [BETAS]: '1' } }, null, 2)}\n`
+      await h.write('.claude/settings.json', before)
+      await mkdir(h.path('.claude-gw'), { recursive: true })
+      await symlink(h.path('.claude/settings.json'), h.path('.claude-gw/settings.json'))
+      await h.write('.claude-gw/proxy.env', 'ANTHROPIC_BASE_URL=https://example.com\n', 0o600)
+      await fakeHost(h, 'claude')
+      const text = (await sideby(h, ['advisor'])).out
+      assert.match(text, /Also used by API accounts claude:gw/)
+      assert.match(text, /API accounts get CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS from sideby: no/)
+      const status = checkSchema('advisor', (await sideby(h, ['advisor', '--json'])).out)
+      assert.deepEqual(
+        [
+          status.apiBetasOff,
+          (status.groups as { accounts: string[]; apiAccounts?: string[] }[]).map((g) => [
+            g.accounts,
+            g.apiAccounts,
+          ]),
+        ],
+        [false, [[['claude:main'], ['claude:gw']]]],
+      )
+      const preview = await sideby(h, ['advisor', 'opus'])
+      assert.equal(preview.code, 10)
+      assert.match(preview.out, /claude\.apiBetasOff false -> true/)
+      assert.match(preview.out, /=1 to claude:gw when it starts them/)
+      const pj = checkSchema('advisor', (await sideby(h, ['advisor', 'opus', '--json'])).out)
+      assert.deepEqual([pj.apiAccounts, pj.apiBetasOn], [['claude:gw'], true])
+      const done = await sideby(h, ['advisor', 'opus', '--yes', '--json'])
+      assert.deepEqual([done.code, checkSchema('advisor', done.out).apiBetasOff], [0, true])
+      assert.deepEqual(JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8')).claude, {
+        apiBetasOff: true,
+      })
+      assert.match((await sideby(h, ['advisor'])).out, /from sideby: yes/)
+      const undoPreview = await sideby(h, ['advisor', 'undo'])
+      assert.match(undoPreview.out, /claude\.apiBetasOff true -> as before/)
+      assert.equal(
+        checkSchema('advisor', (await sideby(h, ['advisor', 'undo', '--json'])).out).apiBetasBack,
+        true,
+      )
+      const undone = await sideby(h, ['advisor', 'undo', '--yes', '--json'])
+      assert.deepEqual([undone.code, checkSchema('advisor', undone.out).apiBetasOff], [0, false])
+      assert.equal(await readFile(h.path('.claude/settings.json'), 'utf8'), before)
+      assert.equal(JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8')).claude, undefined)
+    })
+  })
 })
 
 describe('tune (spec §3.18)', () => {

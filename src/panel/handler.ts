@@ -1946,12 +1946,13 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
     '/api/remote-control/undo': previewedChange({ apply: (rt) => rt.remoteControlUndo() }),
     // Claude Code's advisor (spec §3.41, ADR-0074): the same change as `sideby advisor <model>|off [--account]`. It
     // writes `advisorModel` only into the files the page showed (`previewedChange`); a model also turns config
-    // `advisor.unlock` on, which the page shows from the state it read.
+    // `advisor.unlock` on, and config `claude.apiBetasOff` where the variable leaves a file API Accounts share, both
+    // of which the page shows from the state it read.
     '/api/advisor/set': previewedChange({
       async todo(rt, body) {
         const { to, account } = await advisorBody(rt, body)
         const st = await rt.advisor()
-        return advisorPlan(advisorScope(st.groups, account), to, st.unlock).todo
+        return advisorPlan(advisorScope(st.groups, account), to, st).todo
       },
       async apply(rt, body) {
         const { to, account } = await advisorBody(rt, body)

@@ -37,3 +37,19 @@ Ways to unlock it:
 - Removing `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` also turns Claude Code's other experimental features back on in that Account's sessions. The preview says so before the user confirms, and `undo` puts the entry back.
 - Running sessions keep the old setting until they are restarted.
 - If Claude Code renames the key or the variable, or drops the gate, the switch sets a variable nobody reads; the binary version above is where the facts were checked.
+
+## Update (2026-11-13): the variable moves to API Account launches
+
+`CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` exists for gateways that reject `anthropic-beta` headers (https://code.claude.com/docs/en/env-vars). A Claude API Account often shares the Main Account's `settings.json` through a link, so the entry the Advisor removes may be what keeps that API Account's gateway working. Ways to handle a shared file:
+
+- Remove it from the file only, as before. Rejected: it breaks the API Accounts' gateway.
+- Refuse to remove it while an API Account uses the file. Rejected: the Subscription Accounts on that file never get the Advisor.
+- Remove it from the file and, in the same confirmed change, give it to the API Accounts at Launch. Chosen: an API Account can only be started through sideby (its key lives in `proxy.env`), so a launch variable never misses one, and the Subscription Accounts get the Advisor and Claude Code's other experimental features back.
+
+Decision:
+
+- Config `claude.apiBetasOff` (boolean, default off). While it is true, every Launch sideby prepares for a Claude API Account (`sideby run`, `sideby next`, Auto Handoff, Aliases, Pick Commands, the Panel) gets `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`, set before the Account's `proxy.env` is read, so a value in `proxy.env` wins, and never when the environment already sets the variable. Never for a Subscription Account or another Family. `sideby config set claude.apiBetasOff false` turns it off on its own (with a preview, like every `config set`).
+- When a file that sets the variable is also used by API Accounts, choosing a model removes it from the file and turns `claude.apiBetasOff` on in the same confirmed change; the preview lists `sideby config: claude.apiBetasOff false -> true` and names the API Accounts, or says they already get it when the config is on. The config is written before the settings file, so an API Account never starts without the variable; if no file the API Accounts use lost the variable after all, the config goes back.
+- A file used only by API Accounts is never listed or offered a removal: the Advisor needs a Claude login.
+- `undo` puts the entry back in the file, then puts `claude.apiBetasOff` back to its earlier value (unset or false), only while the config still holds `true` and every file it was turned on for got the entry back; otherwise it stays on, and the message names `sideby config set claude.apiBetasOff false`.
+- The rule "never override it at Launch" above still holds for Subscription Accounts and for a value in the user's environment or `proxy.env`; sideby only adds the variable where nothing sets it.

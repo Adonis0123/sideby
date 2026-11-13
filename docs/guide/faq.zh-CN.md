@@ -40,9 +40,13 @@ sideby 不往宿主的账号目录里写自己的文件，只有下面几个命�
 - `sideby handoff setup grok --yes` 添加 `~/.grok/hooks/sideby-handoff.json`（[自动接力](usage.zh-CN.md#自动接力auto-handoff)）。
 - `sideby tune apply` 设置账号 `settings.json` 里的 `autoCompactWindow`（[上下文调优](usage.zh-CN.md#上下文调优)）。
 - `sideby remote-control off` 把 Claude `settings.json` 里的 `remoteControlAtStartup` 设成 `false`（[Remote Control](usage.zh-CN.md#remote-control)）。
-- `sideby advisor <模型>` 设置 Claude `settings.json` 里的 `advisorModel`，`off` 删掉这个键；选模型时，若开着 `env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`，先在预览里列出再删掉它（[顾问模型](usage.zh-CN.md#顾问模型advisor)）。
+- `sideby advisor <模型>` 设置 Claude `settings.json` 里的 `advisorModel`，`off` 删掉这个键；选模型时，若开着 `env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`，先在预览里列出再删掉它；有 API 账号共用这个文件时，同时打开配置 `claude.apiBetasOff`，改由 sideby 在启动它们时带上这个变量（[顾问模型](usage.zh-CN.md#顾问模型advisor)）。
 
 每一项都能撤回：`quota teardown claude`、`handoff teardown grok`、`tune undo`、`remote-control undo`、`advisor undo`。用 `sideby new` 建出来的账号目录归宿主所有。
+
+## sideby 为什么给我的 API 账号加上 `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`？
+
+这个变量让 Claude Code 不发 `anthropic-beta` 请求头，有些 API 网关不接受这种请求头；但它也会让 `/advisor` 消失。你选 Advisor 模型时，如果设了这个变量的设置文件还被 `claude:deepseek` 这样的 API 账号共用，sideby 会把它从文件里删掉，并在同一次确认里打开配置 `claude.apiBetasOff`：之后每次启动 Claude API 账号都会带上 `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`，网关照常可用。订阅账号从不加；账号 `proxy.env` 或你环境里已有的值优先。如果改了 Advisor 之后 API 账号的网关报错，先看 `sideby advisor`；`sideby advisor undo` 把变量放回文件，`sideby config set claude.apiBetasOff false` 关掉启动时加的变量。
 
 ## 和 aimux、agenv、cc-switch、magpie 有什么区别？
 

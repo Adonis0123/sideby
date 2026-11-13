@@ -1417,26 +1417,55 @@ describe('Advisor row state (spec §3.41)', () => {
   it('changes the files that do not name the choice yet and that sideby can write', () => {
     const gs = [g('opus'), g('off'), g('other'), g('missing'), g('blocked')]
     assert.deepEqual(
-      advisorPending(gs, 'opus', true).todo.map((x) => x.state),
+      advisorPending(gs, 'opus', { unlock: true, apiBetasOff: false }).todo.map((x) => x.state),
       ['off', 'other'],
     )
     assert.deepEqual(
-      advisorPending(gs, 'off', true).todo.map((x) => x.state),
+      advisorPending(gs, 'off', { unlock: true, apiBetasOff: false }).todo.map((x) => x.state),
       ['opus', 'other'],
     )
   })
   it('keeps the current model as the choice while choosing it still changes something', () => {
     const betas = { state: 'opus', accounts: ['claude:main'], betasOff: true }
     // Every file already names Opus, but one still turns experimental features off: the removal waits to be confirmed.
-    const pending = advisorPending([g('opus'), betas], 'opus', true)
+    const pending = advisorPending([g('opus'), betas], 'opus', { unlock: true, apiBetasOff: false })
     assert.deepEqual([pending.todo, pending.unlocks], [[betas], false])
     assert.equal(advisorPick('opus', 'opus', pending), 'opus')
     // Off never removes it, so choosing off where every file is off waits for nothing.
-    assert.equal(advisorPick('off', 'off', advisorPending([{ ...betas, state: 'off' }], 'off', true)), null)
+    assert.equal(
+      advisorPick(
+        'off',
+        'off',
+        advisorPending([{ ...betas, state: 'off' }], 'off', { unlock: true, apiBetasOff: false }),
+      ),
+      null,
+    )
     // The unlock alone is a change too.
-    assert.equal(advisorPick('opus', 'opus', advisorPending([g('opus')], 'opus', false)), 'opus')
-    assert.equal(advisorPick('opus', 'opus', advisorPending([g('opus')], 'opus', true)), null)
-    assert.equal(advisorPick('fable', 'opus', advisorPending([g('opus')], 'fable', true)), 'fable')
+    assert.equal(
+      advisorPick('opus', 'opus', advisorPending([g('opus')], 'opus', { unlock: false, apiBetasOff: false })),
+      'opus',
+    )
+    assert.equal(
+      advisorPick('opus', 'opus', advisorPending([g('opus')], 'opus', { unlock: true, apiBetasOff: false })),
+      null,
+    )
+    assert.equal(
+      advisorPick(
+        'fable',
+        'opus',
+        advisorPending([g('opus')], 'fable', { unlock: true, apiBetasOff: false }),
+      ),
+      'fable',
+    )
+  })
+  it('turns config claude.apiBetasOff on only where the variable leaves a file API accounts share', () => {
+    const shared = { state: 'off', accounts: ['claude:main'], apiAccounts: ['claude:api'], betasOff: true }
+    const cfg = { unlock: true, apiBetasOff: false }
+    assert.equal(advisorPending([shared], 'opus', cfg).apiBetas, true)
+    assert.equal(advisorPending([shared], 'opus', { ...cfg, apiBetasOff: true }).apiBetas, false)
+    assert.equal(advisorPending([shared], 'off', cfg).apiBetas, false)
+    assert.equal(advisorPending([{ ...shared, betasOff: undefined }], 'opus', cfg).apiBetas, false)
+    assert.equal(advisorPending([{ ...shared, apiAccounts: undefined }], 'opus', cfg).apiBetas, false)
   })
 })
 

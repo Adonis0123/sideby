@@ -8035,15 +8035,17 @@ const MAIN = String.raw`
   // What advisorModel holds, as keyChange shows it: null is "not set".
   function advValue(g) { return g.state === 'off' ? null : g.state === 'other' ? (g.model ? '"' + g.model + '"' : t('adv.otherValue')) : '"' + g.state + '"' }
   // The server's own rule (core/advisor.ts), so the page offers exactly the change the server would make.
-  function advPlan(st, to) { return to ? advisorPending(st.groups, to, st.unlock) : { todo: [], unlocks: false } }
+  function advPlan(st, to) { return to ? advisorPending(st.groups, to, st) : { todo: [], unlocks: false, apiBetas: false } }
   function renderAdvisor() {
     const st = advState()
     if (!st) { if (dlg.el && dlg.el.open) dlg.el.close(); return }
     const groups = st.groups
     const sum = advisorSummary(groups)
     const to = adv.target
-    const { todo, unlocks } = advPlan(st, to)
+    const { todo, unlocks, apiBetas } = advPlan(st, to)
     const changing = new Set(todo.map((g) => g.file))
+    // API accounts on a file that loses the variable: sideby gives it to them at launch instead.
+    const apiRefs = to && to !== 'off' ? todo.filter((g) => g.betasOff).flatMap((g) => g.apiAccounts || []) : []
     const ro = BOOT.readOnly
     const pick = (v) => { adv.target = advisorPick(v, sum, advPlan(st, v)); renderAdvisor() }
     const choose = h('div', { class: 'set-row rc-switch' }, h('span', null, t('adv.pick')),
@@ -8054,12 +8056,19 @@ const MAIN = String.raw`
       h('div', null, h('code', null, g.file), ' ', h('span', { class: 'chip chip-sm ' + chip(g) }, g.state === 'other' && g.model ? g.model : advName(g.state))),
       h('div', { class: 'muted small' }, t('rc.usedBy', { refs: g.accounts.map(shortRef).join(', ') })),
       g.reason ? h('div', { class: 'muted small' }, g.why ? t('settings.why.' + g.why) : g.reason) : null,
+      g.betasOff && g.apiAccounts ? h('div', { class: 'muted small' }, t('adv.apiUsedBy', { refs: g.apiAccounts.map(shortRef).join(', ') })) : null,
       g.betasOff ? h('div', { class: 'note note-warn small' }, t('adv.betasWarn', { v: 'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS' })) : null,
       changing.has(g.file) && g.state !== to ? h('div', { class: 'small rc-change', 'data-enter': 'adv-change:' + to + ':' + g.file }, keyChange('advisorModel', advValue(g), to === 'off' ? null : '"' + to + '"')) : null,
       changing.has(g.file) && to !== 'off' && g.betasOff ? h('div', { class: 'small rc-change', 'data-enter': 'adv-betas:' + g.file },
         h('span', { class: 'key-change' }, h('code', null, 'env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS'), ' ', h('code', null, g.betasValue), ' → ', t('adv.removed'))) : null))
     const body = [h('p', { class: 'small' }, t('adv.explain')), choose, h('ul', { class: 'rc-list' }, rows)]
     if (to && to !== 'off' && todo.some((g) => g.betasOff)) body.push(h('div', { class: 'note note-warn small', 'data-enter': 'adv-betas-note' }, t('adv.betasNote')))
+    if (apiRefs.length) {
+      const refs = apiRefs.map(shortRef).join(', ')
+      body.push(apiBetas
+        ? h('div', { class: 'note small', 'data-enter': 'adv-api-note' }, t('adv.apiNote', { refs }), ' ', h('code', null, 'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1'))
+        : h('div', { class: 'note small', 'data-enter': 'adv-api-already' }, t('adv.apiAlready', { refs })))
+    }
     if (to && (todo.length || unlocks)) {
       if (unlocks) body.push(h('div', { class: 'note small', 'data-enter': 'adv-unlocks' }, t('adv.unlockNote'), ' ', h('code', null, 'CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1')))
       body.push(h('p', { class: 'small muted', 'data-enter': 'adv-note:' + (to === 'off' ? 'off' : 'on') }, t(to === 'off' ? 'adv.offNote' : 'adv.onNote')))
@@ -8069,6 +8078,9 @@ const MAIN = String.raw`
       h('div', { class: 'set-text' }, h('span', { class: 'set-label' }, t('adv.unlockSwitch')), h('span', { class: 'set-hint' }, t('adv.unlockHint'))),
       h('div', { class: 'seg', role: 'group', 'aria-label': t('adv.unlockSwitch') }, [[true, t('ah.on')], [false, t('ah.off')]].map(([v, text]) =>
         h('button', { class: 'seg-btn', type: 'button', 'data-key': 'adv-unlock:' + v, disabled: ro || adv.busy, 'aria-pressed': String(st.unlock === v), onclick: () => { if (st.unlock !== v) setAdvisorUnlock(v) } }, text)))))
+    // sideby's other setting here: whether API accounts get the variable at launch (config claude.apiBetasOff).
+    // While the chosen change turns it on, the note above already says so; the current "no" would read as a contradiction.
+    if ((st.apiBetasOff || groups.some((g) => g.apiAccounts)) && !apiBetas) body.push(h('p', { class: 'small muted', 'data-enter': 'adv-api-state' }, t(st.apiBetasOff ? 'adv.apiOn' : 'adv.apiOff', { v: 'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS' })))
     if (st.envOff) body.push(h('div', { class: 'note note-warn small' }, t('adv.envOff', { v: st.envOff })))
     body.push(h('p', { class: 'small muted' }, t('adv.unavailable')))
     if (ro) body.push(h('p', { class: 'small' }, t('adv.readOnly')))
@@ -8094,8 +8106,9 @@ const MAIN = String.raw`
         // Show the new state now; the reload that follows confirms it.
         const changed = new Set(files)
         // A model also removed the variable that turned experimental features off; off leaves it.
-        const after = (g) => to === 'off' && g.betasOff ? { file: g.file, accounts: g.accounts, state: to, betasOff: true, betasValue: g.betasValue, undo: true } : { file: g.file, accounts: g.accounts, state: to, undo: true }
-        S.state.advisor = { ...st, unlock: st.unlock || Boolean(r.unlocked), groups: st.groups.map((g) => changed.has(g.file) ? after(g) : g) }
+        const base = (g) => g.apiAccounts ? { file: g.file, accounts: g.accounts, apiAccounts: g.apiAccounts } : { file: g.file, accounts: g.accounts }
+        const after = (g) => to === 'off' && g.betasOff ? { ...base(g), state: to, betasOff: true, betasValue: g.betasValue, undo: true } : { ...base(g), state: to, undo: true }
+        S.state.advisor = { ...st, unlock: st.unlock || Boolean(r.unlocked), apiBetasOff: st.apiBetasOff || r.apiBetas === true, groups: st.groups.map((g) => changed.has(g.file) ? after(g) : g) }
         adv.target = null
         toast(to === 'off' ? t('adv.doneOff') : t('adv.done', { m: advName(to) }), { kind: 'ok', action: { label: t('toast.undo'), run: advisorUndo }, duration: 12000 })
       } else toast(t('adv.failed', { msg: r.message }), { kind: 'fail' })

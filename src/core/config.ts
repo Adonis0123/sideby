@@ -456,6 +456,19 @@ export const ConfigSchema = Type.Object(
         { additionalProperties: false, description: 'Advisor (spec §3.41, ADR-0074).' },
       ),
     ),
+    claude: Type.Optional(
+      Type.Object(
+        {
+          apiBetasOff: Type.Optional(
+            Type.Boolean({
+              description:
+                "Give Claude API accounts `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` when sideby starts them, for gateways that reject Claude Code's `anthropic-beta` headers. The account's own proxy.env and a value already in the environment win. Off by default; `sideby advisor <model>` turns it on when it removes that variable from a settings file API accounts share.",
+            }),
+          ),
+        },
+        { additionalProperties: false, description: 'Claude Code launches (spec §3.41, ADR-0074).' },
+      ),
+    ),
     unattended: Type.Optional(
       Type.Object(
         {
@@ -808,6 +821,19 @@ export function editConfigAdvisor(
   opts: { dryRun?: boolean } = {},
 ): Promise<{ changed: boolean; before: AdvisorConfig | undefined; after: AdvisorConfig | undefined }> {
   return editConfigKey(file, 'advisor', 'change the setting', (current) => edit(current ?? {}), opts)
+}
+
+export type ClaudeConfig = NonNullable<Config['claude']>
+
+/**
+ * The config `claude` key (spec §3.41): changed with `edit` (see `editConfigKey` for how the file is written); `edit`
+ * returns undefined to remove the section, or null to leave the file as it is.
+ */
+export function editConfigClaude(
+  file: string,
+  edit: (current: ClaudeConfig) => ClaudeConfig | undefined | null,
+): Promise<{ changed: boolean; before: ClaudeConfig | undefined; after: ClaudeConfig | undefined }> {
+  return editConfigKey(file, 'claude', 'change the setting', (current) => edit(current ?? {}))
 }
 
 export type UnattendedConfig = NonNullable<Config['unattended']>

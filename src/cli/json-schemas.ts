@@ -1063,11 +1063,23 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
             betasValue: Type.Optional(
               Type.String({ description: 'That value as JSON, such as "1"; only with betasOff.' }),
             ),
+            apiAccounts: Type.Optional(
+              Type.Array(Str, {
+                description:
+                  'Claude API accounts that use this same file. Where the variable is removed, config claude.apiBetasOff gives it to them at launch instead.',
+              }),
+            ),
             why: Type.Optional(
               Type.Union([Type.Literal('no-settings'), Type.Literal('broken-link'), Type.Literal('unsafe')]),
             ),
             reason: Type.Optional(Str),
             undo: Type.Boolean({ description: 'sideby changed it here and can put the earlier value back.' }),
+            undoApiBetas: Type.Optional(
+              Type.Literal(true, {
+                description:
+                  'With undo: that change turned config claude.apiBetasOff on for this file, and undo puts it back.',
+              }),
+            ),
           }),
           { description: 'For status, every file; for a preview, the files that would change.' },
         ),
@@ -1097,6 +1109,28 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
         }),
       ),
       unlocked: Type.Optional(Type.Boolean({ description: 'This change turned advisor.unlock on.' })),
+      apiBetasOff: Type.Optional(
+        Type.Boolean({
+          description:
+            'Config claude.apiBetasOff: Claude API accounts sideby starts get CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1 (a value in their proxy.env or the environment wins). After a change, its new value.',
+        }),
+      ),
+      apiAccounts: Type.Optional(
+        Type.Array(Str, {
+          description:
+            'For a preview of a model: API accounts whose settings file loses the variable; they keep it through claude.apiBetasOff.',
+        }),
+      ),
+      apiBetasOn: Type.Optional(
+        Type.Boolean({
+          description: 'For a preview of a model: the change also turns claude.apiBetasOff on.',
+        }),
+      ),
+      apiBetasBack: Type.Optional(
+        Type.Boolean({
+          description: 'For a preview of undo: claude.apiBetasOff also goes back to its earlier value.',
+        }),
+      ),
       envOff: Type.Optional(
         Type.String({
           description: 'A variable in the environment that makes Claude Code hide the advisor.',

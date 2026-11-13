@@ -40,9 +40,13 @@ sideby writes nothing of its own into Host account directories, except in these 
 - `sideby handoff setup grok --yes` adds `~/.grok/hooks/sideby-handoff.json` ([Auto Handoff](usage.md#auto-handoff)).
 - `sideby tune apply` sets `autoCompactWindow` in an account's `settings.json` ([Context tuning](usage.md#context-tuning)).
 - `sideby remote-control off` sets `remoteControlAtStartup` to `false` in Claude's `settings.json` ([Remote Control](usage.md#remote-control)).
-- `sideby advisor <model>` sets `advisorModel` in Claude's `settings.json`, and `off` removes it; choosing a model also removes `env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` where it is on, after showing it in the preview ([Advisor](usage.md#advisor)).
+- `sideby advisor <model>` sets `advisorModel` in Claude's `settings.json`, and `off` removes it; choosing a model also removes `env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` where it is on, after showing it in the preview, and when API accounts share that file it turns on config `claude.apiBetasOff` so sideby gives them the variable at launch instead ([Advisor](usage.md#advisor)).
 
 Each has a way back: `quota teardown claude`, `handoff teardown grok`, `tune undo`, `remote-control undo`, `advisor undo`. Account directories you create with `sideby new` belong to the Host.
+
+## Why does sideby add `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` to my API account?
+
+That variable stops Claude Code from sending `anthropic-beta` headers, which some API gateways reject, but it also hides `/advisor`. When you pick an Advisor model and the settings file that sets it is shared with an API account such as `claude:deepseek`, sideby removes it from the file and, in the same confirmed change, turns on config `claude.apiBetasOff`: from then on it adds `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` whenever it starts a Claude API account, so the gateway keeps working. It never does this for subscription accounts, and a value in the account's `proxy.env` or your environment wins. If your API account's gateway broke after an Advisor change, check `sideby advisor`; `sideby advisor undo` puts the variable back in the file, and `sideby config set claude.apiBetasOff false` turns the launch variable off.
 
 ## How is it different from aimux, agenv, cc-switch or magpie?
 

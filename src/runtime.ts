@@ -1208,6 +1208,19 @@ export async function createRuntime(
     stateDir: paths.stateDir,
     env,
   })
+  /** The two config switches the Advisor reads and may change (spec §3.41). */
+  const advisorConfig = () => ({
+    unlock: config.advisor?.unlock === true,
+    apiBetasOff: config.claude?.apiBetasOff === true,
+  })
+  /** After an Advisor change wrote the config file, this Runtime reads those two switches again. */
+  const reloadAdvisorConfig = async () => {
+    const fresh = await loadConfig(paths.configFile).catch(() => null)
+    if (fresh) {
+      config.advisor = fresh.advisor
+      config.claude = fresh.claude
+    }
+  }
 
   /** The config value of the alias `name`, from own keys only (`constructor` is not an alias unless configured). */
   const ownAlias = (name: string): AliasValue | undefined =>
@@ -1670,6 +1683,7 @@ export async function createRuntime(
         config.unattended = fresh.unattended
         config.ask = fresh.ask
         config.advisor = fresh.advisor
+        config.claude = fresh.claude
       }
       const all = await accounts()
       const inputs = launchInputs(ref, all, userArgs, command)
@@ -1677,6 +1691,8 @@ export async function createRuntime(
         ...inputs,
         // Claude Code's advisor (spec §3.41, ADR-0074): unlocked in Claude subscription sessions while config says so.
         ...(config.advisor?.unlock === true ? { advisorUnlock: true } : {}),
+        // Claude API Accounts get the variable that turns experimental betas off, moved here from a shared settings file.
+        ...(config.claude?.apiBetasOff === true ? { apiBetasOff: true } : {}),
         // Config `ask.permissions: account` (ADR-0070): the AI Task keeps the Account's own arguments, as `run` does.
         ...(opts.aiTask && aiTaskPermissions(config) === 'checked' ? { aiTask: true } : {}),
         label: launchLabel(ref, inputs.account, all),
@@ -2190,24 +2206,29 @@ export async function createRuntime(
       return undoRemoteControlOff(await accounts(), readContext())
     },
     async advisor() {
-      return advisorStatus(await accounts(), readContext(), config.advisor?.unlock === true)
+      return advisorStatus(await accounts(), readContext(), advisorConfig())
     },
     async advisorSet(to, opts = {}) {
       const account = opts.account ? checkAdvisorAccount(await rt.resolve(opts.account)).ref : undefined
       const r = await setAdvisor(await accounts(), readContext(), to, {
         configFile: paths.configFile,
-        unlock: config.advisor?.unlock === true,
+        ...advisorConfig(),
         ...(account ? { account } : {}),
       })
-      if (r.unlocked) config.advisor = { ...config.advisor, unlock: true }
+      await reloadAdvisorConfig()
       return r
     },
     async advisorUndo() {
-      return undoAdvisor(await accounts(), readContext(), config.advisor?.unlock === true)
+      const r = await undoAdvisor(await accounts(), readContext(), {
+        configFile: paths.configFile,
+        ...advisorConfig(),
+      })
+      await reloadAdvisorConfig()
+      return r
     },
     async advisorUnlock(on) {
       const r = await setAdvisorUnlock(paths.configFile, on)
-      config.advisor = (await loadConfig(paths.configFile).catch(() => null))?.advisor
+      await reloadAdvisorConfig()
       return r
     },
     async tuneUndoInfo(account) {

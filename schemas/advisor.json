@@ -126,6 +126,13 @@
             "type": "string",
             "description": "That value as JSON, such as \"1\"; only with betasOff."
           },
+          "apiAccounts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Claude API accounts that use this same file. Where the variable is removed, config claude.apiBetasOff gives it to them at launch instead."
+          },
           "why": {
             "anyOf": [
               {
@@ -148,6 +155,11 @@
           "undo": {
             "type": "boolean",
             "description": "sideby changed it here and can put the earlier value back."
+          },
+          "undoApiBetas": {
+            "type": "boolean",
+            "const": true,
+            "description": "With undo: that change turned config claude.apiBetasOff on for this file, and undo puts it back."
           }
         }
       },
@@ -197,6 +209,25 @@
     "unlocked": {
       "type": "boolean",
       "description": "This change turned advisor.unlock on."
+    },
+    "apiBetasOff": {
+      "type": "boolean",
+      "description": "Config claude.apiBetasOff: Claude API accounts sideby starts get CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1 (a value in their proxy.env or the environment wins). After a change, its new value."
+    },
+    "apiAccounts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "For a preview of a model: API accounts whose settings file loses the variable; they keep it through claude.apiBetasOff."
+    },
+    "apiBetasOn": {
+      "type": "boolean",
+      "description": "For a preview of a model: the change also turns claude.apiBetasOff on."
+    },
+    "apiBetasBack": {
+      "type": "boolean",
+      "description": "For a preview of undo: claude.apiBetasOff also goes back to its earlier value."
     },
     "envOff": {
       "type": "string",
