@@ -179,7 +179,8 @@ describe('background panel', () => {
         const rec = { pid: fake.pid, port, url: `http://127.0.0.1:${port}/`, startedAt: '', instance: 'abc' }
 
         // Same pid and command line, different start time: the pid was reused.
-        await writeFile(pidFile(h), JSON.stringify({ ...rec, processStart: 'Mon Jan  1 00:00:00 2001' }))
+        const otherStart = start.startsWith('ticks:') ? 'ticks:1' : 'Mon Jan  1 00:00:00 2001'
+        await writeFile(pidFile(h), JSON.stringify({ ...rec, processStart: otherStart }))
         let r = await sideby(env, ['ui', '--stop'])
         assert.equal(r.code, 0, r.err)
         assert.match(r.out, /removed a stale pid file/)
@@ -192,6 +193,16 @@ describe('background panel', () => {
         assert.equal(alive(fake.pid!), true, 'not signalled')
         assert.equal(r.code, 1)
         assert.match(r.err, /does not answer/)
+
+        // On Linux a start time an older sideby wrote (`ps -o lstart`, which moves with the clock) is not held against
+        // the process: it goes on to the Panel's answer instead of being called stale.
+        if (start.startsWith('ticks:')) {
+          await writeFile(pidFile(h), JSON.stringify({ ...rec, processStart: 'Mon Jan  1 00:00:00 2001' }))
+          r = await sideby(env, ['ui', '--stop'])
+          assert.equal(alive(fake.pid!), true, 'not signalled')
+          assert.equal(r.code, 1)
+          assert.match(r.err, /does not answer/)
+        }
 
         // A real detached Panel of another state directory, named by this pid file with another instance id.
         const otherState = h.path('other-state')

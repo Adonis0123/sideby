@@ -33,7 +33,7 @@ export interface PanelPidFile {
   startedAt: string
   /** Random id the Panel also returns on `/api/health`. */
   instance: string
-  /** `ps -o lstart=` of the process, when `ps` gave one; a reused pid has another. */
+  /** When the process started (`processStartTime`), when it could be read; a reused pid has another. */
   processStart?: string
 }
 
@@ -73,8 +73,37 @@ function psField(pid: number, field: string): Promise<string | undefined> {
   })
 }
 
-/** When `pid` started, as `ps` prints it; with the pid it names one process, which a reused pid does not match. */
-export const processStartTime = (pid: number) => psField(pid, 'lstart')
+/**
+ * When `pid` started; with the pid it names one process, which a reused pid does not match. On Linux it is the start
+ * in clock ticks since boot from `/proc/<pid>/stat` (`ticks:<n>`): `ps -o lstart` adds that to the boot time, which
+ * moves when the system clock is adjusted (under WSL by seconds within minutes), so the same process would stop
+ * matching its own pid file. Elsewhere it is `ps -o lstart`.
+ */
+export async function processStartTime(pid: number): Promise<string | undefined> {
+  if (process.platform === 'linux') {
+    try {
+      const stat = await readFile(`/proc/${pid}/stat`, 'utf8')
+      // Fields after the command name, which is in parentheses and may hold spaces; starttime is field 22.
+      const ticks = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19]
+      if (ticks && /^\d+$/.test(ticks)) return `ticks:${ticks}`
+    } catch {
+      // gone, or no /proc: fall back to ps
+    }
+  }
+  return psField(pid, 'lstart')
+}
+
+/**
+ * Whether a pid file's start time names this process. One written in another form (an older sideby wrote `ps -o lstart`
+ * on Linux too) cannot be compared and is not held against it; the command line and the Panel's answer still have to
+ * match.
+ */
+async function sameStart(pid: number, recorded: string): Promise<boolean> {
+  const now = await processStartTime(pid)
+  if (!now) return false
+  if (now.startsWith('ticks:') !== recorded.startsWith('ticks:')) return true
+  return now === recorded
+}
 
 type PanelCheck =
   | { status: 'ours'; build?: string }
@@ -91,7 +120,7 @@ async function checkPanel(rec: PanelPidFile): Promise<PanelCheck> {
   const stale = (reason: string): PanelCheck => ({ status: 'stale', reason })
   if (!rec.instance) return stale('it names no panel instance')
   if (!alive(rec.pid)) return stale(`process ${rec.pid} is not running`)
-  if (rec.processStart && (await processStartTime(rec.pid)) !== rec.processStart)
+  if (rec.processStart && !(await sameStart(rec.pid, rec.processStart)))
     return stale(`process ${rec.pid} is not the one that wrote it`)
   const cmd = await psField(rec.pid, 'command')
   if (!(cmd && / ui( |$)/.test(cmd) && cmd.includes(`--${DETACHED_FLAG}`)))
