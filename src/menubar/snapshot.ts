@@ -2,9 +2,12 @@
 import type { HandoffPlan } from '../core/handoff.ts'
 import {
   bindingWindow,
+  limitResetOffer,
   openWindows,
+  QUOTA_LONG_WARN_PERCENT,
+  QUOTA_WARN_PERCENT,
   type QuotaLevel,
-  quotaIsStale,
+  quotaAge,
   windowLevel,
   worseLevel,
 } from '../core/quota-levels.ts'
@@ -35,8 +38,13 @@ export interface MenubarRow {
   recommended: boolean
   /** When the quota was observed, independently of the menu's check time; null without quota. */
   observedAt: string | null
-  /** An old or undated reading, or a failed quota query. */
+  /** An old or undated reading, or a failed quota query; true when any of the row's windows is. */
   stale: boolean
+  /**
+   * Whether the account's own bars are old, when that differs from `stale`: a model group under them was read at
+   * another time (ADR-0073). Left out, `stale` stands for them.
+   */
+  barsStale?: boolean
   /** Hover text: when the numbers were read, each window's use and reset, and what a click does. */
   tip: string
   /**
@@ -49,10 +57,13 @@ export interface MenubarRow {
    * its own two bars, reset and hover text, while the account's own `bars` stay null. Null otherwise.
    */
   groups:
-    | ({ label: string; bars: MenubarRow['bars']; tip: string } & Pick<
-        MenubarRow,
-        'reset' | 'resetLabel' | 'resetTime'
-      >)[]
+    | ({
+        label: string
+        bars: MenubarRow['bars']
+        tip: string
+        /** Whether this group's numbers are old by their own read time (ADR-0073); left out, the row's `stale` stands. */
+        stale?: boolean
+      } & Pick<MenubarRow, 'reset' | 'resetLabel' | 'resetTime'>)[]
     | null
   /**
    * Which window resets and when, such as `7d · tomorrow 4:59 PM`: the window closest to its own red level (85% for 5
@@ -73,6 +84,20 @@ export interface MenubarRow {
   refreshFailed?: true
   /** A no-quota explanation, or an old-reading warning beside the bars. */
   note: string
+  /** The Limit Resets the account holds, in words (`1 reset available`, ADR-0072); left out for none or unknown. */
+  limitResets?: string
+  /**
+   * A line under the account that leads to using a Limit Reset (spec §3.40, ADR-0072): its words and hover text.
+   * `sideby menubar reset <account>` is what a click runs; it opens a page and never uses one itself. Present for an
+   * Account that holds one where the Host can use it (Codex), and for one with a window at its warning level where
+   * only the vendor's page can (Claude Code). Left out otherwise.
+   */
+  useReset?: { title: string; tip: string }
+  /**
+   * How old the numbers are, in words (`read 25m ago`), once they are older than the Family's check interval or old
+   * (ADR-0073); left out while they are current. The hover text always says when they were read.
+   */
+  age?: string
 }
 
 export interface MenubarSection {
@@ -142,6 +167,14 @@ export interface MenubarFamilyInput {
    * changes only when a session runs in the account; old readings then say so. Default true.
    */
   refreshable?: boolean
+  /** How often the Family asks its Host for Quota (`fetchQuota.everyMinutes`); the age shows once a reading is older. */
+  everyMinutes?: number
+  /**
+   * How a Limit Reset is used in this Family (`FamilyDef.limitReset`): `use` when the Host's CLI can, `page` when only
+   * the vendor's page can, with that page's host name in `limitResetSite`. Left out when it offers neither.
+   */
+  limitReset?: 'use' | 'page'
+  limitResetSite?: string
   /** Its Handoff ranking (`sideby next`); null when the Family has no Quota source. */
   plan: HandoffPlan | null
   /** In Display Order. */
@@ -376,8 +409,10 @@ function row(
   s: MenubarStrings,
   refreshable: boolean,
   lang: MenubarLang,
+  everyMinutes?: number,
+  limitReset?: { kind: 'use' | 'page'; site?: string },
 ): MenubarRow {
-  const r = quotaRow(a, plan, now, s, refreshable, lang)
+  const r = quotaRow(a, plan, now, s, refreshable, lang, everyMinutes, limitReset)
   if (!a.refresh) return r
   // A manual refresh in progress (spec §3.31): the old bars stay, and the reset cell says where the refresh stands.
   const says = a.refresh === 'waiting' ? s.rowRefreshing : s.rowRefreshFailed
@@ -400,6 +435,8 @@ function quotaRow(
   s: MenubarStrings,
   refreshable: boolean,
   lang: MenubarLang,
+  everyMinutes?: number,
+  limitReset?: { kind: 'use' | 'page'; site?: string },
 ): MenubarRow {
   const recommended = Boolean(plan?.hasQuota && plan.pick === a.ref)
   const startTip = fill(s.startTip, { account: a.ref })
@@ -422,9 +459,13 @@ function quotaRow(
   if (a.loginExpired) return { ...noted(s.loginExpired), tip: fill(s.loginExpiredTip, { account: a.ref }) }
   const quota = a.quota
   if (quota.status !== 'ok') return noted(s.noData)
-  const stale = quotaIsStale(quota, now.getTime(), a.lastUseAt)
+  // Each window by its own read time (ADR-0073): a model group kept under a newer plan reading may be older.
+  const ageOf = (windows: readonly QuotaWindow[]) =>
+    quotaAge({ ...quota, windows }, now.getTime(), a.lastUseAt, everyMinutes)
+  const age = ageOf(quota.windows)
+  const stale = age.stale
   // Over an hour old but unused here since: the numbers stand, and the hover text says what it cannot see.
-  const quiet = !stale && now.getTime() - Date.parse(quota.observedAt) > 3600_000
+  const quiet = !stale && age.quiet
   // The head of the hover text: when the numbers were read, and why they may be old.
   const head = [
     observedText(quota.observedAt, now, s),
@@ -432,27 +473,83 @@ function quotaRow(
     ...(quiet ? [s.quietTip] : []),
     ...(quota.fetchError ? [fill(s.fetchFailed, { error: quota.fetchError })] : []),
   ]
+  // The Limit Resets the Host tells (ADR-0072): a quiet note on the row, with the next expiry in the hover text.
+  const stock = quota.limitResets && quota.limitResets.available > 0 ? quota.limitResets : null
+  const resetsNote = stock
+    ? stock.available === 1
+      ? s.limitResetsOne
+      : fill(s.limitResetsMany, { n: stock.available })
+    : ''
+  const resetsTip = stock
+    ? [
+        '',
+        fill(s.limitResetsTip, { n: stock.available }),
+        ...(stock.nextExpiresAt
+          ? [fill(s.limitResetsExpiry, { date: resetDate(stock.nextExpiresAt, now.getTime(), lang) })]
+          : []),
+      ]
+    : []
+  const minutesOld = Math.floor((now.getTime() - Date.parse(age.observedAt)) / 60000)
+  const ageNote =
+    age.showAge && Number.isFinite(minutesOld) && minutesOld >= 1
+      ? fill(s.readAgo, { time: durationText(minutesOld, s) })
+      : ''
+  // The line that leads to using one: where the Host can, whenever the Account holds one; where only the vendor's
+  // page can, once a window is at its warning level, as sideby cannot see the count.
+  const offered =
+    limitReset?.kind === 'use'
+      ? stock !== null
+      : limitReset?.kind === 'page' &&
+        limitResetOffer(quota, 'page', now.getTime(), {
+          short: QUOTA_WARN_PERCENT,
+          long: QUOTA_LONG_WARN_PERCENT,
+        }) !== null
+  const extra = {
+    ...(offered
+      ? {
+          useReset: {
+            title: s.useReset,
+            tip:
+              limitReset!.kind === 'use'
+                ? s.useResetTip
+                : fill(s.useResetPageTip, { site: limitReset!.site ?? '' }),
+          },
+        }
+      : {}),
+    ...(resetsNote ? { limitResets: resetsNote } : {}),
+    ...(ageNote ? { age: ageNote } : {}),
+  }
   // Every window is past its reset: Refresh asks now, where the Family can be asked.
   const due = (d: { allPassed: boolean }) => (d.allPassed && refreshable ? [s.resetDueTip] : [])
   const groups = quotaGroups(quota)
   if (groups) {
     // One line per model group under the account, each with its own 5h and 7d bars (spec §3.31). Windows that cover
     // every model (Cursor's plan total) keep their bars on the account's own line.
-    const drawnGroups = groups.map((g) => ({ name: g.name, d: drawn(g.quota, now, s, lang) }))
+    const drawnGroups = groups.map((g) => ({
+      name: g.name,
+      d: drawn(g.quota, now, s, lang),
+      age: ageOf(g.quota.windows),
+    }))
     const groupTip = (g: (typeof drawnGroups)[number]) => [
       g.name,
       ...g.d.lines.map((l) => `   ${l}`),
+      // A group read at another time than the rest says when.
+      ...(g.age.observedAt !== quota.observedAt ? [`   ${observedText(g.age.observedAt, now, s)}`] : []),
       ...due(g.d).map((l) => `   ${l}`),
     ]
     const all = openWindows(quota, now) ? drawn(quota, now, s, lang) : null
+    const ownStale = all ? ageOf(quota.windows.filter((w) => !w.name)).stale : stale
     return {
       ...base,
+      ...extra,
       observedAt: quota.observedAt,
       stale,
+      ...(ownStale !== stale ? { barsStale: ownStale } : {}),
       detail: [
         ...(all ? [all.parts.join(' ')] : []),
         ...drawnGroups.map((g) => `${groupLabel(g.name)} ${g.d.parts.join(' ')}`),
         ...(stale ? [s.olderReading] : []),
+        ...(resetsNote ? [resetsNote] : []),
       ].join(s.sep),
       level: drawnGroups.reduce<QuotaLevel>((l, g) => worseLevel(l, g.d.level), all?.level ?? 'ok'),
       tip: [
@@ -460,6 +557,7 @@ function quotaRow(
         '',
         ...(all ? [...all.lines, ...due(all), ''] : []),
         ...drawnGroups.flatMap(groupTip),
+        ...resetsTip,
         '',
         startTip,
       ].join('\n'),
@@ -478,8 +576,9 @@ function quotaRow(
           resetLabel: g.d.resetLabel,
           resetTime: g.d.resetTime,
           tip: [...head, '', ...groupTip(g), '', startTip].join('\n'),
+          ...(g.age.stale !== stale ? { stale: g.age.stale } : {}),
         })),
-      note: stale ? s.olderReading : '',
+      note: ownStale ? s.olderReading : '',
     }
   }
   if (openWindows(quota, now) === null) return noted(s.noData)
@@ -488,13 +587,15 @@ function quotaRow(
   if (d.fullest) parts.push(fill(s.resets, { label: d.fullest.label, time: d.resetTime }))
   else if (d.allPassed) parts.push(s.resetDue)
   if (stale) parts.push(s.olderReading)
+  if (resetsNote) parts.push(resetsNote)
   return {
     ...base,
+    ...extra,
     observedAt: quota.observedAt,
     stale,
     detail: parts.join(s.sep),
     level: d.level,
-    tip: [...head, '', ...d.lines, ...due(d), '', startTip].join('\n'),
+    tip: [...head, '', ...d.lines, ...due(d), ...resetsTip, '', startTip].join('\n'),
     bars: d.bars,
     reset: d.reset,
     resetLabel: d.resetLabel,
@@ -522,7 +623,21 @@ function section(f: MenubarFamilyInput, now: Date, s: MenubarStrings, lang: Menu
         ...(f.logo.gradients?.length ? { gradients: f.logo.gradients } : {}),
       }
     : null
-  const all = f.accounts.map((a) => ({ a, r: row(a, f.plan, now, s, f.refreshable !== false, lang) }))
+  const all = f.accounts.map((a) => ({
+    a,
+    r: row(
+      a,
+      f.plan,
+      now,
+      s,
+      f.refreshable !== false,
+      lang,
+      f.everyMinutes,
+      f.limitReset
+        ? { kind: f.limitReset, ...(f.limitResetSite ? { site: f.limitResetSite } : {}) }
+        : undefined,
+    ),
+  }))
   const aside = (a: MenubarFamilyInput['accounts'][number]) => a.kind === 'api' || a.login === 'logged-out'
   // A Same Login is one quota, so one row, named like the Panel's: after the directory first in Display Order (the
   // Panel's "Set as shown name" moves one there). It is recommended when any of its directories is. The other
@@ -555,10 +670,12 @@ function section(f: MenubarFamilyInput, now: Date, s: MenubarStrings, lang: Menu
     )
     for (const y of others) {
       const note = y.a.loginExpired ? s.loginExpired : fill(s.sameLoginNote, { name: lead.a.name })
+      // The shared Quota, its Limit Resets and its age are said once, on the row that leads the login.
+      const { limitResets: _resets, age: _age, useReset: _use, ...rest } = y.r
       same.push({
         ...y,
         r: {
-          ...y.r,
+          ...rest,
           bars: null,
           reset: '',
           resetLabel: '',

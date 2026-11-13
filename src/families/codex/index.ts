@@ -7,7 +7,7 @@ import { nestedFileWrittenAt, resumeSubcommandSession } from '../shared/sessions
 import { topLevelTomlString } from '../shared/toml.ts'
 import { codexHandoff } from './handoff.ts'
 import { codexModelChoice } from './model.ts'
-import { codexQuotaFetch } from './quota.ts'
+import { codexQuotaFetch, useCodexLimitReset } from './quota.ts'
 import { readCodexQuota, readCodexUsage } from './rollout.ts'
 import { readCodexTuning } from './tuning.ts'
 
@@ -93,6 +93,8 @@ export const codexFamily: FamilyDef = {
   identity: codexIdentity,
   readQuota: (account) => readCodexQuota(account.dir),
   fetchQuota: codexQuotaFetch,
+  // Spending a Limit Reset the Account holds, only after the user confirmed it (ADR-0072).
+  limitReset: { use: useCodexLimitReset },
   readUsage: (account, ctx) => readCodexUsage(account.dir, ctx.now),
   readTuning: readCodexTuning,
   resumedSession: resumeSubcommandSession,

@@ -46,19 +46,35 @@ export type HandoffDecision =
  * An Account this chain already used: its ref, or its hop as `chain.json` keeps it, with the Quota window that made it
  * hand over (`ChainHop.window`).
  */
-export type UsedAccount = string | { ref: string; window?: { resetsAt: string } }
+export type UsedAccount =
+  | string
+  | {
+      ref: string
+      window?: { resetsAt: string }
+      /** When the hop began, as `chain.json` keeps it. */
+      startedAt?: string
+      /**
+       * Set by the Runtime: a Limit Reset the user confirmed was spent for this Account after the hop began, and the
+       * Quota read that followed it is kept (ADR-0072, amending ADR-0060).
+       */
+      resetUsed?: boolean
+    }
 
 /** What an automatic handoff does with the Accounts this chain already used (spec §3.17 "选号" 3, ADR-0060). */
 export interface UsedRule {
   /** Left out: the origin, a bare ref, and an Account whose latest hop handed over for a window that has not reset. */
   out: Set<string>
-  /** Back only when its own Quota data shows it ready: its latest hop recorded no window (a manual handoff, an older chain). */
+  /**
+   * Back only when its own Quota data shows it ready: its latest hop recorded no window (a manual handoff, an older
+   * chain), or it handed over for a window that has not reset by itself but a Limit Reset was spent for it since.
+   */
   ifReady: Set<string>
 }
 
 /**
  * Sorts the Accounts this chain used by their latest hop: one that handed over for a Quota window that has reset by
- * `now` may take over again like any other, one with no recorded window only when it is `ready`, the rest stay out.
+ * `now` may take over again like any other, one with no recorded window, or one a Limit Reset was spent for since
+ * (`resetUsed`), only when it is `ready`, the rest stay out.
  * A bare ref stays out, and so does the origin.
  */
 export function stillUsed(origin: string, used: readonly UsedAccount[], now: Date): UsedRule {
@@ -66,7 +82,9 @@ export function stillUsed(origin: string, used: readonly UsedAccount[], now: Dat
   for (const u of used) {
     if (typeof u === 'string') latest.set(u, 'out')
     else if (u.window === undefined) latest.set(u.ref, 'ifReady')
-    else latest.set(u.ref, windowReset(u.window.resetsAt, now) ? 'back' : 'out')
+    else if (windowReset(u.window.resetsAt, now)) latest.set(u.ref, 'back')
+    // A confirmed Limit Reset may have emptied the window early: its Quota, read after the spend, decides.
+    else latest.set(u.ref, u.resetUsed ? 'ifReady' : 'out')
   }
   latest.set(origin, 'out')
   const refs = (k: string) => new Set([...latest].flatMap(([ref, v]) => (v === k ? [ref] : [])))

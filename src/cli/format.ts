@@ -1,4 +1,4 @@
-import { windowLevel } from '../core/quota-levels.ts'
+import { quotaAge, windowLevel } from '../core/quota-levels.ts'
 import { MIN_CALLS } from '../core/tuning.ts'
 import { resetWhen } from '../panel/page-logic.ts'
 import type { QuotaResult, QuotaWindow, TuningReason, TuningResult, UsageResult } from '../types.ts'
@@ -112,10 +112,36 @@ export const QUOTA_REASON: Record<string, string> = {
   'fetch-failed': 'could not get it',
 }
 
-export function quotaText(q: QuotaResult, now: Date): string {
+/** `1 reset available`, with when the next one expires where the Host told (ADR-0072); empty for none. */
+export function limitResetsText(q: QuotaResult, now: Date): string {
+  const r = q.status === 'ok' ? q.limitResets : undefined
+  if (!r || r.available < 1) return ''
+  const expires = r.nextExpiresAt ? `, next expires ${clock(r.nextExpiresAt, now)}` : ''
+  return `${r.available} ${r.available === 1 ? 'reset' : 'resets'} available${expires}`
+}
+
+/**
+ * One Account's Quota as a line. A window read at another time than the rest says so after its numbers, and numbers
+ * that count as old by the shared rule (`quotaAge`, ADR-0073) say so after the read time. `lastUseAt` is the newest
+ * use of the login on this computer; `resets: false` leaves the Limit Resets out (another row of the same login
+ * says them).
+ */
+export function quotaText(
+  q: QuotaResult,
+  now: Date,
+  o: { lastUseAt?: string | null; resets?: boolean } = {},
+): string {
   if (q.status === 'unavailable') return c.dim(QUOTA_REASON[q.reason] ?? q.reason)
   const failed = q.fetchError ? c.yellow(' (latest check failed)') : ''
-  return `${q.windows.map((w) => windowText(w, now)).join('  ')}  ${c.dim(ago(q.observedAt, now))}${failed}`
+  const old =
+    !q.fetchError && quotaAge(q, now.getTime(), o.lastUseAt).stale ? c.yellow(' (may be out of date)') : ''
+  const windows = q.windows.map((w) => {
+    const own =
+      w.observedAt && w.observedAt !== q.observedAt ? c.dim(` (read ${ago(w.observedAt, now)})`) : ''
+    return `${windowText(w, now)}${own}`
+  })
+  const resets = o.resets === false ? '' : limitResetsText(q, now)
+  return `${windows.join('  ')}  ${c.dim(ago(q.observedAt, now))}${failed}${old}${resets ? `  ${c.cyan(resets)}` : ''}`
 }
 
 export function compactNumber(n: number): string {

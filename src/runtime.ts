@@ -60,6 +60,28 @@ import {
   prepareLaunch,
   which,
 } from './core/launch.ts'
+import {
+  confirmedSpends,
+  isOutcome,
+  LimitResetError,
+  type LimitResetPlan,
+  type LimitResetRecord,
+  type LimitResetResult,
+  limitResetFile,
+  loginUnchanged,
+  newLimitResetRecord,
+  outcomeMessage,
+  planExpired,
+  pruneLimitResetRecords,
+  readLimitResetRecord,
+  sameAccounts,
+  scanLimitResetRecords,
+  spent,
+  takeLimitResetLock,
+  unreadableRecordsMessage,
+  unresolvedFor,
+  writeLimitResetRecord,
+} from './core/limit-reset.ts'
 import { loginMarkFile, readLoginMark, writeLoginMark } from './core/login-mark.ts'
 import { memoStore } from './core/memo-store.ts'
 import {
@@ -76,8 +98,10 @@ import { type Paths, resolvePaths } from './core/paths.ts'
 import { choosePick, type PickChoice, suggestPickName } from './core/pick-commands.ts'
 import { categoryReader, type ProjectCategories } from './core/project-categories.ts'
 import {
+  FETCH_TIMEOUT_MS,
   fetchedQuota,
   loginProblemOf,
+  type QuotaAskHint,
   type QuotaFetchMode,
   quotaCheckOff,
   shownQuota,
@@ -93,7 +117,13 @@ import {
   undoRemoteControlOff,
 } from './core/remote-control.ts'
 import { findResumeRoute } from './core/resume.ts'
-import { type LoginMember, SAME_LOGIN_FAMILIES, sameLoginGroups, sharedQuota } from './core/same-login.ts'
+import {
+  type LoginMember,
+  loginComparisonKey,
+  SAME_LOGIN_FAMILIES,
+  sameLoginGroups,
+  sharedQuota,
+} from './core/same-login.ts'
 import { type SessionHookPart, sessionHookArgs } from './core/session-hooks.ts'
 import { shareMeaning } from './core/share-meaning.ts'
 import {
@@ -134,6 +164,7 @@ import {
   unattendedStatus,
 } from './core/unattended.ts'
 import { UNATTENDED_ENV } from './core/unattended-state.ts'
+import { inCi } from './core/update.ts'
 import { packageVersion } from './core/version.ts'
 import { withClaudeMod } from './families/claude/mod.ts'
 import { BUILTIN_PLUGINS } from './families/index.ts'
@@ -146,6 +177,7 @@ import type {
   AccountIdentity,
   Env,
   FamilyDef,
+  LimitResetOutcome,
   LoginProblem,
   LoginState,
   QuotaResult,
@@ -445,9 +477,37 @@ export interface Runtime {
   quota(account: Account, opts?: { fetch?: QuotaFetchMode }): Promise<QuotaResult>
   /**
    * Asks every Family that fetches Quota (spec §3.26) again now, for `only` or every signed-in subscription Account,
-   * and waits for the answers. Fetching that is turned off stays off.
+   * and waits for the answers; a Same Login among them is asked once. Fetching that is turned off stays off.
    */
   refreshQuota(only?: readonly Account[]): Promise<void>
+  /**
+   * The Account whose Host sideby asks for `account`'s Quota (spec §3.26): itself, or, in a Same Login, its first
+   * Account that is signed in and has no Expired Login, since the group is one vendor Quota and is asked once.
+   */
+  quotaAsker(account: Account): Promise<Account>
+  /**
+   * What `account` offers for a Limit Reset (spec §3.40, ADR-0072): `use` when its Host can spend one after a
+   * confirmation, `page` with the vendor's page when a Limit Reset is spent only there, null for neither (an API
+   * Account included).
+   */
+  limitResetKind(account: Account): { kind: 'use' } | { kind: 'page'; url: string } | null
+  /**
+   * What the user confirms before one Limit Reset of `account` is spent: the Quota and the count, read from the Host
+   * now, the Accounts of its Same Login and the operation to confirm. Spends nothing. Throws a `LimitResetError`
+   * when the Account's Host cannot spend one.
+   */
+  limitResetPlan(account: Account): Promise<LimitResetPlan>
+  /**
+   * Spends one Limit Reset of `account` for the plan `operationId` names, which the user confirmed; it cannot be
+   * undone. One spend at a time per Same Login, across processes. An earlier attempt of that login without a final
+   * answer is asked again with its own key instead. Then the Quota is read at once. Throws a `LimitResetError` (with
+   * the `operationId` to retry) when the Host gave no final answer (`outcome-unknown`), or answered but the answer
+   * could not be recorded (`outcome-not-saved`; the message says what the Host answered). An operation that already
+   * has its answer says it again without a second request, reading the Quota when what is kept is from before the
+   * spend. Never called by sideby itself: not from Auto Handoff, `next`, a hook, a session under Unattended Mode, or
+   * in CI.
+   */
+  limitResetUse(account: Account, operationId: string): Promise<LimitResetResult>
   /** Families that fetch Quota, with their switch (config `quota.check.<family>`) and why it is off, if it is. */
   quotaChecks(): QuotaCheckInfo[]
   /** Turns a Family's Quota fetching on (removes the key) or off (`quota.check.<family>: false`). */
@@ -567,6 +627,11 @@ export async function createRuntime(
      * test never asks the network. Not part of the plugin or Portal contract.
      */
     network?: { fetcher?: TraceFetcher; print?: string }
+    /**
+     * Internal, for tests: how long a Limit Reset request may take before it counts as unanswered (spec §3.40), so a
+     * test of a Host that hangs need not wait the real time. Not part of the plugin or Portal contract.
+     */
+    limitReset?: { timeoutMs?: number }
   } = {},
 ): Promise<Runtime> {
   const env = opts.env ?? process.env
@@ -731,15 +796,96 @@ export async function createRuntime(
     return list.filter((a) => peers.includes(a.ref))
   }
 
+  /** A Same Login's Accounts in the order its row names them: the Display Order, the Main Account, then by name. */
+  const loginOrder = (list: readonly Account[]): Account[] => {
+    const at = (a: Account) => {
+      const i = (config.display?.accounts?.[a.family] ?? []).indexOf(a.name)
+      return i < 0 ? Number.POSITIVE_INFINITY : i
+    }
+    return [...list].sort(
+      (x, y) =>
+        at(x) - at(y) ||
+        Number(y.isMain) - Number(x.isMain) ||
+        x.name.localeCompare(y.name, undefined, { numeric: true }),
+    )
+  }
+
+  /**
+   * Who is asked for each Account's Quota (spec §3.26, ADR-0073): a Same Login is one vendor Quota, so only its first
+   * Account in `loginOrder` that is signed in and has no Expired Login asks its Host, and the others show that
+   * answer. Ref → the ref asked; an Account left out asks for itself (one with an Expired Login does, so its own
+   * answer can tell that the login works again).
+   */
+  const askersOf = async (
+    list: readonly Account[],
+    groups: ReadonlyMap<string, string[]>,
+  ): Promise<Map<string, string>> => {
+    const out = new Map<string, string>()
+    for (const a of list) {
+      const peers = groups.get(a.ref)
+      if (!peers?.length || out.has(a.ref) || !families.get(a.family)?.fetchQuota) continue
+      const members = loginOrder(list.filter((x) => x.ref === a.ref || peers.includes(x.ref)))
+      const able: Account[] = []
+      for (const m of members) {
+        const login = await loginOf(m)
+        if (login === 'logged-out' || (await loginProblemFor(m, login))) continue
+        able.push(m)
+      }
+      for (const m of able) out.set(m.ref, able[0]!.ref)
+    }
+    return out
+  }
+
+  /** What decides how early `account` is asked among those due at once (spec §3.26). */
+  const askHint = (account: Account, peers: readonly string[] = []): QuotaAskHint => {
+    const d = config.display ?? {}
+    const names = [account.name, ...peers.map((r) => r.slice(r.indexOf(':') + 1))]
+    const any = (list: readonly string[] | undefined) => names.some((n) => list?.includes(n))
+    return {
+      pinned: any(d.pinned?.[account.family]),
+      hidden: Boolean(d.hiddenFamilies?.includes(account.family)) || any(d.hidden?.[account.family]),
+      // A Same Login is one vendor Quota: what its other Accounts keep tells which reset instants had their ask.
+      ...(peers.length
+        ? {
+            peers: () =>
+              Promise.all(
+                peers.map((r) =>
+                  readQuotaStore(quotaStoreFile(paths.stateDir, account.family, r.slice(r.indexOf(':') + 1))),
+                ),
+              ),
+          }
+        : {}),
+      // An answer asked for before a Limit Reset was used for this Account's login is not kept after it (ADR-0072).
+      ...(families.get(account.family)?.limitReset?.use
+        ? {
+            changedAt: async () => {
+              const at = (await scanLimitResetRecords(paths.stateDir)).records
+                .filter((r) => spent(r.state) && r.accounts.includes(account.ref))
+                .map((r) => Date.parse(r.finishedAt ?? ''))
+                .filter(Number.isFinite)
+              return at.length ? Math.max(...at) : undefined
+            },
+          }
+        : {}),
+    }
+  }
+
   /** Every Account's Quota as shown (shared within a Same Login), reading each Account's own cache once. */
   const quotasOf = async (
     list: readonly Account[],
     mode: QuotaFetchMode = 'wait',
   ): Promise<Map<string, QuotaResult>> => {
-    const [own, groups] = await Promise.all([
-      Promise.all(list.map(async (a) => [a.ref, await ownQuota(a, mode)] as const)).then((e) => new Map(e)),
-      groupsOf(list),
-    ])
+    const groups = await groupsOf(list)
+    const askers = mode === 'never' ? new Map<string, string>() : await askersOf(list, groups)
+    const own = new Map(
+      await Promise.all(
+        list.map(async (a) => {
+          // Another Account of its Same Login asks for the group; this one reads what is kept.
+          const asked = (askers.get(a.ref) ?? a.ref) === a.ref
+          return [a.ref, await ownQuota(a, asked ? mode : 'never', askHint(a, groups.get(a.ref)))] as const
+        }),
+      ),
+    )
     return new Map(
       list.map((a) => [
         a.ref,
@@ -760,7 +906,11 @@ export async function createRuntime(
     return own
   }
 
-  const ownQuota = async (account: Account, mode: QuotaFetchMode = 'wait'): Promise<QuotaResult> => {
+  const ownQuota = async (
+    account: Account,
+    mode: QuotaFetchMode = 'wait',
+    hint: QuotaAskHint = askHint(account),
+  ): Promise<QuotaResult> => {
     if (account.kind === 'api') return { status: 'unavailable', reason: 'api-account' }
     const f = familyOf(account.family)
     if (!f.readQuota && !f.fetchQuota) return { status: 'unavailable', reason: 'no-source' }
@@ -777,10 +927,181 @@ export async function createRuntime(
       const off = quotaCheckOff(f.id, config, env)
       // A signed-out Account has nothing to ask about; its kept answer still shows.
       const ask = off || mode === 'never' || (await loginOf(account)) === 'logged-out' ? 'never' : mode
-      const kept = await fetchedQuota(f.fetchQuota, account, readContext(), accountEnv(f, account, env), ask)
+      // The local reading's time stands for the last use on this computer: the Hosts write it while a session runs.
+      const usedAt = local?.status === 'ok' ? Date.parse(local.observedAt) : Number.NaN
+      const kept = await fetchedQuota(
+        f.fetchQuota,
+        account,
+        readContext(),
+        accountEnv(f, account, env),
+        ask,
+        {
+          ...hint,
+          ...(Number.isFinite(usedAt) ? { usedAt } : {}),
+          local,
+        },
+      )
       return shownQuota(local, kept, off, f.fetchQuota.localFallbackOnly)
     } finally {
       memos.saveSoon()
+    }
+  }
+
+  /** The Account asked for `account`'s Quota (`Runtime.quotaAsker`). */
+  const askerOf = async (account: Account): Promise<Account> => {
+    const peers = await peersOf(account)
+    if (!peers.length) return account
+    const list = [account, ...peers]
+    const ref = (await askersOf(list, await groupsOf(list))).get(account.ref)
+    return list.find((a) => a.ref === ref) ?? account
+  }
+
+  /**
+   * Asks `asker`'s Host for its Quota now, outside `everyMinutes`, and says whether a new answer was kept. With
+   * `notBefore` (real ms) an answer another reader took before that moment does not count.
+   */
+  const askQuotaNow = async (asker: Account, notBefore?: number): Promise<boolean> => {
+    const file = quotaStoreFile(paths.stateDir, asker.family, asker.name)
+    const before = (await readQuotaStore(file))?.attemptedAt
+    await ownQuota(asker, 'force', {
+      ...askHint(asker),
+      ...(notBefore !== undefined ? { notBefore } : {}),
+    }).catch(() => undefined)
+    const after = await readQuotaStore(file)
+    // An answer whose ask began before `notBefore` may hold the numbers from before the change, whenever it was kept.
+    const seen = notBefore === undefined || Date.parse(after?.startedAt ?? '') >= notBefore
+    return Boolean(after?.quota && !after.error && after.attemptedAt !== before && seen)
+  }
+
+  /**
+   * Whether `asker`'s kept Quota is from after `sinceMs` (real ms), the moment a Limit Reset was spent (ADR-0072): its
+   * ask began at or after that moment, or one made now did. Only a read; false when neither is so, and the numbers
+   * kept are then still the ones from before.
+   */
+  const quotaSince = async (asker: Account, sinceMs: number): Promise<boolean> => {
+    const kept = await readQuotaStore(quotaStoreFile(paths.stateDir, asker.family, asker.name))
+    // After a failed ask `startedAt` is that ask's, and the numbers are older than it.
+    if (kept?.quota && !kept.error && Date.parse(kept.startedAt ?? '') >= sinceMs) return true
+    return askQuotaNow(asker, sinceMs)
+  }
+
+  /** The Family of an Account whose Host can spend a Limit Reset, or a `LimitResetError` saying what to do. */
+  const limitResetFamily = (account: Account): FamilyDef => {
+    const f = familyOf(account.family)
+    if (account.kind !== 'api' && f.limitReset?.use) return f
+    const page = account.kind !== 'api' ? f.limitReset?.vendorPage : undefined
+    throw new LimitResetError(
+      page
+        ? `${f.title} cannot use a limit reset from the command line; it is used on ${page} (open it with \`sideby quota reset ${account.ref} --open\`)`
+        : account.kind === 'api'
+          ? `${account.ref} is an API account, which has no limit resets; they belong to subscription accounts`
+          : `${f.title} has no limit reset sideby can use; check the vendor's own usage page`,
+      { code: 'no-limit-reset' },
+    )
+  }
+
+  /** Why a spend is refused whoever asks (ADR-0072), or null: in CI, and from a session under Unattended Mode. */
+  const limitResetRefused = async (account: Account): Promise<{ why: string; code: string } | null> => {
+    if (inCi(env)) return { why: 'Using a limit reset is off in CI', code: 'ci' }
+    if (env.SIDEBY_ACCOUNT) {
+      const st = await unattendedStatus({
+        paths,
+        families: [...families.keys()],
+        env,
+        now: now(),
+        readOnly: true,
+      }).catch(() => null)
+      if (st?.on)
+        return {
+          why: `Unattended Mode is on, and using a limit reset cannot be undone, so it waits for the user: they can run \`sideby quota reset ${account.ref}\` themselves or use the Panel`,
+          code: 'unattended',
+        }
+    }
+    return null
+  }
+
+  /**
+   * The comparison key of the login `account` is signed in as right now (`loginComparisonKey`), read from the Host's
+   * files each time; undefined when it cannot be told (signed out, an unreadable sign-in, a Family without an
+   * Identity). It holds the Login Key and the Identity, so it stays in the Runtime: a Limit Reset record keeps only a
+   * salted digest of it, to tell that the login of an operation is unchanged (ADR-0072).
+   */
+  const loginKeyNow = async (account: Account): Promise<string | undefined> => {
+    const f = families.get(account.family)
+    if (!f || account.kind !== 'subscription') return undefined
+    const [identity, loginKey] = await Promise.all([readIdentity(f, account), readLoginKey(account)])
+    return loginComparisonKey({
+      family: account.family,
+      kind: account.kind,
+      ...(identity ? { identity } : {}),
+      ...(loginKey ? { loginKey } : {}),
+    })
+  }
+
+  /**
+   * Why an unresolved operation is not sent from `asker`: sideby cannot show that `asker` is still signed in as the
+   * login the operation was sent for. The operation stays unresolved; only that login may ask about it again.
+   * `refs` are the Accounts of `account`'s login now: an Account the operation names beside them may still be
+   * signed in as its login, and can ask from there.
+   */
+  const otherLogin = (
+    rec: LimitResetRecord,
+    account: Account,
+    asker: Account,
+    known: boolean,
+    refs: readonly string[],
+  ): string => {
+    const elsewhere = rec.accounts.filter((r) => !refs.includes(r))
+    const retry = (ref: string) => `\`sideby quota reset ${ref} --yes --operation ${rec.operationId}\``
+    return `${
+      known
+        ? `${asker.ref} is now signed in as a different login than the one operation ${rec.operationId} was sent for`
+        : `sideby cannot read which login ${asker.ref} is signed in as now, so it cannot tell that it is the one operation ${rec.operationId} was sent for`
+    }, and sideby will not retry that operation from this account: it would use a limit reset of the wrong login. Nothing was sent. Whether that earlier attempt used one is still unknown. ${
+      elsewhere.length
+        ? `If ${elsewhere.join(' or ')} is still signed in as the original login, run ${retry(elsewhere[0]!)}. Otherwise sign`
+        : 'Sign'
+    } in as the original login (\`sideby login ${asker.ref}\`), then run ${retry(account.ref)}; if you no longer use that login, check its count on the vendor's own usage page, then move ${limitResetFile(paths.stateDir, rec.operationId)} away`
+  }
+
+  /** Stops a spend while an operation file is there but cannot be read: it may be an unresolved one (ADR-0072). */
+  const readableRecords = async () => {
+    const scan = await scanLimitResetRecords(paths.stateDir)
+    if (scan.unreadable.length)
+      throw new LimitResetError(
+        `${unreadableRecordsMessage(paths.stateDir, scan.unreadable)}. Nothing was sent`,
+        { code: 'records-unreadable' },
+      )
+    return scan.records
+  }
+
+  /** `account` and the other Accounts of its Same Login, with their refs sorted. */
+  const loginGroup = async (account: Account) => {
+    const peers = await peersOf(account)
+    return { peers, group: [account, ...peers], refs: [account.ref, ...peers.map((a) => a.ref)].sort() }
+  }
+
+  /** One request to spend a Limit Reset, ended after `FETCH_TIMEOUT_MS` whatever the Family does. */
+  const sendLimitReset = async (f: FamilyDef, asker: Account, idempotencyKey: string) => {
+    const ac = new AbortController()
+    const timer = setTimeout(() => ac.abort(), opts.limitReset?.timeoutMs ?? FETCH_TIMEOUT_MS)
+    const aborted = new Promise<never>((_, reject) => {
+      ac.signal.addEventListener('abort', () => reject(new Error('no answer in time')), { once: true })
+    })
+    aborted.catch(() => {})
+    try {
+      return await Promise.race([
+        f.limitReset!.use!(asker, {
+          ...readContext(),
+          signal: ac.signal,
+          hostEnv: accountEnv(f, asker, env),
+          idempotencyKey,
+        }),
+        aborted,
+      ])
+    } finally {
+      clearTimeout(timer)
+      if (!ac.signal.aborted) ac.abort()
     }
   }
 
@@ -1433,7 +1754,292 @@ export async function createRuntime(
       const list = (only ?? (await accounts())).filter(
         (a) => a.kind === 'subscription' && families.get(a.family)?.fetchQuota,
       )
-      await Promise.all(list.map((a) => ownQuota(a, 'force')))
+      // A Same Login among them is asked once (spec §3.26); an Account named alone is asked itself.
+      const groups = await groupsOf(list)
+      const askers = await askersOf(list, groups)
+      await Promise.all(
+        list
+          .filter((a) => (askers.get(a.ref) ?? a.ref) === a.ref)
+          .map((a) => ownQuota(a, 'force', askHint(a, groups.get(a.ref)))),
+      )
+    },
+    quotaAsker: (account) => askerOf(account),
+    limitResetKind(account) {
+      const r = account.kind === 'api' ? undefined : families.get(account.family)?.limitReset
+      if (r?.use) return { kind: 'use' }
+      return r?.vendorPage ? { kind: 'page', url: r.vendorPage } : null
+    },
+    async limitResetPlan(account) {
+      const f = limitResetFamily(account)
+      const { peers, group, refs } = await loginGroup(account)
+      const asker = await askerOf(account)
+      await pruneLimitResetRecords(paths.stateDir, now()).catch(() => {})
+      // A file that is there but cannot be read may be an unresolved spend: the plan still shows, and says so.
+      const scan = await scanLimitResetRecords(paths.stateDir)
+      const refused = await limitResetRefused(account)
+      const off = quotaCheckOff(f.id, config, env)
+      const login = await loginOf(asker)
+      const signedOut = login === 'logged-out' || Boolean(await loginProblemFor(asker, login))
+      // The login is read before and after the numbers: a plan is for one login, and the record keeps its digest.
+      const keyBefore = await loginKeyNow(asker)
+      // The count and the Quota, read from the Host now: a plan is never made of old numbers.
+      const fresh = !off && !signedOut && !refused ? await askQuotaNow(asker) : false
+      const quota = (await quotasOf(group, 'never')).get(account.ref)!
+      const stock = quota.status === 'ok' ? quota.limitResets : undefined
+      const why = quota.status === 'ok' ? quota.fetchError : (quota.detail ?? quota.reason)
+      const key = await loginKeyNow(asker)
+      // An attempt of this login with no final answer, also one made before this Account signed in as the login: no
+      // new operation, and so no new key, is made beside it.
+      const open = unresolvedFor(scan.records, refs, key)
+      const blocked = refused
+        ? refused.why
+        : signedOut
+          ? `${asker.ref} is signed out; run \`sideby login ${asker.ref}\` first`
+          : scan.unreadable.length
+            ? unreadableRecordsMessage(paths.stateDir, scan.unreadable)
+            : open && !loginUnchanged(open, key)
+              ? otherLogin(open, account, asker, key !== undefined, refs)
+              : open
+                ? undefined
+                : !key
+                  ? f.identity
+                    ? `sideby cannot read which login ${asker.ref} is signed in as, so it cannot make sure a limit reset goes to the login you confirm it for; sign in again with \`sideby login ${asker.ref}\`, then try again`
+                    : `${f.title} does not tell sideby which login an account is signed in as, so sideby cannot make sure a limit reset goes to the login you confirm it for; use it in ${f.title} itself`
+                  : key !== keyBefore
+                    ? `${asker.ref} signed in as another login while this plan was read; run \`sideby quota reset ${account.ref}\` again`
+                    : off
+                      ? `${off}, so sideby cannot read how many limit resets ${account.ref} holds`
+                      : !fresh
+                        ? `sideby could not read ${account.ref}'s quota just now${why ? ` (${why})` : ''}, and it does not use a limit reset on old numbers; try again in a moment`
+                        : !stock
+                          ? `${f.title} did not say whether ${account.ref} holds a limit reset; update ${f.title}, then try again`
+                          : stock.available < 1
+                            ? `${account.ref} holds no limit reset`
+                            : undefined
+      let operationId = open?.operationId
+      if (!blocked && !operationId && key) {
+        const record = newLimitResetRecord(refs, now(), key)
+        await writeLimitResetRecord(paths.stateDir, record)
+        operationId = record.operationId
+      }
+      const all = peers.length
+        ? ` and every account of the same login (${peers.map((a) => a.ref).join(', ')})`
+        : ''
+      return {
+        account: account.ref,
+        via: asker.ref,
+        sameLogin: peers.map((a) => a.ref),
+        ...(!blocked && operationId ? { operationId } : {}),
+        ...(open ? { unresolved: true as const } : {}),
+        quota,
+        ...(stock ? { limitResets: stock } : {}),
+        ...(stock && stock.available > 0 ? { expectedAfter: stock.available - 1 } : {}),
+        canUse: !blocked,
+        ...(blocked ? { blocked } : {}),
+        message: open
+          ? `An earlier attempt to use a limit reset for ${account.ref} got no final answer. Confirming asks ${f.title} again with the same request: it uses nothing more if that attempt already went through, and it cannot be undone if it did not.`
+          : `Using a limit reset restores quota for ${account.ref}${all} before its windows reset by themselves. It cannot be undone, and ${f.title} does not say beforehand which windows it restores.`,
+      }
+    },
+    async limitResetUse(account, operationId) {
+      const f = limitResetFamily(account)
+      const refused = await limitResetRefused(account)
+      if (refused) throw new LimitResetError(`${refused.why}. Nothing was sent.`, { code: refused.code })
+      // Before anything is made or changed under the folder: every operation file in it must be readable.
+      const before = await readableRecords()
+      const { peers, group, refs } = await loginGroup(account)
+      const again = `sideby quota reset ${account.ref}`
+      /**
+       * Refuses unless the login that would send `rec` now is the one it was made for (ADR-0072). Equal Account refs
+       * do not show that: an Account can sign in as another login and keep its name. A confirmed plan is out of date
+       * then; an unresolved operation stays unresolved, for its own login to ask again.
+       */
+      const sameLoginOrThrow = async (rec: LimitResetRecord, asker: Account) => {
+        const key = await loginKeyNow(asker)
+        if (loginUnchanged(rec, key)) return
+        if (rec.state === 'pending')
+          throw new LimitResetError(otherLogin(rec, account, asker, key !== undefined, refs), {
+            code: 'login-changed',
+            operationId: rec.operationId,
+          })
+        throw new LimitResetError(
+          `${key === undefined ? `sideby cannot read which login ${asker.ref} is signed in as now` : `${asker.ref} is signed in as a different login than when this plan was shown`}, so nothing was sent; run \`${again}\` to see a new plan, and confirm that one`,
+          { code: 'plan-outdated' },
+        )
+      }
+      // When the plan is confirmed: the operation this confirmation would send, checked before waiting for the lock.
+      const firstAsker = await askerOf(account)
+      const first =
+        unresolvedFor(before, refs, await loginKeyNow(firstAsker)) ??
+        before.find((r) => r.operationId === operationId && r.state === 'planned' && sameAccounts(r, refs))
+      if (first) await sameLoginOrThrow(first, firstAsker)
+      // An unresolved operation is also locked for the Accounts it names, so everyone who may resume it takes turns.
+      const release = await takeLimitResetLock(
+        paths.stateDir,
+        [...refs, ...(first?.state === 'pending' ? first.accounts : [])],
+        FETCH_TIMEOUT_MS + 15_000,
+      )
+      if (!release)
+        throw new LimitResetError(
+          `another sideby is using a limit reset for this login right now, so nothing was sent; wait a moment, then run \`sideby quota reset ${account.ref}\` again`,
+          { code: 'busy' },
+        )
+      const save = (r: LimitResetRecord) => writeLimitResetRecord(paths.stateDir, r)
+      // Notes on a spent operation that the Quota read after it is kept. False when the record cannot be written:
+      // the spend stands either way, and only Auto Handoff's early return to the Account (ADR-0060) waits.
+      const noteQuotaRead = (r: LimitResetRecord): Promise<boolean> =>
+        save({ ...r, quotaReadAt: now().toISOString() }).then(
+          () => true,
+          () => false,
+        )
+      const shown = async () => (await quotasOf(group, 'never')).get(account.ref)!
+      const base = { account: account.ref, sameLogin: peers.map((a) => a.ref) }
+      const oldNumbers =
+        ' The quota could not be read yet, so the numbers on show are still the old ones; they update with the next check.'
+      try {
+        const records = await readableRecords()
+        const asker = await askerOf(account)
+        // The unresolved operation of this login goes first, with its own key, whichever Accounts it names: an Account
+        // that left the login or joined it since never ends it, because its request may already have used one.
+        let rec = unresolvedFor(records, refs, await loginKeyNow(asker))
+        const resumed = Boolean(rec)
+        if (rec) await sameLoginOrThrow(rec, asker)
+        if (!rec) {
+          const given = await readLimitResetRecord(paths.stateDir, operationId)
+          if (!given?.accounts.includes(account.ref))
+            throw new LimitResetError(
+              `there is no plan ${operationId} for ${account.ref} (a plan is kept for a day); run \`${again}\` for a new one. Nothing was sent`,
+              { code: 'unknown-operation' },
+            )
+          if (isOutcome(given.state)) {
+            // Already answered: say it again, and send no second request. After a spend the numbers are shown as
+            // current only when the read kept for the Account asked now began after it: the read that followed may
+            // have failed, or been kept for an Account that has left this login since, and what is kept here is then
+            // from before. `quotaReadAt` does not prove it, so it is looked at each time; a missing read is made now
+            // (a read, never a spend), and noted once it is kept.
+            let current = !spent(given.state)
+            if (!current) {
+              const finished = Date.parse(given.finishedAt ?? '')
+              current = await quotaSince(asker, Number.isFinite(finished) ? finished : Date.now())
+              if (current && !given.quotaReadAt) await noteQuotaRead(given)
+            }
+            return {
+              ...base,
+              via: asker.ref,
+              operationId: given.operationId,
+              outcome: given.state,
+              replayed: true,
+              ...(current ? { quota: await shown() } : { quotaPending: true as const }),
+              message: `${outcomeMessage(given.state, account.ref)}${current ? '' : oldNumbers}`,
+            }
+          }
+          if (given.state !== 'planned')
+            throw new LimitResetError(
+              `operation ${given.operationId} ended without an answer from ${f.title}${given.state === 'not-sent' ? ' (nothing was sent, so nothing was spent)' : ''}; run \`${again}\` for a new plan`,
+              { code: 'operation-ended', operationId: given.operationId },
+            )
+          if (!sameAccounts(given, refs))
+            throw new LimitResetError(
+              `the accounts signed in as this login changed since this plan was shown, so nothing was sent; run \`${again}\` to see the plan as it is now`,
+              { code: 'plan-outdated' },
+            )
+          // Its numbers are a day old, and pruning may remove it: it is refused here, under the lock pruning takes.
+          if (planExpired(given, now()))
+            throw new LimitResetError(
+              `this plan was shown more than a day ago, so its numbers are out of date and nothing was sent; run \`${again}\` to see them now`,
+              { code: 'plan-outdated' },
+            )
+          const later = records.find(
+            (r) =>
+              spent(r.state) &&
+              r.accounts.some((a) => refs.includes(a)) &&
+              Date.parse(r.finishedAt ?? '') >= Date.parse(given.createdAt),
+          )
+          if (later)
+            throw new LimitResetError(
+              `a limit reset was already used for this login after this plan was shown (operation ${later.operationId}), so its numbers are out of date and nothing was sent; run \`${again}\` to see them now`,
+              { code: 'plan-outdated', operationId: later.operationId },
+            )
+          rec = given
+        }
+        // Under the lock, right before the request: the login is read once more, for a plan and for a retry alike.
+        await sameLoginOrThrow(rec, asker)
+        // The key is on disk before the request leaves, so a retry from any process sends the same one. While it is
+        // unresolved the record names every Account it was made for or resumed from, so each of them finds it.
+        rec = {
+          ...rec,
+          accounts: [...new Set([...rec.accounts, ...refs])].sort(),
+          state: 'pending',
+          attempts: [...rec.attempts, now().toISOString()],
+        }
+        const file = limitResetFile(paths.stateDir, rec.operationId)
+        const retryWith = `\`${again} --yes --operation ${rec.operationId}\` (or "Check again" in the Panel)`
+        const retry = `Check again with ${retryWith}: it repeats the same request, which cannot use a second one`
+        try {
+          await save(rec)
+        } catch (err) {
+          // Not on disk, not sent. A plan stays a plan; an earlier attempt stays as unanswered as it was.
+          const why = `sideby could not write ${file} (${(err as Error)?.message || String(err)}), and it sends nothing before the request is on disk`
+          throw resumed
+            ? new LimitResetError(
+                `${why}. Nothing was sent now, and sideby still cannot tell whether the earlier attempt used a limit reset for ${account.ref}. Once that file can be written: ${retry}`,
+                { code: 'outcome-unknown', operationId: rec.operationId },
+              )
+            : new LimitResetError(
+                `${why}. Nothing was sent, so nothing was spent. Once that file can be written, run \`${again}\` again`,
+                { code: 'not-sent', operationId: rec.operationId },
+              )
+        }
+        let outcome: LimitResetOutcome
+        try {
+          outcome = await sendLimitReset(f, asker, rec.idempotencyKey)
+          if (!isOutcome(outcome)) throw new Error(`${f.title} gave an answer sideby does not know`)
+        } catch (err) {
+          const why = (err as Error)?.message || String(err)
+          // Only a first attempt that never left this computer is known to have spent nothing.
+          if ((err as { sent?: unknown } | null)?.sent === false && rec.attempts.length === 1) {
+            // Left as `pending` when this cannot be saved: a later confirmation then sends the same key, which is safe.
+            await save({ ...rec, state: 'not-sent', finishedAt: now().toISOString() }).catch(() => {})
+            throw new LimitResetError(`${why}. Nothing was sent, so nothing was spent`, {
+              code: 'not-sent',
+              operationId: rec.operationId,
+            })
+          }
+          throw new LimitResetError(
+            `${why}, so sideby cannot tell whether a limit reset was used for ${account.ref}. ${retry}`,
+            { code: 'outcome-unknown', operationId: rec.operationId },
+          )
+        }
+        // The Host answered: the outcome is for the Accounts of this login as they are now.
+        rec = { ...rec, accounts: refs, state: outcome, finishedAt: now().toISOString() }
+        try {
+          await save(rec)
+        } catch (err) {
+          // The answer is known but not on disk, where the operation still reads as unanswered. Say what the Host
+          // answered, and that only its own key may ask again: the retry cannot use a second one.
+          if (spent(outcome)) await askQuotaNow(asker, Date.now())
+          throw new LimitResetError(
+            `${outcomeMessage(outcome, account.ref)} That is what ${f.title} answered, but sideby could not write ${file} to record it (${(err as Error)?.message || String(err)}), so it still lists this operation as unanswered. Once that file can be written, check again with ${retryWith}: it repeats the same request, ${spent(outcome) ? 'which cannot use a second one' : 'so it uses at most the one limit reset you confirmed'}`,
+            { code: 'outcome-not-saved', operationId: rec.operationId },
+          )
+        }
+        // The answer holds no Quota: ask at once, outside `everyMinutes`, and show what the Host says. The count and
+        // the bars are never changed by sideby itself.
+        const read = await askQuotaNow(asker, Date.now())
+        // A note that cannot be saved does not undo the spend: it is reported as it went.
+        const noted = !read || !spent(outcome) || (await noteQuotaRead(rec))
+        return {
+          ...base,
+          via: asker.ref,
+          operationId: rec.operationId,
+          outcome,
+          ...(resumed ? { resumed: true as const } : {}),
+          ...(read ? { quota: await shown() } : spent(outcome) ? { quotaPending: true as const } : {}),
+          message: `${outcomeMessage(outcome, account.ref)}${spent(outcome) && !read ? oldNumbers : ''}${noted ? '' : ` sideby could not note in ${file} that the quota was read afterwards, so Auto Handoff comes back to this account at its window's own reset time, not before.`}`,
+        }
+      } finally {
+        await release()
+      }
     },
     quotaChecks() {
       const ci = quotaCheckOff('', {}, env)
@@ -1619,6 +2225,20 @@ export async function createRuntime(
     },
     handoffSettings: () => handoffSettings(config),
     async handoffDecision(origin, used, opts = {}) {
+      // An Account left for a full window comes back early when a Limit Reset the user confirmed was spent for it
+      // since, and the Quota read after that spend is kept (ADR-0072, amending ADR-0060); `selectNext` then takes
+      // it only when that Quota shows it under the Takeover Limit.
+      const spends = await confirmedSpends(paths.stateDir).catch(() => [])
+      if (spends.length)
+        used = used.map((u) => {
+          if (typeof u === 'string' || !u.window) return u
+          const since = Date.parse(u.startedAt ?? '')
+          const hit = spends.some(
+            (sp) =>
+              sp.accounts.includes(u.ref) && (!Number.isFinite(since) || Date.parse(sp.quotaReadAt) > since),
+          )
+          return hit ? { ...u, resetUsed: true } : u
+        })
       const all = await accounts()
       const [quotas, groups] = await Promise.all([quotasOf(all), groupsOf(all)])
       const candidates = await Promise.all(

@@ -23,7 +23,8 @@
 | `sideby resume <family> [-- args]` | 运行宿主；参数按 id 恢复会话时（`claude --resume <id>`、`codex resume <id>`、`grok --resume <id>`），像 `run` 一样启动存有该会话的账号；从没保存过的 Claude 会话，在起过它的账号开新会话；其他情况原样运行宿主 | 宿主的退出码；家族不存在或不支持会话路由（pi）为 1 |
 | `sideby login <acct>` | 用该账号运行家族的登录命令，前后各说一次它登录的是谁（也用来给账号换号）；pi 会直接启动，并提示你输入 `/login` | 宿主的退出码 |
 | `sideby doctor [acct\|family] [--fix] [--force]` | 检查共享项、凭据文件权限和备份残留；`--fix` 修复安全的部分 | 0 没有 fail（允许有 warn）；1 至少一条 fail |
-| `sideby quota [acct]` | 额度和近 7 天用量 | 0 |
+| `sideby quota [acct]` | 额度和近 7 天用量，带多久前读到的；Codex 账号还写可用的重置次数 | 0 |
+| `sideby quota reset <acct> [--yes] [--operation <id>] [--open]` | 使用一次重置，在窗口自己重置之前恢复额度，用掉不能撤销。Codex：先读一次最新额度并展示计划（账号、同一登录的其他账号、每个窗口用了多少和各自的重置时间、用完还剩几次）；加 `--yes` 才使用，之后显示 Codex 报告的真实额度。没收到最终答复时，再跑一次同样的命令会重复同一个请求，不会多用一次。Claude Code：命令行用不了，打印 claude.ai 的用量页，`--open` 用该账号的浏览器用户打开 | 只展示计划时为 10；用掉了为 0；没用掉（没有可重置的额度、没有次数）、被拒绝或结果不明为 1 |
 | `sideby quota setup claude [--yes]` | 展示改动；加 `--yes` 后会话进行中也从 status line 读 Claude 额度（自动接力需要；不开也能看到额度） | 只展示改动时为 10；开启后为 0；无法开启或失败为 1 |
 | `sideby quota teardown claude` | 关闭并还原原文件 | 0；拒绝或失败为 1 |
 | `sideby tune [acct\|family]` | 用最近 7 天的会话估算每个模型最省的自动压缩阈值（Claude 给推荐值，Codex 只观测）；只读 | 0；账号或家族不存在为 1；多给参数为 2 |
@@ -71,7 +72,7 @@
 | `sideby ask --choices --json` | 给 Portal 用：任务现在会用哪个账号（用不了时说明原因）、能用哪些账号、本机装了哪些终端以及会打开哪个 | 0 |
 | `sideby ask --permissions [checked\|account] [--yes]` | AI Task 怎样启动账号：`checked`（默认）去掉跳过宿主权限检查的参数；`account` 像 `sideby run` 一样用账号自己的参数。带值时先显示要改什么 | 0；有改动等 `--yes` 时为 10 |
 | `sideby terminal [--set <id>\|--unset]` | 列出支持的终端、本机装了哪些、当前用哪个；`--set` 保存首选终端 | 0；sideby 不认识的终端为 1 |
-| `sideby menubar [on\|off] [--yes]` | 在 macOS 状态栏显示额度：sideby 小人图标；某个工具连下一个要用的账号也到了提醒级别（5 小时窗口 60%，每周窗口 85%）时，旁边显示工具名和百分比；点开列出每个账号的额度，点一个账号就在终端里启动它。`menubar snapshot` 打印菜单内容；`menubar start <账号>` 在终端里启动账号；`menubar hotkey [<组合键>\|off\|default]` 查看或更换打开菜单的快捷键（⌥X）。先显示要写的文件 | 0；有变化等 `--yes` 为 10；被拒绝（Windows 原生、sideby 在 npx 缓存或临时目录里、文件不是 sideby 的）为 1 |
+| `sideby menubar [on\|off] [--yes]` | 在 macOS 状态栏显示额度：sideby 小人图标；某个工具连下一个要用的账号也到了提醒级别（5 小时窗口 60%，每周窗口 85%）时，旁边显示工具名和百分比；点开列出每个账号的额度，点一个账号就在终端里启动它。`menubar snapshot` 打印菜单内容；`menubar start <账号>` 在终端里启动账号；`menubar reset <账号>` 是菜单里「使用重置…」运行的命令：打开面板上该账号的确认框（Codex）或厂商页面（Claude Code），它自己从不使用重置；`menubar hotkey [<组合键>\|off\|default]` 查看或更换打开菜单的快捷键（⌥X）。先显示要写的文件 | 0；有变化等 `--yes` 为 10；被拒绝（Windows 原生、sideby 在 npx 缓存或临时目录里、文件不是 sideby 的）为 1 |
 | `sideby autostart [on\|off] [--yes]` | 登录后在后台启动面板（macOS、Linux 桌面、WSL：登录 Windows 时），不打开窗口；不带 `on`/`off` 时报告开着、关着、过期了，还是被一个不是 sideby 写的文件挡住。先显示要写的文件（macOS 还有 `launchctl` 命令） | 0；有变化等 `--yes` 为 10；被拒绝（不是 macOS、sideby 在 npx 缓存或临时目录里、文件不是 sideby 的）为 1 |
 | `sideby theme [list]` / `theme use <名字>` / `theme use --undo` / `theme check <名字\|文件>` / `theme preview <名字\|文件>` / `theme import <文件> [--id <名字>] [--yes]` / `theme export <名字> [--out <文件>]` / `theme remove <名字> [--yes]` | 面板主题：列出、切换和撤销，检查亮暗两套的对比度，在运行中的面板里看一眼，把自己的主题存成 JSON 文件（只放颜色） | 完成为 0；`check` 有太淡的颜色为 1；`import` 遇到同名、`remove` 等 `--yes` 为 10；拒绝为 1；命令写错为 2 |
 | `sideby config get [<key>]` / `config set <key> <value> [--yes]` / `config unset <key> [--yes]` | 读或改任意设置，比如 `panel.theme`（`system`、`light`、`dark`）、`panel.language`（`auto`、`en`、`zh`）、`handoff.threshold`；`get` 不带 key 列出每个键、当前值和说明。值能按 JSON 解析就按 JSON，否则当文字。插件自己的配置不在这里读写 | `get` 为 0；`set`/`unset` 有变化等 `--yes` 为 10；不是键或值不对为 1；命令写错为 2 |

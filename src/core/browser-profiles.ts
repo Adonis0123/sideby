@@ -413,6 +413,61 @@ export async function openInBrowser(
   }
 }
 
+export interface VendorPageOpen {
+  ref: string
+  url: string
+  /** The Browser Profile it opened in; left out when the default browser opened it. */
+  profile?: { dir: string; name: string }
+  command: string[]
+}
+
+/**
+ * Opens the page where a Limit Reset of `account` is spent (`FamilyDef.limitReset.vendorPage`, ADR-0072): in the
+ * Browser Profile the user chose for the Account, or the only one found signed in to it, else in the default browser.
+ * sideby never reads which login that browser has. The url passed the loader's https check; no other is opened.
+ */
+export async function openVendorPage(rt: Runtime, account: Account): Promise<VendorPageOpen> {
+  const url = account.kind === 'api' ? undefined : rt.families.get(account.family)?.limitReset?.vendorPage
+  if (!url)
+    throw new UserError(`${account.ref} has no page for limit resets; check the vendor's own usage page`, {
+      code: 'no-limit-reset',
+    })
+  const deps = depsFor(rt)
+  const run = async (cmd: string, args: readonly string[]) => (await deps.exec(cmd, args)).code === 0
+  // The Account's own Browser Profile, when one is known without asking; any problem falls back to the default browser.
+  // Nothing of a browser is read unless the user chose a Browser Profile for this Account or turned Browser Sign-ins on.
+  const chosen = rt.config.browser?.choices?.[account.ref]
+  const findIt = rt.config.browser?.signIns === true
+  if ((deps.platform === 'darwin' || deps.wslMount) && (chosen || findIt)) {
+    const problems: string[] = []
+    const launch = await chromeLauncher(deps, problems).catch(() => null)
+    const entries = launch
+      ? ((await profileEntries(launch.userData ?? chromeUserData(rt.paths.home), problems)) ?? [])
+      : []
+    let pick = chosen ? entries.find((e) => e.dir === chosen) : undefined
+    if (launch && !pick && findIt) {
+      const found = (await browserReport(rt, [account]).catch(() => undefined))?.profiles.filter((p) =>
+        p.signIns.includes(account.ref),
+      )
+      if (found?.length === 1) pick = entries.find((e) => e.dir === found[0]?.dir)
+    }
+    if (launch && pick) {
+      const [cmd, ...args] = launch.command(`--profile-directory=${pick.dir}`, url)
+      if (await run(cmd as string, args))
+        return {
+          ref: account.ref,
+          url,
+          profile: { dir: pick.dir, name: pick.name },
+          command: [cmd as string, ...args],
+        }
+    }
+  }
+  const command = deps.platform === 'darwin' ? [OPEN, url] : ['xdg-open', url]
+  if (!(await run(command[0] as string, command.slice(1))))
+    throw new UserError(`could not open a browser; open ${url} yourself`, { code: 'open-failed' })
+  return { ref: account.ref, url, command }
+}
+
 /** The browser user `profile` names: its folder, else its name or Google account, which must be unique. */
 function findProfile(entries: readonly ProfileEntry[], profile: string): ProfileEntry {
   const byDir = entries.find((e) => e.dir === profile)

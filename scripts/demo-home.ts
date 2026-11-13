@@ -1,5 +1,7 @@
 // Builds a throwaway HOME with realistic, fake accounts for screenshots and manual testing.
-// Usage: node scripts/demo-home.ts <dir> [normal|empty|error|slow]
+// Usage: node scripts/demo-home.ts <dir> [normal|empty|error|slow|resets]
+// `resets` is `normal` plus a Codex account that holds a Limit Reset and one whose quota check stopped answering, so
+// its kept numbers are old (spec §3.26).
 // Then:  HOME=<dir>/home XDG_CONFIG_HOME=<dir>/home/.config XDG_STATE_HOME=<dir>/home/.local/state \
 //        PATH=<dir>/bin:$PATH node src/cli/main.ts ui
 import { chmod, mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises'
@@ -7,8 +9,8 @@ import { join } from 'node:path'
 import { createRuntime } from '../src/runtime.ts'
 
 const [root, variant = 'normal'] = process.argv.slice(2)
-if (!root || !['normal', 'empty', 'error', 'slow'].includes(variant)) {
-  console.error('usage: node scripts/demo-home.ts <dir> [normal|empty|error|slow]')
+if (!root || !['normal', 'empty', 'error', 'slow', 'resets'].includes(variant)) {
+  console.error('usage: node scripts/demo-home.ts <dir> [normal|empty|error|slow|resets]')
   process.exit(2)
 }
 const home = join(root, 'home')
@@ -59,16 +61,43 @@ console.log(JSON.stringify({ type: 'result', is_error: false, num_turns: 0, tota
 `,
   { mode: 0o755 },
 )
-// The official Codex quota protocol, with demo numbers only (ADR-0038).
+// The official Codex quota protocol, with demo numbers only (ADR-0038). In the `resets` variant it also answers the
+// request that spends a Limit Reset (ADR-0072), keeping what it "spent" in `<dir>/codex-demo.json`, outside every
+// Host directory. `<dir>/codex-consume-mode` chooses the answer: `reset` (default), `nothing`, `none` or `hang`.
 await writeFile(
   join(bin, 'codex'),
   `#!${process.execPath}
+const fs = require('node:fs')
 if (!process.argv.includes('app-server')) { console.log('demo host'); process.exit(0) }
 const team = /codex-team$/.test(process.env.CODEX_HOME || '')
-const limits = {
-  limitId: 'codex', planType: 'plus',
-  primary: { usedPercent: team ? 12 : 38, windowDurationMins: 300, resetsAt: ${Math.round((now + 2.5 * H) / 1000)} },
-  secondary: { usedPercent: team ? 27 : 61, windowDurationMins: 10080, resetsAt: ${Math.round((now + 70 * H) / 1000)} }
+const resets = ${variant === 'resets'}
+// The \`resets\` variant: the team account's check gets no answer, and the main account holds one Limit Reset.
+if (team && resets) process.exit(1)
+const stateFile = ${JSON.stringify(join(root, 'codex-demo.json'))}
+const modeFile = ${JSON.stringify(join(root, 'codex-consume-mode'))}
+const H = 3600000
+const readState = () => { try { return JSON.parse(fs.readFileSync(stateFile, 'utf8')) } catch { return { credits: resets ? 1 : 0, keys: [], resetAt: 0 } } }
+const mode = () => { try { return fs.readFileSync(modeFile, 'utf8').trim() } catch { return 'reset' } }
+function answer() {
+  const st = readState()
+  const credits = resets ? { rateLimitResetCredits: { availableCount: st.credits, credits: st.credits ? [{ id: 'demo-credit', grantedAt: ${Math.round((now - 24 * H) / 1000)}, expiresAt: ${Math.round((now + 60 * H) / 1000)}, resetType: 'codexRateLimits', status: 'available' }] : [] } } : {}
+  const limits = st.resetAt
+    ? { limitId: 'codex', planType: 'plus',
+        primary: { usedPercent: 0, windowDurationMins: 300, resetsAt: Math.round((st.resetAt + 5 * H) / 1000) },
+        secondary: { usedPercent: 0, windowDurationMins: 10080, resetsAt: Math.round((st.resetAt + 168 * H) / 1000) } }
+    : { limitId: 'codex', planType: 'plus',
+        primary: { usedPercent: team ? 12 : 38, windowDurationMins: 300, resetsAt: ${Math.round((now + 2.5 * H) / 1000)} },
+        secondary: { usedPercent: team ? 27 : 61, windowDurationMins: 10080, resetsAt: ${Math.round((now + 70 * H) / 1000)} } }
+  return { rateLimits: limits, rateLimitsByLimitId: { codex: limits }, ...credits }
+}
+function consume(key) {
+  const st = readState()
+  if (st.keys.includes(key)) return 'alreadyRedeemed'
+  const m = mode()
+  if (m === 'none' || st.credits < 1) return 'noCredit'
+  if (m === 'nothing' || st.resetAt) return 'nothingToReset'
+  fs.writeFileSync(stateFile, JSON.stringify({ credits: st.credits - 1, keys: [...st.keys, key], resetAt: Date.now() }))
+  return 'reset'
 }
 let buf = ''
 process.stdin.on('data', d => {
@@ -76,7 +105,13 @@ process.stdin.on('data', d => {
   for (let i; (i = buf.indexOf('\\n')) >= 0; buf = buf.slice(i + 1)) {
     const req = JSON.parse(buf.slice(0, i))
     if (req.method === 'initialized') continue
-    const result = req.method === 'initialize' ? { userAgent: 'demo' } : { rateLimits: limits, rateLimitsByLimitId: { codex: limits } }
+    let result
+    if (req.method === 'initialize') result = { userAgent: 'demo' }
+    else if (req.method === 'account/rateLimitResetCredit/consume') {
+      // \`hang\`: the request is taken and never answered, as when the answer is lost.
+      if (mode() === 'hang') continue
+      result = { outcome: consume(req.params.idempotencyKey) }
+    } else result = answer()
     process.stdout.write(JSON.stringify({ id: req.id, result }) + '\\n')
   }
 })
@@ -534,6 +569,26 @@ if (variant !== 'empty') {
         { label: '7d', windowMinutes: 10080, usedPercent: seven, resetsAt: iso(96 * H) },
       ],
     })
+  // `resets`: the team account's last good answer is three hours old, and its Host stopped answering since.
+  if (variant === 'resets')
+    await write(
+      '.local/state/sideby/quota/codex/team.fetched.json',
+      `${JSON.stringify({
+        version: 1,
+        attemptedAt: iso(-3 * H),
+        quota: {
+          status: 'ok',
+          windows: [
+            { label: '5h', windowMinutes: 300, usedPercent: 12, resetsAt: iso(2.5 * H) },
+            { label: '7d', windowMinutes: 10080, usedPercent: 27, resetsAt: iso(70 * H) },
+          ],
+          observedAt: iso(-3 * H),
+          source: 'codex app-server account/rateLimits/read',
+          plan: 'plus',
+        },
+      })}\n`,
+      0o600,
+    )
   await write('.local/state/sideby/quota/claude/main.json', cache(35, 44, 0.2 * H))
   await write('.local/state/sideby/quota/claude/work.json', cache(23, 91, 1.1 * H))
   const wrapped = JSON.stringify(

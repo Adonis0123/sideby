@@ -37,6 +37,22 @@ export function isSameLogin(a: LoginMember, b: LoginMember): boolean {
   return norm(a.identity?.org) === norm(b.identity?.org)
 }
 
+/**
+ * Everything two Accounts must have equal to be the same login, as one string: the Family, the email, the
+ * organization and, in a Family of `LOGIN_KEY_FAMILIES`, the Login Key. Undefined when the login cannot be told: not
+ * a subscription, no email, or no Login Key where one is needed. Any Family with an Identity has one, also one whose
+ * Accounts never group. Only for comparing inside the Runtime: it holds the Login Key and the Identity, so it is
+ * never put into an output, an error or a file as it is (a Limit Reset record keeps a salted digest of it, ADR-0072).
+ */
+export function loginComparisonKey(m: Omit<LoginMember, 'ref'>): string | undefined {
+  if (m.kind !== 'subscription') return undefined
+  const email = norm(m.identity?.email)
+  if (!email) return undefined
+  const keyed = LOGIN_KEY_FAMILIES.has(m.family)
+  if (keyed && !m.loginKey) return undefined
+  return JSON.stringify([m.family, email, norm(m.identity?.org) ?? '', keyed ? m.loginKey : ''])
+}
+
 /** Ref → the other refs of its Same Login, in the order given; Accounts without one are left out. */
 export function sameLoginGroups(members: readonly LoginMember[]): Map<string, string[]> {
   const out = new Map<string, string[]>()

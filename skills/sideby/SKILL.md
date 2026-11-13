@@ -52,6 +52,8 @@ Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique
 | Pin accounts or arrange their Display Order | `sideby order --json`, `sideby pin <ref> --json`, `sideby unpin <ref> --json` | `references/panel.md` |
 | Hide or show a tool or an account in the lists ("too many shown", "hide pi") | `sideby hide <family\|ref> --json`, `sideby unhide <family\|ref> --json`, `sideby list --all` | `references/panel.md` |
 | Turn quota checks on or off, or fix outdated Codex/Grok quota | `sideby quota check <family> on|off --json`, `sideby quota [family] --refresh --json` | `references/quota.md` |
+| See whether an account holds a limit reset ("do I have a reset?", "有没有重置次数", "还能重置几次"), or how old a quota number is | `sideby quota [family] --json` (`quota.limitResets`, each window's `observedAt`) | `references/quota.md` |
+| Use a limit reset ("use a reset", "reset my Codex quota", "用一次重置", "把额度重置一下", "去 claude.ai 用重置") | `sideby quota reset <ref> --json` (exit 10: the plan; show it and ask the user), then `sideby quota reset <ref> --yes --operation <operationId> --json`; Claude: `sideby quota reset <ref> --open` | `references/quota.md` |
 | Set the model, effort or Remote Control | `sideby model <ref> --json`, `sideby remote-control --json` | `references/panel.md` |
 | Start sideby at login ("开机启动", "start the panel when I log in") | `sideby autostart --json`, `sideby autostart on --json` (exit 10 first) | `references/panel.md` |
 | Show quota in the macOS menu bar ("状态栏显示额度", "menu bar"), its icon is missing ("状态栏没有图标"), or change its shortcut ("换个快捷键", "帮我挑个顺手的快捷键") | `sideby menubar --json`, `sideby menubar on --json` (exit 10 first), `sideby menubar snapshot --json`, `sideby menubar hotkey [<keys>] --json` | `references/panel.md` |

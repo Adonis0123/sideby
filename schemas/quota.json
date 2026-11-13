@@ -78,6 +78,14 @@
                         },
                         "resetsAt": {
                           "type": "string"
+                        },
+                        "observedAt": {
+                          "type": "string",
+                          "description": "When this window was read, when that is not the quota's `observedAt` (a newer reading did not cover it); left out, it is as old as the quota."
+                        },
+                        "source": {
+                          "type": "string",
+                          "description": "Where this window was read from, when that is not the quota's `source`."
                         }
                       }
                     }
@@ -90,6 +98,28 @@
                   },
                   "plan": {
                     "type": "string"
+                  },
+                  "limitResets": {
+                    "type": "object",
+                    "required": [
+                      "available",
+                      "observedAt"
+                    ],
+                    "properties": {
+                      "available": {
+                        "type": "number",
+                        "description": "How many the account can use now; 0 when its Host says none."
+                      },
+                      "observedAt": {
+                        "type": "string",
+                        "description": "When the count was read."
+                      },
+                      "nextExpiresAt": {
+                        "type": "string",
+                        "description": "When the next one to expire does; left out when that is not known for all of them."
+                      }
+                    },
+                    "description": "The Limit Resets the account holds: one-time credits from the vendor that restore quota before a window's own reset time (ADR-0072). Only from a Host that tells the count (Codex); left out when the Host cannot tell, which never means zero."
                   },
                   "from": {
                     "type": "string",

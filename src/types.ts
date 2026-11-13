@@ -313,6 +313,11 @@ export interface FamilyDef {
   /** One-time, reversible change that lets the Host report Quota (Claude: status line wrapper). */
   quotaSetup?: QuotaSetup
   /**
+   * How a user spends a Limit Reset of this Family's Accounts (ADR-0072); at least one of `use` and `vendorPage`.
+   * Public contract, additive only: a Family without it offers nothing.
+   */
+  limitReset?: FamilyLimitReset
+  /**
    * The session these Host arguments resume by id (UUID-shaped), or undefined when they start a new session or
    * pick one another way. With `sessionWrittenAt` it lets `sideby resume` find the Account (ADR-0007).
    */
@@ -485,6 +490,70 @@ export interface QuotaWindow {
   usedPercent: number
   /** ISO timestamp. */
   resetsAt: string
+  /**
+   * When this window was read, when that is not the Quota's `observedAt` (ISO timestamp; ADR-0073). Left out, the
+   * window is as old as the Quota. sideby sets it on the windows a newer reading did not cover.
+   */
+  observedAt?: string
+  /** Where this window was read from, when that is not the Quota's `source`. */
+  source?: string
+}
+
+/**
+ * The Limit Resets an Account holds (ADR-0072): one-time credits its vendor gave it, each restoring Quota ahead of a
+ * window's own reset time when spent. Only a Host that tells the count reports it; a Host that cannot tell leaves
+ * `limitResets` out, which never means zero.
+ */
+export interface LimitResets {
+  /** How many the Account can spend now; 0 when the Host says it holds none. */
+  available: number
+  /** When the count was read (ISO timestamp). */
+  observedAt: string
+  /** When the next one to expire does (ISO timestamp); left out when no expiry is known for every one of them. */
+  nextExpiresAt?: string
+}
+
+/** What the Host answered to one spend of a Limit Reset (ADR-0072). */
+export type LimitResetOutcome =
+  /** One Limit Reset was spent and the windows it applies to were reset. */
+  | 'reset'
+  /** No window can be reset now; nothing was spent. */
+  | 'nothing-to-reset'
+  /** The Account holds no Limit Reset; nothing was spent. */
+  | 'none-left'
+  /** The same `idempotencyKey` already spent one: this request spent nothing more. */
+  | 'already-done'
+
+export interface LimitResetContext extends QuotaFetchContext {
+  /**
+   * Names this one spend. sideby keeps it before calling `use` and passes the same key again when it retries, so
+   * pass it to the Host unchanged: a Host that sees a key twice must spend at most once.
+   */
+  idempotencyKey: string
+}
+
+/**
+ * How a Limit Reset of this Family is spent (ADR-0072). sideby owns the confirmation, the lock, the record of the
+ * attempt, the timeout and the Quota read afterwards; a Family only sends the one request, or names the page.
+ */
+export interface FamilyLimitReset {
+  /**
+   * Spends one Limit Reset of `account` through the Host's own CLI and says what the Host answered. Called only
+   * after the user confirmed this one spend; it cannot be undone. Send `ctx.idempotencyKey` with it, run the Host
+   * with `ctx.hostEnv`, and stop when `ctx.signal` aborts. Throw when the Host gave no final answer: sideby then
+   * keeps the attempt as unresolved and retries it with the same key. Set `sent: false` on the thrown error only
+   * when the request certainly never reached the Host (it is not installed, it does not know the request): sideby
+   * then tells the user nothing was spent. Never read a credential for it. The Family also needs `identity`: sideby
+   * compares the login an Account is signed in as when the plan is shown with the one right before the request, and
+   * refuses when it cannot tell them to be the same, so a confirmed spend never goes to another login.
+   */
+  use?(account: Account, ctx: LimitResetContext): Promise<LimitResetOutcome>
+  /**
+   * The vendor's own page where a Limit Reset is spent, for a Host whose CLI cannot do it (Claude Code:
+   * `https://claude.ai/settings/usage`). An https address under the same rules as `website.url`. sideby only opens
+   * it, in the Account's Browser Profile when one is known, else the default browser.
+   */
+  vendorPage?: string
 }
 
 export type QuotaUnavailableReason =
@@ -503,6 +572,8 @@ export type QuotaResult =
       observedAt: string
       source: string
       plan?: string
+      /** The Limit Resets the Account holds, from a Host that tells (ADR-0072); left out when it cannot tell. */
+      limitResets?: LimitResets
       /**
        * Set by sideby, never by a Family's reader: the Account this reading was taken from, when it is another
        * Account signed in as the same login (spec §3.21). `observedAt` is that Account's time.

@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { chmod, readFile, writeFile } from 'node:fs/promises'
+import { chmod, readFile, rm, writeFile } from 'node:fs/promises'
+import { createServer, request as httpRequest } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { promisify } from 'node:util'
 import { type FakeHome, fakeHost, readHostLog, snapshot, withFakeHome } from '../../../testing/index.ts'
 import { quotaStoreFile, readQuotaStore, writeQuotaStore } from '../../core/quota-store.ts'
+import { createPanelHandler, type PanelState } from '../../panel/handler.ts'
 import { createRuntime } from '../../runtime.ts'
 import { codexFamily, codexPlugin } from './index.ts'
+import { limitResetsOf } from './quota.ts'
 
 const builtins = [{ plugin: codexPlugin, version: '0.1.0', description: '', defaultEnabled: true }]
 const SECRET = 'private-response-must-not-escape'
@@ -57,7 +61,9 @@ process.stdin.on('data', chunk => {
       const response = mode === 'error' ? { error: { code: -32603, message: '${SECRET}' } }
         : mode === 'old' ? { error: { code: -32601, message: '${SECRET}' } }
         : { result: answers }
-      process.stdout.write(JSON.stringify({ id: req.id, ...response }) + '\\n')
+      const answer = () => process.stdout.write(JSON.stringify({ id: req.id, ...response }) + '\\n')
+      if (mode === 'slow') setTimeout(answer, 700)
+      else answer()
     }
   }
 })
@@ -377,5 +383,381 @@ describe('Codex fetched quota', () => {
         clearTimeout(timer)
       }
     })
+  })
+})
+
+// Limit Resets (ADR-0072): read from the answer sideby already asks for; batch 1 only reads and shows them.
+describe('Codex Limit Resets', () => {
+  const AT = '2026-11-12T10:00:00.000Z'
+  const CREDIT = 'credit-fake-0001'
+  const credit = (status: string, expiresAt: number | null = null) => ({
+    id: CREDIT,
+    title: SECRET,
+    description: SECRET,
+    grantedAt: 1893000000,
+    expiresAt,
+    resetType: 'codexRateLimits',
+    status,
+  })
+
+  it('takes the count from availableCount and the next expiry only from complete detail rows', () => {
+    // Present, with a row for every available credit: the earliest expiry among them.
+    assert.deepEqual(
+      limitResetsOf(
+        {
+          availableCount: 2,
+          credits: [credit('available', 1893542400), credit('available', 1893456000), credit('redeemed', 1)],
+        },
+        AT,
+      ),
+      { available: 2, observedAt: AT, nextExpiresAt: '2030-01-01T00:00:00.000Z' },
+    )
+    // Details not given (null or missing): the count alone.
+    assert.deepEqual(limitResetsOf({ availableCount: 2, credits: null }, AT), {
+      available: 2,
+      observedAt: AT,
+    })
+    assert.deepEqual(limitResetsOf({ availableCount: 2 }, AT), { available: 2, observedAt: AT })
+    // Details cut short (fewer available rows than the count): the expiry of the rows shown may not be the next.
+    assert.deepEqual(limitResetsOf({ availableCount: 3, credits: [credit('available', 1893456000)] }, AT), {
+      available: 3,
+      observedAt: AT,
+    })
+    assert.deepEqual(
+      limitResetsOf(
+        { availableCount: 2, credits: [credit('available', 1893456000), credit('redeeming', 1893456000)] },
+        AT,
+      ),
+      { available: 2, observedAt: AT },
+    )
+    // Credits that never expire give no expiry.
+    assert.deepEqual(limitResetsOf({ availableCount: 1, credits: [credit('available')] }, AT), {
+      available: 1,
+      observedAt: AT,
+    })
+    // Zero is a count the Host told; its rows are not read.
+    assert.deepEqual(limitResetsOf({ availableCount: 0, credits: [] }, AT), { available: 0, observedAt: AT })
+  })
+
+  it('reports nothing when the Host does not tell: never a guessed zero', () => {
+    for (const raw of [undefined, null, 'none', [], {}, { availableCount: null }, { availableCount: '2' }])
+      assert.equal(limitResetsOf(raw, AT), undefined)
+    assert.equal(limitResetsOf({ availableCount: 1.5 }, AT), undefined)
+    assert.equal(limitResetsOf({ availableCount: -1 }, AT), undefined)
+  })
+
+  it('reads the stock with the same single request, keeps no credit id, and shows it in the CLI', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      await host(h, 'ok', {
+        ...result(12),
+        rateLimitResetCredits: { availableCount: 1, credits: [credit('available', 1893456000)] },
+      })
+      const rt = await createRuntime({ env: h.env, builtins })
+      const before = await Promise.all(['.codex', '.codex-work'].map((d) => snapshot(h.path(d))))
+      const q = await rt.quota(await rt.resolve('codex:main'))
+      assert.equal(q.status, 'ok')
+      if (q.status !== 'ok') return
+      assert.equal(q.limitResets?.available, 1)
+      assert.equal(q.limitResets?.nextExpiresAt, '2030-01-01T00:00:00.000Z')
+      assert.equal(q.limitResets?.observedAt, q.observedAt)
+      assert.deepEqual(await methods(h), ['initialize', 'initialized', 'account/rateLimits/read'])
+      const stored = await readFile(quotaStoreFile(rt.paths.stateDir, 'codex', 'main'), 'utf8')
+      for (const secret of [CREDIT, SECRET, 'credits', 'grantedAt'])
+        assert.ok(!stored.includes(secret), `the kept answer must not hold ${secret}`)
+      assert.deepEqual(
+        (await readQuotaStore(quotaStoreFile(rt.paths.stateDir, 'codex', 'main')))?.quota?.limitResets,
+        q.limitResets,
+      )
+
+      const main = new URL('../../cli/main.ts', import.meta.url).pathname
+      const run = (...args: string[]) =>
+        promisify(execFile)(process.execPath, [main, ...args], { env: h.env as NodeJS.ProcessEnv })
+      const json = JSON.parse((await run('quota', 'codex', '--json')).stdout)
+      assert.equal(json.schemaVersion, 1)
+      const row = (ref: string) => json.accounts.find((a: { ref: string }) => a.ref === ref).quota
+      assert.deepEqual(row('codex:main').limitResets, q.limitResets)
+      assert.equal(row('codex:work').limitResets.available, 1)
+      const text = (await run('quota', 'codex')).stdout
+      assert.match(text, /codex:main .*1 reset available, next expires /)
+      const snap = JSON.parse((await run('menubar', 'snapshot', '--json', '--cached')).stdout)
+      assert.equal(snap.sections[0].rows[0].limitResets, '1 reset available')
+      assert.deepEqual(await Promise.all(['.codex', '.codex-work'].map((d) => snapshot(h.path(d)))), before)
+    })
+  })
+
+  it('leaves the field out for a Host that does not send it, in the answer and in the CLI', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      await host(h, 'ok', { ...result(12), rateLimitResetCredits: null })
+      const rt = await createRuntime({ env: h.env, builtins })
+      const q = await rt.quota(await rt.resolve('codex:main'))
+      assert.equal(q.status === 'ok' && 'limitResets' in q, false)
+      const main = new URL('../../cli/main.ts', import.meta.url).pathname
+      const text = (
+        await promisify(execFile)(process.execPath, [main, 'quota', 'codex:main'], {
+          env: h.env as NodeJS.ProcessEnv,
+        })
+      ).stdout
+      assert.doesNotMatch(text, /reset available/)
+    })
+  })
+})
+
+// One vendor Quota, one ask (spec §3.26, ADR-0073): a Same Login is asked through its first Account.
+describe('Codex Same Login asks', () => {
+  const WS = '00000000-0000-4000-8000-00000000aaaa'
+  const idToken = (ws: string, email = 'codex@example.com') =>
+    `e30.${Buffer.from(
+      JSON.stringify({
+        email,
+        'https://api.openai.com/auth': { chatgpt_account_id: ws, chatgpt_user_id: 'user-FakeUser00000001' },
+      }),
+    ).toString('base64url')}.fake-sig`
+  const signIn = (h: FakeHome, dir: string, token: string) =>
+    h.write(`${dir}/auth.json`, JSON.stringify({ tokens: { id_token: token } }), 0o600)
+  const runs = async (h: FakeHome) => (await readHostLog(h, 'codex')).filter((r) => r.argv)
+
+  it('asks one directory of a Same Login and shows its answer in every one, also on refresh', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.codex/config.toml', '')
+      await h.write('.codex-team/config.toml', '')
+      await h.write('.codex-other/config.toml', '')
+      await signIn(h, '.codex', idToken(WS))
+      await signIn(h, '.codex-team', idToken(WS))
+      await signIn(h, '.codex-other', idToken('00000000-0000-4000-8000-00000000bbbb'))
+      await host(h, 'ok', {
+        ...result(33),
+        rateLimitResetCredits: { availableCount: 1, credits: null },
+      })
+      const rt = await createRuntime({ env: h.env, builtins })
+      const all = await rt.accounts()
+      const quotas = await Promise.all(all.map(async (a) => [a.ref, await rt.quota(a)] as const))
+      // main and team share a workspace: one ask for both; the other workspace is asked itself.
+      const asked = (await runs(h)).map((r) => r.env.CODEX_HOME ?? 'main')
+      assert.deepEqual(asked.sort(), [h.path('.codex-other'), 'main'].sort())
+      const by = new Map(quotas)
+      const team = by.get('codex:team')!
+      assert.equal(team.status === 'ok' && team.from, 'codex:main')
+      assert.equal(team.status === 'ok' && team.windows[0]!.usedPercent, 33)
+      assert.equal(team.status === 'ok' && team.limitResets?.available, 1)
+      assert.equal((await rt.quotaAsker(await rt.resolve('codex:team'))).ref, 'codex:main')
+      assert.equal((await rt.quotaAsker(await rt.resolve('codex:other'))).ref, 'codex:other')
+
+      // A refresh of everything asks the login once more, not once per directory.
+      await rt.refreshQuota()
+      assert.equal((await runs(h)).length, 4)
+      // A directory named alone is asked itself.
+      await rt.refreshQuota([await rt.resolve('codex:team')])
+      const last = (await runs(h)).at(-1)!
+      assert.equal(last.env.CODEX_HOME, h.path('.codex-team'))
+
+      // The menu's refresh marks no directory as failed because another one asked for it.
+      const main = new URL('../../cli/main.ts', import.meta.url).pathname
+      const snap = JSON.parse(
+        (
+          await promisify(execFile)(process.execPath, [main, 'menubar', 'snapshot', '--json', '--refresh'], {
+            env: h.env as NodeJS.ProcessEnv,
+          })
+        ).stdout,
+      )
+      const rows = [...snap.sections[0].rows, ...(snap.sections[0].more?.rows ?? [])]
+      assert.ok(rows.every((r: { refreshFailed?: boolean }) => !r.refreshFailed))
+      // The quota line says the Limit Resets once for the login.
+      const text = (
+        await promisify(execFile)(process.execPath, [main, 'quota', 'codex'], {
+          env: h.env as NodeJS.ProcessEnv,
+        })
+      ).stdout
+      assert.equal(text.match(/1 reset available/g)?.length, 2, 'the login once, the other workspace once')
+      assert.match(text, /codex:team .*read from codex:main \(same login\)/)
+    })
+  })
+})
+
+// The Panel on open (spec §3.26): kept answers at once, due Hosts asked behind them, rows filled as answers land.
+describe('Panel quota on open', () => {
+  it('shows what is kept, says which accounts are being asked, and has the new numbers once they land', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      await host(h, 'slow', result(77))
+      const stateDir = (await createRuntime({ env: h.env, builtins })).paths.stateDir
+      const old = new Date(Date.now() - 3600_000).toISOString()
+      for (const name of ['main', 'work'])
+        await writeQuotaStore(quotaStoreFile(stateDir, 'codex', name), {
+          version: 1,
+          attemptedAt: old,
+          quota: {
+            status: 'ok',
+            windows: [
+              { label: '7d', windowMinutes: 10080, usedPercent: 20, resetsAt: '2030-01-01T00:00:00.000Z' },
+            ],
+            observedAt: old,
+            source: 'codex app-server account/rateLimits/read',
+          },
+        })
+      let handler: ReturnType<typeof createPanelHandler> | undefined
+      const server = createServer((req, res) => void handler!(req, res))
+      await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+      const port = (server.address() as AddressInfo).port
+      handler = createPanelHandler({
+        runtime: () => createRuntime({ env: h.env, builtins }),
+        allowedHosts: [`127.0.0.1:${port}`],
+      })
+      const state = () =>
+        new Promise<PanelState>((resolve, reject) => {
+          const req = httpRequest(
+            { host: '127.0.0.1', port, path: '/api/state', headers: { host: `127.0.0.1:${port}` } },
+            (res) => {
+              let body = ''
+              res.on('data', (d: Buffer) => (body += d))
+              res.on('end', () => resolve(JSON.parse(body) as PanelState))
+            },
+          )
+          req.on('error', reject)
+          req.end()
+        })
+      const used = (s: PanelState, ref: string) => {
+        const q = s.accounts.find((a) => a.ref === ref)?.quota
+        return q?.status === 'ok' ? q.windows[0]!.usedPercent : undefined
+      }
+      try {
+        const first = await state()
+        assert.equal(first.families.find((f) => f.id === 'codex')?.quotaEvery, 15)
+        assert.deepEqual([used(first, 'codex:main'), used(first, 'codex:work')], [20, 20])
+        assert.deepEqual([...(first.quotaAsking ?? [])].sort(), ['codex:main', 'codex:work'])
+        let later = first
+        for (let i = 0; i < 40 && later.quotaAsking; i++) {
+          await new Promise((r) => setTimeout(r, 250))
+          later = await state()
+        }
+        assert.equal(later.quotaAsking, undefined)
+        assert.deepEqual([used(later, 'codex:main'), used(later, 'codex:work')], [77, 77])
+        assert.equal((await readHostLog(h, 'codex')).filter((r) => r.argv).length, 2)
+      } finally {
+        await new Promise<void>((r) => {
+          server.close(() => r())
+          server.closeAllConnections()
+        })
+      }
+    })
+  })
+})
+
+describe('Codex Same Login after a reset time passed', () => {
+  it('asks the login once more, not once per directory', async () => {
+    await withFakeHome(async (h) => {
+      const token = `e30.${Buffer.from(
+        JSON.stringify({
+          email: 'codex@example.com',
+          'https://api.openai.com/auth': {
+            chatgpt_account_id: '00000000-0000-4000-8000-00000000aaaa',
+            chatgpt_user_id: 'user-FakeUser00000001',
+          },
+        }),
+      ).toString('base64url')}.fake-sig`
+      for (const dir of ['.codex', '.codex-team']) {
+        await h.write(`${dir}/config.toml`, '')
+        await h.write(`${dir}/auth.json`, JSON.stringify({ tokens: { id_token: token } }), 0o600)
+      }
+      await host(h, 'ok', result(3))
+      const rt = await createRuntime({ env: h.env, builtins })
+      const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
+      for (const name of ['main', 'team'])
+        await writeQuotaStore(quotaStoreFile(rt.paths.stateDir, 'codex', name), {
+          version: 1,
+          attemptedAt: ago(5),
+          quota: {
+            status: 'ok',
+            windows: [{ label: '5h', windowMinutes: 300, usedPercent: 96, resetsAt: ago(1) }],
+            observedAt: ago(5),
+            source: 'codex app-server account/rateLimits/read',
+          },
+        })
+      const quotas = await Promise.all((await rt.accounts()).map((a) => rt.quota(a)))
+      assert.equal((await readHostLog(h, 'codex')).filter((r) => r.argv).length, 1)
+      assert.ok(quotas.every((q) => q.status === 'ok' && q.windows[0]!.usedPercent === 3))
+    })
+  })
+})
+
+// One more ask after a published reset time passed (ADR-0073), through the Runtime's switches.
+describe('Codex quota after a reset time passed', () => {
+  /** A kept answer taken five minutes ago whose 5-hour window reset one minute ago. */
+  const keepPassed = (stateDir: string, name: string) => {
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
+    return writeQuotaStore(quotaStoreFile(stateDir, 'codex', name), {
+      version: 1,
+      attemptedAt: ago(5),
+      quota: {
+        status: 'ok',
+        windows: [{ label: '5h', windowMinutes: 300, usedPercent: 96, resetsAt: ago(1) }],
+        observedAt: ago(5),
+        source: 'codex app-server account/rateLimits/read',
+      },
+    })
+  }
+  const runs = async (h: FakeHome) => (await readHostLog(h, 'codex')).filter((r) => r.argv).length
+
+  it('asks the Host once inside the 15 minutes, and not again when that ask fails', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      await host(h, 'exit')
+      const rt = await createRuntime({ env: h.env, builtins })
+      await keepPassed(rt.paths.stateDir, 'main')
+      const a = await rt.resolve('codex:main')
+      const q = await rt.quota(a)
+      assert.equal(await runs(h), 1)
+      assert.equal(q.status === 'ok' && q.windows[0]!.usedPercent, 96, 'the kept answer stays on show')
+      assert.match((q.status === 'ok' && q.fetchError) || '', /exited without answering/)
+      await rt.quota(a)
+      await rt.quota(a, { fetch: 'background' })
+      assert.equal(await runs(h), 1)
+    })
+  })
+
+  it('shows the room at once when the Host answers', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      await host(h, 'ok', result(2))
+      const rt = await createRuntime({ env: h.env, builtins })
+      await keepPassed(rt.paths.stateDir, 'main')
+      const q = await rt.quota(await rt.resolve('codex:main'))
+      assert.equal(q.status === 'ok' && q.windows[0]!.usedPercent, 2)
+      assert.equal(await runs(h), 1)
+    })
+  })
+
+  it('asks nobody with the check off, in CI, for a signed-out Account, or when only kept answers are read', async () => {
+    for (const why of ['off', 'ci', 'signed-out', 'never'] as const)
+      await withFakeHome(async (h) => {
+        await seed(h)
+        await host(h)
+        if (why === 'off')
+          await h.write('.config/sideby/config.json', JSON.stringify({ quota: { check: { codex: false } } }))
+        const rt = await createRuntime({ env: { ...h.env, ...(why === 'ci' ? { CI: '1' } : {}) }, builtins })
+        await keepPassed(rt.paths.stateDir, 'work')
+        if (why === 'signed-out') await rm(h.path('.codex-work/auth.json'))
+        const q = await rt.quota(await rt.resolve('codex:work'), why === 'never' ? { fetch: 'never' } : {})
+        assert.equal(q.status === 'ok' && q.windows[0]!.usedPercent, 96, why)
+        assert.equal(await runs(h), 0, why)
+      })
+  })
+
+  it('never reaches the entries a Host runs by itself: the status line tap and the handoff hook', async () => {
+    const root = new URL('../../', import.meta.url).pathname
+    for (const entry of ['quota/statusline-tap.ts', 'handoff/hook.ts']) {
+      const seen = new Set<string>()
+      const walk = async (file: string) => {
+        if (seen.has(file)) return
+        seen.add(file)
+        const text = await readFile(file, 'utf8')
+        for (const m of text.matchAll(/^import (?!type )[^'"]*['"](\.{1,2}\/[^'"]+)['"]/gm))
+          await walk(join(file, '..', m[1]!))
+      }
+      await walk(join(root, entry))
+      assert.ok(seen.size > 1, `the walk follows the imports of ${entry}`)
+      assert.ok(!seen.has(join(root, 'core/quota-fetch.ts')), `${entry} must not import core/quota-fetch.ts`)
+    }
   })
 })

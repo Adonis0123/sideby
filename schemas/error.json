@@ -24,6 +24,10 @@
       "type": "string",
       "description": "Same as `code`, for a refused Task Spec (`sideby ask --spec -`): `spec-invalid`, `spec-too-large`, `bad-cwd`, or `spec-version` (exit 2: update sideby)."
     },
+    "operationId": {
+      "type": "string",
+      "description": "Only from `sideby quota reset`: the operation this failure belongs to. With `code: outcome-unknown` the Host gave no final answer; run `sideby quota reset <account> --yes --operation <operationId>` to ask again with the same request, which cannot use a second limit reset. With `code: outcome-not-saved` the Host answered (`error` says what) but sideby could not record it; run the same command once the file `error` names can be written."
+    },
     "_notice": {
       "type": "object",
       "properties": {

@@ -183,11 +183,21 @@ describe('menu bar script', () => {
     )
     assert.deepEqual(commands.sort(), [
       "'menubar', 'off', '--yes'",
-      "'menubar', 'snapshot', '--json', '--cached', '--refreshing-since', refreshSince, '--lang', lang",
+      "'menubar', 'reset', ref",
+      "'menubar', 'snapshot', '--json', '--cached', '--lang', lang",
       "'menubar', 'snapshot', '--json', '--lang', lang",
       "'menubar', 'start', ref",
       "'ui', '--background'",
     ])
+    // "Use a reset…" only opens a page (ADR-0072): the menu never runs the command that uses one, and the one
+    // account is asked again only by a snapshot started after the menu was opened anew.
+    assert.doesNotMatch(MENUBAR_SCRIPT, /'quota'|'--operation'/)
+    assert.equal([...MENUBAR_SCRIPT.matchAll(/'--yes'/g)].length, 1, 'only `menubar off --yes`')
+    assert.match(MENUBAR_SCRIPT, /ask \? \['--ask', ask\] : \[\]/)
+    assert.match(MENUBAR_SCRIPT, /var ask = !force && askDue \? askNext : ''/)
+    assert.match(MENUBAR_SCRIPT, /if \(askNext\) \{ askDue = true;/)
+    // The cache-only snapshot says when a manual refresh started; one during an automatic read says nothing more.
+    assert.match(MENUBAR_SCRIPT, /\.concat\(manual \? \['--refreshing-since', refreshSince\] : \[\]\)/)
     assert.equal([...MENUBAR_SCRIPT.matchAll(/stringWithContentsOfFile/g)].length, 1)
     assert.doesNotMatch(MENUBAR_SCRIPT, /\/bin\/sh|doShellScript|\$\{/)
     // JXA hands enum constants such as NSAlertFirstButtonReturn over as strings: never compare them with === or !==.

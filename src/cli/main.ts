@@ -260,6 +260,7 @@ in the npx cache or a temporary folder, a file that is not sideby's) or failed; 
   menubar: `sideby menubar [on|off] [--yes] [--json]
 sideby menubar snapshot [--refresh] [--lang en|zh] [--json]
 sideby menubar start <account> [--json]
+sideby menubar reset <account> [--json]
 sideby menubar hotkey [<keys>|off|default] [--json]
 
 Show quota in the macOS menu bar: a gauge with one percent, how much the account sideby would pick next has used
@@ -269,7 +270,9 @@ icon. macOS only for now (a LaunchAgent, ~/Library/LaunchAgents/dev.sideby.menub
 
 Without on or off it says whether it is on, off, out of date or blocked by a file that is not sideby's. on and off
 show the file first; --yes does it. snapshot prints what the menu shows (the menu bar item runs it every 2 minutes).
-start opens an account in your preferred terminal, as clicking it does. hotkey shows or changes the shortcut that
+start opens an account in your preferred terminal, as clicking it does. reset is what "Use a reset…" under an
+account runs: it opens the panel on that account's confirmation (Codex) or the vendor's page (Claude Code), and
+never uses a reset itself. hotkey shows or changes the shortcut that
 opens the menu from anywhere (⌥X by default): opt, cmd or ctrl, any of shift, and one letter or digit; off turns
 it off. A running menu bar item takes the new one within seconds, without a restart.
 
@@ -463,7 +466,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   autostart: { flags: ['json', 'yes', 'refresh'] },
   menubar: {
     flags: ['json', 'yes', 'refresh', 'cached'],
-    valued: ['lang', 'hotkey', 'hotkey-label', 'icon', 'refreshing-since'],
+    valued: ['lang', 'hotkey', 'hotkey-label', 'icon', 'refreshing-since', 'ask'],
   },
   config: { flags: ['json', 'yes'] },
   theme: { flags: ['json', 'yes', 'undo'], valued: ['id', 'out'] },
@@ -485,7 +488,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   new: { flags: ['api', 'json', 'next'], valued: ['alias', 'vendor'] },
   alias: { flags: ['json', 'yes'], valued: ['pick'] },
   doctor: { flags: ['fix', 'force', 'json'] },
-  quota: { flags: ['json', 'yes', 'refresh'] },
+  quota: { flags: ['json', 'yes', 'refresh', 'open'], valued: ['operation'] },
   tune: { flags: ['json', 'yes'] },
   model: { flags: ['json', 'yes'], valued: ['effort'] },
   'remote-control': { flags: ['json', 'yes'] },
@@ -712,9 +715,17 @@ export async function main(argv: string[]): Promise<number> {
     if (wantsJson) {
       const { UserError } = await import('../core/errors.ts')
       const code = usage ? 'usage' : err instanceof UserError && err.code ? err.code : 'error'
+      // A Limit Reset that got no final answer names its operation, so a retry reuses it (spec §3.40, ADR-0072).
+      const operationId = (err as { operationId?: unknown } | null)?.operationId
       console.log(
         JSON.stringify(
-          { schemaVersion: 1, error: message, code, ...(notice ? { _notice: notice } : {}) },
+          {
+            schemaVersion: 1,
+            error: message,
+            code,
+            ...(err instanceof UserError && typeof operationId === 'string' ? { operationId } : {}),
+            ...(notice ? { _notice: notice } : {}),
+          },
           null,
           2,
         ),

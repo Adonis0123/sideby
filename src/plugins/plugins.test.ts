@@ -2,13 +2,19 @@ import assert from 'node:assert/strict'
 import { chmod, mkdir, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
+import { Value } from 'typebox/value'
 import { asBuiltin, demoFamily, demoPlugin, seedDemoMain } from '../../testing/demo.ts'
 import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
+import { parseArgs } from '../cli/args.ts'
+import { cmdQuotaReset } from '../cli/commands.ts'
+import { OUTPUT_SCHEMAS } from '../cli/json-schemas.ts'
+import type { ExecResult } from '../core/desktop-app.ts'
 import { UserError } from '../core/errors.ts'
+import { listLimitResetRecords } from '../core/limit-reset.ts'
 import { createRuntime } from '../runtime.ts'
 import { accountScript, SCRIPT_NAME } from './account-script.ts'
 import { HookBus } from './bus.ts'
-import { logoProblem } from './loader.ts'
+import { limitResetProblem, logoProblem } from './loader.ts'
 
 async function runtime(h: FakeHome, extra: Parameters<typeof asBuiltin>[0][] = []) {
   return createRuntime({
@@ -302,5 +308,192 @@ describe('logoProblem', () => {
       Array(5).fill(wash),
     ])
       assert.match(logoProblem({ path, gradients }) ?? '', /logo\.gradients/)
+  })
+})
+
+describe('limitReset (ADR-0072)', () => {
+  const only = (h: FakeHome, fam: ReturnType<typeof demoFamily>) =>
+    createRuntime({ env: h.env, builtins: [asBuiltin(demoPlugin(fam))] })
+  it('accepts a use function, an https vendor page or both, and nothing else', () => {
+    const use = async () => 'reset' as const
+    assert.equal(limitResetProblem({ use }), null)
+    assert.equal(limitResetProblem({ vendorPage: 'https://example.com/settings/usage' }), null)
+    assert.equal(limitResetProblem({ use, vendorPage: 'https://example.com/usage' }), null)
+    assert.match(limitResetProblem({}) ?? '', /needs use, vendorPage or both/)
+    assert.match(limitResetProblem('https://example.com') ?? '', /must be an object/)
+    assert.match(limitResetProblem({ use: 'sideby quota reset' }) ?? '', /use must be a function/)
+    for (const vendorPage of [
+      'http://example.com/usage',
+      'https://example.com/usage?next=1',
+      'https://example.com/usage" & calc',
+      'file:///etc/passwd',
+      7,
+    ])
+      assert.match(
+        limitResetProblem({ vendorPage }) ?? '',
+        /vendorPage must be an https address/,
+        String(vendorPage),
+      )
+  })
+
+  it('drops an unusable limitReset with a plugin error and keeps the Family; keeps only its known fields', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const bad = await only(h, demoFamily({ limitReset: { vendorPage: 'http://x.example' } }))
+      assert.ok(bad.families.has('demo'))
+      assert.equal(bad.families.get('demo')?.limitReset, undefined)
+      assert.match(bad.pluginErrors.map((e) => e.message).join('\n'), /family demo: limitReset\.vendorPage/)
+      assert.equal(bad.limitResetKind(await bad.resolve('demo:main')), null)
+      const ok = await only(
+        h,
+        demoFamily({ limitReset: { vendorPage: 'https://demo.example.com/usage', extra: 'x' } as never }),
+      )
+      assert.deepEqual(ok.families.get('demo')?.limitReset, { vendorPage: 'https://demo.example.com/usage' })
+      assert.deepEqual(ok.limitResetKind(await ok.resolve('demo:main')), {
+        kind: 'page',
+        url: 'https://demo.example.com/usage',
+      })
+    })
+  })
+
+  it('runs a plugin Family’s use only after a confirmed plan, with the key sideby kept, and reads `sent: false`', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const calls: string[] = []
+      let stock = 1
+      let answer: () => Promise<never> | Promise<string> = async () => 'reset'
+      let who: string | undefined = 'me@example.com'
+      const parts = {
+        fetchQuota: {
+          everyMinutes: 15,
+          summary: 'Ask Demo for quota every 15 minutes',
+          fetch: async () => ({
+            status: 'ok' as const,
+            windows: [{ label: '5h', windowMinutes: 300, usedPercent: 80, resetsAt: '2099-01-01T00:00:00Z' }],
+            observedAt: new Date().toISOString(),
+            source: 'demo',
+            limitResets: { available: stock, observedAt: new Date().toISOString() },
+          }),
+        },
+        limitReset: {
+          use: async (_account: unknown, ctx: { idempotencyKey: string }) => {
+            calls.push(ctx.idempotencyKey)
+            return (await answer()) as never
+          },
+        },
+      }
+      // Without `identity` sideby cannot tell which login would be charged, so it never calls `use`.
+      const blind = await only(h, demoFamily(parts))
+      const noWho = await blind.limitResetPlan(await blind.resolve('demo:main'))
+      assert.equal(noWho.canUse, false)
+      assert.equal(noWho.operationId, undefined)
+      assert.match(noWho.blocked ?? '', /Demo does not tell sideby which login an account is signed in as/)
+      assert.deepEqual(await listLimitResetRecords(blind.paths.stateDir), [])
+      const fam = demoFamily({ ...parts, identity: async () => (who ? { email: who } : undefined) })
+      const rt = await only(h, fam)
+      const main = await rt.resolve('demo:main')
+      assert.deepEqual(rt.limitResetKind(main), { kind: 'use' })
+      const plan = await rt.limitResetPlan(main)
+      assert.equal(plan.canUse, true)
+      assert.deepEqual(calls, [], 'a plan calls nothing')
+      // The account signs in as someone else before the plan is confirmed: `use` is not called for that plan.
+      who = 'other@example.com'
+      await assert.rejects(rt.limitResetUse(main, plan.operationId!), (err: unknown) => {
+        assert.ok(err instanceof UserError)
+        assert.equal(err.code, 'plan-outdated')
+        return true
+      })
+      assert.deepEqual(calls, [])
+      who = 'me@example.com'
+      // The request never left: nothing was spent, and the operation ends.
+      answer = async () => {
+        throw Object.assign(new Error('demo is not installed'), { sent: false })
+      }
+      await assert.rejects(rt.limitResetUse(main, plan.operationId!), (err: unknown) => {
+        assert.ok(err instanceof UserError)
+        assert.equal(err.code, 'not-sent')
+        return true
+      })
+      // An answer sideby does not know is not an outcome: unresolved, and retried with the same key.
+      const second = await rt.limitResetPlan(main)
+      answer = async () => 'maybe'
+      await assert.rejects(rt.limitResetUse(main, second.operationId!), (err: unknown) => {
+        assert.ok(err instanceof UserError)
+        assert.equal(err.code, 'outcome-unknown')
+        return true
+      })
+      answer = async () => 'reset'
+      stock = 0
+      const r = await rt.limitResetUse(main, second.operationId!)
+      assert.equal(r.outcome, 'reset')
+      assert.equal(r.resumed, true)
+      assert.equal(r.quota?.status === 'ok' && r.quota.limitResets?.available, 0)
+      assert.equal(calls.length, 3)
+      assert.equal(calls[1], calls[2], 'the retry carries the same key')
+      assert.notEqual(calls[0], calls[1], 'a new plan is a new operation')
+    })
+  })
+
+  it('`quota reset --open` for a Family with both a use and a vendor page opens the page, schema-valid, and uses nothing', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      let uses = 0
+      const opened: string[][] = []
+      const exec = async (cmd: string, args: readonly string[]): Promise<ExecResult> => {
+        opened.push([cmd, ...args])
+        return { code: 0, stdout: '', stderr: '' }
+      }
+      const fam = demoFamily({
+        identity: async () => ({ email: 'me@example.com' }),
+        limitReset: {
+          use: async () => {
+            uses++
+            return 'reset'
+          },
+          vendorPage: 'https://demo.example.com/usage',
+        },
+      })
+      const rt = await createRuntime({
+        env: h.env,
+        builtins: [asBuiltin(demoPlugin(fam))],
+        desktop: { platform: 'linux', exec },
+      })
+      assert.deepEqual(rt.limitResetKind(await rt.resolve('demo:main')), { kind: 'use' })
+      const run = async (argv: string[]) => {
+        const out: string[] = []
+        const code = await cmdQuotaReset(
+          parseArgs(['reset', ...argv], ['json', 'yes', 'refresh', 'open'], ['operation']),
+          { out: (s) => out.push(s), err: () => {} },
+          rt,
+        )
+        return { code, out: out.join('\n') }
+      }
+      const j = await run(['demo:main', '--open', '--json'])
+      assert.equal(j.code, 0)
+      const v = JSON.parse(j.out) as Record<string, unknown>
+      assert.ok(
+        Value.Check(OUTPUT_SCHEMAS['quota-reset']!, JSON.parse(j.out)),
+        JSON.stringify([...Value.Errors(OUTPUT_SCHEMAS['quota-reset']!, v)].slice(0, 3)),
+      )
+      assert.deepEqual(
+        { account: v.account, outcome: v.outcome, url: v.url, opened: v.opened },
+        {
+          account: 'demo:main',
+          outcome: 'open-vendor-page',
+          url: 'https://demo.example.com/usage',
+          opened: true,
+        },
+      )
+      assert.match(String(v.message), /Opened https:\/\/demo\.example\.com\/usage in your browser/)
+      assert.match(String(v.message), /Nothing was used from here/)
+      assert.match(String(v.message), /sideby quota reset demo:main/)
+      assert.deepEqual(opened, [['xdg-open', 'https://demo.example.com/usage']])
+      const text = await run(['demo:main', '--open'])
+      assert.equal(text.code, 0)
+      assert.match(text.out, /Opened https:\/\/demo\.example\.com\/usage/)
+      // Opening a page uses nothing and keeps no operation.
+      assert.equal(uses, 0)
+      assert.deepEqual(await listLimitResetRecords(rt.paths.stateDir), [])
+    })
   })
 })
