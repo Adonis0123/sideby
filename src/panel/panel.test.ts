@@ -1734,7 +1734,13 @@ describe('choosing the advisor in the Panel (spec §3.41)', () => {
         )
         assert.deepEqual(await settings(), { theme: 'dark' })
         const files = ['~/.claude/settings.json']
-        const opus = await post(port, '/api/advisor/set', { confirm: true, to: 'opus', files }, hdr)
+        const shown = (await state()).advisor.groups
+        const opus = await post(
+          port,
+          '/api/advisor/set',
+          { confirm: true, to: 'opus', files, groups: shown },
+          hdr,
+        )
         assert.deepEqual([opus.body.ok, opus.body.unlocked], [true, true])
         assert.deepEqual(await settings(), { theme: 'dark', advisorModel: 'opus' })
         const after = (await state()).advisor
@@ -1744,6 +1750,7 @@ describe('choosing the advisor in the Panel (spec §3.41)', () => {
         const off = await post(port, '/api/advisor/unlock', { on: false }, hdr)
         assert.deepEqual([off.body.ok, off.body.unlock], [true, false])
         assert.equal((await state()).advisor.unlock, false)
+        const stale = (await state()).advisor.groups
         // A file whose env turns experimental features off: the state says so, and a model removes it in the same write.
         await h.write(
           '.claude/settings.json',
@@ -1754,7 +1761,23 @@ describe('choosing the advisor in the Panel (spec §3.41)', () => {
         assert.ok(!JSON.stringify(g).includes('FOO'))
         assert.deepEqual((await post(port, '/api/advisor/set', { to: 'opus' }, hdr)).body.files, files)
         assert.deepEqual((await post(port, '/api/advisor/set', { to: 'off' }, hdr)).body.files, files)
-        const betas = await post(port, '/api/advisor/set', { confirm: true, to: 'opus', files }, hdr)
+        // The page showed the file before the env entry came: same file list, but the write would remove what it never
+        // showed, so nothing is written.
+        const before = await settings()
+        const late = await post(
+          port,
+          '/api/advisor/set',
+          { confirm: true, to: 'opus', files, groups: stale },
+          hdr,
+        )
+        assert.deepEqual([late.body.applied, late.body.changedSince], [false, true])
+        assert.equal(
+          (await post(port, '/api/advisor/set', { confirm: true, to: 'opus', files }, hdr)).body.changedSince,
+          true,
+        )
+        assert.deepEqual(await settings(), before)
+        const groups = (await state()).advisor.groups
+        const betas = await post(port, '/api/advisor/set', { confirm: true, to: 'opus', files, groups }, hdr)
         assert.equal(betas.body.ok, true)
         assert.deepEqual(await settings(), { theme: 'dark', advisorModel: 'opus', env: { FOO: 'x' } })
       } finally {
@@ -1793,7 +1816,12 @@ describe('choosing the advisor in the Panel (spec §3.41)', () => {
           'x-sideby-token': handler.token,
         }
         const files = ['~/.claude/settings.json']
-        const r = await post(port, '/api/advisor/set', { confirm: true, to: 'sonnet', files }, hdr)
+        const r = await post(
+          port,
+          '/api/advisor/set',
+          { confirm: true, to: 'sonnet', files, groups: st.groups },
+          hdr,
+        )
         assert.deepEqual([r.body.ok, r.body.apiBetas], [true, true])
         assert.deepEqual((await config()).claude, { apiBetasOff: true })
         const after = await state()

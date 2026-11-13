@@ -8097,10 +8097,12 @@ const MAIN = String.raw`
   async function setAdvisorModel(to) {
     const st = advState()
     if (!st) return
-    const files = advPlan(st, to).todo.map((g) => g.file)
+    const groups = advPlan(st, to).todo
+    const files = groups.map((g) => g.file)
     advBusy(true)
     try {
-      const r = await api('/api/advisor/set', { confirm: true, to, files })
+      // The groups as shown, so the server refuses when a file now holds something the preview did not show.
+      const r = await api('/api/advisor/set', { confirm: true, to, files, groups })
       if (r.changedSince) toast(t('as.changedSince'), { kind: 'fail' })
       else if (r.ok) {
         // Show the new state now; the reload that follows confirms it.

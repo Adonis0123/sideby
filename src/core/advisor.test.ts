@@ -380,6 +380,74 @@ describe('a settings file whose env turns experimental features off (spec §3.41
       })
       assert.deepEqual([r.ok, r.results.length], [true, 1])
       assert.deepEqual(await json(join(a.dir, 'settings.json')), { advisorModel: 'opus', env: {} })
+      // Undo names only what it really puts back: the env entry, not the model the file already named.
+      const [g] = await advisorGroups([a], ctx(h))
+      assert.deepEqual([g?.undo, g?.undoModel, g?.undoBetas], [true, undefined, '"yes"'])
+    })
+  })
+
+  it('a file that no longer looks as the preview showed it is not written', async () => {
+    await withFakeHome(async (h) => {
+      const a = acct(h, 'main')
+      const file = join(a.dir, 'settings.json')
+      await h.write('.claude/settings.json', pretty({ advisorModel: 'sonnet' }))
+      const [shown] = await advisorGroups([a], ctx(h))
+      assert.ok(shown)
+      // The env entry came after the preview: the write would remove what the user never saw.
+      const now = pretty({ advisorModel: 'sonnet', env: { [BETAS]: '1' } })
+      await h.write('.claude/settings.json', now)
+      const opts = { configFile: configFile(h), unlock: true, apiBetasOff: false }
+      const r = await setAdvisor([a], ctx(h), 'opus', { ...opts, seen: [shown] })
+      assert.equal(r.ok, false)
+      assert.match(r.results[0]?.message ?? '', /changed after sideby read it/)
+      assert.equal(await readFile(file, 'utf8'), now)
+      // A file the preview did not show at all is not written either.
+      const none = await setAdvisor([a], ctx(h), 'opus', { ...opts, seen: [] })
+      assert.deepEqual([none.ok, await readFile(file, 'utf8')], [false, now])
+      const [fresh] = await advisorGroups([a], ctx(h))
+      assert.ok(fresh)
+      assert.equal((await setAdvisor([a], ctx(h), 'opus', { ...opts, seen: [fresh] })).ok, true)
+    })
+  })
+
+  it('undo names the model it puts back, and no env entry when the change removed none', async () => {
+    await withFakeHome(async (h) => {
+      const a = acct(h, 'main')
+      await h.write('.claude/settings.json', pretty({ advisorModel: 'sonnet' }))
+      const opts = { configFile: configFile(h), unlock: true, apiBetasOff: false }
+      assert.equal((await setAdvisor([a], ctx(h), 'opus', opts)).ok, true)
+      const [g] = await advisorGroups([a], ctx(h))
+      assert.deepEqual([g?.undoModel, g?.undoBetas], ['"sonnet"', undefined])
+      assert.equal((await undoAdvisor([a], ctx(h), opts)).ok, true)
+      await h.write('.claude/settings.json', pretty({}))
+      assert.equal((await setAdvisor([a], ctx(h), 'fable', opts)).ok, true)
+      assert.equal((await advisorGroups([a], ctx(h)))[0]?.undoModel, 'removed')
+    })
+  })
+
+  it('a change waits for another sideby change of the same file, and gives up without writing', async () => {
+    await withFakeHome(async (h) => {
+      const a = acct(h, 'main')
+      await h.write('.claude/settings.json', pretty({ advisorModel: 'sonnet' }))
+      const { lockedSettingsChange, SETTINGS_BUSY } = await import('./claude-settings-file.ts')
+      const file = (await advisorGroups([a], ctx(h)))[0]?.file ?? ''
+      const opts = { configFile: configFile(h), unlock: true, apiBetasOff: false }
+      // A change that starts while another holds the file runs after it, so its record is the last one.
+      let inner: Awaited<ReturnType<typeof setAdvisor>> | undefined
+      await lockedSettingsChange(ctx(h).stateDir, file, async () => {
+        const late = setAdvisor([a], ctx(h), 'opus', opts)
+        await new Promise((r) => setTimeout(r, 200))
+        assert.deepEqual(await json(join(a.dir, 'settings.json')), { advisorModel: 'sonnet' })
+        void late.then((r) => {
+          inner = r
+        })
+        return null
+      })
+      while (!inner) await new Promise((r) => setTimeout(r, 20))
+      assert.equal(inner.ok, true)
+      assert.deepEqual(await json(join(a.dir, 'settings.json')), { advisorModel: 'opus' })
+      assert.equal((await advisorGroups([a], ctx(h)))[0]?.undoModel, '"sonnet"')
+      assert.match(SETTINGS_BUSY, /Try again/)
     })
   })
 
@@ -557,6 +625,49 @@ describe('API Accounts that share a file which turns experimental features off (
       assert.ok((await lstat(h.path('.claude-api/settings.json'))).isSymbolicLink())
       assert.deepEqual(await json(configFile(h)), { claudeMod: false, advisor: { unlock: true } })
       assert.equal((await launchEnv('claude:api'))[BETAS], undefined)
+    })
+  })
+
+  it('undo that cannot take a busy file writes nothing there and keeps config claude.apiBetasOff on', async () => {
+    await withFakeHome(async (h) => {
+      const { runtime } = await shared(h)
+      // A second file, used by subscription two and API Account api2, that also turns experimental features off.
+      await h.write('.claude-two/settings.json', pretty({ env: { [BETAS]: '1' } }), 0o644)
+      await mkdir(h.path('.claude-api2'), { recursive: true })
+      await symlink(h.path('.claude-two/settings.json'), h.path('.claude-api2/settings.json'))
+      await h.write('.claude-api2/proxy.env', 'ANTHROPIC_BASE_URL=https://example.com\n', 0o600)
+      assert.equal((await (await runtime()).advisorSet('opus')).ok, true)
+      const { lockedSettingsChange, SETTINGS_BUSY, settingsLockWait } = await import(
+        './claude-settings-file.ts'
+      )
+      const groups = (await (await runtime()).advisor()).groups
+      assert.equal(groups.filter((g) => g.undoApiBetas).length, 2)
+      const busy = groups.find((g) => g.accounts.includes('claude:two'))?.file ?? ''
+      const two = await readFile(h.path('.claude-two/settings.json'), 'utf8')
+      const wait = settingsLockWait.timeoutMs
+      settingsLockWait.timeoutMs = 100
+      try {
+        let u: Awaited<ReturnType<Awaited<ReturnType<typeof runtime>>['advisorUndo']>> | undefined
+        await lockedSettingsChange(h.path('.local/state/sideby'), busy, async () => {
+          u = await (await runtime()).advisorUndo()
+          return null
+        })
+        assert.deepEqual(
+          u?.results.map((r) => [r.ok, r.message]),
+          [
+            [true, 'Put back.'],
+            [false, SETTINGS_BUSY],
+          ],
+        )
+        assert.equal(u?.apiBetas, undefined)
+      } finally {
+        settingsLockWait.timeoutMs = wait
+      }
+      // The busy file still lacks the variable, so its API Account still gets it from sideby.
+      assert.equal(await readFile(h.path('.claude-two/settings.json'), 'utf8'), two)
+      assert.deepEqual((await json(configFile(h))).claude, { apiBetasOff: true })
+      const again = await (await runtime()).advisorUndo()
+      assert.deepEqual([again.ok, again.apiBetas], [true, false])
     })
   })
 

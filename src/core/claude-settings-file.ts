@@ -5,6 +5,7 @@ import { mkdir, readFile, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Account } from '../types.ts'
 import { lstatOrNull, realpathOrNull, sha256, writeFileAtomic, writeIfUnchanged } from './fs-safe.ts'
+import { takeFileLock } from './lock.ts'
 
 const MAX_BYTES = 5_000_000
 
@@ -100,6 +101,39 @@ export async function writeSettingsKey(
   return wrote ? null : 'settings.json changed while sideby was writing, so nothing was changed. Try again.'
 }
 
+/** How long a change waits for another one of the same file. Mutable for tests only. */
+export const settingsLockWait = { timeoutMs: 10_000, pollMs: 50 }
+
+/** What a change says when another sideby change of the same file held it for too long. */
+export const SETTINGS_BUSY =
+  'Another sideby change of this settings file is still running, so nothing was changed. Try again in a moment.'
+
+/**
+ * Runs one change of `file` and its undo record while no other sideby process (the CLI, the Panel) changes that file,
+ * so a record always describes the write it follows and one change never replaces another's record halfway. The lock
+ * is `<state>/settings-locks/<hash of file>.lock`. Returns `fn`'s answer, or `SETTINGS_BUSY` when the lock stayed
+ * held.
+ */
+export async function lockedSettingsChange(
+  stateDir: string,
+  file: string,
+  fn: () => Promise<string | null>,
+): Promise<string | null> {
+  const dir = join(stateDir, 'settings-locks')
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  const release = await takeFileLock(join(dir, `${sha256(file).slice(0, 16)}.lock`), {
+    staleMs: 15_000,
+    beatMs: 3_000,
+    wait: { ...settingsLockWait },
+  })
+  if (!release) return SETTINGS_BUSY
+  try {
+    return await fn()
+  } finally {
+    await release()
+  }
+}
+
 /** Where sideby keeps the undo record of one key it wrote in `file`: `<state>/<dir>/<hash of file>.json`. */
 export const keyRecordPath = (stateDir: string, dir: string, file: string): string =>
   join(stateDir, dir, `${sha256(file).slice(0, 16)}.json`)
@@ -179,20 +213,23 @@ export function settingsKey(key: string, records: string, opts: { legacyWrote?: 
     ): Promise<KeyResult[]> {
       const results: KeyResult[] = []
       for (const g of groups) {
-        let before: Pick<KeyUndo, 'hadKey' | 'previous'> = { hadKey: false }
-        const failed = await writeSettingsKey(
-          g.file,
-          (obj) => {
-            before = key in obj ? { hadKey: true, previous: obj[key] } : { hadKey: false }
-            obj[key] = to
-            return obj
-          },
-          (obj) => expect(obj[key]),
-        )
-        if (!failed) {
-          const record: KeyUndo = { file: g.file, ...before, wrote: to, at: new Date().toISOString() }
-          await writeKeyRecord(stateDir, records, g.file, record)
-        }
+        const failed = await lockedSettingsChange(stateDir, g.file, async () => {
+          let before: Pick<KeyUndo, 'hadKey' | 'previous'> = { hadKey: false }
+          const failed = await writeSettingsKey(
+            g.file,
+            (obj) => {
+              before = key in obj ? { hadKey: true, previous: obj[key] } : { hadKey: false }
+              obj[key] = to
+              return obj
+            },
+            (obj) => expect(obj[key]),
+          )
+          if (!failed) {
+            const record: KeyUndo = { file: g.file, ...before, wrote: to, at: new Date().toISOString() }
+            await writeKeyRecord(stateDir, records, g.file, record)
+          }
+          return failed
+        })
         results.push({ file: g.file, accounts: g.accounts, ok: !failed, message: failed ?? done })
       }
       return results
@@ -204,21 +241,28 @@ export function settingsKey(key: string, records: string, opts: { legacyWrote?: 
     ): Promise<KeyResult[]> {
       const results: KeyResult[] = []
       for (const g of groups) {
-        const record = await readRecord(stateDir, g.file)
-        if (!record) continue
-        const failed = await writeSettingsKey(
-          g.file,
-          (obj) => {
-            if (record.hadKey) obj[key] = record.previous
-            else delete obj[key]
-            return obj
-          },
-          (obj) =>
-            same(obj[key], record.wrote)
-              ? null
-              : 'The setting was changed after sideby set it, so it was left alone.',
-        )
-        if (!failed) await rm(keyRecordPath(stateDir, records, g.file), { force: true })
+        // The record is read under the lock, so it is the one of the last change that finished.
+        let found = false
+        const failed = await lockedSettingsChange(stateDir, g.file, async () => {
+          const record = await readRecord(stateDir, g.file)
+          if (!record) return null
+          found = true
+          const failed = await writeSettingsKey(
+            g.file,
+            (obj) => {
+              if (record.hadKey) obj[key] = record.previous
+              else delete obj[key]
+              return obj
+            },
+            (obj) =>
+              same(obj[key], record.wrote)
+                ? null
+                : 'The setting was changed after sideby set it, so it was left alone.',
+          )
+          if (!failed) await rm(keyRecordPath(stateDir, records, g.file), { force: true })
+          return failed
+        })
+        if (!found && !failed) continue
         results.push({ file: g.file, accounts: g.accounts, ok: !failed, message: failed ?? 'Put back.' })
       }
       return results

@@ -15,6 +15,7 @@ import {
   type Json,
   type KeyResult,
   keyRecordPath,
+  lockedSettingsChange,
   readKeyRecord,
   readSettingsGroups,
   type SettingsProblem,
@@ -83,6 +84,13 @@ export interface AdvisorGroup {
   undo: boolean
   /** With `undo`: the change turned config `claude.apiBetasOff` on for this file's API Accounts, and undo turns it back. */
   undoApiBetas?: true
+  /**
+   * With `undo`: undo changes `advisorModel`, back to this value as JSON, or `removed` when the file had none. Absent
+   * when the change kept the model the file already named (it only removed the `env` entry).
+   */
+  undoModel?: string
+  /** With `undo`: undo puts `env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` back, with this value as JSON. */
+  undoBetas?: string
 }
 
 export interface AdvisorStatus {
@@ -100,6 +108,20 @@ export interface AdvisorConfigState {
   unlock: boolean
   apiBetasOff: boolean
 }
+
+/** What a preview showed of one file: a change refuses a file that no longer holds this (`AdvisorGroup` fields). */
+export type AdvisorSeen = Pick<AdvisorGroup, 'file' | 'state' | 'model' | 'betasValue'>
+
+/** Whether `obj` still holds what `seen` showed: the same `advisorModel` reading and the same true env entry. */
+function looksAsSeen(obj: Json, seen: AdvisorSeen): boolean {
+  const now = stateOf(obj[ADVISOR_KEY])
+  const betas = isObj(obj.env) ? obj.env[BETAS_VAR] : undefined
+  const value = truthy(betas) ? JSON.stringify(betas) : undefined
+  return now.state === seen.state && now.model === seen.model && value === seen.betasValue
+}
+
+const CHANGED_SINCE =
+  'settings.json changed after sideby read it, so nothing was changed. Look again and try again.'
 
 export interface AdvisorChange {
   ok: boolean
@@ -192,6 +214,21 @@ async function readRecord(stateDir: string, file: string): Promise<AdvisorRecord
   return r as unknown as AdvisorRecord
 }
 
+/** What undo would change in `obj`, from the record of the change it undoes (`AdvisorGroup.undoModel` and on). */
+function undoParts(
+  obj: Json,
+  r: AdvisorRecord,
+): Pick<AdvisorGroup, 'undoApiBetas' | 'undoModel' | 'undoBetas'> {
+  const model = r.removed ? r.hadKey : !(r.hadKey && same(r.previous, r.wrote))
+  const env = obj.env
+  const betas = r.betas !== undefined && (env === undefined || (isObj(env) && !Object.hasOwn(env, BETAS_VAR)))
+  return {
+    ...(r.apiBetas ? { undoApiBetas: true as const } : {}),
+    ...(model ? { undoModel: r.hadKey ? JSON.stringify(r.previous) : 'removed' } : {}),
+    ...(betas ? { undoBetas: JSON.stringify(r.betas?.previous) } : {}),
+  }
+}
+
 /** `obj` with `key` set to `value` at `index` among its keys (at the end without one), keeping the others' order. */
 function insertAt(obj: Json, key: string, value: unknown, index?: number): Json {
   const entries: [string, unknown][] = Object.entries(obj).filter(([k]) => k !== key)
@@ -231,7 +268,7 @@ export async function advisorGroups(accounts: readonly Account[], ctx: ReadConte
         ...stateOf(g.obj[ADVISOR_KEY]),
         ...(truthy(betas) ? { betasOff: true as const, betasValue: JSON.stringify(betas) } : {}),
         undo,
-        ...(undo && record.apiBetas ? { undoApiBetas: true as const } : {}),
+        ...(undo ? undoParts(g.obj, record) : {}),
       })
     }
   }
@@ -388,44 +425,49 @@ async function writeGroup(
   g: AdvisorGroup,
   to: AdvisorChoice,
   apiBetas?: { previous: boolean | null },
+  seen: AdvisorSeen = g,
 ): Promise<KeyResult & { betas: boolean; api: boolean }> {
   const dropBetas = to !== 'off'
   const box: { record?: AdvisorRecord } = {}
-  const failed = await writeSettingsKey(
-    g.file,
-    (obj) => {
-      const r: AdvisorRecord = {
-        file: g.file,
-        hadKey: Object.hasOwn(obj, ADVISOR_KEY),
-        at: new Date().toISOString(),
-      }
-      if (r.hadKey) r.previous = obj[ADVISOR_KEY]
-      if (to === 'off') {
-        r.removed = true
-        if (r.hadKey) r.index = Object.keys(obj).indexOf(ADVISOR_KEY)
-        delete obj[ADVISOR_KEY]
-      } else {
-        r.wrote = to
-        obj[ADVISOR_KEY] = to
-      }
-      const env = obj.env
-      if (dropBetas && isObj(env) && truthy(env[BETAS_VAR])) {
-        r.betas = { previous: env[BETAS_VAR], index: Object.keys(env).indexOf(BETAS_VAR) }
-        obj.env = Object.fromEntries(Object.entries(env).filter(([k]) => k !== BETAS_VAR))
-        if (apiBetas && g.apiAccounts?.length) r.apiBetas = apiBetas
-      }
-      box.record = r
-      return obj
-    },
-    (obj) => {
-      if (obj.env !== undefined && !isObj(obj.env)) return `${ENV_NOT_OBJECT}.`
-      const betas = dropBetas && isObj(obj.env) && truthy(obj.env[BETAS_VAR])
-      return stateOf(obj[ADVISOR_KEY]).state === to && !betas
-        ? 'It was set that way meanwhile; nothing changed.'
-        : null
-    },
-  )
-  if (!failed && box.record) await writeKeyRecord(stateDir, RECORDS, g.file, box.record)
+  const failed = await lockedSettingsChange(stateDir, g.file, async () => {
+    const failed = await writeSettingsKey(
+      g.file,
+      (obj) => {
+        const r: AdvisorRecord = {
+          file: g.file,
+          hadKey: Object.hasOwn(obj, ADVISOR_KEY),
+          at: new Date().toISOString(),
+        }
+        if (r.hadKey) r.previous = obj[ADVISOR_KEY]
+        if (to === 'off') {
+          r.removed = true
+          if (r.hadKey) r.index = Object.keys(obj).indexOf(ADVISOR_KEY)
+          delete obj[ADVISOR_KEY]
+        } else {
+          r.wrote = to
+          obj[ADVISOR_KEY] = to
+        }
+        const env = obj.env
+        if (dropBetas && isObj(env) && truthy(env[BETAS_VAR])) {
+          r.betas = { previous: env[BETAS_VAR], index: Object.keys(env).indexOf(BETAS_VAR) }
+          obj.env = Object.fromEntries(Object.entries(env).filter(([k]) => k !== BETAS_VAR))
+          if (apiBetas && g.apiAccounts?.length) r.apiBetas = apiBetas
+        }
+        box.record = r
+        return obj
+      },
+      (obj) => {
+        if (obj.env !== undefined && !isObj(obj.env)) return `${ENV_NOT_OBJECT}.`
+        const betas = dropBetas && isObj(obj.env) && truthy(obj.env[BETAS_VAR])
+        if (stateOf(obj[ADVISOR_KEY]).state === to && !betas)
+          return 'It was set that way meanwhile; nothing changed.'
+        // Read under the lock: the write must be the one the plan (or the Panel's preview) was made for.
+        return looksAsSeen(obj, seen) ? null : CHANGED_SINCE
+      },
+    )
+    if (!failed && box.record) await writeKeyRecord(stateDir, RECORDS, g.file, box.record)
+    return failed
+  })
   const betas = !failed && box.record?.betas !== undefined
   const done = (to === 'off' ? 'Turned off.' : `Set to ${to}.`) + (betas ? ` Removed env.${BETAS_VAR}.` : '')
   return {
@@ -448,7 +490,12 @@ export async function setAdvisor(
   accounts: readonly Account[],
   ctx: ReadContext,
   to: AdvisorChoice,
-  opts: AdvisorConfigState & { configFile: string; account?: string },
+  opts: AdvisorConfigState & {
+    configFile: string
+    account?: string
+    /** The files as a preview showed them; a file missing here or no longer like this is not written. */
+    seen?: readonly AdvisorSeen[]
+  },
 ): Promise<AdvisorChange> {
   const scope = advisorScope(await advisorGroups(accounts, ctx), opts.account)
   const plan = advisorPlan(scope, to, opts)
@@ -469,7 +516,19 @@ export async function setAdvisor(
     }
   }
   const written: Awaited<ReturnType<typeof writeGroup>>[] = []
-  for (const g of plan.todo) written.push(await writeGroup(ctx.stateDir, g, to, apiPrev))
+  for (const g of plan.todo) {
+    const seen = opts.seen ? opts.seen.find((s) => s.file === g.file) : g
+    if (seen) written.push(await writeGroup(ctx.stateDir, g, to, apiPrev, seen))
+    else
+      written.push({
+        file: g.file,
+        accounts: g.accounts,
+        ok: false,
+        message: CHANGED_SINCE,
+        betas: false,
+        api: false,
+      })
+  }
   const results: KeyResult[] = written.map(({ betas: _b, api: _a, ...r }) => r)
   // No file the API Accounts use lost the variable after all: the config goes back as it was.
   const apiOn = apiPrev !== undefined && written.some((r) => r.api)
@@ -529,31 +588,41 @@ export async function undoAdvisor(
   let apiPrev: boolean | null | undefined
   let apiBack = true
   for (const g of todo) {
-    const record = await readRecord(ctx.stateDir, g.file)
-    if (!record) continue
+    // The record is read under the lock, so it is the one of the last change that finished.
+    const box: { record?: AdvisorRecord } = {}
     let back = false
-    const failed = await writeSettingsKey(
-      g.file,
-      (obj) => {
-        let out = obj
-        if (record.removed) {
-          if (record.hadKey) out = insertAt(out, ADVISOR_KEY, record.previous, record.index)
-        } else if (record.hadKey) out[ADVISOR_KEY] = record.previous
-        else delete out[ADVISOR_KEY]
-        const b = record.betas
-        if (b) {
-          if (out.env === undefined) out.env = { [BETAS_VAR]: b.previous }
-          else if (isObj(out.env) && !Object.hasOwn(out.env, BETAS_VAR))
-            out.env = insertAt(out.env, BETAS_VAR, b.previous, b.index)
-        }
-        back = isObj(out.env) && truthy(out.env[BETAS_VAR])
-        return out
-      },
-      (obj) =>
-        holds(obj, record) ? null : 'The setting was changed after sideby set it, so it was left alone.',
-    )
-    if (!failed) await rm(keyRecordPath(ctx.stateDir, RECORDS, g.file), { force: true })
-    if (record.apiBetas) {
+    const failed = await lockedSettingsChange(ctx.stateDir, g.file, async () => {
+      const record = await readRecord(ctx.stateDir, g.file)
+      if (!record) return null
+      box.record = record
+      const failed = await writeSettingsKey(
+        g.file,
+        (obj) => {
+          let out = obj
+          if (record.removed) {
+            if (record.hadKey) out = insertAt(out, ADVISOR_KEY, record.previous, record.index)
+          } else if (record.hadKey) out[ADVISOR_KEY] = record.previous
+          else delete out[ADVISOR_KEY]
+          const b = record.betas
+          if (b) {
+            if (out.env === undefined) out.env = { [BETAS_VAR]: b.previous }
+            else if (isObj(out.env) && !Object.hasOwn(out.env, BETAS_VAR))
+              out.env = insertAt(out.env, BETAS_VAR, b.previous, b.index)
+          }
+          back = isObj(out.env) && truthy(out.env[BETAS_VAR])
+          return out
+        },
+        (obj) =>
+          holds(obj, record) ? null : 'The setting was changed after sideby set it, so it was left alone.',
+      )
+      if (!failed) await rm(keyRecordPath(ctx.stateDir, RECORDS, g.file), { force: true })
+      return failed
+    })
+    const record = box.record
+    if (!record && !failed) continue
+    // The lock stayed held, so its record was not read: the file may still need config claude.apiBetasOff.
+    if (!record) apiBack = false
+    if (record?.apiBetas) {
       apiPrev ??= record.apiBetas.previous
       if (failed || !back) apiBack = false
     }

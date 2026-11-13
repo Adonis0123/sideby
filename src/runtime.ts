@@ -10,6 +10,7 @@ import {
 import {
   type AdvisorChange,
   type AdvisorChoice,
+  type AdvisorSeen,
   type AdvisorStatus,
   advisorStatus,
   checkAdvisorAccount,
@@ -563,9 +564,13 @@ export interface Runtime {
   advisor(): Promise<AdvisorStatus>
   /**
    * Sets `advisorModel` to `to` (`off` removes it) in every settings file that does not hold it yet, or only in the one
-   * `opts.account` uses, remembering how to undo it; a model also turns config `advisor.unlock` on.
+   * `opts.account` uses, remembering how to undo it; a model also turns config `advisor.unlock` on. With `opts.seen`
+   * (the files as a preview showed them), a file that no longer looks like that is not written.
    */
-  advisorSet(to: AdvisorChoice, opts?: { account?: string }): Promise<AdvisorChange>
+  advisorSet(
+    to: AdvisorChoice,
+    opts?: { account?: string; seen?: readonly AdvisorSeen[] },
+  ): Promise<AdvisorChange>
   /** Puts back what `advisorSet` replaced, only where the key still holds what it wrote. */
   advisorUndo(): Promise<AdvisorChange>
   /** Turns config `advisor.unlock` on or off. */
@@ -2214,6 +2219,7 @@ export async function createRuntime(
         configFile: paths.configFile,
         ...advisorConfig(),
         ...(account ? { account } : {}),
+        ...(opts.seen ? { seen: opts.seen } : {}),
       })
       await reloadAdvisorConfig()
       return r

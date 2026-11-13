@@ -1452,10 +1452,16 @@ export async function cmdAdvisor(a: ParsedArgs, io: Io, runtime?: Runtime): Prom
             : 'Put back the advisor setting sideby replaced?',
       )
       for (const g of todo) {
-        const to = choice === 'off' ? 'removed' : choice ? `"${choice}"` : 'what it was before'
         const file = tildify(g.file, home)
-        if (g.state !== choice) io.out(`  ${file}: advisorModel ${advisorValue(g)} -> ${to}`)
-        if (plan?.betas.includes(g)) io.out(`  ${file}: env.${BETAS_VAR} ${g.betasValue} -> removed`)
+        if (choice) {
+          const to = choice === 'off' ? 'removed' : `"${choice}"`
+          if (g.state !== choice) io.out(`  ${file}: advisorModel ${advisorValue(g)} -> ${to}`)
+          if (plan?.betas.includes(g)) io.out(`  ${file}: env.${BETAS_VAR} ${g.betasValue} -> removed`)
+        } else {
+          // Only what undo really puts back: a change that kept the model only removed the env entry.
+          if (g.undoModel) io.out(`  ${file}: advisorModel ${advisorValue(g)} -> ${g.undoModel}`)
+          if (g.undoBetas) io.out(`  ${file}: env.${BETAS_VAR} absent -> ${g.undoBetas}`)
+        }
         io.out(c.dim(`    used by ${g.accounts.join(', ')}`))
         if (g.apiAccounts?.length && (plan ? plan.betas.includes(g) : g.undoApiBetas))
           io.out(c.dim(`    and by API accounts ${g.apiAccounts.join(', ')}`))

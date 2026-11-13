@@ -1575,28 +1575,49 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
    * A change of one key in Claude's settings files that the page showed file by file before the user confirmed
    * (Remote Control, spec §3.22; receiving Messages, ADR-0045). Without `confirm` it writes nothing and names the
    * files; with it, `files` must be exactly the files the page showed, or nothing is written and `changedSince` says
-   * so, because a file the user never saw in the preview must not change. Undo passes no `todo`: it only puts back
-   * what sideby wrote, and its toast runs before the page has read the new state.
+   * so, because a file the user never saw in the preview must not change. Where what a file holds decides what the
+   * write does (Advisor: whether `env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` goes too), `shown` names that part of a
+   * group: the page sends the groups it showed as `groups`, and a file whose part differs now refuses the same way.
+   * Remote Control and receiving Messages need none: they write one fixed value, whatever the file held. Undo passes
+   * no `todo`: it only puts back what sideby wrote, only while the file still holds that (spec §3.22), and its toast
+   * runs before the page has read the new state.
    */
-  const previewedChange = (change: {
-    todo?: (rt: Runtime, body: Record<string, unknown>) => Promise<readonly { file: string }[]>
+  const previewedChange = <G extends { file: string }>(change: {
+    todo?: (rt: Runtime, body: Record<string, unknown>) => Promise<readonly G[]>
+    shown?: (g: Partial<G>) => unknown
+    /** `checked`: the groups of `todo` that matched the preview, with their real paths, for a check under the lock. */
     apply: (
       rt: Runtime,
       body: Record<string, unknown>,
+      checked?: readonly G[],
     ) => Promise<{ ok: boolean; message: string; results: { file: string }[] }>
   }): Route => ({
     writes: (body) => body.confirm === true,
     async run(body) {
       const rt = await getRuntime()
       const home = rt.paths.home
-      const files = change.todo ? (await change.todo(rt, body)).map((g) => tildify(g.file, home)) : undefined
+      const raw = change.todo ? await change.todo(rt, body) : undefined
+      const todo = raw?.map((g) => ({ ...g, file: tildify(g.file, home) }))
+      const files = todo?.map((g) => g.file)
       if (!optBool(body, 'confirm')) return { applied: false, ...(files ? { files } : {}) }
-      if (files) {
+      if (todo && files) {
         const saw = body.files
         const same = Array.isArray(saw) && saw.length === files.length && files.every((f) => saw.includes(f))
         if (!same) return { applied: false, changedSince: true, files }
+        const shown = change.shown
+        if (shown) {
+          const seen = (Array.isArray(body.groups) ? body.groups : []).filter(
+            (x): x is Partial<G> => typeof x === 'object' && x !== null && !Array.isArray(x),
+          )
+          const key = (g: Partial<G>) => JSON.stringify(shown(g) ?? null)
+          const alike = todo.every((g) => {
+            const s = seen.find((x) => x.file === g.file)
+            return s !== undefined && key(s) === key(g)
+          })
+          if (!alike) return { applied: false, changedSince: true, files }
+        }
       }
-      const r = await change.apply(rt, body)
+      const r = await change.apply(rt, body, raw)
       return { ...r, applied: true, results: r.results.map((x) => ({ ...x, file: tildify(x.file, home) })) }
     },
   })
@@ -1954,9 +1975,12 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const st = await rt.advisor()
         return advisorPlan(advisorScope(st.groups, account), to, st).todo
       },
-      async apply(rt, body) {
+      // What decides the write besides the model the body names: the env entry it removes, and who shares the file.
+      shown: (g) => [g.state ?? null, g.model ?? null, g.betasValue ?? null, g.apiAccounts ?? []],
+      // The files as the page showed them, checked again under each file's lock right before the write.
+      async apply(rt, body, checked) {
         const { to, account } = await advisorBody(rt, body)
-        return rt.advisorSet(to, account ? { account } : {})
+        return rt.advisorSet(to, { ...(account ? { account } : {}), ...(checked ? { seen: checked } : {}) })
       },
     }),
     '/api/advisor/undo': previewedChange({ apply: (rt) => rt.advisorUndo() }),
