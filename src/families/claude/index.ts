@@ -144,6 +144,8 @@ export const claudeFamily: FamilyDef = {
   readUsage: readClaudeUsage,
   readTuning: readClaudeTuning,
   quotaSetup: claudeStatusline,
+  // Claude Code cannot spend a Limit Reset or tell how many an Account holds: only the vendor's page can (ADR-0072).
+  limitReset: { vendorPage: 'https://claude.ai/settings/usage' },
   resumedSession: resumeFlagSession,
   sessionWrittenAt: (account, id) =>
     groupedEntryWrittenAt(join(account.dir, 'projects'), `${id}.jsonl`, 'file'),

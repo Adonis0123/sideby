@@ -84,6 +84,129 @@ export function quotaIsStale(
   return !(Number.isFinite(used) && used - at <= 600_000)
 }
 
+/** How old one Quota window's number is, by the one rule the Panel, the CLI and the Menu Bar Item share (ADR-0073). */
+export interface WindowAge {
+  /** When this window was read: its own time, else the Quota's. */
+  observedAt: string
+  /** Where it was read from: its own source, else the Quota's. */
+  source: string
+  /**
+   * Old: the latest ask failed, the time cannot be read or lies ahead, or it is over an hour old and this computer
+   * has used the login since, or its Usage cannot be read (`quotaIsStale`, ADR-0051).
+   */
+  stale: boolean
+  /** Over an hour old, but this computer has not used the login since: the number stands. */
+  quiet: boolean
+  /** Whether the age is written next to the number: old, or older than the Family's `everyMinutes`. */
+  showAge: boolean
+}
+
+/**
+ * One window's age from its own read time (`observedAt` on the window, else the Quota's). `everyMinutes` is how
+ * often the Family asks its Host; without it the age is written only once the number is old. Self-contained apart
+ * from `quotaIsStale`, so the Panel can inline both.
+ */
+export function windowAge(
+  quota: { observedAt: string; source?: string; fetchError?: string },
+  w: { observedAt?: string; source?: string } | null | undefined,
+  now: number,
+  lastUseAt?: string | null,
+  everyMinutes?: number,
+): WindowAge {
+  const observedAt = w?.observedAt || quota.observedAt
+  const source = w?.source || quota.source || ''
+  const stale = quotaIsStale({ observedAt, fetchError: quota.fetchError }, now, lastUseAt)
+  const age = now - Date.parse(observedAt)
+  const every = Number(everyMinutes)
+  return {
+    observedAt,
+    source,
+    stale,
+    quiet: !stale && age > 3600_000,
+    showAge: stale || (Number.isFinite(every) && every > 0 && age > every * 60_000),
+  }
+}
+
+/**
+ * The oldest age among a Quota's windows (the Quota's own when it has none): what a row says once for all its
+ * numbers. `stale`, `quiet` and `showAge` are true when they are for any window.
+ */
+export function quotaAge(
+  quota: {
+    observedAt: string
+    source?: string
+    fetchError?: string
+    windows?: readonly { observedAt?: string; source?: string }[]
+  },
+  now: number,
+  lastUseAt?: string | null,
+  everyMinutes?: number,
+): WindowAge {
+  const list = quota.windows?.length ? quota.windows : [null]
+  let out: WindowAge | undefined
+  for (const w of list) {
+    const a = windowAge(quota, w, now, lastUseAt, everyMinutes)
+    if (!out) {
+      out = a
+      continue
+    }
+    // A time that cannot be read is the oldest there is.
+    const at = Date.parse(a.observedAt)
+    const best = Date.parse(out.observedAt)
+    const older = Number.isFinite(best) && !(at >= best)
+    out = {
+      observedAt: older ? a.observedAt : out.observedAt,
+      source: older ? a.source : out.source,
+      stale: out.stale || a.stale,
+      quiet: out.quiet || a.quiet,
+      showAge: out.showAge || a.showAge,
+    }
+  }
+  return out!
+}
+
+/** A known Limit Reset that expires within this many hours makes the action a visible button (ADR-0072). */
+export const LIMIT_RESET_EXPIRY_HOURS = 72
+
+/**
+ * Whether "use a reset" is a visible button on an Account's row, and why (spec §3.40, ADR-0072); null leaves the
+ * action in the row's menu and the command palette. `use` (the Host spends one, Codex): the Account holds one, and a
+ * plan-wide window is at its warning level or a known one expires within 72 hours. `page` (only the vendor's page
+ * spends one, Claude Code): any window is at its warning level, a model group's included, since sideby cannot see the
+ * count. A window whose reset time has passed still counts: the numbers are read again before anything is spent.
+ * `warn` is the warning level of a Short and of a Long Window (60 and 85). Self-contained, so the Panel can inline it.
+ */
+export function limitResetOffer(
+  quota:
+    | {
+        windows?: readonly { label?: string; name?: string; windowMinutes?: number; usedPercent: number }[]
+        limitResets?: { available: number; nextExpiresAt?: string }
+      }
+    | null
+    | undefined,
+  kind: 'use' | 'page',
+  now: number,
+  warn: { short: number; long: number },
+): { tight: number[]; expiring: boolean } | null {
+  if (!quota) return null
+  const stock = quota.limitResets
+  if (kind === 'use' && !(stock && stock.available > 0)) return null
+  const minutes = (w: { label?: string; windowMinutes?: number }) => {
+    const n = Number(w.windowMinutes)
+    if (Number.isFinite(n) && n > 0) return n
+    const m = /^(\d+(?:\.\d+)?)\s*([mhdw])$/i.exec(String(w.label ?? '').trim())
+    return m ? Number(m[1]) * ({ m: 1, h: 60, d: 1440, w: 10080 }[m[2]!.toLowerCase()] ?? 0) : 0
+  }
+  const tight: number[] = []
+  ;(quota.windows ?? []).forEach((w, i) => {
+    if (kind === 'use' && w.name) return
+    if ((Number(w.usedPercent) || 0) >= (minutes(w) > 1440 ? warn.long : warn.short)) tight.push(i)
+  })
+  const expires = kind === 'use' && stock?.nextExpiresAt ? Date.parse(stock.nextExpiresAt) : Number.NaN
+  const expiring = Number.isFinite(expires) && expires > now && expires - now <= 72 * 3600_000
+  return tight.length || expiring ? { tight, expiring } : null
+}
+
 /** The warning level of a used percent; `long` for a Long Window, which warns later (spec §3.26). */
 export function quotaLevel(usedPercent: number, long = false): QuotaLevel {
   if (usedPercent >= (long ? QUOTA_LONG_FAIL_PERCENT : QUOTA_FAIL_PERCENT)) return 'fail'

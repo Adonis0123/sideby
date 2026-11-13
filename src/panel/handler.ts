@@ -54,6 +54,7 @@ import {
   type BrowserReport,
   browserReport,
   openInBrowser,
+  openVendorPage,
   setBrowserChoice,
   setBrowserSignIns,
 } from '../core/browser-profiles.ts'
@@ -89,6 +90,7 @@ import {
   undoInbound,
   waitingFiles,
 } from '../core/inbound.ts'
+import { LimitResetError } from '../core/limit-reset.ts'
 import {
   accountLabels,
   type LiveSession,
@@ -103,6 +105,7 @@ import { listMessages, type MessageReceipt, sendMessage } from '../core/messages
 import { type AccountModel, accountModel, setAccountModel } from '../core/model-choice.ts'
 import { GUARDED_FAMILIES, type NetworkChange, type NetworkOverview, setNetwork } from '../core/network.ts'
 import { tildify } from '../core/paths.ts'
+import { quotaAsking } from '../core/quota-fetch.ts'
 import { takeoverLimits } from '../core/quota-levels.ts'
 import { type RemoteControlGroup, remoteControlTodo } from '../core/remote-control.ts'
 import { openRunBoard, withRuns } from '../core/run-link.ts'
@@ -342,12 +345,31 @@ export type PanelFamily = FamilyInfo & {
   aiTaskSafe?: true
   /** "Refresh" can ask the Host for its Quota (`fetchQuota`); without it old numbers wait for a session (spec §3.31). */
   quotaRefresh?: true
+  /** How often sideby asks this Host for Quota, in minutes: a number older than this says its age (ADR-0073). */
+  quotaEvery?: number
+  /**
+   * How a Limit Reset of its Subscription Accounts is spent (ADR-0072): `use` through the Host after a confirmation,
+   * `page` only on the vendor's page (`limitResetPage`). Absent when the Family offers neither.
+   */
+  limitReset?: 'use' | 'page'
+  /** The vendor's page where a Limit Reset is spent, when the Family names one. */
+  limitResetPage?: string
 }
 
 function keyFacts(
   def: FamilyDef,
   permissions: AiTaskPermissions,
-): Pick<PanelFamily, 'keyVar' | 'keyAlways' | 'tryCommand' | 'aiTaskSafe' | 'quotaRefresh'> {
+): Pick<
+  PanelFamily,
+  | 'keyVar'
+  | 'keyAlways'
+  | 'tryCommand'
+  | 'aiTaskSafe'
+  | 'quotaRefresh'
+  | 'quotaEvery'
+  | 'limitReset'
+  | 'limitResetPage'
+> {
   let keyVar: string | null = null
   try {
     keyVar = secretVarFor(def)
@@ -357,7 +379,13 @@ function keyFacts(
     ...(def.secretFileMeansApi === false ? { keyAlways: true } : {}),
     ...(def.probe ? { tryCommand: [def.bin, ...def.probe.args] } : {}),
     ...(def.aiTaskArgs && permissions === 'checked' ? { aiTaskSafe: true as const } : {}),
-    ...(def.fetchQuota ? { quotaRefresh: true as const } : {}),
+    ...(def.fetchQuota ? { quotaRefresh: true as const, quotaEvery: def.fetchQuota.everyMinutes } : {}),
+    ...(def.limitReset?.use
+      ? { limitReset: 'use' as const }
+      : def.limitReset?.vendorPage
+        ? { limitReset: 'page' as const }
+        : {}),
+    ...(def.limitReset?.vendorPage ? { limitResetPage: def.limitReset.vendorPage } : {}),
   }
 }
 
@@ -409,6 +437,11 @@ export interface PanelState {
   /** Config `ask.permissions` when it is `account` (ADR-0070): AI Tasks start with the Account's own arguments. */
   aiTaskPermissions?: 'account'
   accounts: PanelAccount[]
+  /**
+   * The Accounts whose Host is being asked for Quota right now, behind the kept answer on show (spec §3.26); the page
+   * reads the state again soon, so each row takes its new numbers as they land. Left out when none is.
+   */
+  quotaAsking?: string[]
   pluginErrors: { where: string; message: string }[]
   quotaSetups: { family: string; summary: string; plan: QuotaSetupPlan }[]
   /** Latest Doctor result per Account and per Family. */
@@ -1023,6 +1056,10 @@ async function buildState(
   // Reads of Accounts that are gone are dropped.
   for (const ref of opts.readings.keys()) if (!accounts.some((a) => a.ref === ref)) opts.readings.delete(ref)
   const aliases = aliasesByAccount(aliasRefs(rt.config.aliases), accounts)
+  // Asks in flight before the reads start: one that ends while they run may have left a row with the older numbers.
+  const askingOf = () =>
+    accounts.filter((a) => quotaAsking(rt.paths.stateDir, a.family, a.name)).map((a) => a.ref)
+  const askingBefore = askingOf()
   // Desktop Apps (spec §3.20): one process listing for every Account, run alongside the per-Account reads.
   const [states, appProfiles] = await Promise.all([
     withDesktopApps(
@@ -1032,6 +1069,11 @@ async function buildState(
     ),
     listAppProfiles(rt),
   ])
+  // A Same Login is asked through one of its Accounts, so every Account of it is waiting for that answer.
+  const askingNow = new Set([...askingBefore, ...askingOf()])
+  const asking = states
+    .filter((st) => askingNow.has(st.ref) || (st.sameLogin ?? []).some((r) => askingNow.has(r)))
+    .map((st) => st.ref)
   const list = states.map((st): PanelAccount => {
     const h = health.get(st.ref)
     const names = aliases.get(st.ref)
@@ -1109,6 +1151,7 @@ async function buildState(
     ...(upd ? { update: upd } : {}),
     ...(showBrowser ? { browser } : {}),
     display: rt.displayOrder(),
+    ...(asking.length ? { quotaAsking: asking } : {}),
     ...(rt.quotaChecks().length ? { quotaChecks: rt.quotaChecks() } : {}),
     ...(rt.config.panel && Object.keys(rt.config.panel).length ? { panel: rt.config.panel } : {}),
     ...(network ? { network } : {}),
@@ -2620,12 +2663,42 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return { display: await rt.setDisplayOrder(display) }
       },
     },
-    // Asks every Family that fetches Quota again now, and waits (spec §3.26); the page reloads its state after.
+    // Asks every Family that fetches Quota again now, and waits (spec §3.26); the page reloads its state after. With
+    // `account`, only that Account (its Same Login is asked once): the one ask after a jump to the vendor's page.
     '/api/quota/refresh': {
-      async run() {
+      async run(body) {
         const rt = await getRuntime()
-        await rt.refreshQuota()
+        const account = optString(body, 'account')
+        await rt.refreshQuota(account ? [await rt.resolve(account)] : undefined)
         return { ok: true }
+      },
+    },
+    // Using a Limit Reset (spec §3.40, ADR-0072). Without `confirm`: the plan, read from the Host now, and the
+    // operation to confirm; nothing is spent. With `confirm` and that `operationId`: one spend, which cannot be
+    // undone, then the Quota read again. Beside the write queue: the Runtime's own lock makes spends take turns, and
+    // a Host that is slow to answer must not hold other changes back.
+    '/api/quota/reset': {
+      queued: false,
+      async run(body) {
+        const ref = optString(body, 'account')
+        if (!ref) throw new HttpError(400, '"account" is required')
+        const rt = await getRuntime()
+        const account = await rt.resolve(ref)
+        if (!optBool(body, 'confirm')) return { plan: await rt.limitResetPlan(account) }
+        const operationId = optString(body, 'operationId')
+        if (!operationId) throw new HttpError(400, '"operationId" is required to confirm')
+        return { result: await rt.limitResetUse(account, operationId) }
+      },
+    },
+    // Opens the vendor's page where a Limit Reset is spent (Claude Code, ADR-0072), in the Account's Browser Profile
+    // when one is known, else the default browser. It starts a program, so a read-only Panel refuses it.
+    '/api/quota/reset/open': {
+      async run(body) {
+        const ref = optString(body, 'account')
+        if (!ref) throw new HttpError(400, '"account" is required')
+        const rt = await getRuntime()
+        const r = await openVendorPage(rt, await rt.resolve(ref))
+        return { ref: r.ref, url: r.url, ...(r.profile ? { profile: r.profile } : {}) }
       },
     },
     // A Family's Quota check on or off: config `quota.check.<family>` (spec §3.26).
@@ -2918,7 +2991,13 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         send(res, err.status, body, unread ? { connection: 'close' } : {})
         if (unread) req.resume()
       } else if (err instanceof UserError) {
-        send(res, 400, err.code ? { error: err.message, code: err.code } : { error: err.message })
+        // A Limit Reset that got no final answer names its operation, so the page retries that one (ADR-0072).
+        const operationId = err instanceof LimitResetError ? err.operationId : undefined
+        send(res, 400, {
+          error: err.message,
+          ...(err.code ? { code: err.code } : {}),
+          ...(operationId ? { operationId } : {}),
+        })
       } else {
         send(res, 500, { error: (err as Error)?.message || 'internal error' })
       }

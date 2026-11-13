@@ -381,6 +381,18 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
     summary: { en: 'Undo the Claude quota setup', zh: '撤销 Claude 额度设置，恢复原文件' },
   },
   {
+    id: 'quota.reset',
+    group: 'quota',
+    usage: 'sideby quota reset <account> [--yes] [--operation <id>] [--open]',
+    help: 'use a limit reset: shows the plan first, --yes uses one (cannot be undone); for Claude Code it names the page on claude.ai and --open opens it',
+    summary: {
+      en: 'Use a limit reset (shows the plan first; cannot be undone)',
+      zh: '使用一次重置（先给你看计划；用了不能撤销）',
+    },
+    example: 'sideby quota reset codex:main',
+    feature: 'action.limit-reset',
+  },
+  {
     id: 'quota.check',
     group: 'quota',
     usage: 'sideby quota check <family> on|off',

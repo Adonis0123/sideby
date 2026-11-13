@@ -3,7 +3,7 @@
 import { advisorPending } from '../core/advisor.ts'
 import { filterCommands } from '../core/cli-commands.ts'
 import { groupsToAccept } from '../core/inbound.ts'
-import { quotaIsStale } from '../core/quota-levels.ts'
+import { limitResetOffer, quotaAge, quotaIsStale, windowAge } from '../core/quota-levels.ts'
 import { remoteControlTodo } from '../core/remote-control.ts'
 import { catalogMatchLevel, catalogNorm, searchCatalog } from '../core/search-catalog.ts'
 import {
@@ -127,6 +127,9 @@ import { cn, esc } from './ui/lib/cn.ts'
 
 const LOGIC = [
   quotaIsStale,
+  windowAge,
+  quotaAge,
+  limitResetOffer,
   portalRefresh,
   openBridge,
   openBridged,
@@ -280,6 +283,7 @@ const MAIN = String.raw`
   const AUTO_MS = 20000
   const FAST_MS = 5000
   const PENDING_MS = 1500
+  const ASKING_MS = 2000
   const FAST_FOR_MS = 3 * 60000
   // After the layout follows a width into another band, how long the width must hold still before a later crossing
   // in the same gesture is applied (page-logic.ts, widthFollower).
@@ -293,7 +297,7 @@ const MAIN = String.raw`
     silent: false, lastTry: 0, pending: false, fastUntil: 0, fastFamily: null,
   }
   // View state that is not saved: the search text, the attention filter, the Health check filter.
-  const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, desktopRef: null, browserRef: null, appBusy: null, appRemove: null, copied: null, appNew: null, highlight: null, fade: true, loginRefs: new Map(), order: { families: [], units: {} }, drag: null, arrange: null }
+  const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, desktopRef: null, browserRef: null, appBusy: null, appRemove: null, copied: null, resetRef: null, appNew: null, highlight: null, fade: true, loginRefs: new Map(), order: { families: [], units: {} }, drag: null, arrange: null }
   const $ = (id) => document.getElementById(id)
 
   // ---------- preferences ----------
@@ -700,9 +704,11 @@ const MAIN = String.raw`
   // fetches the new token from api/session and sends that same request once more; the server refused it before
   // running it, so the retry cannot apply anything twice. A request that got no answer is never replayed.
   let token = BOOT.token
-  function failure(message, retryable, network, status, code) {
+  function failure(message, retryable, network, status, code, operationId) {
     const e = new Error(message)
     e.code = code || ''
+    // A Limit Reset that got no final answer names its operation, so "Check again" retries that one (ADR-0072).
+    e.operationId = operationId || ''
     e.retryable = retryable
     e.network = Boolean(network)
     e.status = status || 0
@@ -739,7 +745,7 @@ const MAIN = String.raw`
       const msg = (data && data.error) || 'request failed (' + res.status + ')'
       // 4xx messages are written for people (what is wrong, what to do); 5xx ones are internal, so they get a lead-in.
       if (res.status >= 500) throw failure(t('err.server', { msg }), true, false, res.status)
-      throw failure(msg.charAt(0).toUpperCase() + msg.slice(1), false, false, res.status, data && typeof data.code === 'string' ? data.code : '')
+      throw failure(msg.charAt(0).toUpperCase() + msg.slice(1), false, false, res.status, data && typeof data.code === 'string' ? data.code : '', data && typeof data.operationId === 'string' ? data.operationId : '')
     }
   }
 
@@ -1295,7 +1301,7 @@ const MAIN = String.raw`
     const items = [pinItem(a), ...hideItems(a),
       opens.length ? '-' : null, opens.length ? { header: t('menu.groupOpen') } : null, ...opens,
       '-', { header: t('menu.groupCopy') }, run, ...(fold ? [fold] : more),
-      '-', { header: t('menu.groupManage') }, signInItem, key, aliasItem(a), ...dirTools(a), likeItem(a),
+      '-', { header: t('menu.groupManage') }, resetItem(a), signInItem, key, aliasItem(a), ...dirTools(a), likeItem(a),
       ...(dirs.length ? ['-', { header: t('menu.groupOtherDirs') }, ...dirs.map((d) => d.item)] : [])]
     back.sub = items
     for (const d of dirs) d.up.sub = items
@@ -1613,12 +1619,16 @@ const MAIN = String.raw`
   }
   // A window's cell: percent and countdown on one line, the bar under them. The label shows where no column
   // header does (cards, narrow screens).
-  function meter(w, now, stale, observedAt, withLength) {
+  // age: this window's own read time and whether its number is old (windowAge, ADR-0073).
+  function meter(w, now, age, withLength) {
+    const stale = age.stale
+    const observedAt = age.observedAt
     const st = windowState(w, now, WARN, FAIL, LONG)
     const passed = passedWindow(w, observedAt, now)
     const left = prefs.quota === 'left'
     const shown = left ? 100 - st.pct : st.pct
-    const asOf = stale ? t('quota.asOf', { ago: ago(observedAt) }) : ''
+    // When and where this number was read is always in the hover text, old or not.
+    const asOf = [Number.isFinite(Date.parse(observedAt)) ? t('quota.readAt', { at: clock(observedAt), ago: ago(observedAt) }) : t('quota.readUnknown'), age.source ? t('quota.source', { source: age.source }) : ''].filter(Boolean).join(' · ')
     // The same words as the menu bar and the CLI (spec §3.31): a countdown under a day, then tomorrow, a weekday, a date.
     const reset = passed ? t('quota.resetShort') : t('quota.resetsIn', { d: resetWhen(w.resetsAt, now, lang) })
     // The wide list's column says only the model group, so the hover names which of its limits this is.
@@ -1666,15 +1676,27 @@ const MAIN = String.raw`
     const times = (S.state ? S.state.accounts : []).filter((x) => refs.includes(x.ref) && x.usage && x.usage.status === 'ok' && x.usage.lastActivityAt).map((x) => Date.parse(x.usage.lastActivityAt)).filter(Number.isFinite)
     return times.length ? new Date(Math.max(...times)).toISOString() : null
   }
+  // A note under the bars that was not there at the last render fades in once; the first paint draws all at rest.
+  const noteSeen = new Set()
+  function noteClass(key, cls, present) {
+    if (!present) { noteSeen.delete(key); return cls }
+    const fresh = !noteSeen.has(key) && S.firstAt && Date.now() - S.firstAt > 1000
+    noteSeen.add(key)
+    return cls + (fresh ? ' q-new' : '')
+  }
   function quotaBlock(a, now, cols) {
     // Still reading (a slow plugin or Host): say so where its numbers will appear; the page asks again soon.
     if (a.pending) return h('div', { class: 'quota' }, h('div', { class: 'q-note' }, spinner(), t('acct.reading', { host: famTitle(a) })))
     const q = a.quota
     if (!q) return h('div', { class: 'quota' }, h('div', { class: 'q-note' }, '—'))
     if (q.status !== 'ok') return h('div', { class: 'quota' }, quotaNote(a, q))
-    const stale = quotaIsStale(q, now, lastUseOf(a))
+    // Each window by its own read time (ADR-0073); the row says the oldest once, under the bars.
+    const lastUse = lastUseOf(a)
+    const every = family(a.family).quotaEvery
+    const age = quotaAge(q, now, lastUse, every)
+    const stale = age.stale
     // Over an hour old but unused here since: the numbers stand, and the hover text says what it cannot see.
-    const quiet = !stale && now - Date.parse(q.observedAt) > 3600_000
+    const quiet = !stale && age.quiet
     // Old numbers of a Host that cannot be asked (Claude Code) change only when a session runs in the account.
     const waits = stale && !q.fetchError && !family(a.family).quotaRefresh ? t('quota.staleSession') : null
     const wins = q.windows || []
@@ -1684,17 +1706,265 @@ const MAIN = String.raw`
     const via = q.fetched ? t('quota.fetchedFrom', { host: famTitle(a), ago: ago(q.observedAt) }) : null
     const failed = q.fetchError ? t('quota.lastCheckFailed', { why: q.fetchError }) : null
     const title = [from || via || (stale ? null : t('quota.dataFrom', { ago: ago(q.observedAt) })), quiet ? t('quota.quiet') : null, failed, waits].filter(Boolean).join('\n') || null
+    // The age next to the numbers only once they are older than the Family asks (or old); failed and undated at once.
+    const showAge = Boolean(age.showAge && wins.length)
+    const asOf = showAge
+      ? h('span', { class: noteClass(a.ref + ':asof', 'q-asof', true), title: failed || [t('quota.asOf', { ago: ago(age.observedAt) }), waits].filter(Boolean).join('\n') }, icon('clock'), q.fetchError ? t('quota.fetchFailed') + ' · ' : '', t('quota.staleShort', { ago: agoShort(now - Date.parse(age.observedAt)) }))
+      : null
+    if (!showAge) noteClass(a.ref + ':asof', '', false)
+    const resets = limitResetsNote(a, q)
+    const resetBtn = resetButton(a, q, now)
     // --qr: this row's own number of windows, so a narrow list can split the width between them alone (--qn is the
     // widest Family's, for the wide list's shared columns).
-    return h('div', { class: 'quota' + (stale ? ' is-stale' : ''), title, css: wins.length ? { '--qr': String(cols.length) } : null },
+    return h('div', { class: 'quota' + (stale ? ' is-stale' : '') + (ui.resetRef === a.ref ? ' is-resetting' : ''), title, css: wins.length ? { '--qr': String(cols.length) } : null },
       wins.length ? cols.map((c) => {
         // A model group with several limits (Antigravity's 5-hour and weekly) shows the one that binds first.
         const same = wins.filter((x) => winKey(x) === c)
         const w = bindingWindow(same, now, WARN, FAIL, LONG)
-        return w ? meter(w, now, stale, q.observedAt, same.length > 1) : noMeter(winTitle(c), winShort(c))
+        return w ? meter(w, now, windowAge(q, w, now, lastUse, every), same.length > 1) : noMeter(winTitle(c), winShort(c))
       }) : h('div', { class: 'q-note' }, t('quota.noWindows')),
-      // Old numbers keep their colours and say their age once, under the bars.
-      stale && wins.length ? h('div', { class: 'q-asof', title: failed || [t('quota.asOf', { ago: ago(q.observedAt) }), waits].filter(Boolean).join('\n') }, icon('clock'), q.fetchError ? t('quota.fetchFailed') + ' · ' : '', t('quota.staleShort', { ago: agoShort(now - Date.parse(q.observedAt)) })) : null)
+      // Old numbers keep their colours and say their age once, under the bars, next to the Limit Resets the account holds.
+      asOf || resets || resetBtn ? h('div', { class: 'q-foot' }, asOf, resets, resetBtn) : null)
+  }
+  // The Limit Resets an account holds (ADR-0072), where its Host tells: a quiet count under the bars, with when it
+  // was read and when the next one expires in the hover text. A Same Login is one row, so it shows once.
+  function limitResetsNote(a, q) {
+    const r = q.limitResets
+    if (!r || !(r.available > 0)) { noteClass(a.ref + ':resets', '', false); return null }
+    const tipText = [t('reset.tip', { host: famTitle(a), ago: ago(r.observedAt) }), r.nextExpiresAt ? t('reset.expires', { at: clock(r.nextExpiresAt) }) : t('reset.noExpiry', { host: famTitle(a) })].join('\n')
+    return h('span', { class: noteClass(a.ref + ':resets', 'q-resets', true), title: tipText }, icon('refresh'), tn('reset.count', r.available))
+  }
+  // ---------- using a Limit Reset (spec §3.40, ADR-0072) ----------
+  // Codex spends one through its own CLI, after a dialog that shows the numbers read just now; Claude Code can only
+  // be sent to the vendor's page. A button shows on the row when it matters (limitResetOffer); otherwise the action is
+  // in the row's menu and the command palette. Nothing here spends by itself.
+  function resetKind(a) { return a.kind === 'api' || BOOT.readOnly ? null : family(a.family).limitReset || null }
+  function resetSite(a) { return String(family(a.family).limitResetPage || '').replace(/^https:\/\//, '').split('/')[0] }
+  function resetWindowName(w) { return (w.name ? w.name + ' · ' : '') + winTitle(w.label) }
+  // What the link is for: the tight windows, who the account is, and what sideby cannot see.
+  function resetPageHint(a, q, offer) {
+    const tight = offer ? offer.tight.map((i) => resetWindowName(q.windows[i]) + ' ' + Math.round(q.windows[i].usedPercent) + '%') : []
+    const who = a.identity && a.identity.email ? emailText(a.identity.email) : a.ref
+    return [tight.length ? t('reset.page.tight', { list: tight.join(', ') }) : '', t('reset.page.who', { who, site: resetSite(a) }), t('reset.page.blind', { host: famTitle(a) })].filter(Boolean).join('\n')
+  }
+  function resetButton(a, q, now) {
+    const kind = resetKind(a)
+    const offer = kind ? limitResetOffer(q, kind, now, { short: WARN, long: LONG.warn }) : null
+    if (!offer) { noteClass(a.ref + ':resetbtn', '', false); return null }
+    const busy = ui.resetRef === a.ref
+    const cls = noteClass(a.ref + ':resetbtn', 'btn btn-sm q-reset-btn', true)
+    if (kind === 'page')
+      return h('button', { class: cls, type: 'button', disabled: busy, 'aria-busy': busy ? 'true' : null, title: resetPageHint(a, q, offer), onclick: (e) => { e.stopPropagation(); openResetPage(a) } }, busy ? spinner() : icon('globe'), t('reset.usePage', { site: resetSite(a) }))
+    const why = [offer.tight.length ? t('reset.page.tight', { list: offer.tight.map((i) => resetWindowName(q.windows[i]) + ' ' + Math.round(q.windows[i].usedPercent) + '%').join(', ') }) : '', offer.expiring && q.limitResets.nextExpiresAt ? t('reset.expires', { at: clock(q.limitResets.nextExpiresAt) }) : '', t('reset.useHint')].filter(Boolean).join('\n')
+    return h('button', { class: cls, type: 'button', disabled: busy, title: why, onclick: (e) => { e.stopPropagation(); openReset(a) } }, t('reset.use'))
+  }
+  // The same action in the row's menu, also when the row shows no button. A Host that says an account holds none has
+  // no item; one that cannot tell (Claude Code) always has the link.
+  function resetItem(a) {
+    const kind = resetKind(a)
+    if (!kind) return null
+    const q = a.quota && a.quota.status === 'ok' ? a.quota : null
+    if (kind === 'page') return { icon: 'globe', label: t('reset.usePage', { site: resetSite(a) }), hint: resetSite(a), disabled: ui.resetRef === a.ref, run: () => openResetPage(a) }
+    if (q && q.limitResets && !(q.limitResets.available > 0)) return null
+    return { icon: 'refresh', label: t('reset.useMenu'), hint: q && q.limitResets ? tn('reset.count', q.limitResets.available) : '', run: () => openReset(a) }
+  }
+  // After the jump to the vendor's page: when the user is back on this page, that account's quota is asked once.
+  const resetJump = { ref: null, away: false }
+  async function openResetPage(a) {
+    if (ui.resetRef) return
+    ui.resetRef = a.ref
+    renderAccounts()
+    try {
+      const r = await api('/api/quota/reset/open', { account: a.ref })
+      resetJump.ref = a.ref
+      resetJump.away = document.visibilityState !== 'visible' || !document.hasFocus()
+      const who = a.identity && a.identity.email ? emailText(a.identity.email) : a.ref
+      toast(t(r.profile ? 'reset.page.openedIn' : 'reset.page.opened', { site: resetSite(a), name: r.profile ? profileLabel(r.profile) : '', who }), { kind: 'info', duration: 9000 })
+    } catch (e) { toast(t('reset.page.failed', { url: family(a.family).limitResetPage || '', msg: e.message }), { kind: 'fail' }) }
+    ui.resetRef = null
+    renderAccounts()
+  }
+  function resetLeft() { if (resetJump.ref) resetJump.away = true }
+  async function resetReturned() {
+    if (!resetJump.ref || !resetJump.away || document.visibilityState !== 'visible') return
+    const ref = resetJump.ref
+    resetJump.ref = null
+    resetJump.away = false
+    ui.resetRef = ref
+    renderAccounts()
+    try { await api('/api/quota/refresh', { account: ref }) } catch {}
+    ui.resetRef = null
+    await load({ silent: true })
+    renderAccounts()
+  }
+  // The accounts the palette's "Use a limit reset" offers: one row per login, those a Host says hold none left out.
+  function resetCandidates() {
+    if (!S.state) return []
+    return S.state.accounts.filter((a) => {
+      const kind = resetKind(a)
+      if (!kind || a.login === 'logged-out' || (loginLead(a) && loginLead(a) !== a.ref)) return false
+      const q = a.quota && a.quota.status === 'ok' ? a.quota : null
+      return kind === 'page' || !(q && q.limitResets && !(q.limitResets.available > 0))
+    })
+  }
+  let rs = null
+  // "#reset=<account>": where the Menu Bar Item sends the user for a Codex account. It only opens the confirmation;
+  // the address is cleaned at once, so a reload does not open it again.
+  function resetFromHash() {
+    const m = /^#reset=(.+)$/.exec(location.hash)
+    if (!m || !S.state) return
+    let ref = ''
+    try { ref = decodeURIComponent(m[1]) } catch {}
+    try { history.replaceState(null, '', location.pathname + location.search) } catch {}
+    const a = S.state.accounts.find((x) => x.ref === ref)
+    if (!a || (dlg.el && dlg.el.open)) return
+    const lead = loginLead(a)
+    const head = (lead && S.state.accounts.find((x) => x.ref === lead)) || a
+    // Only the confirmation opens from an address: a link never starts a browser or uses anything by itself.
+    if (resetKind(head) === 'use') openReset(head)
+  }
+  function openResetPick() {
+    const list = resetCandidates()
+    if (list.length === 1 && resetKind(list[0]) === 'use') { openReset(list[0]); return }
+    rs = { step: 'pick', ref: null, plan: null, result: null, error: null, operationId: '' }
+    showDialog('reset')
+    dlg.onClose = () => { rs = null; renderAccounts() }
+    renderReset()
+  }
+  function openReset(a) {
+    closeMenu()
+    rs = { step: 'loading', ref: a.ref, plan: null, result: null, error: null, operationId: '' }
+    showDialog('reset')
+    dlg.onClose = () => { rs = null; renderAccounts() }
+    renderReset()
+    resetPlan()
+  }
+  // The plan: the count and the quota read from the Host now, never the numbers the row happened to show.
+  async function resetPlan() {
+    const mine = rs
+    try {
+      const r = await api('/api/quota/reset', { account: mine.ref })
+      if (rs !== mine) return
+      rs.plan = r.plan
+      rs.operationId = r.plan.operationId || ''
+      rs.step = 'plan'
+    } catch (e) {
+      if (rs !== mine) return
+      rs.error = e
+      rs.step = 'error'
+    }
+    renderReset()
+    load({ silent: true })
+  }
+  async function resetConfirm() {
+    if (!rs || !rs.operationId || dlg.busy) return
+    const mine = rs
+    rs.step = 'busy'
+    rs.error = null
+    dlg.busy = true
+    ui.resetRef = rs.ref
+    renderReset()
+    try {
+      const r = await api('/api/quota/reset', { account: mine.ref, operationId: mine.operationId, confirm: true })
+      rs.result = r.result
+      rs.step = r.result.outcome === 'reset' || r.result.outcome === 'already-done' ? 'done' : 'nothing'
+    } catch (e) {
+      rs.error = e
+      if (e.operationId) rs.operationId = e.operationId
+      // A confirmation that got no answer the page can read (the connection dropped, a server error, a reply that is
+      // not a result) may have been carried out: it is as unknown as a Host that did not answer, and "Check again"
+      // asks about that same operation. Only an answer that says so (4xx, an expired page) is a plain error.
+      rs.lost = e.code !== 'outcome-unknown' && Boolean(e.network || e.status >= 500 || e.retryable === undefined)
+      rs.step = e.code === 'outcome-unknown' || rs.lost ? 'unknown' : 'error'
+    }
+    dlg.busy = false
+    ui.resetRef = null
+    if (rs === mine && dlg.kind === 'reset') renderReset()
+    await load({ silent: true })
+    if (rs === mine && dlg.kind === 'reset') renderReset()
+  }
+  // One window in the dialog: its name, used percent, own reset time and bar. The same element stays through the
+  // steps, so the bar eases from the old number to the real one the Host reports afterwards.
+  function resetWindowRow(w, now, busy) {
+    const st = windowState(w, now, WARN, FAIL, LONG)
+    const key = (w.name || '') + '|' + w.label
+    return h('div', { class: 'rs-win lvl-' + st.level + (busy ? ' is-busy' : ''), 'data-key': 'rs-' + key, 'data-patch': '' },
+      h('span', { class: 'rs-win-name' }, resetWindowName(w)),
+      h('span', { class: 'rs-win-pct' }, st.pct + '%', h('span', { class: 'm-unit' }, ' ' + t('quota.unitUsed'))),
+      h('span', { class: 'rs-win-reset' }, st.passed ? t('quota.resetShort') : t('quota.resetsIn', { d: resetWhen(w.resetsAt, now, lang) })),
+      h('div', { class: 'bar', 'data-patch': '', role: 'meter', 'aria-label': resetWindowName(w), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(st.pct) }, h('span', { css: { width: st.pct + '%' } })))
+  }
+  function renderReset() {
+    if (!rs || dlg.kind !== 'reset') return
+    const now = Date.now()
+    const close = h('button', { class: 'btn', type: 'button', 'data-key': 'rs-close', disabled: dlg.busy, onclick: () => dlg.el.close() }, t(rs.step === 'done' || rs.step === 'nothing' ? 'btn.done' : rs.step === 'pick' || rs.step === 'error' || rs.step === 'unknown' ? 'btn.close' : 'btn.cancel'))
+    const frame = (fam, body, foot) => [
+      h('div', { class: 'dlg-head', 'data-patch': '' },
+        h('h2', { id: 'dlg-title', class: 'title-logo', 'data-patch': '' }, fam ? badge(fam, 'sm') : null, t('reset.title')),
+        h('button', { class: 'icon-btn', type: 'button', 'aria-label': t('btn.close'), disabled: dlg.busy, onclick: () => dlg.el.close() }, icon('x'))),
+      h('div', { class: 'dlg-body rs-body', 'data-patch': '' }, body),
+      h('div', { class: 'dlg-foot', 'data-patch': '' }, foot),
+    ]
+    if (rs.step === 'pick') {
+      const list = resetCandidates()
+      const body = [h('p', { class: 'muted small', 'data-key': 'rs-intro' }, t('reset.pick.intro'))]
+      if (!list.length) body.push(h('p', { class: 'note', 'data-key': 'rs-none' }, t('reset.pick.none')))
+      else body.push(h('ul', { class: 'rs-pick', 'data-key': 'rs-pick' }, list.map((a) => {
+        const q = a.quota && a.quota.status === 'ok' ? a.quota : null
+        const page = resetKind(a) === 'page'
+        const peers = (a.sameLogin || []).map(refName)
+        return h('li', null, h('button', { class: 'rs-pick-btn', type: 'button', onclick: () => { if (page) { dlg.el.close(); openResetPage(a) } else openReset(a) } },
+          badge(a.family, 'sm'),
+          h('span', { class: 'rs-pick-main' }, h('b', null, a.ref), peers.length ? h('span', { class: 'muted small' }, ' = ' + peers.join(', ')) : null,
+            h('span', { class: 'rs-pick-sub' }, page ? t('reset.usePage', { site: resetSite(a) }) : q && q.limitResets ? tn('reset.count', q.limitResets.available) : t('reset.pick.unknown'))),
+          icon(page ? 'globe' : 'chevron', 'rs-pick-go')))
+      })))
+      patch(dlg.el, frame(null, body, [close]))
+      return
+    }
+    const a = S.state && S.state.accounts.find((x) => x.ref === rs.ref)
+    if (!a) { dlg.el.close(); return }
+    const plan = rs.plan
+    // While the plan is being read, the row's kept numbers hold the place of the fresh ones, so the dialog opens at
+    // the size it will have.
+    const shown = rs.result && rs.result.quota && rs.result.quota.status === 'ok' ? rs.result.quota : plan && plan.quota.status === 'ok' ? plan.quota : a.quota && a.quota.status === 'ok' ? a.quota : null
+    const stock = rs.result && rs.result.quota && rs.result.quota.status === 'ok' ? rs.result.quota.limitResets : plan ? plan.limitResets : shown ? shown.limitResets : null
+    const peers = plan ? plan.sameLogin : a.sameLogin || []
+    const who = a.identity && a.identity.email ? emailText(a.identity.email) : ''
+    const body = []
+    body.push(h('div', { class: 'rs-acct', 'data-key': 'rs-acct', 'data-patch': '' },
+      h('b', { class: 'mono' }, a.ref), who ? h('span', { class: 'muted' }, ' · ' + who) : null,
+      peers.length ? h('div', { class: 'rs-peers' }, t('reset.peers', { names: peers.join(', ') })) : null))
+    const wins = shown ? shown.windows.filter((w) => !w.name) : []
+    const reading = rs.step === 'loading'
+    body.push(h('div', { class: 'rs-wins' + (reading ? ' is-reading' : ''), 'data-key': 'rs-wins', 'data-patch': '' },
+      wins.length ? wins.map((w) => resetWindowRow(w, now, rs.step === 'busy')) : h('p', { class: 'muted small' }, t('quota.noWindows'))))
+    const after = plan && plan.expectedAfter !== undefined ? plan.expectedAfter : null
+    const stockLine = reading ? [spinner(), t('reset.reading', { host: famTitle(a) })]
+      : rs.step === 'done' || rs.step === 'nothing'
+        ? [stock ? tn('reset.left', stock.available) : t('reset.stockUnknown')]
+        : stock
+          ? [tn('reset.count', stock.available), after !== null ? ' → ' + t('reset.after', { n: after }) : '', ' · ', stock.nextExpiresAt ? t('reset.expires', { at: clock(stock.nextExpiresAt) }) : t('reset.expiryUnknown')]
+          : [t('reset.stockUnknown')]
+    body.push(h('div', { class: 'rs-stock', 'data-key': 'rs-stock', 'data-patch': '' }, icon('refresh'), h('span', { 'data-patch': '' }, stockLine)))
+    // One message slot, the same height through the steps: what confirming does, then what happened.
+    let msg
+    if (rs.step === 'busy') msg = h('p', { class: 'note rs-msg', role: 'status' }, spinner(), t('reset.busy', { host: famTitle(a) }))
+    else if (rs.step === 'done') msg = h('p', { class: 'note note-ok rs-msg', role: 'status' }, t(rs.result.outcome === 'already-done' ? 'reset.done.already' : 'reset.done', { ref: a.ref }), rs.result.quotaPending ? ' ' + t('reset.done.pending') : ' ' + t('reset.done.real', { host: famTitle(a) }))
+    else if (rs.step === 'nothing') msg = h('p', { class: 'note rs-msg', role: 'status' }, t(rs.result.outcome === 'none-left' ? 'reset.nothing.none' : 'reset.nothing.window', { ref: a.ref }))
+    else if (rs.step === 'unknown') msg = h('p', { class: 'note note-warn rs-msg', role: 'alert' }, t(rs.lost ? 'reset.noAnswer' : 'reset.unknown', { host: famTitle(a) }))
+    else if (rs.step === 'error') msg = h('p', { class: 'note note-fail rs-msg', role: 'alert' }, rs.error.message)
+    else if (plan && !plan.canUse) msg = h('p', { class: 'note note-warn rs-msg' }, plan.blocked ? plan.blocked.charAt(0).toUpperCase() + plan.blocked.slice(1) + '.' : t('reset.blocked'))
+    else msg = h('p', { class: 'note note-warn rs-msg' }, t(plan && plan.unresolved ? 'reset.confirm.unresolved' : peers.length ? 'reset.confirm.warnAll' : 'reset.confirm.warn', { host: famTitle(a), ref: a.ref }))
+    body.push(h('div', { class: 'rs-slot', 'data-key': 'rs-slot', 'data-patch': '' }, msg))
+    const foot = [close]
+    if (rs.step === 'loading' || rs.step === 'plan' || rs.step === 'busy') {
+      const can = rs.step === 'plan' && plan && plan.canUse && rs.operationId
+      foot.push(h('button', { class: 'btn btn-primary', type: 'button', 'data-key': 'rs-go', disabled: !can, 'aria-busy': rs.step === 'busy' ? 'true' : null, onclick: resetConfirm }, rs.step === 'busy' ? spinner() : null, t(plan && plan.unresolved ? 'reset.confirm.check' : 'reset.confirm.go')))
+    } else if ((rs.step === 'unknown' || (rs.step === 'error' && rs.error.code === 'outcome-not-saved')) && rs.operationId) {
+      foot.push(h('button', { class: 'btn btn-primary', type: 'button', 'data-key': 'rs-go', onclick: resetConfirm }, t('reset.confirm.check')))
+    }
+    patch(dlg.el, frame(a.family, body, foot))
   }
   function usageBlock(a) {
     const u = a.usage
@@ -2053,7 +2323,7 @@ const MAIN = String.raw`
   }
   // What a row or card shows depends on more than the account (health, view preferences, language); the
   // fingerprint covers what its click handlers use.
-  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref, ui.browserRef === a.ref, ui.copied === a.ref, browserFor(a), prefs.hideEmail, isOpen(a), loginLead(a), isPinned(a), isHidden(a), famHidden(a.family)]) }
+  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref, ui.browserRef === a.ref, ui.resetRef === a.ref, ui.copied === a.ref, browserFor(a), prefs.hideEmail, isOpen(a), loginLead(a), isPinned(a), isHidden(a), famHidden(a.family)]) }
   // Whether the row sits in a login group (spec §3.21): its first row then shows the quota for all of them.
   function inLogin(a) { return ui.loginRefs.has(a.ref) }
   // The group's first row, which shows the quota for all of them.
@@ -3548,6 +3818,7 @@ const MAIN = String.raw`
     setKids(box, kids)
   }
   window.addEventListener('hashchange', () => {
+    if (/^#reset=/.test(location.hash)) { resetFromHash(); return }
     navSeq++
     curPage = pageFromHash()
     if (curPage === 'sessions') { const m = location.hash === '#live' ? 'live' : 'history'; if (m !== hs.mode) { hs.mode = m; sp.drawn = '' } }
@@ -6950,6 +7221,7 @@ const MAIN = String.raw`
     inbound: { run: openInbound, ok: () => Boolean(S.state) },
     'unattended-on': { run: () => uaGo('on'), ok: () => Boolean(uaStatusNow()), nav: true },
     'unattended-add-slot': { run: () => uaGo('add'), ok: () => Boolean(uaStatusNow()), nav: true },
+    'limit-reset': { run: openResetPick, ok: () => resetCandidates().length > 0 },
   }
   function palHealth() {
     setPage('accounts')
@@ -7547,6 +7819,7 @@ const MAIN = String.raw`
     else if (dlg.kind === 'model' && md) { md.form = null; renderModel() }
     else if (dlg.kind === 'alias' && al) renderAlias()
     else if (dlg.kind === 'browser') renderBrowser()
+    else if (dlg.kind === 'reset' && rs) renderReset()
     else if (dlg.kind === 'update' && up) renderUpdate()
     else if (dlg.kind === 'rc') renderRc()
     else if (dlg.kind === 'advisor') renderAdvisor()
@@ -7571,7 +7844,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.expired', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.advisor', 'ai.ask.network', 'ai.ask.unattended', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.commands', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.reset', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.expired', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.advisor', 'ai.ask.network', 'ai.ask.unattended', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.commands', 'ai.ask.tool']
   // Network Guard (spec §3.35): one dialog with the switch, the allowed countries and the newest result per address.
   // Countries are never ticked for the user, the current one included: a wrong network would allow itself.
   const NET_COMMON = ['US', 'JP', 'SG', 'GB', 'DE', 'FR', 'NL', 'CA', 'AU', 'KR', 'TW', 'HK']
@@ -8912,7 +9185,7 @@ const MAIN = String.raw`
     try { state = await api('/api/state') } catch (e) { error = e }
     if (seq === loadSeq) {
       if (state) {
-        if (!S.state) ui.fade = true
+        if (!S.state) { ui.fade = true; S.firstAt = Date.now() }
         S.state = state; S.loadError = null; S.loadedAt = Date.now()
         // The server now runs another build (sideby was reinstalled and restarted): this page's script is old.
         if (state.build && BOOT.build && state.build !== BOOT.build && !S.newBuild) {
@@ -8935,6 +9208,7 @@ const MAIN = String.raw`
       else toast(t('toast.refreshFailed', { msg: error.message }), { kind: 'fail' })
     }
     if (S.state && opts.check) runCheck()
+    resetFromHash()
     reloadForNewBuild()
   }
   // Reloads into the new build once the viewer is not in the middle of something (a dialog, a form, a selection).
@@ -8959,11 +9233,18 @@ const MAIN = String.raw`
     const pending = S.state.accounts.some((a) => a.pending)
     if (!pending) S.pendingSince = 0
     else if (!S.pendingSince) S.pendingSince = now
-    const every = pending && now - S.pendingSince < 30_000 ? PENDING_MS : now < S.fastUntil ? FAST_MS : AUTO_MS
+    // A Host being asked for its Quota behind the kept answer (spec §3.26): its row takes the new numbers as soon as
+    // they land, without waiting for the next round. For half a minute, as above: an ask ends after 20 s.
+    const asking = (S.state.quotaAsking || []).length > 0
+    if (!asking) S.askingSince = 0
+    else if (!S.askingSince) S.askingSince = now
+    const every = pending && now - S.pendingSince < 30_000 ? PENDING_MS : asking && now - S.askingSince < 30_000 ? ASKING_MS : now < S.fastUntil ? FAST_MS : AUTO_MS
     if (!S.loading && !conn.lost && !S.fixing && !S.checking && !dlg.busy && now - S.lastTry >= every) load({ silent: true })
   }
   // Coming back to the page refreshes at once.
   function wake() {
+    // Back from the vendor's page a Limit Reset is used on: that account's quota is asked once (ADR-0072).
+    if (resetJump.ref && resetJump.away) { resetReturned(); return }
     if (document.visibilityState !== 'visible' || !S.state || S.loading || conn.lost) return
     if (Date.now() - S.lastTry > 3000) load({ silent: true })
   }
@@ -9417,7 +9698,8 @@ const MAIN = String.raw`
   // The sessions too, so the Sessions page opens with its rows already there.
   loadSessions()
   setInterval(tick, 1000)
-  document.addEventListener('visibilitychange', wake)
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') resetLeft(); wake() })
+  window.addEventListener('blur', resetLeft)
   window.addEventListener('focus', wake)
   // A Portal that changed something the Panel shows says so (ADR-0006): read the state now instead of at the next
   // round, and the Unattended page its list too, so the Portal's switch and this page never disagree for long.

@@ -325,7 +325,11 @@
                 },
                 "stale": {
                   "type": "boolean",
-                  "description": "The quota is old, undated, or its last query failed."
+                  "description": "The quota is old, undated, or its last query failed; true when any window of the row is."
+                },
+                "barsStale": {
+                  "type": "boolean",
+                  "description": "Whether the account's own bars are old, when that differs from `stale` (a model group under them was read at another time); left out, `stale` stands for them."
                 },
                 "tip": {
                   "type": "string",
@@ -583,6 +587,10 @@
                           },
                           "tip": {
                             "type": "string"
+                          },
+                          "stale": {
+                            "type": "boolean",
+                            "description": "This group's numbers are old by their own read time; left out, the row's `stale` stands for it."
                           }
                         }
                       }
@@ -618,6 +626,32 @@
                 "note": {
                   "type": "string",
                   "description": "A no-quota explanation, or an old-reading warning beside the bars."
+                },
+                "limitResets": {
+                  "type": "string",
+                  "description": "The Limit Resets the account holds, in words (`1 reset available`); left out for none or when the Host cannot tell."
+                },
+                "useReset": {
+                  "type": "object",
+                  "required": [
+                    "title",
+                    "tip"
+                  ],
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "description": "The words of the line, such as `Use a reset…`."
+                    },
+                    "tip": {
+                      "type": "string",
+                      "description": "Its hover text: which page a click opens."
+                    }
+                  },
+                  "description": "A line under the account that leads to using a Limit Reset; a click runs `sideby menubar reset <account>`, which opens the Panel on that account's confirmation or the vendor's page and never uses one. Left out when nothing is offered."
+                },
+                "age": {
+                  "type": "string",
+                  "description": "How old the numbers are, in words (`read 25m ago`), once older than the Family's check interval or old; left out while they are current."
                 }
               }
             },
@@ -703,7 +737,11 @@
                         },
                         "stale": {
                           "type": "boolean",
-                          "description": "The quota is old, undated, or its last query failed."
+                          "description": "The quota is old, undated, or its last query failed; true when any window of the row is."
+                        },
+                        "barsStale": {
+                          "type": "boolean",
+                          "description": "Whether the account's own bars are old, when that differs from `stale` (a model group under them was read at another time); left out, `stale` stands for them."
                         },
                         "tip": {
                           "type": "string",
@@ -961,6 +999,10 @@
                                   },
                                   "tip": {
                                     "type": "string"
+                                  },
+                                  "stale": {
+                                    "type": "boolean",
+                                    "description": "This group's numbers are old by their own read time; left out, the row's `stale` stands for it."
                                   }
                                 }
                               }
@@ -996,6 +1038,32 @@
                         "note": {
                           "type": "string",
                           "description": "A no-quota explanation, or an old-reading warning beside the bars."
+                        },
+                        "limitResets": {
+                          "type": "string",
+                          "description": "The Limit Resets the account holds, in words (`1 reset available`); left out for none or when the Host cannot tell."
+                        },
+                        "useReset": {
+                          "type": "object",
+                          "required": [
+                            "title",
+                            "tip"
+                          ],
+                          "properties": {
+                            "title": {
+                              "type": "string",
+                              "description": "The words of the line, such as `Use a reset…`."
+                            },
+                            "tip": {
+                              "type": "string",
+                              "description": "Its hover text: which page a click opens."
+                            }
+                          },
+                          "description": "A line under the account that leads to using a Limit Reset; a click runs `sideby menubar reset <account>`, which opens the Panel on that account's confirmation or the vendor's page and never uses one. Left out when nothing is offered."
+                        },
+                        "age": {
+                          "type": "string",
+                          "description": "How old the numbers are, in words (`read 25m ago`), once older than the Family's check interval or old; left out while they are current."
                         }
                       }
                     }

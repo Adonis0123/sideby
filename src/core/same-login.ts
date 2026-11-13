@@ -37,6 +37,22 @@ export function isSameLogin(a: LoginMember, b: LoginMember): boolean {
   return norm(a.identity?.org) === norm(b.identity?.org)
 }
 
+/**
+ * Everything two Accounts must have equal to be the same login, as one string: the Family, the email, the
+ * organization and, in a Family of `LOGIN_KEY_FAMILIES`, the Login Key. Undefined when the login cannot be told: not
+ * a subscription, no email, or no Login Key where one is needed. Any Family with an Identity has one, also one whose
+ * Accounts never group. Only for comparing inside the Runtime: it holds the Login Key and the Identity, so it is
+ * never put into an output, an error or a file as it is (a Limit Reset record keeps a salted digest of it, ADR-0072).
+ */
+export function loginComparisonKey(m: Omit<LoginMember, 'ref'>): string | undefined {
+  if (m.kind !== 'subscription') return undefined
+  const email = norm(m.identity?.email)
+  if (!email) return undefined
+  const keyed = LOGIN_KEY_FAMILIES.has(m.family)
+  if (keyed && !m.loginKey) return undefined
+  return JSON.stringify([m.family, email, norm(m.identity?.org) ?? '', keyed ? m.loginKey : ''])
+}
+
 /** Ref → the other refs of its Same Login, in the order given; Accounts without one are left out. */
 export function sameLoginGroups(members: readonly LoginMember[]): Map<string, string[]> {
   const out = new Map<string, string[]>()
@@ -46,6 +62,9 @@ export function sameLoginGroups(members: readonly LoginMember[]): Map<string, st
   }
   return out
 }
+
+/** How much older than the reading shown a count of Limit Resets from another reading of the login may be. */
+const RESETS_CARRY_MS = 60 * 60_000
 
 /**
  * The Quota an Account of a Same Login shows: the freshest `ok` reading of the group (its own wins a tie), marked
@@ -68,7 +87,21 @@ export function sharedQuota(
     const rank = localFallbackOnly && q.fetched ? 1 : 0
     if (!best || rank > best.rank || (rank === best.rank && t > best.t)) best = { ref: r, q, t, rank }
   }
-  if (!best || best.ref === ref) return own
+  if (!best) return own
+  // The count of Limit Resets belongs to the login. A reading that does not tell it (kept by a sideby from before
+  // the count was read, which may still run in an open session) takes the newest count another reading of the login
+  // tells, while that count was read within the hour; it carries its own read time.
+  let resets = best.q.limitResets
+  if (!resets)
+    for (const r of [ref, ...peers]) {
+      const q = readings.get(r)
+      const c = q?.status === 'ok' ? q.limitResets : undefined
+      const at = Date.parse(c?.observedAt ?? '')
+      if (!c || !(best.t - at <= RESETS_CARRY_MS)) continue
+      if (!resets || at > Date.parse(resets.observedAt)) resets = c
+    }
+  const carried = resets && !best.q.limitResets ? { limitResets: resets } : {}
+  if (best.ref === ref) return { ...own, ...carried }
   const { from: _from, ...reading } = best.q
-  return { ...reading, from: best.ref }
+  return { ...reading, ...carried, from: best.ref }
 }

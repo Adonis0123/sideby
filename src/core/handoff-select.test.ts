@@ -570,4 +570,32 @@ describe('selectNext and an Expired Login (ADR-0071)', () => {
     assert.equal(r.kind, 'none')
     assert.match(r.kind === 'none' ? r.reason : '', /expired.*sideby login claude:002/)
   })
+
+  it('takes an Account left for a full window back after a confirmed Limit Reset, only once its Quota shows room', () => {
+    // ADR-0072, amending ADR-0060: the window has not reset by itself, so without a spend it stays out.
+    const s = settings({ auto: true, sameFamily: true })
+    const hop = { ref: 'claude:002', window: { resetsAt: inMinutes(180) }, startedAt: inMinutes(-60) }
+    const base = { origin, aliases: {}, settings: s, now: NOW }
+    const room = [acct('claude:002', { quota: quota(4, 180) })]
+    assert.equal(selectNext({ ...base, candidates: room, used: [hop] }).kind, 'none')
+    assert.deepEqual(
+      selectNext({ ...base, candidates: room, used: [{ ...hop, resetUsed: true }] }),
+      pick('claude:002'),
+    )
+    // The read after the spend still shows it over the Takeover Limit (the reset restored another window): out.
+    const full = [acct('claude:002', { quota: quota(97, 180) })]
+    assert.equal(selectNext({ ...base, candidates: full, used: [{ ...hop, resetUsed: true }] }).kind, 'none')
+    // No Quota data is a guess, not room.
+    const blind = [acct('claude:002', { quota: { status: 'unavailable', reason: 'no-session' } })]
+    assert.equal(selectNext({ ...base, candidates: blind, used: [{ ...hop, resetUsed: true }] }).kind, 'none')
+    // The origin never comes back to itself, spend or not.
+    assert.equal(
+      selectNext({
+        ...base,
+        candidates: [],
+        used: [{ ref: origin.ref, window: { resetsAt: inMinutes(180) }, resetUsed: true }],
+      }).kind,
+      'none',
+    )
+  })
 })

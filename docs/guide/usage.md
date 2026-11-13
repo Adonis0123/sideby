@@ -157,6 +157,50 @@ sideby asks the official Codex CLI for current quota every 15 minutes, without s
 
 Before the first successful query, local session records are a fallback. Once a query succeeds, newer session events cannot overwrite it with cached quota. If a query fails, the last reading remains with its observation time and the reason; update Codex or sign in as prompted. This was verified with Codex CLI 0.163.0.
 
+### Limit resets
+
+OpenAI sometimes gives a subscription a **limit reset**: a one-time credit that restores quota before a window resets by itself. Codex tells how many an account holds in the same answer as its quota, so sideby shows the count where the quota is: **1 reset available** under the account's bars in the panel (hover it for when the next one expires, when Codex says), at the end of the account's line in the menu bar, and in `sideby quota` (`limitResets` with `available`, `observedAt` and `nextExpiresAt` in `--json`). Accounts signed in as the same login share one count, shown once. Claude Code and the other tools do not tell the count, so nothing is shown for them, which does not mean they hold none. Read from the protocol of Codex CLI 0.167.2 on 2026-11-12.
+
+### Use a limit reset
+
+Using a limit reset cannot be undone, so sideby never uses one by itself: not in Auto Handoff, not in `sideby next`, not in Unattended Mode, not from the menu bar. You confirm each one.
+
+**Codex.** Click **Use a reset** on the account's row in the panel, or run:
+
+```sh
+sideby quota reset codex:main          # shows the plan and changes nothing (exit 10)
+sideby quota reset codex:main --yes    # uses one
+```
+
+The button is on the row when the account holds a reset and it matters: a 5-hour window at 60% or a weekly one at 85%, or a reset that expires within 72 hours. Otherwise the action is in the row's menu (⋯) and in Search. In the menu bar, **Use a reset…** under the account opens the panel on the same confirmation.
+
+Before you confirm, sideby asks Codex for the numbers of that moment and shows the account, the other accounts of the same login (a reset applies to all of them, because they share one quota), each window with how much is used and when it resets by itself, how many resets you hold and how many are left afterwards, and when the next one expires (or that Codex did not say). Codex does not say beforehand which windows a reset restores, so sideby does not promise it either.
+
+After you confirm, Codex itself sends the request with its own sign-in; sideby reads no credential. Then sideby asks Codex for the quota again and shows what it reports. It never changes the count or the bars by itself, so what you see is what Codex says:
+
+- **A reset was used.** The new numbers are shown, for every account of that login.
+- **Nothing was used.** Codex answered that no limit can be reset right now, or that the account holds no reset. The numbers stay as they are.
+- **Outcome unknown.** No answer came in time, or Codex stopped. sideby cannot tell whether a reset was used, and says so. Click **Check again** (or run the same command again): it repeats the same request, which Codex recognizes, so it cannot use a second reset. sideby keeps that request until Codex gives a final answer. If the account has signed in as another login since, sideby does not send it from there: sign in as the original login, then check again.
+- **Used; quota pending update.** The reset was used but the quota could not be read yet; the numbers update with the next check.
+
+**Claude Code.** Its command line can neither tell how many resets an account holds nor use one. A reset is used on Claude's usage page, and then counts for Claude Code too. On an account with a window at its warning level (the Fable week included), the panel shows **Use a reset on claude.ai**; otherwise it is in the row's menu and in Search, and `sideby quota reset claude:work --open` and **Use a reset…** under the account in the menu bar do the same. It opens `https://claude.ai/settings/usage` in the browser profile you chose for the account (see [Which browser you signed in with](#which-browser-you-signed-in-with)), else in your default browser. sideby cannot see which login that page uses or whether it holds a reset: hover the button for the account's email and the windows that are tight, and check the page is signed in as that account. When you come back to the panel, sideby asks that account's quota once.
+
+Which limit a Claude reset restores is Anthropic's rule, not sideby's: a reset for Fable gives back the Fable share of the week, and a reset of the 5-hour window restores that window whole. See Anthropic's [What is a limit reset?](https://support.claude.com/en/articles/17007452-what-is-a-limit-reset) and [Claude Fable 5.2 launch offers](https://support.claude.com/en/articles/17506494-claude-fable-5-2-launch-offers).
+
+You can also ask your AI: "use a limit reset for codex:main". It shows you the plan and asks before it confirms.
+
+Checked against the protocol of Codex CLI 0.167.2 on 2026-11-13; no real reset was used in that check.
+
+## How fresh the numbers are
+
+Every number has the time it was read and where it came from: hover a quota bar in the panel or an account in the menu bar, or read the age at the end of each `sideby quota` line (`observedAt` and `source` in `--json`). A model's own weekly window (such as Claude Code's Fable week) can be older than the 5-hour and weekly numbers next to it, because the status line reports only those two; such a window carries its own `observedAt`, and its own age decides whether it is marked old.
+
+- The age is written next to the numbers only once they are older than sideby asks the tool (15 minutes for Claude Code, Codex, Grok Build and Antigravity CLI). A check that failed is marked at once.
+- Numbers over an hour old are marked old, unless this computer has not used the login since they were read; use on the web or another computer cannot be seen.
+- When a window passes the reset time the tool gave, sideby asks that tool once more instead of waiting out the 15 minutes, so an account that is free again shows its room soon. It does this once per reset time; if that ask fails, the regular schedule goes on.
+- Accounts signed in as the same login are one quota, so sideby asks one of them (the first in your order that is signed in) and shows the answer on all. At most four tools are asked at the same time, your pinned accounts first, then the ones running low, then the most recently used.
+- The panel and the menu bar show what they have at once and fill in each account as its answer arrives; **Refresh** still asks everything again.
+
 ## Grok quota
 
 Grok Build shows each subscription's weekly credit use in its own `/usage` screen. sideby asks the `grok` CLI for the same numbers, so it needs no setup:

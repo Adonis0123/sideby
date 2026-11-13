@@ -77,16 +77,21 @@ function run(argv) {
   }
   var forceNext = false;
   // While a manual refresh runs: when it started (ISO, for --refreshing-since) and the cache-only snapshot in flight.
-  var refreshSince = '', peekTask = null, peekHandle = null, peekOut = out + '.peek';
+  var refreshSince = '', peekTask = null, peekHandle = null, peekOut = out + '.peek', peekManual = false;
+  // The account whose "Use a reset…" was clicked, and whether the menu has opened since: the first snapshot after
+  // that asks it once. A manual refresh asks every account, so it settles this too.
+  var askNext = '', askDue = false;
   function startSnapshot(force) {
     if (task) { if (force) forceNext = true; return; }
     force = force || forceNext;
     forceNext = false;
+    var ask = !force && askDue ? askNext : '';
+    if (force || ask) { askNext = ''; askDue = false; }
     if (force) refreshSince = new Date().toISOString();
     $.NSFileManager.defaultManager.createFileAtPathContentsAttributes(out, $(), $());
     hotkeyReported = hotkeyReport();
     iconReported = iconStable;
-    var t = sideby(['menubar', 'snapshot', '--json', '--lang', lang].concat(force ? ['--refresh'] : [], hotkeyReported ? ['--hotkey', hotkeyStatus, '--hotkey-label', hotkeyWant.label] : [], iconReported ? ['--icon', iconReported] : []));
+    var t = sideby(['menubar', 'snapshot', '--json', '--lang', lang].concat(force ? ['--refresh'] : [], ask ? ['--ask', ask] : [], hotkeyReported ? ['--hotkey', hotkeyStatus, '--hotkey-label', hotkeyWant.label] : [], iconReported ? ['--icon', iconReported] : []));
     handle = $.NSFileHandle.fileHandleForWritingAtPath(out);
     t.standardOutput = handle;
     lastStart = now();
@@ -125,20 +130,23 @@ function run(argv) {
     });
     build();
   }
-  // During a manual refresh, a cache-only snapshot that never asks a Host: accounts already answered show their new
-  // numbers, the others say they are refreshing. At most one runs at a time.
+  // While a snapshot asks Hosts, a cache-only snapshot that never asks one: accounts already answered show their new
+  // numbers as they land. During a manual refresh the others say they are refreshing; during an automatic one they
+  // keep what was kept, and it starts only once the snapshot has run for a while (it is asking). At most one at a time.
   function peek() {
     if (task && !task.running) { finishSnapshot(); return; }
     if (peekTask && !peekTask.running) {
       var ok = peekTask.terminationStatus === 0;
       peekTask = null;
       closePeek();
-      var next = ok && task && manual ? readSnapshot(peekOut) : null;
+      var next = ok && task && manual === peekManual ? readSnapshot(peekOut) : null;
       if (next) { snap = next; build(); }
     }
-    if (peekTask || !task || !manual || !refreshSince) return;
+    if (peekTask || !task) return;
+    if (manual ? !refreshSince : now() - lastStart < PEEK) return;
+    peekManual = manual;
     $.NSFileManager.defaultManager.createFileAtPathContentsAttributes(peekOut, $(), $());
-    var t = sideby(['menubar', 'snapshot', '--json', '--cached', '--refreshing-since', refreshSince, '--lang', lang]);
+    var t = sideby(['menubar', 'snapshot', '--json', '--cached', '--lang', lang].concat(manual ? ['--refreshing-since', refreshSince] : []));
     peekHandle = $.NSFileHandle.fileHandleForWritingAtPath(peekOut);
     t.standardOutput = peekHandle;
     if (t.launchAndReturnError(null)) peekTask = t;
@@ -379,7 +387,7 @@ function run(argv) {
     return (bars[key] = $.NSAttributedString.attributedStringWithAttachment(att));
   }
 
-  var keptW = { name: 0, reset: 0, tag: 0 };
+  var keptW = { name: 0, reset: 0, tag: 0, aside: 0 };
   // Columns: the name, then per window its bar and percent, then the reset time. One set of tab stops lines them up
   // across every tool; the window names sit once in each tool's header, over their column. A tool with one window
   // draws it in the second column, under the others' long window.
@@ -394,7 +402,7 @@ function run(argv) {
     // The reset column names its window ("7d", then "tomorrow 4:59 PM"), so it is as wide as its longest entry. While the
     // menu is open it never gets narrower, so rows changing during a refresh do not make the menu jump.
     // The times start at one tab stop after the widest window tag, so 7d and 31d rows line their times up.
-    var nameW = 0, first = false, tagW = width('7d', L.font), timeW = width('Wed 12:59 PM', L.font), plainW = 0;
+    var nameW = 0, first = false, tagW = width('7d', L.font), timeW = width('Wed 12:59 PM', L.font), plainW = 0, asideW = 0;
     function measure(r) {
       var c = resetCell(r);
       if (c[0]) { tagW = Math.max(tagW, width(c[0], L.font)); timeW = Math.max(timeW, width(c[1], L.font)); }
@@ -405,17 +413,18 @@ function run(argv) {
       if (s.columns[0]) first = true;
       s.rows.concat(s.more ? s.more.rows : []).forEach(function (r) {
         nameW = Math.max(nameW, width(r.label, L.font));
+        asideW = Math.max(asideW, width(aside(r), L.small));
         if (r.bars) measure(r);
         (r.groups || []).forEach(function (g) {
           nameW = Math.max(nameW, width(GROUP_INDENT + g.label, L.font));
-          measure({ reset: g.reset, resetLabel: g.resetLabel, resetTime: g.resetTime, refreshing: r.refreshing, refreshFailed: r.refreshFailed, stale: r.stale, note: g.reset });
+          measure({ reset: g.reset, resetLabel: g.resetLabel, resetTime: g.resetTime, refreshing: r.refreshing, refreshFailed: r.refreshFailed, stale: groupStale(r, g), note: g.reset });
         });
       });
     });
     tagW = Math.ceil(tagW) + 8;
     var resetW = Math.max(tagW + timeW, plainW);
-    if (menuOpen) { nameW = Math.max(nameW, keptW.name); resetW = Math.max(resetW, keptW.reset); tagW = Math.max(tagW, keptW.tag); }
-    keptW = { name: nameW, reset: resetW, tag: tagW };
+    if (menuOpen) { nameW = Math.max(nameW, keptW.name); resetW = Math.max(resetW, keptW.reset); tagW = Math.max(tagW, keptW.tag); asideW = Math.max(asideW, keptW.aside); }
+    keptW = { name: nameW, reset: resetW, tag: tagW, aside: asideW };
     var pctW = width('100%', L.mono), x = Math.ceil(nameW) + 20, stops = [], at = [];
     function tab(pos) { stops.push($.NSTextTab.alloc.initWithTextAlignmentLocationOptions($.NSTextAlignmentLeft, pos, $())); }
     for (var c = 0; c < (first ? 2 : 1); c++) {
@@ -425,6 +434,8 @@ function run(argv) {
     }
     tab(x);
     tab(x + tagW);
+    // A last column for quiet remarks (a Limit Reset the account holds, how old its numbers are), only when a row has one.
+    if (asideW) tab(x + resetW + 16);
     L.reset = x;
     L.first = first;
     L.para = $.NSMutableParagraphStyle.alloc.init;
@@ -434,9 +445,18 @@ function run(argv) {
     L.headPara.tabStops = $(at.concat([x]).map(function (pos) {
       return $.NSTextTab.alloc.initWithTextAlignmentLocationOptions($.NSTextAlignmentLeft, pos, $());
     }));
-    L.width = x + resetW + 70;
+    L.width = x + resetW + 70 + (asideW ? Math.ceil(asideW) + 16 : 0);
+    L.aside = asideW > 0;
+    L.tag = tagW;
     return L;
   }
+  // The quiet remarks after a row's reset time: the Limit Resets it holds, then how old its numbers are.
+  function aside(r) {
+    return [r.limitResets, r.age].filter(function (x) { return x; }).join(' · ');
+  }
+  // Whether a line's numbers are old: a model group may have been read at another time than the account's own bars.
+  function barsStale(r) { return r.barsStale === undefined ? r.stale : r.barsStale; }
+  function groupStale(r, g) { return g.stale === undefined ? r.stale : g.stale; }
   // The reset cell: [window tag, time]. The tag is drawn grey and the time in the text colour; a cell that says
   // something else (refreshing, failed, an old reading, every window past its reset) has only grey words.
   function resetCell(r) {
@@ -466,13 +486,18 @@ function run(argv) {
     if (cell[0]) {
       line.appendAttributedString(str('\t' + cell[0], dim));
       line.appendAttributedString(str('\t' + cell[1], stale() ? dim : plain));
-    } else if (cell[1]) line.appendAttributedString(str('\t' + cell[1], dim));
+    } else {
+      line.appendAttributedString(str('\t' + cell[1], dim));
+      // Words shorter than the window tag stop before the time's tab stop: one more tab reaches the remarks column.
+      if (L.aside && r.aside && width(cell[1], L.font) < L.tag) line.appendAttributedString(str('\t', dim));
+    }
+    if (L.aside && r.aside) line.appendAttributedString(str('\t' + r.aside, attrs($.NSColor.secondaryLabelColor, L.small, L.para)));
     return line;
   }
   function accountItem(menu, r, L) {
     refs.push(r.ref);
     var mi = add(menu, r.label, 'start:', refs.length);
-    mi.attributedTitle = rowTitle(r, L);
+    mi.attributedTitle = rowTitle({ label: r.label, bars: r.bars, reset: r.reset, resetLabel: r.resetLabel, resetTime: r.resetTime, refreshing: r.refreshing, refreshFailed: r.refreshFailed, stale: barsStale(r), note: r.note, aside: aside(r) }, L);
     // An empty image as wide as the tools' logos, so every row's text starts where the headers' text does and the
     // window names sit over their bars.
     mi.image = GUTTER;
@@ -490,10 +515,18 @@ function run(argv) {
     (r.groups || []).forEach(function (g) {
       refs.push(r.ref);
       var gi = add(menu, g.label, 'start:', refs.length);
-      gi.attributedTitle = rowTitle({ label: GROUP_INDENT + g.label, bars: g.bars, reset: g.reset, resetLabel: g.resetLabel, resetTime: g.resetTime, refreshing: r.refreshing, refreshFailed: r.refreshFailed, stale: r.stale, note: g.reset }, L);
+      gi.attributedTitle = rowTitle({ label: GROUP_INDENT + g.label, bars: g.bars, reset: g.reset, resetLabel: g.resetLabel, resetTime: g.resetTime, refreshing: r.refreshing, refreshFailed: r.refreshFailed, stale: groupStale(r, g), note: g.reset }, L);
       gi.image = GUTTER;
       gi.toolTip = g.tip;
     });
+    // The way to using a Limit Reset (ADR-0072), under the account: it opens a page and uses nothing by itself.
+    if (r.useReset) {
+      refs.push(r.ref);
+      var ui = add(menu, GROUP_INDENT + r.useReset.title, 'useReset:', refs.length);
+      ui.attributedTitle = str(GROUP_INDENT + r.useReset.title, attrs($.NSColor.secondaryLabelColor, L.font, L.para));
+      ui.image = GUTTER;
+      ui.toolTip = r.useReset.tip;
+    }
     return mi;
   }
   // A tool's header: its mark, its name, and the window names over the bar columns. A view, not a title: macOS dims
@@ -645,7 +678,15 @@ function run(argv) {
     name: 'SidebyMenuBar',
     protocols: ['NSMenuDelegate'],
     methods: {
-      'menuWillOpen:': { types: ['void', ['id']], implementation: function () { menuOpen = true; try { unregisterHotkey(); } catch (e) {} } },
+      'menuWillOpen:': {
+        types: ['void', ['id']],
+        implementation: function () {
+          menuOpen = true;
+          try { unregisterHotkey(); } catch (e) {}
+          // After "Use a reset…": ask that one account once, now that the menu is looked at again.
+          if (askNext) { askDue = true; try { startSnapshot(); } catch (e) {} }
+        },
+      },
       'menuDidClose:': {
         types: ['void', ['id']],
         implementation: function () { menuOpen = false; closedAt = uptime(); lastUse = now(); try { registerHotkey(); } catch (e) {} },
@@ -662,7 +703,7 @@ function run(argv) {
           if (task && !task.running) finishSnapshot();
           lookAtIcon();
           // A shortcut that just registered or failed, and an icon that just showed or went, are told at once.
-          if (!task && (forceNext || now() - lastStart >= SNAPSHOT || hotkeyReport() !== hotkeyReported || iconStable !== iconReported)) startSnapshot();
+          if (!task && (forceNext || askDue || now() - lastStart >= SNAPSHOT || hotkeyReport() !== hotkeyReported || iconStable !== iconReported)) startSnapshot();
           // The bars are pictures in the colours of the moment; redraw them when light or dark mode changes.
           if (ObjC.unwrap(app.effectiveAppearance.name) !== appearance) build();
           else drawTitle();
@@ -714,6 +755,17 @@ function run(argv) {
         implementation: function (sender) {
           var ref = refs[sender.tag - 1];
           if (ref) act(['menubar', 'start', ref]);
+        },
+      },
+      // "Use a reset…": the command opens the Panel on that account's confirmation, or the vendor's page where only
+      // that can use one. The numbers may change there, so the next time the menu opens that account is asked once.
+      'useReset:': {
+        types: ['void', ['id']],
+        implementation: function (sender) {
+          var ref = refs[sender.tag - 1];
+          if (!ref) return;
+          askNext = ref;
+          act(['menubar', 'reset', ref]);
         },
       },
     },

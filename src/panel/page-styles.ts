@@ -235,8 +235,44 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .ai-ask:hover { border-color: var(--btn-hover-border); color: var(--accent); }
 .ai-ask .ic { width: 14px; height: 14px; color: var(--muted); flex: none; }
 .arrange-text .link-btn { margin-left: 8px; }
-.q-asof { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; }
-.q-asof .ic { width: 11px; height: 11px; }
+/* Under the bars: how old the numbers are (once that matters) and the Limit Resets the account holds. One that
+   appears after the first paint fades in once (.q-new), so it does not snap. */
+.q-foot { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; color: var(--muted); font-size: 11px; }
+.q-asof, .q-resets { display: inline-flex; align-items: center; gap: 4px; }
+.q-asof .ic, .q-resets .ic { width: 11px; height: 11px; }
+.q-reset-btn { height: 22px; padding: 0 8px; gap: 4px; font-size: 11px; }
+.q-reset-btn .ic, .q-reset-btn .spin { width: 11px; height: 11px; }
+/* While a reset is being used or the quota is asked after the vendor's page: the old bars stay and breathe. */
+.quota.is-resetting .bar > span, .rs-win.is-busy .bar > span { animation: rs-wait 1.2s var(--ease-out) infinite alternate; }
+@keyframes rs-wait { from { opacity: 1; } to { opacity: .45; } }
+/* The Limit Reset dialog: every step fills the same slots, so it opens at its final size and never jumps. */
+.rs-body { gap: 12px; }
+.rs-acct { font-size: 13px; }
+.rs-peers { margin-top: 2px; color: var(--muted); font-size: 12px; }
+.rs-wins { display: flex; flex-direction: column; gap: 10px; transition: opacity var(--duration-base) var(--ease-out); }
+.rs-wins.is-reading { opacity: .6; }
+.rs-win { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: baseline; column-gap: 12px; font-size: 13px; }
+.rs-win-name { font-weight: 600; }
+.rs-win-pct { font-variant-numeric: tabular-nums; font-weight: 600; }
+.rs-win.lvl-warn .rs-win-pct { color: var(--warn); } .rs-win.lvl-fail .rs-win-pct { color: var(--fail); }
+.rs-win-reset { color: var(--muted); font-size: 12px; min-width: 132px; text-align: right; }
+.rs-win .bar { grid-column: 1 / -1; }
+.rs-stock { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; min-height: 18px; }
+.rs-stock .ic { width: 12px; height: 12px; flex: none; }
+.rs-stock .spin { margin-right: 4px; }
+.rs-slot { min-height: 76px; display: flex; }
+.rs-msg { margin: 0; flex: 1; align-items: flex-start; line-height: 1.5; }
+.rs-msg .spin { margin-top: 3px; }
+.note-ok { background: var(--ok-soft, var(--surface-2)); color: var(--ok, var(--text)); }
+.rs-pick { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rs-pick-btn { width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-md, 8px); background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out); }
+.rs-pick-btn:hover { border-color: var(--btn-hover-border); background: var(--surface-2); }
+.rs-pick-btn:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
+.rs-pick-main { flex: 1; min-width: 0; }
+.rs-pick-sub { display: block; color: var(--muted); font-size: 12px; }
+.rs-pick-go { width: 14px; height: 14px; color: var(--muted); flex: none; }
+.q-new { animation: chip-in var(--duration-base) var(--ease-out); }
+@media (prefers-reduced-motion: reduce) { .q-new, .quota.is-resetting .bar > span, .rs-win.is-busy .bar > span { animation: none; } .rs-wins, .rs-pick-btn { transition: none; } }
 .stat-act { align-self: flex-end; color: var(--accent); font-size: 12px; white-space: nowrap; }
 .next-why { margin: 0 0 12px; max-width: 280px; line-height: 1.5; }
 .next-cmd { display: block; margin-top: 8px; color: var(--muted); font-size: 11px; }

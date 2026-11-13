@@ -110,6 +110,30 @@ describe('sharedQuota', () => {
     assert.deepEqual(sharedQuota('codex:work', r, ['codex:main']), fresh)
   })
 
+  it('keeps the count of Limit Resets when the freshest reading of the login does not tell it', () => {
+    const count = { available: 3, observedAt: '2026-10-14T11:50:00Z' }
+    const withCount = { ...ok('2026-10-14T11:50:00Z', 60), limitResets: count }
+    const r = readings({ 'codex:main': withCount, 'codex:work': fresh })
+    // `codex:work` holds the newer numbers, kept without a count: both show them with the count read ten minutes ago.
+    assert.deepEqual(sharedQuota('codex:main', r, ['codex:work']), {
+      ...fresh,
+      limitResets: count,
+      from: 'codex:work',
+    })
+    assert.deepEqual(sharedQuota('codex:work', r, ['codex:main']), { ...fresh, limitResets: count })
+    // A count the freshest reading tells itself stands, zero included; one read over an hour before is not carried.
+    const none = { ...fresh, limitResets: { available: 0, observedAt: '2026-10-14T12:00:00Z' } }
+    assert.deepEqual(
+      sharedQuota('codex:work', readings({ 'codex:main': withCount, 'codex:work': none }), ['codex:main']),
+      none,
+    )
+    const stale = { ...old, limitResets: { available: 3, observedAt: '2026-10-14T06:00:00Z' } }
+    assert.deepEqual(
+      sharedQuota('codex:work', readings({ 'codex:main': stale, 'codex:work': fresh }), ['codex:main']),
+      fresh,
+    )
+  })
+
   it('borrows when the Account has no reading of its own, and keeps its own reason when nobody has one', () => {
     const none: QuotaResult = { status: 'unavailable', reason: 'no-session' }
     assert.deepEqual(

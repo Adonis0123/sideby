@@ -99,6 +99,10 @@ history: {
 
 
 `FamilyDef.fetchQuota.localFallbackOnly` 可选，默认 `false`。宿主会在新事件里重放缓存额度时设为 `true`：有查询结果后，sideby 优先使用它，同一登录的多个目录也一样。查询失败保留上次读数、原记录时间和 `fetchError`。
+
+额度读数还可以带这些可选内容：宿主说得出账号有几次重置次数时，带 `limitResets: { available, observedAt, nextExpiresAt? }`（说不出就不写；不写不等于 0）；某个窗口的读取时间或来源和整份读数不一样时，在这个窗口上写 `observedAt` 和 `source`。联网查到的结果里，sideby 只保留这些字段，读取函数返回的其他内容都会丢掉。存下的结果里有窗口过了它给出的 `resetsAt` 时，sideby 会再调用一次 `fetch`，每个重置时间一次；同一登录的账号只问其中一个。
+
+`FamilyDef.limitReset`（可选）让用户能在 sideby 里使用重置：`{ use?, vendorPage? }`，两个至少给一个。`use(account, ctx)` 通过宿主自己的 CLI 发出那一个请求，返回宿主的答复：`'reset'`、`'nothing-to-reset'`、`'none-left'` 或 `'already-done'`。用 `ctx.hostEnv` 运行宿主，`ctx.signal` 中止时停下，并把 `ctx.idempotencyKey` 原样传给宿主：sideby 在调用你之前就把这个 key 存好，重试时传的还是它，所以宿主对同一个 key 最多只能用掉一次。宿主没给最终答复就抛错；只有确定请求根本没到宿主时，才在错误上写 `sent: false`，sideby 会告诉用户没有用掉。其余都由 sideby 做：先给用户看计划、等用户确认（没有确认不会调用 `use`，Auto Handoff、`sideby next`、无人值守和 hook 也都不会调用），保存这次尝试的记录，同一登录一次只发一个请求，20 秒没答复就结束，之后重新读一次额度。所以带 `use` 的家族需要一个会报告 `limitResets` 的 `fetchQuota`：计划用的是刚读到的答复，次数未知或为 0 时 sideby 不会去用。它还需要 `identity`：调用 `use` 之前，sideby 会核对账号登录的还是出计划时的那个登录；读不出账号登录的是谁，就不给计划。`vendorPage` 用于只能在厂商网站上使用重置的宿主：一个不带查询串和片段的 `https` 地址，sideby 只负责打开它。不符合这些规则的 `limitReset` 会被去掉，并报一条写明插件名的错误。用掉重置不能撤销，而 `use` 和插件的其他部分一样以你的全部权限运行：sideby 没法检查它发了什么。
 ## 加一个 sideby 还不支持的工具
 
 sideby 没列出的宿主，今天就能以本地 Family 插件的形式用起来。最省事的办法是交给你的 AI：在面板的新建账号对话框里选「其他工具……」，或者运行 `sideby ask --task host`。自己动手的话：

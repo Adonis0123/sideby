@@ -5,6 +5,7 @@ import { planHandoff } from '../core/handoff.ts'
 import type { QuotaResult } from '../types.ts'
 import {
   type MenubarFamilyInput,
+  type MenubarRow,
   menubarHotkey,
   menubarLang,
   menubarSnapshot,
@@ -678,4 +679,173 @@ it('keeps a Same Login row’s quota when its first directory’s sign-in expire
     false,
   )
   assert.equal(sec.more!.rows.find((r) => r.label === 'main')!.note, MENUBAR_STRINGS.en.loginExpired)
+})
+
+describe('Limit Resets and per-window age (ADR-0072, ADR-0073)', () => {
+  const holding = (available: number, nextExpiresAt?: string): QuotaResult => ({
+    ...(quota(30, 40) as Extract<QuotaResult, { status: 'ok' }>),
+    limitResets: { available, observedAt: NOW.toISOString(), ...(nextExpiresAt ? { nextExpiresAt } : {}) },
+  })
+  const rows = (accounts: Acc[], lang: 'en' | 'zh' = 'en', extra: Partial<MenubarFamilyInput> = {}) => {
+    const s = menubarSnapshot([{ ...family('codex', 'Codex', accounts), ...extra }], NOW, lang).sections[0]!
+    return [...s.rows, ...(s.more?.rows ?? [])]
+  }
+
+  it('says the Limit Resets an account holds on its line, with the next expiry in the hover text', () => {
+    const [one, two, zero, unknown] = rows([
+      sub('main', holding(1, at(3 * 1440)), 'codex'),
+      sub('team', holding(2), 'codex'),
+      sub('none', holding(0), 'codex'),
+      sub('plain', quota(30, 40), 'codex'),
+    ]) as [MenubarRow, MenubarRow, MenubarRow, MenubarRow]
+    assert.equal(one.limitResets, '1 reset available')
+    assert.match(one.detail, / · 1 reset available$/)
+    assert.match(one.tip, /Limit resets: 1 available[^\n]*\nThe next one expires Thu, Oct 22, 12:00 PM\n/)
+    assert.equal(two.limitResets, '2 resets available')
+    assert.doesNotMatch(two.tip, /expires/)
+    // None, and a Host that cannot tell, say nothing.
+    for (const r of [zero, unknown]) {
+      assert.equal('limitResets' in r, false)
+      assert.doesNotMatch(`${r.detail}\n${r.tip}`, /reset available|Limit resets/)
+    }
+    assert.equal(rows([sub('main', holding(1), 'codex')], 'zh')[0]!.limitResets, '可用重置 1 次')
+  })
+
+  it('says a Same Login’s Limit Resets once, on the row that shows its quota', () => {
+    const all = rows([
+      { ...sub('team', holding(1), 'codex'), sameLogin: ['codex:main'] },
+      { ...sub('main', holding(1), 'codex'), sameLogin: ['codex:team'] },
+    ])
+    assert.deepEqual(
+      all.map((r) => [r.label, r.limitResets]),
+      [
+        ['team', '1 reset available'],
+        ['main', undefined],
+      ],
+    )
+  })
+
+  it('offers "Use a reset…" where the Host can use one and the account holds one, once per login', () => {
+    const use = { limitReset: 'use' as const }
+    const three = rows(
+      [
+        sub('main', holding(1), 'codex'),
+        sub('none', holding(0), 'codex'),
+        sub('plain', quota(96, 96), 'codex'),
+      ],
+      'en',
+      use,
+    )
+    const [has, none, unknown] = ['main', 'none', 'plain'].map((l) => three.find((r) => r.label === l)!) as [
+      MenubarRow,
+      MenubarRow,
+      MenubarRow,
+    ]
+    assert.deepEqual(has.useReset, {
+      title: 'Use a reset…',
+      tip: 'Opens the Panel, which shows what a reset would do and asks before using one',
+    })
+    // Nothing to use, or a count the Host did not tell: no line, however full the windows are.
+    assert.equal('useReset' in none, false)
+    assert.equal('useReset' in unknown, false)
+    // A Family that offers no way to use one never shows the line.
+    assert.equal('useReset' in rows([sub('main', holding(1), 'codex')])[0]!, false)
+    assert.equal(rows([sub('main', holding(1), 'codex')], 'zh', use)[0]!.useReset?.title, '使用重置…')
+    const login = rows(
+      [
+        { ...sub('team', holding(1), 'codex'), sameLogin: ['codex:main'] },
+        { ...sub('main', holding(1), 'codex'), sameLogin: ['codex:team'] },
+      ],
+      'en',
+      use,
+    )
+    assert.deepEqual(
+      login.map((r) => [r.label, Boolean(r.useReset)]),
+      [
+        ['team', true],
+        ['main', false],
+      ],
+    )
+  })
+
+  it('offers it where only the vendor page can, once a window is at its warning level, naming the page', () => {
+    const page = { limitReset: 'page' as const, limitResetSite: 'claude.ai' }
+    const fable = {
+      ...(quota(10, 20) as Extract<QuotaResult, { status: 'ok' }>),
+    }
+    fable.windows = [
+      ...fable.windows,
+      { label: '7d', name: 'Fable', windowMinutes: 10_080, usedPercent: 90, resetsAt: at(2000) },
+    ]
+    const all = rows(
+      [
+        sub('roomy', quota(59, 84), 'codex'),
+        sub('short', quota(60, 10), 'codex'),
+        sub('long', quota(10, 85), 'codex'),
+        sub('group', fable, 'codex'),
+      ],
+      'en',
+      page,
+    )
+    const by = (label: string) => all.find((r) => r.label === label)!
+    assert.equal('useReset' in by('roomy'), false)
+    for (const r of [by('short'), by('long'), by('group')]) {
+      assert.equal(r.useReset?.title, 'Use a reset…', r.label)
+      assert.equal(
+        r.useReset?.tip,
+        'Opens claude.ai, where a reset is used · sideby cannot see whether this account holds one',
+      )
+    }
+  })
+
+  it('writes the age on the line only once the numbers are older than the Family asks', () => {
+    const read = (minutes: number): QuotaResult =>
+      ({ ...quota(30, 40), observedAt: at(-minutes) }) as QuotaResult
+    const [fresh, aging] = rows([sub('main', read(10), 'codex'), sub('team', read(25), 'codex')], 'en', {
+      everyMinutes: 15,
+    })
+    assert.equal('age' in fresh!, false)
+    assert.equal(aging!.age, 'read 25m ago')
+    assert.equal(aging!.stale, false)
+    // The hover text says when the numbers were read either way.
+    assert.match(fresh!.tip, /^Quota read 10m ago/)
+    // A Family that is not asked says the age only once the reading is old.
+    assert.equal('age' in rows([sub('main', read(25), 'codex')])[0]!, false)
+    assert.equal(rows([sub('main', read(25), 'codex')], 'zh', { everyMinutes: 15 })[0]!.age, '25分前读取')
+  })
+
+  it('marks only the model group that was read long ago as old, not the plan-wide bars above it', () => {
+    const q: QuotaResult = {
+      status: 'ok',
+      windows: [
+        { label: '5h', windowMinutes: 300, usedPercent: 5, resetsAt: at(125) },
+        { label: '7d', windowMinutes: 10080, usedPercent: 23, resetsAt: at(3000) },
+        {
+          label: '7d',
+          name: 'Fable',
+          windowMinutes: 10080,
+          usedPercent: 60,
+          resetsAt: at(3000),
+          observedAt: at(-300),
+          source: 'claude /usage',
+        },
+      ],
+      observedAt: at(-2),
+      source: 'claude statusline',
+    }
+    const [row] = rows([{ ...sub('main', q), lastUseAt: at(-1) }])
+    // Any old window makes the row old for readers of the JSON; the lines say which.
+    assert.equal(row!.stale, true)
+    assert.equal(row!.barsStale, false)
+    assert.equal(row!.note, '')
+    assert.equal(row!.groups![0]!.stale, undefined, 'as old as the row says')
+    assert.match(row!.tip, /Fable\n {3}7-day window: 60% used[^\n]*\n {3}Quota read 5h 0m ago/)
+    // The same group read with the rest: nothing is old, and no line carries a mark of its own.
+    const { observedAt: _at, source: _source, ...sameTime } = q.windows[2]!
+    const [calm] = rows([
+      { ...sub('main', { ...q, windows: [q.windows[0]!, q.windows[1]!, sameTime] }), lastUseAt: at(-1) },
+    ])
+    assert.equal(calm!.stale, false)
+    assert.equal('barsStale' in calm!, false)
+  })
 })

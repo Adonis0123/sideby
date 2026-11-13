@@ -300,7 +300,32 @@ const QuotaWindow = Type.Object({
   windowMinutes: Type.Number(),
   usedPercent: Type.Number(),
   resetsAt: Str,
+  observedAt: Type.Optional(
+    Type.String({
+      description:
+        "When this window was read, when that is not the quota's `observedAt` (a newer reading did not cover it); left out, it is as old as the quota.",
+    }),
+  ),
+  source: Type.Optional(
+    Type.String({ description: "Where this window was read from, when that is not the quota's `source`." }),
+  ),
 })
+
+const LimitResets = Type.Object(
+  {
+    available: Type.Number({ description: 'How many the account can use now; 0 when its Host says none.' }),
+    observedAt: Type.String({ description: 'When the count was read.' }),
+    nextExpiresAt: Type.Optional(
+      Type.String({
+        description: 'When the next one to expire does; left out when that is not known for all of them.',
+      }),
+    ),
+  },
+  {
+    description:
+      "The Limit Resets the account holds: one-time credits from the vendor that restore quota before a window's own reset time (ADR-0072). Only from a Host that tells the count (Codex); left out when the Host cannot tell, which never means zero.",
+  },
+)
 
 const Quota = Type.Union([
   Type.Object({
@@ -309,6 +334,7 @@ const Quota = Type.Union([
     observedAt: Str,
     source: Str,
     plan: Type.Optional(Str),
+    limitResets: Type.Optional(LimitResets),
     from: Type.Optional(
       Type.String({
         description:
@@ -590,7 +616,15 @@ const MenubarRow = Type.Object({
   level: MenubarLevel,
   recommended: Type.Boolean({ description: 'The account `sideby next` would pick in this Family.' }),
   observedAt: Type.Union([Str, Type.Null()], { description: 'When the quota was observed, not checked.' }),
-  stale: Type.Boolean({ description: 'The quota is old, undated, or its last query failed.' }),
+  stale: Type.Boolean({
+    description: 'The quota is old, undated, or its last query failed; true when any window of the row is.',
+  }),
+  barsStale: Type.Optional(
+    Type.Boolean({
+      description:
+        "Whether the account's own bars are old, when that differs from `stale` (a model group under them was read at another time); left out, `stale` stands for them.",
+    }),
+  ),
   tip: Type.String({
     description:
       "Hover text: when the numbers were read, each window's use and reset, and what a click does.",
@@ -608,6 +642,12 @@ const MenubarRow = Type.Object({
           reset: Str,
           ...ResetParts,
           tip: Str,
+          stale: Type.Optional(
+            Type.Boolean({
+              description:
+                "This group's numbers are old by their own read time; left out, the row's `stale` stands for it.",
+            }),
+          ),
         }),
       ),
       Type.Null(),
@@ -636,6 +676,30 @@ const MenubarRow = Type.Object({
   note: Type.String({
     description: 'A no-quota explanation, or an old-reading warning beside the bars.',
   }),
+  limitResets: Type.Optional(
+    Type.String({
+      description:
+        'The Limit Resets the account holds, in words (`1 reset available`); left out for none or when the Host cannot tell.',
+    }),
+  ),
+  useReset: Type.Optional(
+    Type.Object(
+      {
+        title: Type.String({ description: 'The words of the line, such as `Use a reset…`.' }),
+        tip: Type.String({ description: 'Its hover text: which page a click opens.' }),
+      },
+      {
+        description:
+          "A line under the account that leads to using a Limit Reset; a click runs `sideby menubar reset <account>`, which opens the Panel on that account's confirmation or the vendor's page and never uses one. Left out when nothing is offered.",
+      },
+    ),
+  ),
+  age: Type.Optional(
+    Type.String({
+      description:
+        "How old the numbers are, in words (`read 25m ago`), once older than the Family's check interval or old; left out while they are current.",
+    }),
+  ),
 })
 
 const MessageReceipt = Type.Object({
@@ -1206,6 +1270,95 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
   'quota-setup': Type.Object(
     { schemaVersion: Version, family: Str, applied: Type.Boolean(), plan: QuotaSetupPlan },
     { title: 'sideby quota setup --json' },
+  ),
+  'quota-reset': Type.Object(
+    {
+      schemaVersion: Version,
+      account: Type.String({ description: 'The account the command named.' }),
+      confirmationRequired: Type.Optional(
+        Type.Boolean({
+          description:
+            'Only without `--yes` (the plan; nothing was spent). True: show the plan to the user and, after a yes, run again with `--yes --operation <operationId>` (exit 10). False: it cannot be used now, see `blocked` (exit 1).',
+        }),
+      ),
+      operationId: Type.Optional(
+        Type.String({
+          description:
+            'The operation: in a plan, the one to confirm; in a result, the one that ran. One operation sends one idempotency key, however often it is retried.',
+        }),
+      ),
+      via: Type.Optional(
+        Type.String({
+          description: 'The account whose Host sends the request (the first signed-in one of the login).',
+        }),
+      ),
+      sameLogin: Type.Optional(
+        Type.Array(Str, {
+          description:
+            'The other accounts signed in as the same login; a limit reset applies to all of them.',
+        }),
+      ),
+      unresolved: Type.Optional(
+        Type.Literal(true, {
+          description:
+            'In a plan: an earlier attempt for this login got no final answer; confirming asks the Host again with that same request.',
+        }),
+      ),
+      quota: Type.Optional(Quota),
+      limitResets: Type.Optional(LimitResets),
+      expectedAfter: Type.Optional(
+        Type.Number({ description: 'In a plan: the count expected after one is used; not a promise.' }),
+      ),
+      canUse: Type.Optional(Type.Boolean()),
+      blocked: Type.Optional(
+        Type.String({ description: 'In a plan that cannot be confirmed: why, and what to do.' }),
+      ),
+      outcome: Type.Optional(
+        Type.Union(
+          ['reset', 'nothing-to-reset', 'none-left', 'already-done', 'open-vendor-page'].map((k) =>
+            Type.Literal(k),
+          ),
+          {
+            description:
+              'With `--yes`: `reset` (one was used), `already-done` (this operation had already used one; nothing more was spent), `nothing-to-reset` or `none-left` (nothing was spent; exit 1). `open-vendor-page`: this Host cannot use one from the command line; `url` is the page where it is used (Claude Code).',
+          },
+        ),
+      ),
+      resumed: Type.Optional(
+        Type.Literal(true, { description: 'This run finished an earlier attempt with its own key.' }),
+      ),
+      replayed: Type.Optional(
+        Type.Literal(true, {
+          description:
+            'The outcome was already known for this operation; no request to use one was sent now. `quota` is read again when the kept numbers are from before the spend.',
+        }),
+      ),
+      quotaPending: Type.Optional(
+        Type.Literal(true, {
+          description:
+            'One was used, but the quota could not be read afterwards; the numbers on show are still old.',
+        }),
+      ),
+      url: Type.Optional(Type.String({ description: "With `open-vendor-page`: the vendor's page." })),
+      opened: Type.Optional(Type.Boolean({ description: 'Whether `--open` opened the page.' })),
+      profile: Type.Optional(
+        Type.Object({ dir: Str, name: Str }, { description: 'The browser user the page was opened in.' }),
+      ),
+      identity: Type.Optional(
+        Type.Object(
+          { email: Str, org: Type.Optional(Str) },
+          { description: 'Who the account is signed in as; the page must be signed in as the same login.' },
+        ),
+      ),
+      tight: Type.Optional(
+        Type.Array(
+          Type.Object({ label: Str, name: Type.Optional(Str), usedPercent: Type.Number(), resetsAt: Str }),
+          { description: 'With `open-vendor-page`: the windows at their warning level now.' },
+        ),
+      ),
+      message: Type.String({ description: 'What happened or what confirming does, in plain words.' }),
+    },
+    { title: 'sideby quota reset --json' },
   ),
   'handoff-status': Type.Object(
     {
@@ -2282,6 +2435,12 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
             'Same as `code`, for a refused Task Spec (`sideby ask --spec -`): `spec-invalid`, `spec-too-large`, `bad-cwd`, or `spec-version` (exit 2: update sideby).',
         }),
       ),
+      operationId: Type.Optional(
+        Type.String({
+          description:
+            'Only from `sideby quota reset`: the operation this failure belongs to. With `code: outcome-unknown` the Host gave no final answer; run `sideby quota reset <account> --yes --operation <operationId>` to ask again with the same request, which cannot use a second limit reset. With `code: outcome-not-saved` the Host answered (`error` says what) but sideby could not record it; run the same command once the file `error` names can be written.',
+        }),
+      ),
     },
     { title: 'sideby error --json' },
   ),
@@ -2521,6 +2680,18 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       }),
     ),
     detail: Type.Optional(Type.String({ description: 'What to do next, for a person.' })),
+  }),
+  'menubar-reset': Type.Object({
+    schemaVersion: Version,
+    account: Str,
+    url: Type.String({
+      description:
+        "The page that was opened: the Panel on this account's limit reset confirmation, or the vendor's page where a limit reset is used. Opening it uses nothing.",
+    }),
+    opened: Type.Boolean(),
+    profile: Type.Optional(
+      Type.String({ description: 'The Browser Profile it opened in, when not the default browser.' }),
+    ),
   }),
   'config-get': Type.Object({
     schemaVersion: Version,

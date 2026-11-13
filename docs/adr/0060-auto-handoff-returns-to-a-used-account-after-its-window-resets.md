@@ -30,6 +30,12 @@ A used Account whose latest hop recorded no `window` may now be picked again whe
 
 The Takeover Limit is what keeps this from ping-pong: an Account hands over at the threshold and is taken back only once it is at least 10 points below it, which in practice means its window has reset.
 
+### Amendment, 2026-11-13: after a confirmed Limit Reset, a hop with a window comes back when its Quota shows it ready (ADR-0072)
+
+A Limit Reset can empty a window before the `resetsAt` its hop recorded. A used Account whose latest hop recorded a `window` that has not reset by itself may now be picked again when both hold: a Limit Reset the user confirmed was used for it (or for an Account of its Same Login) after that hop began, and the Quota read that followed that use is kept. It is then treated like a hop with no window: picked only when its own Quota shows it `ready`, below the Takeover Limit. A reset that restored another window leaves it out, since its Quota still shows it full.
+
+The Runtime's `handoffDecision` marks such a hop (`resetUsed`) from the operation records of `core/limit-reset.ts`; `selectNext` stays pure. A record is kept for 24 hours after it finished, so the early return holds for that long; after it, the hop follows the rule above again and comes back at its window's `resetsAt`. Auto Handoff never uses a Limit Reset itself.
+
 ## Consequences
 
 - A long chain can come back to its first Account after its 5-hour window resets instead of waiting for the current Account's reset.

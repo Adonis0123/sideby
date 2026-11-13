@@ -79,6 +79,7 @@ Avoid: *tab* for a Session (one tab can run several Sessions over time), *inbox*
 ## Limits
 
 - **Quota**: a limit the Host's vendor sets on a Subscription Account for a time window (for example 5 hours or 7 days), with the time it resets. Some limits cover only one group of models (Cursor's *other models*) and are named after it; the Account can still work with the other models when one is used up.
+- **Limit Reset** (the Panel says *use a reset*; 中文「重置次数」，操作「使用一次重置」): a one-time credit the vendor gives a Subscription Account; when the user spends it, the vendor restores Quota ahead of the window's own reset time, by the rules of that kind of credit (not always every window to full). Spending one cannot be undone. Not the reset time of a Quota window, which comes by itself. Avoid *reset credit* (sounds like money) and plain *reset* for the credit.
 - **Usage**: what an Account has consumed (tokens, estimated cost), counted from the Host's own local records.
 - **Quota Pressure**: how full an Account's fullest Quota window is, ignoring windows whose reset time has passed and limits that cover only one group of models. Unknown when the Account has no Quota yet.
 - **Short Window**: a Quota window of one day or less, such as Claude Code's or Codex's 5 hours. It warns at 60% used and turns red at 85%.

@@ -17,6 +17,7 @@ import {
   browserReport,
   keyHasId,
   openInBrowser,
+  openVendorPage,
   setBrowserChoice,
   setBrowserSignIns,
 } from './browser-profiles.ts'
@@ -558,6 +559,54 @@ describe('sideby browser: open', () => {
         ],
       )
       assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+    })
+  })
+
+  it("opens the page where a limit reset is used in the account's browser user, else in the default browser", async () => {
+    await withFakeHome(async (h) => {
+      const { rt, fake } = await setup(h)
+      const before = await snapshot(h.home)
+      const URL_ = 'https://claude.ai/settings/usage'
+      // claude:work was found in one browser user: the page opens there.
+      const found = await openVendorPage(rt, await rt.resolve('claude:work'))
+      assert.equal(found.url, URL_)
+      assert.deepEqual(found.profile, { dir: 'Profile 1', name: 'Work' })
+      assert.deepEqual(fake.calls.filter((c) => c.cmd === '/usr/bin/open').at(-1)?.args, [
+        '-na',
+        h.path('Apps/Google Chrome.app'),
+        '--args',
+        '--profile-directory=Profile 1',
+        URL_,
+      ])
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [], 'opening writes nothing')
+      // A Family whose Host uses the reset itself has no such page, and an API account has no resets.
+      await refused(openVendorPage(rt, await rt.resolve('codex:main')), 'no-limit-reset')
+      await refused(openVendorPage(rt, await rt.resolve('claude:deepseek')), 'no-limit-reset')
+      // A browser that does not open is said, with the address to open by hand.
+      fake.openCode = 1
+      await assert.rejects(
+        openVendorPage(rt, await rt.resolve('claude:work')),
+        /open https:\/\/claude\.ai\/settings\/usage yourself/,
+      )
+    })
+    await withFakeHome(async (h) => {
+      // Nothing known about the browser (sign-in matching is off): the default browser, with only the address.
+      const { rt, fake } = await setup(h, { enabled: false })
+      const r = await openVendorPage(rt, await rt.resolve('claude:work'))
+      assert.equal(r.profile, undefined)
+      // With sign-in matching off and no browser user chosen, the browser is not looked at: one command, the address.
+      assert.deepEqual(fake.calls, [{ cmd: '/usr/bin/open', args: ['https://claude.ai/settings/usage'] }])
+    })
+    await withFakeHome(async (h) => {
+      // A browser user the user chose for the Account is used with sign-in matching off too.
+      const { fake } = await setup(h, { enabled: false })
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ browser: { choices: { 'claude:work': 'Profile 1' } } }),
+      )
+      const rt = await createRuntime({ env: h.env, desktop: fake.deps })
+      const r = await openVendorPage(rt, await rt.resolve('claude:work'))
+      assert.deepEqual(r.profile, { dir: 'Profile 1', name: 'Work' })
     })
   })
 

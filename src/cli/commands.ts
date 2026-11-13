@@ -19,6 +19,7 @@ import { listAppProfiles, openAppProfile, parseProfileRef, removeAppProfile } fr
 import {
   browserReport,
   openInBrowser,
+  openVendorPage,
   setBrowserChoice,
   setBrowserSignIns,
 } from '../core/browser-profiles.ts'
@@ -53,11 +54,19 @@ import {
 } from '../core/handoff-status.ts'
 import type { HistoryQuery, HistoryResult } from '../core/history.ts'
 import { installHint, runHost } from '../core/launch.ts'
+import { LimitResetError, type LimitResetPlan, pruneLimitResetRecords } from '../core/limit-reset.ts'
 import { type LoginSnapshot, loginAfterLine, loginBeforeLine } from '../core/login-check.ts'
 import { accountModel, type ModelChange, setAccountModel } from '../core/model-choice.ts'
 import { resolvePaths, tildify } from '../core/paths.ts'
 import { type QuotaFetchMode, quotaCheckOff } from '../core/quota-fetch.ts'
-import { takeoverLimits, USAGE_DAYS } from '../core/quota-levels.ts'
+import {
+  limitResetOffer,
+  QUOTA_LONG_WARN_PERCENT,
+  QUOTA_WARN_PERCENT,
+  quotaAge,
+  takeoverLimits,
+  USAGE_DAYS,
+} from '../core/quota-levels.ts'
 import { quotaStoreFile, readQuotaStore } from '../core/quota-store.ts'
 import {
   groupsToUndo,
@@ -84,7 +93,7 @@ import {
   withPinned,
 } from '../panel/page-logic.ts'
 import { createRuntime, type Runtime, UnknownFamilyError } from '../runtime.ts'
-import type { Account, Finding } from '../types.ts'
+import type { Account, Finding, QuotaResult, QuotaWindow } from '../types.ts'
 import { type ParsedArgs, UsageError } from './args.ts'
 import { c, clock, compactNumber, quotaText, table, truncate, tuningLines, usageText } from './format.ts'
 
@@ -1610,7 +1619,12 @@ export async function cmdQuota(a: ParsedArgs, io: Io): Promise<number> {
     return 0
   }
   if (sub === 'setup' || sub === 'teardown') return cmdQuotaSetup(a, io, sub)
+  if (sub === 'reset') return cmdQuotaReset(a, io)
+  if (a.flags.has('open') || a.flags.has('operation'))
+    throw new UsageError('--open and --operation go with `sideby quota reset <account>`')
   const rt = await createRuntime()
+  // Records of Limit Reset operations that finished a day ago go with the next quota command (spec §3.40).
+  await pruneLimitResetRecords(rt.paths.stateDir, rt.readContext().now).catch(() => {})
   const accounts = !sub
     ? displayOrdered(await rt.accounts(), rt)
     : rt.families.has(sub)
@@ -1635,11 +1649,26 @@ export async function cmdQuota(a: ParsedArgs, io: Io): Promise<number> {
     return 0
   }
   const now = new Date()
+  // A reading over an hour old is old only when this computer used the login since (spec §3.31); a Same Login's
+  // sessions count too, read only then.
+  const lastUse = new Map<string, string | undefined>()
+  for (const r of rows) {
+    if (r.quota.status !== 'ok' || !overAnHour(r.quota, now.getTime())) continue
+    const x = accounts.find((y) => y.ref === r.ref)!
+    const peers = await rt.sameLogin(x)
+    const all = peers.length ? (await rt.accounts()).filter((y) => peers.includes(y.ref)) : []
+    lastUse.set(r.ref, await lastLocalUse(rt, [x, ...all]))
+  }
+  const listed = new Set(rows.map((r) => r.ref))
   io.out(
     table(
       rows.map((r) => [
         c.bold(r.ref),
-        `${quotaText(r.quota, now)}${r.quota.status === 'ok' && r.quota.from ? c.dim(` read from ${r.quota.from} (same login)`) : ''}`,
+        // A Same Login's Limit Resets are said once, on the row the reading came from.
+        `${quotaText(r.quota, now, {
+          lastUseAt: lastUse.get(r.ref),
+          resets: !(r.quota.status === 'ok' && r.quota.from && listed.has(r.quota.from)),
+        })}${r.quota.status === 'ok' && r.quota.from ? c.dim(` read from ${r.quota.from} (same login)`) : ''}`,
         usageText(r.usage),
       ]),
       ['ACCOUNT', 'QUOTA', `USAGE (${USAGE_DAYS}d)`],
@@ -1665,6 +1694,168 @@ export async function cmdQuota(a: ParsedArgs, io: Io): Promise<number> {
           ),
         )
   return 0
+}
+
+/** One window as the Limit Reset plan lists it: its name, used percent and own reset time. */
+function resetWindowLine(w: QuotaWindow, now: Date): string {
+  const label = w.name ? `${w.name} ${w.label}` : w.label
+  const passed = Date.parse(w.resetsAt) <= now.getTime()
+  return `  ${label.padEnd(8)} ${String(Math.round(w.usedPercent)).padStart(3)}% used · ${
+    passed ? 'reset time passed' : `resets ${resetWhen(w.resetsAt, now.getTime(), 'en')}`
+  }`
+}
+
+/**
+ * `sideby quota reset <account> [--yes] [--operation <id>] [--open] [--json]` (spec §3.40, ADR-0072): use a Limit
+ * Reset. Where the Host can spend one (Codex) it shows the plan, read from the Host now, and exits 10; `--yes` spends
+ * one, which cannot be undone. Where only the vendor's page can (Claude Code) it prints the page, and `--open` opens
+ * it. A spend that got no final answer fails with the `operationId` to retry.
+ */
+export async function cmdQuotaReset(a: ParsedArgs, io: Io, runtime?: Runtime): Promise<number> {
+  const usage = 'usage: sideby quota reset <account> [--yes] [--operation <id>] [--open] [--json]'
+  const ref = a.positionals[1]
+  if (!ref || a.positionals.length !== 2 || a.rest.length || a.flags.has('refresh'))
+    throw new UsageError(usage)
+  const operation = a.flags.get('operation') as string | undefined
+  const asJson = a.flags.has('json')
+  const rt = runtime ?? (await createRuntime())
+  const now = rt.readContext().now
+  await pruneLimitResetRecords(rt.paths.stateDir, now).catch(() => {})
+  const account = await rt.resolve(ref)
+  const kind = rt.limitResetKind(account)
+  const f = rt.families.get(account.family)!
+  if (kind?.kind === 'page') {
+    if (a.flags.has('yes') || operation !== undefined)
+      throw new UserError(
+        `${f.title} cannot use a limit reset from the command line, so there is nothing to confirm; it is used on ${kind.url} (open it with \`sideby quota reset ${account.ref} --open\`)`,
+        { code: 'no-limit-reset' },
+      )
+    const [quota, st] = await Promise.all([rt.quota(account), rt.status(account)])
+    const offer = limitResetOffer(quota.status === 'ok' ? quota : null, 'page', now.getTime(), {
+      short: QUOTA_WARN_PERCENT,
+      long: QUOTA_LONG_WARN_PERCENT,
+    })
+    const tight = quota.status === 'ok' ? (offer?.tight ?? []).map((i) => quota.windows[i]!) : []
+    const opened = a.flags.has('open') ? await openVendorPage(rt, account) : undefined
+    const who = st.identity?.email
+    const message = `${f.title} cannot use a limit reset from the command line: it is used on the vendor's page, and then applies to ${f.title} too. sideby cannot see whether ${account.ref} holds one.`
+    if (asJson) {
+      json(io, {
+        account: account.ref,
+        outcome: 'open-vendor-page',
+        url: kind.url,
+        opened: Boolean(opened),
+        ...(opened?.profile ? { profile: opened.profile } : {}),
+        ...(who ? { identity: { email: who, ...(st.identity?.org ? { org: st.identity.org } : {}) } } : {}),
+        tight: tight.map((w) => ({
+          label: w.label,
+          ...(w.name ? { name: w.name } : {}),
+          usedPercent: w.usedPercent,
+          resetsAt: w.resetsAt,
+        })),
+        message,
+      })
+      return 0
+    }
+    io.out(message)
+    io.out(`  ${c.bold(kind.url)}`)
+    io.out(
+      who
+        ? `Check that the page is signed in as ${who} (${account.ref}): a reset used there belongs to the login of the page.`
+        : `Check that the page is signed in as the login of ${account.ref}: a reset used there belongs to the login of the page.`,
+    )
+    if (tight.length) {
+      io.out('Windows that are tight now:')
+      for (const w of tight) io.out(resetWindowLine(w, now))
+    }
+    io.out(
+      opened
+        ? `${c.green('✓')} Opened it${opened.profile ? ` in the browser user ${opened.profile.name}` : ' in your browser'}. Run \`sideby quota ${account.ref} --refresh\` after using one.`
+        : c.cyan(`Open it with \`sideby quota reset ${account.ref} --open\`.`),
+    )
+    return 0
+  }
+  if (a.flags.has('open')) {
+    if (!f.limitReset?.vendorPage)
+      throw new UserError(
+        `--open is for an account whose limit reset is used on the vendor's page (Claude Code); for ${account.ref} run \`sideby quota reset ${account.ref}\``,
+        { code: 'no-vendor-page' },
+      )
+    // A Family whose Host can use one and that has a vendor page too: `--open` only opens the page, and uses nothing.
+    const opened = await openVendorPage(rt, account)
+    const message = `Opened ${opened.url}${opened.profile ? ` in the browser user ${opened.profile.name}` : ' in your browser'}: the vendor's page for the limit resets of ${account.ref}. Nothing was used from here; to use one through ${f.title} itself, run \`sideby quota reset ${account.ref}\`.`
+    if (asJson)
+      json(io, {
+        account: account.ref,
+        outcome: 'open-vendor-page',
+        url: opened.url,
+        opened: true,
+        ...(opened.profile ? { profile: opened.profile } : {}),
+        message,
+      })
+    else io.out(`${c.green('✓')} ${message}`)
+    return 0
+  }
+  const planLines = (plan: LimitResetPlan): string[] => {
+    const q = plan.quota
+    const stock = plan.limitResets
+    return [
+      c.bold(`Use a limit reset for ${plan.account}`),
+      ...(plan.sameLogin.length ? [`  Also applies to: ${plan.sameLogin.join(', ')} (same login)`] : []),
+      ...(plan.via !== plan.account ? [`  Sent through: ${plan.via}`] : []),
+      ...(q.status === 'ok'
+        ? q.windows.map((w) => resetWindowLine(w, now))
+        : [`  quota: ${q.detail ?? q.reason}`]),
+      stock
+        ? `  Limit resets: ${stock.available} available${
+            plan.expectedAfter !== undefined ? ` → ${plan.expectedAfter} expected afterwards` : ''
+          } · ${stock.nextExpiresAt ? `the next one expires ${clock(stock.nextExpiresAt, now)}` : 'expiry unknown'}`
+        : '  Limit resets: unknown',
+      '',
+      plan.message,
+    ]
+  }
+  if (!a.flags.has('yes')) {
+    if (operation !== undefined) throw new UsageError(`--operation goes with --yes; ${usage}`)
+    const plan = await rt.limitResetPlan(account)
+    if (asJson) json(io, { confirmationRequired: plan.canUse, ...plan })
+    else {
+      for (const l of planLines(plan)) io.out(l)
+      io.out(
+        plan.canUse
+          ? c.cyan(
+              `\nConfirm with \`sideby quota reset ${account.ref} --yes --operation ${plan.operationId}\`. It cannot be undone.`,
+            )
+          : c.yellow(`\nNot possible now: ${plan.blocked}.`),
+      )
+    }
+    // 10: the plan is shown and waits for the user's yes (spec §3.9); agents ask before adding --yes.
+    return plan.canUse ? 10 : 1
+  }
+  let operationId = operation
+  if (operationId === undefined) {
+    // `--yes` alone: the plan is read first, so a spend never goes out on old numbers. An earlier attempt of this
+    // login that got no final answer is the plan's operation, and is asked again with its own key.
+    const plan = await rt.limitResetPlan(account)
+    if (!asJson) for (const l of planLines(plan)) io.out(l)
+    if (!plan.canUse || !plan.operationId)
+      throw new LimitResetError(
+        `${plan.blocked ?? 'this limit reset cannot be used now'}; nothing was sent`,
+        {
+          code: 'cannot-use',
+        },
+      )
+    operationId = plan.operationId
+    if (!asJson) io.out('')
+  }
+  const r = await rt.limitResetUse(account, operationId)
+  const used = r.outcome === 'reset' || r.outcome === 'already-done'
+  if (asJson) json(io, r)
+  else {
+    io.out(`${used ? c.green('✓') : c.yellow('•')} ${r.message}`)
+    if (r.quota) io.out(`${c.bold(r.account)}  ${quotaText(r.quota, new Date())}`)
+  }
+  return used ? 0 : 1
 }
 
 async function cmdQuotaSetup(a: ParsedArgs, io: Io, sub: 'setup' | 'teardown'): Promise<number> {
@@ -3349,6 +3540,11 @@ export async function cmdAutostart(a: ParsedArgs, io: Io): Promise<number> {
   return 0
 }
 
+/** Whether any window of the reading was read over an hour ago (a window may be older than the rest, ADR-0073). */
+function overAnHour(quota: Extract<QuotaResult, { status: 'ok' }>, now: number): boolean {
+  return !(now - Date.parse(quotaAge(quota, now).observedAt) <= 3600_000)
+}
+
 /** The newest session activity among these Accounts, from their Usage; undefined when none can be read. */
 async function lastLocalUse(rt: Runtime, list: readonly Account[]): Promise<string | undefined> {
   const times = await Promise.all(
@@ -3394,14 +3590,16 @@ async function menubarFamilies(
             const login = st ? st.login : ('not-needed' as const)
             let refresh: 'waiting' | 'failed' | undefined
             if (asks && x.kind === 'subscription' && login !== 'logged-out') {
-              const kept = await readQuotaStore(quotaStoreFile(rt.paths.stateDir, x.family, x.name))
+              // A Same Login is asked once, through one of its Accounts (spec §3.26): that answer is this one's.
+              const asked = await rt.quotaAsker(x)
+              const kept = await readQuotaStore(quotaStoreFile(rt.paths.stateDir, asked.family, asked.name))
               const attempted = kept ? Date.parse(kept.attemptedAt) : Number.NaN
               // The refresh's own snapshot has nothing left waiting: an answer it could not keep counts as failed.
               if (!(attempted >= o.since!)) refresh = o.final ? 'failed' : 'waiting'
               else if (kept?.error) refresh = 'failed'
             }
             // Usage is read only for a reading over an hour old, to tell whether this computer used the login since.
-            const old = quota.status === 'ok' && now - Date.parse(quota.observedAt) > 3600_000
+            const old = quota.status === 'ok' && overAnHour(quota, now)
             const lastUseAt = old
               ? await lastLocalUse(rt, [x, ...accounts.filter((p) => sameLogin.includes(p.ref))])
               : undefined
@@ -3423,6 +3621,12 @@ async function menubarFamilies(
         title: f.title,
         logo: f.logo ?? null,
         refreshable: Boolean(f.fetchQuota),
+        ...(f.fetchQuota ? { everyMinutes: f.fetchQuota.everyMinutes } : {}),
+        ...(f.limitReset?.use
+          ? { limitReset: 'use' as const }
+          : f.limitReset?.vendorPage
+            ? { limitReset: 'page' as const, limitResetSite: new URL(f.limitReset.vendorPage).host }
+            : {}),
         plan,
         accounts: list,
       }
@@ -3443,15 +3647,17 @@ export async function cmdMenubar(a: ParsedArgs, io: Io): Promise<number> {
     const sinceFlag = a.flags.get('refreshing-since') as string | undefined
     const since = sinceFlag === undefined ? undefined : Date.parse(sinceFlag)
     const cached = a.flags.has('cached')
+    const ask = a.flags.get('ask') as string | undefined
     if (
       extra !== undefined ||
       (cached && a.flags.has('refresh')) ||
+      (ask !== undefined && (cached || a.flags.has('refresh'))) ||
       (since !== undefined && (!cached || !Number.isFinite(since))) ||
       (reported !== undefined && reported !== 'ok' && reported !== 'taken') ||
       (icon !== undefined && icon !== 'visible' && icon !== 'hidden')
     )
       throw new UsageError(
-        'usage: sideby menubar snapshot [--refresh | --cached [--refreshing-since <ISO time>]] [--lang en|zh] [--hotkey ok|taken [--hotkey-label <label>]] [--icon visible|hidden] [--json]',
+        'usage: sideby menubar snapshot [--refresh | --ask <account> | --cached [--refreshing-since <ISO time>]] [--lang en|zh] [--hotkey ok|taken [--hotkey-label <label>]] [--icon visible|hidden] [--json]',
       )
     const { menubarHotkey, menubarLang, menubarSnapshot } = await import('../menubar/snapshot.ts')
     const rt = await createRuntime()
@@ -3487,6 +3693,12 @@ export async function cmdMenubar(a: ParsedArgs, io: Io): Promise<number> {
     if (a.flags.has('refresh')) {
       refreshedSince = Date.now()
       await rt.refreshQuota()
+    }
+    // After "Use a reset…" (spec §3.40): that one account is asked once, as its numbers may have changed on the
+    // vendor's page or in the Panel. An account that is gone by now is not an error for the menu.
+    if (ask) {
+      const one = await rt.resolve(ask).catch(() => null)
+      if (one) await rt.refreshQuota([one]).catch(() => {})
     }
     const families = await menubarFamilies(
       rt,
@@ -3555,6 +3767,53 @@ export async function cmdMenubar(a: ParsedArgs, io: Io): Promise<number> {
           : 'Menu bar shortcut turned off.',
       )
     return 0
+  }
+  if (action === 'reset') {
+    // What "Use a reset…" in the menu runs (spec §3.40, ADR-0072). It only opens a page: the Panel on that account's
+    // confirmation where the Host can use one, the vendor's page where only that can. It never uses one.
+    if (!extra || a.positionals.length > 2)
+      throw new UsageError('usage: sideby menubar reset <account> [--json]')
+    const rt = await createRuntime()
+    const account = await rt.resolve(extra)
+    const kind = rt.limitResetKind(account)
+    if (!kind)
+      throw new UserError(
+        `${rt.families.get(account.family)!.title} offers no way to use a limit reset; its quota comes back when its window resets (see \`sideby quota ${account.ref}\`)`,
+        { code: 'no-limit-reset' },
+      )
+    if (kind.kind === 'page') {
+      const r = await openVendorPage(rt, account)
+      if (wantJson)
+        json(io, {
+          account: account.ref,
+          url: r.url,
+          opened: true,
+          ...(r.profile ? { profile: r.profile.name } : {}),
+        })
+      else
+        io.out(
+          `Opened ${r.url} for ${account.ref}${r.profile ? ` in the browser profile ${r.profile.name}` : ''}.`,
+        )
+      return 0
+    }
+    const bg = await import('../panel/background.ts')
+    const { openBrowser } = await import('../panel/server.ts')
+    const paths = resolvePaths()
+    const panel = await bg.startBackgroundPanel({ paths, env: process.env, entry: cliEntry() })
+    const url = `${panel.url.replace(/#.*$/, '')}#reset=${encodeURIComponent(account.ref)}`
+    // The browser is started detached and does not keep this process alive, so a short timer waits for its answer;
+    // without one, the page is taken as opened.
+    let timer: NodeJS.Timeout | undefined
+    const opened = await Promise.race([
+      openBrowser(url),
+      new Promise<boolean>((done) => {
+        timer = setTimeout(() => done(true), 3000)
+      }),
+    ])
+    clearTimeout(timer)
+    if (wantJson) json(io, { account: account.ref, url, opened })
+    else io.out(opened ? `Opened the panel on ${account.ref}'s limit reset.` : `Open ${url} in your browser.`)
+    return opened ? 0 : 1
   }
   if (action === 'start') {
     if (!extra || a.positionals.length > 2)

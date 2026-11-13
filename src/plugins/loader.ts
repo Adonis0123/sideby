@@ -6,6 +6,7 @@ import { writeFileAtomic } from '../core/fs-safe.ts'
 import { expandUserPath } from '../core/paths.ts'
 import type {
   FamilyDef,
+  FamilyLimitReset,
   FamilyLogo,
   FamilyWebsite,
   HookEvent,
@@ -155,6 +156,23 @@ export function websiteProblem(website: unknown): string | null {
   return null
 }
 
+/** Why a Family's `limitReset` is unusable (ADR-0072), or null when it is fine. */
+export function limitResetProblem(limitReset: unknown): string | null {
+  if (typeof limitReset !== 'object' || limitReset === null || Array.isArray(limitReset))
+    return 'limitReset must be an object'
+  const { use, vendorPage } = limitReset as Record<string, unknown>
+  if (use === undefined && vendorPage === undefined) return 'limitReset needs use, vendorPage or both'
+  if (use !== undefined && typeof use !== 'function') return 'limitReset.use must be a function'
+  if (vendorPage !== undefined && (typeof vendorPage !== 'string' || !WEBSITE_URL_RE.test(vendorPage)))
+    return 'limitReset.vendorPage must be an https address such as https://example.com/usage, with no query or fragment'
+  return null
+}
+
+/** Only the known `limitReset` fields. */
+function cleanLimitReset(r: FamilyLimitReset): FamilyLimitReset {
+  return { ...(r.use ? { use: r.use } : {}), ...(r.vendorPage ? { vendorPage: r.vendorPage } : {}) }
+}
+
 /** Only the known website fields. */
 function cleanWebsite(website: FamilyWebsite): FamilyWebsite {
   return {
@@ -248,6 +266,14 @@ async function register(
           const { website: _dropped, ...rest } = clean
           clean = rest
         } else clean = { ...clean, website: cleanWebsite(def.website) }
+      }
+      if (def.limitReset !== undefined) {
+        const problem = limitResetProblem(def.limitReset)
+        if (problem) {
+          stagedErrors.push(`family ${def.id}: ${problem}; it offers no Limit Reset until this is fixed`)
+          const { limitReset: _dropped, ...rest } = clean
+          clean = rest
+        } else clean = { ...clean, limitReset: cleanLimitReset(def.limitReset) }
       }
       if (def.history !== undefined) {
         const h = def.history as unknown as Record<string, unknown> | null

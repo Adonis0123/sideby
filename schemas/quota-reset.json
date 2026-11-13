@@ -1,0 +1,369 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/quota-reset.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "account",
+    "message"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "account": {
+      "type": "string",
+      "description": "The account the command named."
+    },
+    "confirmationRequired": {
+      "type": "boolean",
+      "description": "Only without `--yes` (the plan; nothing was spent). True: show the plan to the user and, after a yes, run again with `--yes --operation <operationId>` (exit 10). False: it cannot be used now, see `blocked` (exit 1)."
+    },
+    "operationId": {
+      "type": "string",
+      "description": "The operation: in a plan, the one to confirm; in a result, the one that ran. One operation sends one idempotency key, however often it is retried."
+    },
+    "via": {
+      "type": "string",
+      "description": "The account whose Host sends the request (the first signed-in one of the login)."
+    },
+    "sameLogin": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The other accounts signed in as the same login; a limit reset applies to all of them."
+    },
+    "unresolved": {
+      "type": "boolean",
+      "const": true,
+      "description": "In a plan: an earlier attempt for this login got no final answer; confirming asks the Host again with that same request."
+    },
+    "quota": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "status",
+            "windows",
+            "observedAt",
+            "source"
+          ],
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "ok"
+            },
+            "windows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "label",
+                  "windowMinutes",
+                  "usedPercent",
+                  "resetsAt"
+                ],
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "The group of models this limit covers, when it covers only some (spec §3.26); it does not count toward Quota Pressure."
+                  },
+                  "windowMinutes": {
+                    "type": "number"
+                  },
+                  "usedPercent": {
+                    "type": "number"
+                  },
+                  "resetsAt": {
+                    "type": "string"
+                  },
+                  "observedAt": {
+                    "type": "string",
+                    "description": "When this window was read, when that is not the quota's `observedAt` (a newer reading did not cover it); left out, it is as old as the quota."
+                  },
+                  "source": {
+                    "type": "string",
+                    "description": "Where this window was read from, when that is not the quota's `source`."
+                  }
+                }
+              }
+            },
+            "observedAt": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "plan": {
+              "type": "string"
+            },
+            "limitResets": {
+              "type": "object",
+              "required": [
+                "available",
+                "observedAt"
+              ],
+              "properties": {
+                "available": {
+                  "type": "number",
+                  "description": "How many the account can use now; 0 when its Host says none."
+                },
+                "observedAt": {
+                  "type": "string",
+                  "description": "When the count was read."
+                },
+                "nextExpiresAt": {
+                  "type": "string",
+                  "description": "When the next one to expire does; left out when that is not known for all of them."
+                }
+              },
+              "description": "The Limit Resets the account holds: one-time credits from the vendor that restore quota before a window's own reset time (ADR-0072). Only from a Host that tells the count (Codex); left out when the Host cannot tell, which never means zero."
+            },
+            "from": {
+              "type": "string",
+              "description": "The account this reading was taken from, when it is another account of the same login (spec §3.21); observedAt is its time."
+            },
+            "fetched": {
+              "type": "boolean",
+              "description": "This reading is the kept answer of a quota check that costs a request (spec §3.26)."
+            },
+            "fetchError": {
+              "type": "string",
+              "description": "Why the latest quota check failed, while this older reading is shown."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "status",
+            "reason"
+          ],
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "unavailable"
+            },
+            "reason": {
+              "type": "string",
+              "description": "not-enabled, no-session, unrecognized, no-source, api-account or fetch-failed."
+            },
+            "detail": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "limitResets": {
+      "type": "object",
+      "required": [
+        "available",
+        "observedAt"
+      ],
+      "properties": {
+        "available": {
+          "type": "number",
+          "description": "How many the account can use now; 0 when its Host says none."
+        },
+        "observedAt": {
+          "type": "string",
+          "description": "When the count was read."
+        },
+        "nextExpiresAt": {
+          "type": "string",
+          "description": "When the next one to expire does; left out when that is not known for all of them."
+        }
+      },
+      "description": "The Limit Resets the account holds: one-time credits from the vendor that restore quota before a window's own reset time (ADR-0072). Only from a Host that tells the count (Codex); left out when the Host cannot tell, which never means zero."
+    },
+    "expectedAfter": {
+      "type": "number",
+      "description": "In a plan: the count expected after one is used; not a promise."
+    },
+    "canUse": {
+      "type": "boolean"
+    },
+    "blocked": {
+      "type": "string",
+      "description": "In a plan that cannot be confirmed: why, and what to do."
+    },
+    "outcome": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "reset"
+        },
+        {
+          "type": "string",
+          "const": "nothing-to-reset"
+        },
+        {
+          "type": "string",
+          "const": "none-left"
+        },
+        {
+          "type": "string",
+          "const": "already-done"
+        },
+        {
+          "type": "string",
+          "const": "open-vendor-page"
+        }
+      ],
+      "description": "With `--yes`: `reset` (one was used), `already-done` (this operation had already used one; nothing more was spent), `nothing-to-reset` or `none-left` (nothing was spent; exit 1). `open-vendor-page`: this Host cannot use one from the command line; `url` is the page where it is used (Claude Code)."
+    },
+    "resumed": {
+      "type": "boolean",
+      "const": true,
+      "description": "This run finished an earlier attempt with its own key."
+    },
+    "replayed": {
+      "type": "boolean",
+      "const": true,
+      "description": "The outcome was already known for this operation; no request to use one was sent now. `quota` is read again when the kept numbers are from before the spend."
+    },
+    "quotaPending": {
+      "type": "boolean",
+      "const": true,
+      "description": "One was used, but the quota could not be read afterwards; the numbers on show are still old."
+    },
+    "url": {
+      "type": "string",
+      "description": "With `open-vendor-page`: the vendor's page."
+    },
+    "opened": {
+      "type": "boolean",
+      "description": "Whether `--open` opened the page."
+    },
+    "profile": {
+      "type": "object",
+      "required": [
+        "dir",
+        "name"
+      ],
+      "properties": {
+        "dir": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "description": "The browser user the page was opened in."
+    },
+    "identity": {
+      "type": "object",
+      "required": [
+        "email"
+      ],
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "org": {
+          "type": "string"
+        }
+      },
+      "description": "Who the account is signed in as; the page must be signed in as the same login."
+    },
+    "tight": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "label",
+          "usedPercent",
+          "resetsAt"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "usedPercent": {
+            "type": "number"
+          },
+          "resetsAt": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "With `open-vendor-page`: the windows at their warning level now."
+    },
+    "message": {
+      "type": "string",
+      "description": "What happened or what confirming does, in plain words."
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby quota reset --json"
+}
