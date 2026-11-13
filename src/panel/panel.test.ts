@@ -1683,6 +1683,86 @@ describe('turning Remote Control off in the Panel (spec §3.22)', () => {
   })
 })
 
+describe('choosing the advisor in the Panel (spec §3.41)', () => {
+  it('lists the files in the state, writes only the files the page showed, unlocks, never on a read-only Panel, and undoes', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{"theme":"dark"}\n')
+      const { claudePlugin } = await import('../families/claude/index.ts')
+      const runtime = () => createRuntime({ env: h.env, builtins: [asBuiltin(claudePlugin)] })
+      const settings = async () => JSON.parse(await readFile(h.path('.claude/settings.json'), 'utf8'))
+      const ro = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`], readOnly: true }),
+      )
+      try {
+        const hdr = {
+          host: `127.0.0.1:${ro.port}`,
+          origin: `http://127.0.0.1:${ro.port}`,
+          'x-sideby-token': ro.handler.token,
+        }
+        const files = ['~/.claude/settings.json']
+        const set = { confirm: true, to: 'opus', files }
+        assert.equal((await post(ro.port, '/api/advisor/set', set, hdr)).status, 403)
+        assert.equal((await post(ro.port, '/api/advisor/undo', { confirm: true }, hdr)).status, 403)
+        assert.equal((await post(ro.port, '/api/advisor/unlock', { on: true }, hdr)).status, 403)
+        assert.deepEqual(await settings(), { theme: 'dark' })
+      } finally {
+        await close(ro.server)
+      }
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      try {
+        const state = async () =>
+          JSON.parse((await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text)
+        assert.deepEqual((await state()).advisor, {
+          groups: [{ file: '~/.claude/settings.json', accounts: ['claude:main'], state: 'off', undo: false }],
+          unlock: false,
+        })
+        const hdr = {
+          host: `127.0.0.1:${port}`,
+          origin: `http://127.0.0.1:${port}`,
+          'x-sideby-token': handler.token,
+        }
+        assert.equal((await post(port, '/api/advisor/set', { to: 'gpt' }, hdr)).status, 400)
+        const preview = await post(port, '/api/advisor/set', { to: 'opus' }, hdr)
+        assert.deepEqual(preview.body, { applied: false, files: ['~/.claude/settings.json'] })
+        assert.equal(
+          (await post(port, '/api/advisor/set', { confirm: true, to: 'opus', files: [] }, hdr)).body
+            .changedSince,
+          true,
+        )
+        assert.deepEqual(await settings(), { theme: 'dark' })
+        const files = ['~/.claude/settings.json']
+        const opus = await post(port, '/api/advisor/set', { confirm: true, to: 'opus', files }, hdr)
+        assert.deepEqual([opus.body.ok, opus.body.unlocked], [true, true])
+        assert.deepEqual(await settings(), { theme: 'dark', advisorModel: 'opus' })
+        const after = (await state()).advisor
+        assert.deepEqual([after.groups[0].state, after.groups[0].undo, after.unlock], ['opus', true, true])
+        assert.equal((await post(port, '/api/advisor/undo', { confirm: true }, hdr)).body.ok, true)
+        assert.deepEqual(await settings(), { theme: 'dark' })
+        const off = await post(port, '/api/advisor/unlock', { on: false }, hdr)
+        assert.deepEqual([off.body.ok, off.body.unlock], [true, false])
+        assert.equal((await state()).advisor.unlock, false)
+        // A file whose env turns experimental features off: the state says so, and a model removes it in the same write.
+        await h.write(
+          '.claude/settings.json',
+          '{"theme":"dark","advisorModel":"opus","env":{"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS":"1","FOO":"x"}}\n',
+        )
+        const g = (await state()).advisor.groups[0]
+        assert.deepEqual([g.state, g.betasOff, g.betasValue], ['opus', true, '"1"'])
+        assert.ok(!JSON.stringify(g).includes('FOO'))
+        assert.deepEqual((await post(port, '/api/advisor/set', { to: 'opus' }, hdr)).body.files, files)
+        assert.deepEqual((await post(port, '/api/advisor/set', { to: 'off' }, hdr)).body.files, files)
+        const betas = await post(port, '/api/advisor/set', { confirm: true, to: 'opus', files }, hdr)
+        assert.equal(betas.body.ok, true)
+        assert.deepEqual(await settings(), { theme: 'dark', advisorModel: 'opus', env: { FOO: 'x' } })
+      } finally {
+        await close(server)
+      }
+    })
+  })
+})
+
 describe('using a tuning suggestion in the Panel (ADR-0012)', () => {
   it('shows the plan without writing, writes only on confirm, never on a read-only Panel, and undoes', async () => {
     await withFakeHome(async (h) => {

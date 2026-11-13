@@ -4,6 +4,14 @@ import { realpath } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { aliasesByAccount, startArgsOf } from '../core/accounts.ts'
 import {
+  type AdvisorChoice,
+  type AdvisorStatus,
+  advisorPlan,
+  advisorScope,
+  checkAdvisorAccount,
+  isAdvisorChoice,
+} from '../core/advisor.ts'
+import {
   type AppProfileStatus,
   listAppProfiles,
   openAppProfile,
@@ -427,6 +435,11 @@ export interface PanelState {
   autoHandoff: { settings: HandoffSettings; starters: string[]; apiUndecided: boolean }
   /** Claude settings files grouped as `sideby remote-control` shows them (spec §3.22); absent without Claude Accounts. */
   remoteControl?: RemoteControlView[]
+  /**
+   * Claude Code's advisor as `sideby advisor --json` shows it (spec §3.41): the settings files of Claude subscription
+   * Accounts and whether sideby unlocks it at launch; absent without such Accounts.
+   */
+  advisor?: AdvisorView
   /** Grok Bot windows (ADR-0019), data folders shown as `~/…`; absent when there are none to show. */
   appProfiles?: AppProfileStatus[]
   /** Update Check result and Auto Update setting (spec §3.23); absent with `updates: false`. */
@@ -887,8 +900,31 @@ async function accountState(rt: Runtime, account: Account, families: FamilyInfo[
 
 export type RemoteControlView = Omit<RemoteControlGroup, 'file'> & { file: string }
 
+/** The model an advisor request asks for, and the Account it is limited to (a ref), checked. */
+async function advisorBody(
+  rt: Runtime,
+  body: Record<string, unknown>,
+): Promise<{ to: AdvisorChoice; account?: string }> {
+  if (!isAdvisorChoice(body.to)) throw new HttpError(400, '"to" must be "fable", "opus", "sonnet" or "off"')
+  const ref = optString(body, 'account')
+  return ref ? { to: body.to, account: checkAdvisorAccount(await rt.resolve(ref)).ref } : { to: body.to }
+}
+
 function rcView(groups: readonly RemoteControlGroup[], home: string): RemoteControlView[] {
   return groups.map((g) => ({ ...g, file: tildify(g.file, home) }))
+}
+
+export type AdvisorView = AdvisorStatus
+
+function advisorView(st: AdvisorStatus, home: string): AdvisorView {
+  return {
+    ...st,
+    groups: st.groups.map((g) => ({
+      ...g,
+      file: tildify(g.file, home),
+      ...(g.reason ? { reason: g.reason.split(home).join('~') } : {}),
+    })),
+  }
 }
 
 /**
@@ -971,12 +1007,13 @@ async function buildState(
   opts: { version: string; build: string; readOnly: boolean; updates: boolean; readings: Readings },
 ): Promise<PanelState> {
   const ctx = rt.readContext()
-  const [families, accounts, history, quotaSetups, remoteControl, upd] = await Promise.all([
+  const [families, accounts, history, quotaSetups, remoteControl, advisor, upd] = await Promise.all([
     rt.familyInfo(),
     rt.accounts(),
     rt.doctorHistory(),
     rt.quotaSetups(),
     rt.remoteControl(),
+    rt.advisor(),
     opts.updates ? updateState(rt, opts.readOnly).catch(() => undefined) : Promise.resolve(undefined),
   ])
   const health = healthByAccount(history)
@@ -1054,6 +1091,7 @@ async function buildState(
     shellSetup: { ...shellSt, rc: tildify(shellSt.rc, ctx.home), block: setupBlock(shellSt.shell) },
     ...(Object.keys(handoff).length ? { handoff } : {}),
     ...(remoteControl.length ? { remoteControl: rcView(remoteControl, ctx.home) } : {}),
+    ...(advisor.groups.length ? { advisor: advisorView(advisor, ctx.home) } : {}),
     ...(appProfiles.length
       ? {
           appProfiles: appProfiles.map((p) =>
@@ -1498,21 +1536,24 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
    * what sideby wrote, and its toast runs before the page has read the new state.
    */
   const previewedChange = (change: {
-    todo?: (rt: Runtime) => Promise<readonly { file: string }[]>
-    apply: (rt: Runtime) => Promise<{ ok: boolean; message: string; results: { file: string }[] }>
+    todo?: (rt: Runtime, body: Record<string, unknown>) => Promise<readonly { file: string }[]>
+    apply: (
+      rt: Runtime,
+      body: Record<string, unknown>,
+    ) => Promise<{ ok: boolean; message: string; results: { file: string }[] }>
   }): Route => ({
     writes: (body) => body.confirm === true,
     async run(body) {
       const rt = await getRuntime()
       const home = rt.paths.home
-      const files = change.todo ? (await change.todo(rt)).map((g) => tildify(g.file, home)) : undefined
+      const files = change.todo ? (await change.todo(rt, body)).map((g) => tildify(g.file, home)) : undefined
       if (!optBool(body, 'confirm')) return { applied: false, ...(files ? { files } : {}) }
       if (files) {
         const saw = body.files
         const same = Array.isArray(saw) && saw.length === files.length && files.every((f) => saw.includes(f))
         if (!same) return { applied: false, changedSince: true, files }
       }
-      const r = await change.apply(rt)
+      const r = await change.apply(rt, body)
       return { ...r, applied: true, results: r.results.map((x) => ({ ...x, file: tildify(x.file, home) })) }
     },
   })
@@ -1860,6 +1901,28 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       apply: (rt) => rt.remoteControlOn(),
     }),
     '/api/remote-control/undo': previewedChange({ apply: (rt) => rt.remoteControlUndo() }),
+    // Claude Code's advisor (spec §3.41, ADR-0074): the same change as `sideby advisor <model>|off [--account]`. It
+    // writes `advisorModel` only into the files the page showed (`previewedChange`); a model also turns config
+    // `advisor.unlock` on, which the page shows from the state it read.
+    '/api/advisor/set': previewedChange({
+      async todo(rt, body) {
+        const { to, account } = await advisorBody(rt, body)
+        const st = await rt.advisor()
+        return advisorPlan(advisorScope(st.groups, account), to, st.unlock).todo
+      },
+      async apply(rt, body) {
+        const { to, account } = await advisorBody(rt, body)
+        return rt.advisorSet(to, account ? { account } : {})
+      },
+    }),
+    '/api/advisor/undo': previewedChange({ apply: (rt) => rt.advisorUndo() }),
+    // Config `advisor.unlock` only: sideby's own setting, so the switch writes at once and the toast offers the way back.
+    '/api/advisor/unlock': {
+      async run(body) {
+        if (typeof body.on !== 'boolean') throw new HttpError(400, '"on" must be true or false')
+        return (await getRuntime()).advisorUnlock(body.on)
+      },
+    },
     // Sessions (spec §3.32, ADR-0039): what every Account is running now, read only, with the texts its copy buttons
     // copy in the Panel's language. Polled every few seconds, so it runs beside the write queue.
     '/api/sessions': {

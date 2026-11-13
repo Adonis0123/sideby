@@ -4,6 +4,7 @@ import { constants as osConstants } from 'node:os'
 import { delimiter, join } from 'node:path'
 import type { HookBus } from '../plugins/bus.ts'
 import type { Account, Env, FamilyDef } from '../types.ts'
+import { unlockAdvisorEnv } from './advisor.ts'
 import { lstatOrNull, realpathOrNull } from './fs-safe.ts'
 import { readSecretFile } from './secret-file.ts'
 
@@ -156,6 +157,8 @@ export async function prepareLaunch(
     bus: HookBus
     /** What the Host may show as the Account (`SIDEBY_LABEL`): the short command, else the ref. */
     label?: string
+    /** Config `advisor.unlock` (spec §3.41, ADR-0074): unlock Claude Code's advisor in a Claude subscription session. */
+    advisorUnlock?: boolean
   },
 ): Promise<PreparedLaunch> {
   const { account, family } = opts
@@ -167,6 +170,8 @@ export async function prepareLaunch(
   // inherited from another sideby Launch never leaks through.
   env.SIDEBY_ACCOUNT = account.ref
   env.SIDEBY_LABEL = opts.label || account.ref
+  // Before the Plugins' `launch.before`, so a Plugin sees it and may take it out again.
+  if (opts.advisorUnlock && opts.command === 'run') unlockAdvisorEnv(env, family.id, account)
 
   const { args, notice } = launchCommand(opts)
 

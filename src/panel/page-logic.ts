@@ -1286,6 +1286,33 @@ export function remoteControlSummary(
 }
 
 /**
+ * What the Panel's Advisor row says (spec §3.41): the one state every readable settings file has (`fable`, `opus`,
+ * `sonnet`, `other` or `off`), `mixed` when they differ, `off` when none can be read; null without groups.
+ */
+export function advisorSummary(groups: readonly { state: string }[]): string | null {
+  if (!groups.length) return null
+  const seen = [
+    ...new Set(groups.filter((g) => g.state !== 'missing' && g.state !== 'blocked').map((g) => g.state)),
+  ]
+  if (!seen.length) return 'off'
+  return seen.length === 1 ? (seen[0] as string) : 'mixed'
+}
+
+/**
+ * The choice the Advisor dialog waits to confirm after a click on `v` (spec §3.41): `v`, unless it is the model the
+ * files already name (`current`) and choosing it changes nothing (`pending`, from `advisorPending`); then nothing waits.
+ * A file that already names the model but still needs a change (its `env` turns experimental features off, or the
+ * unlock is off) keeps the choice, so the dialog offers that change.
+ */
+export function advisorPick(
+  v: string,
+  current: string | null,
+  pending: { todo: readonly unknown[]; unlocks: boolean },
+): string | null {
+  return v === current && !pending.todo.length && !pending.unlocks ? null : v
+}
+
+/**
  * Where a menu or popover goes next to its anchor, all in viewport pixels. It opens below when its whole height fits
  * there, else above when it fits there, else on the side with more room, its height capped at that room so it scrolls
  * inside. Below `margin` from each edge and `gap` from the anchor. When neither side has even `min` pixels (a tiny

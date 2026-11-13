@@ -40,8 +40,9 @@ sideby 不往宿主的账号目录里写自己的文件，只有下面几个命�
 - `sideby handoff setup grok --yes` 添加 `~/.grok/hooks/sideby-handoff.json`（[自动接力](usage.zh-CN.md#自动接力auto-handoff)）。
 - `sideby tune apply` 设置账号 `settings.json` 里的 `autoCompactWindow`（[上下文调优](usage.zh-CN.md#上下文调优)）。
 - `sideby remote-control off` 把 Claude `settings.json` 里的 `remoteControlAtStartup` 设成 `false`（[Remote Control](usage.zh-CN.md#remote-control)）。
+- `sideby advisor <模型>` 设置 Claude `settings.json` 里的 `advisorModel`，`off` 删掉这个键；选模型时，若开着 `env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`，先在预览里列出再删掉它（[顾问模型](usage.zh-CN.md#顾问模型advisor)）。
 
-每一项都能撤回：`quota teardown claude`、`handoff teardown grok`、`tune undo`、`remote-control undo`。用 `sideby new` 建出来的账号目录归宿主所有。
+每一项都能撤回：`quota teardown claude`、`handoff teardown grok`、`tune undo`、`remote-control undo`、`advisor undo`。用 `sideby new` 建出来的账号目录归宿主所有。
 
 ## 和 aimux、agenv、cc-switch、magpie 有什么区别？
 

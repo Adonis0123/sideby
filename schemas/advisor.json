@@ -1,0 +1,301 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/advisor.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "action"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "action": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "status"
+        },
+        {
+          "type": "string",
+          "const": "set"
+        },
+        {
+          "type": "string",
+          "const": "undo"
+        },
+        {
+          "type": "string",
+          "const": "unlock"
+        }
+      ]
+    },
+    "to": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "fable"
+        },
+        {
+          "type": "string",
+          "const": "opus"
+        },
+        {
+          "type": "string",
+          "const": "sonnet"
+        },
+        {
+          "type": "string",
+          "const": "off"
+        },
+        {
+          "type": "string",
+          "const": "on"
+        }
+      ],
+      "description": "For set: the model chosen, or off. For unlock: on or off."
+    },
+    "applied": {
+      "type": "boolean",
+      "description": "True once the change was written (or undone)."
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "file",
+          "accounts",
+          "state",
+          "undo"
+        ],
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Claude subscription accounts whose settings.json is this file."
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "fable"
+              },
+              {
+                "type": "string",
+                "const": "opus"
+              },
+              {
+                "type": "string",
+                "const": "sonnet"
+              },
+              {
+                "type": "string",
+                "const": "other"
+              },
+              {
+                "type": "string",
+                "const": "off"
+              },
+              {
+                "type": "string",
+                "const": "missing"
+              },
+              {
+                "type": "string",
+                "const": "blocked"
+              }
+            ],
+            "description": "fable, opus, sonnet: advisorModel names that model; other: another value (see model); off: not set or empty; missing: no settings.json; blocked: cannot be changed safely (see reason)."
+          },
+          "model": {
+            "type": "string"
+          },
+          "betasOff": {
+            "type": "boolean",
+            "const": true,
+            "description": "The file's env sets CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS to a true value, which turns off Claude Code's experimental features, the advisor among them. Choosing a model removes it."
+          },
+          "betasValue": {
+            "type": "string",
+            "description": "That value as JSON, such as \"1\"; only with betasOff."
+          },
+          "why": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "no-settings"
+              },
+              {
+                "type": "string",
+                "const": "broken-link"
+              },
+              {
+                "type": "string",
+                "const": "unsafe"
+              }
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "undo": {
+            "type": "boolean",
+            "description": "sideby changed it here and can put the earlier value back."
+          }
+        }
+      },
+      "description": "For status, every file; for a preview, the files that would change."
+    },
+    "skipped": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "file",
+          "accounts",
+          "state"
+        ],
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "state": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "For a preview: files of the scope sideby cannot change (no settings.json, or unsafe)."
+    },
+    "unlock": {
+      "type": "boolean",
+      "description": "Config advisor.unlock: sessions sideby starts for Claude subscription accounts get CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1."
+    },
+    "unlocks": {
+      "type": "boolean",
+      "description": "For a preview: the change also turns advisor.unlock on."
+    },
+    "removesBetas": {
+      "type": "boolean",
+      "description": "For a preview of a model: the listed groups with betasOff also lose env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS in the same write."
+    },
+    "unlocked": {
+      "type": "boolean",
+      "description": "This change turned advisor.unlock on."
+    },
+    "envOff": {
+      "type": "string",
+      "description": "A variable in the environment that makes Claude Code hide the advisor."
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "file",
+          "accounts",
+          "ok",
+          "message"
+        ],
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "message": {
+      "type": "string"
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby advisor [fable|opus|sonnet|off|undo|unlock on|off] --json"
+}

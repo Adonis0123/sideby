@@ -2233,6 +2233,114 @@ describe('remote-control (spec §3.22)', () => {
   })
 })
 
+describe('advisor (spec §3.41)', () => {
+  it('shows the state, previews a model with exit 10, writes it and the unlock only with --yes, and undoes it', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{"model":"sonnet"}\n')
+      await fakeHost(h, 'claude')
+      const status = checkSchema('advisor', (await sideby(h, ['advisor', '--json'])).out)
+      assert.deepEqual(
+        [
+          status.unlock,
+          (status.groups as { state: string; accounts: string[] }[]).map((g) => [g.state, g.accounts]),
+        ],
+        [false, [['off', ['claude:main']]]],
+      )
+      const before = await snapshot(h.home)
+      const preview = await sideby(h, ['advisor', 'opus'])
+      assert.equal(preview.code, 10)
+      assert.match(preview.out, /advisorModel not set -> "opus"/)
+      assert.match(preview.out, /advisor\.unlock false -> true/)
+      assert.match(preview.out, /more quota/)
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+      assert.equal(checkSchema('advisor', (await sideby(h, ['advisor', 'opus', '--json'])).out).unlocks, true)
+      const done = await sideby(h, ['advisor', 'opus', '--yes', '--json'])
+      assert.equal(done.code, 0)
+      const r = checkSchema('advisor', done.out)
+      assert.deepEqual([r.applied, r.unlocked, r.unlock], [true, true, true])
+      assert.deepEqual(JSON.parse(await readFile(h.path('.claude/settings.json'), 'utf8')), {
+        model: 'sonnet',
+        advisorModel: 'opus',
+      })
+      assert.deepEqual(JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8')).advisor, {
+        unlock: true,
+      })
+      // Already that model and unlocked: nothing to change, exit 1.
+      assert.equal((await sideby(h, ['advisor', 'opus', '--yes'])).code, 1)
+      assert.equal((await sideby(h, ['advisor', 'undo'])).code, 10)
+      assert.equal((await sideby(h, ['advisor', 'undo', '--yes'])).code, 0)
+      assert.deepEqual(JSON.parse(await readFile(h.path('.claude/settings.json'), 'utf8')), {
+        model: 'sonnet',
+      })
+      assert.equal((await sideby(h, ['advisor', 'undo', '--yes'])).code, 1)
+      assert.equal((await sideby(h, ['advisor', 'nope'])).code, 2)
+      assert.equal((await sideby(h, ['advisor', 'undo', '--account', 'main'])).code, 2)
+    })
+  })
+  it('offers to remove env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS in the same preview and puts it back on undo', async () => {
+    await withFakeHome(async (h) => {
+      const before = `${JSON.stringify({ env: { CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1', FOO: 'x' } }, null, 2)}\n`
+      await h.write('.claude/settings.json', before)
+      await fakeHost(h, 'claude')
+      const status = checkSchema('advisor', (await sideby(h, ['advisor', '--json'])).out)
+      assert.equal((status.groups as { betasOff?: boolean }[])[0]?.betasOff, true)
+      const preview = await sideby(h, ['advisor', 'opus'])
+      assert.equal(preview.code, 10)
+      assert.match(preview.out, /env\.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS "1" -> removed/)
+      assert.match(preview.out, /other(s)? back on/)
+      assert.equal(
+        checkSchema('advisor', (await sideby(h, ['advisor', 'opus', '--json'])).out).removesBetas,
+        true,
+      )
+      assert.equal((await sideby(h, ['advisor', 'opus', '--yes'])).code, 0)
+      assert.deepEqual(JSON.parse(await readFile(h.path('.claude/settings.json'), 'utf8')), {
+        env: { FOO: 'x' },
+        advisorModel: 'opus',
+      })
+      assert.equal((await sideby(h, ['advisor', 'undo', '--yes'])).code, 0)
+      assert.equal(await readFile(h.path('.claude/settings.json'), 'utf8'), before)
+    })
+  })
+  it('still previews the removal when every file already names the model', async () => {
+    await withFakeHome(async (h) => {
+      await h.write(
+        '.claude/settings.json',
+        '{"advisorModel":"opus","env":{"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS":"1"}}\n',
+      )
+      await h.write('.config/sideby/config.json', '{"advisor":{"unlock":true}}\n')
+      await fakeHost(h, 'claude')
+      const preview = await sideby(h, ['advisor', 'opus'])
+      assert.equal(preview.code, 10)
+      assert.match(preview.out, /env\.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS "1" -> removed/)
+      assert.doesNotMatch(preview.out, /advisorModel/)
+      assert.equal((await sideby(h, ['advisor', 'opus', '--yes'])).code, 0)
+      assert.deepEqual(JSON.parse(await readFile(h.path('.claude/settings.json'), 'utf8')), {
+        advisorModel: 'opus',
+        env: {},
+      })
+      assert.equal((await sideby(h, ['advisor', 'opus', '--yes'])).code, 1)
+    })
+  })
+  it('turns the unlocking on and off with a preview, and refuses an API account', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}\n')
+      await h.write('.claude-api/settings.json', '{}\n')
+      await h.write('.claude-api/proxy.env', 'ANTHROPIC_BASE_URL=https://example.com\n', 0o600)
+      await fakeHost(h, 'claude')
+      const preview = await sideby(h, ['advisor', 'unlock', 'on'])
+      assert.equal(preview.code, 10)
+      assert.match(preview.out, /CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1/)
+      const on = await sideby(h, ['advisor', 'unlock', 'on', '--yes', '--json'])
+      assert.deepEqual([on.code, checkSchema('advisor', on.out).unlock], [0, true])
+      assert.equal((await sideby(h, ['advisor', 'unlock', 'on', '--yes'])).code, 1)
+      assert.equal((await sideby(h, ['advisor', 'unlock', 'off', '--yes'])).code, 0)
+      const api = await sideby(h, ['advisor', 'opus', '--account', 'claude:api', '--json'])
+      assert.equal(api.code, 1)
+      assert.match(JSON.parse(api.out).error, /API account.*subscription account/)
+    })
+  })
+})
+
 describe('tune (spec §3.18)', () => {
   /** A Claude main Account with one session of 210 turns and an auto compaction, dated just now. */
   async function withSession(h: FakeHome): Promise<void> {

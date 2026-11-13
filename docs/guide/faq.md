@@ -40,8 +40,9 @@ sideby writes nothing of its own into Host account directories, except in these 
 - `sideby handoff setup grok --yes` adds `~/.grok/hooks/sideby-handoff.json` ([Auto Handoff](usage.md#auto-handoff)).
 - `sideby tune apply` sets `autoCompactWindow` in an account's `settings.json` ([Context tuning](usage.md#context-tuning)).
 - `sideby remote-control off` sets `remoteControlAtStartup` to `false` in Claude's `settings.json` ([Remote Control](usage.md#remote-control)).
+- `sideby advisor <model>` sets `advisorModel` in Claude's `settings.json`, and `off` removes it; choosing a model also removes `env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` where it is on, after showing it in the preview ([Advisor](usage.md#advisor)).
 
-Each has a way back: `quota teardown claude`, `handoff teardown grok`, `tune undo`, `remote-control undo`. Account directories you create with `sideby new` belong to the Host.
+Each has a way back: `quota teardown claude`, `handoff teardown grok`, `tune undo`, `remote-control undo`, `advisor undo`. Account directories you create with `sideby new` belong to the Host.
 
 ## How is it different from aimux, agenv, cc-switch or magpie?
 

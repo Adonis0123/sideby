@@ -1,0 +1,39 @@
+# ADR 0074: The Advisor is unlocked at Launch and chosen through one key, plus the one env entry that blocks it
+
+Date: 2026-11-13 · Status: accepted
+
+## Context
+
+Claude Code's Advisor lets a session consult a stronger model at key moments. The user `settings.json` stores the model as the top-level `advisorModel` (the aliases `fable`, `opus`, `sonnet`, or a full model id; absent or empty means off); `/advisor [fable|opus|sonnet|off]` and `--advisor <model>` set the same thing. Everything about it is gated (read from the Claude Code 2.1.322 binary on 2026-11-13): it is off when `CLAUDE_CODE_DISABLE_ADVISOR_TOOL` is set, when the provider is not first-party, Bedrock or Vertex, or when `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` is set; otherwise it is on when `CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL` is set, and Anthropic's server-side rollout flag decides when it is not. Gated off, `advisorModel` is ignored and `/advisor` answers "Unknown command: /advisor". A user who runs several Claude Accounts wants it available and set to one model in all of them, without editing files by hand.
+
+Ways to unlock it:
+
+- Write `env.CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL` into each Account's `settings.json`. Rejected: it is a second key in a Host directory; it also reaches sessions started without sideby and API Accounts that share the file; and it leaves an experimental flag behind after sideby is removed.
+- Set `CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1` in the environment sideby already prepares for every Launch (spec §3.5, like `SIDEBY_ACCOUNT`), behind one config switch. Chosen: one switch turns it off again, and it reaches only sessions sideby starts.
+
+`CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` wins over the unlock. Tried with Claude Code 2.1.322 on 2026-11-13 (`claude -p /advisor --no-session-persistence`): while it is true, `/advisor` answers "/advisor isn't available in this environment", even with `CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1`; without it, `/advisor` works ("Advisor: off"), also without the unlock variable on an Account Anthropic has rolled the Advisor out to. Users often keep it in a Claude `settings.json` `env` block (`"env": {"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"}`), where it reaches every session of that Account. It also turns off Claude Code's other experimental features. Ways to handle it:
+
+- Leave it and only warn. Rejected: the user picks a model and the feature silently does nothing.
+- Override it at Launch (unset it, or set it false, in the environment sideby prepares). Rejected: it overrides a choice the user made on purpose, and turns every other experimental feature back on without asking.
+- Remove it from the file as part of the write, outside a preview. Rejected: a second key changes without the user seeing it.
+- Detect it, say it blocks the Advisor, and list its removal in the same preview as the model choice. Chosen: the user sees exactly what changes, including the side effect, before anything is written, and undo puts it back.
+
+## Decision
+
+- Config `advisor.unlock` (boolean, default off). While it is on, every Launch sideby prepares for a Claude Subscription Account (`sideby run`, Aliases, Pick Commands, `sideby next`, Auto Handoff starts, AI Tasks; not `login`) gets `CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1`, set before Plugins' `launch.before` hooks. It is never added when the environment already sets `CLAUDE_CODE_DISABLE_ADVISOR_TOOL` or `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` (the user turned it off on purpose), or sets the variable itself. Nothing is written into a Host directory for it.
+- `sideby advisor <fable|opus|sonnet|off>` (preview and exit 10 without `--yes`) and the Panel's Advisor dialog write the top-level `advisorModel` of each Claude Subscription Account's `settings.json`: the chosen alias, or, for `off`, the key is removed. Same rules as Remote Control (ADR-0017): `writeIfUnchanged`, every other key, the indentation and the file mode kept; a symlinked file is written at its real target with the Accounts sharing it named, and a link is never created, replaced or retargeted; an Account without `settings.json` gets no new file (`sideby doctor --fix` first); a file that is not a regular JSON object is skipped.
+- sideby also reads `env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` of each file, and only whether it is true as Claude Code reads it (`1`, `true`, `yes`, `on`, any case, trimmed): the group gets `betasOff: true` and `betasValue` (that value as JSON). A false-like value (`"0"`) is neither reported nor touched. An `env` that is not a JSON object makes the group `blocked` (fix `env` in the file); nothing is written there. Choosing a model (never `off`) lists, in the same preview, `env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS "1" -> removed` for each such file and one line that removing it also turns Claude Code's other experimental features back on; a file that already names the model but has the variable is still a change. Confirmed, it is one `writeIfUnchanged` per file: `advisorModel` and that one entry; every other key and every other `env` entry kept, and an `env` emptied by the removal stays `{}`. This is a second key in a Host directory, so it is written only with a confirmed model choice. The variable in sideby's own (shell) environment is never overridden: status names it (`envOff`) and says to remove it from the shell profile, since it hides the Advisor in every session, those sideby starts too.
+- Choosing a model also turns `advisor.unlock` on when it is off, and the preview says so: a model nobody can use would be a surprise. `off` and `undo` leave the switch alone; `sideby advisor unlock off` turns it off.
+- The undo record (sideby's state directory, `advisor/<hash of file>.json`) keeps whether `advisorModel` was there, its old value, its position among top-level keys when `off` removed it, what sideby wrote (or `removed`), and for a removed env entry its old value and its position in `env`. `undo` puts each back at its old place (so a canonically formatted file comes back byte for byte), only while `advisorModel` still holds what sideby wrote, or is still absent after `off`; the env entry comes back only while it is still absent.
+- API Accounts are left out of reading, writing and unlocking: the Advisor needs a Claude login.
+- This is the sixth exception to "sideby writes nothing into a Host directory", after `quota setup claude --yes`, `handoff setup grok --yes`, `tune apply` (ADR-0012), `remote-control` (ADR-0017) and `messages inbound accept` (ADR-0040).
+- Still never: read any other key of the file, or any other `env` entry or value, into an output, an error or the undo record; write any other key or `env` entry (in particular never `CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL`); touch `~/.claude.json`; end a running session.
+
+## Consequences
+
+- Sessions started with plain `claude`, outside sideby, are not unlocked; they get the Advisor only where Anthropic has rolled it out. The docs and the Panel say so.
+- Unlocking only shows `/advisor` and lets `advisorModel` count. If Anthropic has not enabled the Account, the session shows "Advisor unavailable (<code>)"; sideby cannot change that and says what it means.
+- The Advisor uses more Quota, and its model should be at least as capable as the session's own. The Panel and the skill say so before a model is chosen. The first use of Fable may show a consent prompt in Claude Code.
+- Removing `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` also turns Claude Code's other experimental features back on in that Account's sessions. The preview says so before the user confirms, and `undo` puts the entry back.
+- Running sessions keep the old setting until they are restarted.
+- If Claude Code renames the key or the variable, or drops the gate, the switch sets a variable nobody reads; the binary version above is where the facts were checked.

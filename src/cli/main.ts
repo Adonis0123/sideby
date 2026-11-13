@@ -489,6 +489,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   tune: { flags: ['json', 'yes'] },
   model: { flags: ['json', 'yes'], valued: ['effort'] },
   'remote-control': { flags: ['json', 'yes'] },
+  advisor: { flags: ['json', 'yes'], valued: ['account'] },
   handoff: {
     flags: ['json', 'yes', 'same-family', 'no-same-family', 'other-ai', 'no-other-ai', 'api', 'no-api'],
     valued: ['brief', 'to', 'order', 'ai-order', 'prepare-at', 'threshold', 'wait-minutes', 'countdown'],
@@ -774,6 +775,8 @@ async function dispatch(
       return await cmds.cmdModel(parsed, io)
     case 'remote-control':
       return await cmds.cmdRemoteControl(parsed, io)
+    case 'advisor':
+      return await cmds.cmdAdvisor(parsed, io)
     case 'handoff':
       return await cmds.cmdHandoff(parsed, io)
     case 'ui':

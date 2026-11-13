@@ -443,6 +443,19 @@ export const ConfigSchema = Type.Object(
         { additionalProperties: false, description: 'Network Guard (spec §3.35, ADR-0053).' },
       ),
     ),
+    advisor: Type.Optional(
+      Type.Object(
+        {
+          unlock: Type.Optional(
+            Type.Boolean({
+              description:
+                "Unlock Claude Code's advisor (`/advisor`) in the sessions sideby starts for Claude subscription accounts, by setting `CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1` at launch (never when `CLAUDE_CODE_DISABLE_ADVISOR_TOOL` is set). Off by default; choosing a model with `sideby advisor <model>` turns it on.",
+            }),
+          ),
+        },
+        { additionalProperties: false, description: 'Advisor (spec §3.41, ADR-0074).' },
+      ),
+    ),
     unattended: Type.Optional(
       Type.Object(
         {
@@ -780,6 +793,21 @@ export function editConfigNetwork(
   opts: { dryRun?: boolean } = {},
 ): Promise<{ changed: boolean; before: NetworkConfig | undefined; after: NetworkConfig | undefined }> {
   return editConfigKey(file, 'network', 'change the setting', (current) => edit(current ?? {}), opts)
+}
+
+export type AdvisorConfig = NonNullable<Config['advisor']>
+
+/**
+ * `sideby advisor` and the Panel's Advisor dialog (spec §3.41): changes the config `advisor` key with `edit` (see
+ * `editConfigKey` for how the file is written); `edit` returns undefined to remove the section. With `dryRun`, shows
+ * the change without writing.
+ */
+export function editConfigAdvisor(
+  file: string,
+  edit: (current: AdvisorConfig) => AdvisorConfig | undefined,
+  opts: { dryRun?: boolean } = {},
+): Promise<{ changed: boolean; before: AdvisorConfig | undefined; after: AdvisorConfig | undefined }> {
+  return editConfigKey(file, 'advisor', 'change the setting', (current) => edit(current ?? {}), opts)
 }
 
 export type UnattendedConfig = NonNullable<Config['unattended']>
