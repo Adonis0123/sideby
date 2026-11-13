@@ -63,6 +63,9 @@ export function sameLoginGroups(members: readonly LoginMember[]): Map<string, st
   return out
 }
 
+/** How much older than the reading shown a count of Limit Resets from another reading of the login may be. */
+const RESETS_CARRY_MS = 60 * 60_000
+
 /**
  * The Quota an Account of a Same Login shows: the freshest `ok` reading of the group (its own wins a tie), marked
  * with `from` when it is another member's. Without any `ok` reading the Account keeps its own result.
@@ -84,7 +87,21 @@ export function sharedQuota(
     const rank = localFallbackOnly && q.fetched ? 1 : 0
     if (!best || rank > best.rank || (rank === best.rank && t > best.t)) best = { ref: r, q, t, rank }
   }
-  if (!best || best.ref === ref) return own
+  if (!best) return own
+  // The count of Limit Resets belongs to the login. A reading that does not tell it (kept by a sideby from before
+  // the count was read, which may still run in an open session) takes the newest count another reading of the login
+  // tells, while that count was read within the hour; it carries its own read time.
+  let resets = best.q.limitResets
+  if (!resets)
+    for (const r of [ref, ...peers]) {
+      const q = readings.get(r)
+      const c = q?.status === 'ok' ? q.limitResets : undefined
+      const at = Date.parse(c?.observedAt ?? '')
+      if (!c || !(best.t - at <= RESETS_CARRY_MS)) continue
+      if (!resets || at > Date.parse(resets.observedAt)) resets = c
+    }
+  const carried = resets && !best.q.limitResets ? { limitResets: resets } : {}
+  if (best.ref === ref) return { ...own, ...carried }
   const { from: _from, ...reading } = best.q
-  return { ...reading, from: best.ref }
+  return { ...reading, ...carried, from: best.ref }
 }
