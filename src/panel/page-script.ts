@@ -1,5 +1,6 @@
 // The Panel page's inline script. Plain browser JavaScript in a string (no template literals inside, so String.raw
 // keeps it verbatim); the pure helpers from page-logic.ts are prepended so the tested code is the code that runs.
+import { advisorPending } from '../core/advisor.ts'
 import { filterCommands } from '../core/cli-commands.ts'
 import { groupsToAccept } from '../core/inbound.ts'
 import { limitResetOffer, quotaAge, quotaIsStale, windowAge } from '../core/quota-levels.ts'
@@ -7,6 +8,8 @@ import { remoteControlTodo } from '../core/remote-control.ts'
 import { catalogMatchLevel, catalogNorm, searchCatalog } from '../core/search-catalog.ts'
 import {
   accountTitle,
+  advisorPick,
+  advisorSummary,
   aiTaskAccounts,
   aliasArgsOf,
   aliasIssue,
@@ -200,6 +203,9 @@ const LOGIC = [
   quotaPressure,
   remoteControlSummary,
   remoteControlTodo,
+  advisorSummary,
+  advisorPick,
+  advisorPending,
   groupsToAccept,
   saveHandoffChange,
   enableOutcome,
@@ -7022,6 +7028,7 @@ const MAIN = String.raw`
     if (S.state && S.state.accounts.length && !BOOT.readOnly) out.push('order')
     out.push('ai')
     if (S.state && rcSummary()) out.push('rc')
+    if (advSummary()) out.push('advisor')
     if (S.state && ahState()) out.push('ah')
     if (S.state && (S.state.quotaChecks || []).length) out.push('checks')
     if (S.state && S.state.network) out.push('net')
@@ -7036,6 +7043,7 @@ const MAIN = String.raw`
     b.setAttribute('aria-label', t('set.button') + (warn ? colon() + t('set.rcOn') : ''))
     refreshSettings()
     if (dlg.kind === 'rc') renderRc()
+    if (dlg.kind === 'advisor') renderAdvisor()
     if (dlg.kind === 'net' && net) renderNet()
   }
   // The settings live in two places (spec §3.29, 2026-10-20). The header popover holds only what people change
@@ -7104,6 +7112,7 @@ const MAIN = String.raw`
       acct.push(fm('pick', link(t('pk.title'), names.length ? names.join(', ') : t('pk.noneYet'), names.length ? 'chip-ok' : '', () => openPick(null), true)))
     }
     if (secs.includes('rc')) acct.push(fm('rc', rcLink(leave)))
+    if (secs.includes('advisor')) acct.push(fm('advisor', advLink(leave)))
     // Quota checks that ask the Host (spec §3.26): one switch per Family under one shared explanation.
     const checks = []
     let every = 15
@@ -7813,6 +7822,7 @@ const MAIN = String.raw`
     else if (dlg.kind === 'reset' && rs) renderReset()
     else if (dlg.kind === 'update' && up) renderUpdate()
     else if (dlg.kind === 'rc') renderRc()
+    else if (dlg.kind === 'advisor') renderAdvisor()
     else if (dlg.kind === 'inbound') renderInbound()
     else if (dlg.kind === 'ask' && ak) { if (ak.els.text) ak.text = ak.els.text.value; renderAsk() }
     else if (dlg.kind === 'key' && ky && ky.step !== 'enter') renderKey()
@@ -7834,7 +7844,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.reset', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.expired', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.network', 'ai.ask.unattended', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.commands', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.reset', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.expired', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.advisor', 'ai.ask.network', 'ai.ask.unattended', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.commands', 'ai.ask.tool']
   // Network Guard (spec §3.35): one dialog with the switch, the allowed countries and the newest result per address.
   // Countries are never ticked for the user, the current one included: a wrong network would allow itself.
   const NET_COMMON = ['US', 'JP', 'SG', 'GB', 'DE', 'FR', 'NL', 'CA', 'AU', 'KR', 'TW', 'HK']
@@ -7996,6 +8006,137 @@ const MAIN = String.raw`
     if (!BOOT.readOnly && !to && undo) foot.push(h('button', { class: 'btn', type: 'button', disabled: rc.busy, onclick: async () => { rc.busy = true; renderRc(); await remoteControlUndo(); rc.busy = false; if (dlg.kind === 'rc') renderRc() } }, t('rc.undo')))
     if (!BOOT.readOnly && to) foot.push(h('button', { class: 'btn btn-primary', type: 'button', disabled: rc.busy || !todo.length, 'aria-busy': rc.busy ? 'true' : null, onclick: () => setRemoteControl(to) }, rc.busy ? spinner() : null, t(to === 'on' ? 'rc.confirmOn' : 'rc.confirm')))
     setKids(dlg.el, dialogFrame(t('rc.dialogTitle'), null, body, foot))
+  }
+
+  // ---------- Advisor (spec §3.41, ADR-0074) ----------
+  // Claude Code's advisor: one choice for every Claude settings file. Picking a model lists each file that changes, from
+  // what to what, and that sideby will unlock /advisor at launch; only the confirmation writes, and its toast carries
+  // the undo. The unlock switch is sideby's own setting, so it writes at once, also with an undo.
+  // target: the choice waiting for its confirmation; null while nothing is chosen.
+  const adv = { busy: false, target: null }
+  const ADV_CHOICES = ['fable', 'opus', 'sonnet', 'off']
+  function advState() { return S.state && S.state.advisor }
+  function advSummary() { const a = advState(); return a ? advisorSummary(a.groups) : null }
+  function advName(v) { return t('adv.state.' + v) }
+  function advLink(leave) {
+    const sum = advSummary()
+    // A settings file that turns experimental features off hides the advisor whatever it names, so the row says that.
+    if (advState().groups.some((g) => g.betasOff)) return setLink(leave, t('adv.button'), t('adv.state.betas'), 'chip-warn', openAdvisor, true)
+    return setLink(leave, t('adv.button'), advName(sum), sum === 'off' || sum === 'mixed' ? '' : 'chip-ok', openAdvisor, true)
+  }
+  function openAdvisor() {
+    if (!advState()) return
+    adv.target = null
+    showDialog('advisor')
+    // Empty first, so the first render draws the dialog at its size instead of growing rows in.
+    setKids(dlg.el, [])
+    renderAdvisor()
+  }
+  // What advisorModel holds, as keyChange shows it: null is "not set".
+  function advValue(g) { return g.state === 'off' ? null : g.state === 'other' ? (g.model ? '"' + g.model + '"' : t('adv.otherValue')) : '"' + g.state + '"' }
+  // The server's own rule (core/advisor.ts), so the page offers exactly the change the server would make.
+  function advPlan(st, to) { return to ? advisorPending(st.groups, to, st) : { todo: [], unlocks: false, apiBetas: false } }
+  function renderAdvisor() {
+    const st = advState()
+    if (!st) { if (dlg.el && dlg.el.open) dlg.el.close(); return }
+    const groups = st.groups
+    const sum = advisorSummary(groups)
+    const to = adv.target
+    const { todo, unlocks, apiBetas } = advPlan(st, to)
+    const changing = new Set(todo.map((g) => g.file))
+    // API accounts on a file that loses the variable: sideby gives it to them at launch instead.
+    const apiRefs = to && to !== 'off' ? todo.filter((g) => g.betasOff).flatMap((g) => g.apiAccounts || []) : []
+    const ro = BOOT.readOnly
+    const pick = (v) => { adv.target = advisorPick(v, sum, advPlan(st, v)); renderAdvisor() }
+    const choose = h('div', { class: 'set-row rc-switch' }, h('span', null, t('adv.pick')),
+      h('div', { class: 'seg', role: 'group', 'aria-label': t('adv.pick') }, ADV_CHOICES.map((v) =>
+        h('button', { class: 'seg-btn', type: 'button', 'data-key': 'adv:' + v, disabled: ro || adv.busy, 'aria-pressed': String((to || sum) === v), onclick: () => pick(v) }, advName(v)))))
+    const chip = (g) => g.state === 'blocked' ? 'chip-fail' : g.state === 'missing' || g.state === 'off' || g.state === 'other' ? '' : 'chip-ok'
+    const rows = groups.map((g) => h('li', { class: 'rc-row', 'data-key': 'adv-row:' + g.file },
+      h('div', null, h('code', null, g.file), ' ', h('span', { class: 'chip chip-sm ' + chip(g) }, g.state === 'other' && g.model ? g.model : advName(g.state))),
+      h('div', { class: 'muted small' }, t('rc.usedBy', { refs: g.accounts.map(shortRef).join(', ') })),
+      g.reason ? h('div', { class: 'muted small' }, g.why ? t('settings.why.' + g.why) : g.reason) : null,
+      g.betasOff && g.apiAccounts ? h('div', { class: 'muted small' }, t('adv.apiUsedBy', { refs: g.apiAccounts.map(shortRef).join(', ') })) : null,
+      g.betasOff ? h('div', { class: 'note note-warn small' }, t('adv.betasWarn', { v: 'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS' })) : null,
+      changing.has(g.file) && g.state !== to ? h('div', { class: 'small rc-change', 'data-enter': 'adv-change:' + to + ':' + g.file }, keyChange('advisorModel', advValue(g), to === 'off' ? null : '"' + to + '"')) : null,
+      changing.has(g.file) && to !== 'off' && g.betasOff ? h('div', { class: 'small rc-change', 'data-enter': 'adv-betas:' + g.file },
+        h('span', { class: 'key-change' }, h('code', null, 'env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS'), ' ', h('code', null, g.betasValue), ' → ', t('adv.removed'))) : null))
+    const body = [h('p', { class: 'small' }, t('adv.explain')), choose, h('ul', { class: 'rc-list' }, rows)]
+    if (to && to !== 'off' && todo.some((g) => g.betasOff)) body.push(h('div', { class: 'note note-warn small', 'data-enter': 'adv-betas-note' }, t('adv.betasNote')))
+    if (apiRefs.length) {
+      const refs = apiRefs.map(shortRef).join(', ')
+      body.push(apiBetas
+        ? h('div', { class: 'note small', 'data-enter': 'adv-api-note' }, t('adv.apiNote', { refs }), ' ', h('code', null, 'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1'))
+        : h('div', { class: 'note small', 'data-enter': 'adv-api-already' }, t('adv.apiAlready', { refs })))
+    }
+    if (to && (todo.length || unlocks)) {
+      if (unlocks) body.push(h('div', { class: 'note small', 'data-enter': 'adv-unlocks' }, t('adv.unlockNote'), ' ', h('code', null, 'CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1')))
+      body.push(h('p', { class: 'small muted', 'data-enter': 'adv-note:' + (to === 'off' ? 'off' : 'on') }, t(to === 'off' ? 'adv.offNote' : 'adv.onNote')))
+    } else if (to) body.push(h('p', { class: 'small muted', 'data-enter': 'adv-nothing' }, t('adv.nothing')))
+    // sideby's own switch: whether the sessions it starts get the variable that shows /advisor.
+    body.push(h('div', { class: 'set-row rc-switch adv-unlock' },
+      h('div', { class: 'set-text' }, h('span', { class: 'set-label' }, t('adv.unlockSwitch')), h('span', { class: 'set-hint' }, t('adv.unlockHint'))),
+      h('div', { class: 'seg', role: 'group', 'aria-label': t('adv.unlockSwitch') }, [[true, t('ah.on')], [false, t('ah.off')]].map(([v, text]) =>
+        h('button', { class: 'seg-btn', type: 'button', 'data-key': 'adv-unlock:' + v, disabled: ro || adv.busy, 'aria-pressed': String(st.unlock === v), onclick: () => { if (st.unlock !== v) setAdvisorUnlock(v) } }, text)))))
+    // sideby's other setting here: whether API accounts get the variable at launch (config claude.apiBetasOff).
+    // While the chosen change turns it on, the note above already says so; the current "no" would read as a contradiction.
+    if ((st.apiBetasOff || groups.some((g) => g.apiAccounts)) && !apiBetas) body.push(h('p', { class: 'small muted', 'data-enter': 'adv-api-state' }, t(st.apiBetasOff ? 'adv.apiOn' : 'adv.apiOff', { v: 'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS' })))
+    if (st.envOff) body.push(h('div', { class: 'note note-warn small' }, t('adv.envOff', { v: st.envOff })))
+    body.push(h('p', { class: 'small muted' }, t('adv.unavailable')))
+    if (ro) body.push(h('p', { class: 'small' }, t('adv.readOnly')))
+    if (!askBridged(BOOT, window)) body.push(h('p', { class: 'small' }, h('button', { class: 'link-btn small', type: 'button', 'data-key': 'adv-ask', onclick: () => openAsk({ text: t('ai.ask.advisor') }) }, t('adv.ask'))))
+    const foot = [h('button', { class: 'btn', type: 'button', 'data-key': 'adv-close', disabled: adv.busy, onclick: () => { if (!to) dlg.el.close(); else { adv.target = null; renderAdvisor() } } }, t(to ? 'btn.cancel' : 'btn.close'))]
+    if (!ro && !to && groups.some((g) => g.undo)) foot.push(h('button', { class: 'btn', type: 'button', 'data-key': 'adv-undo', disabled: adv.busy, onclick: advisorUndo }, t('adv.undo')))
+    if (!ro && to) foot.push(h('button', { class: 'btn btn-primary', type: 'button', 'data-key': 'adv-confirm', disabled: adv.busy || !(todo.length || unlocks), 'aria-busy': adv.busy ? 'true' : null, onclick: () => setAdvisorModel(to) }, adv.busy ? spinner() : null, to === 'off' ? t('adv.confirmOff') : t('adv.confirmUse', { m: advName(to) })))
+    patchEnter(dlg.el, dialogFrame(t('adv.title'), null, body, foot))
+  }
+  function advBusy(v) {
+    adv.busy = v
+    if (dlg.kind === 'advisor') renderAdvisor()
+  }
+  async function setAdvisorModel(to) {
+    const st = advState()
+    if (!st) return
+    const files = advPlan(st, to).todo.map((g) => g.file)
+    advBusy(true)
+    try {
+      const r = await api('/api/advisor/set', { confirm: true, to, files })
+      if (r.changedSince) toast(t('as.changedSince'), { kind: 'fail' })
+      else if (r.ok) {
+        // Show the new state now; the reload that follows confirms it.
+        const changed = new Set(files)
+        // A model also removed the variable that turned experimental features off; off leaves it.
+        const base = (g) => g.apiAccounts ? { file: g.file, accounts: g.accounts, apiAccounts: g.apiAccounts } : { file: g.file, accounts: g.accounts }
+        const after = (g) => to === 'off' && g.betasOff ? { ...base(g), state: to, betasOff: true, betasValue: g.betasValue, undo: true } : { ...base(g), state: to, undo: true }
+        S.state.advisor = { ...st, unlock: st.unlock || Boolean(r.unlocked), apiBetasOff: st.apiBetasOff || r.apiBetas === true, groups: st.groups.map((g) => changed.has(g.file) ? after(g) : g) }
+        adv.target = null
+        toast(to === 'off' ? t('adv.doneOff') : t('adv.done', { m: advName(to) }), { kind: 'ok', action: { label: t('toast.undo'), run: advisorUndo }, duration: 12000 })
+      } else toast(t('adv.failed', { msg: r.message }), { kind: 'fail' })
+    } catch (e) { toast(t('adv.failed', { msg: e.message }), { kind: 'fail' }) }
+    advBusy(false)
+    refreshSettings()
+    await load({ silent: true })
+  }
+  async function advisorUndo() {
+    advBusy(true)
+    try {
+      const r = await api('/api/advisor/undo', { confirm: true })
+      toast(r.ok ? t('adv.undone') : r.message, { kind: r.ok ? 'ok' : 'fail' })
+    } catch (e) { toast(t('toast.undoFailed', { msg: e.message }), { kind: 'fail' }) }
+    advBusy(false)
+    await load({ silent: true })
+  }
+  async function setAdvisorUnlock(on) {
+    advBusy(true)
+    try {
+      const r = await api('/api/advisor/unlock', { on })
+      if (r.unlock === on) {
+        if (advState()) S.state.advisor = { ...advState(), unlock: on }
+        toast(t(on ? 'adv.unlockOn' : 'adv.unlockOff'), { kind: 'ok', action: { label: t('toast.undo'), run: () => setAdvisorUnlock(!on) }, duration: 8000 })
+      } else toast(t('adv.failed', { msg: r.message }), { kind: 'fail' })
+    } catch (e) { toast(t('adv.failed', { msg: e.message }), { kind: 'fail' }) }
+    advBusy(false)
+    await load({ silent: true })
   }
 
   // ---------- AI Tasks (spec §3.28) ----------

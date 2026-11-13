@@ -98,7 +98,7 @@ Shared Item paths must be relative and stay inside the account directory: config
 - The other exceptions to that rule, and the rules for each hook entry, reader and writer that touches a Host or a shell rc file, are in `docs/agents/host-directories.md`. They are Invariants too.
 - Quota warning levels, the Usage window and the rule for how old a Quota window is (`windowAge`, ADR-0073) live in `core/quota-levels.ts`; the CLI, the Panel page and the Menu Bar Item all use them.
 - Fixes write only inside the account being fixed, through the atomic writer (temp file in the same directory, mode 600, rename). Credential files end at mode 600.
-- `launch` never changes the parent shell environment, never adds dangerous flags by default, and clears Hijack Variables for every account.
+- `launch` never changes the parent shell environment, never adds dangerous flags by default, and clears Hijack Variables for every account; the only experimental-feature variables it adds are the Advisor unlock for Subscription Accounts and, under config `claude.apiBetasOff`, `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` for Claude API Accounts, never over a value `proxy.env` or the environment sets (ADR-0074).
 - `sideby next` (Handoff, spec §3.13) only ranks local Quota and starts its pick exactly as `run` would. It starts nothing when nothing can be picked, nor when no signed-in Subscription Account of the Family has Quota data (`hasQuota: false`, the pick would be a guess), and never copies sessions between Accounts.
 - Auto Handoff (spec §3.17, ADR-0010) acts only with config `handoff.auto`, and between two Accounts of one Family only with `sameFamily` too. It never ends a Host before a pick exists, never kills one (SIGTERM, then 10 s, then it gives up), never copies sessions, and passes the Brief's path, never its text, on the command line. It adds no dangerous flag: hooks come through `--settings` (Claude), `-c hooks.*` (Codex, which the user must trust in `/hooks`) or the Grok setup file.
 
@@ -117,7 +117,7 @@ Shared Item paths must be relative and stay inside the account directory: config
 
 - Every `--json` output has `schemaVersion: 1`, and an optional `_notice` (`update`, `skill`; spec §3.23) that never changes the result. A `--json` error is `{ schemaVersion, error, code }` (plus `_notice`); `error` stays a string. Adding a field keeps the version; removing, renaming or changing meaning bumps it and needs an ADR.
 - Every user-facing error says what to do next.
-- Exit code 10 means a change was shown and waits for `--yes` (`quota setup`, `quota reset`, `handoff setup`, `update`, `browser --enable|--disable` and `network on|off|allow`). Doctor never uses it: it exits 1 only for `fail` Findings.
+- Exit code 10 means a change was shown and waits for `--yes` (`quota setup`, `quota reset`, `handoff setup`, `update`, `browser --enable|--disable`, `network on|off|allow`, `advisor <model>|off|undo` and `advisor unlock`). Doctor never uses it: it exits 1 only for `fail` Findings.
 
 ## Tests
 

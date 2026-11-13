@@ -7,7 +7,7 @@ You are inside such a session when the first message came from sideby and names 
 ## Rules for every task
 
 - Use this skill and `sideby … --json` for every step a command covers.
-- `quota setup`, `handoff setup`, `update`, `browser --enable|--disable`, `try`, `tune apply|undo`, `model` and `remote-control off|on` show a preview first and exit 10: show the user the change, and add `--yes` only after they agree. `doctor` shows what `--fix` would fix; run `--fix` after they agree. `new`, `plugins new`, `terminal --set|--custom` and `key` write at once, so ask the user before you run them.
+- `quota setup`, `handoff setup`, `update`, `browser --enable|--disable`, `try`, `tune apply|undo`, `model`, `remote-control off|on` and `advisor <model>|off|undo|unlock` show a preview first and exit 10: show the user the change, and add `--yes` only after they agree. `doctor` shows what `--fix` would fix; run `--fix` after they agree. `new`, `plugins new`, `terminal --set|--custom` and `key` write at once, so ask the user before you run them.
 - Never sign in for the user. Tell them to click **Sign in** on the account in the Panel, or to run `sideby login <ref>` in their own terminal.
 - Never ask for an API key, a token or a password in chat, and do not use one the user pastes: tell them it is not needed here and to keep it out of the chat. A key goes in with `sideby key <ref>`, which the user runs in their own terminal (or **Enter key** in the Panel); it reads the key without showing it.
 - Do not run `sideby ask` to start another AI Task yourself.

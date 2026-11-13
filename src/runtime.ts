@@ -8,6 +8,16 @@ import {
   startArgsOf,
 } from './core/accounts.ts'
 import {
+  type AdvisorChange,
+  type AdvisorChoice,
+  type AdvisorStatus,
+  advisorStatus,
+  checkAdvisorAccount,
+  setAdvisor,
+  setAdvisorUnlock,
+  undoAdvisor,
+} from './core/advisor.ts'
+import {
   type AliasValue,
   addConfigAlias,
   addConfigPickCommand,
@@ -546,6 +556,20 @@ export interface Runtime {
   remoteControlOn(): Promise<RemoteControlChange>
   /** Puts back what `remoteControlOff` or `remoteControlOn` replaced, only where the key still holds what it wrote. */
   remoteControlUndo(): Promise<RemoteControlChange>
+  /**
+   * Claude Code's advisor (spec §3.41, ADR-0074): `advisorModel` of each Claude subscription Account's settings file,
+   * grouped by file, and whether sideby unlocks it at launch (config `advisor.unlock`).
+   */
+  advisor(): Promise<AdvisorStatus>
+  /**
+   * Sets `advisorModel` to `to` (`off` removes it) in every settings file that does not hold it yet, or only in the one
+   * `opts.account` uses, remembering how to undo it; a model also turns config `advisor.unlock` on.
+   */
+  advisorSet(to: AdvisorChoice, opts?: { account?: string }): Promise<AdvisorChange>
+  /** Puts back what `advisorSet` replaced, only where the key still holds what it wrote. */
+  advisorUndo(): Promise<AdvisorChange>
+  /** Turns config `advisor.unlock` on or off. */
+  advisorUnlock(on: boolean): Promise<{ ok: boolean; unlock: boolean; message: string }>
   /**
    * Which Account of a Family to move on to (spec §3.13), for a start the user asks for: past the Takeover Limit it
    * falls back to the least used Account under 100% (`tight`). Throws a UserError with code `no-quota-source`
@@ -1184,6 +1208,19 @@ export async function createRuntime(
     stateDir: paths.stateDir,
     env,
   })
+  /** The two config switches the Advisor reads and may change (spec §3.41). */
+  const advisorConfig = () => ({
+    unlock: config.advisor?.unlock === true,
+    apiBetasOff: config.claude?.apiBetasOff === true,
+  })
+  /** After an Advisor change wrote the config file, this Runtime reads those two switches again. */
+  const reloadAdvisorConfig = async () => {
+    const fresh = await loadConfig(paths.configFile).catch(() => null)
+    if (fresh) {
+      config.advisor = fresh.advisor
+      config.claude = fresh.claude
+    }
+  }
 
   /** The config value of the alias `name`, from own keys only (`constructor` is not an alias unless configured). */
   const ownAlias = (name: string): AliasValue | undefined =>
@@ -1645,11 +1682,17 @@ export async function createRuntime(
         config.accounts = fresh.accounts
         config.unattended = fresh.unattended
         config.ask = fresh.ask
+        config.advisor = fresh.advisor
+        config.claude = fresh.claude
       }
       const all = await accounts()
       const inputs = launchInputs(ref, all, userArgs, command)
       const p = await prepareLaunch({
         ...inputs,
+        // Claude Code's advisor (spec §3.41, ADR-0074): unlocked in Claude subscription sessions while config says so.
+        ...(config.advisor?.unlock === true ? { advisorUnlock: true } : {}),
+        // Claude API Accounts get the variable that turns experimental betas off, moved here from a shared settings file.
+        ...(config.claude?.apiBetasOff === true ? { apiBetasOff: true } : {}),
         // Config `ask.permissions: account` (ADR-0070): the AI Task keeps the Account's own arguments, as `run` does.
         ...(opts.aiTask && aiTaskPermissions(config) === 'checked' ? { aiTask: true } : {}),
         label: launchLabel(ref, inputs.account, all),
@@ -2161,6 +2204,32 @@ export async function createRuntime(
     },
     async remoteControlUndo() {
       return undoRemoteControlOff(await accounts(), readContext())
+    },
+    async advisor() {
+      return advisorStatus(await accounts(), readContext(), advisorConfig())
+    },
+    async advisorSet(to, opts = {}) {
+      const account = opts.account ? checkAdvisorAccount(await rt.resolve(opts.account)).ref : undefined
+      const r = await setAdvisor(await accounts(), readContext(), to, {
+        configFile: paths.configFile,
+        ...advisorConfig(),
+        ...(account ? { account } : {}),
+      })
+      await reloadAdvisorConfig()
+      return r
+    },
+    async advisorUndo() {
+      const r = await undoAdvisor(await accounts(), readContext(), {
+        configFile: paths.configFile,
+        ...advisorConfig(),
+      })
+      await reloadAdvisorConfig()
+      return r
+    },
+    async advisorUnlock(on) {
+      const r = await setAdvisorUnlock(paths.configFile, on)
+      await reloadAdvisorConfig()
+      return r
     },
     async tuneUndoInfo(account) {
       return account.family === 'claude' ? tuneUndoInfo(account, readContext()) : null

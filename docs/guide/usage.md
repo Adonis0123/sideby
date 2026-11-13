@@ -393,6 +393,27 @@ sideby remote-control undo --yes # puts back what was there
 
 It only stops sessions from connecting by themselves: you can still run `/remote-control` in a session when you want it. Sessions already running stay connected until you restart them. sideby writes that one key, keeps everything else in the file, writes a linked file at its real target, and never creates a `settings.json` (an account without one should share the main one first: `sideby doctor --fix`). API accounts never sign in to claude.ai, so the banner leaves them out.
 
+## Advisor
+
+Claude Code's Advisor lets a session ask a stronger model (Fable, Opus or Sonnet) for advice at key moments. The model is saved as `advisorModel` in `settings.json`; `/advisor` in a session changes it. Claude Code hides the whole feature until Anthropic turns it on for you, so `/advisor` may answer "Unknown command: /advisor".
+
+In the panel, **Settings** → **All settings…** → **Accounts** → **Advisor (ask a stronger model)** shows the current model (the Command Palette finds it as "advisor" too). Pick Fable, Opus, Sonnet or Off: each settings file shows its change (`advisorModel not set → "opus"`) and the accounts that use it, and **Use Opus** (or **Turn off**) writes it; the toast has **Undo**, and **Undo last change** stays in the dialog. Picking a model also turns on **Unlock /advisor in sessions sideby starts**, a switch you can turn off on its own. The same from a terminal:
+
+```sh
+sideby advisor                  # each settings file's model, and whether sideby unlocks /advisor
+sideby advisor opus             # shows the change, exit 10
+sideby advisor opus --yes       # writes it and turns the unlock on
+sideby advisor off --yes        # removes the key
+sideby advisor undo --yes       # puts back what was there
+sideby advisor unlock off --yes # stops unlocking, keeps the model
+```
+
+While the unlock is on, every Claude session sideby starts (`sideby run`, short commands, pick commands, `sideby next`, Auto Handoff, Let AI do it) gets `CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1`; nothing is written for it. Sessions you start with plain `claude` get the Advisor only once Anthropic turns it on for you. If a session says "Advisor unavailable", Anthropic has not enabled it for that account yet, and sideby cannot change that. The Advisor uses more quota; choose a model at least as strong as the one the session runs. Restart running sessions to pick up a change.
+
+If `/advisor` answers "/advisor isn't available in this environment", a setting is turning off Claude Code's experimental features: usually `"env": {"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"}` in `settings.json`. sideby points it out (the panel shows **Turned off by a setting**), and when you pick a model the same preview lists `env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS "1" -> removed`. Removing it also turns Claude Code's other experimental features back on; nothing is written until you confirm, and **Undo** puts it back. Off never touches it. If you also have API accounts (say `claude:deepseek`) that share that file, their gateway may need the variable, because it stops Claude Code from sending `anthropic-beta` headers some gateways reject. Then the same preview also lists `sideby config: claude.apiBetasOff false -> true` and names them: from then on sideby adds `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` whenever it starts a Claude API account (a value in its `proxy.env` still wins), so the variable leaves the shared file without breaking them. API accounts are only ever started by sideby, so none is missed. `sideby advisor` says whether this is on, and **Undo** turns it back off with the file; `sideby config set claude.apiBetasOff false` turns it off on its own. If the variable is set in your shell instead, sideby leaves it alone: remove it from your shell profile, because it hides the Advisor in every session, those sideby starts too.
+
+sideby writes only `advisorModel` (or removes it for Off) and, with a model choice, that one `env` entry; it keeps everything else in the file, including the other `env` entries, writes a linked file at its real target, and never creates a `settings.json` (run `sideby doctor --fix` first). API accounts are left out: the Advisor needs a Claude sign-in.
+
 ## When an account hits its limit
 
 ```sh

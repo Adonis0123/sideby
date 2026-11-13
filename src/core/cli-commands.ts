@@ -125,6 +125,18 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
     example: 'sideby model claude:work',
   },
   {
+    id: 'advisor',
+    group: 'accounts',
+    usage: 'sideby advisor [fable|opus|sonnet|off|undo] [--account <account>] [--yes]',
+    help: "let Claude ask a stronger model for advice at key moments: sets Claude Code's advisor in every Claude settings file and unlocks /advisor in sessions sideby starts (shows the change first; unlock on|off toggles only the unlocking)",
+    summary: {
+      en: 'Let Claude ask a stronger model for advice at key moments',
+      zh: '让 Claude 在关键时刻请教更强的模型',
+    },
+    example: 'sideby advisor opus',
+    feature: 'setting.advisor',
+  },
+  {
     id: 'edit',
     group: 'accounts',
     usage: 'sideby edit <account> [--path] [--with <editor>]',
@@ -889,7 +901,7 @@ export function cliHelp(list: readonly CliCommand[] = CLI_COMMANDS): string {
 }
 
 const HELP_TAIL = `Options:
-  --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, remote-control, handoff,
+  --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, advisor, remote-control, handoff,
                 families, commands, plugins, app, desktop, sessions, history, send, messages, edit, browser, update, local, ask,
                 terminal, key, try, autostart, menubar, config, network, unattended)
   -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, commands, desktop, edit, browser,

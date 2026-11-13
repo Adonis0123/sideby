@@ -393,6 +393,27 @@ sideby remote-control undo --yes # 恢复原来的值
 
 它只让会话不再自动连接：需要时仍可在会话里运行 `/remote-control` 手动打开。已经开着的会话要重开才断开。sideby 只写这一个键，文件里其他内容不变；链接的文件写到真实文件上；不会新建 `settings.json`（没有这个文件的账号先运行 `sideby doctor --fix` 共享主账号的）。API 账号不登录 claude.ai，提示条不算它们。
 
+## 顾问模型（Advisor）
+
+Claude Code 的 Advisor 让会话在关键时刻请教一个更强的模型（Fable、Opus 或 Sonnet）。模型存在 `settings.json` 的 `advisorModel` 里，会话里的 `/advisor` 可以改它。Anthropic 没给你开之前，Claude Code 会把整个功能藏起来，所以 `/advisor` 可能显示「Unknown command: /advisor」。
+
+在面板里，**设置** → **所有设置…** → **账号** → **顾问模型（Advisor）** 写着当前模型（搜索里输入「顾问」或 advisor 也能找到）。选 Fable、Opus、Sonnet 或关：每个设置文件列出改动（`advisorModel 未设置 → "opus"`）和用到它的账号，点 **改用 Opus**（或 **确认关闭**）才写入；之后的提示里有 **撤销**，对话框里也一直有 **撤销上次更改**。选了模型还会打开 **在 sideby 启动的会话里解锁 /advisor**，这个开关也可以单独关。命令行同样可以：
+
+```sh
+sideby advisor                  # 每个设置文件的模型，以及 sideby 会不会解锁 /advisor
+sideby advisor opus             # 只展示改动，退出码 10
+sideby advisor opus --yes       # 写入，并打开解锁
+sideby advisor off --yes        # 删掉这个键
+sideby advisor undo --yes       # 恢复原来的值
+sideby advisor unlock off --yes # 不再解锁，模型保留
+```
+
+解锁开着时，sideby 启动的每个 Claude 会话（`sideby run`、短命令、挑选命令、`sideby next`、自动接力、让 AI 帮你操作）环境里都有 `CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1`；为此不写任何文件。直接运行 `claude` 开的会话，要等 Anthropic 给你开了才有 Advisor。会话里显示「Advisor unavailable」说明 Anthropic 还没给这个账号开，sideby 改不了。Advisor 会多用额度；选的模型不要比会话本身用的弱。正在运行的会话要重开才生效。
+
+如果 `/advisor` 显示「/advisor isn't available in this environment」，是有个设置关掉了 Claude Code 的实验功能，通常是 `settings.json` 里的 `"env": {"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"}`。sideby 会指出来（面板上写 **被设置关掉了**），选模型时同一个预览里会列出 `env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS "1" -> removed`。删掉它也会重新打开 Claude Code 的其他实验功能；你确认之前什么都不写，**撤销** 能放回去。选关不会动它。如果还有 API 账号（比如 `claude:deepseek`）共用这个文件，它们的网关可能需要这个变量：它让 Claude Code 不发 `anthropic-beta` 请求头，有些网关不接受这种请求头。这时同一个预览还会列出 `sideby config: claude.apiBetasOff false -> true` 并点名这些账号：之后 sideby 每次启动 Claude API 账号都会带上 `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`（它 `proxy.env` 里的值仍优先），变量从共用文件删掉也不影响它们。API 账号只能经 sideby 启动，所以不会漏。`sideby advisor` 会写明这一项开没开，**撤销** 会连同文件一起把它关回去；`sideby config set claude.apiBetasOff false` 可以单独关。如果这个变量设在你的 shell 里，sideby 不动它：请从 shell 配置文件里删掉，因为它让所有会话（包括 sideby 启动的）都没有 Advisor。
+
+sideby 只写 `advisorModel`（选关时删掉它），选模型时再删掉上面那一项 `env`；文件里其他内容不变，`env` 的其他条目也不变；链接的文件写到真实文件上；不会新建 `settings.json`（先运行 `sideby doctor --fix`）。API 账号不算：Advisor 要用 Claude 登录。
+
 ## 账号撞上限额时
 
 ```sh

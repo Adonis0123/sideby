@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { advisorPending } from '../core/advisor.ts'
 import { ALIAS_NAME, RESERVED_ALIASES } from '../core/config.ts'
 import { remoteControlTodo } from '../core/remote-control.ts'
 import { checkHotkey } from '../menubar/hotkey.ts'
@@ -8,6 +9,8 @@ import { renderPage } from './page.ts'
 import {
   AI_TASK_KINDS,
   accountTitle,
+  advisorPick,
+  advisorSummary,
   aiTaskAccounts,
   aliasArgsOf,
   aliasIssue,
@@ -1400,6 +1403,69 @@ describe('Remote Control button state', () => {
   it('ignores groups used only by API Accounts', () => {
     assert.equal(remoteControlSummary([g('off', 'claude:main'), g('on', 'claude:ds')], ['claude:ds']), 'off')
     assert.equal(remoteControlSummary([g('on', 'claude:main', 'claude:ds')], ['claude:ds']), 'on')
+  })
+})
+
+describe('Advisor row state (spec §3.41)', () => {
+  const g = (state: string) => ({ state, accounts: ['claude:main'] })
+  it('says the one model every readable file names, mixed when they differ, off when none can be read', () => {
+    assert.equal(advisorSummary([]), null)
+    assert.equal(advisorSummary([g('opus'), g('opus'), g('missing')]), 'opus')
+    assert.equal(advisorSummary([g('opus'), g('off')]), 'mixed')
+    assert.equal(advisorSummary([g('missing'), g('blocked')]), 'off')
+  })
+  it('changes the files that do not name the choice yet and that sideby can write', () => {
+    const gs = [g('opus'), g('off'), g('other'), g('missing'), g('blocked')]
+    assert.deepEqual(
+      advisorPending(gs, 'opus', { unlock: true, apiBetasOff: false }).todo.map((x) => x.state),
+      ['off', 'other'],
+    )
+    assert.deepEqual(
+      advisorPending(gs, 'off', { unlock: true, apiBetasOff: false }).todo.map((x) => x.state),
+      ['opus', 'other'],
+    )
+  })
+  it('keeps the current model as the choice while choosing it still changes something', () => {
+    const betas = { state: 'opus', accounts: ['claude:main'], betasOff: true }
+    // Every file already names Opus, but one still turns experimental features off: the removal waits to be confirmed.
+    const pending = advisorPending([g('opus'), betas], 'opus', { unlock: true, apiBetasOff: false })
+    assert.deepEqual([pending.todo, pending.unlocks], [[betas], false])
+    assert.equal(advisorPick('opus', 'opus', pending), 'opus')
+    // Off never removes it, so choosing off where every file is off waits for nothing.
+    assert.equal(
+      advisorPick(
+        'off',
+        'off',
+        advisorPending([{ ...betas, state: 'off' }], 'off', { unlock: true, apiBetasOff: false }),
+      ),
+      null,
+    )
+    // The unlock alone is a change too.
+    assert.equal(
+      advisorPick('opus', 'opus', advisorPending([g('opus')], 'opus', { unlock: false, apiBetasOff: false })),
+      'opus',
+    )
+    assert.equal(
+      advisorPick('opus', 'opus', advisorPending([g('opus')], 'opus', { unlock: true, apiBetasOff: false })),
+      null,
+    )
+    assert.equal(
+      advisorPick(
+        'fable',
+        'opus',
+        advisorPending([g('opus')], 'fable', { unlock: true, apiBetasOff: false }),
+      ),
+      'fable',
+    )
+  })
+  it('turns config claude.apiBetasOff on only where the variable leaves a file API accounts share', () => {
+    const shared = { state: 'off', accounts: ['claude:main'], apiAccounts: ['claude:api'], betasOff: true }
+    const cfg = { unlock: true, apiBetasOff: false }
+    assert.equal(advisorPending([shared], 'opus', cfg).apiBetas, true)
+    assert.equal(advisorPending([shared], 'opus', { ...cfg, apiBetasOff: true }).apiBetas, false)
+    assert.equal(advisorPending([shared], 'off', cfg).apiBetas, false)
+    assert.equal(advisorPending([{ ...shared, betasOff: undefined }], 'opus', cfg).apiBetas, false)
+    assert.equal(advisorPending([{ ...shared, apiAccounts: undefined }], 'opus', cfg).apiBetas, false)
   })
 })
 
