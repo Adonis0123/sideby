@@ -423,10 +423,16 @@ export interface VendorPageOpen {
 
 /**
  * Opens the page where a Limit Reset of `account` is spent (`FamilyDef.limitReset.vendorPage`, ADR-0072): in the
- * Browser Profile the user chose for the Account, or the only one found signed in to it, else in the default browser.
- * sideby never reads which login that browser has. The url passed the loader's https check; no other is opened.
+ * Browser Profile given (folder, name or Google account), else the one the user chose for the Account, or the only one
+ * found signed in to it, else in the default browser. A `profile` that cannot be opened is an error, never a silent
+ * fall back to another browser. sideby never reads which login that browser has. The url passed the loader's https
+ * check; no other is opened.
  */
-export async function openVendorPage(rt: Runtime, account: Account): Promise<VendorPageOpen> {
+export async function openVendorPage(
+  rt: Runtime,
+  account: Account,
+  profile?: string,
+): Promise<VendorPageOpen> {
   const url = account.kind === 'api' ? undefined : rt.families.get(account.family)?.limitReset?.vendorPage
   if (!url)
     throw new UserError(`${account.ref} has no page for limit resets; check the vendor's own usage page`, {
@@ -434,11 +440,42 @@ export async function openVendorPage(rt: Runtime, account: Account): Promise<Ven
     })
   const deps = depsFor(rt)
   const run = async (cmd: string, args: readonly string[]) => (await deps.exec(cmd, args)).code === 0
+  const canPick = deps.platform === 'darwin' || Boolean(deps.wslMount)
+  if (profile) {
+    // The user named the browser user: it opens there or says why not, with the address to open by hand.
+    if (!canPick)
+      throw new UserError(
+        `opening a browser user works on macOS and WSL only for now (this is ${deps.platform}); open ${url} yourself`,
+        { code: 'unsupported' },
+      )
+    const problems: string[] = []
+    const launch = await chromeLauncher(deps, problems)
+    if (!launch)
+      throw new UserError(
+        `${CHROME.title} is not installed; get it from ${CHROME_DOWNLOAD}, or open ${url} yourself`,
+        { code: 'not-installed' },
+      )
+    const entries = (await profileEntries(launch.userData ?? chromeUserData(rt.paths.home), problems)) ?? []
+    if (!entries.length)
+      throw new UserError(`${CHROME.title} has no browser users yet; open it once, then try again`, {
+        code: 'no-profiles',
+      })
+    const pick = findProfile(entries, profile)
+    const [cmd, ...args] = launch.command(`--profile-directory=${pick.dir}`, url)
+    if (!(await run(cmd as string, args)))
+      throw new UserError(`could not open ${CHROME.title}; open ${url} yourself`, { code: 'open-failed' })
+    return {
+      ref: account.ref,
+      url,
+      profile: { dir: pick.dir, name: pick.name },
+      command: [cmd as string, ...args],
+    }
+  }
   // The Account's own Browser Profile, when one is known without asking; any problem falls back to the default browser.
   // Nothing of a browser is read unless the user chose a Browser Profile for this Account or turned Browser Sign-ins on.
   const chosen = rt.config.browser?.choices?.[account.ref]
   const findIt = rt.config.browser?.signIns === true
-  if ((deps.platform === 'darwin' || deps.wslMount) && (chosen || findIt)) {
+  if (canPick && (chosen || findIt)) {
     const problems: string[] = []
     const launch = await chromeLauncher(deps, problems).catch(() => null)
     const entries = launch

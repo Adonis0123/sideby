@@ -1769,11 +1769,18 @@ function resetWindowLine(w: QuotaWindow, now: Date): string {
  * it. A spend that got no final answer fails with the `operationId` to retry.
  */
 export async function cmdQuotaReset(a: ParsedArgs, io: Io, runtime?: Runtime): Promise<number> {
-  const usage = 'usage: sideby quota reset <account> [--yes] [--operation <id>] [--open] [--json]'
+  const usage =
+    'usage: sideby quota reset <account> [--yes] [--operation <id>] [--open [--profile <browser user>]] [--json]'
   const ref = a.positionals[1]
   if (!ref || a.positionals.length !== 2 || a.rest.length || a.flags.has('refresh'))
     throw new UsageError(usage)
   const operation = a.flags.get('operation') as string | undefined
+  // Which Chrome browser user `--open` opens the page in (folder, name or Google account); without it, the Account's own.
+  const profile = a.flags.get('profile') as string | undefined
+  if (profile !== undefined && !a.flags.has('open'))
+    throw new UsageError(
+      `--profile chooses the browser user that --open opens the page in; add --open\n${usage}`,
+    )
   const asJson = a.flags.has('json')
   const rt = runtime ?? (await createRuntime())
   const now = rt.readContext().now
@@ -1793,7 +1800,7 @@ export async function cmdQuotaReset(a: ParsedArgs, io: Io, runtime?: Runtime): P
       long: QUOTA_LONG_WARN_PERCENT,
     })
     const tight = quota.status === 'ok' ? (offer?.tight ?? []).map((i) => quota.windows[i]!) : []
-    const opened = a.flags.has('open') ? await openVendorPage(rt, account) : undefined
+    const opened = a.flags.has('open') ? await openVendorPage(rt, account, profile) : undefined
     const who = st.identity?.email
     const message = `${f.title} cannot use a limit reset from the command line: it is used on the vendor's page, and then applies to ${f.title} too. sideby cannot see whether ${account.ref} holds one.`
     if (asJson) {
@@ -1839,7 +1846,7 @@ export async function cmdQuotaReset(a: ParsedArgs, io: Io, runtime?: Runtime): P
         { code: 'no-vendor-page' },
       )
     // A Family whose Host can use one and that has a vendor page too: `--open` only opens the page, and uses nothing.
-    const opened = await openVendorPage(rt, account)
+    const opened = await openVendorPage(rt, account, profile)
     const message = `Opened ${opened.url}${opened.profile ? ` in the browser user ${opened.profile.name}` : ' in your browser'}: the vendor's page for the limit resets of ${account.ref}. Nothing was used from here; to use one through ${f.title} itself, run \`sideby quota reset ${account.ref}\`.`
     if (asJson)
       json(io, {

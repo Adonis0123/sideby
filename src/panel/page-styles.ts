@@ -242,6 +242,10 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .q-asof .ic, .q-resets .ic { width: 11px; height: 11px; }
 .q-reset-btn { height: 22px; padding: 0 8px; gap: 4px; font-size: 11px; }
 .q-reset-btn .ic, .q-reset-btn .spin { width: 11px; height: 11px; }
+.q-reset { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 2px 10px; min-width: 0; max-width: 100%; }
+.q-reset-go { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; white-space: nowrap; }
+.q-reset-go .ic, .q-reset-go .spin { width: 11px; height: 11px; }
+.q-reset-in { font-size: 11px; }
 /* While a reset is being used or the quota is asked after the vendor's page: the old bars stay and breathe. */
 .quota.is-resetting .bar > span, .rs-win.is-busy .bar > span { animation: rs-wait 1.2s var(--ease-out) infinite alternate; }
 @keyframes rs-wait { from { opacity: 1; } to { opacity: .45; } }

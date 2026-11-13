@@ -610,6 +610,31 @@ describe('sideby browser: open', () => {
     })
   })
 
+  it('opens the limit reset page in the browser user that is named, and never in another one instead', async () => {
+    await withFakeHome(async (h) => {
+      // Named by its name, with sign-in matching off: only `Local State` is needed to know the folder.
+      const { rt, fake } = await setup(h, { enabled: false })
+      const before = await snapshot(h.home)
+      const work = await rt.resolve('claude:work')
+      const r = await openVendorPage(rt, work, 'Personal')
+      assert.deepEqual(r.profile, { dir: 'Default', name: 'Personal' })
+      assert.deepEqual(fake.calls.filter((c) => c.cmd === '/usr/bin/open').at(-1)?.args, [
+        '-na',
+        h.path('Apps/Google Chrome.app'),
+        '--args',
+        '--profile-directory=Default',
+        'https://claude.ai/settings/usage',
+      ])
+      // One that does not exist is refused, and nothing opens in the default browser instead.
+      const opens = fake.calls.filter((c) => c.cmd === '/usr/bin/open').length
+      await refused(openVendorPage(rt, work, 'Nobody'), 'profile-unknown')
+      fake.openCode = 1
+      await refused(openVendorPage(rt, work, 'Default'), 'open-failed')
+      assert.equal(fake.calls.filter((c) => c.cmd === '/usr/bin/open').length, opens + 1)
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [], 'opening writes nothing')
+    })
+  })
+
   it('opens a browser user named by the Google account it uses in Chrome', async () => {
     await withFakeHome(async (h) => {
       const { rt } = await setup(h)

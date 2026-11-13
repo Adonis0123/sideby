@@ -183,7 +183,7 @@ sideby quota reset codex:main --yes    # 使用一次
 - **结果不明。** 没有及时收到答复，或者 Codex 中途停了。sideby 没法判断有没有用掉，并会照实说。点「再查一次」（或者再跑一遍同样的命令）：它重复的是同一个请求，Codex 认得出来，所以不会多用一次。在 Codex 给出最终答复之前，sideby 一直留着这个请求。如果这个账号之后换了一个登录，sideby 不会从它重发：用原来的登录重新登录，再查一次。
 - **已使用；额度待更新。** 重置已经用掉，但额度暂时没读到，下一次检查时更新。
 
-**Claude Code。** 它的命令行既说不出账号有几次重置，也用不了。重置要在 Claude 的用量页上使用，用了之后对 Claude Code 同样生效。账号有窗口到了提醒线（Fable 的每周窗口也算）时，面板在这一行显示「去 claude.ai 使用重置」；其他时候它在这一行的菜单和搜索里，`sideby quota reset claude:work --open` 和状态栏菜单里账号下面的「使用重置…」也一样。它会用你给这个账号选的浏览器用户打开 `https://claude.ai/settings/usage`（见[在哪个浏览器登录过](#在哪个浏览器登录过)），没选就用默认浏览器。sideby 看不到那个页面登录的是谁，也看不到它有没有重置：把鼠标停在按钮上，能看到这个账号的邮箱和哪些窗口紧张，请核对页面登录的是不是它。你回到面板时，sideby 会查一次这个账号的额度。
+**Claude Code。** 它的命令行既说不出账号有几次重置，也用不了。重置要在 Claude 的用量页上使用，用了之后对 Claude Code 同样生效。账号有窗口到了提醒线（Fable 的每周窗口也算）时，面板在这一行显示「去 claude.ai 使用重置」；其他时候它在这一行的菜单和搜索里，`sideby quota reset claude:work --open` 和状态栏菜单里账号下面的「使用重置…」也一样。它会用你给这个账号选的浏览器用户打开 `https://claude.ai/settings/usage`（见[在哪个浏览器登录过](#在哪个浏览器登录过)），没选就用默认浏览器。链接后面写着它会在哪里打开；点这个名字可以换一个 Chrome 浏览器用户打开（命令行是 `--open --profile <名字>`）。sideby 找过这个账号的浏览器用户却拿不准是哪个时，点链接会先让你选。sideby 看不到那个页面登录的是谁，也看不到它有没有重置：把鼠标停在链接上，能看到这个账号的邮箱和哪些窗口紧张，请核对页面登录的是不是它。你回到面板时，sideby 会查一次这个账号的额度。
 
 Claude 的重置恢复哪一部分额度，是 Anthropic 的规则，不是 sideby 的：Fable 的重置恢复这一周里 Fable 的份额，5 小时窗口的重置把这个窗口整个恢复。见 Anthropic 的 [What is a limit reset?](https://support.claude.com/en/articles/17007452-what-is-a-limit-reset) 和 [Claude Fable 5.2 launch offers](https://support.claude.com/en/articles/17506494-claude-fable-5-2-launch-offers)。
 

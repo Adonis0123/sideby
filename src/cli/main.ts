@@ -488,7 +488,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   new: { flags: ['api', 'json', 'next'], valued: ['alias', 'vendor'] },
   alias: { flags: ['json', 'yes'], valued: ['pick'] },
   doctor: { flags: ['fix', 'force', 'json'] },
-  quota: { flags: ['json', 'yes', 'refresh', 'open'], valued: ['operation'] },
+  quota: { flags: ['json', 'yes', 'refresh', 'open'], valued: ['operation', 'profile'] },
   tune: { flags: ['json', 'yes'] },
   model: { flags: ['json', 'yes'], valued: ['effort'] },
   'remote-control': { flags: ['json', 'yes'] },

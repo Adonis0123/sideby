@@ -2715,14 +2715,15 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return { result: await rt.limitResetUse(account, operationId) }
       },
     },
-    // Opens the vendor's page where a Limit Reset is spent (Claude Code, ADR-0072), in the Account's Browser Profile
-    // when one is known, else the default browser. It starts a program, so a read-only Panel refuses it.
+    // Opens the vendor's page where a Limit Reset is spent (Claude Code, ADR-0072): in the Browser Profile the page
+    // names, else the Account's own when one is known, else the default browser. It starts a program, so a read-only
+    // Panel refuses it.
     '/api/quota/reset/open': {
       async run(body) {
         const ref = optString(body, 'account')
         if (!ref) throw new HttpError(400, '"account" is required')
         const rt = await getRuntime()
-        const r = await openVendorPage(rt, await rt.resolve(ref))
+        const r = await openVendorPage(rt, await rt.resolve(ref), optString(body, 'profile'))
         return { ref: r.ref, url: r.url, ...(r.profile ? { profile: r.profile } : {}) }
       },
     },

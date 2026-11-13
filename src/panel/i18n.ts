@@ -379,6 +379,17 @@ const en = {
   'reset.page.openedIn':
     'Opened {site} in the browser user {name}. Check that it is signed in as {who} before you use a reset.',
   'reset.page.failed': 'Could not open the page: {msg}. Open {url} yourself.',
+  'reset.in.hint': 'Opens {site} in the Chrome browser user {name}. Click to open it in another one.',
+  'reset.in.pick': 'Choose browser',
+  'reset.in.pickHint':
+    "sideby is not sure which Chrome browser user is this account's. Choose the one to open {site} in.",
+  'reset.in.default': 'Default browser',
+  'reset.in.defaultHint':
+    'Opens {site} in your default browser. Click to choose a Chrome browser user instead.',
+  'reset.in.title': 'Use a reset: which browser',
+  'reset.in.intro':
+    'A reset counts for the login of the page. Open {site} in the browser user that is signed in as {who}.',
+  'reset.in.useDefault': 'Use my default browser',
   'reset.title': 'Use a limit reset',
   'reset.peers': 'Same login as {names}: one reset applies to all of them.',
   'reset.reading': 'Reading the numbers from {host}…',
@@ -2296,6 +2307,14 @@ const zh: Record<MessageKey, string> = {
   'reset.page.opened': '已在浏览器打开 {site}。使用重置前，请确认网页登录的是 {who}。',
   'reset.page.openedIn': '已在浏览器用户 {name} 里打开 {site}。使用重置前，请确认网页登录的是 {who}。',
   'reset.page.failed': '打不开页面：{msg}。请自己打开 {url}。',
+  'reset.in.hint': '会在 Chrome 浏览器用户 {name} 里打开 {site}。点这里换一个。',
+  'reset.in.pick': '选浏览器',
+  'reset.in.pickHint': 'sideby 拿不准这个账号对应哪个 Chrome 浏览器用户。选一个来打开 {site}。',
+  'reset.in.default': '默认浏览器',
+  'reset.in.defaultHint': '会在默认浏览器里打开 {site}。点这里改用某个 Chrome 浏览器用户。',
+  'reset.in.title': '使用重置：在哪个浏览器打开',
+  'reset.in.intro': '重置算在网页登录的那个账号上。请在登录了 {who} 的浏览器用户里打开 {site}。',
+  'reset.in.useDefault': '用默认浏览器打开',
   'reset.title': '使用一次重置',
   'reset.peers': '与 {names} 是同一登录：用一次重置，这些账号都生效。',
   'reset.reading': '正在向 {host} 读取最新数字…',

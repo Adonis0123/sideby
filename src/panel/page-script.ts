@@ -1752,9 +1752,14 @@ const MAIN = String.raw`
     const offer = kind ? limitResetOffer(q, kind, now, { short: WARN, long: LONG.warn }) : null
     if (!offer) { noteClass(a.ref + ':resetbtn', '', false); return null }
     const busy = ui.resetRef === a.ref
-    const cls = noteClass(a.ref + ':resetbtn', 'btn btn-sm q-reset-btn', true)
-    if (kind === 'page')
-      return h('button', { class: cls, type: 'button', disabled: busy, 'aria-busy': busy ? 'true' : null, title: resetPageHint(a, q, offer), onclick: (e) => { e.stopPropagation(); openResetPage(a) } }, busy ? spinner() : icon('globe'), t('reset.usePage', { site: resetSite(a) }))
+    const cls = noteClass(a.ref + ':resetbtn', kind === 'page' ? 'q-reset' : 'btn btn-sm q-reset-btn', true)
+    if (kind === 'page') {
+      // One quiet line: the link that opens the page, then the browser user it opens in, which is also where to change it.
+      const where = resetWhere(a)
+      return h('span', { class: cls },
+        h('button', { class: 'link-btn q-reset-go', type: 'button', disabled: busy, 'aria-busy': busy ? 'true' : null, title: resetPageHint(a, q, offer), onclick: (e) => { e.stopPropagation(); openResetPage(a) } }, busy ? spinner() : icon('refresh'), t('reset.usePage', { site: resetSite(a) })),
+        where ? h('button', { class: 'email-btn br-btn q-reset-in', type: 'button', title: where.hint, 'aria-label': where.hint, onclick: (e) => { e.stopPropagation(); openBrowserDialog(a, 'reset') } }, icon('globe', 'br-ico'), h('span', { class: 'br-name' }, where.label), icon('chevron', 'br-ico')) : null)
+    }
     const why = [offer.tight.length ? t('reset.page.tight', { list: offer.tight.map((i) => resetWindowName(q.windows[i]) + ' ' + Math.round(q.windows[i].usedPercent) + '%').join(', ') }) : '', offer.expiring && q.limitResets.nextExpiresAt ? t('reset.expires', { at: clock(q.limitResets.nextExpiresAt) }) : '', t('reset.useHint')].filter(Boolean).join('\n')
     return h('button', { class: cls, type: 'button', disabled: busy, title: why, onclick: (e) => { e.stopPropagation(); openReset(a) } }, t('reset.use'))
   }
@@ -1768,14 +1773,40 @@ const MAIN = String.raw`
     if (q && q.limitResets && !(q.limitResets.available > 0)) return null
     return { icon: 'refresh', label: t('reset.useMenu'), hint: q && q.limitResets ? tn('reset.count', q.limitResets.available) : '', run: () => openReset(a) }
   }
+  // The browser user the vendor's page opens in when nobody is asked: the one chosen for the account, else the only
+  // one found signed in to it. Null: not known (the default browser, or the user picks).
+  function resetBrowser(a) {
+    const info = browserFor(a)
+    if (!info) return null
+    const chosen = browserChosen(a)
+    if (chosen) return info.b.profiles.find((p) => p.dir === chosen) || { dir: chosen, name: chosen }
+    return info.found.length === 1 ? info.found[0] : null
+  }
+  // Whether a click asks which browser user first: Chrome's are known here, and none of them is this account's for sure.
+  function resetAsks(a) {
+    const info = browserFor(a)
+    return Boolean(info && info.b.enabled && info.b.found && info.b.profiles.length && !resetBrowser(a))
+  }
+  // Next to the link: where the page will open, and the way to change it. Nothing where sideby cannot pick a browser user.
+  function resetWhere(a) {
+    if (!browserFor(a)) return null
+    const p = resetBrowser(a)
+    if (p) return { label: profileLabel(p), hint: t('reset.in.hint', { name: profileLabel(p), site: resetSite(a) }) }
+    return resetAsks(a) ? { label: t('reset.in.pick'), hint: t('reset.in.pickHint', { site: resetSite(a) }) } : { label: t('reset.in.default'), hint: t('reset.in.defaultHint', { site: resetSite(a) }) }
+  }
   // After the jump to the vendor's page: when the user is back on this page, that account's quota is asked once.
   const resetJump = { ref: null, away: false }
-  async function openResetPage(a) {
+  // p: the browser user picked in the dialog. direct: do not ask, open where sideby would by itself.
+  async function openResetPage(a, p, direct) {
     if (ui.resetRef) return
+    if (!p && !direct && resetAsks(a)) { openBrowserDialog(a, 'reset'); return }
+    const inDialog = Boolean(dlg.el && dlg.el.open)
     ui.resetRef = a.ref
     renderAccounts()
+    if (dlg.kind === 'browser') renderBrowser()
     try {
-      const r = await api('/api/quota/reset/open', { account: a.ref })
+      const r = await api('/api/quota/reset/open', { account: a.ref, ...(p ? { profile: p.dir } : {}) })
+      if (inDialog && dlg.el.open) dlg.el.close()
       resetJump.ref = a.ref
       resetJump.away = document.visibilityState !== 'visible' || !document.hasFocus()
       const who = a.identity && a.identity.email ? emailText(a.identity.email) : a.ref
@@ -1783,6 +1814,7 @@ const MAIN = String.raw`
     } catch (e) { toast(t('reset.page.failed', { url: family(a.family).limitResetPage || '', msg: e.message }), { kind: 'fail' }) }
     ui.resetRef = null
     renderAccounts()
+    if (dlg.kind === 'browser') renderBrowser()
   }
   function resetLeft() { if (resetJump.ref) resetJump.away = true }
   async function resetReturned() {
@@ -1913,7 +1945,7 @@ const MAIN = String.raw`
         const q = a.quota && a.quota.status === 'ok' ? a.quota : null
         const page = resetKind(a) === 'page'
         const peers = (a.sameLogin || []).map(refName)
-        return h('li', null, h('button', { class: 'rs-pick-btn', type: 'button', onclick: () => { if (page) { dlg.el.close(); openResetPage(a) } else openReset(a) } },
+        return h('li', null, h('button', { class: 'rs-pick-btn', type: 'button', onclick: () => { if (page) openResetPage(a); else openReset(a) } },
           badge(a.family, 'sm'),
           h('span', { class: 'rs-pick-main' }, h('b', null, a.ref), peers.length ? h('span', { class: 'muted small' }, ' = ' + peers.join(', ')) : null,
             h('span', { class: 'rs-pick-sub' }, page ? t('reset.usePage', { site: resetSite(a) }) : q && q.limitResets ? tn('reset.count', q.limitResets.available) : t('reset.pick.unknown'))),
@@ -2220,8 +2252,9 @@ const MAIN = String.raw`
     if (dlg.kind === 'browser') renderBrowser()
   }
   let br = null
-  function openBrowserDialog(a) {
-    br = { ref: a.ref, busy: false, error: null }
+  // mode 'reset': the same choice, for the page where a Limit Reset is used; "Open" opens that page.
+  function openBrowserDialog(a, mode) {
+    br = { ref: a.ref, busy: false, error: null, mode: mode || null }
     showDialog('browser')
     // Rows skip background renders while a dialog is open; turning the finding on changes what they show.
     dlg.onClose = () => renderAccounts()
@@ -2243,12 +2276,13 @@ const MAIN = String.raw`
     renderBrowser()
   }
   function brProfileRow(a, p) {
-    const busy = ui.browserRef === a.ref
+    const reset = br.mode === 'reset'
+    const busy = (reset ? ui.resetRef : ui.browserRef) === a.ref
     const chosen = browserChosen(a) === p.dir
     return h('li', { class: 'br-row' },
       h('span', null, h('b', null, profileName(p.name)), p.email ? h('span', { class: 'muted small' }, ' · ' + emailText(p.email)) : null, ' ', h('span', { class: 'muted small mono' }, p.dir), p.changedAt ? h('span', { class: 'muted small' }, ' · ' + t('br.changed', { when: ago(p.changedAt) })) : null),
       h('span', { class: 'br-acts' },
-        h('button', { class: 'btn btn-sm', type: 'button', disabled: Boolean(ui.browserRef), 'aria-busy': busy ? 'true' : null, onclick: () => openBrowser(a, p) }, t('br.openIt')),
+        h('button', { class: 'btn btn-sm', type: 'button', disabled: Boolean(ui.browserRef || ui.resetRef), 'aria-busy': busy ? 'true' : null, onclick: () => (reset ? openResetPage(a, p) : openBrowser(a, p)) }, t('br.openIt')),
         chosen ? h('span', { class: 'tag', title: t('br.chosenHint') }, t('br.chosen'))
           : h('button', { class: 'link-btn small', type: 'button', disabled: br.busy, title: t('br.chooseHint', { ref: a.ref }), onclick: () => brChoose(a, p.dir) }, t('br.choose'))))
   }
@@ -2271,8 +2305,15 @@ const MAIN = String.raw`
     const info = a && browserFor(a)
     if (!info) { dlg.el.close(); return }
     const url = siteOf(info.b, a.family)
+    const reset = br.mode === 'reset'
     const body = []
     const foot = [h('button', { class: 'btn', type: 'button', disabled: br.busy, onclick: () => dlg.el.close() }, t('btn.close'))]
+    if (reset) {
+      // A reset belongs to the login of the page, so the dialog says who to look for, and keeps the plain way open.
+      const who = a.identity && a.identity.email ? emailText(a.identity.email) : a.ref
+      body.push(h('p', null, t('reset.in.intro', { site: resetSite(a), who })))
+      if (!resetBrowser(a)) foot.push(h('button', { class: 'btn', type: 'button', disabled: br.busy || Boolean(ui.resetRef), onclick: () => openResetPage(a, null, true) }, t('reset.in.useDefault')))
+    }
     if (!info.b.enabled) {
       body.push(h('p', null, t('br.offIntro', { ref: a.ref, url })))
       body.push(h('p', { class: 'small' }, t('br.reads')), h('ul', { class: 'small' }, ['br.read1', 'br.read2', 'br.read3'].map((k) => h('li', null, t(k)))))
@@ -2292,7 +2333,7 @@ const MAIN = String.raw`
       foot.unshift(h('button', { class: 'btn', type: 'button', disabled: br.busy, onclick: () => brSwitch(false) }, t('br.disable')))
     }
     if (br.error) body.push(errorNote(br.error, null))
-    setKids(dlg.el, dialogFrame(t('br.title') + ' · ' + a.ref, a.family, body, foot))
+    setKids(dlg.el, dialogFrame(t(reset ? 'reset.in.title' : 'br.title') + ' · ' + a.ref, a.family, body, foot))
   }
   // How to get a Host that cannot run: the sentence, then on its own line the install command to copy (with the
   // install page next to it) when the Family has one; without a command the sentence ends with the page's link.
