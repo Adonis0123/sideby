@@ -20,6 +20,20 @@ export function claudeStatus(s: unknown): LiveSessionStatus {
   return 'unknown'
 }
 
+/**
+ * Where Claude Code says a session was started from (Started From, spec §3.32): its record's `entrypoint`, which the
+ * launcher sets through `CLAUDE_CODE_ENTRYPOINT`, so it is any text (seen with Claude Code 2.1.325 on 2026-11-15:
+ * `cli`, `orca`, `claude-desktop`, `sdk-cli`). A plain terminal (`cli`, or none) gives undefined; every `sdk-*` is a
+ * script; anything else keeps only letters, digits and `._-`, at most 24 characters.
+ */
+export function claudeStartedFrom(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined
+  const raw = v.trim()
+  if (!raw || raw === 'cli') return undefined
+  if (raw.startsWith('sdk-')) return 'script'
+  return raw.replace(/[^A-Za-z0-9._-]/g, '').slice(0, 24) || undefined
+}
+
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined)
 
@@ -99,6 +113,7 @@ export const claudeLiveSessions: LiveSessionReader = {
       const aiTitle =
         named || !transcript ? undefined : await claudeAiTitle(transcript).catch(() => undefined)
       const title = named ?? aiTitle ?? str(rec.name) ?? (cwd ? basename(cwd) : undefined)
+      const startedFrom = claudeStartedFrom(rec.entrypoint)
       out.push({
         sessionId,
         ...(title ? { title } : {}),
@@ -111,6 +126,7 @@ export const claudeLiveSessions: LiveSessionReader = {
           : {}),
         guessed: false,
         ...(transcript ? { transcript } : {}),
+        ...(startedFrom ? { startedFrom } : {}),
       })
     }
     return out

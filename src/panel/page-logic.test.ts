@@ -90,6 +90,7 @@ import {
   sortAccounts,
   sortMenu,
   sortSessions,
+  startedFromView,
   steadyOrder,
   stripSecrets,
   suggestAlias,
@@ -2379,6 +2380,32 @@ describe('Sessions page', () => {
       JSON.stringify(sessionRowShape(asks)),
       'its latest Message still counts',
     )
+  })
+
+  it('redraws a row when where the Session was started from changes', () => {
+    const plain = s('aaaaaaaa1')
+    const orca = { ...plain, startedFrom: 'orca' }
+    assert.notEqual(JSON.stringify(sessionRowShape(plain)), JSON.stringify(sessionRowShape(orca)))
+    assert.equal(JSON.stringify(sessionRowShape(orca)), JSON.stringify(sessionRowShape({ ...orca })))
+  })
+
+  it('shows Started From by name, a script by its own message, and anything else cleaned (spec §3.32)', () => {
+    assert.deepEqual(startedFromView('orca'), { name: 'Orca', orca: true })
+    assert.deepEqual(startedFromView('claude-desktop'), { name: 'Claude Desktop', orca: false })
+    assert.deepEqual(startedFromView('claude-vscode'), { name: 'VS Code', orca: false })
+    assert.deepEqual(startedFromView('script'), { key: 'spage.fromScript', name: 'script', orca: false })
+    assert.deepEqual(startedFromView('zed'), { name: 'zed', orca: false })
+    assert.deepEqual(startedFromView('constructor'), { name: 'constructor', orca: false })
+    // A value that reached the page some other way is cleaned again: no markup, at most 24 characters.
+    assert.deepEqual(startedFromView('<img src=x onerror=alert(1)>'), {
+      name: 'imgsrcxonerroralert1',
+      orca: false,
+    })
+    assert.equal(startedFromView('x'.repeat(30))?.name, 'x'.repeat(24))
+    assert.equal(startedFromView('<>"&'), null)
+    assert.equal(startedFromView(''), null)
+    assert.equal(startedFromView(undefined), null)
+    assert.equal(startedFromView(42), null)
   })
 
   it('says how long ago a Session was active, from updatedAt or else startedAt', () => {

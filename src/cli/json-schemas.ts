@@ -1797,6 +1797,12 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
               "True when sideby could not tie a running program to the session and took the account's newest one (Codex, pi).",
           }),
           transcript: Type.Optional(Type.String({ description: "Path of the session's record." })),
+          startedFrom: Type.Optional(
+            Type.String({
+              description:
+                "Started From: the app the session was started from, as the host's own record says (Claude Code's `entrypoint`). `orca`, `claude-desktop`, `script` (`claude -p`, scripts, the Agent SDK) or the host's value with only letters, digits and `._-`, at most 24 characters. Left out for a plain terminal and for hosts that do not say (Codex, Grok, pi).",
+            }),
+          ),
           reference: Type.String({
             description:
               'The Session Reference in English: one sentence that points another AI at the session and its record.',

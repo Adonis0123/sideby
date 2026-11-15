@@ -41,6 +41,11 @@ export interface LiveSession {
   guessed: boolean
   /** Path of the Session's record (transcript), when known. */
   transcript?: string
+  /**
+   * The app the Session was started from (Started From, spec §3.32), as a stable id: `orca`, `claude-desktop`,
+   * `script`, or the Host's own value cleaned. Left out for a plain terminal. Claude Code only for now.
+   */
+  startedFrom?: string
   /** The command that resumes the Session in the Account that holds it. */
   resumeCommand: string
   /** The Session Reference in English, as `sessionCopyText(s, 'reference', 'en')` gives it. */
@@ -64,6 +69,18 @@ export const shortId = (id: string): string => id.slice(0, 8)
 /** `<accountLabel> · <title> · <first 8 of id>`; a Session without a title leaves its part out. */
 export const sessionLabel = (accountLabel: string, title: string, id: string): string =>
   [accountLabel, title, shortId(id)].filter(Boolean).join(' · ')
+
+/** Display names of the Started From ids sideby knows; any other id is shown as it is. */
+const STARTED_FROM_NAMES: Readonly<Record<string, string>> = {
+  orca: 'Orca',
+  'claude-desktop': 'Claude Desktop',
+  'claude-vscode': 'VS Code',
+  script: 'Script',
+}
+
+/** The name a Started From id is shown by in English text output. */
+export const startedFromName = (id: string): string =>
+  Object.hasOwn(STARTED_FROM_NAMES, id) ? STARTED_FROM_NAMES[id]! : id
 
 /** The key that names a Session across Accounts: the same id in two Accounts is two Sessions. */
 export const liveKey = (account: string, sessionId: string): string => `${account}\0${sessionId}`
@@ -116,6 +133,7 @@ export function toLiveSession(account: Account, accountLabel: string, raw: RawLi
     ...(raw.updatedAt ? { updatedAt: raw.updatedAt } : {}),
     guessed: raw.guessed,
     ...(raw.transcript ? { transcript: raw.transcript } : {}),
+    ...(raw.startedFrom ? { startedFrom: raw.startedFrom } : {}),
     resumeCommand: resumeCommandFor(account.family, account.ref, raw.sessionId),
   }
   return { ...s, reference: referenceText(s, 'en') }

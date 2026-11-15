@@ -698,7 +698,7 @@ a.btn:hover { text-decoration: none; }
 .sess-busy .sess-dot { background: var(--ok-bar); animation: pulse 1.4s ease-in-out infinite; }
 .sess-unknown .sess-dot { background: transparent; border: 1px solid var(--faint); }
 .sess-cwd { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sess-guessed { cursor: help; }
+.sess-guessed, .sess-from { cursor: help; }
 .sess-run { flex: 0 1 auto; min-width: 0; max-width: 24em; }
 .sess-run-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .sess-run-more { flex: none; font-weight: 600; }

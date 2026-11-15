@@ -986,6 +986,7 @@ export function sessionRowShape(
     copy?: unknown
     orca?: unknown
     run?: unknown
+    startedFrom?: string
   },
   msg?: { status: string; needsApproval?: boolean },
 ): unknown[] {
@@ -1003,8 +1004,27 @@ export function sessionRowShape(
     s.copy,
     Boolean(s.orca),
     s.run || null,
+    s.startedFrom || '',
     msg ? msg.status + (msg.needsApproval ? '+approve' : '') : '',
   ]
+}
+
+/**
+ * How a Session's Started From id is shown (spec §3.32): the message key of the whole chip text for a name the page
+ * translates, else the name.
+ * The reader already cleans the id; it is cleaned again here, so the page never shows more than 24 letters, digits
+ * and `._-`, and the caller puts it in as text only. Null when there is nothing to show.
+ */
+export function startedFromView(id: unknown): { key?: string; name: string; orca: boolean } | null {
+  if (typeof id !== 'string') return null
+  if (id === 'script') return { key: 'spage.fromScript', name: id, orca: false }
+  const names: Record<string, string> = {
+    orca: 'Orca',
+    'claude-desktop': 'Claude Desktop',
+    'claude-vscode': 'VS Code',
+  }
+  const name = Object.hasOwn(names, id) ? names[id]! : id.replace(/[^A-Za-z0-9._-]/g, '').slice(0, 24)
+  return name ? { name, orca: id === 'orca' } : null
 }
 
 /** How long ago a Session was last active, as a message key and count; null when it has no time at all. */

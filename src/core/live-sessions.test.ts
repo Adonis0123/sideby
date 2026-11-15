@@ -7,6 +7,7 @@ import { syncBuiltinESMExports } from 'node:module'
 import { basename, join } from 'node:path'
 import { describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
+import { claudeStartedFrom } from '../families/claude/live-sessions.ts'
 import { createRuntime } from '../runtime.ts'
 import type { Account } from '../types.ts'
 import { UserError } from './errors.ts'
@@ -17,6 +18,7 @@ import {
   type SessionCopyAs,
   sessionCopyText,
   sortSessions,
+  startedFromName,
 } from './live-sessions.ts'
 import { type LiveSessionDeps, type ProcessInfo, parseLstart, parsePs } from './live-sessions-procs.ts'
 import { sessionTitleOf, watchSessionTitle } from './live-sessions-title.ts'
@@ -515,6 +517,63 @@ describe('Claude session title (spec §3.32)', () => {
       assert.equal(title(ID2), 'payments')
       assert.equal(title(ID3), 'repo-a1')
       assert.ok(!JSON.stringify(r).includes(SECRET))
+    })
+  })
+})
+
+describe('Started From (spec §3.32)', () => {
+  it("maps Claude Code's entrypoint to a stable id, cleaning values it does not know", () => {
+    assert.equal(claudeStartedFrom('cli'), undefined, 'a plain terminal shows nothing')
+    assert.equal(claudeStartedFrom(undefined), undefined)
+    assert.equal(claudeStartedFrom(''), undefined)
+    assert.equal(claudeStartedFrom('   '), undefined)
+    assert.equal(claudeStartedFrom(7), undefined)
+    assert.equal(claudeStartedFrom({ app: 'orca' }), undefined)
+    assert.equal(claudeStartedFrom('orca'), 'orca')
+    assert.equal(claudeStartedFrom('claude-desktop'), 'claude-desktop')
+    assert.equal(claudeStartedFrom('sdk-cli'), 'script')
+    assert.equal(claudeStartedFrom('sdk-ts'), 'script')
+    assert.equal(claudeStartedFrom('sdk-py'), 'script')
+    assert.equal(claudeStartedFrom('claude-vscode'), 'claude-vscode')
+    assert.equal(claudeStartedFrom('remote_desktop'), 'remote_desktop')
+    assert.equal(claudeStartedFrom('my app\n<b>v1.2</b>'), 'myappbv1.2b', 'only letters, digits and ._-')
+    assert.equal(claudeStartedFrom('a'.repeat(40)), 'a'.repeat(24), 'at most 24 characters')
+    assert.equal(claudeStartedFrom('<>!@#$%'), undefined, 'nothing left after cleaning')
+  })
+
+  it('names the ids sideby knows and shows any other one as it is', () => {
+    assert.equal(startedFromName('orca'), 'Orca')
+    assert.equal(startedFromName('claude-desktop'), 'Claude Desktop')
+    assert.equal(startedFromName('claude-vscode'), 'VS Code')
+    assert.equal(startedFromName('script'), 'Script')
+    assert.equal(startedFromName('zed'), 'zed')
+    assert.equal(startedFromName('constructor'), 'constructor', 'never a name from the object prototype')
+  })
+
+  it('carries it from the session record onto the Live Session, and leaves it out for a plain terminal', async () => {
+    await withFakeHome(async (h) => {
+      await homeWithAccounts(h)
+      await claudeSession(h, '.claude-002', 111, {
+        sessionId: ID1,
+        cwd: '/w/a',
+        status: 'idle',
+        entrypoint: 'orca',
+      })
+      await claudeSession(h, '.claude', 112, {
+        sessionId: ID2,
+        cwd: '/w/b',
+        status: 'busy',
+        entrypoint: 'cli',
+      })
+      const rt = await createRuntime({ env: h.env })
+      const r = await listLiveSessions(
+        rt,
+        { only: 'claude' },
+        fakeDeps([proc(111, 'claude'), proc(112, 'claude')]),
+      )
+      const by = new Map(r.sessions.map((s) => [s.sessionId, s]))
+      assert.equal(by.get(ID1)?.startedFrom, 'orca')
+      assert.equal('startedFrom' in by.get(ID2)!, false)
     })
   })
 })

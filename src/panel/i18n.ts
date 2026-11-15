@@ -1161,6 +1161,11 @@ const en = {
   'spage.guessed': 'newest session (guessed)',
   'spage.guessedTip':
     'sideby could not tell which session this account is running, so it shows the newest one.',
+  'spage.from': 'Started from {app}',
+  'spage.fromScript': 'Started from a script',
+  'spage.fromTip': 'Where this session was started, as Claude Code records it.',
+  'spage.fromOrcaTip':
+    "Orca picks the account for its Chat panes itself. To use a certain account, open a terminal pane in Orca and run that account's short command.",
   'spage.run': 'Task: {title}',
   'spage.runTip': 'Open the task board of this session.',
   'spage.runTipLane': 'Open the task board of this session. Its part: {lane}.',
@@ -3034,6 +3039,11 @@ const zh: Record<MessageKey, string> = {
   'spage.decisionTip': '打开「无人值守」页，看它问了什么，处理完标为已完成。',
   'spage.guessed': '最新会话（推测）',
   'spage.guessedTip': 'sideby 没法确定这个账号正在跑哪个会话，先显示它最新的一个。',
+  'spage.from': '启动自 {app}',
+  'spage.fromScript': '启动自脚本',
+  'spage.fromTip': 'Claude Code 记下的这个会话是从哪里启动的。',
+  'spage.fromOrcaTip':
+    'Orca 的 Chat 面板由 Orca 自己选账号。要用某个账号，在 Orca 里打开终端面板，运行这个账号的短命令。',
   'spage.run': '任务：{title}',
   'spage.runTip': '打开这个会话的任务看板。',
   'spage.runTipLane': '打开这个会话的任务看板。它负责：{lane}。',

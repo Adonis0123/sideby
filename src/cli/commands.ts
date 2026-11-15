@@ -4166,7 +4166,7 @@ export async function cmdSessions(a: ParsedArgs, io: Io, runtime?: Runtime): Pro
       'usage: sideby sessions [<account>|<family>] | sideby sessions copy <account|session-id> | sideby sessions open-run <account|session-id>',
     )
   const rt = runtime ?? (await createRuntime())
-  const { listLiveSessions, sessionLabel } = await import('../core/live-sessions.ts')
+  const { listLiveSessions, sessionLabel, startedFromName } = await import('../core/live-sessions.ts')
   const { withRuns } = await import('../core/run-link.ts')
   const { readHandoffChains, withHandoffs } = await import('../core/session-handoffs.ts')
   const r = await listLiveSessions(rt, first ? { only: first } : {})
@@ -4191,8 +4191,10 @@ export async function cmdSessions(a: ParsedArgs, io: Io, runtime?: Runtime): Pro
   // A long title (often in Chinese, two columns a character) is cut so the table stays readable.
   // The RUN column shows only when an orchestrator's Session Index ties a Session to a Run (spec §3.32 step 2b).
   const anyRun = sessions.some((s) => s.run)
+  // Where a Session was started from, when not a plain terminal (Started From, spec §3.32): `· Orca`.
   const rows = sessions.map((s) => [
-    c.bold(sessionLabel(s.accountLabel, truncate(s.title, 40), s.sessionId)),
+    c.bold(sessionLabel(s.accountLabel, truncate(s.title, 40), s.sessionId)) +
+      (s.startedFrom ? c.dim(` · ${startedFromName(s.startedFrom)}`) : ''),
     sessionStatusText(s),
     s.cwd ? tildify(s.cwd, home) : '',
     s.startedAt ? clock(s.startedAt, now) : '',

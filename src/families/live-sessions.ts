@@ -20,6 +20,8 @@ export interface RawLiveSession {
   updatedAt?: string
   guessed: boolean
   transcript?: string
+  /** The app the Session was started from (Started From), as the Host's own record says; Claude only. */
+  startedFrom?: string
 }
 
 export interface LiveSessionReader {

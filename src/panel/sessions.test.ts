@@ -114,7 +114,10 @@ describe('panel sessions endpoint', () => {
       const runtime = () => createRuntime({ env: h.env, builtins: [asBuiltin(demoPlugin(demoFamily()))] })
       const home = h.env.HOME!
       const list = async () => ({
-        sessions: [session(home), session(home, { sessionId: 'abc', cwd: undefined, guessed: true })],
+        sessions: [
+          session(home, { startedFrom: 'orca' }),
+          session(home, { sessionId: 'abc', cwd: undefined, guessed: true }),
+        ],
         problems: [`codex: cannot read ${home}/.codex/sessions`],
       })
       const { server, port, handler } = await serve((p) =>
@@ -139,6 +142,8 @@ describe('panel sessions endpoint', () => {
           resume: 'sideby resume claude -- --resume 61230c3d-0000-4000-8000-000000000001',
         })
         assert.equal(sessions[0]!.orca, undefined, 'no Orca, no jump')
+        assert.equal(sessions[0]!.startedFrom, 'orca', 'where it was started from goes to the page as it is')
+        assert.equal(sessions[1]!.startedFrom, undefined)
         assert.equal(sessions[1]!.cwd, undefined)
         assert.equal(sessions[1]!.guessed, true)
         assert.deepEqual(r.body.problems, ['codex: cannot read ~/.codex/sessions'])

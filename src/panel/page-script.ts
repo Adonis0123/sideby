@@ -94,6 +94,7 @@ import {
   sortAccounts,
   sortMenu,
   sortSessions,
+  startedFromView,
   steadyOrder,
   stripSecrets,
   suggestAlias,
@@ -221,6 +222,7 @@ const LOGIC = [
   shortCwd,
   shortSessionLabel,
   sortAccounts,
+  startedFromView,
   sortSessions,
   steadyOrder,
   histFilters,
@@ -4187,6 +4189,13 @@ const MAIN = String.raw`
       h('span', { class: 'sess-run-title' }, t('spage.run', { title: run.title })),
       others.length ? h('span', { class: 'sess-run-more' }, '+' + others.length) : null)
   }
+  // Where the Session was started from (Started From, spec §3.32), as text only. An Orca Session says why it may run
+  // in an Account the user did not pick: Orca chooses it for its Chat panes.
+  function startedFromChip(s) {
+    const v = startedFromView(s.startedFrom)
+    if (!v) return null
+    return h('span', { class: 'chip sess-from', tabindex: '0', 'data-tip': v.orca ? t('spage.fromOrcaTip') : t('spage.fromTip') }, v.key ? t(v.key) : t('spage.from', { app: v.name }))
+  }
   function sessionRow(s) {
     const p = sessionLabelParts(s)
     const copied = (sp.copied[s.sessionId] || 0) > Date.now()
@@ -4221,6 +4230,7 @@ const MAIN = String.raw`
           s.reason === 'pending-decision' && status === 'needs-you' ? h('button', { class: 'chip chip-sm chip-warn chip-btn sess-decision', type: 'button', 'data-key': 'sess-decision-' + s.sessionId, 'data-tip': t('spage.decisionTip'), onclick: () => setPage('unattended') }, t('spage.decision'), icon('chevron')) : null,
           chip ? msgChip(chip, msg, s) : null,
           s.guessed ? h('span', { class: 'chip sess-guessed', tabindex: '0', 'data-tip': t('spage.guessedTip') }, t('spage.guessed')) : null,
+          startedFromChip(s),
           runChip(s),
           h('span', { class: 'sess-cwd' + (cwd ? ' mono' : ''), title: s.cwd && cwd !== s.cwd ? s.cwd : null }, cwd || t('spage.noCwd')),
           h('span', { class: 'sess-age', 'data-age': s.sessionId }, sessAgeText(s)))),

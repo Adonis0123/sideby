@@ -3083,6 +3083,33 @@ describe('sideby sessions (spec §3.32)', () => {
     })
   })
 
+  it('says where a session was started from, in the row and as startedFrom in --json (spec §3.32)', async () => {
+    await withFakeHome(async (h) => {
+      await claudeSessions(h, true)
+      const from = async (pid: number, entrypoint: string) => {
+        const file = `.claude-work/sessions/${pid}.json`
+        const rec = JSON.parse(await readFile(join(h.env.HOME!, file), 'utf8')) as Record<string, unknown>
+        await h.write(file, JSON.stringify({ ...rec, entrypoint }))
+      }
+      await from(4101, 'orca')
+      await from(4102, 'cli')
+      await fakeMachine(h, [4101, 4102])
+      const human = await sideby(h, ['sessions'])
+      assert.equal(human.code, 0, human.err)
+      assert.match(human.out, /cc002 · knip cleanup · 61230c3d · Orca\s+needs you/)
+      assert.match(human.out, /cc002 · release notes · 0799701d\s+idle/)
+      const data = checkSchema('sessions', (await sideby(h, ['sessions', '--json'])).out)
+      const list = data.sessions as { sessionId: string; startedFrom?: string }[]
+      assert.deepEqual(
+        list.map((s) => [s.sessionId, s.startedFrom ?? null]).sort(),
+        [
+          [ID_A, 'orca'],
+          [ID_B, null],
+        ].sort(),
+      )
+    })
+  })
+
   it('says a session needs you for an open Pending Decision, with where to see it, in text and --json', async () => {
     await withFakeHome(async (h) => {
       await claudeSessions(h, true)
