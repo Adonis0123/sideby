@@ -16,6 +16,7 @@ import { resolvePaths } from '../core/paths.ts'
 import {
   hashOf,
   markWatchWoken,
+  newerPrompt,
   progressReminderTurn,
   readProgressEvery,
   readPromptRecord,
@@ -47,11 +48,18 @@ export interface ProgressHookDeps {
   parentGone?: () => boolean
   /** This watch's id; random by default. */
   id?: string
+  /**
+   * When the hook began, before it read its input: the order of the session's `Stop`s, kept as the watch's `at`.
+   * `runProgressHook` sets it; by default when the watch starts.
+   */
+  entered?: Date
   checkEveryMs?: number
   /** How long a write waits for the session's lock (for tests). */
   lockWait?: { timeoutMs: number; pollMs: number }
   /** Runs between the last check of the watch record and marking it woken, inside the lock (for tests). */
   beforeWake?: () => Promise<void>
+  /** Runs after the loop's last checks, before taking the session's lock to mark the watch woken (for tests). */
+  beforeLock?: () => Promise<void>
 }
 
 type Input = AsyncIterable<string | Uint8Array> | string
@@ -199,14 +207,16 @@ export async function watchWhileWaiting(
   const promptId = str(input.prompt_id)
   const paths = resolvePaths(env)
   const start = clock().getTime()
+  const stopAt = deps.entered ? deps.entered.getTime() : start
   // The wait goes on across the turns reminders start; any other turn starts a new one.
   const prev = await readWatch(paths.stateDir, sessionId)
   const afterReminder = await progressReminderTurn(paths.stateDir, sessionId, promptId)
   const since = afterReminder && prev ? prev.since : iso(start)
   const id = deps.id ?? randomBytes(8).toString('hex')
   // Written first, so a watch left by an earlier Stop ends even when this one has nothing to watch. When the session's
-  // lock stays held nothing is written, and this Stop does not watch: an earlier watch may still hold the record.
-  if (!(await writeWatch(paths.stateDir, sessionId, { id, since, at: iso(start) }, deps))) return { exit: 0 }
+  // lock stays held nothing is written, and this Stop does not watch: an earlier watch may still hold the record. Nor
+  // does it when the record is a later Stop's watch (its hook began after this one's): that turn's wait goes on.
+  if (!(await writeWatch(paths.stateDir, sessionId, { id, since, at: iso(stopAt) }, deps))) return { exit: 0 }
   const tasks = input.background_tasks
   if (!Array.isArray(tasks) || tasks.length === 0) return { exit: 0 }
   let every = await readProgressEvery(paths.configFile, env)
@@ -220,11 +230,8 @@ export async function watchWhileWaiting(
     const t = now.getTime()
     if (t - start >= WATCH_FOR_MS || parentGone()) return { exit: 0 }
     if ((await readWatch(paths.stateDir, sessionId))?.id !== id) return { exit: 0 }
-    // The latest prompt is another one: a turn began after this Stop's, and its own Stop decides again. Compared by
-    // the prompt's id, never by time: the next prompt's record can be written before this watch even starts. Only a
-    // Stop without an id falls back to whether the record came after it.
-    const p = await readPromptRecord(paths.stateDir, sessionId)
-    if (p && (ownPrompt ? p.prompt !== ownPrompt : Date.parse(p.at) > start)) return { exit: 0 }
+    // The latest prompt is another one: a turn began after this Stop's, and its own Stop decides again.
+    if (newerPrompt(await readPromptRecord(paths.stateDir, sessionId), ownPrompt, stopAt)) return { exit: 0 }
     // Read every time: turning it off, or another interval, reaches a running session.
     every = await readProgressEvery(paths.configFile, env)
     if (every === undefined) return { exit: 0 }
@@ -249,8 +256,14 @@ export async function watchWhileWaiting(
       continue
     }
     // Checked and marked under the session's lock just before waking, so a Stop that came meanwhile is never
-    // answered by this watch, and never has its record put back to this one.
-    const hook = deps.beforeWake ? { beforeWrite: deps.beforeWake } : {}
+    // answered by this watch, and never has its record put back to this one; a prompt noted meanwhile drops the
+    // reminder, which would only queue behind that turn. A prompt whose own (background) hook has not noted it yet,
+    // or that comes between this check and the Host reading the exit code, still gets the reminder after its turn.
+    const hook = {
+      turn: { ...(ownPrompt ? { prompt: ownPrompt } : {}), stopAt },
+      ...(deps.beforeWake ? { beforeWrite: deps.beforeWake } : {}),
+    }
+    await deps.beforeLock?.()
     if (!(await markWatchWoken(paths.stateDir, sessionId, id, now, hook))) return { exit: 0 }
     return { exit: 2, message: reminderMessage({ tasks, since, now, every }) }
   }
@@ -272,9 +285,11 @@ export async function runProgressHook(
       return 0
     }
     if (event !== 'Stop') return 0
+    // Taken before the input is read, which may wait: it orders this Stop among the session's others.
+    const entered = deps.entered ?? (deps.now ? deps.now() : new Date())
     const v = await parseInput(input)
     if (!v) return 0
-    const w = await watchWhileWaiting(v, env, deps)
+    const w = await watchWhileWaiting(v, env, { ...deps, entered })
     // Exit 2 wakes the session (asyncRewake), which hands stderr to the model.
     if (w.exit === 2 && w.message) {
       io.err.write(`${w.message}\n`)

@@ -192,15 +192,20 @@ describe('progress hook: Stop', () => {
       )
       await notePrompt(h, held, 'p-held')
       assert.deepEqual(await readPromptRecord(stateDir, SID).then((p) => p?.reminder), true)
+      // Each later Stop comes later than the one before it.
+      const after = (id: string, ms: number) => {
+        const f = fake({ id })
+        return { ...f, now: () => new Date(f.now!().getTime() + ms) }
+      }
       await watchWhileWaiting(
         stopInput({ promptId: 'p-held', active: true, tasks: [] }),
         h.env,
-        fake({ id: 'w4' }),
+        after('w4', 21 * MIN),
       )
       assert.equal((await readWatch(stateDir, SID))!.since, since)
       // An ordinary turn (typed, or a task's notification) starts a new wait.
       await notePrompt(h, 'how is it going?', 'p-typed-2')
-      await watchWhileWaiting(stopInput({ promptId: 'p-typed-2', tasks: [] }), h.env, fake({ id: 'w3' }))
+      await watchWhileWaiting(stopInput({ promptId: 'p-typed-2', tasks: [] }), h.env, after('w3', 22 * MIN))
       assert.notEqual((await readWatch(stateDir, SID))!.since, since)
     })
   })
@@ -316,6 +321,84 @@ describe('progress hook: Stop', () => {
       const record = await readWatch(stateDir, SID)
       assert.equal(record?.id, 'w1')
       assert.ok(record?.wokeAt)
+    })
+  })
+
+  it('a Stop whose hook runs late never replaces the watch of a later Stop, so that wait is still reminded', async () => {
+    await withFakeHome(async (h) => {
+      await on(h, 10)
+      const { stateDir } = resolvePaths(h.env)
+      const at = Date.now()
+      const note = (prompt: string, promptId: string, t: number) =>
+        runProgressHook(
+          ['claude', 'UserPromptSubmit'],
+          h.env,
+          JSON.stringify({ session_id: SID, prompt_id: promptId, prompt }),
+          { err: { write: () => true } },
+          { now: () => new Date(t) },
+        )
+      // The first turn's Stop, then the next prompt, then that turn's Stop. The first Stop's hook started first but
+      // got its input only after the second Stop's watch was written (a slow start, a held lock).
+      await note('start the build', 'p-1', at - 1000)
+      let open = () => {}
+      const gate = new Promise<void>((r) => {
+        open = r
+      })
+      const input = (async function* () {
+        await gate
+        yield JSON.stringify(stopInput({ promptId: 'p-1' }))
+      })()
+      const fa = fake({ id: 'w1' })
+      const err: string[] = []
+      const first = runProgressHook(
+        ['claude', 'Stop'],
+        h.env,
+        input,
+        { err: { write: (s) => err.push(s) } },
+        fa,
+      )
+      await note('and now the tests', 'p-2', at + 500)
+      let firstExit: number | undefined
+      const fb = fake({
+        id: 'w2',
+        onSleep: async (m) => {
+          if (m !== 1) return
+          open()
+          firstExit = await first
+        },
+      })
+      const later = { ...fb, now: () => new Date(fb.now!().getTime() + 1000) }
+      assert.equal((await watchWhileWaiting(stopInput({ promptId: 'p-2' }), h.env, later)).exit, 2)
+      assert.equal(firstExit, 0)
+      assert.deepEqual(err, [])
+      assert.equal(fa.sleeps, 0)
+      assert.equal((await readWatch(stateDir, SID))?.id, 'w2')
+    })
+  })
+
+  it('a prompt sent between the last check and the wake-up drops the reminder, which would only queue behind it', async () => {
+    await withFakeHome(async (h) => {
+      await on(h, 10)
+      const clock = fake()
+      const f = {
+        ...clock,
+        beforeLock: async () => {
+          await notePrompt(h, 'how is it going?', 'p-new')
+        },
+      }
+      assert.deepEqual(await watchWhileWaiting(stopInput({ promptId: 'p-typed' }), h.env, f), { exit: 0 })
+      assert.equal(clock.minutes, 10)
+    })
+    await withFakeHome(async (h) => {
+      await on(h, 10)
+      // The prompt of the turn that just ended, noted at that moment, is not a new one: the reminder goes.
+      const f = {
+        ...fake(),
+        beforeLock: async () => {
+          await notePrompt(h, 'start the build', 'p-typed')
+        },
+      }
+      assert.equal((await watchWhileWaiting(stopInput({ promptId: 'p-typed' }), h.env, f)).exit, 2)
     })
   })
 

@@ -44,3 +44,11 @@ A reminder every 10 minutes is six model turns an hour for one waiting session, 
 - Turning it on without an interval (`sideby progress on`, the Panel's switch, an AI asked without a number) now picks 30 minutes, not 10. The Panel still offers 5, 10, 15, 30 and 60, and `--every` still takes 1 to 240.
 - A config that already holds `progress.every` keeps its value; `on` without `--every` keeps the interval it finds, as before.
 - Where the setting is turned on, the cost note adds that a longer interval uses less.
+
+## Amendment (2026-11-16): order Stops by when their hook began, and check for a new prompt under the lock
+
+Two races remained. A `Stop` whose hook got its input or the session's lock late could replace the watch of the next turn's `Stop`; then the newer watch saw another id and ended, and the older one saw a newer prompt and ended, so that wait got no reminders. And a prompt the user sent after a watch's last check, but before it woke the session, still got the reminder queued behind its turn, one model turn for nothing.
+
+- The watch record's `at` is when the `Stop` hook began, before it read its input. A `Stop` writes its watch only when the record does not hold a later `at`; otherwise it does not watch. The clock is the machine's: when it is set back, two `Stop`s around that moment may be ordered wrongly, which at worst leaves that one wait without reminders.
+- Right before waking the session, under the same lock as the `wokeAt` mark, the watch reads the prompt record again and ends without a reminder when the session's latest prompt is not the one its `Stop` ended (compared as in the loop: by the prompt's id, or by time for a `Stop` without one).
+- What stays open: the `UserPromptSubmit` entry runs in the background, so a prompt whose record is not written yet is not seen, and a prompt that comes after the lock is released but before Claude Code reads the exit code is not either. In both cases the reminder arrives after that turn, as before.

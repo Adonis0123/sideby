@@ -75,7 +75,7 @@ export interface WatchRecord {
   id: string
   /** When the session began waiting: kept across reminder turns. */
   since: string
-  /** When the `Stop` that started this watch came. */
+  /** When the hook of the `Stop` that started this watch began, before reading its input: the order of the Stops. */
   at: string
   /** When this watch woke the session. */
   wokeAt?: string
@@ -164,8 +164,10 @@ export async function readWatch(stateDir: string, sessionId: string): Promise<Wa
 
 /**
  * Replaces the session's watch (file 600, atomically) under the session's lock, so it never lands between another
- * watch's last check and its `wokeAt`. False when the lock stays held: then nothing is written and the caller must not
- * act as the session's watch. Throws when the folder is not safe to use.
+ * watch's last check and its `wokeAt`, unless the record holds the watch of a later `Stop` (its `at` is later): a
+ * `Stop` whose hook got its input or the lock late never ends the watch of the turn after it. False when the lock
+ * stays held or a later watch is kept: then nothing is written and the caller must not act as the session's watch.
+ * Throws when the folder is not safe to use.
  */
 export async function writeWatch(
   stateDir: string,
@@ -174,23 +176,38 @@ export async function writeWatch(
   opts: LockWait = {},
 ): Promise<boolean> {
   const dir = (await folder(stateDir, true))!
-  const done = await underLock(dir, hashOf(sessionId), opts.lockWait ?? LOCK_WAIT, () =>
-    writeFileAtomic(join(dir, watchName(sessionId)), `${JSON.stringify(record)}\n`, 0o600),
-  )
-  return done !== undefined
+  const done = await underLock(dir, hashOf(sessionId), opts.lockWait ?? LOCK_WAIT, async () => {
+    const file = join(dir, watchName(sessionId))
+    const old = parseWatch(await readSmallFile(file, RECORD_MAX))
+    if (old && Date.parse(old.at) > Date.parse(record.at)) return false
+    await writeFileAtomic(file, `${JSON.stringify(record)}\n`, 0o600)
+    return true
+  })
+  return done?.value === true
 }
 
 /**
- * Marks the watch `id` woken at `at`, only while the session's record is still that watch: the check and the write
- * hold the session's lock, so a later `Stop` replaces the record before or after, never in between. False when the
- * record is another watch's, is missing, or the lock stays held (`beforeWrite` runs inside the lock, for tests).
+ * Whether the session's latest prompt is not the one the watching `Stop` ended, so a turn began after it: compared by
+ * the prompt's id (`own`, hashed), never by time, because the next prompt's record can be written before the watch
+ * starts. Only a `Stop` without an id falls back to whether the record came after it (`stopAt`).
+ */
+export function newerPrompt(p: PromptRecord | undefined, own: string | undefined, stopAt: number): boolean {
+  return Boolean(p && (own ? p.prompt !== own : Date.parse(p.at) > stopAt))
+}
+
+/**
+ * Marks the watch `id` woken at `at`, only while the session's record is still that watch and, with `turn`, no
+ * prompt came after the turn the watch's `Stop` ended (`newerPrompt`): a reminder sent then would only queue behind
+ * that turn and cost a model call of its own. The checks and the write hold the session's lock, so a later `Stop`
+ * replaces the record, or a prompt is noted, before or after, never in between. False when the record is another
+ * watch's, is missing, a newer prompt is noted, or the lock stays held (`beforeWrite` runs inside the lock, for tests).
  */
 export async function markWatchWoken(
   stateDir: string,
   sessionId: string,
   id: string,
   at: Date,
-  deps: { beforeWrite?: () => Promise<void> } = {},
+  deps: { beforeWrite?: () => Promise<void>; turn?: { prompt?: string; stopAt: number } } = {},
 ): Promise<boolean> {
   const dir = await folder(stateDir, false)
   if (!dir) return false
@@ -198,6 +215,10 @@ export async function markWatchWoken(
     const file = join(dir, watchName(sessionId))
     const fresh = parseWatch(await readSmallFile(file, RECORD_MAX))
     if (fresh?.id !== id) return false
+    if (deps.turn) {
+      const p = parsePrompt(await readSmallFile(join(dir, promptName(sessionId)), RECORD_MAX))
+      if (newerPrompt(p, deps.turn.prompt, deps.turn.stopAt)) return false
+    }
     await deps.beforeWrite?.()
     await writeFileAtomic(file, `${JSON.stringify({ ...fresh, wokeAt: at.toISOString() })}\n`, 0o600)
     return true
