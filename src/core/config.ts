@@ -486,6 +486,21 @@ export const ConfigSchema = Type.Object(
         },
       ),
     ),
+    progress: Type.Optional(
+      Type.Object(
+        {
+          every: Type.Optional(
+            Type.Integer({
+              minimum: 1,
+              maximum: 240,
+              description:
+                'Progress Reminders: while a Claude session sideby started waits on background work (subagents, background commands), wake it every this many minutes so the model tells you in one or two sentences what it waits for. Each reminder is one model turn over the whole conversation, so it uses quota. Not set: off (the default). Sessions started afterwards get it; turning it off or changing the interval also reaches running sessions. Not while the session is unattended; Codex is not covered.',
+            }),
+          ),
+        },
+        { additionalProperties: false, description: 'Progress Reminders (spec §3.42, ADR-0076).' },
+      ),
+    ),
     browser: Type.Optional(
       Type.Object(
         {
@@ -909,6 +924,23 @@ export function editConfigQuotaCheck(
     else check[family] = false
     const { check: _old, ...rest } = current ?? {}
     const next: QuotaConfig = { ...rest, ...(Object.keys(check).length ? { check } : {}) }
+    return Object.keys(next).length ? next : undefined
+  })
+}
+
+export type ProgressConfig = NonNullable<Config['progress']>
+
+/**
+ * `sideby progress on|off` and the Panel's switch (spec §3.42): a number writes `progress.every`, undefined removes
+ * `progress` (off is the default) (see `editConfigKey` for how the file is written).
+ */
+export function editConfigProgress(
+  file: string,
+  every: number | undefined,
+): Promise<{ changed: boolean; before: ProgressConfig | undefined; after: ProgressConfig | undefined }> {
+  return editConfigKey(file, 'progress', 'change the setting', (current) => {
+    const { every: _old, ...rest } = current ?? {}
+    const next: ProgressConfig = { ...rest, ...(every === undefined ? {} : { every }) }
     return Object.keys(next).length ? next : undefined
   })
 }

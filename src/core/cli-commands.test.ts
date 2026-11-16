@@ -20,6 +20,7 @@ const INTERNAL = new Set([
   'handoff-hook',
   'network-hook',
   'unattended-hook',
+  'progress-hook',
 ])
 
 const ids = (q: string) => filterCommands(q, CLI_COMMANDS, COMMAND_GROUPS).map((c) => c.id)

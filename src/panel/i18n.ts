@@ -1961,6 +1961,23 @@ const en = {
   'ua.problem': 'sideby cannot keep its state: {msg}',
   'ua.unreadable': 'sideby could not read Unattended Mode. Refresh to try again.',
   'ai.ask.unattended': 'Run unattended tonight, until 8 tomorrow morning.',
+  'ai.ask.progress': 'While background tasks run, tell me every 10 minutes what my sessions are waiting for.',
+  'pr.title': 'Progress updates',
+  'pr.hint':
+    'When a Claude session waits on background work (subagents, long commands), it tells you every few minutes what it is waiting for and for how long.',
+  'pr.switch': 'Report progress while waiting',
+  'pr.every': 'How often',
+  'pr.minutes': '{n} min',
+  'pr.everyLong': 'Every {n} minutes',
+  'pr.cost': 'Each update is one model turn, which reads the whole conversation, so it uses quota.',
+  'pr.scope':
+    'Claude sessions you start after turning it on get it. Turning it off stops it in open sessions too. No updates while you are away (Unattended Mode).',
+  'pr.codex': 'Codex is not covered: it has no way to wake a waiting session.',
+  'pr.onToast': 'Progress updates on, every {n} minutes. Claude sessions you start from now on get them.',
+  'pr.everyToast': 'Progress updates now every {n} minutes.',
+  'pr.offToast': 'Progress updates off.',
+  'pr.failed':
+    'Could not change progress updates: {msg}. It is back as it was; try again, or run sideby progress in a terminal.',
 }
 
 export type MessageKey = keyof typeof en
@@ -3797,6 +3814,20 @@ const zh: Record<MessageKey, string> = {
   'ua.problem': 'sideby 没法保存状态：{msg}',
   'ua.unreadable': 'sideby 读不到无人值守的状态。刷新再试一次。',
   'ai.ask.unattended': '今晚无人值守，到明早 8 点',
+  'ai.ask.progress': '后台任务跑着时，每 10 分钟告诉我会话在等什么。',
+  'pr.title': '进度提醒',
+  'pr.hint': 'Claude 会话等后台任务（子任务、长命令）时，每隔几分钟告诉你在等什么、等了多久。',
+  'pr.switch': '等待时报进度',
+  'pr.every': '多久一次',
+  'pr.minutes': '{n} 分钟',
+  'pr.everyLong': '每 {n} 分钟',
+  'pr.cost': '每次提醒是一轮模型调用，会读一遍整个对话，会用额度。',
+  'pr.scope': '打开后启动的 Claude 会话才有；关掉对已经开着的会话也生效。无人值守时不提醒。',
+  'pr.codex': 'Codex 不支持：它没有办法叫醒等待中的会话。',
+  'pr.onToast': '已打开进度提醒，每 {n} 分钟一次。之后启动的 Claude 会话会有。',
+  'pr.everyToast': '进度提醒改为每 {n} 分钟一次。',
+  'pr.offToast': '已关闭进度提醒。',
+  'pr.failed': '没能改进度提醒：{msg}。已恢复原样；可以再试一次，或在终端运行 sideby progress。',
 }
 
 export const MESSAGES: Record<PanelLang, Record<string, string>> = { en, zh }

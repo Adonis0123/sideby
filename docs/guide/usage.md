@@ -378,6 +378,25 @@ Each Slot of the Schedule is days, a start and an end in this computer's time zo
 - `sideby config unset unattended` stops adding the hook to new sessions.
 - The Panel has a page of its own, **Unattended**: the status in one line ("On · Slot “Weeknights” · until 08:00"), **Turn on now** with a choice of how long (until the Slot ends, 4 hours, 12 hours, or a time you pick), the Schedule as rows of day chips and times that save as you change them (each change has **Undo**), the sessions asking you as usual because you typed there (each with until when), what waits for you grouped by session with **Done** and **Back to the session**, and where it works. While it is on, the header shows **Unattended · until 08:00**.
 
+## Progress updates
+
+A Claude session often starts subagents or long commands in the background and then waits for them. While it waits it says nothing, so after twenty minutes of silence you cannot tell whether it is still waiting, stuck or done. With progress updates on, sideby wakes a waiting Claude session every few minutes, and it tells you in one or two sentences what it is waiting for, how long it has been, and whether there is new output.
+
+```sh
+sideby progress on               # every 10 minutes
+sideby progress on --every 15    # another interval, 1 to 240 minutes
+sideby progress off
+sideby progress                  # on or off, and how often
+```
+
+- It is off by default, because each update is one model turn, which reads the whole conversation: it uses quota.
+- Only while background work runs, and never while a turn is running (a reminder never follows an answer), so it stops by itself when the work is done or you type something.
+- Turning it on reaches Claude sessions sideby starts from then on. Turning it off, or a new interval, also reaches sessions already running.
+- No updates while you are away (Unattended Mode), unless you typed in that session in the last 30 minutes.
+- With Auto Handoff on, a session hands over as it would without these updates.
+- Codex is not covered: it has no way for sideby to wake a waiting session. Grok, pi and sessions started without sideby are not covered either.
+- In the Panel: **Settings › Progress updates**, with the interval (5, 10, 15, 30 or 60 minutes) under the switch. Or ask your AI: "While background tasks run, tell me every 10 minutes what my sessions are waiting for."
+
 ## Remote Control
 
 Claude Code's Remote Control connects a session to claude.ai/code and the Claude mobile app, where every device signed in to that claude.ai account can read and continue it. Turning on "Enable Remote Control for all sessions" in `/config` saves `remoteControlAtStartup: true` in `settings.json`, and since accounts usually link that file to the main one, every account connects.

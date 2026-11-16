@@ -36,6 +36,7 @@
 | `sideby unattended [status]`、`sideby unattended on [--for 4h\|--until 07:30\|--slot-end]`、`sideby unattended off` | 无人值守：显示开没开、为什么、到几点、时间表、未处理的 Pending Decision、30 分钟内你打过字因而照常问你的 Claude 会话，以及覆盖哪些 Host；现在打开（最长 72 小时）或关闭（在时段内只暂停到这一段结束）。开着时，sideby 启动的 Claude、Codex 会话不能提问；Claude 会话里 Claude Code 要弹的权限确认直接回答「不行」（记成 Pending Decision），因为暂时性错误中断的 Claude 回合会自动接着跑，最多 3 次。`run`、`next`、`resume`、短命令和挑选命令加 `--unattended` 只让这一个会话无人值守 | 0；时间或选项不对 2 |
 | `sideby unattended schedule [add --days <days> --from HH:MM --to HH:MM [--name <名字>]\|remove <n>\|preset weeknights]` | 时间表：列出时段、加一个、按编号删一个，或加上周一到周五 23:00 到次日 08:00。每次改动都打印撤销命令 | 0；没有这个时段 1；星期或时间不对 2 |
 | `sideby unattended pending [--all]`、`sideby unattended pending done <id>\|--all`、`sideby unattended defer "<文字>"` | Pending Decision（待你决定）：会话没能问出口的问题和跳过的操作；标成已处理（30 天后删除）；在会话里记一条 | 0；没有这条 1 |
+| `sideby progress [status]`、`sideby progress on [--every <分钟>]`、`sideby progress off` | 进度提醒：sideby 启动的 Claude 会话等后台任务时，每隔几分钟（默认 10，可设 1 到 240）告诉你在等什么。默认关；每次提醒是一轮模型调用，会用额度。打开后之后启动的会话才有；关掉和改间隔对在跑的会话也生效。无人值守时不提醒；Codex 不支持。每次改动都打印撤销命令 | 0（没有变化也是 0）；间隔不对 2 |
 | `sideby handoff status` | 按家族列出本机启用自动接力还差什么，以及接下来要运行的命令 | 0 |
 | `sideby handoff enable [--same-family] [--order <family>=<acct,…>] [--threshold n] [--prepare-at n] [--yes]` | 展示 config 改动；加 `--yes` 才开启（其他设置保留），并列出还要做的步骤 | 只展示改动时为 10；写入后或已是这样为 0；`--order` 里有找不到的账号为 1 |
 | `sideby handoff disable [--yes]` | 关闭，其他设置保留 | 只展示改动时为 10；写入后或本来就关着为 0 |
@@ -85,5 +86,5 @@
 - 所有命令遇到用法错误（未知选项、缺参数）时退出码为 2；sideby 自身出错（账号不存在、名字不合法、配置读不了）时为 1。
 - `<acct>` 写成 `<family>:<name>`；名字在所有家族里唯一时，只写 `<name>` 也行。有歧义就报错，并列出候选。
 - 退出码 10 表示命令展示了改动、在等你确认：同意的话，加上 `--yes` 再跑一次同一条命令。
-- `list`、`new`、`next`、`alias`、`doctor`、`quota`（包括 `setup` 和 `teardown`）、`tune`、`model`、`remote-control`、`advisor`、`network`、`unattended`、`handoff`、`families`、`plugins`、`ask`、`terminal`、`key`、`try`、`autostart`、`menubar`、`config`、`app`、`desktop`、`sessions`、`send`、`messages` 支持 `--json`，输出带 `schemaVersion: 1`，JSON Schema 随包放在 [`schemas/`](../../schemas/)。有新版本或本机装的 skill 版本不对时，输出里还会多一个 `_notice`（sideby skill 让 agent 提一次并主动问要不要帮你更新；设 `SIDEBY_NO_UPDATE_NOTIFIER=1` 就不带）。加了 `--json` 时，出错会输出 `{ "schemaVersion": 1, "error": "…", "code": "…" }`：命令行写错时 `code` 为 `usage`，其他情况是 `no-quota-source` 这样的原因。只新增字段时版本不变；删除、改名或改语义时加 1。
+- `list`、`new`、`next`、`alias`、`doctor`、`quota`（包括 `setup` 和 `teardown`）、`tune`、`model`、`remote-control`、`advisor`、`network`、`unattended`、`progress`、`handoff`、`families`、`plugins`、`ask`、`terminal`、`key`、`try`、`autostart`、`menubar`、`config`、`app`、`desktop`、`sessions`、`send`、`messages` 支持 `--json`，输出带 `schemaVersion: 1`，JSON Schema 随包放在 [`schemas/`](../../schemas/)。有新版本或本机装的 skill 版本不对时，输出里还会多一个 `_notice`（sideby skill 让 agent 提一次并主动问要不要帮你更新；设 `SIDEBY_NO_UPDATE_NOTIFIER=1` 就不带）。加了 `--json` 时，出错会输出 `{ "schemaVersion": 1, "error": "…", "code": "…" }`：命令行写错时 `code` 为 `usage`，其他情况是 `no-quota-source` 这样的原因。只新增字段时版本不变；删除、改名或改语义时加 1。
 - 任何输出、日志和错误信息里都不会出现凭据的值。

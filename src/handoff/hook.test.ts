@@ -16,7 +16,9 @@ import {
   readJsonFile,
   writeJsonFile,
 } from '../core/handoff-chain.ts'
+import { PROGRESS_MARK } from '../core/prompt-origin.ts'
 import { writeQuotaCache } from '../families/claude/quota-cache.ts'
+import { runProgressHook } from '../progress/hook.ts'
 import type { Env, HandoffHookEvent } from '../types.ts'
 import { decide, idleWatch, runHandoffHook } from './hook.ts'
 import type { HookInput } from './reader.ts'
@@ -515,6 +517,161 @@ describe('handoff hook IdleWatch', () => {
       // Another Family, or outside a run: nothing at all.
       assert.deepEqual(await watch(env, BUSY, fake(), 'codex'), { exit: 0 })
       assert.deepEqual(await watch({ ...env, SIDEBY_HANDOFF_RUN: undefined }, BUSY), { exit: 0 })
+    })
+  })
+})
+
+// Progress Reminders (spec §3.42, ADR-0076) wake the session while it waits on background work; the turn they start
+// ends in a Stop that Auto Handoff also sees. Handing over must go as it would without them.
+describe('handoff hook with Progress Reminders', () => {
+  const SID = 's1'
+  const BUSY = {
+    background_tasks: [{ id: 't1', type: 'subagent', status: 'running', description: 'tests' }],
+  }
+  /** The wake-up of a reminder, as Claude Code 2.1.325 hands it to `UserPromptSubmit`. */
+  const WAKE = `<task-notification>\n<summary>Stop hook feedback</summary>\n</task-notification>\n<system-reminder>\nStop hook blocking error from command "Stop": ${PROGRESS_MARK} you are waiting on background work (1 task: subagent "tests"), since 11:40, 10 minutes as of this reminder.\n\n</system-reminder>`
+  /** The progress hook notes each prompt (its `UserPromptSubmit` entry runs in the background). */
+  const prompt = async (env: Env, promptId: string, text: string) => {
+    const code = await runProgressHook(
+      ['claude', 'UserPromptSubmit'],
+      env,
+      JSON.stringify({ session_id: SID, prompt_id: promptId, prompt: text }),
+      { err: { write: () => true } },
+    )
+    assert.equal(code, 0)
+  }
+  const stop = (env: Env, promptId: string, active = false) =>
+    call(env, 'Stop', { session_id: SID, prompt_id: promptId, stop_hook_active: active, ...BUSY })
+  const progressOn = (h: FakeHome) =>
+    h.write('.config/sideby/config.json', JSON.stringify({ progress: { every: 10 } }))
+
+  /** One wait on background work: a turn at 84%, the wait (with or without reminders), and the notification's turn. */
+  async function wait(h: FakeHome, reminders: boolean): Promise<RunState> {
+    await progressOn(h)
+    const { env, dir } = await setup(h, { adaptive: true })
+    await pressure(env, 80)
+    await prompt(env, 'p1', 'run the tests in the background')
+    await call(env, 'PostToolUse')
+    await pressure(env, 84)
+    await stop(env, 'p1')
+    for (const [i, used] of [86, 88].entries()) {
+      await pressure(env, used)
+      if (!reminders) continue
+      await prompt(env, `p-wake-${i}`, WAKE)
+      assert.deepEqual(await stop(env, `p-wake-${i}`, true), {})
+    }
+    await pressure(env, 90)
+    await prompt(env, 'p-note', '<task-notification>\n<task-id>t1</task-id>\n<status>completed</status>')
+    await stop(env, 'p-note')
+    return (await readJsonFile<RunState>(join(dir, FILES.run('r1'))))!
+  }
+
+  it('a reminder’s turn does not count as a turn: the adaptive level is what it would be without reminders', async () => {
+    let without: RunState | undefined
+    let withReminders: RunState | undefined
+    await withFakeHome(async (h) => {
+      without = await wait(h, false)
+    })
+    await withFakeHome(async (h) => {
+      withReminders = await wait(h, true)
+    })
+    // The wait counts as one turn of 6 points, after the first of 4.
+    assert.deepEqual(without?.turnUse, { '5h': [4, 6] })
+    assert.deepEqual(withReminders?.turnUse, without?.turnUse)
+    assert.deepEqual(withReminders?.turnMark, without?.turnMark)
+  })
+
+  it('an ordinary turn, or a reminder record for another prompt, still counts', async () => {
+    await withFakeHome(async (h) => {
+      await progressOn(h)
+      const { env, dir } = await setup(h, { adaptive: true })
+      await pressure(env, 80)
+      await call(env, 'PostToolUse')
+      await prompt(env, 'p-wake', WAKE)
+      await pressure(env, 83)
+      // The Stop carries another prompt's id (the record was for the wake-up, this turn is a typed one).
+      await stop(env, 'p-typed')
+      const st = await readJsonFile<RunState>(join(dir, FILES.run('r1')))
+      assert.deepEqual(st?.turnUse, { '5h': [3] })
+    })
+  })
+
+  it('at the level, a reminder’s Stop asks for the Brief naming the background work, as IdleWatch would', async () => {
+    await withFakeHome(async (h) => {
+      await progressOn(h)
+      const { env, brief } = await setup(h)
+      await pressure(env, 90)
+      await prompt(env, 'p-wake', WAKE)
+      await pressure(env, 96)
+      const out = (await stop(env, 'p-wake', true)).output as { decision: string; reason: string }
+      assert.equal(out.decision, 'block')
+      assert.match(out.reason, /sideby Auto Handoff, set up when this session started/)
+      assert.match(out.reason, /background task/)
+      assert.ok(out.reason.includes(brief))
+    })
+  })
+
+  it('when IdleWatch marked the level and its wake-up waits behind a reminder, the Brief is still asked for', async () => {
+    await withFakeHome(async (h) => {
+      await progressOn(h)
+      const { env, dir } = await setup(h)
+      await pressure(env, 96)
+      // IdleWatch reached the level while the reminder's turn ran: it marked the threshold and woke the session.
+      const marked = {
+        thresholdSentAt: NOW.toISOString(),
+        thresholdWindow: { label: '5h', usedPercent: 96, resetsAt: '2026-10-09T15:00:00Z' },
+      }
+      await writeJsonFile(join(dir, FILES.run('r1')), marked)
+      await prompt(env, 'p-wake', WAKE)
+      const held = (await stop(env, 'p-wake', true)).output as { decision: string; reason: string }
+      assert.equal(held.decision, 'block')
+      assert.match(held.reason, /before you stop, update the handoff brief/)
+      assert.equal(await readJsonFile<ReadyFile>(join(dir, FILES.ready)), null)
+      // The held turn goes on and ends: it hands over, once.
+      assert.deepEqual(await stop(env, 'p-wake', true), {})
+      assert.equal((await readJsonFile<ReadyFile>(join(dir, FILES.ready)))?.trigger, 'threshold')
+    })
+    await withFakeHome(async (h) => {
+      // Without a reminder, IdleWatch's own wake-up turn hands over at its Stop as before.
+      await progressOn(h)
+      const { env, dir } = await setup(h)
+      await pressure(env, 96)
+      await writeJsonFile(join(dir, FILES.run('r1')), { thresholdSentAt: NOW.toISOString() })
+      await prompt(
+        env,
+        'p-idle',
+        '<task-notification>\n<summary>Stop hook feedback</summary>\n</task-notification>\n<system-reminder>\nStop hook blocking error from command "Stop": sideby: this is sideby Auto Handoff …\n</system-reminder>',
+      )
+      assert.deepEqual(await stop(env, 'p-idle', true), {})
+      assert.equal((await readJsonFile<ReadyFile>(join(dir, FILES.ready)))?.trigger, 'threshold')
+    })
+  })
+
+  it('IdleWatch, started again by a reminder’s Stop, still wakes the session at the level', async () => {
+    await withFakeHome(async (h) => {
+      await progressOn(h)
+      const { env, dir } = await setup(h)
+      await pressure(env, 90)
+      await writeJsonFile(join(dir, FILES.watch('r1')), { id: 'before-reminder' })
+      await prompt(env, 'p-wake', WAKE)
+      assert.deepEqual(await stop(env, 'p-wake', true), {})
+      let t = NOW.getTime()
+      let n = 0
+      const r = await idleWatch({
+        family: 'claude',
+        input: { session_id: SID, prompt_id: 'p-wake', stop_hook_active: true, ...BUSY } as HookInput,
+        env,
+        clock: () => new Date(t),
+        sleep: async (ms) => {
+          t += ms
+          if (++n === 2) await pressure(env, 96)
+        },
+        parentGone: () => false,
+        id: 'after-reminder',
+      })
+      assert.equal(r.exit, 2)
+      assert.equal(n, 2)
+      assert.match(r.message!, /sideby Auto Handoff, set up when this session started/)
     })
   })
 })

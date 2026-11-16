@@ -35,6 +35,8 @@ src/
 ├── handoff/      the `handoff-hook` entry (leaf imports only), its messages and the per-Host reader contract;
 │                 each Family's reader is families/<id>/handoff-hook.ts, its `handoff` member families/<id>/handoff.ts
 ├── unattended/   the `unattended-hook` entry (leaf imports only); Unattended Mode's state from the Schedule and the manual state (core/unattended-state.ts), its CLI and Panel operations (core/unattended.ts), the end-of-stretch event (core/unattended-ended.ts) the Pending Decision store (core/unattended-pending.ts) and Turn Retry (core/unattended-retry.ts, ADR-0067); the hook answers ask tools and Claude Code's permission requests and starts a failed Claude turn again (§3.37)
+├── progress/     the `progress-hook` entry (leaf imports only): Progress Reminders while a Claude session waits on background work
+│                 (§3.42, ADR-0076); its records are core/progress-state.ts, the hook part, CLI and Panel operations core/progress.ts
 ├── panel/        createPanelHandler, the standalone server, the inline page and theme.ts (host theme tokens);
 │                 page-logic.ts suggestName/suggestAlias also pick the name and short command for `new --next`
 │                 background.ts runs the server detached (`ui --background`, `--stop`)

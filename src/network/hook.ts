@@ -24,7 +24,7 @@ import {
 } from '../core/egress.ts'
 import { ownedFolder, readSmallFile, sha256, writeFileAtomic } from '../core/fs-safe.ts'
 import { resolvePaths } from '../core/paths.ts'
-import { hostMade } from '../core/prompt-origin.ts'
+import { hookWakeUp, hostMade } from '../core/prompt-origin.ts'
 
 export const NETWORK_HOOK_COMMAND = 'sideby network-hook'
 
@@ -51,8 +51,6 @@ export interface NetworkHookDeps {
 const STDIN_MAX = 1024 * 1024
 /** Input that has not ended after this long is not waited for: the hook then decides as if it were given nothing. */
 const STDIN_WAIT_MS = 5000
-/** A wake-up Claude Code makes from a background hook's exit 2 starts like this; only such a prompt carries a held message. */
-const WAKE_UP = /^<task-notification>\s*<summary>Stop hook feedback<\/summary>/
 /** `Held` asks again after these waits, then every `HELD_EVERY_MS`: one request each time. */
 export const HELD_DELAYS_MS = [15_000, 30_000] as const
 export const HELD_EVERY_MS = 60_000
@@ -158,7 +156,8 @@ function heldMessage(prompt: string, zh: boolean): string {
   // A wake-up that was blocked again carries the first message inside the tags: hand over that one alone.
   const from = prompt.indexOf(HELD_OPEN)
   const to = prompt.lastIndexOf(HELD_CLOSE)
-  const inner = WAKE_UP.test(prompt.trimStart()) && from !== -1 && to > from
+  // Only a wake-up Claude Code made from a background hook's exit 2 carries a held message.
+  const inner = hookWakeUp(prompt) && from !== -1 && to > from
   const whole = (inner ? prompt.slice(from + HELD_OPEN.length, to) : prompt).trim()
   const text = whole.slice(0, HELD_MAX_CHARS)
   const cut =

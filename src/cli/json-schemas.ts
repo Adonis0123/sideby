@@ -2314,6 +2314,42 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     { schemaVersion: Version, decision: PendingDecision },
     { title: 'sideby unattended defer "<text>" --json' },
   ),
+  progress: Type.Object(
+    {
+      schemaVersion: Version,
+      action: Type.Union([Type.Literal('status'), Type.Literal('on'), Type.Literal('off')]),
+      on: Type.Boolean({
+        description:
+          'Progress Reminders are on: a Claude session sideby starts that waits on background work tells the user every `every` minutes what it waits for (spec §3.42).',
+      }),
+      every: Type.Optional(
+        Type.Integer({
+          description: 'Minutes between reminders, config `progress.every`; absent while off.',
+        }),
+      ),
+      defaultEvery: Type.Optional(
+        Type.Integer({ description: 'What `on` picks without --every (status only).' }),
+      ),
+      choices: Type.Optional(
+        Type.Array(Type.Integer(), { description: 'The intervals the Panel offers (status only).' }),
+      ),
+      families: Type.Optional(
+        Type.Array(Str, {
+          description:
+            'Families whose sessions get reminders (status only); Codex has no hook that can wake a session.',
+        }),
+      ),
+      changed: Type.Optional(Type.Boolean({ description: 'on and off: whether the config changed.' })),
+      before: Type.Optional(
+        Type.Integer({ description: 'on and off: the interval before, when it was on.' }),
+      ),
+      undo: Type.Optional(
+        Type.String({ description: 'on and off: the command that puts back what was there.' }),
+      ),
+      message: Type.Optional(Type.String({ description: 'on and off: one line for the user.' })),
+    },
+    { title: 'sideby progress [on|off] --json' },
+  ),
   browser: Type.Object(
     {
       schemaVersion: Version,

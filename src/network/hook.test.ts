@@ -520,6 +520,37 @@ describe('network hook: a prompt the Host made itself (spec §3.35)', () => {
     })
   })
 
+  it('holds a blocked Progress Reminder and hands it over whole, its start time with it (spec §3.42)', async () => {
+    await withFakeHome(async (h) => {
+      const env = sessionEnv(h.path('net'), 'US')
+      // How Claude Code 2.1.325 hands a background Stop hook's exit 2 to the session.
+      const wake =
+        '<task-notification>\n<summary>Stop hook feedback</summary>\n</task-notification>\n<system-reminder>\nStop hook blocking error from command "Stop": sideby progress reminder: you are waiting on background work (1 task: subagent "review"), since 11:40, 10 minutes as of this reminder.\n\n</system-reminder>'
+      assert.equal(
+        await runNetworkHook(['claude', 'UserPromptSubmit'], env, sink(), {
+          fetcher: trace('CN'),
+          print: 'p',
+          input: promptInput(wake, 'prompt-wake'),
+        }),
+        2,
+      )
+      const time = fakeTime()
+      const held = sink()
+      const code = await runNetworkHook(['claude', 'Held'], env, held, {
+        fetcher: trace('US'),
+        print: 'p',
+        now: time.now,
+        sleep: time.sleep,
+        parentGone: () => false,
+        input: promptInput(wake, 'prompt-wake'),
+      })
+      assert.equal(code, 2)
+      const text = held.lines.join('')
+      assert.ok(text.includes('sideby progress reminder: you are waiting on background work'), text)
+      assert.ok(text.includes('since 11:40'), text)
+    })
+  })
+
   it('hands a notification over whole when its own text contains the tags', async () => {
     await withFakeHome(async (h) => {
       const env = sessionEnv(h.path('net'), 'US')

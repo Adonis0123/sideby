@@ -1,0 +1,38 @@
+# ADR-0076: Tell the user what a waiting session waits for
+
+Status: accepted
+Date: 2026-11-16
+
+## Context
+
+A coordinator session often starts subagents or long commands in the background and ends its turn to wait for them. While it waits, the session is idle and the model has no turn in which to say anything. A subagent that runs for 40 minutes means 40 minutes without a line of text, and the user cannot tell whether the session is waiting, stuck or finished. Instructions such as "say something when nothing readable has appeared for a while" cannot help: the model is not running.
+
+What Claude Code 2.1.325 does (tried on 2026-11-16 with an isolated HOME, `ANTHROPIC_BASE_URL` pointed at a local fake server, interactive sessions in tmux, and hooks in the isolated `settings.json` that recorded their input):
+
+- The `Stop` hook input lists work in flight in `background_tasks`: `{ id, type: "shell", status: "running", description, command }` for a background command and `{ id, type: "subagent", status: "running", description, agent_type }` for a background subagent. Finished work drops out; the turn after the last one finishes has `[]`. The input also carries the `prompt_id` that started the turn and `stop_hook_active`.
+- A `Stop` command hook with `asyncRewake: true` that exits 2 wakes the idle session at once (ADR-0056 saw the same with 2.1.312). The wake-up reaches `UserPromptSubmit` as `<task-notification>\n<summary>Stop hook feedback</summary>\n</task-notification>\n<system-reminder>\nStop hook blocking error from command "Stop": <stderr>…`, so it is host-made by `core/prompt-origin.ts`. The turn it starts ends in a `Stop` with the same `prompt_id`, `stop_hook_active: true` and the tasks still running. Turns started by typing or by a task notification end with `stop_hook_active: false`.
+- A hook that exits 2 while a turn is running is queued: a new turn starts right after that one ends. A notification that arrives during a turn joins it and carries the same `prompt_id`.
+- The session record `sessions/<pid>.json` says `busy` both while a turn runs and while the session waits idle on a background subagent (`shell` while it waits on a background command), so it cannot tell whether a turn has started.
+- End to end (the same day, Claude Code 2.1.325 started by `sideby run` as an API Account whose `proxy.env` pointed at the fake server, `progress.every: 1`, one background command of 150 seconds): the session was woken 60 and 120 seconds after its `Stop`, both reminders counting from that first `Stop` ("1 minute", "2 minutes") and naming the task by its description, never its command; the turn after the command finished ended with `[]`, and the hook ended without waking it again.
+
+Each reminder is one model turn that reads the whole conversation, so it costs Quota. Reference practice: CI systems and long-running job runners print a heartbeat line every few minutes ("still running, 12 minutes"), and chat assistants that run background work post a short status when asked; none wakes a paid model by default.
+
+## Decision
+
+- **Progress Reminder**, off by default: config `progress.every` (whole minutes, 1 to 240; the Panel offers 5, 10, 15, 30 and 60, and turning it on picks 10). Off removes `progress`.
+- While it is set, every Claude session sideby starts gets two more entries in its `--settings` file, merged with the other session hooks: `sideby progress-hook claude Stop` with `asyncRewake: true` and `timeout: 18000`, and `sideby progress-hook claude UserPromptSubmit` with `async: true` and `timeout: 10`. The session's environment gets `SIDEBY_PROGRESS_EVERY`, the interval at launch, used only when the config cannot be read. A user's own `--settings` leaves no room for them; the launch says so. Codex is not covered: no Codex hook can wake an idle session. The Panel and `sideby progress` say so.
+- The `UserPromptSubmit` entry records, per session, the time and a hash of the latest prompt's id, and whether that prompt is a reminder's wake-up: Claude Code's wake-up wrapper, the reminder's opening words `sideby progress reminder:`, and only one hook's message in it.
+- The `Stop` entry first replaces the session's watch record (a random id, the time, and when the wait began: kept from the previous record when this `Stop` ends a reminder turn, otherwise now). With no background work, or with the setting off, it ends. Otherwise it looks every minute and ends without a reminder when a later `Stop` took over, a new prompt arrived after this `Stop` (a turn is running and its own `Stop` takes over), the Host is gone, the setting was turned off, Auto Handoff is handing over, or 4 hours 55 minutes have passed. When the interval has passed, a session that is unattended now (`sessionUnattended()`, ADR-0075) gets no reminder and the wait starts again; otherwise the hook prints the reminder and exits 2.
+- The reminder names the background tasks (type and description, never the command), the clock time the wait began and the minutes so far, and asks the model to tell the user in one or two sentences what it waits for, for how long and whether there is new output, then end its turn without starting new work. A reminder that Network Guard holds and delivers later (ADR-0053) still makes sense because it carries the clock time.
+- Auto Handoff stays as it would be without reminders. Its `Stop` decides whether the turn that ended was a reminder from the same record: the hashed `prompt_id` must match and the record must say it was a reminder. A record that is missing or late counts as an ordinary turn, which is today's behaviour. For a reminder turn it does not add the turn to the recent turns behind the adaptive hand-over level (ADR-0032), so one wait is not cut into small turns that push the level later. When the level is first seen there, it uses IdleWatch's message, which asks the Brief to name the background work. When IdleWatch has just marked the threshold and its wake-up is still queued, the reminder turn's `stop_hook_active` does not hand over without the agent's Brief: the stop is held once, as for an ordinary turn. A watcher also stays quiet once a hand-over is under way.
+- Turning it on reaches sessions sideby starts afterwards. Turning it off or changing the interval reaches running sessions at their next check, because the hook reads the config every time.
+
+## Consequences
+
+- A user sees a line every N minutes while a Claude session waits on background work, instead of silence, and knows it is still waiting and for what.
+- Each reminder costs one model turn over the whole conversation. The Panel, `sideby progress` and the guide say so where the setting is turned on.
+- One small background Node process waits per idle Claude session with background work, and every prompt starts one short background process (about 40 ms), only while the setting is on.
+- `<state>/progress/sessions/` holds two small files per session: hashes, times and a random id, never a command, description, reply or prompt. Records a day old are removed.
+- `handoff-hook` reads that record at `Stop`. `docs/agents/host-directories.md` says so, and its import walk still allows only leaf modules.
+- If Claude Code changes the wake-up wrapper or stops repeating the `prompt_id` at `Stop`, no turn counts as a reminder: Auto Handoff behaves as before this ADR, and the wait's start time resets at each reminder.
+- Codex, Grok, pi and sessions started without sideby get no reminders.

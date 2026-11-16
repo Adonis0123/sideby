@@ -16,6 +16,8 @@ import {
   type WaitingFile,
   writeJsonFile,
 } from '../core/handoff-chain.ts'
+import { resolvePaths } from '../core/paths.ts'
+import { progressReminderTurn } from '../core/progress-state.ts'
 import { claudeHookReader } from '../families/claude/handoff-hook.ts'
 import { codexHookReader } from '../families/codex/handoff-hook.ts'
 import { grokHookReader } from '../families/grok/handoff-hook.ts'
@@ -150,6 +152,15 @@ export async function decide(opts: {
     // Grok also fires Stop when the session ends; only a finished turn counts.
     const reason = field(input, 'reason')
     if (reason && reason !== 'end_turn') return {}
+    // A turn a Progress Reminder started while the session waits on background work (spec §3.42, ADR-0076): handled so
+    // that handing over goes as it would without the reminder. A record that is missing or late says no: an ordinary turn.
+    const reminder =
+      family === 'claude' &&
+      (await progressReminderTurn(
+        resolvePaths(env).stateDir,
+        sessionId,
+        field(input, 'prompt_id', 'promptId'),
+      ))
     // A finished turn means a Host kept at its limit has continued: a later `handoff ready` waits for the turn again.
     const waitingFile = join(dir, FILES.waiting)
     const held = await readJsonFile<WaitingFile>(waitingFile)
@@ -161,8 +172,10 @@ export async function decide(opts: {
       return {}
     }
     if (!usable) return {}
-    // The turn that just ended joins the window's recent turns before anything is judged (ADR-0032).
-    if (windows) await keep(recordTurn(st, windows))
+    // The turn that just ended joins the window's recent turns before anything is judged (ADR-0032). A reminder's turn
+    // does not: what the wait used counts toward the next real turn, as without reminders, so one wait is not cut into
+    // small turns that would move the adaptive level later.
+    if (windows && !reminder) await keep(recordTurn(st, windows))
     const notice = await waitOutput()
     if (notice) return { output: notice }
     const window = st.thresholdWindow ? { window: st.thresholdWindow } : {}
@@ -173,7 +186,12 @@ export async function decide(opts: {
     if (st.thresholdSentAt) {
       if (await briefFinished(usable.brief, Date.parse(st.thresholdSentAt)))
         await ready({ trigger: 'threshold', brief: usable.brief, briefSource: 'agent', ...window })
-      else if (!st.stopBlocked && input.stop_hook_active !== true && input.stopHookActive !== true) {
+      // A reminder's turn always has `stop_hook_active` (a hook woke it), but nobody asked it for the Brief yet: hold
+      // it once like an ordinary turn instead of handing over without the agent's Brief.
+      else if (
+        !st.stopBlocked &&
+        (reminder || (input.stop_hook_active !== true && input.stopHookActive !== true))
+      ) {
         await keep({ ...st, stopBlocked: true })
         return { output: blockOutput(stopMessage(usable.brief)) }
       } else await ready({ trigger: 'threshold', ...window })
@@ -187,7 +205,11 @@ export async function decide(opts: {
         return {}
       }
       await keep({ ...st, thresholdSentAt: now.toISOString(), thresholdWindow: crossed, stopBlocked: true })
-      return { output: blockOutput(thresholdMessage(usable.brief, crossed)) }
+      // A reminder's turn ends while background work runs: the message IdleWatch would have sent.
+      const text = reminder
+        ? idleThresholdMessage(usable.brief, crossed)
+        : thresholdMessage(usable.brief, crossed)
+      return { output: blockOutput(text) }
     }
     return {}
   }

@@ -7090,6 +7090,45 @@ const MAIN = String.raw`
     } catch (e) { toast(t('quota.checkFailed', { msg: e.message }), { kind: 'fail' }) }
     load({ silent: true })
   }
+  // Progress Reminders (spec §3.42): on with every minutes, or off with null. The switch moves at once (the state
+  // here first), so the interval row grows in or folds away without waiting for the server; a failure puts it back.
+  async function setProgressEvery(every) {
+    const p = S.state && S.state.progress
+    if (!p) return
+    const was = { on: p.on, every: p.every }
+    S.state.progress = Object.assign({}, p, every === null ? { on: false, every: undefined } : { on: true, every })
+    refreshSettings()
+    try {
+      await api('/api/progress', { every })
+      toast(every === null ? t('pr.offToast') : was.on ? t('pr.everyToast', { n: every }) : t('pr.onToast', { n: every }))
+    } catch (e) {
+      S.state.progress = Object.assign({}, S.state.progress, was)
+      refreshSettings()
+      toast(t('pr.failed', { msg: e.message }), { kind: 'fail' })
+    }
+    load({ silent: true })
+  }
+  // The section's rows: the switch, the interval (it grows in under the switch while on), and three short notes.
+  function progressItems() {
+    const p = S.state.progress
+    const every = p.every || p.defaultEvery
+    const label = t('pr.switch')
+    const seg = (name, opts, cur, pick) => h('div', { class: 'seg', role: 'group', 'aria-label': name, 'data-patch': '' }, opts.map(([v, text]) =>
+      h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === cur), onclick: () => { if (v !== cur) pick(v) } }, text)))
+    const out = [fm('progress', h('div', { class: 'set-row', 'data-patch': '' },
+      h('span', { class: 'set-label' }, label),
+      BOOT.readOnly ? h('span', { class: 'chip chip-sm' + (p.on ? ' chip-ok' : '') }, p.on ? t('pr.everyLong', { n: every }) : t('ah.off'))
+        : seg(label, [[true, t('ah.on')], [false, t('ah.off')]], p.on, (v) => setProgressEvery(v ? every : null))))]
+    if (!BOOT.readOnly)
+      out.push(h('div', { class: 'reveal' + (p.on ? ' is-open' : ''), 'data-patch': '', 'data-key': 'pr-every', inert: p.on ? undefined : true },
+        h('div', { class: 'reveal-in', 'data-patch': '' }, h('div', { class: 'set-row pr-every', 'data-patch': '' },
+          h('span', { class: 'set-label' }, t('pr.every')),
+          seg(t('pr.every'), p.choices.map((n) => [n, t('pr.minutes', { n })]), p.on ? every : null, (n) => setProgressEvery(n))))))
+    out.push(h('ul', { class: 'pr-notes' }, h('li', null, t('pr.cost')), h('li', null, t('pr.scope')), h('li', null, t('pr.codex'))))
+    if (!BOOT.readOnly && !askBridged(BOOT, window))
+      out.push(h('p', { class: 'small' }, h('button', { class: 'link-btn small', type: 'button', 'data-key': 'pr-ask', onclick: () => openAsk({ text: t('ai.ask.progress') }) }, t('adv.ask'))))
+    return out
+  }
   function famTitleOf(fam) { const f = S.state && S.state.families.find((x) => x.id === fam); return f ? f.title : fam }
   // ---------- settings ----------
   // One header button holds what is set once and rarely changed: language, theme, Remote Control and Auto Handoff.
@@ -7106,6 +7145,7 @@ const MAIN = String.raw`
     if (S.state && ahState()) out.push('ah')
     if (S.state && (S.state.quotaChecks || []).length) out.push('checks')
     if (S.state && S.state.network) out.push('net')
+    if (S.state && S.state.progress) out.push('progress')
     return out
   }
   function renderSettingsButton() {
@@ -7153,7 +7193,8 @@ const MAIN = String.raw`
   function aiLink(leave) {
     return setLink(leave, t('ai.title'), t(skillInstalled() ? 'ai.installed' : 'ai.notInstalled'), skillInstalled() ? 'chip-ok' : '', () => openAsk(), true)
   }
-  // The dialog's sections, in order: General, Menu bar, Accounts, Quota checks, Auto Handoff, Let AI help. Each is
+  // The dialog's sections, in order: General, Menu bar, Accounts, Quota checks, Auto Handoff, Progress updates,
+  // Network check, Let AI help. Each is
   // { id, title, items, foot }: foot is the one line that explains the whole section.
   function settingsGroups(leave) {
     const secs = settingsSections()
@@ -7218,6 +7259,7 @@ const MAIN = String.raw`
       { id: 'accounts', title: t('set.g.accounts'), items: acct },
       { id: 'quota', title: t('set.g.quota'), items: checks, foot: t('set.quotaChecksHint', { n: every }) },
       { id: 'handoff', title: t('ah.button'), items: [ahLink(leave)].filter(Boolean), foot: t('set.ahHint') },
+      { id: 'progress', title: t('pr.title'), items: secs.includes('progress') ? progressItems() : [], foot: t('pr.hint') },
       { id: 'network', title: t('net.title'), items: netItems, foot: t('net.hint') },
       { id: 'ai', title: t('set.g.ai'), items: ai, foot: t('set.aiHint') },
     ].filter((g) => g.items.length)
@@ -7918,7 +7960,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.reset', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.expired', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.advisor', 'ai.ask.network', 'ai.ask.unattended', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.commands', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.reset', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.expired', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.advisor', 'ai.ask.network', 'ai.ask.unattended', 'ai.ask.progress', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.commands', 'ai.ask.tool']
   // Network Guard (spec §3.35): one dialog with the switch, the allowed countries and the newest result per address.
   // Countries are never ticked for the user, the current one included: a wrong network would allow itself.
   const NET_COMMON = ['US', 'JP', 'SG', 'GB', 'DE', 'FR', 'NL', 'CA', 'AU', 'KR', 'TW', 'HK']

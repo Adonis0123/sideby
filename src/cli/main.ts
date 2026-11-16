@@ -384,6 +384,25 @@ Examples:
   sideby unattended defer "deleting the old branch is left for the user"
 Exit: 0 shown or done; 1 no such Slot or Pending Decision; 2 a time or option it does not take (the message says
 which to use).`,
+  progress: `sideby progress [status] [--json]
+       sideby progress on [--every <minutes>] [--json]
+       sideby progress off [--json]
+
+Progress reminders: while a Claude session sideby started waits on background work (subagents, long commands),
+sideby wakes it every few minutes so it tells you in one or two sentences what it waits for, how long, and whether
+there is new output. Off by default: each reminder is one model turn, which reads the whole conversation, so it uses
+quota. No reminders while the session is unattended, or while a turn is running.
+
+\`on\` turns them on (every 10 minutes, or --every <minutes>, 1 to 240); \`off\` turns them off. Turning them on reaches
+Claude sessions sideby starts from now on; turning them off or changing the interval also reaches running ones. Only
+sideby's config is written, so there is no preview; each change prints its undo. Codex is not covered: it has no
+way for sideby to wake a waiting session. Grok, pi and sessions started without sideby are not covered either.
+
+Examples:
+  sideby progress on
+  sideby progress on --every 15
+  sideby progress off
+Exit: 0 shown or done (also when nothing changed); 2 an interval or option it does not take.`,
   browser: `sideby browser [--enable|--disable] [--yes] [--json]
        sideby browser open <account> [--profile <folder|name>] [--json]
        sideby browser set <account> <folder|name> [--json]
@@ -485,6 +504,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
     flags: ['json', 'all', 'slot-end'],
     valued: ['for', 'until', 'days', 'from', 'to', 'name', 'at'],
   },
+  progress: { flags: ['json'], valued: ['every'] },
   new: { flags: ['api', 'json', 'next'], valued: ['alias', 'vendor'] },
   alias: { flags: ['json', 'yes'], valued: ['pick'] },
   doctor: { flags: ['fix', 'force', 'json'] },
@@ -635,6 +655,13 @@ export async function main(argv: string[]): Promise<number> {
   if (first === 'unattended-hook') {
     const { runUnattendedHook } = await import('../unattended/hook.ts')
     return runUnattendedHook(rest, process.env, process.stdin, { out: process.stdout, err: process.stderr })
+  }
+  // Progress Reminders' hook runs after every turn and on every prompt in the background (spec §3.42); same fast path.
+  if (first === 'progress-hook') {
+    const { runProgressHook } = await import('../progress/hook.ts')
+    return runProgressHook(rest, process.env, process.stdin.isTTY ? '' : process.stdin, {
+      err: process.stderr,
+    })
   }
   if (nodeTooOld()) {
     console.error(
@@ -814,6 +841,8 @@ async function dispatch(
       return await cmds.cmdNetwork(parsed, io)
     case 'unattended':
       return await cmds.cmdUnattended(parsed, io)
+    case 'progress':
+      return await cmds.cmdProgress(parsed, io)
     case 'shell-init':
       return await cmds.cmdShellInit(parsed, io)
     case 'plugins':

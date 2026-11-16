@@ -105,6 +105,8 @@ import { listMessages, type MessageReceipt, sendMessage } from '../core/messages
 import { type AccountModel, accountModel, setAccountModel } from '../core/model-choice.ts'
 import { GUARDED_FAMILIES, type NetworkChange, type NetworkOverview, setNetwork } from '../core/network.ts'
 import { tildify } from '../core/paths.ts'
+import { PROGRESS_FAMILIES, type ProgressView } from '../core/progress.ts'
+import { validEvery } from '../core/progress-state.ts'
 import { quotaAsking } from '../core/quota-fetch.ts'
 import { takeoverLimits } from '../core/quota-levels.ts'
 import { type RemoteControlGroup, remoteControlTodo } from '../core/remote-control.ts'
@@ -492,6 +494,8 @@ export interface PanelState {
   network?: NetworkOverview
   /** Unattended Mode (spec §3.37): whether it is on for the computer, why, until when, the Schedule; absent when unreadable. */
   unattended?: PanelUnattendedStatus
+  /** Progress Reminders (spec §3.42): on or off, how often, and the choices; absent without Claude Accounts. */
+  progress?: ProgressView
 }
 
 /** One Pending Decision as the Panel's Unattended page lists it, with the way back to its Session. */
@@ -1107,6 +1111,7 @@ async function buildState(
     .then((st) => withPendingIds(st, rt.paths.stateDir))
     .catch(() => undefined)
   const showBrowser = browser && (browser.families.matched.length || browser.families.openOnly.length)
+  const progress = accounts.some((a) => PROGRESS_FAMILIES.includes(a.family)) ? rt.progressView() : undefined
   const permissions = aiTaskPermissions(rt.config)
   return {
     schemaVersion: 1,
@@ -1156,6 +1161,7 @@ async function buildState(
     ...(rt.config.panel && Object.keys(rt.config.panel).length ? { panel: rt.config.panel } : {}),
     ...(network ? { network } : {}),
     ...(unattended ? { unattended } : {}),
+    ...(progress ? { progress } : {}),
   }
 }
 
@@ -2735,6 +2741,17 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         if (typeof body.on !== 'boolean') throw new HttpError(400, '"on" must be true or false')
         const rt = await getRuntime()
         return { family, ...(await rt.setQuotaCheck(family, body.on)) }
+      },
+    },
+    // Progress Reminders on with `every` minutes, or off with null: config `progress` (spec §3.42).
+    '/api/progress': {
+      async run(body) {
+        const every = body.every
+        if (every !== null && !validEvery(every))
+          throw new HttpError(400, '"every" must be whole minutes from 1 to 240, or null to turn it off')
+        const rt = await getRuntime()
+        const r = await rt.setProgress(validEvery(every) ? every : undefined)
+        return { changed: r.changed, ...(r.after === undefined ? {} : { every: r.after }) }
       },
     },
     // The Panel's theme and language (spec §3.29): config `panel.theme` and `panel.language`; null removes one.

@@ -505,6 +505,19 @@
       "additionalProperties": false,
       "description": "Unattended Mode (spec §3.37, ADR-0058): while it is on, sessions sideby starts never stop to wait for a person. Present once the feature is used; from then on sideby adds its hook to every Claude and Codex session it starts, so turning it on later covers sessions already running. `sideby config unset unattended` stops adding it."
     },
+    "progress": {
+      "type": "object",
+      "properties": {
+        "every": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 240,
+          "description": "Progress Reminders: while a Claude session sideby started waits on background work (subagents, background commands), wake it every this many minutes so the model tells you in one or two sentences what it waits for. Each reminder is one model turn over the whole conversation, so it uses quota. Not set: off (the default). Sessions started afterwards get it; turning it off or changing the interval also reaches running sessions. Not while the session is unattended; Codex is not covered."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Progress Reminders (spec §3.42, ADR-0076)."
+    },
     "browser": {
       "type": "object",
       "properties": {

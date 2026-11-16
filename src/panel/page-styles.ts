@@ -982,6 +982,15 @@ ${UI_CSS}
 .set-foot { margin: -8px 0 4px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .set-dialog .set-hint { max-width: none; }
 .set-dialog .set-link { margin: 0 -12px; width: calc(100% + 20px); }
+/* Progress updates (spec §3.42): the interval grows in under the switch while it is on. Folded, it takes no room: the
+   group's gap above it is taken back and given inside instead. */
+.set-group > .reveal[data-key=pr-every] { margin-top: -8px; }
+.reveal[data-key=pr-every] > .reveal-in > .pr-every { padding-top: 8px; }
+.pr-notes { margin: 4px 0 0; padding-left: 16px; display: grid; gap: 4px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.pr-every .seg-btn { white-space: nowrap; }
+:where(:root[data-width=phone]) .pr-every { flex-direction: column; align-items: flex-start; gap: 8px; }
+:where(:root[data-width=phone]) .pr-every .seg { max-width: 100%; }
+:where(:root[data-width=phone]) .pr-every .seg-btn { padding: 0 8px; }
 :where(:root[data-width=narrow], :root[data-width=phone]) {
   .set-dialog { grid-template-columns: minmax(0, 1fr); gap: 16px; min-height: 0; }
   .set-nav { flex-direction: row; overflow-x: auto; padding: 0 0 8px; border-right: 0; border-bottom: 1px solid var(--border); }

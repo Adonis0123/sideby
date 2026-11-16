@@ -107,6 +107,15 @@ import {
 } from './core/network.ts'
 import { type Paths, resolvePaths } from './core/paths.ts'
 import { choosePick, type PickChoice, suggestPickName } from './core/pick-commands.ts'
+import {
+  PROGRESS_FAMILIES,
+  type ProgressView,
+  progressHookPart,
+  progressSettingsLine,
+  progressView,
+  setProgress,
+} from './core/progress.ts'
+import { PROGRESS_ENV, validEvery } from './core/progress-state.ts'
 import { categoryReader, type ProjectCategories } from './core/project-categories.ts'
 import { LAUNCH_PROMPTS_ENV, LAUNCH_PROMPTS_UNSET } from './core/prompt-origin.ts'
 import {
@@ -524,6 +533,10 @@ export interface Runtime {
   quotaChecks(): QuotaCheckInfo[]
   /** Turns a Family's Quota fetching on (removes the key) or off (`quota.check.<family>: false`). */
   setQuotaCheck(family: string, on: boolean): Promise<{ changed: boolean }>
+  /** Progress Reminders (spec §3.42): whether they are on, how often, and for which Families. */
+  progressView(): ProgressView
+  /** Turns Progress Reminders on with `every` minutes, or off (undefined); writes only config `progress`. */
+  setProgress(every: number | undefined): Promise<{ changed: boolean; before?: number; after?: number }>
   /** The config `display` (spec §3.25), or an empty object. */
   displayOrder(): DisplayConfig
   /** Replaces the config `display`; undefined or empty removes it. Returns what the file now holds. */
@@ -742,6 +755,21 @@ export async function createRuntime(
     return unattendedHookPart()
   }
 
+  /**
+   * Progress Reminders on a Claude session sideby starts (spec §3.42): their hooks while config `progress.every` is
+   * set, and the interval at launch in the environment (used only when the config cannot be read).
+   */
+  const progressPrepared = (p: PreparedLaunch): SessionHookPart | null => {
+    const every = config.progress?.every
+    if (!validEvery(every) || !PROGRESS_FAMILIES.includes(p.family.id)) return null
+    if (hasOption(p.args, ['--settings'])) {
+      addNotice(p, [progressSettingsLine(p.env)])
+      return null
+    }
+    p.env[PROGRESS_ENV] = String(every)
+    return progressHookPart()
+  }
+
   /** Puts every session hook into the Launch's arguments: one `--settings` for Claude, `-c hooks.*` for Codex. */
   const addSessionHooks = async (p: PreparedLaunch, list: readonly (SessionHookPart | null)[]) => {
     const parts = list.filter((x): x is SessionHookPart => x !== null)
@@ -752,7 +780,10 @@ export async function createRuntime(
     p.args = beforeDashes(p.args, args)
   }
 
-  /** Network Guard and Unattended Mode on a prepared Launch, in that order; hooks only for a session (`run`). */
+  /**
+   * Network Guard, Unattended Mode and Progress Reminders on a prepared Launch, in that order; hooks only for a session
+   * (`run`).
+   */
   const sessionReady = async (
     p: PreparedLaunch,
     session: boolean,
@@ -761,6 +792,7 @@ export async function createRuntime(
     const parts: (SessionHookPart | null)[] = []
     if (!o.ignoreNetwork) parts.push(await guardPrepared(p, session))
     if (session) parts.push(await unattendedPrepared(p, Boolean(o.unattended)))
+    if (session) parts.push(progressPrepared(p))
     await addSessionHooks(p, parts)
   }
 
@@ -1757,7 +1789,8 @@ export async function createRuntime(
       const guarded = async (h: HostLaunch): Promise<HostLaunch> => {
         const net = !ro.ignoreNetwork && guardOn(config, h.env)
         const unattended = Boolean(ro.unattended) || config.unattended !== undefined
-        if (!net && !unattended) return h
+        const progress = validEvery(config.progress?.every) && PROGRESS_FAMILIES.includes(family.id)
+        if (!net && !unattended && !progress) return h
         const main = (await accounts()).find((a) => a.family === family.id && a.isMain)
         if (!main) return h
         const p: PreparedLaunch = { ...h, account: main, args: [...h.args], env: { ...h.env } }
@@ -2112,6 +2145,17 @@ export async function createRuntime(
       const r = await editConfigQuotaCheck(paths.configFile, family, on)
       config.quota = r.after
       return { changed: r.changed }
+    },
+    progressView: () => progressView(config),
+    async setProgress(every) {
+      const r = await setProgress(paths.configFile, every)
+      if (r.config === undefined) delete config.progress
+      else config.progress = r.config
+      return {
+        changed: r.changed,
+        ...(r.before === undefined ? {} : { before: r.before }),
+        ...(r.after === undefined ? {} : { after: r.after }),
+      }
     },
     displayOrder: () => config.display ?? {},
     async setDisplayOrder(display) {

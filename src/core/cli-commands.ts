@@ -557,6 +557,18 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
     },
     feature: 'action.inbound',
   },
+  {
+    id: 'progress',
+    group: 'sessions',
+    usage: 'sideby progress [on|off]',
+    help: 'while a Claude session waits on background work, it tells you every few minutes what it waits for (on [--every <minutes>], off; each reminder uses quota)',
+    summary: {
+      en: 'While a session waits on background work, it tells you what it waits for',
+      zh: '会话等后台任务时，隔几分钟告诉你在等什么',
+    },
+    example: 'sideby progress on --every 10',
+    feature: 'setting.progress',
+  },
   // ---------- Health and safety ----------
   {
     id: 'doctor',
@@ -903,9 +915,9 @@ export function cliHelp(list: readonly CliCommand[] = CLI_COMMANDS): string {
 const HELP_TAIL = `Options:
   --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, advisor, remote-control, handoff,
                 families, commands, plugins, app, desktop, sessions, history, send, messages, edit, browser, update, local, ask,
-                terminal, key, try, autostart, menubar, config, network, unattended)
+                terminal, key, try, autostart, menubar, config, network, unattended, progress)
   -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, commands, desktop, edit, browser,
-                autostart, menubar, config, sessions, history, send, messages, network, unattended
+                autostart, menubar, config, sessions, history, send, messages, network, unattended, progress
   -v, --version show the version
 
 An <account> is <family>:<name> (claude:work) or just <name> when it is unique.

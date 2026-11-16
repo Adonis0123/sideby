@@ -5298,6 +5298,88 @@ function printUnattended(
     )
 }
 
+/**
+ * `sideby progress`: Progress Reminders (spec §3.42, ADR-0076). Without a subcommand shows whether they are on and how
+ * often; `on [--every <minutes>]` and `off` change config `progress` at once (only sideby's config is written, so there
+ * is no preview) and print the undo.
+ */
+export async function cmdProgress(a: ParsedArgs, io: Io): Promise<number> {
+  const [sub, ...rest] = a.positionals
+  const asJson = a.flags.has('json')
+  const usage =
+    'usage: sideby progress [status] | sideby progress on [--every <minutes>] | sideby progress off [--json]'
+  if (rest.length || a.rest.length) throw new UsageError(usage)
+  for (const k of a.flags.keys())
+    if (k !== 'json' && !(k === 'every' && sub === 'on'))
+      throw new UsageError(`--${k} does not go with \`sideby progress ${sub ?? ''}\`; ${usage}`)
+  const { PROGRESS_DEFAULT, PROGRESS_MAX, PROGRESS_MIN, validEvery } = await import(
+    '../core/progress-state.ts'
+  )
+  const rt = await createRuntime()
+  const notes = (every: number | undefined) => [
+    every === undefined
+      ? `Off. While a Claude session sideby started waits on background work (subagents, long commands), it can tell you what it waits for every few minutes: \`sideby progress on\` (every ${PROGRESS_DEFAULT} minutes; --every <minutes> for another interval).`
+      : `On: while a Claude session sideby started waits on background work (subagents, long commands), it tells you every ${every} minutes what it waits for, how long, and whether there is new output.`,
+    'Each reminder is one model turn, which reads the whole conversation: it uses quota.',
+    'Turning it on reaches Claude sessions sideby starts from now on; turning it off or changing the interval also reaches running ones. No reminders while a session is unattended.',
+    'Codex is not covered: it has no way for sideby to wake a waiting session.',
+  ]
+  if (sub === undefined || sub === 'status') {
+    const v = rt.progressView()
+    if (asJson) json(io, { action: 'status', ...v })
+    else {
+      const [first, ...more] = notes(v.every)
+      io.out(first!)
+      for (const line of more) io.out(c.dim(line))
+    }
+    return 0
+  }
+  if (sub !== 'on' && sub !== 'off') throw new UsageError(usage)
+  let every: number | undefined
+  if (sub === 'on') {
+    const raw = a.flags.get('every')
+    const given = raw === undefined ? undefined : Number(raw)
+    if (raw !== undefined && !validEvery(given))
+      throw new UsageError(
+        `--every takes whole minutes from ${PROGRESS_MIN} to ${PROGRESS_MAX} (for example --every 10)`,
+      )
+    every = given ?? rt.progressView().every ?? PROGRESS_DEFAULT
+  }
+  const r = await rt.setProgress(every)
+  const undo =
+    r.before === r.after
+      ? undefined
+      : r.before === undefined
+        ? 'sideby progress off'
+        : `sideby progress on --every ${r.before}`
+  const message =
+    sub === 'on'
+      ? r.changed
+        ? r.before === undefined
+          ? `Progress reminders on: every ${every} minutes. Claude sessions sideby starts from now on get them.`
+          : `Progress reminders now every ${every} minutes (was ${r.before}), also in running sessions.`
+        : `Progress reminders were already on, every ${every} minutes.`
+      : r.changed
+        ? 'Progress reminders off, also in running sessions.'
+        : 'Progress reminders were already off.'
+  if (asJson) {
+    json(io, {
+      action: sub,
+      changed: r.changed,
+      on: sub === 'on',
+      ...(sub === 'on' ? { every } : {}),
+      ...(r.before === undefined ? {} : { before: r.before }),
+      ...(undo ? { undo } : {}),
+      message,
+    })
+    return 0
+  }
+  io.out(r.changed ? `${c.green('✓')} ${message}` : message)
+  if (sub === 'on') io.out(c.dim(notes(every).slice(1).join('\n')))
+  if (undo && r.changed) io.out(c.dim(`Undo: ${undo}`))
+  return 0
+}
+
 /** `sideby unattended …` (spec §3.37, ADR-0058): status, on and off, the Schedule, Pending Decisions and `defer`. */
 export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
   const [sub, ...rest] = a.positionals

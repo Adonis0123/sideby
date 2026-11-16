@@ -10,6 +10,28 @@ export const HOST_MADE = '<task-notification>'
 export const hostMade = (prompt: string): boolean => prompt.trimStart().startsWith(HOST_MADE)
 
 /**
+ * How Claude Code wraps a background hook's message when its exit 2 wakes the session (`asyncRewake`): `<task-notification>
+ * <summary>Stop hook feedback</summary> </task-notification> <system-reminder> Stop hook blocking error from command
+ * "Stop": <stderr> …` (Claude Code 2.1.325).
+ */
+const WAKE_UP = /^<task-notification>\s*<summary>Stop hook feedback<\/summary>/
+
+/** Whether the prompt is a background hook's wake-up, which Claude Code made itself. */
+export const hookWakeUp = (prompt: string): boolean => WAKE_UP.test(prompt.trimStart())
+
+/** How every Progress Reminder starts (spec §3.42, ADR-0076); the model reads it, so it is plain words. */
+export const PROGRESS_MARK = 'sideby progress reminder:'
+
+/**
+ * Whether the prompt is the wake-up of a Progress Reminder and nothing else: Claude Code's wrapper, the reminder's
+ * opening words, and only one hook's message (two wake-ups at once might be joined into one prompt).
+ */
+export function progressWakeUp(prompt: string): boolean {
+  if (!hookWakeUp(prompt) || !prompt.includes(PROGRESS_MARK)) return false
+  return prompt.split('Stop hook blocking error').length <= 2 && prompt.split(HOST_MADE).length === 2
+}
+
+/**
  * The mark every Message `sideby send` delivers, and the line it asks the user to paste, carries (`sideby message
  * <id>`, an id of 8 hex digits; core/messages.ts).
  */
