@@ -5318,9 +5318,9 @@ export async function cmdProgress(a: ParsedArgs, io: Io): Promise<number> {
   const rt = await createRuntime()
   const notes = (every: number | undefined) => [
     every === undefined
-      ? `Off. While a Claude session sideby started waits on background work (subagents, long commands), it can tell you what it waits for every few minutes: \`sideby progress on\` (every ${PROGRESS_DEFAULT} minutes; --every <minutes> for another interval).`
+      ? `Off. While a Claude session sideby started waits on background work (subagents, long commands), it can tell you what it waits for: \`sideby progress on\` (every ${PROGRESS_DEFAULT} minutes; --every <minutes> for another interval).`
       : `On: while a Claude session sideby started waits on background work (subagents, long commands), it tells you every ${every} minutes what it waits for, how long, and whether there is new output.`,
-    'Each reminder is one model turn, which reads the whole conversation: it uses quota.',
+    'Each reminder is one model turn, which reads the whole conversation: it uses quota, and a longer interval uses less.',
     'Turning it on reaches Claude sessions sideby starts from now on; turning it off or changing the interval also reaches running ones. No reminders while a session is unattended.',
     'Codex is not covered: it has no way for sideby to wake a waiting session.',
   ]

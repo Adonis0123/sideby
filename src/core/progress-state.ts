@@ -15,7 +15,7 @@ export const PROGRESS_ENV = 'SIDEBY_PROGRESS_EVERY'
 export const PROGRESS_MIN = 1
 export const PROGRESS_MAX = 240
 /** What turning it on picks when no interval is given. */
-export const PROGRESS_DEFAULT = 10
+export const PROGRESS_DEFAULT = 30
 /** The intervals the Panel offers. */
 export const PROGRESS_CHOICES: readonly number[] = [5, 10, 15, 30, 60]
 /** The `timeout` of the `Stop` entry, in seconds (the same as Auto Handoff's IdleWatch). */

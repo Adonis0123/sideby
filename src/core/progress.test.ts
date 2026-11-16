@@ -47,7 +47,7 @@ describe('Progress Reminders at launch', () => {
       assert.equal(p.env.SIDEBY_PROGRESS_EVERY, undefined)
       assert.deepEqual(rt.progressView(), {
         on: false,
-        defaultEvery: 10,
+        defaultEvery: 30,
         choices: [5, 10, 15, 30, 60],
         families: ['claude'],
       })

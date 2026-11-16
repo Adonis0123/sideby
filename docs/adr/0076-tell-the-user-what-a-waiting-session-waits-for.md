@@ -36,3 +36,11 @@ Each reminder is one model turn that reads the whole conversation, so it costs Q
 - `handoff-hook` reads that record at `Stop`. `docs/agents/host-directories.md` says so, and its import walk still allows only leaf modules.
 - If Claude Code changes the wake-up wrapper or stops repeating the `prompt_id` at `Stop`, no turn counts as a reminder: Auto Handoff behaves as before this ADR, and the wait's start time resets at each reminder.
 - Codex, Grok, pi and sessions started without sideby get no reminders.
+
+## Amendment (2026-11-16): turning it on picks 30 minutes
+
+A reminder every 10 minutes is six model turns an hour for one waiting session, each reading the whole conversation, and over a long wait most of them say the same thing. Every 30 minutes still tells the user that a long wait is a wait, at a third of the cost.
+
+- Turning it on without an interval (`sideby progress on`, the Panel's switch, an AI asked without a number) now picks 30 minutes, not 10. The Panel still offers 5, 10, 15, 30 and 60, and `--every` still takes 1 to 240.
+- A config that already holds `progress.every` keeps its value; `on` without `--every` keeps the interval it finds, as before.
+- Where the setting is turned on, the cost note adds that a longer interval uses less.

@@ -389,11 +389,11 @@ which to use).`,
        sideby progress off [--json]
 
 Progress reminders: while a Claude session sideby started waits on background work (subagents, long commands),
-sideby wakes it every few minutes so it tells you in one or two sentences what it waits for, how long, and whether
+sideby wakes it now and then so it tells you in one or two sentences what it waits for, how long, and whether
 there is new output. Off by default: each reminder is one model turn, which reads the whole conversation, so it uses
 quota. No reminders while the session is unattended, or while a turn is running.
 
-\`on\` turns them on (every 10 minutes, or --every <minutes>, 1 to 240); \`off\` turns them off. Turning them on reaches
+\`on\` turns them on (every 30 minutes, or --every <minutes>, 1 to 240); \`off\` turns them off. Turning them on reaches
 Claude sessions sideby starts from now on; turning them off or changing the interval also reaches running ones. Only
 sideby's config is written, so there is no preview; each change prints its undo. Codex is not covered: it has no
 way for sideby to wake a waiting session. Grok, pi and sessions started without sideby are not covered either.

@@ -380,22 +380,22 @@ Each Slot of the Schedule is days, a start and an end in this computer's time zo
 
 ## Progress updates
 
-A Claude session often starts subagents or long commands in the background and then waits for them. While it waits it says nothing, so after twenty minutes of silence you cannot tell whether it is still waiting, stuck or done. With progress updates on, sideby wakes a waiting Claude session every few minutes, and it tells you in one or two sentences what it is waiting for, how long it has been, and whether there is new output.
+A Claude session often starts subagents or long commands in the background and then waits for them. While it waits it says nothing, so after a long silence you cannot tell whether it is still waiting, stuck or done. With progress updates on, sideby wakes a waiting Claude session every 30 minutes (or as often as you pick), and it tells you in one or two sentences what it is waiting for, how long it has been, and whether there is new output.
 
 ```sh
-sideby progress on               # every 10 minutes
+sideby progress on               # every 30 minutes
 sideby progress on --every 15    # another interval, 1 to 240 minutes
 sideby progress off
 sideby progress                  # on or off, and how often
 ```
 
-- It is off by default, because each update is one model turn, which reads the whole conversation: it uses quota.
+- It is off by default, because each update is one model turn, which reads the whole conversation: it uses quota. A longer interval uses less.
 - Only while background work runs, and never while a turn is running (a reminder never follows an answer), so it stops by itself when the work is done or you type something.
 - Turning it on reaches Claude sessions sideby starts from then on. Turning it off, or a new interval, also reaches sessions already running.
 - No updates while you are away (Unattended Mode), unless you typed in that session in the last 30 minutes.
 - With Auto Handoff on, a session hands over as it would without these updates.
 - Codex is not covered: it has no way for sideby to wake a waiting session. Grok, pi and sessions started without sideby are not covered either.
-- In the Panel: **Settings › Progress updates**, with the interval (5, 10, 15, 30 or 60 minutes) under the switch. Or ask your AI: "While background tasks run, tell me every 10 minutes what my sessions are waiting for."
+- In the Panel: **Settings › Progress updates**, with the interval (5, 10, 15, 30 or 60 minutes; 30 when you turn it on) under the switch. Or ask your AI: "While background tasks run, tell me every 30 minutes what my sessions are waiting for."
 
 ## Remote Control
 
