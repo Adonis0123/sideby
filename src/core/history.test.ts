@@ -111,7 +111,7 @@ async function seed(h: FakeHome) {
         sessionId: B,
         cwd: web,
         timestamp: ago(20 * DAY),
-        message: { content: 'add dark mode (暗色) to the UI' },
+        message: { content: 'add dark mode (暗色) to the Q版 UI' },
       },
       {
         type: 'assistant',
@@ -372,8 +372,9 @@ describe('Session History', () => {
       // Twenty days old: outside the week, inside the month, with and without a letter in the word.
       assert.deepEqual(ids(await searchHistory(rt, { q: '暗色', since: '7d' })), [])
       assert.deepEqual(ids(await searchHistory(rt, { q: '暗色', since: '30d' })), [B])
-      assert.deepEqual(ids(await searchHistory(rt, { q: 'UI', since: '30d' })), [B])
-      assert.deepEqual(ids(await searchHistory(rt, { q: 'ui', since: '7d' })), [])
+      // A word of ASCII letters only could also sit in the random temporary folder name of a project path.
+      assert.deepEqual(ids(await searchHistory(rt, { q: 'q版', since: '30d' })), [B])
+      assert.deepEqual(ids(await searchHistory(rt, { q: 'Q版', since: '7d' })), [])
     })
   })
 
