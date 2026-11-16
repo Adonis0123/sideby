@@ -40,6 +40,51 @@ describe('transcript origin of a prompt', () => {
     })
   })
 
+  it('reads a line written before the hook started whole, even one longer than the part read back', async () => {
+    await withFakeHome(async (h) => {
+      const quick = () => {
+        let t = 0
+        return { clock: () => (t += 1000), sleep: async () => {} }
+      }
+      const at = '2026-11-16T15:00:00.000Z'
+      const earlier = line({ type: 'assistant', message: { content: 'earlier' } }).repeat(100)
+      const picture = {
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/png', data: 'A'.repeat(300 * 1024) },
+      }
+      const withPicture = await h.write(
+        't/picture.jsonl',
+        earlier +
+          line({
+            type: 'user',
+            promptId: 'p1',
+            origin: { kind: 'human' },
+            timestamp: at,
+            message: { content: [{ type: 'text', text: 'look' }, picture] },
+          }),
+      )
+      assert.deepEqual(await promptOrigin(withPicture, 'p1', quick()), {
+        origin: 'human',
+        at: Date.parse(at),
+        text: 'look',
+      })
+      const long = 'a long log\n'.repeat(30_000)
+      const longText = await h.write(
+        't/long.jsonl',
+        earlier +
+          line({
+            type: 'user',
+            promptId: 'p2',
+            origin: { kind: 'human' },
+            timestamp: at,
+            message: { content: long },
+          }) +
+          line({ type: 'assistant', message: { content: 'reading it' } }),
+      )
+      assert.equal((await promptOrigin(longText, 'p2', quick()))?.text, long)
+    })
+  })
+
   it('reads a transcript that did not exist yet from its start', async () => {
     await withFakeHome(async (h) => {
       const file = h.path('t', 'new.jsonl')
@@ -202,6 +247,33 @@ describe('Attended Session records', () => {
       )
       assert.equal((await readdir(`${paths.stateDir}/unattended/attended`)).length, 2)
       assert.deepEqual(await listAttended(paths.stateDir, new Date(T0 + ATTENDED_MS)), [])
+    })
+  })
+
+  it('a told mark written while a prompt renews the stretch keeps the renewed time', async () => {
+    await withFakeHome(async (h) => {
+      const state = resolvePaths(h.env).stateDir
+      const who = { sessionId: 's1', family: 'claude' }
+      const first = await markAttended(state, who, new Date(T0))
+      let renewal: Promise<unknown> | undefined
+      // Between the told mark's read and its write, a prompt at T0 + 29 minutes renews the stretch to T0 + 59.
+      await markTold(state, 's1', first.since, new Date(T0 + 60_000), {
+        beforeWrite: async () => {
+          renewal = markAttended(state, who, new Date(T0 + 29 * 60_000))
+          await new Promise((r) => setTimeout(r, 150))
+        },
+      })
+      await renewal
+      const r = await readAttended(state, 's1', new Date(T0 + 45 * 60_000))
+      assert.deepEqual(
+        [r?.at, r?.since, r?.toldAt],
+        [new Date(T0 + 29 * 60_000).toISOString(), first.since, new Date(T0 + 60_000).toISOString()],
+      )
+      // The lock is gone once both are done.
+      assert.deepEqual(
+        (await readdir(`${state}/unattended/attended`)).filter((f) => !f.endsWith('.json')),
+        [],
+      )
     })
   })
 

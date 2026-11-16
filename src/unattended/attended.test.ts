@@ -52,8 +52,8 @@ let ids = 0
  * Submits `prompt` to session `session` at `at` as Claude Code does, through the background `UserPromptSubmit` entry.
  * The transcript line is written while the hook waits (as Claude Code writes it 70–180 ms after the hook starts), with
  * the origin `kind` (none: never written), the prompt as its text and that moment as its time. `line` writes another
- * text, time or id instead, and `transcript` hands the hook another file, as an input made by hand could. Returns how
- * often the hook waited.
+ * text, time or id instead, and `transcript` hands the hook another file, as an input made by hand could. `before` is
+ * already in the transcript when the hook starts. Returns how often the hook waited.
  */
 async function submit(
   h: FakeHome,
@@ -67,11 +67,12 @@ async function submit(
     extra?: Record<string, unknown>
     line?: { id?: string; text?: string; at?: number }
     transcript?: string
+    before?: string
   } = {},
 ) {
   const session = o.session ?? 's1'
   await h.write(`.claude/projects/p/${session}.jsonl`, '{"type":"mode"}\n').catch(() => {})
-  await appendFile(transcriptOf(h, session), '')
+  await appendFile(transcriptOf(h, session), o.before ?? '')
   const file = o.transcript ?? transcriptOf(h, session)
   await mkdir(dirname(file), { recursive: true })
   await appendFile(file, '')
@@ -285,6 +286,10 @@ describe('Attended Sessions (unattended-hook on UserPromptSubmit)', () => {
     await withFakeHome(async (h) => {
       await turnOn(h)
       const launch = launchPromptMarks(['--model', 'opus', 'Read the brief at /tmp/b.md and continue.'])
+      const crowded = launchPromptMarks([
+        ...Array.from({ length: 64 }, (_, i) => ['--add-dir', `/work/d${i}`]).flat(),
+        'Read the brief at /tmp/b.md and continue.',
+      ])
       const cases: [string, Parameters<typeof submit>[2]][] = [
         // Each is written `human` in the transcript, so only the text or the launch tells them apart.
         ['<task-notification>\n<task-id>b1</task-id>\n<status>failed</status>', {}],
@@ -293,6 +298,8 @@ describe('Attended Sessions (unattended-hook on UserPromptSubmit)', () => {
         [pasteLine('0a47374f', '/state/messages/x.md', 0, 'en'), {}],
         ['Read the brief at /tmp/b.md and continue.', { env: { SIDEBY_LAUNCH_PROMPTS: launch } }],
         ['  Read the brief at   /tmp/b.md and continue.\n', { env: { SIDEBY_LAUNCH_PROMPTS: launch } }],
+        // A launch prompt after 64 other values: too many to list, so the session counts none.
+        ['Read the brief at /tmp/b.md and continue.', { env: { SIDEBY_LAUNCH_PROMPTS: crowded } }],
         // A session whose launch did not say which prompts it carried counts none.
         ['typed', { env: { SIDEBY_LAUNCH_PROMPTS: undefined } }],
         ['typed', { env: { SIDEBY_LAUNCH_PROMPTS: '?' } }],
@@ -308,6 +315,35 @@ describe('Attended Sessions (unattended-hook on UserPromptSubmit)', () => {
       for (const [prompt, o] of cases) await submit(h, prompt, o)
       assert.deepEqual(await attendedNow(h), [])
       assert.equal((await event(h, 'PreToolUse', { at: T0 + MIN })).code, 2)
+    })
+  })
+
+  it('counts a prompt written before the hook started whose line is longer than the part read back', async () => {
+    await withFakeHome(async (h) => {
+      await turnOn(h)
+      const typed = (id: string, content: unknown) =>
+        `${JSON.stringify({
+          type: 'user',
+          promptId: id,
+          origin: { kind: 'human' },
+          promptSource: 'typed',
+          message: { role: 'user', content },
+          timestamp: new Date(T0).toISOString(),
+        })}\n`
+      const picture = {
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/png', data: 'A'.repeat(300 * 1024) },
+      }
+      await submit(h, 'look at this', {
+        line: { id: 'picture-1' },
+        before: typed('picture-1', [{ type: 'text', text: 'look at this' }, picture]),
+      })
+      const long = 'a long log\n'.repeat(30_000)
+      await submit(h, long, { session: 's2', line: { id: 'long-1' }, before: typed('long-1', long) })
+      assert.deepEqual(
+        (await attendedNow(h)).map((s) => s.sessionId),
+        ['s1', 's2'],
+      )
     })
   })
 

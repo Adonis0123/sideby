@@ -42,11 +42,11 @@ export const sidebyMessage = (prompt: string): boolean => SIDEBY_MESSAGE.test(pr
 
 /**
  * Set in the environment of a Claude session that has `unattended-hook`: the marks of the prompts sideby put on its
- * command line (`launchPromptMarks`). `?` until the Host starts; a session whose value is not a list counts no prompt
- * as typed.
+ * command line (`launchPromptMarks`). `?` until the Host starts, and for a command line with more than `MARKS_MAX`
+ * of them; a session whose value is not a list counts no prompt as typed.
  */
 export const LAUNCH_PROMPTS_ENV = 'SIDEBY_LAUNCH_PROMPTS'
-/** The value before the final arguments are known. */
+/** The value before the final arguments are known, or when there are too many to list. */
 export const LAUNCH_PROMPTS_UNSET = '?'
 const MARKS_MAX = 64
 const MARK = /^[0-9a-f]{16}$/
@@ -57,14 +57,15 @@ const mark = (text: string): string =>
 
 /**
  * The marks of every argument that may be a prompt: each one that does not start with `-`, and the value of each
- * `--x=value`. Over-counting an option's value is harmless: a typed prompt equal to it is only not counted.
+ * `--x=value`. Over-counting an option's value is harmless: a typed prompt equal to it is only not counted. More than
+ * `MARKS_MAX` of them give `LAUNCH_PROMPTS_UNSET`: a list cut short would let a launch prompt past it count as typed.
  */
 export function launchPromptMarks(args: readonly string[]): string {
   const out = new Set<string>()
   for (const a of args) {
     const value = a.startsWith('-') ? (a.includes('=') ? a.slice(a.indexOf('=') + 1) : '') : a
     if (value.trim()) out.add(mark(value))
-    if (out.size >= MARKS_MAX) break
+    if (out.size > MARKS_MAX) return LAUNCH_PROMPTS_UNSET
   }
   return [...out].join(',')
 }

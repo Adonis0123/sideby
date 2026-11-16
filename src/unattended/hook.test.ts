@@ -889,6 +889,7 @@ describe('unattended hook imports', () => {
       'core/unattended-attended.ts',
       'core/prompt-origin.ts',
       'core/fs-safe.ts',
+      'core/lock.ts',
       'core/paths.ts',
     ])
     assert.deepEqual(

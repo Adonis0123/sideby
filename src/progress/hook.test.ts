@@ -477,6 +477,7 @@ describe('progress hook imports', () => {
       'core/unattended-attended.ts',
       'core/unattended-state.ts',
       'core/fs-safe.ts',
+      'core/lock.ts',
       'core/paths.ts',
     ])
     assert.deepEqual(

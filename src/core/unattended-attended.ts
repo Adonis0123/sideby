@@ -5,12 +5,14 @@
 // Only `unattended-hook`'s background `UserPromptSubmit` entry writes a record, and only after the session's own
 // transcript (`ownTranscript`) said the prompt was typed by a person (`promptOrigin`). One file per session under `<state>/unattended/attended/`,
 // named by a hash of the session id; every level must be a real folder of the user that nobody else can write to
-// (`ownedFolder`, as for Pending Decisions). Nothing of the prompt is kept.
+// (`ownedFolder`, as for Pending Decisions). Nothing of the prompt is kept. A record is read and written back under a lock
+// of its own (`<hash>.lock` beside it), so a told mark never puts back an older `at` a prompt has just renewed.
 import { constants } from 'node:fs'
-import { open, readdir, realpath, rm } from 'node:fs/promises'
+import { type FileHandle, open, readdir, realpath, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import { ownedFolder, readSmallFile, sha256, writeFileAtomic } from './fs-safe.ts'
+import { takeFileLock } from './lock.ts'
 import {
   readUnattendedConfig,
   readUnattendedOverride,
@@ -25,7 +27,11 @@ export const ATTENDED_HOOK_TIMEOUT_S = 30
 /** How long the hook waits for Claude Code to write the prompt into the transcript (70–180 ms with Claude Code 2.1.325). */
 export const ORIGIN_WAIT_MS = 10_000
 const ORIGIN_POLL_MS = 50
-/** How far before the transcript's end at the start the prompt's line is looked for (a queued prompt is written early). */
+/**
+ * How far before the transcript's end at the start the prompt's line is looked for (a queued prompt is written early).
+ * Reading starts at the beginning of the line that holds this point, so a line longer than it (a prompt with a
+ * picture) is read whole.
+ */
 const ORIGIN_BACK_BYTES = 256 * 1024
 /** The most of a transcript read while waiting, and the longest line held: past either, the prompt does not count. */
 const ORIGIN_READ_MAX = 32 * 1024 * 1024
@@ -61,6 +67,10 @@ export interface AttendedSession {
 }
 
 const fileName = (sessionId: string) => `${sha256(sessionId).slice(0, 32)}.json`
+const lockName = (sessionId: string) => `${sha256(sessionId).slice(0, 32)}.lock`
+/** One session's record is read and written back by one caller at a time; a holder that died frees it after `staleMs`. */
+const LOCK = { staleMs: 15_000, beatMs: 5_000 }
+const LOCK_WAIT = { timeoutMs: 5_000, pollMs: 25 }
 const iso = (ms: number) => new Date(ms).toISOString()
 
 function parse(text: string | undefined): AttendedRecord | undefined {
@@ -111,7 +121,7 @@ export async function readAttended(
  * Notes a prompt someone typed into the session at `at`: it counts as attended for `ATTENDED_MS` from then. A stretch
  * that was still running goes on (its `since` and `toldAt` are kept); otherwise a new one starts. A prompt no later than
  * the one already noted changes nothing. Removes records that ran out over an hour ago. Throws when the folder is not
- * safe to use.
+ * safe to use, or when the session's record stays locked for 5 seconds.
  */
 export async function markAttended(
   stateDir: string,
@@ -120,34 +130,60 @@ export async function markAttended(
 ): Promise<AttendedRecord> {
   const dir = (await ownedFolder(stateDir, PARTS, { create: true, private: true }))!
   const file = join(dir, fileName(who.sessionId))
-  const old = parse(await readSmallFile(file, 8192))
   const t = at.getTime()
-  // A prompt no later than the one already noted (an old prompt's id handed in again, or two hooks out of order)
-  // changes nothing.
-  if (old && old.sessionId === who.sessionId && t <= Date.parse(old.at) && t < attendedEnd(old)) return old
-  const running = old && old.sessionId === who.sessionId && t < attendedEnd(old) && Date.parse(old.at) <= t
-  const record: AttendedRecord = {
-    sessionId: who.sessionId,
-    family: who.family,
-    ...(who.account ? { account: who.account } : {}),
-    ...(who.cwd ? { cwd: who.cwd } : {}),
-    at: iso(t),
-    since: running ? old.since : iso(t),
-    ...(running && old.toldAt ? { toldAt: old.toldAt } : {}),
+  const release = await takeFileLock(join(dir, lockName(who.sessionId)), { ...LOCK, wait: LOCK_WAIT })
+  if (!release)
+    throw new Error(`the Attended Session record ${file} stayed locked; the next prompt notes it again`)
+  let record: AttendedRecord
+  try {
+    const old = parse(await readSmallFile(file, 8192))
+    // A prompt no later than the one already noted (an old prompt's id handed in again, or two hooks out of order)
+    // changes nothing.
+    if (old && old.sessionId === who.sessionId && t <= Date.parse(old.at) && t < attendedEnd(old)) return old
+    const running = old && old.sessionId === who.sessionId && t < attendedEnd(old) && Date.parse(old.at) <= t
+    record = {
+      sessionId: who.sessionId,
+      family: who.family,
+      ...(who.account ? { account: who.account } : {}),
+      ...(who.cwd ? { cwd: who.cwd } : {}),
+      at: iso(t),
+      since: running ? old.since : iso(t),
+      ...(running && old.toldAt ? { toldAt: old.toldAt } : {}),
+    }
+    await writeFileAtomic(file, `${JSON.stringify(record)}\n`, 0o600)
+  } finally {
+    await release()
   }
-  await writeFileAtomic(file, `${JSON.stringify(record)}\n`, 0o600)
   await pruneAttended(dir, t)
   return record
 }
 
-/** Notes that the user was told in the session during the stretch that began at `since`. Best effort. */
-export async function markTold(stateDir: string, sessionId: string, since: string, now: Date): Promise<void> {
+/**
+ * Notes that the user was told in the session during the stretch that began at `since`. Best effort: a record that
+ * stays locked is left as it is. `beforeWrite` runs between the read and the write (for tests).
+ */
+export async function markTold(
+  stateDir: string,
+  sessionId: string,
+  since: string,
+  now: Date,
+  deps: { beforeWrite?: () => Promise<void> } = {},
+): Promise<void> {
   const dir = await ownedFolder(stateDir, PARTS, { create: false }).catch(() => null)
   if (!dir) return
   const file = join(dir, fileName(sessionId))
-  const r = parse(await readSmallFile(file, 8192))
-  if (!r || r.sessionId !== sessionId || r.since !== since) return
-  await writeFileAtomic(file, `${JSON.stringify({ ...r, toldAt: now.toISOString() })}\n`, 0o600)
+  const release = await takeFileLock(join(dir, lockName(sessionId)), { ...LOCK, wait: LOCK_WAIT }).catch(
+    () => null,
+  )
+  if (!release) return
+  try {
+    const r = parse(await readSmallFile(file, 8192))
+    if (!r || r.sessionId !== sessionId || r.since !== since) return
+    await deps.beforeWrite?.()
+    await writeFileAtomic(file, `${JSON.stringify({ ...r, toldAt: now.toISOString() })}\n`, 0o600)
+  } finally {
+    await release()
+  }
 }
 
 async function pruneAttended(dir: string, t: number): Promise<void> {
@@ -222,7 +258,7 @@ export interface PromptLine {
  * The transcript line of prompt `promptId`: Claude Code writes a `user` line with the prompt's `promptId`, its text, a
  * `timestamp` and an `origin` (`human` for a typed prompt; `task-notification`, `peer` for a Message from another
  * process or session; none under `-p`; checked with Claude Code 2.1.325). The line is written shortly after the hook
- * starts, so the transcript is read from `ORIGIN_BACK_BYTES` before its end at the start, then every `ORIGIN_POLL_MS` what
+ * starts, so the transcript is read from the start of the line `ORIGIN_BACK_BYTES` before its end at the start, then every `ORIGIN_POLL_MS` what
  * was added, for at most `ORIGIN_WAIT_MS`. Only lines holding the prompt id are parsed, and of them only `type`,
  * `promptId`, `origin.kind`, `timestamp` and the message's text are looked at. Undefined when it cannot tell.
  */
@@ -247,7 +283,7 @@ export async function promptOrigin(
         const st = await fh.stat()
         if (!st.isFile()) return undefined
         // A transcript that did not exist yet when the hook started (a new session's first prompt) is read whole.
-        if (offset === undefined) offset = Math.max(0, st.size - ORIGIN_BACK_BYTES)
+        if (offset === undefined) offset = await lineStart(fh, Math.max(0, st.size - ORIGIN_BACK_BYTES))
         if (st.size < offset) [offset, rest] = [0, '']
         while (offset < st.size) {
           const len = Math.min(st.size - offset, 1024 * 1024)
@@ -271,6 +307,25 @@ export async function promptOrigin(
     if (clock() - start >= ORIGIN_WAIT_MS) return undefined
     await sleep(ORIGIN_POLL_MS)
   }
+}
+
+/**
+ * Where the line that holds byte `at` starts: just after the last newline before it, looked for at most `LINE_MAX`
+ * back. A line longer than that is not held anyway, so `at` itself is kept.
+ */
+async function lineStart(fh: FileHandle, at: number): Promise<number> {
+  const stop = Math.max(0, at - LINE_MAX)
+  let end = at
+  while (end > stop) {
+    const len = Math.min(end - stop, 64 * 1024)
+    const buf = Buffer.alloc(len)
+    const { bytesRead } = await fh.read(buf, 0, len, end - len)
+    if (bytesRead < len) return at
+    const nl = buf.lastIndexOf(0x0a)
+    if (nl >= 0) return end - len + nl + 1
+    end -= len
+  }
+  return stop === 0 ? 0 : at
 }
 
 function originOf(line: string, promptId: string): PromptLine | undefined {

@@ -44,8 +44,14 @@ describe('prompt origin', () => {
     assert.equal(launchPrompt('/s/x.json', env), true)
     assert.equal(launchPrompt('Read the brief', env), false)
     assert.equal(launchPrompt('typed', { [LAUNCH_PROMPTS_ENV]: '' }), false)
-    // At most 64 marks.
-    assert.equal(launchPromptMarks(Array.from({ length: 100 }, (_, i) => `p${i}`)).split(',').length, 64)
+    // At most 64 marks; past them sideby cannot tell, and no prompt counts as typed.
+    assert.equal(launchPromptMarks(Array.from({ length: 64 }, (_, i) => `p${i}`)).split(',').length, 64)
+    const many = launchPromptMarks([
+      ...Array.from({ length: 64 }, (_, i) => ['--add-dir', `/work/d${i}`]).flat(),
+      'Read the brief at /b.md',
+    ])
+    assert.equal(many, '?')
+    assert.equal(launchPrompt('Read the brief at /b.md', { [LAUNCH_PROMPTS_ENV]: many }), true)
   })
 
   it('cannot tell, and so counts every prompt as a launch prompt, when the launch did not say', () => {
