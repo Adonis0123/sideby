@@ -214,13 +214,19 @@ function run(argv) {
     if (seen && seen === iconSeen) iconStable = seen;
     iconSeen = seen;
   }
-  // Drops the menu from the icon when it shows; at the pointer when the icon is hidden, such as by a full menu bar or
-  // under the notch, where clicking it would do nothing.
+  // Drops the menu from the icon when it shows. When the icon is hidden, such as by a full menu bar or under the
+  // notch, clicking it would drop the menu in the screen's top left corner, so the menu drops below the right end of
+  // the menu bar instead, where the icon would be, on the screen the user is typing in.
   function openMenu() {
     var w = item.button.window;
     if (w && !w.isNil() && (w.occlusionState & $.NSWindowOcclusionStateVisible)) { item.button.performClick(null); return; }
+    var screen = $.NSScreen.mainScreen;
+    if (!screen || screen.isNil()) screen = $.NSScreen.screens.firstObject;
+    var v = screen.visibleFrame;
+    var at = $.NSMakePoint(Math.max(v.origin.x, v.origin.x + v.size.width - Number(item.menu.size.width) - 8), v.origin.y + v.size.height);
     app.activateIgnoringOtherApps(true);
-    item.menu.popUpMenuPositioningItemAtLocationInView(null, $.NSEvent.mouseLocation, null);
+    // nil, not null: the bridge turns null into NSNull, which AppKit asks for its window and throws.
+    item.menu.popUpMenuPositioningItemAtLocationInView($(), at, $());
     app.deactivate;
   }
   function registerHotkey() {

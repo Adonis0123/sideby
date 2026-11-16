@@ -202,6 +202,9 @@ describe('menu bar script', () => {
     assert.doesNotMatch(MENUBAR_SCRIPT, /\/bin\/sh|doShellScript|\$\{/)
     // JXA hands enum constants such as NSAlertFirstButtonReturn over as strings: never compare them with === or !==.
     assert.doesNotMatch(MENUBAR_SCRIPT, /[!=]==\s*\$\.NS\w+/)
+    // JXA hands a JavaScript null over as NSNull, and AppKit then throws (-[NSNull window]): the menu opened below
+    // the menu bar takes nil, $(), for no item and no view (tried with macOS 27.2 on 2026-11-16).
+    assert.match(MENUBAR_SCRIPT, /popUpMenuPositioningItemAtLocationInView\(\$\(\), at, \$\(\)\)/)
     // The key monitor makes AppKit throw inside a modal loop, so every alert lifts it first and puts it back after.
     const modals = [...MENUBAR_SCRIPT.matchAll(/\.runModal\b/g)].length
     assert.ok(modals > 0)
