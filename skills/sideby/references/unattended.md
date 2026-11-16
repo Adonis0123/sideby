@@ -57,6 +57,20 @@ A Claude session the user types into asks as usual again for 30 minutes after ea
 - Only a prompt the user typed counts: not a background task's notification, not a Message from `sideby send` or another session, not the prompt sideby put on the command line, and not your own tool calls. There is no command to set it, and you must not try to make your own session count: if the user wants questions everywhere, run `sideby unattended off --json`.
 - Typing into a terminal by automation (tmux `send-keys`) looks like a person to Claude Code and counts for that one session. Sessions started before this sideby version, and Codex sessions, do not have it.
 
+## If nobody answers: questions go on after a wait
+
+A question or a permission prompt that a Claude session shows while someone is there (an Attended Session, or Unattended Mode off) waits for the user. Once it has waited the **Answer Wait** (10 minutes unless the user set another; ADR-0077) with nobody answering, and Unattended Mode is on, the session goes on as Unattended Mode would: the question is refused with the instruction to take the recommended option where it can be undone, and the permission prompt is answered "no", never "yes". A turn that ended on a question written as text is woken with the same instructions after the same wait. Each is kept as a Pending Decision with `waited` (minutes). While Unattended Mode is off it keeps waiting, and goes on once the mode comes on (a Slot that begins later, say). So "ask me while I'm here, don't get stuck when I'm not" needs only Unattended Mode on, or a Schedule.
+
+```sh
+sideby unattended wait --json        # field answerWait: minutes, or null when it waits however long
+sideby unattended wait 30 --json     # 1 to 120 minutes
+sideby unattended wait off --json    # questions wait for the user however long
+```
+
+Set it when the user asks ("问题没人回就自动按推荐继续", "问题等我 30 分钟再继续", "别自动继续，一直等我", "how long does a question wait for me"); each change prints its `undo`. It reaches sessions already running at their next look. Not covered: a background subagent's permission prompt (Claude Code shows it only after the hooks, so it waits for the user), Codex, Grok, pi, and sessions started before this sideby version (restart them).
+
+When a refusal or a note in your session starts "No answer after 10 minutes", "Not allowed: nobody confirmed this action in 10 minutes" or "Nobody replied to your question for 10 minutes", that is this: nobody is answering, so do what the note says and do not ask the same thing again.
+
 ## When the user is back
 
 ```sh
@@ -65,6 +79,6 @@ sideby unattended pending --json    # each question, refused permission or skipp
 sideby unattended pending done <id> --json   # or --all, once the user has dealt with them
 ```
 
-Go through the open ones with the user (a `deferred` one that starts "The session stopped" is a session whose turn kept failing after three retries; a `permission` one names the tool, for Bash only the program and the model's description of the step, and `agentType` when a subagent asked; the whole command is in the session itself). A decision with a `sessionId` can be continued in its session: `sideby sessions copy <sessionId> --as resume` copies the command. Done ones are deleted 30 days later. A plugin can be told when a stretch ends through the `unattended.ended` event (`docs/guide/plugins.md`); sideby itself sends no notification.
+Go through the open ones with the user (one with `waited` was on screen that many minutes before the session went on without an answer; a `deferred` one that starts "The session stopped" is a session whose turn kept failing after three retries; a `permission` one names the tool, for Bash only the program and the model's description of the step, and `agentType` when a subagent asked; the whole command is in the session itself). A decision with a `sessionId` can be continued in its session: `sideby sessions copy <sessionId> --as resume` copies the command. Done ones are deleted 30 days later. A plugin can be told when a stretch ends through the `unattended.ended` event (`docs/guide/plugins.md`); sideby itself sends no notification.
 
-The same is on the Panel's **Unattended** tab (`sideby ui`): the status with **Turn on now**, the Schedule, and the Pending Decisions with **Done**. Point the user there when they prefer clicking.
+The same is on the Panel's **Unattended** tab (`sideby ui`): the status with **Turn on now**, the Schedule, **If nobody answers** (the Answer Wait), and the Pending Decisions with **Done** (one that went on after a wait says "No answer for 10 min"). Point the user there when they prefer clicking.

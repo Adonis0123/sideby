@@ -7,6 +7,7 @@ import { withFakeHome } from '../../testing/index.ts'
 import {
   clearUnattendedOverride,
   daysText,
+  parseAnswerWait,
   parseClock,
   parseDays,
   parseSchedule,
@@ -183,14 +184,26 @@ describe('reading the config by hand', () => {
   it('tells a config with the section from one without, and survives a broken file', async () => {
     await withFakeHome(async (h) => {
       const file = h.path('.config/sideby/config.json')
-      assert.deepEqual(await readUnattendedConfig(file), { configured: false, schedule: [] })
+      const none = { configured: false, schedule: [], answerWait: 10 }
+      assert.deepEqual(await readUnattendedConfig(file), none)
       await h.write('.config/sideby/config.json', '{"unattended":{}}')
-      assert.deepEqual(await readUnattendedConfig(file), { configured: true, schedule: [] })
+      assert.deepEqual(await readUnattendedConfig(file), { configured: true, schedule: [], answerWait: 10 })
       await h.write('.config/sideby/config.json', JSON.stringify({ unattended: { schedule: [weeknights] } }))
-      assert.deepEqual(await readUnattendedConfig(file), { configured: true, schedule: [weeknights] })
+      assert.deepEqual(await readUnattendedConfig(file), {
+        configured: true,
+        schedule: [weeknights],
+        answerWait: 10,
+      })
       await h.write('.config/sideby/config.json', '{not json')
-      assert.deepEqual(await readUnattendedConfig(file), { configured: false, schedule: [] })
+      assert.deepEqual(await readUnattendedConfig(file), none)
     })
+  })
+
+  it('reads the Answer Wait: whole minutes from 1 to 120, false for never, anything else the default 10', () => {
+    assert.equal(parseAnswerWait(undefined), 10)
+    assert.equal(parseAnswerWait(false), null)
+    for (const ok of [1, 30, 120]) assert.equal(parseAnswerWait(ok), ok)
+    for (const bad of [0, 121, 2.5, '10', true, null, -5]) assert.equal(parseAnswerWait(bad), 10, String(bad))
   })
 })
 

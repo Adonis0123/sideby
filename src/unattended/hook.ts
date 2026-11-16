@@ -15,6 +15,10 @@
 // most three times in a row, and keeps a Pending Decision when that did not help (Turn Retry, ADR-0067). And in Claude
 // it runs in the background on every prompt (`UserPromptSubmit`, `async`): a prompt a person typed makes that session
 // an Attended Session for 30 minutes, which it leaves alone as if the mode were off, telling the user once (ADR-0075).
+// A question or a permission prompt Claude Code shows, in an Attended Session or while the mode is off, is watched in
+// the background (Answer Wait, ADR-0077): once it has waited `unattended.answerWait` minutes with nobody answering and
+// the mode is on, it is refused as the mode would refuse it, and so is a turn that ended on a question written as text
+// (a second `Stop` entry, `asyncRewake`). It never answers anything with "yes".
 // A failure before the decision is made does nothing: that is
 // how a session behaves without the feature (unlike `network-hook`, which blocks when it cannot tell). Once the
 // decision is to refuse, it refuses: keeping the Pending Decision and writing the reason are best effort, and their
@@ -49,6 +53,7 @@ import {
   type UnattendedState,
   unattendedState,
 } from '../core/unattended-state.ts'
+import { waitedMinutes, watchScreen } from '../core/unattended-wait.ts'
 
 export const UNATTENDED_HOOK_COMMAND = 'sideby unattended-hook'
 
@@ -68,6 +73,8 @@ export interface UnattendedHookDeps {
   sleep?: (ms: number) => Promise<void>
   /** Whether the Host that started the hook is gone (`ppid` 1 by default): nothing is left to wake. */
   parentGone?: () => boolean
+  /** The Host's pid, whose session record says what is on screen (Answer Wait); `process.ppid` by default. */
+  hostPid?: number
 }
 
 function prefersChinese(env: Env): boolean {
@@ -156,21 +163,38 @@ export function questionText(input: Record<string, unknown>): string {
   return parts.join('\n\n') || JSON.stringify(input)
 }
 
-/** What the model reads instead of an answer. */
-export function questionReason(state: UnattendedState, now: Date, zh: boolean, kept: boolean): string {
+/**
+ * What the model reads instead of an answer. `waited`: the question was on screen this many minutes with nobody
+ * answering (Answer Wait); the session shows the text too, so it opens with what happened for the person coming back.
+ */
+export function questionReason(
+  state: UnattendedState,
+  now: Date,
+  zh: boolean,
+  kept: boolean,
+  waited?: number,
+): string {
   const until = state.until ? clockText(Date.parse(state.until), now.getTime(), zh) : undefined
   const session = state.reason === 'session'
   if (zh) {
     const when = session ? '（这个会话）' : until ? `（到 ${until}）` : '（没有结束时间）'
     const keep = kept ? 'sideby 已把这个问题记下，等用户回来看' : 'sideby 没能记下这个问题，请写进最终汇报'
-    return `未显示：sideby 无人值守已开启${when}，现在没人能回答，${keep}。不要再问。能撤回的选择按推荐的选项继续，在最终汇报里写出这个问题和你的选择。删除、对外发送或发布、部署、付费等难撤回的操作不要做：跳过它，运行 \`sideby unattended defer "<一句话>"\` 记下，再继续做其余的事。`
+    const head = waited
+      ? `${waited} 分钟没人回答：sideby 无人值守已开启${when}，会话不再等回答，${keep}。`
+      : `未显示：sideby 无人值守已开启${when}，现在没人能回答，${keep}。`
+    return `${head}不要再问。能撤回的选择按推荐的选项继续，在最终汇报里写出这个问题和你的选择。删除、对外发送或发布、部署、付费等难撤回的操作不要做：跳过它，运行 \`sideby unattended defer "<一句话>"\` 记下，再继续做其余的事。`
   }
   const when = session ? 'for this session' : until ? `until ${until}` : 'with no end set'
   const keep = kept
     ? 'sideby kept this question for the user to look at later'
     : 'sideby could not keep this question, so put it in your final report'
-  return `Not shown: sideby's Unattended Mode is on ${when}, so nobody is here to answer, and ${keep}. Do not ask again. Where the choice can be undone, go on with the recommended option, and list the question and your choice in your final report. Do not do anything hard to undo (deleting, sending or posting anything outside, publishing, deploying, paying): skip it, record it with \`sideby unattended defer "<one sentence>"\`, and go on with the rest.`
+  const head = waited
+    ? `No answer after ${minutesText(waited)}: sideby's Unattended Mode is on ${when}, so the session goes on without one, and ${keep}.`
+    : `Not shown: sideby's Unattended Mode is on ${when}, so nobody is here to answer, and ${keep}.`
+  return `${head} Do not ask again. Where the choice can be undone, go on with the recommended option, and list the question and your choice in your final report. Do not do anything hard to undo (deleting, sending or posting anything outside, publishing, deploying, paying): skip it, record it with \`sideby unattended defer "<one sentence>"\`, and go on with the rest.`
 }
+
+const minutesText = (n: number): string => (n === 1 ? '1 minute' : `${n} minutes`)
 
 /** How much of the end of the model's last message is read to tell whether it ends on a question. */
 export const QUESTION_TAIL = 600
@@ -266,20 +290,35 @@ export function endingQuestion(message: string): string | undefined {
   return undefined
 }
 
-/** What the model reads when it ended its turn on a question and nobody is here to answer. */
-export function stopReason(state: UnattendedState, now: Date, zh: boolean, kept: boolean): string {
+/**
+ * What the model reads when it ended its turn on a question and nobody is here to answer. `waited`: the question was
+ * left this many minutes with no reply (Answer Wait); this note then wakes the session, and is not the user's reply.
+ */
+export function stopReason(
+  state: UnattendedState,
+  now: Date,
+  zh: boolean,
+  kept: boolean,
+  waited?: number,
+): string {
   const until = state.until ? clockText(Date.parse(state.until), now.getTime(), zh) : undefined
   const session = state.reason === 'session'
   if (zh) {
     const when = session ? '（这个会话）' : until ? `（到 ${until}）` : '（没有结束时间）'
     const keep = kept ? 'sideby 已把你的问题记下，等用户回来看' : 'sideby 没能记下你的问题，请写进最终汇报'
-    return `没人能回答：sideby 无人值守已开启${when}，${keep}。不要等回复，也不要再问。能撤回的选择按推荐的选项继续，一直做到完。删除、对外发送或发布、部署、付费等难撤回的操作不要做：跳过它，运行 \`sideby unattended defer "<一句话>"\` 记下，再做完其余的事。最后写一份最终汇报，列出你做的每个选择和记下的每件事，不提任何问题。`
+    const head = waited
+      ? `${waited} 分钟没人回复你的问题：sideby 无人值守已开启${when}，${keep}。这条不是用户的回复。`
+      : `没人能回答：sideby 无人值守已开启${when}，${keep}。`
+    return `${head}不要等回复，也不要再问。能撤回的选择按推荐的选项继续，一直做到完。删除、对外发送或发布、部署、付费等难撤回的操作不要做：跳过它，运行 \`sideby unattended defer "<一句话>"\` 记下，再做完其余的事。最后写一份最终汇报，列出你做的每个选择和记下的每件事，不提任何问题。`
   }
   const when = session ? 'for this session' : until ? `until ${until}` : 'with no end set'
   const keep = kept
     ? 'sideby kept your question for the user to look at later'
     : 'sideby could not keep your question, so put it in your final report'
-  return `Nobody is here to answer: sideby's Unattended Mode is on ${when}, and ${keep}. Do not wait for an answer and do not ask again. Where the choice can be undone, go on with the recommended option and carry on to the end. Do not do anything hard to undo (deleting, sending or posting anything outside, publishing, deploying, paying): skip it, record it with \`sideby unattended defer "<one sentence>"\`, and finish the rest. Then end with a final report that lists each choice you made and each item you recorded, without asking anything.`
+  const head = waited
+    ? `Nobody replied to your question for ${minutesText(waited)}: sideby's Unattended Mode is on ${when}, and ${keep}. This note is not the user's reply.`
+    : `Nobody is here to answer: sideby's Unattended Mode is on ${when}, and ${keep}.`
+  return `${head} Do not wait for an answer and do not ask again. Where the choice can be undone, go on with the recommended option and carry on to the end. Do not do anything hard to undo (deleting, sending or posting anything outside, publishing, deploying, paying): skip it, record it with \`sideby unattended defer "<one sentence>"\`, and finish the rest. Then end with a final report that lists each choice you made and each item you recorded, without asking anything.`
 }
 
 /** What a declined MCP form is kept as: the server's name and what it asked, never a field's value. */
@@ -375,12 +414,18 @@ export function permissionText(tool: string, input: Record<string, unknown>): st
   return tool
 }
 
-/** What the model reads instead of the permission prompt Claude Code would have shown. */
-export function permissionReason(state: UnattendedState, now: Date, kept: boolean): string {
+/**
+ * What the model reads instead of the permission prompt Claude Code would have shown. `waited`: the prompt was on
+ * screen this many minutes with nobody answering (Answer Wait).
+ */
+export function permissionReason(state: UnattendedState, now: Date, kept: boolean, waited?: number): string {
   const until = state.until ? clockText(Date.parse(state.until), now.getTime(), false) : undefined
   const when = state.reason === 'session' ? 'for this session' : until ? `until ${until}` : 'with no end set'
   const keep = kept ? ' sideby kept this request for the user to look at later.' : ''
-  return `Not allowed: Claude Code wanted a person to confirm this action, and nobody is here (sideby's Unattended Mode is on ${when}).${keep} Rewrite it so it needs no confirmation: literal paths, "\${VAR:?}" for variables in rm targets, plain bash syntax, and rm as a command of its own. Or skip it, record it with \`sideby unattended defer "<what and why>"\`, and go on with the rest.`
+  const head = waited
+    ? `Not allowed: nobody confirmed this action in ${minutesText(waited)}, and sideby's Unattended Mode is on ${when}.`
+    : `Not allowed: Claude Code wanted a person to confirm this action, and nobody is here (sideby's Unattended Mode is on ${when}).`
+  return `${head}${keep} Rewrite it so it needs no confirmation: literal paths, "\${VAR:?}" for variables in rm targets, plain bash syntax, and rm as a command of its own. Or skip it, record it with \`sideby unattended defer "<what and why>"\`, and go on with the rest.`
 }
 
 /**
@@ -406,12 +451,16 @@ interface Refusal {
   keep?: () => Promise<unknown>
 }
 
-/** What to do with this call: undefined allows it. Any error here allows it too (the caller catches it). */
+/**
+ * What to do with this call: undefined allows it. Any error here allows it too (the caller catches it). A permission
+ * request (in Claude, also the ask tool's) that is not refused at once may first wait for a person (Answer Wait).
+ */
 async function decide(
   argv: readonly string[],
   env: Env,
   input: AsyncIterable<string | Uint8Array> | string,
   now: Date,
+  deps: UnattendedHookDeps,
 ): Promise<Refusal | undefined> {
   const [family = '', event = ''] = argv
   const askTool = ASK_TOOLS[family]
@@ -428,10 +477,12 @@ async function decide(
     const sessionId = text(parseObject(early)?.session_id, 256)
     if (sessionId) await clearRetryStreak(paths.stateDir, sessionId).catch(() => {})
   }
-  const { schedule } = await readUnattendedConfig(paths.configFile)
+  const { schedule, answerWait } = await readUnattendedConfig(paths.configFile)
   const override = await readUnattendedOverride(paths.stateDir)
   const state = unattendedState({ schedule, override, now, session: env[UNATTENDED_ENV] === '1' })
-  if (!state.on) return undefined
+  // Answer Wait: what Claude Code shows is watched while the mode is off too, since it may come on before anyone answers.
+  const watch = permission && answerWait !== null
+  if (!state.on && !watch) return undefined
   const raw = early ?? (await readInput(input))
   const zh = prefersChinese(env)
   const account = text(env.SIDEBY_ACCOUNT, 256)
@@ -494,8 +545,12 @@ async function decide(
   }
   const payload = parsePayload(raw)
   if (!payload) return undefined
-  if (permission || payload.tool === askTool) {
-    const here = await attended(payload.sessionId, !permission)
+  if (permission) {
+    // Asked in front of someone (an Attended Session) or while the mode is off: shown, and watched while it waits.
+    const shown = state.on ? await attended(payload.sessionId, false) : {}
+    if (shown) return watch ? answerAfterWait(payload, env, now.getTime(), deps) : undefined
+  } else if (payload.tool === askTool) {
+    const here = await attended(payload.sessionId, true)
     if (here) return here.answer
   }
   if (permission)
@@ -562,6 +617,17 @@ export async function runUnattendedHook(
     await notePrompt(env, input, deps).catch(() => {})
     return 0
   }
+  if (argv[0] === 'claude' && argv[1] === 'StopWait') {
+    // In the background (`asyncRewake`): exit 2 wakes the idle session with the note on stderr.
+    try {
+      const wake = await wakeAfterWait(env, input, deps)
+      if (!wake) return 0
+      io.err.write(`${wake}\n`)
+      return 2
+    } catch {
+      return 0
+    }
+  }
   if (argv[0] === 'claude' && argv[1] === 'StopFailure') {
     try {
       const wake = await retryAfterFailure(env, input, deps)
@@ -575,7 +641,7 @@ export async function runUnattendedHook(
   let refusal: Refusal | undefined
   const now = deps.now ? deps.now() : new Date()
   try {
-    refusal = await decide(argv, env, input, now)
+    refusal = await decide(argv, env, input, now, deps)
   } catch {
     return 0
   }
@@ -619,6 +685,168 @@ async function isOn(env: Env, now: Date, sessionId: string): Promise<boolean> {
       now,
     })
   ).on
+}
+
+/** Unattended Mode for the whole computer (or this `--unattended` session) at `at`, read fresh; an Attended Session counts as on. */
+async function modeAt(env: Env, at: Date): Promise<{ state: UnattendedState; answerWait: number | null }> {
+  const paths = resolvePaths(env)
+  const { schedule, answerWait } = await readUnattendedConfig(paths.configFile)
+  const override = await readUnattendedOverride(paths.stateDir)
+  return {
+    state: unattendedState({ schedule, override, now: at, session: env[UNATTENDED_ENV] === '1' }),
+    answerWait,
+  }
+}
+
+/** The clock, the wait and the Host, as Answer Wait's watches use them. */
+function waitTools(deps: UnattendedHookDeps) {
+  const clock = () => (deps.now ? deps.now() : new Date()).getTime()
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const startPpid = process.ppid
+  const parentGone = deps.parentGone ?? (() => process.ppid !== startPpid || process.ppid === 1)
+  return { clock, sleep, parentGone, pid: deps.hostPid ?? startPpid }
+}
+
+/**
+ * Answer Wait for a question or a permission prompt Claude Code shows (spec §3.37 item 7, ADR-0077): watches the
+ * session record while the dialog stays on screen and, once it has waited `unattended.answerWait` minutes and
+ * Unattended Mode is on (counting an Attended Session as on: nobody answered), refuses it as the mode would, keeping a
+ * Pending Decision with how long it waited. Anything that says someone answered, or that it cannot tell, lets it be
+ * (undefined): the record does not show a dialog (a subagent's request, which Claude Code shows only after the hooks,
+ * or a session that shows none), the dialog ended or another took its place, the Host is gone, or the wait is now
+ * never. It never answers "yes": the only decision it gives is a denial.
+ */
+async function answerAfterWait(
+  payload: Payload,
+  env: Env,
+  start: number,
+  deps: UnattendedHookDeps,
+): Promise<Refusal | undefined> {
+  // Claude Code runs a subagent's hooks before it shows the prompt: holding one would hide it from the person.
+  if (payload.agentId || !payload.sessionId) return undefined
+  const sessionId = payload.sessionId
+  const t = waitTools(deps)
+  const end = await watchScreen({
+    env,
+    pid: t.pid,
+    sessionId,
+    expect: 'waiting',
+    startedAt: start,
+    clock: t.clock,
+    sleep: t.sleep,
+    parentGone: t.parentGone,
+    settings: async () => {
+      const m = await modeAt(env, new Date(t.clock()))
+      return { wait: m.answerWait, on: m.state.on }
+    },
+  })
+  if (end !== 'act') return undefined
+  const at = new Date(t.clock())
+  const waited = waitedMinutes(start, at.getTime())
+  const { state } = await modeAt(env, at)
+  const paths = resolvePaths(env)
+  const zh = prefersChinese(env)
+  const account = text(env.SIDEBY_ACCOUNT, 256)
+  const where = {
+    family: 'claude',
+    ...(account ? { account } : {}),
+    sessionId,
+    ...(payload.cwd ? { cwd: payload.cwd } : {}),
+  }
+  const deny = (message: string) => ({
+    hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message } },
+  })
+  if (payload.tool === ASK_TOOLS.claude)
+    return {
+      json: deny,
+      reason: (kept) => questionReason(state, at, zh, kept, waited),
+      keep: () =>
+        addPendingDecision(
+          paths.stateDir,
+          { kind: 'question', ...where, text: questionText(payload.input), waited },
+          at,
+          { dedupe: true },
+        ),
+    }
+  return {
+    json: deny,
+    reason: (kept) => permissionReason(state, at, kept, waited),
+    keep: () =>
+      addPendingDecision(
+        paths.stateDir,
+        { kind: 'permission', ...where, text: permissionText(payload.tool, payload.input), waited },
+        at,
+        { dedupe: true },
+      ),
+  }
+}
+
+/**
+ * Answer Wait for a turn that ended on a question written as text (spec §3.37 item 7, ADR-0077): Claude's second `Stop`
+ * entry, in the background (`asyncRewake`). When the session is not unattended right now (the mode is off, or it is an
+ * Attended Session: otherwise the first `Stop` entry already keeps the turn going) and the last message ends on a
+ * question, it watches the session record while the session waits for a prompt. Once nobody replied for
+ * `unattended.answerWait` minutes and the mode is on, it keeps the question as a Pending Decision and returns the note
+ * that wakes the session (exit 2). A new turn (a reply, a notification), the Host gone, the wait set to never, or
+ * anything it cannot tell: undefined, nothing happens.
+ */
+async function wakeAfterWait(
+  env: Env,
+  input: AsyncIterable<string | Uint8Array> | string,
+  deps: UnattendedHookDeps,
+): Promise<string | undefined> {
+  const t = waitTools(deps)
+  const start = t.clock()
+  const v = parseObject(await readInput(input))
+  // Only a first Stop (`stop_hook_active` false) of the main session.
+  if (v?.stop_hook_active !== false || v.agent_id !== undefined) return undefined
+  const sessionId = text(v.session_id, 256)
+  const message = typeof v.last_assistant_message === 'string' ? v.last_assistant_message : ''
+  const question = sessionId ? endingQuestion(message) : undefined
+  if (!sessionId || !question) return undefined
+  if ((await modeAt(env, new Date(start))).answerWait === null) return undefined
+  if (await isOn(env, new Date(start), sessionId)) return undefined
+  const end = await watchScreen({
+    env,
+    pid: t.pid,
+    sessionId,
+    expect: 'idle',
+    startedAt: start,
+    clock: t.clock,
+    sleep: t.sleep,
+    parentGone: t.parentGone,
+    settings: async () => {
+      const m = await modeAt(env, new Date(t.clock()))
+      return { wait: m.answerWait, on: m.state.on }
+    },
+  })
+  if (end !== 'act') return undefined
+  const at = new Date(t.clock())
+  const waited = waitedMinutes(start, at.getTime())
+  const { state } = await modeAt(env, at)
+  const paths = resolvePaths(env)
+  const account = text(env.SIDEBY_ACCOUNT, 256)
+  const cwd = text(v.cwd)
+  let kept = true
+  try {
+    await addPendingDecision(
+      paths.stateDir,
+      {
+        kind: 'question',
+        family: 'claude',
+        ...(account ? { account } : {}),
+        sessionId,
+        ...(cwd ? { cwd } : {}),
+        text: question,
+        waited,
+      },
+      at,
+      { dedupe: true },
+    )
+  } catch {
+    kept = false
+  }
+  return stopReason(state, at, prefersChinese(env), kept, waited)
 }
 
 /** A prompt id as Claude Code writes it; anything else is not looked for. */

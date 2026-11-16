@@ -99,11 +99,12 @@ describe('Progress Reminders at launch', () => {
       const { hooks } = await settingsOf(
         await withClaudeSessionHooks(['--settings', handoff], p.sessionHookArgs!),
       )
-      // Auto Handoff's IdleWatch first, then Unattended Mode's Stop, then the reminder's.
-      assert.equal(hooks.Stop.length, 3)
+      // Auto Handoff's IdleWatch first, then Unattended Mode's Stop and its Answer Wait, then the reminder's.
+      assert.equal(hooks.Stop.length, 4)
       assert.equal(hooks.Stop[0].hooks[0].command, 'w')
       assert.match(hooks.Stop[1].hooks[0].command, /unattended-hook claude Stop$/)
-      assert.match(hooks.Stop[2].hooks[0].command, /progress-hook claude Stop$/)
+      assert.match(hooks.Stop[2].hooks[0].command, /unattended-hook claude StopWait$/)
+      assert.match(hooks.Stop[3].hooks[0].command, /progress-hook claude Stop$/)
       assert.ok(
         hooks.UserPromptSubmit.some((g: { hooks: { command: string }[] }) =>
           /progress-hook claude UserPromptSubmit$/.test(g.hooks[0]!.command),

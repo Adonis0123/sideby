@@ -780,6 +780,11 @@ export interface PendingDecisionInfo {
   agentType?: string
   /** The question with its options, the tool and what it was to do, or the deferred text (at most 4000 characters). */
   text: string
+  /**
+   * Minutes the question or permission prompt was on screen with nobody answering before the session went on without
+   * an answer (Answer Wait, spec §3.37). Absent when it was never shown.
+   */
+  waited?: number
   doneAt?: string
 }
 

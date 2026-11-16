@@ -15,6 +15,8 @@ import {
   snapshot,
   withFakeHome,
 } from '../../testing/index.ts'
+import { resolvePaths } from '../core/paths.ts'
+import { addPendingDecision } from '../core/unattended-pending.ts'
 import { OUTPUT_SCHEMAS } from './json-schemas.ts'
 
 const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url))
@@ -85,6 +87,10 @@ describe('sideby unattended', () => {
         ['pending', 'done', 'x', '--all'],
         ['defer'],
         ['nap'],
+        ['wait', '0'],
+        ['wait', '121'],
+        ['wait', '5m'],
+        ['wait', '10', '20'],
       ]) {
         const r = cli(h, ['unattended', ...args, '--json'])
         assert.equal(r.status, 2, `${args.join(' ')}: ${r.stdout}${r.stderr}`)
@@ -100,6 +106,44 @@ describe('sideby unattended', () => {
       const none = cli(h, ['unattended', 'schedule', 'remove', '1'])
       assert.equal(none.status, 1)
       assert.match(none.stderr, /schedule add/)
+    })
+  })
+
+  it('sets how long a question waits for you (Answer Wait), with an undo that runs', async () => {
+    await withFakeHome(async (h) => {
+      // 10 minutes until someone changes it, also before the feature is set up.
+      assert.equal(json(h, []).answerWait, 10)
+      const set = json(h, ['wait', '30'])
+      assert.deepEqual(
+        [set.answerWait, set.changed, set.undo, set.configured],
+        [30, true, 'sideby unattended wait 10', true],
+      )
+      assert.equal(json(h, ['wait', '30']).changed, false)
+      const off = json(h, ['wait', 'off'])
+      assert.deepEqual([off.answerWait, off.undo], [null, 'sideby unattended wait 30'])
+      const config = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8'))
+      assert.equal(config.unattended.answerWait, false)
+      const undo = spawnSync('/bin/sh', ['-c', off.undo.replace(/^sideby /, '"$NODE" "$MAIN" ')], {
+        env: { ...h.env, NODE: process.execPath, MAIN } as NodeJS.ProcessEnv,
+        encoding: 'utf8',
+        timeout: 30_000,
+      })
+      assert.equal(undo.status, 0, undo.stdout + undo.stderr)
+      assert.equal(json(h, ['wait']).answerWait, 30)
+      const human = cli(h, ['unattended', 'wait'])
+      assert.match(human.stdout, /after 30 minutes with Unattended Mode on, the session goes on/)
+      assert.match(cli(h, ['unattended']).stdout, /If nobody answers: after 30 minutes/)
+      // What went on without an answer says how long it waited.
+      await addPendingDecision(resolvePaths(h.env).stateDir, {
+        kind: 'question',
+        family: 'claude',
+        account: 'claude:work',
+        sessionId: 's1',
+        text: 'Which framework should I use?',
+        waited: 30,
+      })
+      assert.equal(json(h, ['pending'], 'unattended-pending').pending[0].waited, 30)
+      assert.match(cli(h, ['unattended', 'pending']).stdout, /question · no answer for 30 min/)
     })
   })
 

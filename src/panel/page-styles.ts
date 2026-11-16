@@ -1472,6 +1472,13 @@ input.ua-time::placeholder { color: var(--faint); }
 .ua-here-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; padding: 12px 16px; border-top: 1px solid var(--border); }
 .ua-here-row:first-child { border-top: 0; }
 .ua-here-hint { gap: 8px; margin-top: 12px; }
+/* Answer Wait (ADR-0077): the label, then a row of choices that wraps under it on a narrow page; on a phone the
+   choices make a grid of three, so "Never" is never hidden behind a sideways scroll. */
+.ua-wait { justify-content: flex-start; flex-wrap: wrap; gap: 8px 16px; padding: 12px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow); }
+.ua-wait .seg { max-width: 100%; }
+.ua-wait .seg-btn { white-space: nowrap; }
+:where(:root[data-width=phone]) .ua-wait .seg { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; height: auto; }
+:where(:root[data-width=phone]) .ua-wait .seg-btn { justify-content: center; height: calc(var(--ctl-h-sm) - 4px); padding: 0 8px; }
 .ua-here-hint .ic { width: 15px; height: 15px; flex: none; }
 :where(:root[data-width=narrow], :root[data-width=phone]) .ua-item { grid-template-columns: minmax(0, 1fr); }
 :where(:root[data-width=narrow], :root[data-width=phone]) .ua-item-actions { grid-column: 1; grid-row: auto; }

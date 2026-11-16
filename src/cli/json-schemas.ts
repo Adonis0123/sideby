@@ -33,6 +33,13 @@ const PendingDecision = Type.Object({
     description:
       'The question and its options, the tool and what it was to do, or the deferred text; at most 4000 characters.',
   }),
+  waited: Type.Optional(
+    Type.Integer({
+      minimum: 1,
+      description:
+        'Minutes the question or permission prompt was on screen with nobody answering before the session went on without an answer (Answer Wait, ADR-0077). Absent when it was never shown.',
+    }),
+  ),
   doneAt: Type.Optional(Type.String({ description: 'When it was marked done; ISO.' })),
 })
 
@@ -2235,6 +2242,10 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       schedule: Type.Array(UnattendedSlotSchema, {
         description: 'Config `unattended.schedule`, numbered from 1.',
       }),
+      answerWait: Type.Union([Type.Integer({ minimum: 1, maximum: 120 }), Type.Null()], {
+        description:
+          'Answer Wait (ADR-0077): minutes a question or permission prompt shown in a Claude session sideby started waits for a person before, with Unattended Mode on, the session goes on without an answer. null: never. 10 when config `unattended.answerWait` is not set. Change it with `sideby unattended wait <minutes>|off`.',
+      }),
       pending: Type.Integer({ description: 'Open Pending Decisions (`sideby unattended pending`).' }),
       attended: Type.Array(
         Type.Object({
@@ -2292,13 +2303,13 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
         }),
       ),
       changed: Type.Optional(
-        Type.Boolean({ description: 'Set by on, off and schedule changes: whether anything changed.' }),
+        Type.Boolean({ description: 'Set by on, off, schedule and wait changes: whether anything changed.' }),
       ),
       undo: Type.Optional(
         Type.String({ description: 'The command that puts back what the change replaced.' }),
       ),
     },
-    { title: 'sideby unattended [on|off|schedule …] --json' },
+    { title: 'sideby unattended [on|off|schedule …|wait …] --json' },
   ),
   'unattended-pending': Type.Object(
     {

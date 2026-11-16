@@ -370,20 +370,49 @@ export async function readSmallJson(file: string, max = 1024 * 1024): Promise<un
   }
 }
 
-/** What the config file says about Unattended Mode, read by hand (no schema): whether it has the section, and its Schedule. */
+/**
+ * Answer Wait (spec §3.37 item 7, ADR-0077): how many minutes a question or a confirmation shown in a Claude session
+ * waits for a person before, with Unattended Mode on, the session goes on without an answer. Config
+ * `unattended.answerWait`: whole minutes, or `false` for never.
+ */
+export const ANSWER_WAIT_DEFAULT = 10
+export const ANSWER_WAIT_MIN = 1
+export const ANSWER_WAIT_MAX = 120
+/** The waits the Panel offers; any other one the CLI set is shown beside them. */
+export const ANSWER_WAIT_CHOICES: readonly number[] = [5, 10, 15, 30, 60]
+
+/** Whether `v` is a wait the config takes: whole minutes from 1 to 120. */
+export const validAnswerWait = (v: unknown): v is number =>
+  typeof v === 'number' && Number.isInteger(v) && v >= ANSWER_WAIT_MIN && v <= ANSWER_WAIT_MAX
+
+/** The wait the config's `unattended.answerWait` value means: minutes, or null for never. Anything else is the default. */
+export function parseAnswerWait(value: unknown): number | null {
+  if (value === false) return null
+  return validAnswerWait(value) ? value : ANSWER_WAIT_DEFAULT
+}
+
+/**
+ * What the config file says about Unattended Mode, read by hand (no schema): whether it has the section, its Schedule
+ * and its Answer Wait (minutes, or null for never).
+ */
 export async function readUnattendedConfig(
   configFile: string,
-): Promise<{ configured: boolean; schedule: UnattendedSlot[] }> {
+): Promise<{ configured: boolean; schedule: UnattendedSlot[]; answerWait: number | null }> {
+  const none = { configured: false, schedule: [], answerWait: ANSWER_WAIT_DEFAULT }
   // The config may be a link a dotfiles manager keeps; reading through it is fine.
   try {
     const text = await readFile(configFile, 'utf8')
-    if (text.length > 4 * 1024 * 1024) return { configured: false, schedule: [] }
-    const config = JSON.parse(text) as { unattended?: { schedule?: unknown } } | null
+    if (text.length > 4 * 1024 * 1024) return none
+    const config = JSON.parse(text) as { unattended?: { schedule?: unknown; answerWait?: unknown } } | null
     const section = config && typeof config === 'object' ? config.unattended : undefined
-    if (!section || typeof section !== 'object') return { configured: false, schedule: [] }
-    return { configured: true, schedule: parseSchedule(section.schedule) }
+    if (!section || typeof section !== 'object') return none
+    return {
+      configured: true,
+      schedule: parseSchedule(section.schedule),
+      answerWait: parseAnswerWait(section.answerWait),
+    }
   } catch {
-    return { configured: false, schedule: [] }
+    return none
   }
 }
 

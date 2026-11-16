@@ -70,6 +70,11 @@
           "type": "string",
           "description": "The question and its options, the tool and what it was to do, or the deferred text; at most 4000 characters."
         },
+        "waited": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Minutes the question or permission prompt was on screen with nobody answering before the session went on without an answer (Answer Wait, ADR-0077). Absent when it was never shown."
+        },
         "doneAt": {
           "type": "string",
           "description": "When it was marked done; ISO."

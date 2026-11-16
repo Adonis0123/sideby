@@ -29,6 +29,11 @@ export interface PendingDecision {
   agentType?: string
   /** The question and its options, the tool and what it was to do, or the deferred text; at most 4000 characters. */
   text: string
+  /**
+   * Minutes the question or confirmation was on screen with nobody answering before the session went on without an
+   * answer (Answer Wait, ADR-0077). Absent when it was never shown.
+   */
+  waited?: number
   /** When the user marked it done (ISO). */
   doneAt?: string
 }
@@ -76,6 +81,7 @@ function parse(value: unknown): PendingDecision | undefined {
     typeof v[k] === 'string' && v[k] ? { [k]: (v[k] as string).slice(0, 4096) } : {}
   const done =
     typeof v.doneAt === 'string' && Number.isFinite(Date.parse(v.doneAt)) ? { doneAt: v.doneAt } : {}
+  const waited = validWaited(v.waited) ? { waited: v.waited } : {}
   return {
     id: v.id,
     at: v.at,
@@ -87,6 +93,7 @@ function parse(value: unknown): PendingDecision | undefined {
     ...opt('agentId'),
     ...opt('agentType'),
     text: clipPendingText(v.text),
+    ...waited,
     ...done,
   }
 }
@@ -119,11 +126,16 @@ async function readAll(stateDir: string): Promise<PendingDecision[]> {
     .sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.id.localeCompare(b.id))
 }
 
+/** Whole minutes, at most a week. */
+const validWaited = (v: unknown): v is number =>
+  typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 7 * 24 * 60
+
 const fileOf = (stateDir: string, id: string) => join(pendingDir(stateDir), `${id}.json`)
 
 /**
- * Keeps one Pending Decision and returns it. With `dedupe`, an open one of the same kind, session and text is
- * returned instead of a second copy (a model that asks the same question twice leaves one).
+ * Keeps one Pending Decision and returns it. With `dedupe`, an open one of the same kind, session and text (and both
+ * having waited on screen, or neither) is returned instead of a second copy (a model that asks the same question twice
+ * leaves one).
  */
 export async function addPendingDecision(
   stateDir: string,
@@ -134,7 +146,13 @@ export async function addPendingDecision(
   const text = clipPendingText(input.text)
   if (opts.dedupe) {
     const same = (await readAll(stateDir)).find(
-      (d) => !d.doneAt && d.kind === input.kind && d.sessionId === input.sessionId && d.text === text,
+      (d) =>
+        !d.doneAt &&
+        d.kind === input.kind &&
+        d.sessionId === input.sessionId &&
+        d.text === text &&
+        // One refused at once and one that went on after a wait are two things the user should see.
+        Boolean(d.waited) === Boolean(input.waited),
     )
     if (same) return same
   }
@@ -150,6 +168,7 @@ export async function addPendingDecision(
     ...(input.agentId ? { agentId: input.agentId } : {}),
     ...(input.agentType ? { agentType: input.agentType } : {}),
     text,
+    ...(validWaited(input.waited) ? { waited: input.waited } : {}),
   }
   await writeFileAtomic(join(dir, `${decision.id}.json`), `${JSON.stringify(decision)}\n`, 0o600)
   return decision

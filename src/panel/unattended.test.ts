@@ -190,6 +190,33 @@ describe('the Unattended page (spec §3.37)', () => {
     })
   })
 
+  it('sets how long a question waits (Answer Wait), refuses another value, and returns what was there', async () => {
+    await withFakeHome(async (h) => {
+      const p = await panel(h)
+      try {
+        assert.equal((await p.state()).unattended!.answerWait, 10)
+        const r = await p.post('/api/unattended/wait', { minutes: 30 })
+        assert.equal(r.status, 200)
+        assert.deepEqual([r.body.changed, r.body.before], [true, 10])
+        assert.equal((r.body.status as { answerWait: number }).answerWait, 30)
+        assert.equal((await config(h)).unattended.answerWait, 30)
+        const never = await p.post('/api/unattended/wait', { minutes: null })
+        assert.deepEqual([never.body.changed, never.body.before], [true, 30])
+        assert.equal((await config(h)).unattended.answerWait, false)
+        assert.equal((await p.state()).unattended!.answerWait, null)
+        for (const minutes of [0, 121, 2.5, '10', undefined]) {
+          const bad = await p.post('/api/unattended/wait', { minutes })
+          assert.equal(bad.status, 400, String(minutes))
+        }
+        assert.equal((await config(h)).unattended.answerWait, false)
+        // The page's undo sends `before` back.
+        assert.equal((await p.post('/api/unattended/wait', { minutes: 30 })).body.before, null)
+      } finally {
+        await close(p.server)
+      }
+    })
+  })
+
   it('lists Pending Decisions with the way back to their Session, marks them done and opens them again', async () => {
     await withFakeHome(async (h) => {
       const p = await panel(h)
@@ -319,6 +346,7 @@ describe('the Unattended page (spec §3.37)', () => {
           ['/api/unattended/on', { for: '4h' }],
           ['/api/unattended/off', {}],
           ['/api/unattended/schedule', { schedule: [] }],
+          ['/api/unattended/wait', { minutes: 5 }],
           ['/api/unattended/pending', { all: true }],
         ] as const) {
           const r = await ro.post(path, body)

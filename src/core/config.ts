@@ -478,6 +478,12 @@ export const ConfigSchema = Type.Object(
                 "Slots that turn Unattended Mode on and off by themselves, in this computer's time zone. Empty by default.",
             }),
           ),
+          answerWait: Type.Optional(
+            Type.Union([Type.Integer({ minimum: 1, maximum: 120 }), Type.Literal(false)], {
+              description:
+                'Answer Wait (ADR-0077): how many minutes a question or a permission prompt shown in a Claude session sideby started waits for a person. Once it has waited this long with nobody answering and Unattended Mode is on, the session goes on as Unattended Mode would: the question with the recommended choice where it can be undone, the permission prompt refused (never allowed); each is kept as a Pending Decision. A turn that ended on a question written as text goes on the same way. `false`: never, questions wait for you. Not set: 10 minutes.',
+            }),
+          ),
         },
         {
           additionalProperties: false,

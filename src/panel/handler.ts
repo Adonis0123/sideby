@@ -131,6 +131,7 @@ import { MIN_CALLS } from '../core/tuning.ts'
 import type { TuneApplyPlan } from '../core/tuning-apply.ts'
 import {
   onUntil,
+  setAnswerWait,
   setUnattendedSchedule,
   turnUnattendedOff,
   turnUnattendedOn,
@@ -2462,6 +2463,25 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           changed: r.changed,
           status: await withPendingIds(r.status, rt.paths.stateDir),
           previous: r.previous,
+        }
+      },
+    },
+    // Answer Wait (ADR-0077): `minutes` from 1 to 120, or null for never. Its Undo sends `before` back.
+    '/api/unattended/wait': {
+      async run(body) {
+        const minutes = body.minutes
+        if (minutes !== null && typeof minutes !== 'number')
+          throw new HttpError(
+            400,
+            '"minutes" must be whole minutes from 1 to 120, or null for never',
+            'bad-wait',
+          )
+        const rt = await getRuntime()
+        const r = await setAnswerWait({ paths: rt.paths, families: [...rt.families.keys()], minutes })
+        return {
+          changed: r.changed,
+          status: await withPendingIds(r.status, rt.paths.stateDir),
+          before: r.before,
         }
       },
     },

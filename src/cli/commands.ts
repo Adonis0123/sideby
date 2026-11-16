@@ -5232,6 +5232,13 @@ function deferFamily(env: NodeJS.ProcessEnv): string {
   return 'unknown'
 }
 
+/** What happens to a question nobody answers (Answer Wait, ADR-0077), and how to change it. */
+function answerWaitLine(minutes: number | null): string {
+  return minutes === null
+    ? `If nobody answers: questions shown in a Claude session wait for you, however long. ${c.dim('Change it with `sideby unattended wait <minutes>`.')}`
+    : `If nobody answers: after ${minutes} minute${minutes === 1 ? '' : 's'} with Unattended Mode on, the session goes on (the recommended choice; a step needing your OK is skipped). ${c.dim('Change it with `sideby unattended wait <minutes>|off`.')}`
+}
+
 /** One line for where Unattended Mode stands now. */
 function unattendedLine(s: import('../core/unattended.ts').UnattendedStatus, now: Date): string {
   const at = (iso: string) => clock2(iso, now)
@@ -5284,6 +5291,7 @@ function printUnattended(
       )
   } else if (s.on && s.configured)
     io.out(c.dim('Type in a session and it asks you as usual for 30 minutes; the others stay unattended.'))
+  io.out(answerWaitLine(s.answerWait))
   if (!s.configured)
     io.out(
       c.cyan(
@@ -5537,6 +5545,28 @@ export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
     )
   }
 
+  if (sub === 'wait') {
+    allow()
+    const usage =
+      'usage: sideby unattended wait [<minutes>|off]: minutes from 1 to 120 (for example 10), or off to wait for you however long'
+    if (rest.length > 1) throw new UsageError(usage)
+    const raw = rest[0]
+    if (raw === undefined) {
+      const s = await rt.unattendedStatus()
+      if (asJson) json(io, s)
+      else io.out(answerWaitLine(s.answerWait))
+      return 0
+    }
+    const minutes = raw === 'off' || raw === 'never' ? null : /^\d{1,3}$/.test(raw) ? Number(raw) : Number.NaN
+    if (minutes !== null && !(minutes >= 1 && minutes <= 120)) throw new UsageError(usage)
+    const change = await u.setAnswerWait({ paths, families, minutes, now: now() })
+    const said =
+      minutes === null
+        ? 'Questions shown in Claude sessions now wait for you, however long.'
+        : `Questions shown in Claude sessions now wait ${minutes} minute${minutes === 1 ? '' : 's'}; then, with Unattended Mode on, the session goes on.`
+    return show(change, change.changed ? said : `It was already set. ${said}`)
+  }
+
   if (sub === 'pending') {
     const { listPendingDecisions, markPendingDone } = await import('../core/unattended-pending.ts')
     const [action, ...args] = rest
@@ -5577,6 +5607,7 @@ export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
       const where = [
         d.account ?? d.family,
         d.kind === 'question' ? 'question' : d.kind === 'permission' ? 'needed your OK' : 'left undone',
+        d.waited ? `no answer for ${d.waited} min` : '',
         d.agentType ? `subagent ${d.agentType}` : '',
         d.doneAt ? 'done' : '',
       ]
@@ -5619,7 +5650,7 @@ export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
   }
 
   throw new UsageError(
-    'usage: sideby unattended [status|on|off|schedule|pending|defer]; run `sideby unattended --help`',
+    'usage: sideby unattended [status|on|off|schedule|wait|pending|defer]; run `sideby unattended --help`',
   )
 }
 

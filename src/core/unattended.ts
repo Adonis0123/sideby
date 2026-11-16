@@ -14,6 +14,7 @@ import { ATTENDED_HOOK_TIMEOUT_S, type AttendedSession, listAttended } from './u
 import { listPendingDecisions } from './unattended-pending.ts'
 import { RETRY_HOOK_TIMEOUT_S } from './unattended-retry.ts'
 import {
+  ANSWER_WAIT_DEFAULT,
   clearUnattendedOverride,
   clockText,
   ensureUnattendedDir,
@@ -30,8 +31,10 @@ import {
   type UnattendedSlot,
   type UnattendedState,
   unattendedState,
+  validAnswerWait,
   writeUnattendedOverride,
 } from './unattended-state.ts'
+import { ANSWER_HOOK_TIMEOUT_S } from './unattended-wait.ts'
 
 /** Families whose sessions Unattended Mode covers in v1. */
 export const UNATTENDED_FAMILIES: readonly string[] = ['claude', 'codex']
@@ -47,6 +50,11 @@ export interface UnattendedStatus extends UnattendedState {
   /** The config has an `unattended` section, so sessions sideby starts get the hook. */
   configured: boolean
   schedule: UnattendedSlot[]
+  /**
+   * Answer Wait (ADR-0077): minutes a question or permission prompt shown in a Claude session waits for a person
+   * before, with the mode on, the session goes on without an answer; null: never. 10 when not set.
+   */
+  answerWait: number | null
   /** Open Pending Decisions. */
   pending: number
   /**
@@ -120,7 +128,7 @@ export async function unattendedStatus(opts: {
   readOnly?: boolean
 }): Promise<UnattendedStatus> {
   const now = opts.now ?? new Date()
-  const { configured, schedule } = await readUnattendedConfig(opts.paths.configFile)
+  const { configured, schedule, answerWait } = await readUnattendedConfig(opts.paths.configFile)
   const override = await readUnattendedOverride(opts.paths.stateDir)
   const state = unattendedState({ schedule, override, now, session: opts.env?.[UNATTENDED_ENV] === '1' })
   const end = slotEnd(schedule, now)
@@ -133,6 +141,7 @@ export async function unattendedStatus(opts: {
     ...state,
     configured,
     schedule,
+    answerWait,
     pending: (await listPendingDecisions(opts.paths.stateDir, { now, prune: !opts.readOnly })).length,
     attended: await listAttended(opts.paths.stateDir, now, { prune: !opts.readOnly }),
     coverage: coverageOf(opts.families, configured),
@@ -394,6 +403,37 @@ export async function setUnattendedSchedule(opts: {
   return { changed: r.changed, status: await unattendedStatus(opts), previous }
 }
 
+/** The command that sets the Answer Wait to `minutes` (null: never). */
+const waitCommand = (minutes: number | null) => `sideby unattended wait ${minutes === null ? 'off' : minutes}`
+
+/**
+ * Sets the Answer Wait (ADR-0077): whole minutes from 1 to 120, or null for never, creating the config section. It
+ * reaches running sessions at once (their hooks read it at every look). Throws a UserError for any other value.
+ */
+export async function setAnswerWait(opts: {
+  paths: Paths
+  families: readonly string[]
+  minutes: number | null
+  now?: Date
+}): Promise<UnattendedChange & { before: number | null }> {
+  if (opts.minutes !== null && !validAnswerWait(opts.minutes))
+    throw new UserError(
+      'the wait takes whole minutes from 1 to 120, or off; for example `sideby unattended wait 10`',
+      {
+        code: 'bad-wait',
+      },
+    )
+  let before: number | null = ANSWER_WAIT_DEFAULT
+  const r = await editConfigUnattended(opts.paths.configFile, (current) => {
+    before = current?.answerWait === false ? null : (current?.answerWait ?? ANSWER_WAIT_DEFAULT)
+    if (current && current.answerWait !== undefined && before === opts.minutes) return null
+    return { ...current, answerWait: opts.minutes === null ? false : opts.minutes }
+  })
+  const status = await unattendedStatus(opts)
+  const changed = r.changed && before !== opts.minutes
+  return { changed, status, before, ...(changed ? { undo: waitCommand(before) } : {}) }
+}
+
 /** The preset names `schedule preset` takes, with what each adds. */
 export const UNATTENDED_PRESETS: Readonly<Record<string, UnattendedSlot>> = { weeknights: WEEKNIGHTS }
 
@@ -429,6 +469,8 @@ export const unattendedClock = (iso: string, now: Date, zh = false): string =>
  * about to show, every MCP server form (`Elicitation`), every turn that failed on an API error (`StopFailure`, in the
  * background with `asyncRewake`, so its exit 2 wakes the session: Turn Retry, ADR-0067), and every prompt
  * (`UserPromptSubmit`, in the background with `async`, so it never holds a prompt back: Attended Sessions, ADR-0075).
+ * For Answer Wait (ADR-0077) the `PermissionRequest` entry may wait while its prompt is on screen, so it has a long
+ * `timeout`, and a second `Stop` entry waits in the background (`asyncRewake`) after a turn that ended on a question.
  * Codex has no such events for them; its own approval prompts and failed turns are not covered.
  */
 export function unattendedHookPart(): SessionHookPart {
@@ -440,8 +482,15 @@ export function unattendedHookPart(): SessionHookPart {
     id: 'unattended',
     claude: {
       PreToolUse: [{ matcher: 'AskUserQuestion', hooks: claude('PreToolUse') }],
-      PermissionRequest: [{ matcher: '*', hooks: claude('PermissionRequest') }],
-      Stop: [{ hooks: claude('Stop') }],
+      // Waits while its prompt is on screen (Answer Wait), so Claude Code's 10-minute default would cut it short.
+      PermissionRequest: [
+        { matcher: '*', hooks: [{ ...claude('PermissionRequest')[0], timeout: ANSWER_HOOK_TIMEOUT_S }] },
+      ],
+      Stop: [
+        { hooks: claude('Stop') },
+        // Answer Wait for a question written as text: in the background, so the turn ends at once.
+        { hooks: [{ ...claude('StopWait')[0], asyncRewake: true, timeout: ANSWER_HOOK_TIMEOUT_S }] },
+      ],
       Elicitation: [{ matcher: '*', hooks: claude('Elicitation') }],
       // Waits up to 4 minutes before it wakes the session; Claude Code still enforces `timeout` on `asyncRewake`.
       // No matcher: every failed turn reaches it, so a later failure that is not retried still ends an earlier wait.

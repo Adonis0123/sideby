@@ -6392,7 +6392,7 @@ const MAIN = String.raw`
   const UA_MS = 15000
   const UA_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
   const UA_PRESET = { name: 'Weeknights', days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '23:00', end: '08:00' }
-  const ua = { data: null, error: null, loading: null, at: 0, nextAt: 0, inflight: new Map(), opening: false, choosing: false, choice: null, time: '08:00', timeInit: '08:00', busy: false, local: null, saves: 0, rows: [], seq: 0, gone: {}, open: {}, firstUse: false, focus: null }
+  const ua = { data: null, error: null, loading: null, at: 0, nextAt: 0, inflight: new Map(), opening: false, choosing: false, choice: null, time: '08:00', timeInit: '08:00', busy: false, local: null, saves: 0, rows: [], seq: 0, gone: {}, open: {}, firstUse: false, focus: null, wait: undefined }
   let uaSaving = Promise.resolve()
   function uaStatusNow() { return (S.state && S.state.unattended) || null }
   // The latest status's count, less the ones being marked done right now (the page shows them gone already).
@@ -6859,6 +6859,7 @@ const MAIN = String.raw`
             h('div', { class: 'ua-item-meta' },
               h('span', { class: 'chip chip-sm' + (x.kind === 'question' ? ' chip-accent' : x.kind === 'permission' ? ' chip-warn' : '') }, t('ua.kind.' + x.kind)),
               h('time', { class: 'muted small', datetime: x.at }, uaWhenShort(x.at)),
+              x.waited ? h('span', { class: 'muted small' }, t('ua.waited', { n: x.waited })) : null,
               x.agentType ? h('span', { class: 'muted small' }, t('ua.agent', { type: x.agentType })) : null),
             h('p', { class: 'ua-text' + (long && !open ? ' is-clamped' : '') }, x.text),
             h('div', { class: 'ua-item-actions' },
@@ -6870,6 +6871,50 @@ const MAIN = String.raw`
     return [h('div', { class: 'page-sec-head ua-pending-head' },
       h('div', { class: 'ua-sec-row' }, h('h3', { class: 'page-sec' }, t('ua.pending'), ' ', h('span', { class: 'tab-count' }, String(list.length))), all),
       h('p', { class: 'muted small' }, t('ua.pendingNote'))), box]
+  }
+
+  // ---------- Answer Wait (ADR-0077) ----------
+  // How long a question shown in a session waits for you before, with the mode on, the session goes on. One row of
+  // choices that writes at once (the toast carries the undo); the choice moves before the answer comes back, and a
+  // failure puts it back. A wait set elsewhere (the CLI takes any 1 to 120) shows as one more choice.
+  const UA_WAITS = [5, 10, 15, 30, 60]
+  function uaWaitNow(st) {
+    return ua.wait !== undefined ? ua.wait : st.answerWait === undefined ? 10 : st.answerWait
+  }
+  async function uaSetWait(minutes, opts) {
+    opts = opts || {}
+    const st = uaStatusNow()
+    if (!st) return
+    const was = uaWaitNow(st)
+    if (minutes === was) return
+    ua.wait = minutes
+    if (!st.configured) ua.firstUse = true
+    renderUaPage()
+    uaSaving = uaSaving.then(async () => {
+      try {
+        const r = await api('/api/unattended/wait', { minutes })
+        uaKeepStatus(r.status)
+        if (r.changed) {
+          const text = opts.undone ? t('ua.undone') : minutes === null ? t('ua.waitNeverToast') : t('ua.waitToast', { n: minutes })
+          toast(text, opts.undone ? { key: 'ua-wait' } : { key: 'ua-wait', action: { label: t('toast.undo'), run: () => uaSetWait(r.before, { undone: true }) }, duration: 10000 })
+        }
+      } catch (e) { toast(t('ua.waitFailed', { msg: e.message }), { kind: 'fail' }) }
+      ua.wait = undefined
+      uaRedraw()
+    })
+  }
+  function uaWaitBlock(st) {
+    const cur = uaWaitNow(st)
+    const opts = UA_WAITS.slice()
+    if (cur !== null && !opts.includes(cur)) { opts.push(cur); opts.sort((a, b) => a - b) }
+    const label = t('ua.waitLabel')
+    const choices = [...opts.map((n) => [n, t('ua.waitMin', { n })]), [null, t('ua.waitNever')]]
+    const control = BOOT.readOnly || st.problem
+      ? h('span', { class: 'chip chip-sm' }, cur === null ? t('ua.waitNever') : t('ua.waitMin', { n: cur }))
+      : h('div', { class: 'seg ua-wait-seg', role: 'group', 'aria-label': label, 'data-patch': '' }, choices.map(([v, text]) =>
+        h('button', { class: 'seg-btn', type: 'button', 'data-key': 'ua-wait-' + (v === null ? 'never' : v), 'aria-pressed': String(v === cur), onclick: () => uaSetWait(v) }, text)))
+    return [h('div', { class: 'page-sec-head', 'data-key': 'ua-wait-head' }, h('h3', { class: 'page-sec' }, t('ua.wait')), h('p', { class: 'muted small' }, t('ua.waitNote'))),
+      fm('ua-wait', h('div', { class: 'set-row ua-wait', 'data-key': 'ua-wait', 'data-patch': '' }, h('span', { class: 'set-label' }, label), control))]
   }
 
   // ---------- Attended Sessions (ADR-0075) ----------
@@ -6936,7 +6981,7 @@ const MAIN = String.raw`
       if (box.hidden || (!ua.data && !ua.error)) { if (++tries < 40) setTimeout(look, 100); return }
       const st = uaStatusNow()
       if (what === 'on' && st && uaStatusParts(st).state !== 'on' && !BOOT.readOnly && !st.problem) { if (!ua.choosing) uaOpenChooser(); return }
-      const el = box.querySelector(what === 'on' ? '[data-key="ua-main"]' : '[data-find="ua-add"]')
+      const el = box.querySelector(what === 'on' ? '[data-key="ua-main"]' : what === 'wait' ? '[data-find="ua-wait"]' : '[data-find="ua-add"]')
       if (!el) return
       el.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'center' })
       palFlash(el)
@@ -6978,6 +7023,7 @@ const MAIN = String.raw`
     if (!st.configured || ua.firstUse) kids.push(h('p', { class: 'note ua-first', 'data-key': 'ua-first', 'data-ua': 'first' }, icon('clock'), t('ua.firstUse')))
     kids.push(...uaHereBlock(st, p))
     kids.push(...uaScheduleBlock())
+    kids.push(...uaWaitBlock(st))
     kids.push(...uaPendingBlock(st))
     kids.push(...uaCoverage(st))
     uaPatch(box, kids)
@@ -7337,6 +7383,7 @@ const MAIN = String.raw`
     inbound: { run: openInbound, ok: () => Boolean(S.state) },
     'unattended-on': { run: () => uaGo('on'), ok: () => Boolean(uaStatusNow()), nav: true },
     'unattended-add-slot': { run: () => uaGo('add'), ok: () => Boolean(uaStatusNow()), nav: true },
+    'unattended-wait': { run: () => uaGo('wait'), ok: () => Boolean(uaStatusNow()), nav: true },
     'limit-reset': { run: openResetPick, ok: () => resetCandidates().length > 0 },
   }
   function palHealth() {

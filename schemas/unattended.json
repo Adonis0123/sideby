@@ -8,6 +8,7 @@
     "reason",
     "configured",
     "schedule",
+    "answerWait",
     "pending",
     "attended",
     "coverage"
@@ -153,6 +154,19 @@
       },
       "description": "Config `unattended.schedule`, numbered from 1."
     },
+    "answerWait": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 120
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Answer Wait (ADR-0077): minutes a question or permission prompt shown in a Claude session sideby started waits for a person before, with Unattended Mode on, the session goes on without an answer. null: never. 10 when config `unattended.answerWait` is not set. Change it with `sideby unattended wait <minutes>|off`."
+    },
     "pending": {
       "type": "integer",
       "description": "Open Pending Decisions (`sideby unattended pending`)."
@@ -256,7 +270,7 @@
     },
     "changed": {
       "type": "boolean",
-      "description": "Set by on, off and schedule changes: whether anything changed."
+      "description": "Set by on, off, schedule and wait changes: whether anything changed."
     },
     "undo": {
       "type": "string",
@@ -325,5 +339,5 @@
       "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
     }
   },
-  "title": "sideby unattended [on|off|schedule …] --json"
+  "title": "sideby unattended [on|off|schedule …|wait …] --json"
 }

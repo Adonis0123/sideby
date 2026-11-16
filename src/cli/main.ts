@@ -350,6 +350,7 @@ no country allowed; 2 malformed command line.`,
        sideby unattended off [--json]
        sideby unattended schedule [add --days <days> --from HH:MM --to HH:MM [--name <name>] [--at <n>]] [--json]
        sideby unattended schedule remove <n> | preset weeknights [--json]
+       sideby unattended wait [<minutes>|off] [--json]
        sideby unattended pending [--all] [--json]
        sideby unattended pending done <id> | --all [--json]
        sideby unattended defer "<text>" [--json]
@@ -363,6 +364,12 @@ a subagent) is answered with "no" and how to do it without one, and kept as a Pe
 that failed for a passing reason (an overloaded server, a dropped connection, a rate limit that is not a used-up
 Quota) is started again after 1, 2, then 4 minutes; after three it is kept as a Pending Decision. Codex's own
 approval prompts are not covered.
+
+If nobody answers (\`wait\`): a question or permission prompt that a Claude session shows while you are there (you
+typed in it within 30 minutes, or Unattended Mode is off) waits for you. Once it has waited 10 minutes (\`wait
+<minutes>\`, 1 to 120) and Unattended Mode is on, the session goes on as above: the recommended choice where it can
+be undone, the prompt answered "no", never "yes". A turn that ended on a question in plain text goes on the same way.
+Each is kept as a Pending Decision with how long it waited. \`wait off\`: questions wait for you however long.
 
 When it is on: during a Slot of the Schedule (local days and times; an end before the start is the next day), from
 \`on\` until the time you choose (at most 72 hours; without an option, until the current or next Slot ends, else 12
@@ -380,6 +387,7 @@ Examples:
   sideby unattended on --until 07:30
   sideby unattended schedule preset weeknights
   sideby unattended schedule add --days sat,sun --from 01:00 --to 09:00 --name "Weekend nights"
+  sideby unattended wait 30
   sideby unattended pending
   sideby unattended defer "deleting the old branch is left for the user"
 Exit: 0 shown or done; 1 no such Slot or Pending Decision; 2 a time or option it does not take (the message says

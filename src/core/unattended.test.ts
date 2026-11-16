@@ -124,10 +124,17 @@ describe('Launch', () => {
         hooks.PermissionRequest[0].hooks[0].command,
         /^'.+' '.+main\.ts' unattended-hook claude PermissionRequest$/,
       )
-      // Stop takes no matcher.
-      assert.equal(hooks.Stop.length, 1)
+      // Answer Wait (ADR-0077): it may wait while its prompt is on screen, past Claude Code's 10-minute default.
+      assert.equal(hooks.PermissionRequest[0].hooks[0].timeout, 12 * 60 * 60)
+      // Stop takes no matcher: the turn's own entry, then Answer Wait's in the background (its exit 2 wakes the session).
+      assert.equal(hooks.Stop.length, 2)
       assert.equal(hooks.Stop[0].matcher, undefined)
       assert.match(hooks.Stop[0].hooks[0].command, /^'.+' '.+main\.ts' unattended-hook claude Stop$/)
+      assert.equal(hooks.Stop[0].hooks[0].asyncRewake, undefined)
+      assert.equal(hooks.Stop[1].matcher, undefined)
+      assert.match(hooks.Stop[1].hooks[0].command, /^'.+' '.+main\.ts' unattended-hook claude StopWait$/)
+      assert.equal(hooks.Stop[1].hooks[0].asyncRewake, true)
+      assert.equal(hooks.Stop[1].hooks[0].timeout, 12 * 60 * 60)
       assert.deepEqual(
         hooks.Elicitation.map((g: { matcher: string }) => g.matcher),
         ['*'],
@@ -199,9 +206,10 @@ describe('Launch', () => {
       assert.equal(hooks.PreToolUse.length, 3)
       assert.equal(hooks.PermissionRequest.length, 1)
       assert.equal(hooks.PreToolUse[0].hooks[0].command, 'h')
-      // Auto Handoff's Stop hook first, then Unattended Mode's.
-      assert.equal(hooks.Stop.length, 2)
+      // Auto Handoff's Stop hook first, then Unattended Mode's two (the turn's, then Answer Wait's).
+      assert.equal(hooks.Stop.length, 3)
       assert.match(hooks.Stop[1].hooks[0].command, /unattended-hook claude Stop$/)
+      assert.match(hooks.Stop[2].hooks[0].command, /unattended-hook claude StopWait$/)
       assert.deepEqual(hooks.Stop[0].hooks[0], {
         type: 'command',
         command: 'w',

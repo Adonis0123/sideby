@@ -616,6 +616,18 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
     example: 'sideby unattended on --until 07:30',
     feature: 'page.unattended',
   },
+  {
+    id: 'unattended.wait',
+    group: 'health',
+    usage: 'sideby unattended wait [<minutes>|off]',
+    help: 'how long a question shown in a Claude session waits for you before, with Unattended Mode on, the session goes on without an answer (1 to 120 minutes, 10 by default; off: wait however long)',
+    summary: {
+      en: 'Choose how long a question waits for you before the session goes on',
+      zh: '设置提问等你多久，之后会话自己继续',
+    },
+    example: 'sideby unattended wait 30',
+    feature: 'action.unattended-wait',
+  },
   // ---------- Panel and app ----------
   {
     id: 'ui',
