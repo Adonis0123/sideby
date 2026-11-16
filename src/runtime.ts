@@ -1725,6 +1725,8 @@ export async function createRuntime(
         config.ask = fresh.ask
         config.advisor = fresh.advisor
         config.claude = fresh.claude
+        // Progress Reminders turned on, off or to another interval reach the next session a chain starts too.
+        config.progress = fresh.progress
       }
       const all = await accounts()
       const inputs = launchInputs(ref, all, userArgs, command)

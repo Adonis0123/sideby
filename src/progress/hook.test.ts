@@ -269,6 +269,30 @@ describe('progress hook: Stop', () => {
     })
   })
 
+  it('a Stop that comes while a watch wakes the session keeps its own watch going', async () => {
+    await withFakeHome(async (h) => {
+      await on(h, 10)
+      const { stateDir } = resolvePaths(h.env)
+      let next: Promise<{ exit: number }> | undefined
+      const f = {
+        ...fake({ id: 'w1' }),
+        // Between this watch's last check and its wake-up mark, the next turn's Stop replaces the record.
+        beforeWake: async () => {
+          next = watchWhileWaiting(stopInput({ promptId: 'p-2' }), h.env, fake({ id: 'w2' }))
+          await new Promise((r) => setTimeout(r, 100))
+        },
+      }
+      assert.equal((await watchWhileWaiting(stopInput(), h.env, f)).exit, 2)
+      assert.equal((await next!).exit, 2)
+      // The later Stop's record was never put back to the earlier watch's.
+      assert.equal((await readWatch(stateDir, SID))?.id, 'w2')
+      assert.deepEqual(
+        (await readdir(join(stateDir, 'progress', 'sessions'))).filter((n) => n.endsWith('.lock')),
+        [],
+      )
+    })
+  })
+
   it('ends when the Host is gone or the setting was turned off', async () => {
     await withFakeHome(async (h) => {
       await on(h, 10)

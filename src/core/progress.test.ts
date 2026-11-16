@@ -112,6 +112,24 @@ describe('Progress Reminders at launch', () => {
     })
   })
 
+  it('a Runtime that runs on (an Auto Handoff chain) follows the setting as it is at each start', async () => {
+    await withFakeHome(async (h) => {
+      const rt = await setup(h, {})
+      assert.equal((await rt.prepareLaunch('claude:001', [], 'run')).env.SIDEBY_PROGRESS_EVERY, undefined)
+      // Turned on, changed and turned off from elsewhere (the CLI or the Panel) while this Runtime runs.
+      await h.write('.config/sideby/config.json', JSON.stringify({ progress: { every: 5 } }))
+      const on = await rt.prepareLaunch('claude:001', [], 'run')
+      assert.equal(on.env.SIDEBY_PROGRESS_EVERY, '5')
+      assert.deepEqual(Object.keys((await settingsOf(on.args)).hooks).sort(), ['Stop', 'UserPromptSubmit'])
+      await h.write('.config/sideby/config.json', JSON.stringify({ progress: { every: 30 } }))
+      assert.equal((await rt.prepareLaunch('claude:001', [], 'run')).env.SIDEBY_PROGRESS_EVERY, '30')
+      await h.write('.config/sideby/config.json', '{}')
+      const off = await rt.prepareLaunch('claude:001', [], 'run')
+      assert.equal(off.env.SIDEBY_PROGRESS_EVERY, undefined)
+      assert.deepEqual(off.args, [])
+    })
+  })
+
   it('gives Codex, a sign-in and a session with its own --settings no reminder hooks', async () => {
     await withFakeHome(async (h) => {
       const rt = await setup(h, { progress: { every: 10 } })

@@ -7,6 +7,7 @@
 import { readdir, readFile, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { ownedFolder, readSmallFile, sha256, writeFileAtomic } from './fs-safe.ts'
+import { takeFileLock } from './lock.ts'
 
 /** Set in a session's environment: the interval at launch, used only when the config cannot be read. */
 export const PROGRESS_ENV = 'SIDEBY_PROGRESS_EVERY'
@@ -117,6 +118,10 @@ function parsePrompt(text: string | undefined): PromptRecord | undefined {
 }
 
 const watchName = (sessionId: string) => `${hashOf(sessionId)}.json`
+const lockName = (sessionId: string) => `${hashOf(sessionId)}.lock`
+/** One session's watch record is replaced, or checked and marked woken, by one caller at a time. */
+const LOCK = { staleMs: 15_000, beatMs: 5_000 }
+const LOCK_WAIT = { timeoutMs: 5_000, pollMs: 25 }
 const promptName = (sessionId: string) => `${hashOf(sessionId)}.prompt.json`
 
 /** `<state>/progress/sessions`, checked one level at a time; null when it is missing (without `create`) or not safe. */
@@ -130,10 +135,51 @@ export async function readWatch(stateDir: string, sessionId: string): Promise<Wa
   return dir ? parseWatch(await readSmallFile(join(dir, watchName(sessionId)), RECORD_MAX)) : undefined
 }
 
-/** Writes the session's watch (file 600, atomically); throws when the folder is not safe to use. */
+/**
+ * Replaces the session's watch (file 600, atomically), under the session's lock so it never lands between another
+ * watch's last check and its `wokeAt`. A lock held past 5 seconds is not waited for: the record is replaced anyway.
+ * Throws when the folder is not safe to use.
+ */
 export async function writeWatch(stateDir: string, sessionId: string, record: WatchRecord): Promise<void> {
   const dir = (await folder(stateDir, true))!
-  await writeFileAtomic(join(dir, watchName(sessionId)), `${JSON.stringify(record)}\n`, 0o600)
+  const release = await takeFileLock(join(dir, lockName(sessionId)), { ...LOCK, wait: LOCK_WAIT }).catch(
+    () => null,
+  )
+  try {
+    await writeFileAtomic(join(dir, watchName(sessionId)), `${JSON.stringify(record)}\n`, 0o600)
+  } finally {
+    await release?.()
+  }
+}
+
+/**
+ * Marks the watch `id` woken at `at`, only while the session's record is still that watch: the check and the write
+ * hold the session's lock, so a later `Stop` replaces the record before or after, never in between. False when the
+ * record is another watch's, is missing, or the lock stays held (`beforeWrite` runs inside the lock, for tests).
+ */
+export async function markWatchWoken(
+  stateDir: string,
+  sessionId: string,
+  id: string,
+  at: Date,
+  deps: { beforeWrite?: () => Promise<void> } = {},
+): Promise<boolean> {
+  const dir = await folder(stateDir, false)
+  if (!dir) return false
+  const release = await takeFileLock(join(dir, lockName(sessionId)), { ...LOCK, wait: LOCK_WAIT }).catch(
+    () => null,
+  )
+  if (!release) return false
+  try {
+    const file = join(dir, watchName(sessionId))
+    const fresh = parseWatch(await readSmallFile(file, RECORD_MAX))
+    if (fresh?.id !== id) return false
+    await deps.beforeWrite?.()
+    await writeFileAtomic(file, `${JSON.stringify({ ...fresh, wokeAt: at.toISOString() })}\n`, 0o600)
+    return true
+  } finally {
+    await release()
+  }
 }
 
 export async function readPromptRecord(

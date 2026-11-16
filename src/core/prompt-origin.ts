@@ -74,14 +74,20 @@ const mark = (text: string): string =>
   createHash('sha256').update(text.trim().replace(/\s+/g, ' ')).digest('hex').slice(0, 16)
 
 /**
- * The marks of every argument that may be a prompt: each one that does not start with `-`, and the value of each
- * `--x=value`. Over-counting an option's value is harmless: a typed prompt equal to it is only not counted. More than
- * `MARKS_MAX` of them give `LAUNCH_PROMPTS_UNSET`: a list cut short would let a launch prompt past it count as typed.
+ * The marks of every argument that may be a prompt: each one that does not start with `-`, the value of each
+ * `--x=value`, and every argument after a `--`, whole (there even `- review` or `--x=y` is prompt text). Over-counting
+ * an option's value is harmless: a typed prompt equal to it is only not counted. More than `MARKS_MAX` of them give
+ * `LAUNCH_PROMPTS_UNSET`: a list cut short would let a launch prompt past it count as typed.
  */
 export function launchPromptMarks(args: readonly string[]): string {
   const out = new Set<string>()
+  let dashes = false
   for (const a of args) {
-    const value = a.startsWith('-') ? (a.includes('=') ? a.slice(a.indexOf('=') + 1) : '') : a
+    if (!dashes && a === '--') {
+      dashes = true
+      continue
+    }
+    const value = dashes || !a.startsWith('-') ? a : a.includes('=') ? a.slice(a.indexOf('=') + 1) : ''
     if (value.trim()) out.add(mark(value))
     if (out.size > MARKS_MAX) return LAUNCH_PROMPTS_UNSET
   }

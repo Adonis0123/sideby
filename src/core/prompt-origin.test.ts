@@ -44,6 +44,19 @@ describe('prompt origin', () => {
     assert.equal(launchPrompt('/s/x.json', env), true)
     assert.equal(launchPrompt('Read the brief', env), false)
     assert.equal(launchPrompt('typed', { [LAUNCH_PROMPTS_ENV]: '' }), false)
+    // After `--` every argument is prompt text, whole, even one that starts with `-` or holds `=`.
+    const dashed = {
+      [LAUNCH_PROMPTS_ENV]: launchPromptMarks([
+        '--model',
+        'opus',
+        '--',
+        '- Review the repository',
+        '--task=value',
+      ]),
+    }
+    assert.equal(launchPrompt('- Review the repository', dashed), true)
+    assert.equal(launchPrompt('--task=value', dashed), true)
+    assert.equal(launchPrompt('Review the repository', dashed), false)
     // At most 64 marks; past them sideby cannot tell, and no prompt counts as typed.
     assert.equal(launchPromptMarks(Array.from({ length: 64 }, (_, i) => `p${i}`)).split(',').length, 64)
     const many = launchPromptMarks([

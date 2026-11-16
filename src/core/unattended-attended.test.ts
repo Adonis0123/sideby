@@ -277,6 +277,23 @@ describe('Attended Session records', () => {
     })
   })
 
+  it('removing a long-expired record never loses a prompt that renews it meanwhile', async () => {
+    await withFakeHome(async (h) => {
+      const state = resolvePaths(h.env).stateDir
+      const who = { sessionId: 's1', family: 'claude' }
+      await markAttended(state, who, new Date(T0 - 3 * 3600_000))
+      // Between the clean-up's read of the old record and its removal, someone types in that session again.
+      await listAttended(state, new Date(T0), {
+        prune: true,
+        beforeRemove: async () => {
+          await markAttended(state, who, new Date(T0))
+        },
+      })
+      assert.equal((await readAttended(state, 's1', new Date(T0 + 60_000)))?.at, new Date(T0).toISOString())
+      assert.deepEqual(await readdir(`${state}/unattended/attended`).then((f) => f.length), 1)
+    })
+  })
+
   it('neither reads nor writes through a folder someone else could change', async () => {
     await withFakeHome(async (h) => {
       const state = resolvePaths(h.env).stateDir

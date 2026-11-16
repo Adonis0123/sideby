@@ -15,6 +15,7 @@ import { FILES, HANDOFF_ENV, type ReadyFile, type RunState, readJsonFile } from 
 import { resolvePaths } from '../core/paths.ts'
 import {
   hashOf,
+  markWatchWoken,
   progressReminderTurn,
   readProgressEvery,
   readPromptRecord,
@@ -47,6 +48,8 @@ export interface ProgressHookDeps {
   /** This watch's id; random by default. */
   id?: string
   checkEveryMs?: number
+  /** Runs between the last check of the watch record and marking it woken, inside the lock (for tests). */
+  beforeWake?: () => Promise<void>
 }
 
 type Input = AsyncIterable<string | Uint8Array> | string
@@ -242,10 +245,10 @@ export async function watchWhileWaiting(
       base = t
       continue
     }
-    // Read once more just before waking, so a Stop that came meanwhile is never answered by this watch.
-    const fresh = await readWatch(paths.stateDir, sessionId)
-    if (fresh?.id !== id) return { exit: 0 }
-    await writeWatch(paths.stateDir, sessionId, { ...fresh, wokeAt: now.toISOString() })
+    // Checked and marked under the session's lock just before waking, so a Stop that came meanwhile is never
+    // answered by this watch, and never has its record put back to this one.
+    const hook = deps.beforeWake ? { beforeWrite: deps.beforeWake } : {}
+    if (!(await markWatchWoken(paths.stateDir, sessionId, id, now, hook))) return { exit: 0 }
     return { exit: 2, message: reminderMessage({ tasks, since, now, every }) }
   }
 }

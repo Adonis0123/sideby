@@ -186,19 +186,43 @@ export async function markTold(
   }
 }
 
-async function pruneAttended(dir: string, t: number): Promise<void> {
+/**
+ * Removes records that ran out over an hour ago, or cannot be read. Each one is read again and removed under its
+ * session's lock, so a prompt that renews it meanwhile is never lost; a record whose lock is held is left for the next
+ * time. `beforeRemove` runs between the first read and taking the lock (for tests).
+ */
+async function pruneAttended(
+  dir: string,
+  t: number,
+  deps: { beforeRemove?: () => Promise<void> } = {},
+): Promise<void> {
+  const gone = (r: AttendedRecord | undefined) => !r || attendedEnd(r) + KEEP_EXPIRED_MS < t
   for (const name of await readdir(dir).catch(() => [] as string[])) {
     if (!name.endsWith('.json')) continue
-    const r = parse(await readSmallFile(join(dir, name), 8192))
-    if (!r || attendedEnd(r) + KEEP_EXPIRED_MS < t) await rm(join(dir, name), { force: true }).catch(() => {})
+    const file = join(dir, name)
+    if (!gone(parse(await readSmallFile(file, 8192)))) continue
+    await deps.beforeRemove?.()
+    // The lock beside a record has the record's name (`fileName`, `lockName`).
+    const release = await takeFileLock(join(dir, `${name.slice(0, -'.json'.length)}.lock`), LOCK).catch(
+      () => null,
+    )
+    if (!release) continue
+    try {
+      if (gone(parse(await readSmallFile(file, 8192)))) await rm(file, { force: true }).catch(() => {})
+    } finally {
+      await release()
+    }
   }
 }
 
-/** Every session that counts as attended at `now`, latest end first. `prune` also removes long-expired records. */
+/**
+ * Every session that counts as attended at `now`, latest end first. `prune` also removes long-expired records;
+ * `beforeRemove` runs before each removal takes its lock (for tests).
+ */
 export async function listAttended(
   stateDir: string,
   now: Date,
-  opts: { prune?: boolean } = {},
+  opts: { prune?: boolean; beforeRemove?: () => Promise<void> } = {},
 ): Promise<AttendedSession[]> {
   const dir = await ownedFolder(stateDir, PARTS, { create: false }).catch(() => null)
   if (!dir) return []
@@ -217,7 +241,7 @@ export async function listAttended(
       until: iso(attendedEnd(r)),
     })
   }
-  if (opts.prune) await pruneAttended(dir, t)
+  if (opts.prune) await pruneAttended(dir, t, opts.beforeRemove ? { beforeRemove: opts.beforeRemove } : {})
   return out.sort(
     (a, b) => Date.parse(b.until) - Date.parse(a.until) || a.sessionId.localeCompare(b.sessionId),
   )
