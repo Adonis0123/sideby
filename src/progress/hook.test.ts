@@ -186,6 +186,18 @@ describe('progress hook: Stop', () => {
       assert.equal((await readWatch(stateDir, SID))!.since, since)
       assert.match(two.message!, /, 20 minutes as of this reminder/)
       assert.ok(t0 > 0)
+      // A reminder Network Guard held and handed over later is still a reminder: the wait keeps its start.
+      const held = wrap(
+        `sideby's Network Guard held back a message Claude Code made itself. The message as it was:\n<sideby-held-message>\n${wrap(two.message!)}\n</sideby-held-message>`,
+      )
+      await notePrompt(h, held, 'p-held')
+      assert.deepEqual(await readPromptRecord(stateDir, SID).then((p) => p?.reminder), true)
+      await watchWhileWaiting(
+        stopInput({ promptId: 'p-held', active: true, tasks: [] }),
+        h.env,
+        fake({ id: 'w4' }),
+      )
+      assert.equal((await readWatch(stateDir, SID))!.since, since)
       // An ordinary turn (typed, or a task's notification) starts a new wait.
       await notePrompt(h, 'how is it going?', 'p-typed-2')
       await watchWhileWaiting(stopInput({ promptId: 'p-typed-2', tasks: [] }), h.env, fake({ id: 'w3' }))
@@ -244,6 +256,16 @@ describe('progress hook: Stop', () => {
         },
       })
       assert.equal((await watchWhileWaiting(stopInput({ promptId: 'p-typed' }), h.env, f)).exit, 2)
+    })
+    await withFakeHome(async (h) => {
+      await on(h, 10)
+      // The next prompt (queued while this turn ran) was noted before this Stop's watch even started.
+      await notePrompt(h, 'start the build', 'p-typed')
+      await notePrompt(h, 'and now the docs', 'p-queued')
+      const f = fake()
+      const late = { ...f, now: () => new Date(f.now!().getTime() + 5000) }
+      assert.deepEqual(await watchWhileWaiting(stopInput({ promptId: 'p-typed' }), h.env, late), { exit: 0 })
+      assert.equal(f.minutes, 1)
     })
   })
 

@@ -22,13 +22,31 @@ export const hookWakeUp = (prompt: string): boolean => WAKE_UP.test(prompt.trimS
 /** How every Progress Reminder starts (spec §3.42, ADR-0076); the model reads it, so it is plain words. */
 export const PROGRESS_MARK = 'sideby progress reminder:'
 
+/** The tags around a message Network Guard's `Held` held back and hands over later (spec §3.35, network/hook.ts). */
+export const HELD_OPEN = '<sideby-held-message>'
+export const HELD_CLOSE = '</sideby-held-message>'
+
+/** One background hook's wake-up: Claude Code's wrapper and one hook's message (two at once may be joined). */
+const oneWakeUp = (prompt: string): boolean =>
+  hookWakeUp(prompt) &&
+  prompt.split('Stop hook blocking error').length <= 2 &&
+  prompt.split(HOST_MADE).length === 2
+
 /**
  * Whether the prompt is the wake-up of a Progress Reminder and nothing else: Claude Code's wrapper, the reminder's
- * opening words, and only one hook's message (two wake-ups at once might be joined into one prompt).
+ * opening words, and only one hook's message (two wake-ups at once might be joined into one prompt). A reminder that
+ * Network Guard held and handed over later counts too: `Held`'s own wake-up with one held message between the tags,
+ * which is the reminder's wake-up alone.
  */
 export function progressWakeUp(prompt: string): boolean {
-  if (!hookWakeUp(prompt) || !prompt.includes(PROGRESS_MARK)) return false
-  return prompt.split('Stop hook blocking error').length <= 2 && prompt.split(HOST_MADE).length === 2
+  const from = prompt.indexOf(HELD_OPEN)
+  const to = prompt.indexOf(HELD_CLOSE)
+  if (from === -1 && to === -1) return oneWakeUp(prompt) && prompt.includes(PROGRESS_MARK)
+  if (from === -1 || to < from) return false
+  if (prompt.indexOf(HELD_OPEN, from + 1) !== -1 || prompt.indexOf(HELD_CLOSE, to + 1) !== -1) return false
+  const held = prompt.slice(from + HELD_OPEN.length, to).trim()
+  const outer = prompt.slice(0, from) + prompt.slice(to + HELD_CLOSE.length)
+  return oneWakeUp(outer) && !outer.includes(PROGRESS_MARK) && oneWakeUp(held) && held.includes(PROGRESS_MARK)
 }
 
 /**

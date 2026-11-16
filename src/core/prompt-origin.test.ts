@@ -82,4 +82,25 @@ describe('a background hook’s wake-up', () => {
     // Typed text that quotes the reminder is not one.
     assert.equal(progressWakeUp(`please explain: ${reminder}`), false)
   })
+
+  it('is still a Progress Reminder when Network Guard held it and handed it over later, and only then', () => {
+    // `Held`'s own wake-up, with the message it held between the tags (network/hook.ts).
+    const held = (message: string) =>
+      wrap(
+        `sideby's Network Guard held back a message. The message as it was:\n<sideby-held-message>\n${message}\n</sideby-held-message>`,
+      )
+    assert.equal(progressWakeUp(held(reminder)), true)
+    assert.equal(hostMade(held(reminder)), true)
+    // A held notification, a held reminder joined with another wake-up, or a held reminder joined at the outside are not.
+    assert.equal(
+      progressWakeUp(held('<task-notification>\n<task-id>t1</task-id>\n<status>completed</status>')),
+      false,
+    )
+    assert.equal(progressWakeUp(held(`${reminder}\n${wrap('sideby: this is sideby Auto Handoff')}`)), false)
+    assert.equal(progressWakeUp(`${held(reminder)}\n${wrap('sideby: this is sideby Auto Handoff')}`), false)
+    assert.equal(progressWakeUp(held(`${held(reminder)}`)), false)
+    // Tags out of order, or typed text that quotes a held reminder.
+    assert.equal(progressWakeUp(held(reminder).replace('<sideby-held-message>', '')), false)
+    assert.equal(progressWakeUp(`please explain: ${held(reminder)}`), false)
+  })
 })

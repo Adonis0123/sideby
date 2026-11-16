@@ -6,8 +6,9 @@
 // `UserPromptSubmit` keeps when the session's latest prompt came, a hash of its id, and whether it was a reminder's
 // wake-up. `Stop` watches while the session waits on background work: every `every` minutes it wakes the session with
 // exit 2 and asks the model to tell the user what it waits for, then end its turn. It ends without a word when a later
-// `Stop` took over, a new turn began, the Host is gone, the setting was turned off or Auto Handoff is handing over, and
-// it stays quiet while the session is unattended (ADR-0075).
+// `Stop` took over, a new turn began (told by the prompt's id), the Host is gone, the setting was turned off or Auto
+// Handoff is handing over, and it stays quiet while the session is unattended (ADR-0075). A reminder Network Guard
+// held and delivered later still counts as a reminder.
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { FILES, HANDOFF_ENV, type ReadyFile, type RunState, readJsonFile } from '../core/handoff-chain.ts'
@@ -175,8 +176,8 @@ async function handingOver(env: Env): Promise<boolean> {
 /**
  * The `Stop` watch (spec §3.42). Replaces the session's earlier watch first, then, while background work runs and the
  * setting is on, wakes the session every `progress.every` minutes with a reminder (exit 2). Ends with exit 0 when a
- * later `Stop` took over, a new prompt came after this `Stop`, the parent is gone, the setting is off, Auto Handoff is
- * handing over, or time runs out. While the session is unattended a reminder is skipped and the wait starts again.
+ * later `Stop` took over, the session's latest prompt is not the one this `Stop` ended, the parent is gone, the
+ * setting is off, Auto Handoff is handing over, or time runs out. While the session is unattended a reminder is skipped and the wait starts again.
  */
 export async function watchWhileWaiting(
   input: Record<string, unknown>,
@@ -213,9 +214,11 @@ export async function watchWhileWaiting(
     const t = now.getTime()
     if (t - start >= WATCH_FOR_MS || parentGone()) return { exit: 0 }
     if ((await readWatch(paths.stateDir, sessionId))?.id !== id) return { exit: 0 }
-    // A prompt after this Stop started a turn; that turn's own Stop decides again.
+    // The latest prompt is another one: a turn began after this Stop's, and its own Stop decides again. Compared by
+    // the prompt's id, never by time: the next prompt's record can be written before this watch even starts. Only a
+    // Stop without an id falls back to whether the record came after it.
     const p = await readPromptRecord(paths.stateDir, sessionId)
-    if (p && p.prompt !== ownPrompt && Date.parse(p.at) > start) return { exit: 0 }
+    if (p && (ownPrompt ? p.prompt !== ownPrompt : Date.parse(p.at) > start)) return { exit: 0 }
     // Read every time: turning it off, or another interval, reaches a running session.
     every = await readProgressEvery(paths.configFile, env)
     if (every === undefined) return { exit: 0 }

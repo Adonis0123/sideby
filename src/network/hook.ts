@@ -24,7 +24,7 @@ import {
 } from '../core/egress.ts'
 import { ownedFolder, readSmallFile, sha256, writeFileAtomic } from '../core/fs-safe.ts'
 import { resolvePaths } from '../core/paths.ts'
-import { hookWakeUp, hostMade } from '../core/prompt-origin.ts'
+import { HELD_CLOSE, HELD_OPEN, hookWakeUp, hostMade } from '../core/prompt-origin.ts'
 
 export const NETWORK_HOOK_COMMAND = 'sideby network-hook'
 
@@ -66,8 +66,6 @@ const DECISION_POLL_MS = 200
 const DECISION_KEPT_MS = 3600_000
 /** The most of a held message that is handed over. */
 const HELD_MAX_CHARS = 8000
-const HELD_OPEN = '<sideby-held-message>'
-const HELD_CLOSE = '</sideby-held-message>'
 
 type Decision = 'ok' | 'blocked'
 

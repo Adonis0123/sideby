@@ -546,7 +546,7 @@ describe('handoff hook with Progress Reminders', () => {
     h.write('.config/sideby/config.json', JSON.stringify({ progress: { every: 10 } }))
 
   /** One wait on background work: a turn at 84%, the wait (with or without reminders), and the notification's turn. */
-  async function wait(h: FakeHome, reminders: boolean): Promise<RunState> {
+  async function wait(h: FakeHome, reminders: boolean, wake = WAKE): Promise<RunState> {
     await progressOn(h)
     const { env, dir } = await setup(h, { adaptive: true })
     await pressure(env, 80)
@@ -557,7 +557,7 @@ describe('handoff hook with Progress Reminders', () => {
     for (const [i, used] of [86, 88].entries()) {
       await pressure(env, used)
       if (!reminders) continue
-      await prompt(env, `p-wake-${i}`, WAKE)
+      await prompt(env, `p-wake-${i}`, wake)
       assert.deepEqual(await stop(env, `p-wake-${i}`, true), {})
     }
     await pressure(env, 90)
@@ -579,6 +579,21 @@ describe('handoff hook with Progress Reminders', () => {
     assert.deepEqual(without?.turnUse, { '5h': [4, 6] })
     assert.deepEqual(withReminders?.turnUse, without?.turnUse)
     assert.deepEqual(withReminders?.turnMark, without?.turnMark)
+  })
+
+  it('a reminder Network Guard held and handed over later does not count as a turn either', async () => {
+    // `Held`'s wake-up, with the reminder's wake-up between its tags (network/hook.ts).
+    const held = `<task-notification>\n<summary>Stop hook feedback</summary>\n</task-notification>\n<system-reminder>\nStop hook blocking error from command "UserPromptSubmit": sideby's Network Guard held back a message Claude Code made itself. The message as it was:\n<sideby-held-message>\n${WAKE}\n</sideby-held-message>\n</system-reminder>`
+    let without: RunState | undefined
+    let withHeld: RunState | undefined
+    await withFakeHome(async (h) => {
+      without = await wait(h, false)
+    })
+    await withFakeHome(async (h) => {
+      withHeld = await wait(h, true, held)
+    })
+    assert.deepEqual(withHeld?.turnUse, without?.turnUse)
+    assert.deepEqual(withHeld?.turnMark, without?.turnMark)
   })
 
   it('an ordinary turn, or a reminder record for another prompt, still counts', async () => {

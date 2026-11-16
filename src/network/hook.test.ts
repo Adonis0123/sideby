@@ -8,6 +8,7 @@ import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { diffSnapshots, snapshot, withFakeHome } from '../../testing/index.ts'
 import { NETWORK_ENV, RETRY_BUDGET_MS, TIMEOUT_MS } from '../core/egress.ts'
+import { progressWakeUp } from '../core/prompt-origin.ts'
 import { runNetworkHook } from './hook.ts'
 
 const trace = (loc: string) => async () => `ip=203.0.113.7\nloc=${loc}\n`
@@ -548,6 +549,9 @@ describe('network hook: a prompt the Host made itself (spec §3.35)', () => {
       const text = held.lines.join('')
       assert.ok(text.includes('sideby progress reminder: you are waiting on background work'), text)
       assert.ok(text.includes('since 11:40'), text)
+      // Claude Code wakes the session with it; the turn it starts is still a reminder's (spec §3.42).
+      const delivered = `<task-notification>\n<summary>Stop hook feedback</summary>\n</task-notification>\n<system-reminder>\nStop hook blocking error from command "UserPromptSubmit": ${text}\n</system-reminder>`
+      assert.equal(progressWakeUp(delivered), true)
     })
   })
 
