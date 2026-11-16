@@ -4,7 +4,7 @@
 
 <p align="center">
   <b>工作号、个人号和 API key 账号同时开着，配置也不会各走各的。</b><br>
-  每个账号一个目录、一个终端。skills、hooks 和设置链在主账号上，改一处就都生效。支持 Claude Code、Codex、Grok Build 和 pi。
+  每个账号一个目录、一个终端。skills、hooks 和设置链在主账号上，改一处就都生效。支持 Claude Code、Codex、Grok Build、pi 和 Antigravity CLI。
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 
 ## 快速上手
 
-需要 Node 22.18 或更高版本，并且至少装好一个宿主 CLI（Claude Code、Codex、Grok Build 或 pi）。AI agent 请改按 [`llms.txt`](llms.txt) 里 "Set up sideby for a user" 的步骤做。
+需要 Node 22.18 或更高版本，并且至少装好一个宿主 CLI（Claude Code、Codex、Grok Build、pi 或 Antigravity CLI）。AI agent 请改按 [`llms.txt`](llms.txt) 里 "Set up sideby for a user" 的步骤做。
 
 ```sh
 npm i -g sideby

@@ -21,8 +21,8 @@ src/
 │                 run-link.ts: the Run a Live Session works for, from an orchestrator's Session Index (§3.32 step 2b)
 │                 session-select.ts: which Live Session a target names, for `sessions copy`, `sessions open-run` and `send`
 │                 desktop-app.ts: `sideby desktop`, open a Family's Desktop App per Account (§3.20); definitions in families/desktop.ts (internal)
-├── plugins/      loader (trust checks), hook bus, built-in account-script
 │                 browser-profiles.ts: `sideby browser`, Browser Sign-ins from Chrome's Local Storage key names (§3.24); leveldb-keys.ts reads them; websites in families/browser.ts (internal)
+├── plugins/      loader (trust checks), hook bus, built-in account-script
 ├── families/     claude, codex, grok, pi, agy: each a Family Plugin; index.ts lists built-ins in load order
 │                 agy/ is a Main-only Family (ADR-0047); agy/quota.ts asks `agy -p /usage` for its Quota (ADR-0048)
 │                 logos.ts holds the built-in marks each FamilyDef sets as `logo`
@@ -37,16 +37,21 @@ src/
 ├── unattended/   the `unattended-hook` entry (leaf imports only); Unattended Mode's state from the Schedule and the manual state (core/unattended-state.ts), its CLI and Panel operations (core/unattended.ts), the end-of-stretch event (core/unattended-ended.ts) the Pending Decision store (core/unattended-pending.ts), Turn Retry (core/unattended-retry.ts, ADR-0067) and Answer Wait (core/unattended-wait.ts, ADR-0077: watching a question on screen through the Host's session record); the hook answers ask tools and Claude Code's permission requests, starts a failed Claude turn again, and lets a question nobody answers go on after the wait (§3.37)
 ├── progress/     the `progress-hook` entry (leaf imports only): Progress Reminders while a Claude session waits on background work
 │                 (§3.42, ADR-0076); its records are core/progress-state.ts, the hook part, CLI and Panel operations core/progress.ts
+├── network/      the `network-hook` entry (leaf imports only) for Network Guard (§3.35, ADR-0053): exit 2 blocks a prompt or tool call; the egress check is core/egress.ts and core/network.ts
 ├── panel/        createPanelHandler, the standalone server, the inline page and theme.ts (host theme tokens);
 │                 page-logic.ts suggestName/suggestAlias also pick the name and short command for `new --next`
 │                 background.ts runs the server detached (`ui --background`, `--stop`)
 ├── desktop/      `sideby app install|uninstall`: macOS app bundle, Linux .desktop entry, icon composited in pure Node
+├── menubar/      the Menu Bar Item (§3.31, ADR-0034): script.ts is the JXA `osascript` runs, agent.ts its LaunchAgent, snapshot.ts what it shows
+│                 (`menubar snapshot --json`), hotkey.ts its shortcut, strings.ts its words in English and Chinese
 ├── runtime.ts    createRuntime(): shared services for CLI and panel
 ├── types.ts      public plugin contract (Plugin, PluginApi, FamilyDef, Finding, ...)
-└── index.ts      library entry: createPanelHandler and plugin types
+└── index.ts      library entry: createPanelHandler, startPanelServer, createRuntime and plugin types
 testing/          fake HOME, fake Host binaries, snapshots; also published as `sideby/testing`
 schemas/          generated JSON Schemas for config and every `--json` output
 skills/sideby/    Agent Skill shipped in the package: SKILL.md routes to references/*.md; metadata.version = package version
+mods/claude/      Claude Code mod `sideby run` loads with `--plugin-dir` (§3.32 step 3, ADR-0039): Session Label band, Message toast,
+                  `/sessions` pane; hooks/register.js, tested with `claude plugin test mods/claude`
 scripts/          local.ts (`pnpm local`, Local Build, ADR-0024), release.ts (`pnpm release`), leak-check.sh, demo-home.ts, record-demo.ts (README demo GIF; demo-mark.ts writes its outro mark from brand-mark.ts), shoot-panel.ts (README screenshots), chrome.ts (shared by both), readme-assets.ts (run by `preversion`; manifest.ts formats what its `--mark` writes), sync-skill-version.ts (run by `npm version`), write-build-id.ts (run by `pnpm build`), pin-english-npm-readme.ts (run by `prepublishOnly`, so the npm readme is README.md), design-system.ts (`pnpm design-system`: the Design System's files from the code, into `design-system/dist/`)
 assets/brand/     the painted mark (Sai, ADR-0064) as PNGs, shipped in the package; core/brand-mark.ts reads them
 docs/             adr/, specs/, plans/, verification/, guide/ (user guide, English and .zh-CN.md), assets/ (README banner and screenshots), release.md

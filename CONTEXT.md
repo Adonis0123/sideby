@@ -4,7 +4,7 @@ Glossary for sideby. Defines words only. Decisions live in `docs/adr/`, designs 
 
 ## Hosts and accounts
 
-- **Host**: an AI coding CLI that sideby launches but never modifies: Claude Code, Codex, Grok Build, pi.
+- **Host**: an AI coding CLI that sideby launches but never modifies: Claude Code, Codex, Grok Build, pi, Antigravity CLI.
 - **Family**: one Host plus its convention for where an Account lives and how it is selected (an environment variable such as `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`). A Family is provided by a Family Plugin.
 - **Account**: one isolated configuration directory of a Family. The directory is the identity: its own login, sessions and history. Accounts are discovered from disk, never listed by hand.
 - **Main Account**: the Host's default directory (for example `~/.claude`). It is the source every Shared Item points back to.

@@ -4,7 +4,7 @@
 
 <p align="center">
   <b>Run work, personal and API-key accounts at the same time, without their configs drifting apart.</b><br>
-  Each account is its own directory and its own terminal. Skills, hooks and settings stay linked to your main account. Claude Code, Codex, Grok Build and pi.
+  Each account is its own directory and its own terminal. Skills, hooks and settings stay linked to your main account. Claude Code, Codex, Grok Build, pi and Antigravity CLI.
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 
 ## Quick start
 
-Requires Node 22.18+ and at least one Host CLI (Claude Code, Codex, Grok Build or pi) installed. AI agents: follow the setup steps in [`llms.txt`](llms.txt) ("Set up sideby for a user") instead.
+Requires Node 22.18+ and at least one Host CLI (Claude Code, Codex, Grok Build, pi or Antigravity CLI) installed. AI agents: follow the setup steps in [`llms.txt`](llms.txt) ("Set up sideby for a user") instead.
 
 ```sh
 npm i -g sideby

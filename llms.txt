@@ -1,6 +1,6 @@
 # sideby
 
-> Run every AI coding account side by side. sideby is a Node CLI (npm package `sideby`, Node 22.18+) that starts Claude Code, Codex, Grok Build and pi with one isolated config directory per account, keeps skills, hooks and rules shared with the Main Account, repairs drift with `doctor`, and shows each account's quota from local records or the official Host CLI, and 7-day token usage from local records (built in; no ccusage).
+> Run every AI coding account side by side. sideby is a Node CLI (npm package `sideby`, Node 22.18+) that starts Claude Code, Codex, Grok Build, pi and Antigravity CLI with one isolated config directory per account, keeps skills, hooks and rules shared with the Main Account, repairs drift with `doctor`, and shows each account's quota from local records or the official Host CLI, and 7-day token usage from local records (built in; no ccusage).
 
 Key facts:
 
