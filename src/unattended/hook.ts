@@ -58,7 +58,7 @@ import {
   type UnattendedState,
   unattendedState,
 } from '../core/unattended-state.ts'
-import { type ScreenMark, stillShown, waitedMinutes, watchScreen } from '../core/unattended-wait.ts'
+import { lastLook, type ScreenMark, waitedMinutes, watchScreen } from '../core/unattended-wait.ts'
 
 export const UNATTENDED_HOOK_COMMAND = 'sideby unattended-hook'
 
@@ -717,12 +717,14 @@ function waitTools(deps: UnattendedHookDeps) {
 }
 
 /**
- * Watches what the session shows (`watchScreen`), then keeps the Pending Decision only while it is still so, checked
- * just before keeping and again after (a person may answer meanwhile, or the mode go off): when it changed, the
- * decision this call kept is taken back and nothing is decided (undefined). Otherwise what the hook answers with:
- * when it went on (`at`), how long it waited, the mode then, and whether the decision was kept. What is left is the
- * moment between the last check and the Host reading the answer: a person who answers then has their answer applied
- * and a denial that comes after it changes nothing (ADR-0077); a wake-up is told it is not their reply.
+ * Watches what the session shows (`watchScreen`), then keeps the Pending Decision only while it is still so: one last
+ * look just before keeping and again after, with the wait and the mode read afresh (a person may answer meanwhile, the
+ * mode go off, or the wait be made longer). When the dialog ended or the wait is now never, nothing is decided
+ * (undefined); when the longer wait has not passed or the mode is off, it goes on watching the same dialog. A decision
+ * kept before such a change is taken back. Otherwise what the hook answers with: when it went on (`at`), how long it
+ * waited, the mode then, and whether the decision was kept. What is left is the moment between the last look and the
+ * Host reading the answer: a person who answers then has their answer applied and a denial that comes after it
+ * changes nothing (ADR-0077); a wake-up is told it is not their reply.
  */
 async function actAfterWait(opts: {
   env: Env
@@ -730,6 +732,8 @@ async function actAfterWait(opts: {
   sessionId: string
   expect: 'waiting' | 'idle'
   start: number
+  /** The dialog must have been put on screen by then (when the hook began); see `watchScreen`. */
+  shownBy?: number
   moved?: () => Promise<boolean>
   keep: (at: Date, waited: number) => PendingInput
 }): Promise<{ at: Date; waited: number; state: UnattendedState; kept: boolean } | undefined> {
@@ -739,40 +743,46 @@ async function actAfterWait(opts: {
     const m = await modeAt(env, new Date(t.clock()))
     return { wait: m.answerWait, on: m.state.on }
   }
-  const watch = {
+  const look = {
     env,
     pid: t.pid,
     sessionId,
+    startedAt: opts.start,
+    clock: t.clock,
     parentGone: t.parentGone,
     settings,
     ...(opts.moved ? { moved: opts.moved } : {}),
   }
-  const mark: ScreenMark | undefined = await watchScreen({
-    ...watch,
-    expect: opts.expect,
-    startedAt: opts.start,
-    clock: t.clock,
-    sleep: t.sleep,
-  })
-  if (!mark) return undefined
-  await deps.beforeAct?.()
-  if (!(await stillShown({ ...watch, mark }))) return undefined
-  const at = new Date(t.clock())
-  const waited = waitedMinutes(opts.start, at.getTime())
-  const { state } = await modeAt(env, at)
   const stateDir = resolvePaths(env).stateDir
-  let kept: PendingDecision | undefined
-  try {
-    kept = await addPendingDecision(stateDir, opts.keep(at, waited), at, { dedupe: true })
-  } catch {
-    // Best effort: the reason then asks for it in the final report instead.
-  }
-  await deps.afterKeep?.()
-  if (!(await stillShown({ ...watch, mark }))) {
+  let mark: ScreenMark | undefined
+  for (;;) {
+    mark = await watchScreen({
+      ...look,
+      expect: opts.expect,
+      sleep: t.sleep,
+      ...(opts.shownBy !== undefined ? { shownBy: opts.shownBy } : {}),
+      ...(mark ? { from: mark } : {}),
+    })
+    if (!mark) return undefined
+    await deps.beforeAct?.()
+    const first = await lastLook({ ...look, mark })
+    if (first === 'stop') return undefined
+    if (first === 'wait') continue
+    const at = new Date(t.clock())
+    const waited = waitedMinutes(opts.start, at.getTime())
+    const { state } = await modeAt(env, at)
+    let kept: PendingDecision | undefined
+    try {
+      kept = await addPendingDecision(stateDir, opts.keep(at, waited), at, { dedupe: true })
+    } catch {
+      // Best effort: the reason then asks for it in the final report instead.
+    }
+    await deps.afterKeep?.()
+    const second = await lastLook({ ...look, mark })
+    if (second === 'act') return { at, waited, state, kept: kept !== undefined }
     if (kept) await withdrawPendingDecision(stateDir, kept, at).catch(() => {})
-    return undefined
+    if (second === 'stop') return undefined
   }
-  return { at, waited, state, kept: kept !== undefined }
 }
 
 /**
@@ -782,7 +792,8 @@ async function actAfterWait(opts: {
  * Pending Decision with how long it waited. Anything that says someone answered, or that it cannot tell, lets it be
  * (undefined): the record does not show a dialog (a subagent's request, which Claude Code shows only after the hooks,
  * or a session that shows none), the dialog ended or another took its place, the Host is gone, or the wait is now
- * never; checked once more just before and after keeping the Pending Decision (`actAfterWait`). It never answers
+ * never; looked at once more just before and after keeping the Pending Decision (`actAfterWait`); a dialog put on screen
+ * after the hook began is another one (this one was answered meanwhile) and is never taken for it. It never answers
  * "yes": the only decision it gives is a denial.
  */
 async function answerAfterWait(
@@ -808,6 +819,8 @@ async function answerAfterWait(
     sessionId,
     expect: 'waiting',
     start,
+    // The dialog this request put on screen was there before the hook began; one put up later is another dialog.
+    shownBy: start,
     keep: (_at, waited) =>
       question
         ? { kind: 'question', ...where, text: questionText(payload.input), waited }

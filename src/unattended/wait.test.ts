@@ -7,7 +7,7 @@ import { describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
 import { resolvePaths } from '../core/paths.ts'
 import { markAttended } from '../core/unattended-attended.ts'
-import { listPendingDecisions } from '../core/unattended-pending.ts'
+import { listPendingDecisions, markPendingDone } from '../core/unattended-pending.ts'
 import { writeUnattendedOverride } from '../core/unattended-state.ts'
 import { runUnattendedHook } from './hook.ts'
 
@@ -224,6 +224,64 @@ describe('Answer Wait: a question shown in a session', () => {
         afterKeep: () => screen(h, 'busy', T0 + 10 * MIN),
       })
       assert.deepEqual([saving.code, saving.out, saving.err], [0, '', ''])
+      assert.deepEqual(await pending(h, true), [])
+    })
+  })
+
+  it('goes on watching when the wait is made longer at the last look or while the decision is kept', async () => {
+    await withFakeHome(async (h) => {
+      await configure(h, 1)
+      await turnOn(h)
+      await attend(h)
+      await screen(h, 'waiting', T0)
+      let longer = false
+      const last = await run(h, ['claude', 'PermissionRequest'], request('AskUserQuestion'), {
+        cap: 40,
+        // Made 30 minutes just after the watch saw 1 minute pass.
+        beforeAct: async () => {
+          if (!longer) await configure(h, 30)
+          longer = true
+        },
+      })
+      assert.ok(last.minutes >= 30 && last.minutes < 30.1, `went on after ${last.minutes} minutes`)
+      assert.match(JSON.parse(last.out).hookSpecificOutput.decision.message, /^No answer after 30 minutes/)
+      assert.deepEqual(
+        (await pending(h, true)).map((d) => d.waited),
+        [30],
+      )
+      await markPendingDone(resolvePaths(h.env).stateDir, 'all')
+      await configure(h, 1)
+      let saving = false
+      const kept = await run(h, ['claude', 'PermissionRequest'], request('Bash'), {
+        cap: 40,
+        // Made 30 minutes while the decision of the first minute was being kept: taken back, and the watch goes on.
+        afterKeep: async () => {
+          if (!saving) await configure(h, 30)
+          saving = true
+        },
+      })
+      assert.ok(kept.minutes >= 30 && kept.minutes < 30.1, `went on after ${kept.minutes} minutes`)
+      assert.match(
+        JSON.parse(kept.out).hookSpecificOutput.decision.message,
+        /nobody confirmed this action in 30 minutes/,
+      )
+      assert.deepEqual(
+        (await pending(h)).map((d) => [d.kind, d.waited]),
+        [['permission', 30]],
+      )
+    })
+  })
+
+  it('never takes a dialog put up after the hook began for its own: that one was answered meanwhile', async () => {
+    await withFakeHome(async (h) => {
+      await configure(h)
+      await turnOn(h)
+      await attend(h)
+      // The person answered this request while the hook started, and the next dialog is already on screen.
+      await screen(h, 'waiting', T0 + 1000)
+      const r = await run(h, ['claude', 'PermissionRequest'], request('Bash'))
+      assert.deepEqual([r.code, r.out, r.err], [0, '', ''])
+      assert.ok(r.minutes < 0.1, `let it be after ${r.minutes} minutes`)
       assert.deepEqual(await pending(h, true), [])
     })
   })
