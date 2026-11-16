@@ -24,6 +24,7 @@ import {
 } from '../core/egress.ts'
 import { ownedFolder, readSmallFile, sha256, writeFileAtomic } from '../core/fs-safe.ts'
 import { resolvePaths } from '../core/paths.ts'
+import { hostMade } from '../core/prompt-origin.ts'
 
 export const NETWORK_HOOK_COMMAND = 'sideby network-hook'
 
@@ -52,8 +53,6 @@ const STDIN_MAX = 1024 * 1024
 const STDIN_WAIT_MS = 5000
 /** A wake-up Claude Code makes from a background hook's exit 2 starts like this; only such a prompt carries a held message. */
 const WAKE_UP = /^<task-notification>\s*<summary>Stop hook feedback<\/summary>/
-/** A prompt Claude Code made itself starts with this (a background task's notification, a hook's wake-up). */
-const HOST_MADE = '<task-notification>'
 /** `Held` asks again after these waits, then every `HELD_EVERY_MS`: one request each time. */
 export const HELD_DELAYS_MS = [15_000, 30_000] as const
 export const HELD_EVERY_MS = 60_000
@@ -113,7 +112,7 @@ async function hostMadePrompt(
     const v = JSON.parse(await readInput(input)) as { prompt?: unknown; prompt_id?: unknown } | null
     if (!v || typeof v.prompt !== 'string' || typeof v.prompt_id !== 'string' || !v.prompt_id)
       return undefined
-    return v.prompt.trimStart().startsWith(HOST_MADE) ? { id: v.prompt_id, prompt: v.prompt } : undefined
+    return hostMade(v.prompt) ? { id: v.prompt_id, prompt: v.prompt } : undefined
   } catch {
     return undefined
   }

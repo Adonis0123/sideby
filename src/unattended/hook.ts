@@ -12,12 +12,24 @@
 // written as plain text (`{"decision":"block","reason":…}` on stdout), keeping the question; and it declines an MCP
 // server's form, keeping what the server asked. In Claude it also runs in the background after a turn that failed for
 // a passing reason (`StopFailure`, `asyncRewake`): it waits, then wakes the session with exit 2 so the turn goes on, at
-// most three times in a row, and keeps a Pending Decision when that did not help (Turn Retry, ADR-0067). A failure
-// before the decision is made does nothing: that is
+// most three times in a row, and keeps a Pending Decision when that did not help (Turn Retry, ADR-0067). And in Claude
+// it runs in the background on every prompt (`UserPromptSubmit`, `async`): a prompt a person typed makes that session
+// an Attended Session for 30 minutes, which it leaves alone as if the mode were off, telling the user once (ADR-0075).
+// A failure before the decision is made does nothing: that is
 // how a session behaves without the feature (unlike `network-hook`, which blocks when it cannot tell). Once the
 // decision is to refuse, it refuses: keeping the Pending Decision and writing the reason are best effort, and their
 // failure neither allows the call nor adds any output of its own.
 import { resolvePaths } from '../core/paths.ts'
+import { hostMade, launchPrompt, sidebyMessage } from '../core/prompt-origin.ts'
+import {
+  ATTENDED_MS,
+  markAttended,
+  markTold,
+  ownTranscript,
+  promptOrigin,
+  readAttended,
+  sessionUnattended,
+} from '../core/unattended-attended.ts'
 import { addPendingDecision } from '../core/unattended-pending.ts'
 import {
   clearRetryStreak,
@@ -372,9 +384,21 @@ export function permissionReason(state: UnattendedState, now: Date, kept: boolea
 }
 
 /**
- * A refusal: the reason for the model, and what to keep, if anything. `json`: the answer is this object on stdout
- * with exit 0 (a PermissionRequest decision, a Stop block, an Elicitation decline); otherwise exit 2 with the reason
- * on stderr.
+ * What the user reads once in an Attended Session while Unattended Mode is on (ADR-0075), as a `systemMessage`: shown
+ * in the session, never to the model.
+ */
+export function attendedNotice(state: UnattendedState, zh: boolean): string {
+  const session = state.reason === 'session'
+  if (zh)
+    return `sideby：你在，这个会话在你最后一条消息后 30 分钟内照常问你。${session ? '它是按无人值守启动的，30 分钟没人打字后恢复。' : '其他会话仍然无人值守。要全部关掉，运行 `sideby unattended off`。'}`
+  return `sideby: you're here, so this session asks you as usual for 30 minutes after your last message. ${session ? 'It was started unattended, and goes back to that once nobody has typed for 30 minutes.' : 'Other sessions stay unattended. To turn Unattended Mode off everywhere, run `sideby unattended off`.'}`
+}
+
+/**
+ * An answer to the Host: a refusal (the reason for the model, and what to keep, if anything), or in an Attended
+ * Session a notice for the user that lets the call go on. `json`: the answer is this object on stdout with exit 0 (a
+ * PermissionRequest decision, a Stop block, an Elicitation decline, a `systemMessage`); otherwise exit 2 with the
+ * reason on stderr.
  */
 interface Refusal {
   json?: (reason: string) => unknown
@@ -411,10 +435,33 @@ async function decide(
   const raw = early ?? (await readInput(input))
   const zh = prefersChinese(env)
   const account = text(env.SIDEBY_ACCOUNT, 256)
+  /**
+   * An Attended Session (ADR-0075) is left alone, as when the mode is off: undefined while the session is not one.
+   * Where a `systemMessage` reaches the user (`Stop`, the ask tool's `PreToolUse`), the first such call of a stretch
+   * tells them once.
+   */
+  const attended = async (
+    sessionId: string | undefined,
+    tell: boolean,
+  ): Promise<{ answer?: Refusal } | undefined> => {
+    if (family !== 'claude' || !sessionId) return undefined
+    const r = await readAttended(paths.stateDir, sessionId, now)
+    if (!r) return undefined
+    if (!tell || r.toldAt) return {}
+    return {
+      answer: {
+        json: (systemMessage) => ({ systemMessage }),
+        reason: () => attendedNotice(state, zh),
+        keep: () => markTold(paths.stateDir, sessionId, r.since, now),
+      },
+    }
+  }
   if (stop || elicitation) {
     const v = parseObject(raw)
     if (!v) return undefined
     const sessionId = text(v.session_id, 256)
+    const here = await attended(sessionId, stop)
+    if (here) return here.answer
     const cwd = text(v.cwd)
     const where = {
       family,
@@ -447,6 +494,10 @@ async function decide(
   }
   const payload = parsePayload(raw)
   if (!payload) return undefined
+  if (permission || payload.tool === askTool) {
+    const here = await attended(payload.sessionId, !permission)
+    if (here) return here.answer
+  }
   if (permission)
     return {
       json: (message) => ({
@@ -506,6 +557,11 @@ export async function runUnattendedHook(
   io: { out: { write(s: string): unknown }; err: { write(s: string): unknown } },
   deps: UnattendedHookDeps = {},
 ): Promise<number> {
+  if (argv[0] === 'claude' && argv[1] === 'UserPromptSubmit') {
+    // In the background: its output and exit code change nothing, and it never holds a prompt back.
+    await notePrompt(env, input, deps).catch(() => {})
+    return 0
+  }
   if (argv[0] === 'claude' && argv[1] === 'StopFailure') {
     try {
       const wake = await retryAfterFailure(env, input, deps)
@@ -548,12 +604,66 @@ export async function runUnattendedHook(
   return 2
 }
 
-/** Whether Unattended Mode is on right now, read fresh from the Schedule and the manual state. */
-async function isOn(env: Env, now: Date): Promise<boolean> {
+/**
+ * Whether the session is unattended right now: Unattended Mode is on, read fresh from the Schedule and the manual
+ * state, and the session is not an Attended Session.
+ */
+async function isOn(env: Env, now: Date, sessionId: string): Promise<boolean> {
   const paths = resolvePaths(env)
-  const { schedule } = await readUnattendedConfig(paths.configFile)
-  const override = await readUnattendedOverride(paths.stateDir)
-  return unattendedState({ schedule, override, now, session: env[UNATTENDED_ENV] === '1' }).on
+  return (
+    await sessionUnattended({
+      stateDir: paths.stateDir,
+      configFile: paths.configFile,
+      session: env[UNATTENDED_ENV] === '1',
+      sessionId,
+      now,
+    })
+  ).on
+}
+
+/** A prompt id as Claude Code writes it; anything else is not looked for. */
+const PROMPT_ID = /^[A-Za-z0-9_.:-]{1,128}$/
+
+/**
+ * Claude's background `UserPromptSubmit` entry (spec §3.37 "有人在的会话", ADR-0075): makes the session an Attended
+ * Session when a person typed the prompt. Not counted: a prompt Claude Code made itself, a Message `sideby send`
+ * delivered, a prompt sideby put on the command line (or a session whose launch did not say which those are), a
+ * subagent's, and any prompt whose line in the session's own transcript does not say `human` within the wait. The
+ * transcript line decides, not the input: its text is checked as the prompt is, and its time is when the stretch is
+ * counted from, so an input made by hand that names another file, the launch's prompt or an old prompt marks nothing
+ * new. Nothing of the prompt is kept.
+ */
+async function notePrompt(
+  env: Env,
+  input: AsyncIterable<string | Uint8Array> | string,
+  deps: UnattendedHookDeps,
+): Promise<void> {
+  const v = parseObject(await readInput(input))
+  if (!v || v.agent_id !== undefined) return
+  const sessionId = text(v.session_id, 256)
+  const promptId = typeof v.prompt_id === 'string' && PROMPT_ID.test(v.prompt_id) ? v.prompt_id : undefined
+  const prompt = typeof v.prompt === 'string' ? v.prompt : undefined
+  const transcript = typeof v.transcript_path === 'string' ? v.transcript_path : undefined
+  if (!sessionId || !promptId || prompt === undefined || !transcript) return
+  const notTyped = (s: string) => hostMade(s) || sidebyMessage(s) || launchPrompt(s, env)
+  if (notTyped(prompt) || !(await ownTranscript(transcript, sessionId, env))) return
+  const clock = deps.now ?? (() => new Date())
+  const line = await promptOrigin(transcript, promptId, {
+    ...(deps.sleep ? { sleep: deps.sleep } : {}),
+    clock: () => clock().getTime(),
+  })
+  if (line?.origin !== 'human' || line.text === undefined || line.at === undefined || notTyped(line.text))
+    return
+  const now = clock().getTime()
+  const at = Math.min(line.at, now)
+  if (at + ATTENDED_MS <= now) return
+  const account = text(env.SIDEBY_ACCOUNT, 256)
+  const cwd = text(v.cwd)
+  await markAttended(
+    resolvePaths(env).stateDir,
+    { sessionId, family: 'claude', ...(account ? { account } : {}), ...(cwd ? { cwd } : {}) },
+    new Date(at),
+  )
 }
 
 /**
@@ -581,7 +691,7 @@ async function retryAfterFailure(
   const said = [text(v.last_assistant_message, 1000), text(v.error_details, 1000)].filter(Boolean).join(' ')
   // A later failure that is not retried (a used-up Quota, a lasting error) or comes while the mode is off still
   // takes over the session: the wait an earlier failure left must not wake it.
-  if (!error || !passingFailure(error, said) || !(await isOn(env, now))) {
+  if (!error || !passingFailure(error, said) || !(await isOn(env, now, sessionId))) {
     await clearRetryStreak(paths.stateDir, sessionId).catch(() => {})
     return undefined
   }
@@ -609,6 +719,6 @@ async function retryAfterFailure(
   await sleep(retryDelay(streak.count))
   if ((deps.parentGone ?? (() => process.ppid === 1))()) return undefined
   if ((await readRetryStreak(paths.stateDir, sessionId))?.token !== streak.token) return undefined
-  if (!(await isOn(env, clock()))) return undefined
+  if (!(await isOn(env, clock(), sessionId))) return undefined
   return retryMessage(error, text(v.last_assistant_message, 1000) ?? '', streak.count, prefersChinese(env))
 }

@@ -886,6 +886,8 @@ describe('unattended hook imports', () => {
       'core/unattended-state.ts',
       'core/unattended-pending.ts',
       'core/unattended-retry.ts',
+      'core/unattended-attended.ts',
+      'core/prompt-origin.ts',
       'core/fs-safe.ts',
       'core/paths.ts',
     ])

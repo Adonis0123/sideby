@@ -9,7 +9,9 @@ import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../test
 import { claudePlugin } from '../families/claude/index.ts'
 import { codexPlugin } from '../families/codex/index.ts'
 import { createRuntime } from '../runtime.ts'
+import { hostEnv } from './launch.ts'
 import { resolvePaths } from './paths.ts'
+import { launchPrompt, launchPromptMarks } from './prompt-origin.ts'
 import { withClaudeSessionHooks } from './session-hooks.ts'
 import {
   addUnattendedSlot,
@@ -56,6 +58,8 @@ describe('Launch', () => {
       assert.deepEqual(p.args, [])
       assert.equal(p.sessionHookArgs, undefined)
       assert.equal(p.env.SIDEBY_UNATTENDED, undefined)
+      assert.equal(p.env.SIDEBY_LAUNCH_PROMPTS, undefined)
+      assert.equal(hostEnv(p), p.env)
     })
   })
 
@@ -70,14 +74,31 @@ describe('Launch', () => {
       const { file, hooks } = await settingsOf(p.args)
       assert.ok(file.startsWith(`${rt.paths.stateDir}/unattended/`))
       // Before the ask tool only (no hook on every Bash call), on every permission request Claude Code shows, at
-      // the end of every turn, on every MCP server form, and after a turn that failed for a passing reason.
+      // the end of every turn, on every MCP server form, after a turn that failed for a passing reason, and in the
+      // background on every prompt (Attended Sessions, ADR-0075).
       assert.deepEqual(Object.keys(hooks), [
         'PreToolUse',
         'PermissionRequest',
         'Stop',
         'Elicitation',
         'StopFailure',
+        'UserPromptSubmit',
       ])
+      // `async`: the prompt never waits for it, and nothing it prints reaches the session.
+      assert.equal(hooks.UserPromptSubmit.length, 1)
+      assert.equal(hooks.UserPromptSubmit[0].matcher, undefined)
+      assert.match(
+        hooks.UserPromptSubmit[0].hooks[0].command,
+        /^'.+' '.+main\.ts' unattended-hook claude UserPromptSubmit$/,
+      )
+      assert.equal(hooks.UserPromptSubmit[0].hooks[0].async, true)
+      assert.equal(hooks.UserPromptSubmit[0].hooks[0].asyncRewake, undefined)
+      assert.equal(hooks.UserPromptSubmit[0].hooks[0].timeout, 30)
+      // Which prompts sideby put on the command line is known only where the Host starts: until then, none counts.
+      assert.equal(p.env.SIDEBY_LAUNCH_PROMPTS, '?')
+      assert.equal(hostEnv(p).SIDEBY_LAUNCH_PROMPTS, launchPromptMarks(p.args))
+      assert.equal(launchPrompt('hi', hostEnv(p)), true)
+      assert.equal(launchPrompt('something typed', hostEnv(p)), false)
       // In the background: its exit 2 wakes the session (Turn Retry). No matcher: every failure ends an earlier wait.
       assert.equal(hooks.StopFailure.length, 1)
       assert.equal(hooks.StopFailure[0].matcher, undefined)
@@ -140,6 +161,9 @@ describe('Launch', () => {
         'StopFailure',
         'UserPromptSubmit',
       ])
+      // Network Guard's two entries, then Unattended Mode's.
+      assert.equal(hooks.UserPromptSubmit.length, 2)
+      assert.match(hooks.UserPromptSubmit[1].hooks[0].command, /unattended-hook claude UserPromptSubmit$/)
       const commands = hooks.PreToolUse.map((g: { hooks: { command: string }[] }) => g.hooks[0]!.command)
       assert.equal(commands.length, 2)
       assert.match(commands[0], /network-hook claude PreToolUse$/)

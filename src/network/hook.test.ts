@@ -652,7 +652,13 @@ describe('network hook imports', () => {
     }
     await walk(join(root, 'network/hook.ts'))
     assert.ok(seen.has(join(root, 'core/egress.ts')), 'the walk follows imports')
-    const allowed = new Set(['network/hook.ts', 'core/egress.ts', 'core/fs-safe.ts', 'core/paths.ts'])
+    const allowed = new Set([
+      'network/hook.ts',
+      'core/egress.ts',
+      'core/fs-safe.ts',
+      'core/paths.ts',
+      'core/prompt-origin.ts',
+    ])
     assert.deepEqual(
       [...seen].map((f) => relative(root, f)).filter((f) => !allowed.has(f)),
       [],

@@ -106,6 +106,7 @@ Avoid: *rotation* (cycling through Accounts per request or on a timer; a Handoff
 - **Schedule**: the user's list of Slots that turn Unattended Mode on and off by themselves. Empty unless the user adds one.
 - **Slot**: one entry of the Schedule: the days of the week, a start time and an end time, in the computer's own time zone. An end before the start runs past midnight and belongs to the start day.
 - **Pending Decision**: a question the model was not allowed to ask, a permission request nobody was there to answer, or an action it left undone (or a session left stopped after its Turn Retries ran out), during Unattended Mode, kept for the user to look at once someone is back.
+- **Attended Session** (the Panel says *asking you as usual*): a Claude session sideby started that the user typed a prompt into within the last 30 minutes. Unattended Mode leaves it alone, as if it were off, while it stays on for every other session. Only a typed prompt counts: never one Claude Code made itself, a Message, a prompt sideby put on the command line, or anything the model does.
 - **Turn Retry**: during Unattended Mode, starting a Claude turn again after it failed for a passing reason (an overloaded or failing server, a rate limit that is not a used-up Quota, a dropped connection), up to three times in a row with a longer wait each time; then the session is left as a Pending Decision.
 
 Avoid: *window* (a Quota window), *quiet hours* (sounds like muting alerts only), *away* (sideby does not watch the keyboard).

@@ -2236,6 +2236,26 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
         description: 'Config `unattended.schedule`, numbered from 1.',
       }),
       pending: Type.Integer({ description: 'Open Pending Decisions (`sideby unattended pending`).' }),
+      attended: Type.Array(
+        Type.Object({
+          sessionId: Str,
+          family: Str,
+          account: Type.Optional(Str),
+          cwd: Type.Optional(Str),
+          since: Type.String({
+            format: 'date-time',
+            description: 'When someone first typed into it after it last stopped counting.',
+          }),
+          until: Type.String({
+            format: 'date-time',
+            description: '30 minutes after the last prompt someone typed into it.',
+          }),
+        }),
+        {
+          description:
+            'Attended Sessions (ADR-0075): Claude sessions sideby started that someone typed into within the last 30 minutes. They ask as usual while the mode stays on for every other session. Latest `until` first. Read-only: only a prompt typed into the session sets it.',
+        },
+      ),
       coverage: Type.Record(
         Str,
         Type.Union([Type.Literal('covered'), Type.Literal('needs-trust'), Type.Literal('not-covered')]),

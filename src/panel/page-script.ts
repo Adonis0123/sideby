@@ -6872,6 +6872,28 @@ const MAIN = String.raw`
       h('p', { class: 'muted small' }, t('ua.pendingNote'))), box]
   }
 
+  // ---------- Attended Sessions (ADR-0075) ----------
+  // While it is on: the sessions someone typed into within the last 30 minutes, which ask as usual, each with until
+  // when; with none, one line that says typing in a session is all it takes. Only shown: nothing here sets it.
+  function uaHereBlock(st, p) {
+    if (p.state !== 'on' || st.problem) return []
+    const now = Date.now()
+    const list = (st.attended || []).filter((x) => Date.parse(x.until) > now)
+    if (!list.length) return [h('p', { class: 'note ua-here-hint', 'data-key': 'ua-here-hint', 'data-ua': 'here-hint' }, icon('messages'), t('ua.hereHint'))]
+    return [h('div', { class: 'ua-here', 'data-key': 'ua-here', 'data-ua': 'here', 'data-patch': '' },
+      h('div', { class: 'page-sec-head' },
+        h('h3', { class: 'page-sec' }, t('ua.here'), ' ', h('span', { class: 'tab-count' }, String(list.length))),
+        h('p', { class: 'muted small' }, t('ua.hereNote'))),
+      h('ul', { class: 'ua-here-list', 'data-patch': '' }, list.map((x) => {
+        const folder = x.cwd ? x.cwd.split(/[\\/]/).filter(Boolean).pop() : null
+        return h('li', { class: 'ua-here-row', 'data-key': 'ua-here-' + x.sessionId, 'data-ua': 'here-' + x.sessionId, 'data-patch': '', 'data-tip': t('ua.hereSession', { id: x.sessionId.slice(0, 8) }) },
+          badge(x.family, 'sm'),
+          h('b', null, x.account ? accountLabel(x.account) : family(x.family).title),
+          folder ? h('code', { class: 'ua-cwd' }, folder) : null,
+          h('span', { class: 'ua-when muted' }, uaAt('until', Date.parse(x.until))))
+      })))]
+  }
+
   // ---------- the page ----------
   function uaCoverage(st) {
     const have = new Set(S.state.accounts.map((a) => a.family))
@@ -6954,6 +6976,7 @@ const MAIN = String.raw`
       main))
     if (ua.choosing && p.state !== 'on') kids.push(uaChooser(st))
     if (!st.configured || ua.firstUse) kids.push(h('p', { class: 'note ua-first', 'data-key': 'ua-first', 'data-ua': 'first' }, icon('clock'), t('ua.firstUse')))
+    kids.push(...uaHereBlock(st, p))
     kids.push(...uaScheduleBlock())
     kids.push(...uaPendingBlock(st))
     kids.push(...uaCoverage(st))

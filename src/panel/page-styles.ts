@@ -1459,6 +1459,11 @@ input.ua-time::placeholder { color: var(--faint); }
 .ua-item-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: flex-start; gap: 12px; }
 .ua-cover { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--muted); }
 .ua-cover li::before { content: "·"; margin-right: 8px; color: var(--faint); }
+.ua-here-list { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow); }
+.ua-here-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; padding: 12px 16px; border-top: 1px solid var(--border); }
+.ua-here-row:first-child { border-top: 0; }
+.ua-here-hint { gap: 8px; margin-top: 12px; }
+.ua-here-hint .ic { width: 15px; height: 15px; flex: none; }
 :where(:root[data-width=narrow], :root[data-width=phone]) .ua-item { grid-template-columns: minmax(0, 1fr); }
 :where(:root[data-width=narrow], :root[data-width=phone]) .ua-item-actions { grid-column: 1; grid-row: auto; }
 :where(:root[data-width=phone]) .ua-del { margin-left: 0; }

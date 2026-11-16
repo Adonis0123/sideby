@@ -6,6 +6,7 @@ import type { HookBus } from '../plugins/bus.ts'
 import type { Account, Env, FamilyDef } from '../types.ts'
 import { apiBetasEnv, unlockAdvisorEnv } from './advisor.ts'
 import { lstatOrNull, realpathOrNull } from './fs-safe.ts'
+import { LAUNCH_PROMPTS_ENV, launchPromptMarks } from './prompt-origin.ts'
 import { readSecretFile } from './secret-file.ts'
 
 export interface PreparedLaunch {
@@ -216,6 +217,15 @@ export function runHost(p: HostLaunch): Promise<number> {
 }
 
 /**
+ * The environment the Host starts with. A session with `unattended-hook` gets the marks of the prompts sideby put on
+ * its command line (ADR-0075), from the final arguments: Auto Handoff adds a relay prompt after the Launch is prepared.
+ */
+export function hostEnv(p: Pick<HostLaunch, 'args' | 'env'>): Env {
+  if (p.env[LAUNCH_PROMPTS_ENV] === undefined) return p.env
+  return { ...p.env, [LAUNCH_PROMPTS_ENV]: launchPromptMarks(p.args) }
+}
+
+/**
  * `runHost` with the child process exposed, so the Auto Handoff (spec §3.17) can end the Host and start the next
  * Account in the same terminal. Same signal handling, exit codes and title as `runHost`.
  */
@@ -248,7 +258,7 @@ export function spawnHost(p: HostLaunch): { child: ChildProcess; exited: Promise
   }
   for (const [s, h] of handlers) process.on(s, h)
   try {
-    child = spawn(p.bin, p.args, { stdio: 'inherit', env: p.env as NodeJS.ProcessEnv })
+    child = spawn(p.bin, p.args, { stdio: 'inherit', env: hostEnv(p) as NodeJS.ProcessEnv })
   } catch (err) {
     cleanup()
     throw err

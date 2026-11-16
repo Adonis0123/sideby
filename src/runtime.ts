@@ -108,6 +108,7 @@ import {
 import { type Paths, resolvePaths } from './core/paths.ts'
 import { choosePick, type PickChoice, suggestPickName } from './core/pick-commands.ts'
 import { categoryReader, type ProjectCategories } from './core/project-categories.ts'
+import { LAUNCH_PROMPTS_ENV, LAUNCH_PROMPTS_UNSET } from './core/prompt-origin.ts'
 import {
   FETCH_TIMEOUT_MS,
   fetchedQuota,
@@ -735,6 +736,9 @@ export async function createRuntime(
     }
     if (p.family.id === 'codex')
       addNotice(p, [await codexUnattendedTrustLine(paths.stateDir, p.account.ref, p.env)])
+    // Which prompts sideby put on the command line, so the hook never takes one for typed (ADR-0075): filled in from
+    // the final arguments where the Host starts (`spawnHost`); left as it is, the session counts no prompt as typed.
+    if (p.family.id === 'claude') p.env[LAUNCH_PROMPTS_ENV] = LAUNCH_PROMPTS_UNSET
     return unattendedHookPart()
   }
 

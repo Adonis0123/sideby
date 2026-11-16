@@ -10,6 +10,7 @@ import { UserError } from './errors.ts'
 import { ownedFolder, writeFileAtomic } from './fs-safe.ts'
 import type { Paths } from './paths.ts'
 import { type SessionHookPart, sidebyHookCommand } from './session-hooks.ts'
+import { ATTENDED_HOOK_TIMEOUT_S, type AttendedSession, listAttended } from './unattended-attended.ts'
 import { listPendingDecisions } from './unattended-pending.ts'
 import { RETRY_HOOK_TIMEOUT_S } from './unattended-retry.ts'
 import {
@@ -48,6 +49,11 @@ export interface UnattendedStatus extends UnattendedState {
   schedule: UnattendedSlot[]
   /** Open Pending Decisions. */
   pending: number
+  /**
+   * Attended Sessions (ADR-0075): Claude sessions someone typed into within the last 30 minutes, which ask as usual
+   * while the mode stays on for the rest. Latest end first.
+   */
+  attended: AttendedSession[]
   coverage: Record<string, UnattendedCoverage>
   /** When `on --slot-end` would end: the end of the current or next Slot, when that is within 72 hours. */
   slotEnd?: string
@@ -128,6 +134,7 @@ export async function unattendedStatus(opts: {
     configured,
     schedule,
     pending: (await listPendingDecisions(opts.paths.stateDir, { now, prune: !opts.readOnly })).length,
+    attended: await listAttended(opts.paths.stateDir, now, { prune: !opts.readOnly }),
     coverage: coverageOf(opts.families, configured),
     ...(end !== undefined && end - now.getTime() <= MAX_MANUAL_MS
       ? { slotEnd: new Date(end).toISOString() }
@@ -419,8 +426,10 @@ export const unattendedClock = (iso: string, now: Date, zh = false): string =>
 /**
  * Unattended Mode's session hooks: before the ask tool and when the model ends its turn (`Stop`, which keeps a turn
  * that ended on a question going once) in Claude and Codex; and in Claude on every permission request Claude Code is
- * about to show, every MCP server form (`Elicitation`), and every turn that failed on an API error (`StopFailure`, in the background with `asyncRewake`, so its exit 2 wakes the session: Turn Retry,
- * ADR-0067). Codex has no such events for them; its own approval prompts and failed turns are not covered.
+ * about to show, every MCP server form (`Elicitation`), every turn that failed on an API error (`StopFailure`, in the
+ * background with `asyncRewake`, so its exit 2 wakes the session: Turn Retry, ADR-0067), and every prompt
+ * (`UserPromptSubmit`, in the background with `async`, so it never holds a prompt back: Attended Sessions, ADR-0075).
+ * Codex has no such events for them; its own approval prompts and failed turns are not covered.
  */
 export function unattendedHookPart(): SessionHookPart {
   const command = (family: string, event = 'PreToolUse') =>
@@ -440,6 +449,11 @@ export function unattendedHookPart(): SessionHookPart {
         {
           hooks: [{ ...claude('StopFailure')[0], asyncRewake: true, timeout: RETRY_HOOK_TIMEOUT_S }],
         },
+      ],
+      // Waits up to 10 seconds for the prompt's transcript line; `async`, so the prompt goes on at once and nothing
+      // the hook prints or returns reaches the session.
+      UserPromptSubmit: [
+        { hooks: [{ ...claude('UserPromptSubmit')[0], async: true, timeout: ATTENDED_HOOK_TIMEOUT_S }] },
       ],
     },
     codex: {

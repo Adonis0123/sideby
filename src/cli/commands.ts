@@ -5275,6 +5275,15 @@ function printUnattended(
     io.out(
       `Pending decisions: ${c.yellow(String(s.pending))} open; see them with \`sideby unattended pending\`.`,
     )
+  // Attended Sessions (ADR-0075): shown while the mode is on, when they are what keeps a session asking.
+  if (s.on && s.attended.length) {
+    io.out('Asking you as usual (you typed there in the last 30 minutes):')
+    for (const x of s.attended)
+      io.out(
+        `  ${x.account ?? x.family}${x.cwd ? ` · ${basename(x.cwd)}` : ''} · ${x.sessionId.slice(0, 8)} · until ${clock2(x.until, now)}`,
+      )
+  } else if (s.on && s.configured)
+    io.out(c.dim('Type in a session and it asks you as usual for 30 minutes; the others stay unattended.'))
   if (!s.configured)
     io.out(
       c.cyan(

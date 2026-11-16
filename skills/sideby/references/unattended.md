@@ -49,10 +49,18 @@ Then go on with the rest. Do not retry the question, and do not work around the 
 
 When a note from sideby says your last turn failed for a passing reason, the session was woken to go on: check what is already done (files, commits, background work), do not redo it, and continue where the turn stopped.
 
+## When the user is back early: they just type
+
+A Claude session the user types into asks as usual again for 30 minutes after each message they send (an **Attended Session**, ADR-0075): its questions, permission prompts and forms reach the user, and nothing of it is refused or kept. Every other session stays unattended, and the global state does not change. The first time it applies, the session shows the user one line saying so. So when the user says they are back but only wants to work in one session ("我回来了，这个会话怎么还不问我", "why is this session asking me again"), tell them to just type in it; no command is needed.
+
+- See which sessions it covers now: `sideby unattended --json`, field `attended` (each `sessionId`, `account`, `cwd`, `since`, `until`).
+- Only a prompt the user typed counts: not a background task's notification, not a Message from `sideby send` or another session, not the prompt sideby put on the command line, and not your own tool calls. There is no command to set it, and you must not try to make your own session count: if the user wants questions everywhere, run `sideby unattended off --json`.
+- Typing into a terminal by automation (tmux `send-keys`) looks like a person to Claude Code and counts for that one session. Sessions started before this sideby version, and Codex sessions, do not have it.
+
 ## When the user is back
 
 ```sh
-sideby unattended --json            # on or off and why, until when, the next Slot, open decisions, coverage
+sideby unattended --json            # on or off and why, until when, the next Slot, open decisions, coverage, attended sessions
 sideby unattended pending --json    # each question, refused permission or skipped action, with account, session and folder
 sideby unattended pending done <id> --json   # or --all, once the user has dealt with them
 ```

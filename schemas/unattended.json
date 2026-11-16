@@ -9,6 +9,7 @@
     "configured",
     "schedule",
     "pending",
+    "attended",
     "coverage"
   ],
   "properties": {
@@ -155,6 +156,43 @@
     "pending": {
       "type": "integer",
       "description": "Open Pending Decisions (`sideby unattended pending`)."
+    },
+    "attended": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "sessionId",
+          "family",
+          "since",
+          "until"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "family": {
+            "type": "string"
+          },
+          "account": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When someone first typed into it after it last stopped counting."
+          },
+          "until": {
+            "type": "string",
+            "format": "date-time",
+            "description": "30 minutes after the last prompt someone typed into it."
+          }
+        }
+      },
+      "description": "Attended Sessions (ADR-0075): Claude sessions sideby started that someone typed into within the last 30 minutes. They ask as usual while the mode stays on for every other session. Latest `until` first. Read-only: only a prompt typed into the session sets it."
     },
     "coverage": {
       "type": "object",

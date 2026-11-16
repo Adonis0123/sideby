@@ -1919,6 +1919,12 @@ const en = {
   'ua.overnight': 'next day',
   'ua.allDay': 'all day',
   'ua.remove': 'Remove {slot}',
+  'ua.here': 'Asking you as usual',
+  'ua.hereNote':
+    'You typed in these sessions in the last 30 minutes, so they ask you as usual. Each message you send gives that session another 30 minutes. Every other session stays unattended.',
+  'ua.hereHint':
+    'Back early? Type in a session and it asks you as usual for 30 minutes. The others stay unattended.',
+  'ua.hereSession': 'Session {id}',
   'ua.pending': 'Waiting for you',
   'ua.pendingNote':
     'Questions sessions did not ask you, steps that needed your OK, and steps they skipped. Nothing here was done.',
@@ -3752,6 +3758,11 @@ const zh: Record<MessageKey, string> = {
   'ua.overnight': '次日',
   'ua.allDay': '全天',
   'ua.remove': '删除{slot}',
+  'ua.here': '照常问你的会话',
+  'ua.hereNote':
+    '你 30 分钟内在这些会话里打过字，它们照常问你；每发一条消息，那个会话再算 30 分钟。其他会话仍然无人值守。',
+  'ua.hereHint': '提前回来了？在哪个会话里打字，那个会话 30 分钟内照常问你，其他会话不受影响。',
+  'ua.hereSession': '会话 {id}',
   'ua.pending': '待你决定',
   'ua.pendingNote': '会话没问你的问题、要你确认的操作和跳过的操作。这里的事都还没做。',
   'ua.pendingEmpty': '没有待你决定的事',
