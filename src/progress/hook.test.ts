@@ -3,7 +3,7 @@
 // the setting is off, Auto Handoff is handing over, or the session is unattended. Its wake-up is host-made. Nothing
 // really waits: the clock moves only when the fake sleep says so.
 import assert from 'node:assert/strict'
-import { readdir, readFile } from 'node:fs/promises'
+import { readdir, readFile, utimes } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { Writable } from 'node:stream'
 import { describe, it } from 'node:test'
@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
 import { ensureChainDir, FILES, writeJsonFile } from '../core/handoff-chain.ts'
 import { resolvePaths } from '../core/paths.ts'
-import { readPromptRecord, readWatch } from '../core/progress-state.ts'
+import { hashOf, readPromptRecord, readWatch, writePromptRecord, writeWatch } from '../core/progress-state.ts'
 import { hostMade, PROGRESS_MARK, progressWakeUp } from '../core/prompt-origin.ts'
 import { markAttended, readAttended } from '../core/unattended-attended.ts'
 import { writeUnattendedOverride } from '../core/unattended-state.ts'
@@ -288,6 +288,98 @@ describe('progress hook: Stop', () => {
       assert.equal((await readWatch(stateDir, SID))?.id, 'w2')
       assert.deepEqual(
         (await readdir(join(stateDir, 'progress', 'sessions'))).filter((n) => n.endsWith('.lock')),
+        [],
+      )
+    })
+  })
+
+  it('a Stop that cannot take the session’s lock does not watch, and never has its record put back', async () => {
+    await withFakeHome(async (h) => {
+      await on(h, 10)
+      const { stateDir } = resolvePaths(h.env)
+      let later: { exit: number } | undefined
+      const g = fake({ id: 'w2' })
+      const f = {
+        ...fake({ id: 'w1' }),
+        // While this watch holds the lock to mark itself woken (and stalls), the next Stop gives up waiting for it.
+        beforeWake: async () => {
+          later = await watchWhileWaiting(stopInput({ promptId: 'p-2' }), h.env, {
+            ...g,
+            lockWait: { timeoutMs: 50, pollMs: 5 },
+          })
+        },
+      }
+      assert.equal((await watchWhileWaiting(stopInput(), h.env, f)).exit, 2)
+      // It did not act as the session's watch, so nothing it wrote was lost: the record is the earlier watch's.
+      assert.deepEqual(later, { exit: 0 })
+      assert.equal(g.sleeps, 0)
+      const record = await readWatch(stateDir, SID)
+      assert.equal(record?.id, 'w1')
+      assert.ok(record?.wokeAt)
+    })
+  })
+
+  it('a prompt noted late never replaces a later one, so the later turn’s wait is still reminded', async () => {
+    await withFakeHome(async (h) => {
+      await on(h, 10)
+      const { stateDir } = resolvePaths(h.env)
+      const at = Date.now()
+      const note = (prompt: string, promptId: string, t: number) =>
+        runProgressHook(
+          ['claude', 'UserPromptSubmit'],
+          h.env,
+          JSON.stringify({ session_id: SID, prompt_id: promptId, prompt }),
+          { err: { write: () => true } },
+          { now: () => new Date(t) },
+        )
+      // The second prompt's hook finishes first; the first one's, started earlier, finishes after it.
+      await note('and now the docs', 'p-2', at + 1000)
+      await note('start the build', 'p-1', at)
+      assert.equal((await readPromptRecord(stateDir, SID))?.prompt, hashOf('p-2'))
+      const f = fake()
+      const late = { ...f, now: () => new Date(f.now!().getTime() + 2000) }
+      assert.equal((await watchWhileWaiting(stopInput({ promptId: 'p-2' }), h.env, late)).exit, 2)
+      // The same prompt noted again (a notification that joined its turn) still replaces it.
+      await note('<task-notification>\n<task-id>t1</task-id>', 'p-2', at + 3000)
+      assert.equal((await readPromptRecord(stateDir, SID))?.at, new Date(at + 3000).toISOString())
+    })
+  })
+
+  it('clean-up never removes a record its session rewrote meanwhile, and removes one nobody touched', async () => {
+    await withFakeHome(async (h) => {
+      const { stateDir } = resolvePaths(h.env)
+      const dir = join(stateDir, 'progress', 'sessions')
+      const now = new Date()
+      const twoDaysAgo = new Date(now.getTime() - 48 * 3600_000)
+      const watch = { id: 'old', since: now.toISOString(), at: now.toISOString() }
+      const prompt = { at: now.toISOString(), prompt: hashOf('p-old'), reminder: false }
+      for (const s of ['busy', 'gone']) {
+        assert.equal(await writeWatch(stateDir, s, watch), true)
+        assert.equal(await writePromptRecord(stateDir, s, prompt, now), true)
+      }
+      for (const n of await readdir(dir)) await utimes(join(dir, n), twoDaysAgo, twoDaysAgo)
+      // Between the clean-up's look at a record and its removal, the session `busy` writes both of its records anew.
+      let rewritten = false
+      await writePromptRecord(stateDir, 'other', prompt, now, {
+        beforeRemove: async (name) => {
+          if (rewritten || !name.startsWith(hashOf('busy'))) return
+          rewritten = true
+          await writeWatch(stateDir, 'busy', { ...watch, id: 'new' })
+          const later = new Date(now.getTime() + 1000)
+          await writePromptRecord(
+            stateDir,
+            'busy',
+            { at: later.toISOString(), prompt: hashOf('p-new'), reminder: false },
+            later,
+          )
+        },
+      })
+      assert.equal((await readWatch(stateDir, 'busy'))?.id, 'new')
+      assert.equal((await readPromptRecord(stateDir, 'busy'))?.prompt, hashOf('p-new'))
+      assert.equal(await readWatch(stateDir, 'gone'), undefined)
+      assert.equal(await readPromptRecord(stateDir, 'gone'), undefined)
+      assert.deepEqual(
+        (await readdir(dir)).filter((n) => n.endsWith('.lock')),
         [],
       )
     })

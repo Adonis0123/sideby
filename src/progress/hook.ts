@@ -48,6 +48,8 @@ export interface ProgressHookDeps {
   /** This watch's id; random by default. */
   id?: string
   checkEveryMs?: number
+  /** How long a write waits for the session's lock (for tests). */
+  lockWait?: { timeoutMs: number; pollMs: number }
   /** Runs between the last check of the watch record and marking it woken, inside the lock (for tests). */
   beforeWake?: () => Promise<void>
 }
@@ -202,8 +204,9 @@ export async function watchWhileWaiting(
   const afterReminder = await progressReminderTurn(paths.stateDir, sessionId, promptId)
   const since = afterReminder && prev ? prev.since : iso(start)
   const id = deps.id ?? randomBytes(8).toString('hex')
-  // Written first, so a watch left by an earlier Stop ends even when this one has nothing to watch.
-  await writeWatch(paths.stateDir, sessionId, { id, since, at: iso(start) })
+  // Written first, so a watch left by an earlier Stop ends even when this one has nothing to watch. When the session's
+  // lock stays held nothing is written, and this Stop does not watch: an earlier watch may still hold the record.
+  if (!(await writeWatch(paths.stateDir, sessionId, { id, since, at: iso(start) }, deps))) return { exit: 0 }
   const tasks = input.background_tasks
   if (!Array.isArray(tasks) || tasks.length === 0) return { exit: 0 }
   let every = await readProgressEvery(paths.configFile, env)

@@ -118,11 +118,38 @@ function parsePrompt(text: string | undefined): PromptRecord | undefined {
 }
 
 const watchName = (sessionId: string) => `${hashOf(sessionId)}.json`
-const lockName = (sessionId: string) => `${hashOf(sessionId)}.lock`
-/** One session's watch record is replaced, or checked and marked woken, by one caller at a time. */
-const LOCK = { staleMs: 15_000, beatMs: 5_000 }
-const LOCK_WAIT = { timeoutMs: 5_000, pollMs: 25 }
 const promptName = (sessionId: string) => `${hashOf(sessionId)}.prompt.json`
+/**
+ * Every write of a session's two records, and their removal, holds the session's lock (`<hash>.lock` beside them),
+ * so no check-then-write of one caller can be undone by another. A lock still held after `LOCK_WAIT` is given up on:
+ * nothing is written (a dead holder frees it at once; one that stopped touching it, after `staleMs`). The wait stays
+ * under the 10 seconds Claude Code gives the `UserPromptSubmit` entry.
+ */
+const LOCK = { staleMs: 15_000, beatMs: 5_000 }
+const LOCK_WAIT = { timeoutMs: 8_000, pollMs: 25 }
+
+/** How long a write waits for the session's lock, for tests; by default `LOCK_WAIT`. */
+export interface LockWait {
+  lockWait?: { timeoutMs: number; pollMs: number }
+}
+
+/** Runs `fn` holding the lock of the session whose records start with `hash`; undefined when the lock is not had. */
+async function underLock<T>(
+  dir: string,
+  hash: string,
+  wait: { timeoutMs: number; pollMs: number } | null,
+  fn: () => Promise<T>,
+): Promise<{ value: T } | undefined> {
+  const release = await takeFileLock(join(dir, `${hash}.lock`), wait ? { ...LOCK, wait } : LOCK).catch(
+    () => null,
+  )
+  if (!release) return undefined
+  try {
+    return { value: await fn() }
+  } finally {
+    await release()
+  }
+}
 
 /** `<state>/progress/sessions`, checked one level at a time; null when it is missing (without `create`) or not safe. */
 async function folder(stateDir: string, create: boolean): Promise<string | null> {
@@ -136,20 +163,21 @@ export async function readWatch(stateDir: string, sessionId: string): Promise<Wa
 }
 
 /**
- * Replaces the session's watch (file 600, atomically), under the session's lock so it never lands between another
- * watch's last check and its `wokeAt`. A lock held past 5 seconds is not waited for: the record is replaced anyway.
- * Throws when the folder is not safe to use.
+ * Replaces the session's watch (file 600, atomically) under the session's lock, so it never lands between another
+ * watch's last check and its `wokeAt`. False when the lock stays held: then nothing is written and the caller must not
+ * act as the session's watch. Throws when the folder is not safe to use.
  */
-export async function writeWatch(stateDir: string, sessionId: string, record: WatchRecord): Promise<void> {
+export async function writeWatch(
+  stateDir: string,
+  sessionId: string,
+  record: WatchRecord,
+  opts: LockWait = {},
+): Promise<boolean> {
   const dir = (await folder(stateDir, true))!
-  const release = await takeFileLock(join(dir, lockName(sessionId)), { ...LOCK, wait: LOCK_WAIT }).catch(
-    () => null,
+  const done = await underLock(dir, hashOf(sessionId), opts.lockWait ?? LOCK_WAIT, () =>
+    writeFileAtomic(join(dir, watchName(sessionId)), `${JSON.stringify(record)}\n`, 0o600),
   )
-  try {
-    await writeFileAtomic(join(dir, watchName(sessionId)), `${JSON.stringify(record)}\n`, 0o600)
-  } finally {
-    await release?.()
-  }
+  return done !== undefined
 }
 
 /**
@@ -166,20 +194,15 @@ export async function markWatchWoken(
 ): Promise<boolean> {
   const dir = await folder(stateDir, false)
   if (!dir) return false
-  const release = await takeFileLock(join(dir, lockName(sessionId)), { ...LOCK, wait: LOCK_WAIT }).catch(
-    () => null,
-  )
-  if (!release) return false
-  try {
+  const done = await underLock(dir, hashOf(sessionId), LOCK_WAIT, async () => {
     const file = join(dir, watchName(sessionId))
     const fresh = parseWatch(await readSmallFile(file, RECORD_MAX))
     if (fresh?.id !== id) return false
     await deps.beforeWrite?.()
     await writeFileAtomic(file, `${JSON.stringify({ ...fresh, wokeAt: at.toISOString() })}\n`, 0o600)
     return true
-  } finally {
-    await release()
-  }
+  })
+  return done?.value === true
 }
 
 export async function readPromptRecord(
@@ -190,19 +213,55 @@ export async function readPromptRecord(
   return dir ? parsePrompt(await readSmallFile(join(dir, promptName(sessionId)), RECORD_MAX)) : undefined
 }
 
-/** Writes the session's latest prompt, then removes records nobody changed for a day. */
+/**
+ * Notes the session's latest prompt under the session's lock, unless the record already holds a later one: two
+ * background hooks may finish out of order, and an older prompt never replaces a newer one (`at` is when the hook
+ * started, so it follows the order the prompts came in). The same prompt noted again at the same time or later
+ * replaces it. Then removes records nobody changed for a day. False when the lock stays held or a later prompt is kept.
+ * `beforeRemove` runs with the file's name before each removal takes its lock (for tests).
+ */
 export async function writePromptRecord(
   stateDir: string,
   sessionId: string,
   record: PromptRecord,
   now: Date,
-): Promise<void> {
+  opts: LockWait & { beforeRemove?: (name: string) => Promise<void> } = {},
+): Promise<boolean> {
   const dir = (await folder(stateDir, true))!
-  await writeFileAtomic(join(dir, promptName(sessionId)), `${JSON.stringify(record)}\n`, 0o600)
+  const done = await underLock(dir, hashOf(sessionId), opts.lockWait ?? LOCK_WAIT, async () => {
+    const file = join(dir, promptName(sessionId))
+    const old = parsePrompt(await readSmallFile(file, RECORD_MAX))
+    const t = Date.parse(record.at)
+    if (old && (old.prompt === record.prompt ? Date.parse(old.at) > t : Date.parse(old.at) >= t)) return false
+    await writeFileAtomic(file, `${JSON.stringify(record)}\n`, 0o600)
+    return true
+  })
+  await pruneRecords(dir, now, opts.beforeRemove)
+  return done?.value === true
+}
+
+/**
+ * Removes records nobody changed for a day. Each is checked again and removed under its session's lock, taken without
+ * waiting (a held one is left for next time), so a record its session rewrote meanwhile is never removed.
+ */
+async function pruneRecords(
+  dir: string,
+  now: Date,
+  beforeRemove?: (name: string) => Promise<void>,
+): Promise<void> {
+  const old = async (file: string) => {
+    const st = await stat(file).catch(() => null)
+    return Boolean(st && now.getTime() - st.mtimeMs > KEEP_MS)
+  }
   for (const name of await readdir(dir).catch(() => [] as string[])) {
-    if (!name.endsWith('.json')) continue
-    const st = await stat(join(dir, name)).catch(() => null)
-    if (st && now.getTime() - st.mtimeMs > KEEP_MS) await rm(join(dir, name), { force: true }).catch(() => {})
+    const hash = /^([0-9a-f]{32})\.(?:prompt\.)?json$/.exec(name)?.[1]
+    if (!hash) continue
+    const file = join(dir, name)
+    if (!(await old(file))) continue
+    await beforeRemove?.(name)
+    await underLock(dir, hash, null, async () => {
+      if (await old(file)) await rm(file, { force: true }).catch(() => {})
+    })
   }
 }
 
