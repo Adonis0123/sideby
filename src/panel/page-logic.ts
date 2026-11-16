@@ -2549,6 +2549,90 @@ export function uaGroupPending<D extends { id: string; at: string; sessionId?: s
 }
 
 /**
+ * Where a new toast goes among the shown ones: `replaces`, a keyed one with the same key and other text (the theme's
+ * toast, say); `merges`, one with the same text, and the same key when the new one has a key, so two marks that each
+ * carry an Undo stay two toasts with their own Undo.
+ */
+export function toastMerge<T extends { text: string; key: string | null }>(
+  shown: readonly T[],
+  text: string,
+  key?: string | null,
+): { replaces: T | undefined; merges: T | undefined } {
+  return {
+    replaces: key ? shown.find((x) => x.key === key && x.text !== text) : undefined,
+    merges: shown.find((x) => x.text === text && (!key || x.key === key)),
+  }
+}
+
+/**
+ * Pending Decisions grouped by Project, then by the Session that left them, as the Unattended page and `sideby
+ * unattended pending` show them (spec §3.37, ADR-0078). What nobody touched (`open`) comes first at every level: a
+ * Project with an open one before the others, the newest open one first, then the rest by their newest one, and the
+ * group without a Project (`project` '') last. Inside a Project a Session's open ones and its other ones are two
+ * blocks, so every open block comes before every replied one, each set ordered the same way; inside a block the
+ * replied ones before the done ones, each oldest first. Counts are per state.
+ */
+export function uaGroupByProject<
+  D extends {
+    id: string
+    at: string
+    sessionId?: string
+    project: string
+    projectName: string
+    state?: string
+  },
+>(
+  list: readonly D[],
+): {
+  key: string
+  project: string
+  name: string
+  open: number
+  replied: number
+  done: number
+  sessions: { key: string; first: D; items: D[] }[]
+}[] {
+  const rank = (d: D) => (d.state === 'replied' ? 1 : d.state === 'done' ? 2 : 0)
+  const time = (d: D) => Date.parse(d.at)
+  const order = (a: D, b: D) => rank(a) - rank(b) || time(a) - time(b) || a.id.localeCompare(b.id)
+  // Those with an open one first, the newest open one first; then by the newest one.
+  const lead = (items: readonly D[]): number[] => {
+    const open = items.filter((d) => rank(d) === 0).map(time)
+    return [open.length ? 0 : 1, -Math.max(...(open.length ? open : items.map(time)))]
+  }
+  const before = (a: readonly D[], b: readonly D[]) => {
+    const [x, y] = [lead(a), lead(b)]
+    return x[0]! - y[0]! || x[1]! - y[1]!
+  }
+  const projects = new Map<string, D[]>()
+  for (const d of list) projects.set(d.project, [...(projects.get(d.project) ?? []), d])
+  return [...projects]
+    .sort(([pa, a], [pb, b]) => Number(pa === '') - Number(pb === '') || before(a, b) || pa.localeCompare(pb))
+    .map(([project, items]) => {
+      const sessions = new Map<string, D[]>()
+      for (const d of items) {
+        const key = `${project}|${d.sessionId ? `s:${d.sessionId}` : 'none'}|${rank(d) === 0 ? 'open' : 'rest'}`
+        sessions.set(key, [...(sessions.get(key) ?? []), d])
+      }
+      const count = (r: number) => items.filter((d) => rank(d) === r).length
+      return {
+        key: `p:${project}`,
+        project,
+        name: items[0]!.projectName,
+        open: count(0),
+        replied: count(1),
+        done: count(2),
+        sessions: [...sessions]
+          .sort(([ka, a], [kb, b]) => before(a, b) || ka.localeCompare(kb))
+          .map(([key, s]) => {
+            const sorted = [...s].sort(order)
+            return { key, first: sorted[0]!, items: sorted }
+          }),
+      }
+    })
+}
+
+/**
  * A time typed into the Unattended page's 24-hour fields as `HH:MM`, or null when it is not one. Takes `7:30`,
  * `07:30`, `730`, `0730`, `7` (07:00), and the full-width colon a Chinese input method types; the field's `pattern`
  * accepts the same.

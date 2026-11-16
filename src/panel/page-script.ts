@@ -102,7 +102,9 @@ import {
   switchFailure,
   tailInView,
   taskFindings,
+  toastMerge,
   uaDayRuns,
+  uaGroupByProject,
   uaGroupPending,
   uaOnChoices,
   uaParseClock,
@@ -231,6 +233,7 @@ const LOGIC = [
   suggestAlias,
   suggestName,
   tailInView,
+  toastMerge,
   updatedAge,
   pinnedIn,
   hiddenIn,
@@ -248,6 +251,7 @@ const LOGIC = [
   uaToggleDay,
   uaSameSlot,
   uaGroupPending,
+  uaGroupByProject,
   uaParseClock,
   uaStepClock,
   uaShouldRead,
@@ -804,10 +808,11 @@ const MAIN = String.raw`
     opts = opts || {}
     const kind = opts.kind || 'ok'
     const ms = opts.duration || Math.max(2000, Math.min(8000, 1800 + text.length * 40 + (opts.action ? 4000 : 0) + (kind === 'fail' ? 2000 : 0)))
-    // A keyed toast (such as the theme) replaces the earlier one with that key.
-    const keyed = opts.key ? toasts.find((x) => x.key === opts.key && x.text !== text) : null
-    if (keyed) dismiss(keyed)
-    let item = toasts.find((x) => x.text === text)
+    // A keyed toast (such as the theme) replaces the earlier one with that key; the same text merges into one toast,
+    // unless they carry different keys (two Undos stay two).
+    const where = toastMerge(toasts, text, opts.key)
+    if (where.replaces) dismiss(where.replaces)
+    let item = where.merges
     if (item) {
       clearTimeout(item.timer)
       item.el.classList.remove('bump')
@@ -6392,7 +6397,7 @@ const MAIN = String.raw`
   const UA_MS = 15000
   const UA_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
   const UA_PRESET = { name: 'Weeknights', days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '23:00', end: '08:00' }
-  const ua = { data: null, error: null, loading: null, at: 0, nextAt: 0, inflight: new Map(), opening: false, choosing: false, choice: null, time: '08:00', timeInit: '08:00', busy: false, local: null, saves: 0, rows: [], seq: 0, gone: {}, open: {}, firstUse: false, focus: null, wait: undefined, waitSaves: 0 }
+  const ua = { data: null, error: null, loading: null, at: 0, nextAt: 0, inflight: new Map(), opening: false, choosing: false, choice: null, time: '08:00', timeInit: '08:00', busy: false, local: null, saves: 0, rows: [], seq: 0, gone: {}, open: {}, batch: 0, showReplied: {}, showDone: false, firstUse: false, focus: null, wait: undefined, waitSaves: 0 }
   let uaSaving = Promise.resolve()
   function uaStatusNow() { return (S.state && S.state.unattended) || null }
   // The latest status's count, less the ones being marked done right now (the page shows them gone already).
@@ -6781,7 +6786,7 @@ const MAIN = String.raw`
     for (const id of ids) { ua.gone[id] = true; ua.inflight.set(id, before) }
     uaRedraw()
     try {
-      const r = await api('/api/unattended/pending', all ? { all: true } : { id: ids[0] })
+      const r = await api('/api/unattended/pending', all ? { all: true } : ids.length > 1 ? { ids } : { id: ids[0] })
       const done = r.ids
       // A status read meanwhile already counts without them; only the one from before is lowered.
       if (before && uaStatusNow() === before) {
@@ -6789,21 +6794,28 @@ const MAIN = String.raw`
         if (Array.isArray(before.pendingIds)) before.pendingIds = before.pendingIds.filter((id) => !done.includes(id))
       }
       for (const id of ids) ua.inflight.delete(id)
-      toast(done.length > 1 ? tn('ua.doneMany', done.length) : t('ua.doneOne'), { key: 'ua-done', duration: 10000, action: BOOT.readOnly ? undefined : { label: t('toast.undo'), run: () => uaReopen(done) } })
+      // Each mark has its own toast and Undo: a second mark does not take the first one's away.
+      // Done elsewhere meanwhile (another tab, the CLI): nothing was marked here, so there is nothing to undo.
+      if (!done.length) toast(t('ua.doneAlready'))
+      else toast(done.length > 1 ? tn('ua.doneMany', done.length) : t('ua.doneOne'), { key: 'ua-done-' + (++ua.batch), duration: 10000, action: BOOT.readOnly ? undefined : { label: t('toast.undo'), run: () => uaReopen(done) } })
     } catch (e) {
       for (const id of ids) { delete ua.gone[id]; ua.inflight.delete(id) }
       toast(e.message, { kind: 'fail' })
     }
     uaRedraw()
   }
-  async function uaReopen(ids) {
+  // Undo after "Done", and "Reopen" in the done list (said: what the toast says then).
+  async function uaReopen(ids, said) {
     try {
-      for (const id of ids) await api('/api/unattended/pending', { id, done: false })
+      await api('/api/unattended/pending', { ids, done: false })
       for (const id of ids) delete ua.gone[id]
-      toast(t('ua.undone'), { key: 'ua-done' })
+      toast(said || t('ua.undone'))
     } catch (e) { toast(e.message, { kind: 'fail' }) }
     await load({ silent: true })
     await loadUa()
+    // The done list hid them while they were reopened; it shows what the answer says now.
+    for (const id of ids) delete ua.gone['re:' + id]
+    uaRedraw()
   }
   // "Back to the session": a running one is on the Sessions page; an ended one resumes with the copied command.
   function uaBack(d) {
@@ -6836,9 +6848,27 @@ const MAIN = String.raw`
     // Until the folder is fixed nothing is read; "nothing waits" would not be true.
     if (st.problem) return [head, h('p', { class: 'note', 'data-key': 'ua-blocked' }, t('ua.pendingBlocked'))]
     const list = ua.data.pending.filter((d) => !ua.gone[d.id])
-    if (!list.length) return [head, h('p', { class: 'note ua-empty', 'data-key': 'ua-none', 'data-ua': 'none' }, icon('check'), t('ua.pendingEmpty'))]
-    const groups = uaGroupPending(list)
-    const box = h('div', { class: 'ua-groups', 'data-key': 'ua-groups', 'data-ua': 'groups', 'data-patch': '' }, groups.map((g) => {
+    // Marked done in the last 30 days, folded at the end: one marked by mistake is reopened there.
+    const doneList = (ua.data.done || []).filter((d) => !ua.gone['re:' + d.id])
+    const doneFold = doneList.length
+      ? h('div', { class: 'ua-fold ua-done-fold', 'data-key': 'ua-df', 'data-ua': 'df', 'data-find': 'ua-done', 'data-patch': '' },
+        h('button', { class: 'group-toggle ua-fold-btn', type: 'button', 'data-key': 'ua-df-btn', 'aria-expanded': String(ua.showDone), 'aria-controls': 'ua-df-body', onclick: () => { ua.showDone = !ua.showDone; renderUaPage() } },
+          icon('chevron', 'chev'), h('span', null, tn('ua.doneShow', doneList.length))),
+        ua.showDone
+          ? h('div', { class: 'ua-fold-body', id: 'ua-df-body', 'data-key': 'ua-df-body', 'data-patch': '' },
+            h('p', { class: 'muted small ua-fold-note' }, t('ua.doneListNote')),
+            h('ul', { class: 'ua-items ua-done-list', 'data-patch': '' }, doneList.map((x) => h('li', { class: 'ua-item', 'data-key': 'ua-d-' + x.id, 'data-ua': 'd-' + x.id, 'data-patch': '' },
+              h('div', { class: 'ua-item-meta' },
+                h('span', { class: 'chip chip-sm' }, x.project ? x.projectName : t('ua.projOther')),
+                h('span', { class: 'muted small' }, t('ua.doneWhen', { when: uaWhenShort(x.doneAt) }))),
+              h('p', { class: 'ua-text is-clamped' }, x.text),
+              h('div', { class: 'ua-item-actions' },
+                h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'ua-reopen-' + x.id, disabled: BOOT.readOnly, onclick: () => { ua.gone['re:' + x.id] = true; uaRedraw(); uaReopen([x.id], t('ua.reopenedOne')) } }, icon('refresh'), t('ua.reopen')))))))
+          : null)
+      : null
+    if (!list.length) return [head, h('p', { class: 'note ua-empty', 'data-key': 'ua-none', 'data-ua': 'none' }, icon('check'), t('ua.pendingEmpty')), doneFold]
+    // By Project (ADR-0078), then by the session that left them; what nobody touched first at every level.
+    const session = (g) => {
       const d = g.first
       // Kept outside a session (a defer typed in a terminal): no account or tool to name.
       const known = d.account || (d.family && d.family !== 'unknown')
@@ -6855,22 +6885,53 @@ const MAIN = String.raw`
         h('ul', { class: 'ua-items', 'data-patch': '' }, g.items.map((x) => {
           const long = x.text.length > 280 || x.text.split('\n').length > 5
           const open = Boolean(ua.open[x.id])
-          return h('li', { class: 'ua-item', 'data-key': 'ua-i-' + x.id, 'data-ua': 'i-' + x.id, 'data-patch': '' },
+          const replied = x.state === 'replied' && x.repliedAt
+          return h('li', { class: 'ua-item' + (replied ? ' is-replied' : ''), 'data-key': 'ua-i-' + x.id, 'data-ua': 'i-' + x.id, 'data-patch': '' },
             h('div', { class: 'ua-item-meta' },
               h('span', { class: 'chip chip-sm' + (x.kind === 'question' ? ' chip-accent' : x.kind === 'permission' ? ' chip-warn' : '') }, t('ua.kind.' + x.kind)),
               h('time', { class: 'muted small', datetime: x.at }, uaWhenShort(x.at)),
               x.waited ? h('span', { class: 'muted small' }, t('ua.waited', { n: x.waited })) : null,
-              x.agentType ? h('span', { class: 'muted small' }, t('ua.agent', { type: x.agentType })) : null),
+              x.agentType ? h('span', { class: 'muted small' }, t('ua.agent', { type: x.agentType })) : null,
+              replied ? h('span', { class: 'chip chip-sm ua-replied', 'data-tip': t('ua.repliedTip', { when: uaWhenShort(x.repliedAt) }) }, t('ua.replied', { ago: ago(x.repliedAt) })) : null,
+              x.replyCheck === 'no-record' ? h('span', { class: 'muted small' }, t('ua.noRecord')) : null),
             h('p', { class: 'ua-text' + (long && !open ? ' is-clamped' : '') }, x.text),
             h('div', { class: 'ua-item-actions' },
               long ? h('button', { class: 'link-btn small', type: 'button', 'data-key': 'ua-more-' + x.id, 'aria-expanded': String(open), onclick: () => { ua.open[x.id] = !open; renderUaPage() } }, t(open ? 'ua.less' : 'ua.more')) : null,
               h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'ua-done-' + x.id, disabled: off, onclick: () => uaDone([x.id]) }, icon('check'), t('ua.done'))))
         })))
+    }
+    // In each Project the untouched ones show; the ones written in afterwards fold under them (writing there does not
+    // mean it was finished), each with its own Done, and a counted mark for all of them with a caution.
+    const box = h('div', { class: 'ua-groups', 'data-key': 'ua-groups', 'data-ua': 'groups', 'data-patch': '' }, uaGroupByProject(list).map((p, i) => {
+      const counts = [p.open ? tn('ua.projOpen', p.open) : null, p.replied ? tn('ua.projReplied', p.replied) : null].filter(Boolean).join(' · ')
+      const openBlocks = p.sessions.filter((g) => g.first.state !== 'replied')
+      const repliedBlocks = p.sessions.filter((g) => g.first.state === 'replied')
+      const repliedIds = repliedBlocks.flatMap((g) => g.items).map((x) => x.id)
+      const shown = Boolean(ua.showReplied[p.key])
+      const name = p.project ? p.name : t('ua.projOther')
+      return h('section', { class: 'ua-proj', 'data-key': 'ua-p-' + p.key, 'data-ua': 'p-' + p.key, 'data-patch': '', 'aria-label': name },
+        h('div', { class: 'ua-proj-head', 'data-patch': '' },
+          h('div', { class: 'ua-proj-who' },
+            h('h4', { class: 'ua-proj-name', 'data-tip': p.project || null }, icon('folder'), h('span', null, name)),
+            h('span', { class: 'muted small' }, counts))),
+        openBlocks.length ? h('div', { class: 'ua-proj-sessions', 'data-key': 'ua-po-' + p.key, 'data-patch': '' }, openBlocks.map(session)) : null,
+        repliedIds.length
+          ? h('div', { class: 'ua-fold', 'data-key': 'ua-rf-' + p.key, 'data-ua': 'rf-' + p.key, 'data-patch': '' },
+            h('button', { class: 'group-toggle ua-fold-btn', type: 'button', 'data-key': 'ua-rf-btn-' + p.key, 'aria-expanded': String(shown), 'aria-controls': 'ua-rf-' + i, onclick: () => { ua.showReplied[p.key] = !shown; renderUaPage() } },
+              icon('chevron', 'chev'), h('span', null, tn('ua.repliedShow', repliedIds.length))),
+            shown
+              ? h('div', { class: 'ua-fold-body', id: 'ua-rf-' + i, 'data-key': 'ua-rb-' + p.key, 'data-patch': '' },
+                h('div', { class: 'ua-fold-note', 'data-patch': '' },
+                  h('p', { class: 'muted small' }, t('ua.repliedCaution')),
+                  h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'ua-rdone-' + p.key, disabled: off, onclick: () => uaDone(repliedIds) }, icon('check'), tn('ua.repliedBatch', repliedIds.length))),
+                h('div', { class: 'ua-proj-sessions', 'data-patch': '' }, repliedBlocks.map(session)))
+              : null)
+          : null)
     }))
-    const all = list.length > 1 ? h('button', { class: 'link-btn small', type: 'button', 'data-key': 'ua-all', disabled: off, onclick: () => uaDone(list.map((x) => x.id), true) }, t('ua.allDone')) : null
-    return [h('div', { class: 'page-sec-head ua-pending-head' },
+    const all = list.length > 1 ? h('button', { class: 'link-btn small', type: 'button', 'data-key': 'ua-all', disabled: off, onclick: () => uaDone(list.map((x) => x.id), true) }, tn('ua.allDoneN', list.length)) : null
+    return [h('div', { class: 'page-sec-head ua-pending-head', 'data-find': 'ua-pending' },
       h('div', { class: 'ua-sec-row' }, h('h3', { class: 'page-sec' }, t('ua.pending'), ' ', h('span', { class: 'tab-count' }, String(list.length))), all),
-      h('p', { class: 'muted small' }, t('ua.pendingNote'))), box]
+      h('p', { class: 'muted small' }, t('ua.pendingNote'))), box, doneFold]
   }
 
   // ---------- Answer Wait (ADR-0077) ----------
@@ -6976,6 +7037,7 @@ const MAIN = String.raw`
   }
   // The Search Catalog's actions: to the page, then the chooser open, or the "Add a Slot" button shown.
   function uaGo(what) {
+    if (what === 'done' && !ua.showDone) { ua.showDone = true; renderUaPage() }
     setPage('unattended')
     let tries = 0
     const look = () => {
@@ -6983,7 +7045,8 @@ const MAIN = String.raw`
       if (box.hidden || (!ua.data && !ua.error)) { if (++tries < 40) setTimeout(look, 100); return }
       const st = uaStatusNow()
       if (what === 'on' && st && uaStatusParts(st).state !== 'on' && !BOOT.readOnly && !st.problem) { if (!ua.choosing) uaOpenChooser(); return }
-      const el = box.querySelector(what === 'on' ? '[data-key="ua-main"]' : what === 'wait' ? '[data-find="ua-wait"]' : '[data-find="ua-add"]')
+      const el = box.querySelector(what === 'on' ? '[data-key="ua-main"]' : what === 'wait' ? '[data-find="ua-wait"]' : what === 'pending' ? '.ua-pending-head' : what === 'done' ? '[data-find="ua-done"]' : '[data-find="ua-add"]') ||
+        (what === 'done' ? box.querySelector('.ua-pending-head') : null)
       if (!el) return
       el.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'center' })
       palFlash(el)
@@ -7386,6 +7449,8 @@ const MAIN = String.raw`
     'unattended-on': { run: () => uaGo('on'), ok: () => Boolean(uaStatusNow()), nav: true },
     'unattended-add-slot': { run: () => uaGo('add'), ok: () => Boolean(uaStatusNow()), nav: true },
     'unattended-wait': { run: () => uaGo('wait'), ok: () => Boolean(uaStatusNow()), nav: true },
+    'unattended-pending': { run: () => uaGo('pending'), ok: () => Boolean(uaStatusNow()), nav: true },
+    'unattended-pending-done': { run: () => uaGo('done'), ok: () => Boolean(uaStatusNow()), nav: true },
     'limit-reset': { run: openResetPick, ok: () => resetCandidates().length > 0 },
   }
   function palHealth() {
@@ -8009,7 +8074,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.reset', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.expired', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.advisor', 'ai.ask.network', 'ai.ask.unattended', 'ai.ask.progress', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.commands', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.reset', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.expired', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.advisor', 'ai.ask.network', 'ai.ask.unattended', 'ai.ask.pending', 'ai.ask.progress', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.commands', 'ai.ask.tool']
   // Network Guard (spec §3.35): one dialog with the switch, the allowed countries and the newest result per address.
   // Countries are never ticked for the user, the current one included: a wrong network would allow itself.
   const NET_COMMON = ['US', 'JP', 'SG', 'GB', 'DE', 'FR', 'NL', 'CA', 'AU', 'KR', 'TW', 'HK']

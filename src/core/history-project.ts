@@ -37,6 +37,16 @@ async function worktreeMain(gitFile: string): Promise<string | undefined> {
 /** Resolves Projects, remembering each working directory for the life of this object. */
 export class ProjectResolver {
   #memo = new Map<string, Promise<Project>>()
+  readonly #nearest: boolean
+
+  /**
+   * With `nearest`, a working directory that is gone counts as the repository of its nearest folder that is still
+   * there, when that folder is in one (a deleted worktree under `<repo>/.worktrees/` folds back into the repository;
+   * Pending Decisions, ADR-0078). Without it, as Session History has it: the root the Host recorded, else itself.
+   */
+  constructor(opts: { nearest?: boolean } = {}) {
+    this.#nearest = Boolean(opts.nearest)
+  }
 
   resolve(cwd: string | undefined, hostRoot?: string): Promise<Project> {
     const key = `${cwd ?? ''}\0${hostRoot ?? ''}`
@@ -55,16 +65,24 @@ export class ProjectResolver {
       const root = resolve(hostRoot && isAbsolute(hostRoot) ? hostRoot : cwd)
       const main =
         (await kind(join(root, '.git'))) === 'file' ? await worktreeMain(join(root, '.git')) : undefined
-      return { path: main ?? root, gone: true }
+      if (main || !this.#nearest) return { path: main ?? root, gone: true }
+      let there = dirname(root)
+      while ((await kind(there)) !== 'dir' && dirname(there) !== there) there = dirname(there)
+      return { path: (await repoOf(there)) ?? root, gone: true }
     }
-    for (let dir = resolve(cwd); ; ) {
-      const git = await kind(join(dir, '.git'))
-      if (git === 'dir') return { path: dir, gone: false }
-      if (git === 'file') return { path: (await worktreeMain(join(dir, '.git'))) ?? dir, gone: false }
-      const up = dirname(dir)
-      if (up === dir) return { path: resolve(cwd), gone: false }
-      dir = up
-    }
+    return { path: (await repoOf(resolve(cwd))) ?? resolve(cwd), gone: false }
+  }
+}
+
+/** The repository `dir` is in (a worktree's main repository), or undefined outside any. */
+async function repoOf(dir: string): Promise<string | undefined> {
+  for (let at = dir; ; ) {
+    const git = await kind(join(at, '.git'))
+    if (git === 'dir') return at
+    if (git === 'file') return (await worktreeMain(join(at, '.git'))) ?? at
+    const up = dirname(at)
+    if (up === at) return undefined
+    at = up
   }
 }
 
@@ -102,4 +120,16 @@ export function projectNames(paths: Iterable<string>): Map<string, string> {
     }
   }
   return out
+}
+
+/**
+ * The Projects a name given to `--project` may mean: the one whose shown name it is, else every Project whose path
+ * ends with it. A shown name is unique, so it wins over a path tail it shares with a longer path (`a/app` for
+ * `/a/app` beside `/x/a/app`).
+ */
+export function projectsNamed(names: ReadonlyMap<string, string>, p: string): string[] {
+  const all = [...names.keys()]
+  const named = all.filter((x) => names.get(x) === p)
+  if (named.length === 1) return named
+  return all.filter((x) => names.get(x) === p || x.endsWith(`/${p}`))
 }

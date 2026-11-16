@@ -353,6 +353,71 @@ describe('the Unattended page (spec §3.37)', () => {
     })
   })
 
+  it('gives each one its Project and state, marks a list done and back in one request, and lists the done ones (ADR-0078)', async () => {
+    await withFakeHome(async (h) => {
+      const p = await panel(h)
+      try {
+        const state = join(h.env.XDG_STATE_HOME ?? h.path('.local/state'), 'sideby')
+        await h.mkdir('code/app/.git')
+        const keep = (sessionId: string, text: string, cwd?: string) =>
+          addPendingDecision(state, {
+            kind: 'question',
+            family: 'demo',
+            account: 'demo:main',
+            sessionId,
+            ...(cwd ? { cwd: h.path(cwd) } : {}),
+            text,
+          })
+        const a = await keep(LIVE, 'Which database?', 'code/app')
+        const b = await keep(ENDED, 'Publish it?', 'code/app')
+        const c = await keep(ENDED, 'Somewhere else?')
+        const page = (await p.post('/api/unattended')).body as unknown as PanelUnattended
+        const by = (id: string) => page.pending.find((x) => x.id === id)!
+        assert.deepEqual(
+          [by(a.id).project, by(a.id).projectName, by(a.id).state],
+          ['~/code/app', 'app', 'open'],
+        )
+        // sideby reads no session records of this Family, and says so.
+        assert.equal(by(a.id).replyCheck, 'unsupported')
+        assert.deepEqual([by(c.id).project, by(c.id).projectName], ['', ''])
+        assert.deepEqual(
+          page.projects.map((x) => [x.project, x.open]),
+          [
+            ['~/code/app', 2],
+            ['', 1],
+          ],
+        )
+        assert.equal((await p.post('/api/unattended/pending', { ids: [] })).status, 400)
+        assert.equal((await p.post('/api/unattended/pending', { ids: [1] })).status, 400)
+        assert.deepEqual((await p.post('/api/unattended/pending', { ids: [a.id, b.id] })).body, {
+          ids: [a.id, b.id],
+        })
+        assert.equal((await p.state()).unattended!.pending, 1)
+        // The done list holds them, so one marked by mistake can be reopened; Projects count only open ones.
+        const marked = (await p.post('/api/unattended')).body as unknown as PanelUnattended
+        assert.deepEqual(marked.done.map((x) => x.id).sort(), [a.id, b.id].sort())
+        assert.ok(marked.done.every((x) => x.state === 'done' && x.projectName === 'app'))
+        assert.deepEqual(
+          marked.projects.map((x) => x.project),
+          [''],
+        )
+        // A list marks only what is still open, and answers with those.
+        assert.deepEqual((await p.post('/api/unattended/pending', { ids: [a.id] })).body, { ids: [] })
+        // The toast's undo opens both again, in one request; again, nothing more opens.
+        assert.deepEqual((await p.post('/api/unattended/pending', { ids: [a.id, b.id], done: false })).body, {
+          ids: [a.id, b.id],
+        })
+        assert.deepEqual((await p.post('/api/unattended/pending', { ids: [a.id, b.id], done: false })).body, {
+          ids: [],
+        })
+        const back = (await p.post('/api/unattended')).body as unknown as PanelUnattended
+        assert.deepEqual([back.pending.length, back.done.length], [3, 0])
+      } finally {
+        await close(p.server)
+      }
+    })
+  })
+
   it('keeps the Panel checks, and a read-only Panel shows everything but writes nothing', async () => {
     await withFakeHome(async (h) => {
       const rw = await panel(h)

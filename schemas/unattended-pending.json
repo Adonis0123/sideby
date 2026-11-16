@@ -4,7 +4,8 @@
   "type": "object",
   "required": [
     "schemaVersion",
-    "pending"
+    "pending",
+    "projects"
   ],
   "properties": {
     "schemaVersion": {
@@ -14,83 +15,182 @@
     "pending": {
       "type": "array",
       "items": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "at",
+              "kind",
+              "family",
+              "text"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "at": {
+                "type": "string",
+                "description": "When it was kept; ISO."
+              },
+              "kind": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "question"
+                  },
+                  {
+                    "type": "string",
+                    "const": "permission"
+                  },
+                  {
+                    "type": "string",
+                    "const": "deferred"
+                  }
+                ],
+                "description": "question: the ask tool was refused; permission: a permission request Claude Code was about to show was refused; deferred: kept with `sideby unattended defer`."
+              },
+              "family": {
+                "type": "string"
+              },
+              "account": {
+                "type": "string",
+                "description": "The account the session ran as."
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "agentId": {
+                "type": "string",
+                "description": "The subagent a permission request came from."
+              },
+              "agentType": {
+                "type": "string",
+                "description": "Its type, such as `general-purpose`."
+              },
+              "text": {
+                "type": "string",
+                "description": "The question and its options, the tool and what it was to do, or the deferred text; at most 4000 characters."
+              },
+              "waited": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Minutes the question or permission prompt was on screen with nobody answering before the session went on without an answer (Answer Wait, ADR-0077). Absent when it was never shown."
+              },
+              "doneAt": {
+                "type": "string",
+                "description": "When it was marked done; ISO."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "project",
+              "projectName",
+              "state"
+            ],
+            "properties": {
+              "project": {
+                "type": "string",
+                "description": "The Project: the git repository of its folder (a worktree counts as its main repository; a folder that is gone counts as the repository of the nearest folder still there), else the folder itself; \"\" when it has no folder."
+              },
+              "projectName": {
+                "type": "string",
+                "description": "The Project's short name, as Session History shows it; \"\" when it has no folder."
+              },
+              "state": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "open"
+                  },
+                  {
+                    "type": "string",
+                    "const": "replied"
+                  },
+                  {
+                    "type": "string",
+                    "const": "done"
+                  }
+                ],
+                "description": "done: marked done; replied: not marked, and the user typed in its session after it was kept (that does not tell whether it was finished); open: not marked, and nothing typed after it."
+              },
+              "repliedAt": {
+                "type": "string",
+                "description": "With `replied`: when the user first typed in the session after it; ISO."
+              },
+              "replyCheck": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "no-record"
+                  },
+                  {
+                    "type": "string",
+                    "const": "unsupported"
+                  }
+                ],
+                "description": "Why sideby could not tell whether the user typed in the session afterwards: its session record is gone, or sideby reads no session records of this Family. Only on an open one with a session id."
+              }
+            }
+          }
+        ]
+      },
+      "description": "Open Pending Decisions, oldest first; with --all the done ones too; with --project only that Project's."
+    },
+    "projects": {
+      "type": "array",
+      "items": {
         "type": "object",
         "required": [
-          "id",
-          "at",
-          "kind",
-          "family",
-          "text"
+          "project",
+          "projectName",
+          "open",
+          "replied",
+          "done"
         ],
         "properties": {
-          "id": {
-            "type": "string"
-          },
-          "at": {
+          "project": {
             "type": "string",
-            "description": "When it was kept; ISO."
+            "description": "The Project, as in each row; \"\" for those without a folder."
           },
-          "kind": {
-            "anyOf": [
-              {
-                "type": "string",
-                "const": "question"
-              },
-              {
-                "type": "string",
-                "const": "permission"
-              },
-              {
-                "type": "string",
-                "const": "deferred"
-              }
-            ],
-            "description": "question: the ask tool was refused; permission: a permission request Claude Code was about to show was refused; deferred: kept with `sideby unattended defer`."
-          },
-          "family": {
-            "type": "string"
-          },
-          "account": {
+          "projectName": {
             "type": "string",
-            "description": "The account the session ran as."
+            "description": "Its short name; \"\" for those without a folder."
           },
-          "sessionId": {
-            "type": "string"
-          },
-          "cwd": {
-            "type": "string"
-          },
-          "agentId": {
-            "type": "string",
-            "description": "The subagent a permission request came from."
-          },
-          "agentType": {
-            "type": "string",
-            "description": "Its type, such as `general-purpose`."
-          },
-          "text": {
-            "type": "string",
-            "description": "The question and its options, the tool and what it was to do, or the deferred text; at most 4000 characters."
-          },
-          "waited": {
+          "open": {
             "type": "integer",
-            "minimum": 1,
-            "description": "Minutes the question or permission prompt was on screen with nobody answering before the session went on without an answer (Answer Wait, ADR-0077). Absent when it was never shown."
+            "description": "Open ones nobody typed after."
           },
-          "doneAt": {
-            "type": "string",
-            "description": "When it was marked done; ISO."
+          "replied": {
+            "type": "integer",
+            "description": "Open ones the user typed in their session after."
+          },
+          "done": {
+            "type": "integer",
+            "description": "Done ones (only with --all)."
           }
         }
       },
-      "description": "Open Pending Decisions, oldest first; with --all the done ones too."
+      "description": "Each Project with a listed one, as the Panel orders them: those with an open one first (the newest open one first), then the rest by their newest one, the one without a folder last."
     },
     "done": {
       "type": "array",
       "items": {
         "type": "string"
       },
-      "description": "`pending done`: the ids marked done."
+      "description": "`pending done`: the ids this call marked done (not ones done already)."
+    },
+    "reopened": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "`pending reopen`: the ids this call opened again (not ones open already)."
     },
     "_notice": {
       "type": "object",
@@ -155,5 +255,5 @@
       "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
     }
   },
-  "title": "sideby unattended pending [done <id>|--all] --json"
+  "title": "sideby unattended pending [--project <name>] [done <id>|--ids|--all|--replied] [reopen <id>|--ids] --json"
 }

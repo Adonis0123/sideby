@@ -99,7 +99,9 @@ import {
   tailInView,
   taskFindings,
   taskPrompt,
+  toastMerge,
   uaDayRuns,
+  uaGroupByProject,
   uaGroupPending,
   uaOnChoices,
   uaParseClock,
@@ -3026,6 +3028,76 @@ describe('the Unattended page (spec §3.37)', () => {
       ],
     )
     assert.equal(groups[2]!.first.id, 'f')
+  })
+
+  it('keeps two marks with their own Undo as two toasts, and merges or replaces the rest as before', () => {
+    const shown = [
+      { text: 'Marked done.', key: 'ua-done-1' },
+      { text: 'Dark theme.', key: 'theme' },
+      { text: 'Copied.', key: null },
+    ]
+    // A second mark: same text, its own key, so it neither merges into nor replaces the first.
+    assert.deepEqual(toastMerge(shown, 'Marked done.', 'ua-done-2'), {
+      replaces: undefined,
+      merges: undefined,
+    })
+    // The same key and text bumps the one shown; the same key with other text replaces it.
+    assert.equal(toastMerge(shown, 'Marked done.', 'ua-done-1').merges, shown[0])
+    assert.deepEqual(toastMerge(shown, 'Light theme.', 'theme'), { replaces: shown[1], merges: undefined })
+    // Without a key, the same text merges whatever key the shown one has.
+    assert.equal(toastMerge(shown, 'Copied.').merges, shown[2])
+    assert.equal(toastMerge(shown, 'Marked done.').merges, shown[0])
+    assert.deepEqual(toastMerge(shown, 'Undone.'), { replaces: undefined, merges: undefined })
+  })
+
+  it('groups Pending Decisions by Project then Session, what nobody touched first at every level (ADR-0078)', () => {
+    const d = (id: string, hour: number, project: string, sessionId?: string, state = 'open') => ({
+      id,
+      at: `2026-11-16T0${hour}:00:00Z`,
+      project,
+      projectName: project.split('/').pop() ?? '',
+      state,
+      ...(sessionId ? { sessionId } : {}),
+    })
+    const groups = uaGroupByProject([
+      // shop: one session replied to (newest of all), one with an open one.
+      d('a', 9, '/c/shop', 's1', 'replied'),
+      d('b', 2, '/c/shop', 's2'),
+      d('c', 3, '/c/shop', 's2', 'replied'),
+      d('i', 1, '/c/shop', 's2'),
+      // blog: only replied ones, though newer than every open one.
+      d('e', 8, '/c/blog', 's3', 'replied'),
+      // app: its open one is the newest open one.
+      d('f', 4, '/c/app', 's4'),
+      d('g', 5, '/c/app', 's4', 'done'),
+      // No folder: last, whatever its time.
+      d('h', 7, ''),
+    ])
+    assert.deepEqual(
+      groups.map((g) => [g.name, g.open, g.replied, g.done]),
+      [
+        ['app', 1, 0, 1],
+        ['shop', 2, 2, 0],
+        ['blog', 0, 1, 0],
+        ['', 1, 0, 0],
+      ],
+    )
+    // A session with open and replied ones is two blocks, so no replied one comes before an open one.
+    const shop = groups[1]!
+    assert.deepEqual(
+      shop.sessions.map((s) => [s.key, s.items.map((x) => x.id)]),
+      [
+        ['/c/shop|s:s2|open', ['i', 'b']],
+        ['/c/shop|s:s1|rest', ['a']],
+        ['/c/shop|s:s2|rest', ['c']],
+      ],
+    )
+    assert.equal(shop.sessions[0]!.first.id, 'i')
+    assert.deepEqual(
+      groups[0]!.sessions.map((s) => s.items.map((x) => x.id)),
+      [['f'], ['g']],
+    )
+    assert.equal(groups[3]!.sessions[0]!.key, '|none|open')
   })
 
   it('reads a typed 24-hour time, and the field accepts exactly what it reads', () => {

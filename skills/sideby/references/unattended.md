@@ -75,10 +75,21 @@ When a refusal or a note in your session starts "No answer after 10 minutes", "N
 
 ```sh
 sideby unattended --json            # on or off and why, until when, the next Slot, open decisions, coverage, attended sessions
-sideby unattended pending --json    # each question, refused permission or skipped action, with account, session and folder
-sideby unattended pending done <id> --json   # or --all, once the user has dealt with them
+sideby unattended pending --json    # each question, refused permission or skipped action, with account, session, folder, project and state
+sideby unattended pending --project shop --json   # only one project (its short name, or a path)
+sideby unattended pending done <id> --json        # once the user says this one is dealt with
+sideby unattended pending done --ids <a>,<b> --json   # the ones the user agreed to, by id
+sideby unattended pending reopen <id> --json      # or --ids <a>,<b>: put back ones marked done by mistake
 ```
+
+**By project, and what was already dealt with** (ADR-0078). Each Pending Decision has a `project` (the git repository of the folder the session worked in; a worktree, also a deleted one under the repository, counts as the repository; `""` without a folder) and a `projectName`; `projects` lists each project with its `open`, `replied` and `done` counts, what nobody touched first. `state` says where each one stands:
+
+- `open`: nobody typed in its session after it was kept. Start with these.
+- `replied`: the user wrote in that session afterwards (`repliedAt`), read from the session's own record (Claude and Codex). Say it that way, never "handled" or "probably handled": in one hand check about a third of these were not finished. Slash commands, `!` lines, Messages from other sessions, background notifications and sideby's own notes do not count.
+- `done`: marked done (only with `--all`).
+
+`replyCheck: "no-record"` means the session's record is gone, so sideby cannot tell; `"unsupported"` that it reads no session records of that tool (Grok, pi). When the user asks which ones they already dealt with, list the open ones by project, and say per project how many they wrote in afterwards; those still need a look. Before marking anything done, list each one you would mark (id, project, text) for the user to see, and mark only the ones they agree to, with `done <id>` or `done --ids <a>,<b>`. Never mark a whole project or every `replied` one on your own (`done --replied`, `done --project`, `--all` exist for the user who asks for exactly that). One marked by mistake goes back with `sideby unattended pending reopen <id>` (or `--ids`).
 
 Go through the open ones with the user (one with `waited` was on screen that many minutes before the session went on without an answer; a `deferred` one that starts "The session stopped" is a session whose turn kept failing after three retries; a `permission` one names the tool, for Bash only the program and the model's description of the step, and `agentType` when a subagent asked; the whole command is in the session itself). A decision with a `sessionId` can be continued in its session: `sideby sessions copy <sessionId> --as resume` copies the command. Done ones are deleted 30 days later. A plugin can be told when a stretch ends through the `unattended.ended` event (`docs/guide/plugins.md`); sideby itself sends no notification.
 
-The same is on the Panel's **Unattended** tab (`sideby ui`): the status with **Turn on now**, the Schedule, **If nobody answers** (the Answer Wait), and the Pending Decisions with **Done** (one that went on after a wait says "No answer for 10 min"). Point the user there when they prefer clicking.
+The same is on the Panel's **Unattended** tab (`sideby ui`): the status with **Turn on now**, the Schedule, **If nobody answers** (the Answer Wait), and the Pending Decisions by project, then by session, with **Done** (one that went on after a wait says "No answer for 10 min"); in each project the untouched ones show and the ones written in afterwards fold under **You wrote afterwards (N)**, where each has its own **Done** and a counted button marks them all after a caution. Every **Done** has its own Undo, and the folded **Done (N)** list at the end has **Reopen**. Point the user there when they prefer clicking.

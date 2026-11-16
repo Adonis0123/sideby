@@ -95,7 +95,7 @@ import {
 import { createRuntime, type Runtime, UnknownFamilyError } from '../runtime.ts'
 import type { Account, Finding, QuotaResult, QuotaWindow } from '../types.ts'
 import { type ParsedArgs, UsageError } from './args.ts'
-import { c, clock, compactNumber, quotaText, table, truncate, tuningLines, usageText } from './format.ts'
+import { ago, c, clock, compactNumber, quotaText, table, truncate, tuningLines, usageText } from './format.ts'
 
 export interface Io {
   out(s: string): void
@@ -5568,57 +5568,198 @@ export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
   }
 
   if (sub === 'pending') {
-    const { listPendingDecisions, markPendingDone } = await import('../core/unattended-pending.ts')
+    const { findPendingDecision, listPendingDecisions, markPendingDone, reopenPendingDecisions } =
+      await import('../core/unattended-pending.ts')
+    const { pendingOverview, pendingProjectsNamed } = await import('../core/unattended-followup.ts')
+    const { uaGroupByProject } = await import('../panel/page-logic.ts')
     const [action, ...args] = rest
-    if (action === 'done') {
-      allow('all')
-      const all = a.flags.has('all')
-      if (all === Boolean(args.length) || args.length > 1)
+    const overview = async (all: boolean) =>
+      pendingOverview({
+        decisions: await listPendingDecisions(paths.stateDir, { all, now: now() }),
+        accounts: await rt.accounts(),
+        stateDir: paths.stateDir,
+      })
+    // `--project <name>`: one Project, as `sideby history --project` reads a name; an unknown or unclear one names
+    // the choices.
+    const projectFlag = a.flags.get('project')
+    if (a.flags.has('project') && (typeof projectFlag !== 'string' || !projectFlag.trim()))
+      throw new UsageError(
+        '--project takes a project name, such as --project shop (`sideby unattended pending` shows them)',
+      )
+    const projectOf = async (o: import('../core/unattended-followup.ts').PendingOverview) => {
+      if (typeof projectFlag !== 'string') return undefined
+      const hit = await pendingProjectsNamed(o.projects, projectFlag, paths.home)
+      const choices = o.projects
+        .filter((p) => p.project)
+        .map((p) => p.projectName)
+        .join(', ')
+      if (hit.length === 1) return hit[0]!
+      throw new UsageError(
+        hit.length
+          ? `"${projectFlag}" names ${hit.length} projects (${hit.map((p) => tildify(p, paths.home)).join(', ')}); give more of its path`
+          : `no project named "${projectFlag}" has a Pending Decision${choices ? `; the projects are: ${choices}` : ''}`,
+      )
+    }
+    // `--ids a,b`: whole ids, as `sideby unattended pending` prints them.
+    const idList = (): string[] | undefined => {
+      if (!a.flags.has('ids')) return undefined
+      const v = a.flags.get('ids')
+      const list =
+        typeof v === 'string'
+          ? [
+              ...new Set(
+                v
+                  .split(',')
+                  .map((x) => x.trim())
+                  .filter(Boolean),
+              ),
+            ]
+          : []
+      if (!list.length)
         throw new UsageError(
-          'usage: sideby unattended pending done <id> | --all (the id is in `sideby unattended pending`)',
+          '--ids takes ids separated by commas, such as --ids <id>,<id> (`sideby unattended pending` shows them)',
         )
+      return list
+    }
+    // What is still open afterwards: the full list for --json, else only how many (no session record is read).
+    const left = async (key: 'done' | 'reopened', ids: string[]) => {
+      if (asJson) {
+        const o = await overview(false)
+        json(io, { [key]: ids, pending: o.rows, projects: o.projects })
+        return undefined
+      }
+      return (await listPendingDecisions(paths.stateDir, { now: now() })).length
+    }
+    if (action === 'done') {
+      allow('all', 'replied', 'project', 'ids')
+      const all = a.flags.has('all')
+      const replied = a.flags.has('replied')
+      const byProject = a.flags.has('project')
+      const ids = idList()
+      const usage =
+        'usage: sideby unattended pending done <id> | --ids <a,b> | --all | --replied [--project <name>] | --project <name> (ids and projects are in `sideby unattended pending`)'
+      const ways = [all, args.length > 0, ids !== undefined, replied || byProject].filter(Boolean).length
+      if (ways !== 1 || args.length > 1) throw new UsageError(usage)
       let done: import('../core/unattended-pending.ts').PendingDecision[]
+      let picked = ids
+      if (replied || byProject) {
+        const o = await overview(false)
+        const project = await projectOf(o)
+        picked = o.rows
+          .filter(
+            (r) => (!replied || r.state === 'replied') && (project === undefined || r.project === project),
+          )
+          .map((r) => r.id)
+      }
       try {
-        done = await markPendingDone(paths.stateDir, all ? 'all' : args[0]!, now())
+        done =
+          picked === undefined
+            ? await markPendingDone(paths.stateDir, all ? 'all' : args[0]!, now())
+            : await markPendingDone(paths.stateDir, picked, now())
       } catch (err) {
         throw new UserError((err as Error).message, { code: 'no-pending' })
       }
-      const pending = await listPendingDecisions(paths.stateDir, { now: now() })
-      if (asJson) json(io, { done: done.map((d) => d.id), pending })
+      const open = await left(
+        'done',
+        done.map((d) => d.id),
+      )
+      if (open === undefined) return 0
+      if (!done.length)
+        io.out(
+          picked === undefined
+            ? `Nothing to mark: it is done already. ${open} still open.`
+            : ids
+              ? `Nothing to mark: those are done already. ${open} still open.`
+              : `Nothing to mark: ${replied ? 'you wrote in the session after none of the open ones' : 'no open decision'}${byProject ? ' in that project' : ''}. ${open} still open.`,
+        )
       else
         io.out(
-          `${c.green('✓')} marked ${done.length === 1 ? '1 decision' : `${done.length} decisions`} done; ${pending.length} still open.`,
+          `${c.green('✓')} marked ${done.length === 1 ? '1 decision' : `${done.length} decisions`} done; ${open} still open. Marked one by mistake? \`sideby unattended pending reopen <id>\` puts it back.`,
         )
       return 0
     }
-    allow('all')
-    if (action !== undefined)
-      throw new UsageError('usage: sideby unattended pending [--all] | pending done <id>|--all')
-    const pending = await listPendingDecisions(paths.stateDir, { all: a.flags.has('all'), now: now() })
-    if (asJson) {
-      json(io, { pending })
+    if (action === 'reopen') {
+      allow('ids')
+      const ids = idList()
+      if ([args.length > 0, ids !== undefined].filter(Boolean).length !== 1 || args.length > 1)
+        throw new UsageError(
+          'usage: sideby unattended pending reopen <id> | --ids <a,b> (`sideby unattended pending --all` lists the done ones too)',
+        )
+      let reopened: import('../core/unattended-pending.ts').PendingDecision[]
+      try {
+        // One id may be a start of it, as with `done`; it is whole when nothing else starts the same way.
+        const one = args[0] && (await findPendingDecision(paths.stateDir, args[0]))?.id
+        reopened = await reopenPendingDecisions(paths.stateDir, ids ?? [one || args[0]!])
+      } catch (err) {
+        throw new UserError((err as Error).message, { code: 'no-pending' })
+      }
+      const open = await left(
+        'reopened',
+        reopened.map((d) => d.id),
+      )
+      if (open === undefined) return 0
+      io.out(
+        reopened.length
+          ? `${c.green('✓')} reopened ${reopened.length === 1 ? '1 decision' : `${reopened.length} decisions`}; ${open} open.`
+          : `Nothing to reopen: ${ids && ids.length > 1 ? 'none of them is' : 'it is not'} marked done. ${open} open.`,
+      )
       return 0
     }
-    if (!pending.length) {
+    allow('all', 'project')
+    if (action !== undefined)
+      throw new UsageError(
+        'usage: sideby unattended pending [--all] [--project <name>] | pending done <id> | --ids <a,b> | --all | --replied [--project <name>] | --project <name> | pending reopen <id> | --ids <a,b>',
+      )
+    const o = await overview(a.flags.has('all'))
+    const project = await projectOf(o)
+    const rows = project === undefined ? o.rows : o.rows.filter((r) => r.project === project)
+    const projects = project === undefined ? o.projects : o.projects.filter((p) => p.project === project)
+    if (asJson) {
+      json(io, { pending: rows, projects })
+      return 0
+    }
+    if (!rows.length) {
       io.out('Nothing is waiting for you.')
       return 0
     }
-    for (const d of pending) {
-      const where = [
-        d.account ?? d.family,
-        d.kind === 'question' ? 'question' : d.kind === 'permission' ? 'needed your OK' : 'left undone',
-        d.waited ? `no answer for ${d.waited} min` : '',
-        d.agentType ? `subagent ${d.agentType}` : '',
-        d.doneAt ? 'done' : '',
+    const counts = (g: { open: number; replied: number; done: number }) =>
+      [
+        g.open ? `${g.open} untouched` : '',
+        g.replied ? `${g.replied} you wrote in afterwards` : '',
+        g.done ? `${g.done} done` : '',
       ]
         .filter(Boolean)
         .join(' · ')
-      io.out(`${c.bold(d.id)}  ${clock2(d.at, now())}  ${c.dim(where)}`)
-      for (const line of d.text.split('\n')) io.out(`  ${line}`)
-      if (d.sessionId)
-        io.out(c.dim(`  session ${d.sessionId}${d.cwd ? ` in ${tildify(d.cwd, paths.home)}` : ''}`))
+    for (const g of uaGroupByProject(rows)) {
+      io.out(`${c.bold(g.project ? g.name : 'Other (no folder)')}  ${c.dim(counts(g))}`)
+      // Within a Project: what nobody touched first, then what was replied to, then the done ones.
+      const items = g.sessions.flatMap((s) => s.items)
+      const rank = (r: (typeof items)[number]) => (r.state === 'open' ? 0 : r.state === 'replied' ? 1 : 2)
+      for (const d of [...items].sort((x, y) => rank(x) - rank(y) || Date.parse(x.at) - Date.parse(y.at))) {
+        const where = [
+          d.account ?? d.family,
+          d.kind === 'question' ? 'question' : d.kind === 'permission' ? 'needed your OK' : 'left undone',
+          d.waited ? `no answer for ${d.waited} min` : '',
+          d.agentType ? `subagent ${d.agentType}` : '',
+          d.state === 'replied' && d.repliedAt
+            ? `you wrote in the session afterwards (${ago(d.repliedAt, now())})`
+            : '',
+          d.replyCheck === 'no-record' ? 'its session record is gone' : '',
+          d.state === 'done' ? 'done' : '',
+        ]
+          .filter(Boolean)
+          .join(' · ')
+        io.out(`  ${c.bold(d.id)}  ${clock2(d.at, now())}  ${c.dim(where)}`)
+        for (const line of d.text.split('\n')) io.out(`    ${line}`)
+        if (d.sessionId)
+          io.out(c.dim(`    session ${d.sessionId}${d.cwd ? ` in ${tildify(d.cwd, paths.home)}` : ''}`))
+      }
     }
-    io.out(c.dim('Mark one done with `sideby unattended pending done <id>`, or all with `--all`.'))
+    io.out(
+      c.dim(
+        `${rows.some((r) => r.state === 'replied') ? '"You wrote in the session afterwards" only says you typed there later, not that it was finished. ' : ''}Mark one done once you have checked it: \`sideby unattended pending done <id>\` (several: \`--ids <a,b>\`); \`reopen <id>\` puts back one marked by mistake.`,
+      ),
+    )
     return 0
   }
 

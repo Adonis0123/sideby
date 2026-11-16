@@ -365,7 +365,8 @@ sideby unattended off                             # 在时段内：暂停到这�
 sideby unattended schedule preset weeknights      # 周一到周五，23:00 到次日 08:00
 sideby unattended schedule add --days sat,sun --from 01:00 --to 09:00 --name "Weekend nights"
 sideby unattended                                 # 开没开、为什么、到几点、下一个时段
-sideby unattended pending                         # 等你处理的事；pending done <id> 或 --all
+sideby unattended pending                         # 等你处理的事，按项目分组；pending done <id> 或 --all
+sideby unattended pending reopen <id>             # 把标错的恢复成待决定
 ```
 
 **Schedule（时间表）** 里的每个 **Slot（时段）** 是星期几、开始和结束时间，按本机时区；结束早于开始就是到第二天早上，重叠的时段算一段；时段连起来覆盖一周每个小时时没有结束时间，这时 `off` 会一直暂停到你再打开。`on` 不带时间时开到当前或下一个时段结束，没有时段就开 12 小时；和时段重叠时取更晚的结束时间。每次改动都会打印撤销它的命令。只想让某一个会话无人值守、不管时间表时，启动时加 `--unattended`：`sideby run <account> --unattended`、`sideby next <family> --unattended`，短命令和挑选命令后面也一样（`ccw --unattended`）。这些都可以交给你的 AI：告诉它你今晚要离开就行。
@@ -373,11 +374,12 @@ sideby unattended pending                         # 等你处理的事；pending
 - 它覆盖你第一次用它之后 sideby 启动的 Claude 和 Codex 会话：sideby 给每个会话加上自己的 hook（Claude 走 `--settings`，Codex 走 `-c hooks`），不往账号文件夹里写任何东西。那之前已经在跑的会话不受影响；Grok、pi、桌面应用和直接运行的 `claude`、`codex` 也不受影响。自己传了 `--settings` 的 Claude 会话同样不受影响。
 - Codex 要你先信任一次这些 hook 才会运行它们：在那个账号里输入 `/hooks`，信任两个 `unattended-hook`（提问前一个，回合结束时一个）。在 Codex 里它只管提问（Codex 主要在 Plan 模式下提问）；Codex 自己的批准提示仍会等你，所以 Claude 会话受益最多。
 - hook 每次调用都现读时间表和手动状态，所以 22:30 启动的会话到 23:00 时段开始时就不再提问，不用重启。hook 自己出错时，会话就像没有这个功能时一样运行。
+- 早上回来，`sideby unattended pending` 按项目（会话所在的仓库，worktree 算它的主仓库）列出它们，没人碰过的在前。多数时候你直接在会话里回复，不会去点已处理，所以 sideby 读每个会话自己的记录（Claude 和 Codex）：记下之后你在那个会话里说过话的，标成 **you wrote in the session afterwards**（之后在这个会话里说过话）。这只说明你回来过，不说明事情处理完了，所以逐条看一眼，再用 `sideby unattended pending done <id>`（几条一起用 `--ids <a,b>`）标掉；标错了用 `reopen <id>` 恢复。斜杠命令、别的会话发来的消息、后台通知和 sideby 自己的提示都不算。它只读记录、只留时间，不调模型。
 - Pending Decision 只存在本机，直到你标成已处理，标完 30 天后删除。一段无人值守结束时，sideby 通知插件一次（`unattended.ended` 事件，见[插件](plugins.zh-CN.md)），插件可以把它转给你自己的通知工具；sideby 自己不发任何通知。
 - 提前回来了？直接在想用的会话里打字就行：你在哪个 Claude 会话里打字，那个会话在你每条消息后 30 分钟内照常问你，提问和确认框都照常出现。其他会话仍然无人值守，之后也不用再打开。第一次生效时，会话里会显示一行说明。只有你打的字才算：后台任务的通知、`sideby send` 或别的会话发来的消息、sideby 启动会话时带的那条 prompt、AI 自己做的事都不算。替你往终端里打字的工具（比如 tmux `send-keys`）在 Claude Code 看来和你一样，会让那个会话算作有人在。这个版本之前启动的会话和 Codex 会话没有这个功能。`sideby unattended` 会列出这些会话；`sideby unattended off` 全部关掉。
 - 看到问题后走开了？Claude 会话给你看的提问或确认框会等你 10 分钟。到时还没人回答、无人值守又开着，会话就按上面的做法继续：能撤回的按推荐选项继续，确认框回答“否”，从不替你点“是”。回合末尾用文字提的问题也一样。每一条都会记下等了多久（“等了 10 分钟没人回答”）。无人值守关着时，问题一直等，到时段开始后再继续。`sideby unattended wait 30` 改等待时间（1 到 120 分钟），`sideby unattended wait off` 让问题一直等你。后台子 agent 的确认框和 Codex 仍然等你。
 - `sideby config unset unattended` 之后启动的会话就不再加这个 hook。
-- 面板里有单独的「无人值守」页：一句话写状态（「已开启 · 时段『工作日夜间』· 到 08:00」）；「现在开」可以选开多久（到这一段结束、4 小时、12 小时，或选一个时间）；时间表每个时段一行，星期几和时间改了就保存，每次改动都能「撤销」；因为你打过字而照常问你的会话（每个写到几点）；「没人回答时」（提问等你多久）；待你决定的事按会话分组，有「已处理」和「回到会话」；最后写受保护范围。开着时顶栏显示「无人值守 · 到 08:00」。
+- 面板里有单独的「无人值守」页：一句话写状态（「已开启 · 时段『工作日夜间』· 到 08:00」）；「现在开」可以选开多久（到这一段结束、4 小时、12 小时，或选一个时间）；时间表每个时段一行，星期几和时间改了就保存，每次改动都能「撤销」；因为你打过字而照常问你的会话（每个写到几点）；「没人回答时」（提问等你多久）；待你决定的事先按项目、再按会话分组，有「已处理」「回到会话」（每个项目默认只展开没人碰过的，之后说过话的折叠在下面），后面是折叠的已处理列表，可以「重新打开」；最后写受保护范围。开着时顶栏显示「无人值守 · 到 08:00」。
 
 ## 进度提醒
 
