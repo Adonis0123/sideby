@@ -67,11 +67,12 @@ export interface WaitSettings {
 
 /**
  * Waits while the session shows `expect` (`waiting`: a question or a permission prompt; `idle`: a turn ended and the
- * session waits for a prompt). Returns `act` once the wait has passed since `startedAt` and Unattended Mode is on, and
- * `stop` as soon as anything says a person (or anything else) moved on or it cannot tell: there is no record for the
- * session, it does not show `expect` within 2 seconds, it changes (another status or another `statusUpdatedAt`), it
- * cannot be read, the Host is gone, or the wait was set to never. While the mode is off past the wait it keeps waiting; Claude Code's `timeout`
- * ends it in the end.
+ * session waits for a prompt). Returns the record's mark once the wait has passed since `startedAt` and Unattended
+ * Mode is on, so the caller can check it is still the same just before it acts (`stillShown`), and undefined as soon
+ * as anything says a person (or anything else) moved on or it cannot tell: there is no record for the session, it
+ * does not show `expect` within 2 seconds, it changes (another status or another `statusUpdatedAt`), it cannot be
+ * read, `moved` says so (a person typed after the turn the hook watches), the Host is gone, or the wait was set to
+ * never. While the mode is off past the wait it keeps waiting; Claude Code's `timeout` ends it in the end.
  */
 export async function watchScreen(opts: {
   env: { HOME?: string | undefined; CLAUDE_CONFIG_DIR?: string | undefined }
@@ -83,23 +84,55 @@ export async function watchScreen(opts: {
   sleep: (ms: number) => Promise<void>
   parentGone: () => boolean
   settings: () => Promise<WaitSettings>
-}): Promise<'act' | 'stop'> {
+  /** Whether something sideby noted says the session moved on since `startedAt`; checked at every look. */
+  moved?: () => Promise<boolean>
+}): Promise<ScreenMark | undefined> {
   // No record for this session at all: nothing is shown in a terminal that sideby can watch.
   let mark = await readScreen(opts.env, opts.pid, opts.sessionId)
-  if (!mark) return 'stop'
+  if (!mark) return undefined
   for (let waited = 0; mark?.status !== opts.expect; waited += SHOWN_POLL_MS) {
-    if (waited >= SHOWN_WAIT_MS) return 'stop'
+    if (waited >= SHOWN_WAIT_MS) return undefined
     await opts.sleep(SHOWN_POLL_MS)
     mark = await readScreen(opts.env, opts.pid, opts.sessionId)
   }
+  if (await opts.moved?.()) return undefined
   for (;;) {
     await opts.sleep(WATCH_POLL_MS)
-    if (opts.parentGone()) return 'stop'
+    if (opts.parentGone()) return undefined
     const m = await readScreen(opts.env, opts.pid, opts.sessionId)
-    if (!m || m.status !== mark.status || m.at !== mark.at) return 'stop'
+    if (!sameMark(m, mark)) return undefined
+    if (await opts.moved?.()) return undefined
     const s = await opts.settings()
-    if (s.wait === null) return 'stop'
-    if (opts.clock() - opts.startedAt >= s.wait * 60_000 && s.on) return 'act'
+    if (s.wait === null) return undefined
+    if (opts.clock() - opts.startedAt >= s.wait * 60_000 && s.on) return mark
+  }
+}
+
+const sameMark = (a: ScreenMark | undefined, b: ScreenMark): boolean =>
+  a !== undefined && a.status === b.status && a.at === b.at
+
+/**
+ * The last check before a waiting hook acts (and again after it kept the Pending Decision): the Host is still there,
+ * the record still shows `mark`, nothing sideby noted says the session moved on, the wait is not never and Unattended
+ * Mode is on. Anything else, or anything it cannot read, is false: the hook then lets it be.
+ */
+export async function stillShown(opts: {
+  env: { HOME?: string | undefined; CLAUDE_CONFIG_DIR?: string | undefined }
+  pid: number
+  sessionId: string
+  mark: ScreenMark
+  parentGone: () => boolean
+  settings: () => Promise<WaitSettings>
+  moved?: () => Promise<boolean>
+}): Promise<boolean> {
+  try {
+    if (opts.parentGone()) return false
+    if (!sameMark(await readScreen(opts.env, opts.pid, opts.sessionId), opts.mark)) return false
+    if (await opts.moved?.()) return false
+    const s = await opts.settings()
+    return s.wait !== null && s.on
+  } catch {
+    return false
   }
 }
 

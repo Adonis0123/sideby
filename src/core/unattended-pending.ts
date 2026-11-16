@@ -175,6 +175,22 @@ export async function addPendingDecision(
 }
 
 /**
+ * Takes back a Pending Decision the caller has just kept, when what it was about ended while it was being kept (Answer
+ * Wait: a person answered meanwhile). Only that exact one: the id it got back, still open and kept at `at`; an older
+ * one the dedupe returned is left alone. Best effort.
+ */
+export async function withdrawPendingDecision(
+  stateDir: string,
+  kept: PendingDecision,
+  at: Date,
+): Promise<void> {
+  if (kept.at !== at.toISOString() || kept.doneAt) return
+  const dir = await existingDir(stateDir)
+  if (!dir || !ID.test(kept.id)) return
+  await rm(join(dir, `${kept.id}.json`), { force: true }).catch(() => {})
+}
+
+/**
  * The Pending Decisions, oldest first: open ones, or with `all` the done ones too. Deletes the files of those done
  * more than 30 days ago.
  */

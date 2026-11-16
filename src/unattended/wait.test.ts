@@ -36,6 +36,15 @@ async function turnOn(h: FakeHome, from = T0 - MIN) {
   })
 }
 
+/** Unattended Mode paused by hand at `at` for 12 hours: off. */
+async function turnOff(h: FakeHome, at: number) {
+  await writeUnattendedOverride(resolvePaths(h.env).stateDir, {
+    mode: 'pause',
+    at: new Date(at).toISOString(),
+    until: new Date(at + 12 * 60 * MIN).toISOString(),
+  })
+}
+
 /** Someone typed into session `s1` just before `T0`: an Attended Session, so its questions are shown. */
 const attend = (h: FakeHome) =>
   markAttended(resolvePaths(h.env).stateDir, { sessionId: 's1', family: 'claude' }, new Date(T0 - MIN))
@@ -102,6 +111,8 @@ async function run(
     cap?: number
     env?: Record<string, string>
     parentGone?: () => boolean
+    beforeAct?: () => Promise<unknown>
+    afterKeep?: () => Promise<unknown>
   } = {},
 ) {
   let t = T0
@@ -117,6 +128,8 @@ async function run(
       now: () => new Date(t),
       hostPid: PID,
       parentGone: o.parentGone ?? (() => false),
+      ...(o.beforeAct ? { beforeAct: o.beforeAct } : {}),
+      ...(o.afterKeep ? { afterKeep: o.afterKeep } : {}),
       sleep: async (ms) => {
         waits++
         t += ms
@@ -128,7 +141,7 @@ async function run(
   return { code, out: out.lines.join(''), err: err.lines.join(''), minutes: (t - T0) / MIN, waits }
 }
 
-const pending = (h: FakeHome) => listPendingDecisions(resolvePaths(h.env).stateDir)
+const pending = (h: FakeHome, all = false) => listPendingDecisions(resolvePaths(h.env).stateDir, { all })
 
 describe('Answer Wait: a question shown in a session', () => {
   it('waits 10 minutes, then the session goes on with the recommended option', async () => {
@@ -190,6 +203,28 @@ describe('Answer Wait: a question shown in a session', () => {
       const gone = await run(h, ['claude', 'PermissionRequest'], request('Bash'), { parentGone: () => true })
       assert.deepEqual([gone.out, gone.minutes < 1], ['', true])
       assert.deepEqual(await pending(h), [])
+    })
+  })
+
+  it('lets it be when the person answers right after the last look, or while the decision is kept', async () => {
+    await withFakeHome(async (h) => {
+      await configure(h)
+      await turnOn(h)
+      await attend(h)
+      // Answered between the last look and the answer: the record no longer shows the dialog.
+      await screen(h, 'waiting', T0)
+      const late = await run(h, ['claude', 'PermissionRequest'], request('AskUserQuestion'), {
+        beforeAct: () => screen(h, 'busy', T0 + 10 * MIN),
+      })
+      assert.deepEqual([late.code, late.out, late.err], [0, '', ''])
+      assert.deepEqual(await pending(h), [])
+      // Answered while the Pending Decision was being kept: it is taken back and nothing is answered.
+      await screen(h, 'waiting', T0)
+      const saving = await run(h, ['claude', 'PermissionRequest'], request('Bash'), {
+        afterKeep: () => screen(h, 'busy', T0 + 10 * MIN),
+      })
+      assert.deepEqual([saving.code, saving.out, saving.err], [0, '', ''])
+      assert.deepEqual(await pending(h, true), [])
     })
   })
 
@@ -375,6 +410,49 @@ describe('Answer Wait: a turn that ended on a question written as text', () => {
       })
       assert.deepEqual([r.code, r.err], [0, ''])
       assert.deepEqual(await pending(h), [])
+    })
+  })
+
+  it('wakes nothing when the reply comes right after the last look, or the mode goes off while the question is kept', async () => {
+    await withFakeHome(async (h) => {
+      await configure(h)
+      await turnOn(h)
+      await attend(h)
+      await screen(h, 'idle', T0)
+      const late = await run(h, ['claude', 'StopWait'], stop(ASKED), {
+        beforeAct: () => screen(h, 'busy', T0 + 10 * MIN),
+      })
+      assert.deepEqual([late.code, late.err], [0, ''])
+      await screen(h, 'idle', T0)
+      const off = await run(h, ['claude', 'StopWait'], stop(ASKED), {
+        afterKeep: () => turnOff(h, T0 + 10 * MIN),
+      })
+      assert.deepEqual([off.code, off.err], [0, ''])
+      assert.deepEqual(await pending(h, true), [])
+    })
+  })
+
+  it('wakes nothing when someone replied before the hook first read the record, and that turn has ended', async () => {
+    await withFakeHome(async (h) => {
+      await configure(h)
+      await turnOn(h)
+      await attend(h)
+      // The record the hook first reads is already the end of the turn the reply started; the prompt a person typed
+      // after this Stop is noted (in the background) a moment later.
+      await screen(h, 'idle', T0 + 1800)
+      const r = await run(h, ['claude', 'StopWait'], stop(ASKED), {
+        at: async (t) => {
+          if (t >= T0 + 3000 && t < T0 + 6000)
+            await markAttended(
+              resolvePaths(h.env).stateDir,
+              { sessionId: 's1', family: 'claude' },
+              new Date(T0 + 1000),
+            )
+        },
+      })
+      assert.deepEqual([r.code, r.err], [0, ''])
+      assert.ok(r.minutes < 0.2, `stopped after ${r.minutes} minutes`)
+      assert.deepEqual(await pending(h, true), [])
     })
   })
 

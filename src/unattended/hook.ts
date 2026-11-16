@@ -34,7 +34,12 @@ import {
   readAttended,
   sessionUnattended,
 } from '../core/unattended-attended.ts'
-import { addPendingDecision } from '../core/unattended-pending.ts'
+import {
+  addPendingDecision,
+  type PendingDecision,
+  type PendingInput,
+  withdrawPendingDecision,
+} from '../core/unattended-pending.ts'
 import {
   clearRetryStreak,
   countFailure,
@@ -53,7 +58,7 @@ import {
   type UnattendedState,
   unattendedState,
 } from '../core/unattended-state.ts'
-import { waitedMinutes, watchScreen } from '../core/unattended-wait.ts'
+import { type ScreenMark, stillShown, waitedMinutes, watchScreen } from '../core/unattended-wait.ts'
 
 export const UNATTENDED_HOOK_COMMAND = 'sideby unattended-hook'
 
@@ -75,6 +80,10 @@ export interface UnattendedHookDeps {
   parentGone?: () => boolean
   /** The Host's pid, whose session record says what is on screen (Answer Wait); `process.ppid` by default. */
   hostPid?: number
+  /** Answer Wait, for tests: runs once the wait is over, before the last check. */
+  beforeAct?: () => Promise<unknown>
+  /** Answer Wait, for tests: runs after the Pending Decision is kept, before the check that may take it back. */
+  afterKeep?: () => Promise<unknown>
 }
 
 function prefersChinese(env: Env): boolean {
@@ -708,13 +717,73 @@ function waitTools(deps: UnattendedHookDeps) {
 }
 
 /**
+ * Watches what the session shows (`watchScreen`), then keeps the Pending Decision only while it is still so, checked
+ * just before keeping and again after (a person may answer meanwhile, or the mode go off): when it changed, the
+ * decision this call kept is taken back and nothing is decided (undefined). Otherwise what the hook answers with:
+ * when it went on (`at`), how long it waited, the mode then, and whether the decision was kept. What is left is the
+ * moment between the last check and the Host reading the answer: a person who answers then has their answer applied
+ * and a denial that comes after it changes nothing (ADR-0077); a wake-up is told it is not their reply.
+ */
+async function actAfterWait(opts: {
+  env: Env
+  deps: UnattendedHookDeps
+  sessionId: string
+  expect: 'waiting' | 'idle'
+  start: number
+  moved?: () => Promise<boolean>
+  keep: (at: Date, waited: number) => PendingInput
+}): Promise<{ at: Date; waited: number; state: UnattendedState; kept: boolean } | undefined> {
+  const { env, deps, sessionId } = opts
+  const t = waitTools(deps)
+  const settings = async () => {
+    const m = await modeAt(env, new Date(t.clock()))
+    return { wait: m.answerWait, on: m.state.on }
+  }
+  const watch = {
+    env,
+    pid: t.pid,
+    sessionId,
+    parentGone: t.parentGone,
+    settings,
+    ...(opts.moved ? { moved: opts.moved } : {}),
+  }
+  const mark: ScreenMark | undefined = await watchScreen({
+    ...watch,
+    expect: opts.expect,
+    startedAt: opts.start,
+    clock: t.clock,
+    sleep: t.sleep,
+  })
+  if (!mark) return undefined
+  await deps.beforeAct?.()
+  if (!(await stillShown({ ...watch, mark }))) return undefined
+  const at = new Date(t.clock())
+  const waited = waitedMinutes(opts.start, at.getTime())
+  const { state } = await modeAt(env, at)
+  const stateDir = resolvePaths(env).stateDir
+  let kept: PendingDecision | undefined
+  try {
+    kept = await addPendingDecision(stateDir, opts.keep(at, waited), at, { dedupe: true })
+  } catch {
+    // Best effort: the reason then asks for it in the final report instead.
+  }
+  await deps.afterKeep?.()
+  if (!(await stillShown({ ...watch, mark }))) {
+    if (kept) await withdrawPendingDecision(stateDir, kept, at).catch(() => {})
+    return undefined
+  }
+  return { at, waited, state, kept: kept !== undefined }
+}
+
+/**
  * Answer Wait for a question or a permission prompt Claude Code shows (spec §3.37 item 7, ADR-0077): watches the
  * session record while the dialog stays on screen and, once it has waited `unattended.answerWait` minutes and
  * Unattended Mode is on (counting an Attended Session as on: nobody answered), refuses it as the mode would, keeping a
  * Pending Decision with how long it waited. Anything that says someone answered, or that it cannot tell, lets it be
  * (undefined): the record does not show a dialog (a subagent's request, which Claude Code shows only after the hooks,
  * or a session that shows none), the dialog ended or another took its place, the Host is gone, or the wait is now
- * never. It never answers "yes": the only decision it gives is a denial.
+ * never; checked once more just before and after keeping the Pending Decision (`actAfterWait`). It never answers
+ * "yes": the only decision it gives is a denial.
  */
 async function answerAfterWait(
   payload: Payload,
@@ -725,27 +794,6 @@ async function answerAfterWait(
   // Claude Code runs a subagent's hooks before it shows the prompt: holding one would hide it from the person.
   if (payload.agentId || !payload.sessionId) return undefined
   const sessionId = payload.sessionId
-  const t = waitTools(deps)
-  const end = await watchScreen({
-    env,
-    pid: t.pid,
-    sessionId,
-    expect: 'waiting',
-    startedAt: start,
-    clock: t.clock,
-    sleep: t.sleep,
-    parentGone: t.parentGone,
-    settings: async () => {
-      const m = await modeAt(env, new Date(t.clock()))
-      return { wait: m.answerWait, on: m.state.on }
-    },
-  })
-  if (end !== 'act') return undefined
-  const at = new Date(t.clock())
-  const waited = waitedMinutes(start, at.getTime())
-  const { state } = await modeAt(env, at)
-  const paths = resolvePaths(env)
-  const zh = prefersChinese(env)
   const account = text(env.SIDEBY_ACCOUNT, 256)
   const where = {
     family: 'claude',
@@ -753,31 +801,30 @@ async function answerAfterWait(
     sessionId,
     ...(payload.cwd ? { cwd: payload.cwd } : {}),
   }
+  const question = payload.tool === ASK_TOOLS.claude
+  const done = await actAfterWait({
+    env,
+    deps,
+    sessionId,
+    expect: 'waiting',
+    start,
+    keep: (_at, waited) =>
+      question
+        ? { kind: 'question', ...where, text: questionText(payload.input), waited }
+        : { kind: 'permission', ...where, text: permissionText(payload.tool, payload.input), waited },
+  })
+  if (!done) return undefined
+  const { at, waited, state, kept } = done
   const deny = (message: string) => ({
     hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message } },
   })
-  if (payload.tool === ASK_TOOLS.claude)
-    return {
-      json: deny,
-      reason: (kept) => questionReason(state, at, zh, kept, waited),
-      keep: () =>
-        addPendingDecision(
-          paths.stateDir,
-          { kind: 'question', ...where, text: questionText(payload.input), waited },
-          at,
-          { dedupe: true },
-        ),
-    }
+  // Kept already (and checked after): the answer only says whether that worked.
   return {
     json: deny,
-    reason: (kept) => permissionReason(state, at, kept, waited),
-    keep: () =>
-      addPendingDecision(
-        paths.stateDir,
-        { kind: 'permission', ...where, text: permissionText(payload.tool, payload.input), waited },
-        at,
-        { dedupe: true },
-      ),
+    reason: () =>
+      question
+        ? questionReason(state, at, prefersChinese(env), kept, waited)
+        : permissionReason(state, at, kept, waited),
   }
 }
 
@@ -787,8 +834,9 @@ async function answerAfterWait(
  * Attended Session: otherwise the first `Stop` entry already keeps the turn going) and the last message ends on a
  * question, it watches the session record while the session waits for a prompt. Once nobody replied for
  * `unattended.answerWait` minutes and the mode is on, it keeps the question as a Pending Decision and returns the note
- * that wakes the session (exit 2). A new turn (a reply, a notification), the Host gone, the wait set to never, or
- * anything it cannot tell: undefined, nothing happens.
+ * that wakes the session (exit 2). A new turn (a reply, a notification), a prompt someone typed after this `Stop` (the
+ * Attended Session's record, which also catches a reply whose turn ended before this hook first read the record), the
+ * Host gone, the wait set to never, or anything it cannot tell: undefined, nothing happens.
  */
 async function wakeAfterWait(
   env: Env,
@@ -806,47 +854,33 @@ async function wakeAfterWait(
   if (!sessionId || !question) return undefined
   if ((await modeAt(env, new Date(start))).answerWait === null) return undefined
   if (await isOn(env, new Date(start), sessionId)) return undefined
-  const end = await watchScreen({
-    env,
-    pid: t.pid,
-    sessionId,
-    expect: 'idle',
-    startedAt: start,
-    clock: t.clock,
-    sleep: t.sleep,
-    parentGone: t.parentGone,
-    settings: async () => {
-      const m = await modeAt(env, new Date(t.clock()))
-      return { wait: m.answerWait, on: m.state.on }
-    },
-  })
-  if (end !== 'act') return undefined
-  const at = new Date(t.clock())
-  const waited = waitedMinutes(start, at.getTime())
-  const { state } = await modeAt(env, at)
-  const paths = resolvePaths(env)
+  const stateDir = resolvePaths(env).stateDir
+  // Someone typed after this Stop: the question is answered, even when that turn already ended.
+  const moved = async () => {
+    const r = await readAttended(stateDir, sessionId, new Date(t.clock()))
+    return r !== undefined && Date.parse(r.at) > start
+  }
   const account = text(env.SIDEBY_ACCOUNT, 256)
   const cwd = text(v.cwd)
-  let kept = true
-  try {
-    await addPendingDecision(
-      paths.stateDir,
-      {
-        kind: 'question',
-        family: 'claude',
-        ...(account ? { account } : {}),
-        sessionId,
-        ...(cwd ? { cwd } : {}),
-        text: question,
-        waited,
-      },
-      at,
-      { dedupe: true },
-    )
-  } catch {
-    kept = false
-  }
-  return stopReason(state, at, prefersChinese(env), kept, waited)
+  const done = await actAfterWait({
+    env,
+    deps,
+    sessionId,
+    expect: 'idle',
+    start,
+    moved,
+    keep: (_at, waited) => ({
+      kind: 'question',
+      family: 'claude',
+      ...(account ? { account } : {}),
+      sessionId,
+      ...(cwd ? { cwd } : {}),
+      text: question,
+      waited,
+    }),
+  })
+  if (!done) return undefined
+  return stopReason(done.state, done.at, prefersChinese(env), done.kept, done.waited)
 }
 
 /** A prompt id as Claude Code writes it; anything else is not looked for. */

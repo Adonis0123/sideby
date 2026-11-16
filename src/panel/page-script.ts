@@ -6392,7 +6392,7 @@ const MAIN = String.raw`
   const UA_MS = 15000
   const UA_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
   const UA_PRESET = { name: 'Weeknights', days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '23:00', end: '08:00' }
-  const ua = { data: null, error: null, loading: null, at: 0, nextAt: 0, inflight: new Map(), opening: false, choosing: false, choice: null, time: '08:00', timeInit: '08:00', busy: false, local: null, saves: 0, rows: [], seq: 0, gone: {}, open: {}, firstUse: false, focus: null, wait: undefined }
+  const ua = { data: null, error: null, loading: null, at: 0, nextAt: 0, inflight: new Map(), opening: false, choosing: false, choice: null, time: '08:00', timeInit: '08:00', busy: false, local: null, saves: 0, rows: [], seq: 0, gone: {}, open: {}, firstUse: false, focus: null, wait: undefined, waitSaves: 0 }
   let uaSaving = Promise.resolve()
   function uaStatusNow() { return (S.state && S.state.unattended) || null }
   // The latest status's count, less the ones being marked done right now (the page shows them gone already).
@@ -6875,8 +6875,8 @@ const MAIN = String.raw`
 
   // ---------- Answer Wait (ADR-0077) ----------
   // How long a question shown in a session waits for you before, with the mode on, the session goes on. One row of
-  // choices that writes at once (the toast carries the undo); the choice moves before the answer comes back, and a
-  // failure puts it back. A wait set elsewhere (the CLI takes any 1 to 120) shows as one more choice.
+  // choices that writes at once (the toast carries the undo); the choice moves before the answer comes back, stays on
+  // the latest click while earlier ones are still being written, and a failure puts it back. A wait set elsewhere (the CLI takes any 1 to 120) shows as one more choice.
   const UA_WAITS = [5, 10, 15, 30, 60]
   function uaWaitNow(st) {
     return ua.wait !== undefined ? ua.wait : st.answerWait === undefined ? 10 : st.answerWait
@@ -6888,6 +6888,7 @@ const MAIN = String.raw`
     const was = uaWaitNow(st)
     if (minutes === was) return
     ua.wait = minutes
+    ua.waitSaves++
     if (!st.configured) ua.firstUse = true
     renderUaPage()
     uaSaving = uaSaving.then(async () => {
@@ -6899,7 +6900,8 @@ const MAIN = String.raw`
           toast(text, opts.undone ? { key: 'ua-wait' } : { key: 'ua-wait', action: { label: t('toast.undo'), run: () => uaSetWait(r.before, { undone: true }) }, duration: 10000 })
         }
       } catch (e) { toast(t('ua.waitFailed', { msg: e.message }), { kind: 'fail' }) }
-      ua.wait = undefined
+      // The latest choice stays shown until every change is written; then the page shows what the config holds.
+      if (!--ua.waitSaves) ua.wait = undefined
       uaRedraw()
     })
   }

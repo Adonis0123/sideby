@@ -7,6 +7,7 @@ import { createServer, request as httpRequest, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
+import { runInNewContext } from 'node:vm'
 import { asBuiltin, demoFamily, demoPlugin, seedDemoMain } from '../../testing/demo.ts'
 import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
 import type { LiveSession } from '../core/live-sessions.ts'
@@ -19,6 +20,7 @@ import {
   type PanelUnattended,
   type PanelUnattendedChange,
 } from './handler.ts'
+import { PAGE_SCRIPT } from './page-script.ts'
 
 const LIVE = '7a1c0d2e-0000-4000-8000-00000000a001'
 const ENDED = '7a1c0d2e-0000-4000-8000-00000000a002'
@@ -215,6 +217,63 @@ describe('the Unattended page (spec §3.37)', () => {
         await close(p.server)
       }
     })
+  })
+
+  it('keeps the latest wait shown while earlier clicks are still being written, and sends a click back to it', async () => {
+    // The page's own uaWaitNow and uaSetWait, run with a status that answers each request only when the test says so.
+    const src = /\n( {2}function uaWaitNow\(st\) \{[\s\S]*?)\n {2}function uaWaitBlock\(/.exec(
+      PAGE_SCRIPT,
+    )![1]!
+    const sent: { minutes: number | null; answer: (answerWait: number | null) => void }[] = []
+    const ctx: Record<string, unknown> = {
+      status: { configured: true, answerWait: 10 },
+      api: (_path: string, body: { minutes: number | null }) =>
+        new Promise((resolve) => {
+          const before = (ctx.status as { answerWait: number | null }).answerWait
+          sent.push({
+            minutes: body.minutes,
+            answer: (answerWait) =>
+              resolve({ changed: true, before, status: { configured: true, answerWait } }),
+          })
+        }),
+      toast: () => {},
+      t: (k: string) => k,
+      renderUaPage: () => {},
+      uaRedraw: () => {},
+    }
+    runInNewContext(
+      `const ua = { wait: undefined, waitSaves: 0 }
+      let uaSaving = Promise.resolve()
+      function uaStatusNow() { return status }
+      function uaKeepStatus(st) { status = st }
+      ${src}
+      this.shown = () => uaWaitNow(status)
+      this.set = (m) => uaSetWait(m)
+      this.idle = () => uaSaving`,
+      ctx,
+    )
+    const shown = ctx.shown as () => number | null
+    const set = ctx.set as (m: number | null) => Promise<void>
+    const tick = () => new Promise((r) => setImmediate(r))
+    await set(30)
+    await set(null)
+    assert.equal(shown(), null)
+    await tick()
+    sent[0]!.answer(30)
+    await tick()
+    // The first answer is back; the second click is still on its way and stays shown.
+    assert.equal(shown(), null)
+    await set(30)
+    sent[1]!.answer(null)
+    await tick()
+    await tick()
+    sent[2]!.answer(30)
+    await (ctx.idle as () => Promise<void>)()
+    assert.deepEqual(
+      sent.map((x) => x.minutes),
+      [30, null, 30],
+    )
+    assert.equal(shown(), 30)
   })
 
   it('lists Pending Decisions with the way back to their Session, marks them done and opens them again', async () => {
