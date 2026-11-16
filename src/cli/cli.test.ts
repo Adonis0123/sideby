@@ -586,15 +586,19 @@ describe('plugins', () => {
         'env-adder',
         `export default { name: 'env-adder', register(api) { api.on('launch.before', (ctx) => { ctx.env.FROM_PLUGIN = String(ctx.config.value); ctx.args.push('--added') }) } }\n`,
       )
-      await h.write('.config/sideby/config.json', JSON.stringify({ plugins: { 'env-adder': { value: 42 } } }))
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ plugins: { 'env-adder': { value: 'kept-out-of-the-listing' } } }),
+      )
       assert.equal((await sideby(h, ['run', 'codex:main'])).code, 0)
       const [rec] = await readHostLog(h, 'codex')
-      assert.equal(rec!.env.FROM_PLUGIN, '42')
+      assert.equal(rec!.env.FROM_PLUGIN, 'kept-out-of-the-listing')
       assert.deepEqual(rec!.argv, ['--added'])
       const listed = await sideby(h, ['plugins', '--json'])
       const data = checkSchema('plugins', listed.out) as { plugins: { name: string; configKeys: string[] }[] }
       assert.deepEqual(data.plugins.find((p) => p.name === 'env-adder')!.configKeys, ['value'])
-      assert.doesNotMatch(listed.out, /42/)
+      // A value no temporary folder name can hold by chance, as a short number can.
+      assert.doesNotMatch(listed.out, /kept-out-of-the-listing/)
     })
   })
 

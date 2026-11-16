@@ -686,6 +686,8 @@ test('the extra ask after a passed reset is not sent while its mark cannot be sa
     assert.equal((await readQuotaStore(file))?.resetAsked, undefined)
     assert.match((await fetchedQuota(fq, a, ctxAt(h, 8), {}, 'background'))?.error ?? '', /did not ask/)
     assert.equal(panel?.quota?.windows.length, 2)
+    // Let that background read finish first: one still at work would mark and ask around the two writes below.
+    await new Promise((r) => setTimeout(r, 200))
     // Writes work again: the instant is marked, then asked, once.
     await rm(file)
     await writeQuotaStore(file, entry(iso(0)))
