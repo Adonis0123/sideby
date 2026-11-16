@@ -139,7 +139,18 @@ const HOOK_EVENTS = ['UserPromptSubmit', 'PreToolUse'] as const
  */
 export const CLAUDE_NETWORK_HOOK_TIMEOUT_S = 60
 
-/** Claude Code `hooks` entries for Network Guard, to put in a `--settings` file (alone or with Auto Handoff's). */
+/**
+ * Seconds the background `Held` entry may wait for the exit to be allowed again (5 hours, as Auto Handoff's
+ * `IdleWatch`, ADR-0056). `network-hook` ends by itself a little earlier (`HELD_BUDGET_MS`).
+ */
+export const CLAUDE_NETWORK_HELD_TIMEOUT_S = 18_000
+
+/**
+ * Claude Code `hooks` entries for Network Guard, to put in a `--settings` file (alone or with Auto Handoff's). Next
+ * to the check before a prompt runs `Held` in the background (`asyncRewake`): a prompt Claude Code made itself (a
+ * background task's notification) is not sent again once blocked, so `Held` keeps it and wakes the session with it
+ * when the exit is allowed again (spec §3.35). Codex has no such hook, and gets none.
+ */
 export function claudeNetworkHooks(): Record<string, unknown[]> {
   const out: Record<string, unknown[]> = {}
   for (const e of HOOK_EVENTS)
@@ -147,6 +158,16 @@ export function claudeNetworkHooks(): Record<string, unknown[]> {
       {
         hooks: [
           { type: 'command', command: hookCommand('claude', e), timeout: CLAUDE_NETWORK_HOOK_TIMEOUT_S },
+          ...(e === 'UserPromptSubmit'
+            ? [
+                {
+                  type: 'command',
+                  command: hookCommand('claude', 'Held'),
+                  asyncRewake: true,
+                  timeout: CLAUDE_NETWORK_HELD_TIMEOUT_S,
+                },
+              ]
+            : []),
         ],
       },
     ]

@@ -627,7 +627,9 @@ export async function main(argv: string[]): Promise<number> {
   // Network Guard's hook runs before every prompt and tool call it guards (spec §3.35); same fast path.
   if (first === 'network-hook') {
     const { runNetworkHook } = await import('../network/hook.ts')
-    return runNetworkHook(rest, process.env, process.stderr)
+    return runNetworkHook(rest, process.env, process.stderr, {
+      input: process.stdin.isTTY ? '' : process.stdin,
+    })
   }
   // Unattended Mode's hook runs before every tool call it matches and at every turn end (spec §3.37); same fast path.
   if (first === 'unattended-hook') {

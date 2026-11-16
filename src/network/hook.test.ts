@@ -2,11 +2,11 @@
 // only leaf modules. Requests go through a fake fetcher.
 import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, utimes, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { withFakeHome } from '../../testing/index.ts'
+import { diffSnapshots, snapshot, withFakeHome } from '../../testing/index.ts'
 import { NETWORK_ENV, RETRY_BUDGET_MS, TIMEOUT_MS } from '../core/egress.ts'
 import { runNetworkHook } from './hook.ts'
 
@@ -285,6 +285,356 @@ describe('network hook', () => {
     await withFakeHome(async (h) => {
       const env = sessionEnv(h.path('net'))
       assert.equal(await runNetworkHook(['claude', 'Stop'], env, sink(), { fetcher: trace('HK') }), 0)
+    })
+  })
+})
+
+/** What Claude Code hands a `UserPromptSubmit` hook; every hook of one submit gets the same `prompt_id`. */
+const promptInput = (prompt: string, id = 'prompt-1') =>
+  JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt_id: id, prompt })
+const NOTIFICATION =
+  '<task-notification>\n<task-id>task-7</task-id>\n<status>failed</status>\n<summary>Agent "review" failed</summary>\n</task-notification>'
+const markers = async (dir: string) => readdir(join(dir, 'held')).catch(() => [] as string[])
+
+describe('network hook: a prompt the Host made itself (spec §3.35)', () => {
+  it('holds a blocked background-task notification and hands it over once the exit is allowed again', async () => {
+    await withFakeHome(async (h) => {
+      const env = sessionEnv(h.path('net'), 'US')
+      const before = await snapshot(h.home)
+      const blocked = sink()
+      assert.equal(
+        await runNetworkHook(['claude', 'UserPromptSubmit'], env, blocked, {
+          fetcher: trace('CN'),
+          print: 'p',
+          input: promptInput(NOTIFICATION),
+        }),
+        2,
+      )
+      assert.match(blocked.lines.join(''), /中国大陆（CN）/)
+      const time = fakeTime()
+      const locs = ['CN', 'US']
+      let asked = 0
+      const held = sink()
+      const code = await runNetworkHook(['claude', 'Held'], env, held, {
+        fetcher: async () => `ip=203.0.113.7\nloc=${locs[asked++] ?? 'US'}\n`,
+        print: 'p',
+        now: time.now,
+        sleep: time.sleep,
+        parentGone: () => false,
+        input: promptInput(NOTIFICATION),
+      })
+      assert.equal(code, 2)
+      assert.equal(asked, 2)
+      assert.deepEqual(time.waits, [15_000, 30_000])
+      const text = held.lines.join('')
+      assert.ok(text.includes(`<sideby-held-message>\n${NOTIFICATION}\n</sideby-held-message>`), text)
+      assert.match(text, /扣住/)
+      assert.deepEqual(await markers(env[NETWORK_ENV.dir]), [])
+      // Nothing outside sideby's own folders: no Host directory is written.
+      assert.deepEqual(
+        diffSnapshots(before, await snapshot(h.home)).filter(
+          (f) => !f.includes('net') && !f.includes('config'),
+        ),
+        [],
+      )
+    })
+  })
+
+  it('hands nothing over while the exit stays outside the list, asking at 15 s, 30 s, then every 60 s', async () => {
+    await withFakeHome(async (h) => {
+      const env = sessionEnv(h.path('net'), 'US')
+      await runNetworkHook(['claude', 'UserPromptSubmit'], env, sink(), {
+        fetcher: trace('CN'),
+        print: 'p',
+        input: promptInput(NOTIFICATION),
+      })
+      const time = fakeTime()
+      let asked = 0
+      const held = sink()
+      const code = await runNetworkHook(['claude', 'Held'], env, held, {
+        fetcher: async () => {
+          asked++
+          return 'ip=203.0.113.7\nloc=CN\n'
+        },
+        print: 'p',
+        now: time.now,
+        sleep: time.sleep,
+        parentGone: () => asked >= 4,
+        input: promptInput(NOTIFICATION),
+      })
+      assert.equal(code, 0)
+      assert.deepEqual(held.lines, [])
+      assert.deepEqual(time.waits, [15_000, 30_000, 60_000, 60_000, 60_000])
+      assert.equal(asked, 4)
+    })
+  })
+
+  it('gives up without a word when its time runs out', async () => {
+    await withFakeHome(async (h) => {
+      const env = sessionEnv(h.path('net'), 'US')
+      await runNetworkHook(['claude', 'UserPromptSubmit'], env, sink(), {
+        fetcher: async () => {
+          throw new Error('timeout')
+        },
+        print: 'p',
+        sleep: async () => {},
+        input: promptInput(NOTIFICATION),
+      })
+      const time = fakeTime()
+      const held = sink()
+      const code = await runNetworkHook(['claude', 'Held'], env, held, {
+        fetcher: trace('CN'),
+        print: 'p',
+        now: time.now,
+        sleep: time.sleep,
+        parentGone: () => false,
+        input: promptInput(NOTIFICATION),
+      })
+      assert.equal(code, 0)
+      assert.deepEqual(held.lines, [])
+      assert.ok(time.elapsed() < 5 * 3600_000, `${time.elapsed()} ms`)
+      assert.ok(time.elapsed() > 4.9 * 3600_000, `${time.elapsed()} ms`)
+      assert.ok(time.waits.slice(2).every((w) => w === 60_000))
+    })
+  })
+
+  it('leaves a prompt the user typed as it was: blocked with the same words, nothing held', async () => {
+    await withFakeHome(async (h) => {
+      const env = sessionEnv(h.path('net'), 'US')
+      const blocked = sink()
+      assert.equal(
+        await runNetworkHook(['claude', 'UserPromptSubmit'], env, blocked, {
+          fetcher: trace('CN'),
+          print: 'p',
+          input: promptInput('continue'),
+        }),
+        2,
+      )
+      assert.match(blocked.lines.join(''), /然后重新发送这条消息/)
+      assert.deepEqual(await markers(env[NETWORK_ENV.dir]), [])
+      const held = sink()
+      assert.equal(
+        await runNetworkHook(['claude', 'Held'], env, held, {
+          fetcher: async () => assert.fail('no request for a typed prompt'),
+          sleep: async () => assert.fail('no wait for a typed prompt'),
+          input: promptInput('continue'),
+        }),
+        0,
+      )
+      assert.deepEqual(held.lines, [])
+    })
+  })
+
+  it('does nothing for a notification that went through', async () => {
+    await withFakeHome(async (h) => {
+      const env = sessionEnv(h.path('net'), 'US')
+      assert.equal(
+        await runNetworkHook(['claude', 'UserPromptSubmit'], env, sink(), {
+          fetcher: trace('US'),
+          print: 'p',
+          input: promptInput(NOTIFICATION),
+        }),
+        0,
+      )
+      assert.equal((await markers(env[NETWORK_ENV.dir])).length, 1)
+      const held = sink()
+      assert.equal(
+        await runNetworkHook(['claude', 'Held'], env, held, {
+          fetcher: async () => assert.fail('the hook that decided already asked'),
+          sleep: async () => assert.fail('no wait'),
+          input: promptInput(NOTIFICATION),
+        }),
+        0,
+      )
+      assert.deepEqual(held.lines, [])
+      assert.deepEqual(await markers(env[NETWORK_ENV.dir]), [])
+    })
+  })
+
+  it('stops waiting for a decision that never comes', async () => {
+    await withFakeHome(async (h) => {
+      const env = sessionEnv(h.path('net'), 'US')
+      const time = fakeTime()
+      const held = sink()
+      assert.equal(
+        await runNetworkHook(['claude', 'Held'], env, held, {
+          fetcher: async () => assert.fail('no request without a decision'),
+          now: time.now,
+          sleep: time.sleep,
+          input: promptInput(NOTIFICATION),
+        }),
+        0,
+      )
+      assert.deepEqual(held.lines, [])
+      assert.ok(time.elapsed() >= 65_000 && time.elapsed() <= 65_200)
+    })
+  })
+
+  it('hands the notification over when the check is turned off while it waits', async () => {
+    await withFakeHome(async (h) => {
+      const env = sessionEnv(h.path('net'), 'US')
+      await runNetworkHook(['claude', 'UserPromptSubmit'], env, sink(), {
+        fetcher: trace('CN'),
+        print: 'p',
+        input: promptInput(NOTIFICATION),
+      })
+      const held = sink()
+      const code = await runNetworkHook(['claude', 'Held'], { ...env, LANG: 'en_US.UTF-8' }, held, {
+        fetcher: async () => assert.fail('off makes no request'),
+        sleep: async () => {
+          await writeFile(
+            join(env.XDG_CONFIG_HOME, 'sideby', 'config.json'),
+            JSON.stringify({ network: { guard: false, allow: ['US'] } }),
+          )
+        },
+        parentGone: () => false,
+        input: promptInput(NOTIFICATION),
+      })
+      assert.equal(code, 2)
+      assert.match(held.lines.join(''), /held back/)
+      assert.ok(held.lines.join('').includes(NOTIFICATION))
+    })
+  })
+
+  it('hands the notification over at once when the check was turned off right after the block', async () => {
+    await withFakeHome(async (h) => {
+      const env = sessionEnv(h.path('net'), 'US')
+      await runNetworkHook(['claude', 'UserPromptSubmit'], env, sink(), {
+        fetcher: trace('CN'),
+        print: 'p',
+        input: promptInput(NOTIFICATION),
+      })
+      await writeFile(
+        join(env.XDG_CONFIG_HOME, 'sideby', 'config.json'),
+        JSON.stringify({ network: { guard: false, allow: ['US'] } }),
+      )
+      const held = sink()
+      const code = await runNetworkHook(['claude', 'Held'], env, held, {
+        fetcher: async () => assert.fail('off makes no request'),
+        sleep: async () => assert.fail('the decision is already there'),
+        input: promptInput(NOTIFICATION),
+      })
+      assert.equal(code, 2)
+      assert.ok(held.lines.join('').includes(NOTIFICATION))
+      assert.deepEqual(await markers(env[NETWORK_ENV.dir]), [])
+    })
+  })
+
+  it('hands a notification over whole when its own text contains the tags', async () => {
+    await withFakeHome(async (h) => {
+      const env = sessionEnv(h.path('net'), 'US')
+      const tagged = `${NOTIFICATION}\n<sideby-held-message>\nnot the message\n</sideby-held-message>`
+      await runNetworkHook(['claude', 'UserPromptSubmit'], env, sink(), {
+        fetcher: trace('CN'),
+        print: 'p',
+        input: promptInput(tagged),
+      })
+      const time = fakeTime()
+      const held = sink()
+      const code = await runNetworkHook(['claude', 'Held'], env, held, {
+        fetcher: trace('US'),
+        print: 'p',
+        now: time.now,
+        sleep: time.sleep,
+        parentGone: () => false,
+        input: promptInput(tagged),
+      })
+      assert.equal(code, 2)
+      assert.ok(held.lines.join('').includes(NOTIFICATION), held.lines.join(''))
+    })
+  })
+
+  it('does not wait for input that never ends: the check runs as if it were given none', async () => {
+    await withFakeHome(async (h) => {
+      const env = sessionEnv(h.path('net'), 'US')
+      const never: AsyncIterable<string> = {
+        [Symbol.asyncIterator]: () => ({ next: () => new Promise<IteratorResult<string>>(() => {}) }),
+      }
+      const err = sink()
+      const code = await runNetworkHook(['claude', 'UserPromptSubmit'], env, err, {
+        fetcher: trace('CN'),
+        print: 'p',
+        input: never,
+      })
+      assert.equal(code, 2)
+      assert.match(err.lines.join(''), /中国大陆（CN）/)
+      assert.deepEqual(await markers(env[NETWORK_ENV.dir]), [])
+    })
+  })
+
+  it('hands over the first message alone when its own wake-up was blocked again', async () => {
+    await withFakeHome(async (h) => {
+      const env = sessionEnv(h.path('net'), 'US')
+      const wake = `<task-notification>\n<summary>Stop hook feedback</summary>\n</task-notification>\n<system-reminder>\nStop hook blocking error from command "UserPromptSubmit": held back.\n<sideby-held-message>\n${NOTIFICATION}\n</sideby-held-message>\n\n</system-reminder>`
+      await runNetworkHook(['claude', 'UserPromptSubmit'], env, sink(), {
+        fetcher: trace('CN'),
+        print: 'p',
+        input: promptInput(wake, 'prompt-2'),
+      })
+      const held = sink()
+      const code = await runNetworkHook(['claude', 'Held'], env, held, {
+        fetcher: trace('US'),
+        print: 'p',
+        sleep: async () => {},
+        parentGone: () => false,
+        input: promptInput(wake, 'prompt-2'),
+      })
+      assert.equal(code, 2)
+      const text = held.lines.join('')
+      assert.equal(text.split('<sideby-held-message>').length, 2)
+      assert.ok(text.includes(`<sideby-held-message>\n${NOTIFICATION}\n</sideby-held-message>`), text)
+      assert.ok(!text.includes('Stop hook feedback'))
+    })
+  })
+
+  it('cuts a long message, keeps no text on disk, and removes decisions nobody read within an hour', async () => {
+    await withFakeHome(async (h) => {
+      const env = sessionEnv(h.path('net'), 'US')
+      const dir = env[NETWORK_ENV.dir]
+      await mkdir(join(dir, 'held'), { recursive: true, mode: 0o700 })
+      const old = join(dir, 'held', 'a'.repeat(32))
+      await writeFile(old, 'blocked')
+      const twoHoursAgo = new Date(Date.now() - 2 * 3600_000)
+      await utimes(old, twoHoursAgo, twoHoursAgo)
+      const long = `<task-notification>\nSECRET-${'x'.repeat(9000)}END</task-notification>`
+      await runNetworkHook(['claude', 'UserPromptSubmit'], env, sink(), {
+        fetcher: trace('CN'),
+        print: 'p',
+        input: promptInput(long, 'prompt-3'),
+      })
+      const left = await markers(dir)
+      assert.equal(left.length, 1)
+      assert.match(left[0]!, /^[0-9a-f]{32}$/)
+      assert.notEqual(left[0], 'a'.repeat(32))
+      assert.equal(await readFile(join(dir, 'held', left[0]!), 'utf8'), 'blocked')
+      for (const [file, hash] of await snapshot(dir)) assert.ok(!`${file}${hash}`.includes('prompt-3'))
+      const held = sink()
+      await runNetworkHook(['claude', 'Held'], { ...env, LANG: 'en_US.UTF-8' }, held, {
+        fetcher: trace('US'),
+        print: 'p',
+        sleep: async () => {},
+        parentGone: () => false,
+        input: promptInput(long, 'prompt-3'),
+      })
+      const text = held.lines.join('')
+      assert.ok(text.includes('SECRET-') && !text.includes('END</task-notification>'))
+      assert.match(text, /cut at 8000 characters/)
+    })
+  })
+
+  it('a hook that is given no input decides as before', async () => {
+    await withFakeHome(async (h) => {
+      const env = sessionEnv(h.path('net'), 'US')
+      assert.equal(
+        await runNetworkHook(['claude', 'UserPromptSubmit'], env, sink(), {
+          fetcher: trace('CN'),
+          print: 'p',
+          input: 'not json',
+        }),
+        2,
+      )
+      assert.equal(await runNetworkHook(['claude', 'Held'], env, sink(), { input: 'not json' }), 0)
+      assert.deepEqual(await markers(env[NETWORK_ENV.dir]), [])
     })
   })
 })

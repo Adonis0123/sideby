@@ -39,7 +39,7 @@ The menu opens from anywhere with a shortcut (⌥⌘S by default at first, ⌥X 
 ## Amendment (2026-10-20): choosing a shortcut, and saying where the icon went
 
 - Recording a shortcut in the browser proved hard to use: macOS hands keys another app (or sideby's own current shortcut) registered to that app first, so the page saw only the modifiers and seemed stuck. The Panel now offers a list of checked combinations, Off and Custom…; only Custom… records. Native apps record in the process that registers the key; sideby's settings live in Node and its icon in osascript, so a choice is the dependable default and the distributed notification above carries it across.
-- On macOS 26 and later a full menu bar puts icons behind «, which is where an "on" icon most often is. The script already knew (it drops its menu at the pointer when its window is not visible), so it reports `--icon visible|hidden` with its snapshot, and the Panel and `sideby menubar` say where the icon went instead of listing every possible cause. The script still reads and writes no file of its own.
+- On macOS 26 and later a full menu bar puts icons behind «, which is where an "on" icon most often is. The script already knew (it drops its menu below the right end of the menu bar when its window is not visible), so it reports `--icon visible|hidden` with its snapshot, and the Panel and `sideby menubar` say where the icon went instead of listing every possible cause. The script still reads and writes no file of its own.
 
 ## Amendment (2026-10-20): a default one hand presses
 

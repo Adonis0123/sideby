@@ -101,6 +101,12 @@ describe('Launch', () => {
       assert.equal(hooks.UserPromptSubmit[0].hooks[0].timeout, 60)
       assert.ok(hooks.UserPromptSubmit[0].hooks[0].timeout * 1000 >= 2 * RETRY_BUDGET_MS)
       assert.equal(hooks.PreToolUse[0].hooks[0].timeout, 60)
+      // A prompt Claude Code made itself is held while it is blocked, by a background hook that can wake the session.
+      const held = hooks.UserPromptSubmit[0].hooks[1]
+      assert.match(held.command, /network-hook claude Held$/)
+      assert.equal(held.asyncRewake, true)
+      assert.equal(held.timeout, 18000)
+      assert.equal(hooks.PreToolUse[0].hooks.length, 1)
       assert.deepEqual(diffSnapshots(before, await snapshot(h.path('.claude-001'))), [])
     })
   })
@@ -112,6 +118,8 @@ describe('Launch', () => {
       assert.deepEqual(asked, [TRACE.chatgpt])
       assert.ok(p.args.some((a) => a.startsWith('hooks.UserPromptSubmit=')))
       assert.ok(p.args.some((a) => a.startsWith('hooks.PreToolUse=')))
+      // Codex has no background hook that can wake a session: nothing is held there.
+      assert.ok(!p.args.some((a) => a.includes('Held') || a.includes('asyncRewake')))
       assert.match(p.notice ?? '', /\/hooks/)
       const again = await rt.prepareLaunch('codex:main', [], 'run')
       assert.doesNotMatch(again.notice ?? '', /\/hooks/)
