@@ -30,7 +30,7 @@ import type { HandoffDecision, UsedAccount } from './handoff-select.ts'
 import { beforeDashes, type PreparedLaunch, runHost, sidebyBinProblem, spawnHost } from './launch.ts'
 import { withoutArgs } from './network.ts'
 import { quotaPressure } from './quota-levels.ts'
-import { withClaudeSessionHooks } from './session-hooks.ts'
+import { withClaudeDirs, withClaudeSessionHooks } from './session-hooks.ts'
 
 export interface HandoffIo {
   err(line: string): void
@@ -267,197 +267,214 @@ export async function runWithHandoff(
   const own = rt.config.aliases?.[ref]
   let hop: Hop = { ref, args: [...aliasArgs(own), ...userArgs] }
   let n = 1
+  const chainSettings = join(rt.paths.stateDir, 'handoff', 'chains', `${chain}-claude.json`)
 
-  for (;;) {
-    const launch: PreparedLaunch =
-      n === 1 ? firstLaunch : await rt.prepareLaunch(hop.ref, hop.args, 'run', launchOpts)
-    const account = launch.account
-    const h = launch.family.handoff
-    if (!h) return runHost(launch)
-    const elig = n === 1 ? firstElig : await h.eligibility(withoutNetwork(launch), account, launch.env)
-    const canStart = h.starts.length > 0 && elig.start && HOOK_FAMILIES.includes(account.family)
-    if (!canStart && elig.reason) io.err(`sideby: ${account.ref} will not hand over: ${elig.reason}`)
-
-    const runId = newId()
-    const brief = briefPath(dir, n, account.ref)
-    const extra = [...(elig.args ?? [])]
-    const env = { ...launch.env }
-    // Claude takes one `--settings`: sideby's session hooks (Network Guard §3.35, Unattended Mode §3.37) go into Auto
-    // Handoff's file.
-    const sessionArgs = launch.sessionHookArgs ?? launch.networkArgs ?? []
-    const mergeNet = canStart && account.family === 'claude' && sessionArgs.length > 0
-    if (canStart) {
-      const hookArgs = (await h.hookArgs?.(hookCommand(account.family), rt.paths.stateDir)) ?? []
-      extra.push(...(mergeNet ? await withClaudeSessionHooks(hookArgs, sessionArgs) : hookArgs))
-      env[HANDOFF_ENV.run] = runId
-      env[HANDOFF_ENV.family] = account.family
-      env[HANDOFF_ENV.dir] = dir
-      if (account.family === 'codex') await codexTrustNotice(rt, account, io)
-    }
-    extra.push(...(h.dirArgs?.(dir) ?? []))
-    const args = beforeDashes(mergeNet ? withoutNetwork(launch) : launch.args, extra)
-    // Later hops carry no `--` of their own (continueArgs drops it), so the prompt goes after a fresh one.
-    if (hop.prompt) args.push(...h.promptArgs(hop.prompt))
-    hops.hops.push({ ref: account.ref, startedAt: new Date().toISOString() })
-    await writeJsonFile(join(dir, FILES.chain), hops)
-    if (launch.notice) io.err(launch.notice)
-    if (!canStart) return runHost({ ...launch, args, env })
-
-    // Plan writes run one after another, and none lands after this hop is over: a late one would carry this
-    // run's id into the next hop's plan.json and silence its hook.
-    let stopped = false
-    let pending = Promise.resolve()
-    const writePlan = () => {
-      pending = pending.then(async () => {
-        try {
-          // Read by the hook once the threshold is crossed, so it answers for that moment (spec §3.17 "选号" 1).
-          const d = await rt.handoffDecision(account, hops.hops, { ahead: true })
-          if (stopped) return
-          const plan: PlanFile = {
-            runId,
-            brief,
-            at: new Date().toISOString(),
-            decision: d.kind,
-            ...(d.kind === 'pick' ? { pick: d.ref } : {}),
-            ...(d.kind === 'wait' ? { until: d.until } : {}),
-            prepareAt: settings.prepareAt,
-            threshold: settings.threshold,
-            adaptive: settings.adaptive,
-            ...(elig.agentBrief === false ? { agentBrief: false } : {}),
-            acceptsTo: true,
-          }
-          await writeJsonFile(join(dir, FILES.plan), plan)
-        } catch {
-          // the hook treats a missing plan as "do not interrupt"
-        }
-      })
-      return pending
-    }
-    await writePlan()
-    const refresh = setInterval(() => void writePlan(), PLAN_REFRESH_MS)
-    const host = spawnHost({ ...launch, args, env })
-    const exited = host.exited.then((code) => ({ kind: 'exit' as const, code }))
-    // Nothing to move on to (or better to wait): leave the session alone, keep listening (the user may still ask to
-    // move on while it waits, ADR-0018), and say why once it ends.
-    let kept: HandoffDecision | undefined
-    let outcome:
-      | Awaited<typeof exited>
-      | { kind: 'ready'; ready: ReadyFile; decision: Extract<HandoffDecision, { kind: 'pick' }> }
+  try {
     for (;;) {
-      const watcher = watchReady(dir, runId)
-      const got = await Promise.race([
-        exited,
-        watcher.ready.then((ready) => ({ kind: 'ready' as const, ready })),
+      const launch: PreparedLaunch =
+        n === 1 ? firstLaunch : await rt.prepareLaunch(hop.ref, hop.args, 'run', launchOpts)
+      const account = launch.account
+      const h = launch.family.handoff
+      if (!h) return await runHost(launch)
+      const elig = n === 1 ? firstElig : await h.eligibility(withoutNetwork(launch), account, launch.env)
+      const canStart = h.starts.length > 0 && elig.start && HOOK_FAMILIES.includes(account.family)
+      if (!canStart && elig.reason) io.err(`sideby: ${account.ref} will not hand over: ${elig.reason}`)
+
+      const runId = newId()
+      const brief = briefPath(dir, n, account.ref)
+      const extra = [...(elig.args ?? [])]
+      const env = { ...launch.env }
+      // Claude takes one `--settings`: sideby's session hooks (Network Guard §3.35, Unattended Mode §3.37) go into Auto
+      // Handoff's file.
+      const sessionArgs = launch.sessionHookArgs ?? launch.networkArgs ?? []
+      const mergeNet = canStart && account.family === 'claude' && sessionArgs.length > 0
+      let dirInSettings = false
+      if (canStart) {
+        const hookArgs = (await h.hookArgs?.(hookCommand(account.family), rt.paths.stateDir)) ?? []
+        let settingsArgs = mergeNet ? await withClaudeSessionHooks(hookArgs, sessionArgs) : hookArgs
+        // Claude Code 2.1.326 asks to trust a folder given by `--add-dir`; one in sideby's `--settings` file needs no
+        // question. The file is the chain's own, outside the chain directory the session may write to.
+        if (account.family === 'claude' && settingsArgs.includes('--settings')) {
+          settingsArgs = await withClaudeDirs(settingsArgs, [dir], chainSettings)
+          dirInSettings = true
+        }
+        extra.push(...settingsArgs)
+        env[HANDOFF_ENV.run] = runId
+        env[HANDOFF_ENV.family] = account.family
+        env[HANDOFF_ENV.dir] = dir
+        if (account.family === 'codex') await codexTrustNotice(rt, account, io)
+      }
+      // Where sideby cannot add to `--settings` (the user gave their own), Claude Code asks to trust the folder.
+      if (!dirInSettings) extra.push(...(h.dirArgs?.(dir) ?? []))
+      const args = beforeDashes(mergeNet ? withoutNetwork(launch) : launch.args, extra)
+      // Later hops carry no `--` of their own (continueArgs drops it), so the prompt goes after a fresh one.
+      if (hop.prompt) args.push(...h.promptArgs(hop.prompt))
+      hops.hops.push({ ref: account.ref, startedAt: new Date().toISOString() })
+      await writeJsonFile(join(dir, FILES.chain), hops)
+      if (launch.notice) io.err(launch.notice)
+      if (!canStart) return await runHost({ ...launch, args, env })
+
+      // Plan writes run one after another, and none lands after this hop is over: a late one would carry this
+      // run's id into the next hop's plan.json and silence its hook.
+      let stopped = false
+      let pending = Promise.resolve()
+      const writePlan = () => {
+        pending = pending.then(async () => {
+          try {
+            // Read by the hook once the threshold is crossed, so it answers for that moment (spec §3.17 "选号" 1).
+            const d = await rt.handoffDecision(account, hops.hops, { ahead: true })
+            if (stopped) return
+            const plan: PlanFile = {
+              runId,
+              brief,
+              at: new Date().toISOString(),
+              decision: d.kind,
+              ...(d.kind === 'pick' ? { pick: d.ref } : {}),
+              ...(d.kind === 'wait' ? { until: d.until } : {}),
+              prepareAt: settings.prepareAt,
+              threshold: settings.threshold,
+              adaptive: settings.adaptive,
+              ...(elig.agentBrief === false ? { agentBrief: false } : {}),
+              acceptsTo: true,
+            }
+            await writeJsonFile(join(dir, FILES.plan), plan)
+          } catch {
+            // the hook treats a missing plan as "do not interrupt"
+          }
+        })
+        return pending
+      }
+      await writePlan()
+      const refresh = setInterval(() => void writePlan(), PLAN_REFRESH_MS)
+      const host = spawnHost({ ...launch, args, env })
+      const exited = host.exited.then((code) => ({ kind: 'exit' as const, code }))
+      // Nothing to move on to (or better to wait): leave the session alone, keep listening (the user may still ask to
+      // move on while it waits, ADR-0018), and say why once it ends.
+      let kept: HandoffDecision | undefined
+      let outcome:
+        | Awaited<typeof exited>
+        | { kind: 'ready'; ready: ReadyFile; decision: Extract<HandoffDecision, { kind: 'pick' }> }
+      for (;;) {
+        const watcher = watchReady(dir, runId)
+        const got = await Promise.race([
+          exited,
+          watcher.ready.then((ready) => ({ kind: 'ready' as const, ready })),
+        ])
+        watcher.stop()
+        if (got.kind === 'exit') {
+          outcome = got
+          break
+        }
+        const d = await decide(rt, account, hops.hops, got.ready.to, got.ready.trigger === 'manual')
+        if (d.kind === 'pick') {
+          outcome = { ...got, decision: d }
+          break
+        }
+        await rm(join(dir, FILES.ready), { force: true })
+        // A session kept at its limit (or kept to wait) ends no turn until it continues, so a request would never be
+        // picked up: `waiting.json` lets `handoff ready` hand over at once (ADR-0018). A `threshold` none is still in
+        // its turns and gets none.
+        const until =
+          d.kind === 'wait' ? d.until : got.ready.trigger === 'limit' ? limitUntil(got.ready) : undefined
+        if (until)
+          await writeJsonFile(join(dir, FILES.waiting), {
+            runId,
+            until,
+            at: new Date().toISOString(),
+            trigger: got.ready.trigger,
+          } satisfies WaitingFile)
+        kept = d
+      }
+      clearInterval(refresh)
+      stopped = true
+      await pending
+      await rm(join(dir, FILES.waiting), { force: true })
+
+      if (outcome.kind === 'exit') {
+        if (kept) io.err(`sideby: ${account.ref} did not hand over: ${explain(kept)}`)
+        else await noteUnhandedHighQuota(rt, account, hops.hops, settings.threshold, io)
+        return outcome.code
+      }
+      const decision = outcome.decision
+
+      // The session is ready: end the Host, give it time to save, never kill it.
+      host.child.kill('SIGTERM')
+      const ended = await Promise.race([
+        host.exited.then((code) => ({ code })),
+        new Promise<null>((r) => setTimeout(() => r(null), grace).unref()),
       ])
-      watcher.stop()
-      if (got.kind === 'exit') {
-        outcome = got
-        break
-      }
-      const d = await decide(rt, account, hops.hops, got.ready.to, got.ready.trigger === 'manual')
-      if (d.kind === 'pick') {
-        outcome = { ...got, decision: d }
-        break
-      }
-      await rm(join(dir, FILES.ready), { force: true })
-      // A session kept at its limit (or kept to wait) ends no turn until it continues, so a request would never be
-      // picked up: `waiting.json` lets `handoff ready` hand over at once (ADR-0018). A `threshold` none is still in
-      // its turns and gets none.
-      const until =
-        d.kind === 'wait' ? d.until : got.ready.trigger === 'limit' ? limitUntil(got.ready) : undefined
-      if (until)
-        await writeJsonFile(join(dir, FILES.waiting), {
-          runId,
-          until,
-          at: new Date().toISOString(),
-          trigger: got.ready.trigger,
-        } satisfies WaitingFile)
-      kept = d
-    }
-    clearInterval(refresh)
-    stopped = true
-    await pending
-    await rm(join(dir, FILES.waiting), { force: true })
-
-    if (outcome.kind === 'exit') {
-      if (kept) io.err(`sideby: ${account.ref} did not hand over: ${explain(kept)}`)
-      else await noteUnhandedHighQuota(rt, account, hops.hops, settings.threshold, io)
-      return outcome.code
-    }
-    const decision = outcome.decision
-
-    // The session is ready: end the Host, give it time to save, never kill it.
-    host.child.kill('SIGTERM')
-    const ended = await Promise.race([
-      host.exited.then((code) => ({ code })),
-      new Promise<null>((r) => setTimeout(() => r(null), grace).unref()),
-    ])
-    if (!ended) {
-      io.err(
-        `sideby: ${account.ref} did not exit within ${grace / 1000}s, so nothing was handed over; exit it yourself, then start the next account with \`sideby run ${decision.ref}\``,
-      )
-      return host.exited
-    }
-
-    const ready = outcome.ready
-    const assembled = await h
-      .briefFromSession?.(account, {
-        ...(ready.sessionId ? { id: ready.sessionId } : {}),
-        ...(ready.transcriptPath ? { transcriptPath: ready.transcriptPath } : {}),
-      })
-      .catch(() => undefined)
-    const done = await finishBrief({
-      target: brief,
-      ready,
-      ...(assembled ? { assembled } : {}),
-      cwd: process.cwd(),
-    })
-    const last = hops.hops[hops.hops.length - 1]!
-    Object.assign(last, {
-      trigger: ready.trigger,
-      briefSource: done.source,
-      brief: done.path,
-      ...(ready.window ? { window: ready.window } : {}),
-    })
-    await writeJsonFile(join(dir, FILES.chain), hops)
-    await rm(join(dir, FILES.ready), { force: true })
-    await rm(join(dir, FILES.request), { force: true })
-
-    io.err(
-      `sideby: ${account.ref} saved its session and is handing over because ${WHY[ready.trigger]}${ready.window ? ` (${windowText(ready.window)})` : ''}; next is ${decision.ref}${skippedText(decision)}. Brief: ${done.path}`,
-    )
-    if (
-      settings.countdownSeconds > 0 &&
-      (await countdown(io, settings.countdownSeconds, decision.ref, account.ref))
-    ) {
-      io.err(`sideby: staying in ${account.ref}`)
-      if (!ready.sessionId) {
+      if (!ended) {
         io.err(
-          `sideby: the session id is unknown, so start ${account.ref} yourself; the Brief is at ${done.path}`,
+          `sideby: ${account.ref} did not exit within ${grace / 1000}s, so nothing was handed over; exit it yourself, then start the next account with \`sideby run ${decision.ref}\``,
+        )
+        return await host.exited
+      }
+
+      const ready = outcome.ready
+      const assembled = await h
+        .briefFromSession?.(account, {
+          ...(ready.sessionId ? { id: ready.sessionId } : {}),
+          ...(ready.transcriptPath ? { transcriptPath: ready.transcriptPath } : {}),
+        })
+        .catch(() => undefined)
+      const done = await finishBrief({
+        target: brief,
+        ready,
+        ...(assembled ? { assembled } : {}),
+        cwd: process.cwd(),
+      })
+      const last = hops.hops[hops.hops.length - 1]!
+      Object.assign(last, {
+        trigger: ready.trigger,
+        briefSource: done.source,
+        brief: done.path,
+        ...(ready.window ? { window: ready.window } : {}),
+      })
+      await writeJsonFile(join(dir, FILES.chain), hops)
+      await rm(join(dir, FILES.ready), { force: true })
+      await rm(join(dir, FILES.request), { force: true })
+
+      io.err(
+        `sideby: ${account.ref} saved its session and is handing over because ${WHY[ready.trigger]}${ready.window ? ` (${windowText(ready.window)})` : ''}; next is ${decision.ref}${skippedText(decision)}. Brief: ${done.path}`,
+      )
+      if (
+        settings.countdownSeconds > 0 &&
+        (await countdown(io, settings.countdownSeconds, decision.ref, account.ref))
+      ) {
+        io.err(`sideby: staying in ${account.ref}`)
+        if (!ready.sessionId) {
+          io.err(
+            `sideby: the session id is unknown, so start ${account.ref} yourself; the Brief is at ${done.path}`,
+          )
+          return ended.code
+        }
+        const backArgs = [...h.continueArgs(hop.args), ...h.resumeArgs(ready.sessionId)]
+        const back = await rt.prepareLaunch(account.ref, backArgs, 'run', launchOpts)
+        // The same per-Account arguments as before (Grok's leader socket), without sideby's hooks.
+        const backElig = await h.eligibility(withoutNetwork(back), account, back.env)
+        return await runHost({ ...back, args: beforeDashes(back.args, backElig.args ?? []) })
+      }
+
+      let next: Account
+      try {
+        next = await rt.resolve(decision.ref)
+      } catch (err) {
+        io.err(
+          `sideby: cannot start ${decision.ref}: ${(err as Error).message}; the Brief is at ${done.path}`,
         )
         return ended.code
       }
-      const backArgs = [...h.continueArgs(hop.args), ...h.resumeArgs(ready.sessionId)]
-      const back = await rt.prepareLaunch(account.ref, backArgs, 'run', launchOpts)
-      // The same per-Account arguments as before (Grok's leader socket), without sideby's hooks.
-      const backElig = await h.eligibility(withoutNetwork(back), account, back.env)
-      return runHost({ ...back, args: beforeDashes(back.args, backElig.args ?? []) })
+      io.err(`sideby: handing over from ${account.ref} to ${next.ref}`)
+      hop = {
+        ref: next.ref,
+        args: next.family === account.family ? h.continueArgs(hop.args) : [],
+        prompt: firstPrompt(account.ref, done.path, ready.trigger),
+      }
+      n++
     }
-
-    let next: Account
-    try {
-      next = await rt.resolve(decision.ref)
-    } catch (err) {
-      io.err(`sideby: cannot start ${decision.ref}: ${(err as Error).message}; the Brief is at ${done.path}`)
-      return ended.code
-    }
-    io.err(`sideby: handing over from ${account.ref} to ${next.ref}`)
-    hop = {
-      ref: next.ref,
-      args: next.family === account.family ? h.continueArgs(hop.args) : [],
-      prompt: firstPrompt(account.ref, done.path, ready.trigger),
-    }
-    n++
+  } finally {
+    // Read by Claude Code while a session runs, so it goes only once the chain's last Host is over.
+    await rm(chainSettings, { force: true })
   }
 }
 
