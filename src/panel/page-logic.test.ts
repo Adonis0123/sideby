@@ -25,6 +25,7 @@ import {
   canLeaveLocal,
   categoryOrder,
   codeSwapOutcome,
+  dateFormatter,
   dotsKeepKeyboard,
   enableOutcome,
   fileSize,
@@ -39,7 +40,9 @@ import {
   highlightParts,
   histFilters,
   historyEmpty,
+  historyRowSig,
   historyWhen,
+  historyWhenNext,
   hotkeyFromKey,
   hotkeyPressKind,
   inDisplayOrder,
@@ -2656,6 +2659,73 @@ describe('Session History page logic (spec §3.33)', () => {
     assert.match(historyWhen('2026-09-01T12:00:00Z', now)!.date!, /^2026-09-0[12]$/)
     assert.equal(historyWhen('not a date', now), null)
     assert.equal(historyWhen(undefined, now), null)
+  })
+  it('says when the words for a time change next, so the list redraws an age only then', () => {
+    const at = (iso: string) => new Date(historyWhenNext(iso, now)).toISOString()
+    assert.equal(at('2026-10-20T11:59:30Z'), '2026-10-20T12:00:30.000Z')
+    assert.equal(at('2026-10-20T11:30:00Z'), '2026-10-20T12:01:00.000Z')
+    assert.equal(at('2026-10-20T11:00:00Z'), '2026-10-20T13:00:00.000Z')
+    assert.equal(at('2026-10-19T12:30:00Z'), '2026-10-20T12:30:00.000Z')
+    assert.equal(at('2026-10-13T12:00:01Z'), '2026-10-20T12:00:01.000Z')
+    // Not yet: a time a little ahead of this clock reads "just now" for a minute after it.
+    assert.equal(at('2026-10-20T12:00:10Z'), '2026-10-20T12:01:10.000Z')
+    assert.equal(historyWhenNext('2026-09-01T12:00:00Z', now), new Date(2027, 0, 1).getTime())
+    assert.equal(historyWhenNext('not a date', now), Number.POSITIVE_INFINITY)
+    // Right up to the next change the words are the ones of now, and at it they differ.
+    for (const iso of [
+      '2026-10-20T11:59:30Z',
+      '2026-10-20T11:30:00Z',
+      '2026-10-20T03:00:00Z',
+      '2026-10-15T09:00:00Z',
+      '2026-10-13T12:00:01Z',
+    ]) {
+      const next = historyWhenNext(iso, now)
+      assert.deepEqual(historyWhen(iso, next - 1), historyWhen(iso, now), iso)
+      assert.notDeepEqual(historyWhen(iso, next), historyWhen(iso, now), iso)
+    }
+  })
+  it('formats dates as toLocaleDateString does, with one formatter per locale and options', () => {
+    const format = dateFormatter()
+    const d = new Date(2026, 9, 20, 9, 5)
+    for (const locale of ['en-US', 'zh-CN']) {
+      for (const options of [
+        { month: 'short', day: 'numeric' },
+        { dateStyle: 'medium' },
+        { weekday: 'short' },
+      ] as const)
+        assert.equal(format(d, locale, options), d.toLocaleDateString(locale, options))
+      assert.equal(
+        format(d, locale, { hour: '2-digit', minute: '2-digit' }),
+        d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }),
+      )
+      assert.equal(
+        format(d, locale, { dateStyle: 'medium', timeStyle: 'short' }),
+        d.toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' }),
+      )
+    }
+    // A change of language gets that language's formatter, not the one made first.
+    assert.notEqual(
+      format(d, 'en-US', { month: 'short', day: 'numeric' }),
+      format(d, 'zh-CN', { month: 'short', day: 'numeric' }),
+    )
+  })
+  it('signs a History row with what it shows and acts on', () => {
+    const s = {
+      account: 'claude:work',
+      sessionId: 'a1',
+      title: 'Fix login',
+      continueCommand: 'sideby run claude:work -- --resume a1',
+    }
+    const base = historyRowSig(s, ['login'], false, 'en')
+    assert.equal(historyRowSig({ ...s }, ['login'], false, 'en'), base)
+    assert.notEqual(historyRowSig({ ...s, title: 'Fix logout' }, ['login'], false, 'en'), base)
+    assert.notEqual(
+      historyRowSig({ ...s, continueCommand: 'cd /x && sideby run claude:work' }, ['login'], false, 'en'),
+      base,
+    )
+    assert.notEqual(historyRowSig(s, [], false, 'en'), base)
+    assert.notEqual(historyRowSig(s, ['login'], true, 'en'), base)
+    assert.notEqual(historyRowSig(s, ['login'], false, 'zh'), base)
   })
   it('marks every word in any case, merges overlaps, and keeps the text whole', () => {
     const parts = highlightParts('Login page: fix the LOGIN button', ['login', 'button'])

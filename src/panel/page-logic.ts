@@ -2126,6 +2126,49 @@ export function historyWhen(
   return { key: 'time.on', date: d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) }
 }
 
+/**
+ * When the words for `iso` (historyWhen, and the page's date, which shows the year only for another year) change
+ * next, as a time after `now`: the next minute under an hour, the next hour under a day, the next day under a week
+ * (the seventh is when they turn into a date), and after that the next New Year. Infinity for a time that is not a date.
+ */
+export function historyWhenNext(iso: string | undefined, now: number): number {
+  const ts = Date.parse(iso || '')
+  if (!Number.isFinite(ts)) return Number.POSITIVE_INFINITY
+  const ms = Math.max(0, now - ts)
+  if (ms < 7 * 86_400_000) {
+    const step = ms < 3_600_000 ? 60_000 : ms < 86_400_000 ? 3_600_000 : 86_400_000
+    return ts + (Math.floor(ms / step) + 1) * step
+  }
+  return new Date(new Date(now).getFullYear() + 1, 0, 1).getTime()
+}
+
+/**
+ * A date formatter that keeps one Intl.DateTimeFormat per locale and options: `toLocaleDateString(locale, options)`
+ * builds a new one on every call, which was most of the time a long list spent showing its dates.
+ */
+export function dateFormatter(): (date: Date, locale: string, options: Intl.DateTimeFormatOptions) => string {
+  const made = new Map<string, Intl.DateTimeFormat>()
+  return (date, locale, options) => {
+    const key = `${locale} ${JSON.stringify(options)}`
+    let f = made.get(key)
+    if (!f) {
+      f = new Intl.DateTimeFormat(locale, options)
+      made.set(key, f)
+    }
+    return f.format(date)
+  }
+}
+
+/** Everything a History row shows and its buttons act on, so a row drawn from the same can be kept as it is. */
+export function historyRowSig(
+  session: unknown,
+  words: readonly string[],
+  noProject: boolean,
+  lang: string,
+): string {
+  return JSON.stringify([lang, words, Boolean(noProject), session])
+}
+
 /** `text` cut into the parts that match one of `words` (any case) and the parts between, for highlighting. */
 export function highlightParts(text: string, words: readonly string[]): { text: string; hit: boolean }[] {
   const low = text.toLowerCase()
