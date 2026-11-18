@@ -7177,6 +7177,82 @@ const MAIN = String.raw`
       out.push(h('p', { class: 'small' }, h('button', { class: 'link-btn small', type: 'button', 'data-key': 'pr-ask', onclick: () => openAsk({ text: t('ai.ask.progress') }) }, t('adv.ask'))))
     return out
   }
+  // Carried trust (spec §3.43, ADR-0078): the switch writes config claude.carryTrust at once (the words beside it say
+  // what it does) and the toast offers the way back. The trust sideby copied is listed behind Review, read from
+  // sideby's own records, and goes only after the list is shown and Remove is pressed.
+  const tu = { open: false, busy: false, items: null, error: null }
+  async function setTrust(on) {
+    const tr = S.state && S.state.trust
+    if (!tr) return
+    const was = tr.on
+    S.state.trust = Object.assign({}, tr, { on })
+    refreshSettings()
+    try {
+      await api('/api/trust/settings', { on, confirm: true })
+      toast(t(on ? 'tr.onToast' : 'tr.offToast'), { kind: 'ok', action: { label: t('toast.undo'), run: () => setTrust(was) }, duration: 8000 })
+    } catch (e) {
+      S.state.trust = Object.assign({}, S.state.trust, { on: was })
+      refreshSettings()
+      toast(t('tr.failed', { msg: e.message }), { kind: 'fail' })
+    }
+    load({ silent: true })
+  }
+  // The list is read before it opens, so it opens at its full size.
+  async function trustReview() {
+    if (tu.open) { tu.open = false; refreshSettings(); return }
+    if (tu.busy) return
+    Object.assign(tu, { busy: true, items: null, error: null })
+    refreshSettings()
+    try { tu.items = (await api('/api/trust/undo', {})).items } catch (e) { tu.error = e.message }
+    Object.assign(tu, { busy: false, open: true })
+    refreshSettings()
+  }
+  async function trustRemove() {
+    tu.busy = true
+    refreshSettings()
+    try {
+      const shown = (tu.items || []).map((x) => ({ id: x.id, at: x.at }))
+      const items = (await api('/api/trust/undo', { confirm: true, items: shown })).items
+      const done = items.filter((x) => x.status === 'undone').length
+      const stuck = items.filter((x) => x.status === 'blocked' || x.status === 'busy')
+      if (stuck.length) toast(t('tr.notRemoved', { msg: stuck.map((x) => x.why || x.path).join('; ') }), { kind: 'fail' })
+      else toast(tn('tr.removed', done))
+      Object.assign(tu, { open: false, items: null })
+    } catch (e) { toast(t('tr.notRemoved', { msg: e.message }), { kind: 'fail' }) }
+    tu.busy = false
+    refreshSettings()
+    load({ silent: true })
+  }
+  function trustItems() {
+    const tr = S.state.trust
+    const label = t('tr.switch')
+    const out = [fm('trust', h('div', { class: 'set-row', 'data-patch': '' },
+      h('span', { class: 'set-label' }, label),
+      BOOT.readOnly ? h('span', { class: 'chip chip-sm' + (tr.on ? ' chip-ok' : '') }, tr.on ? t('ah.on') : t('ah.off'))
+        : h('div', { class: 'seg', role: 'group', 'aria-label': label, 'data-patch': '' }, [[true, t('ah.on')], [false, t('ah.off')]].map(([v, text]) =>
+          h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === tr.on), onclick: () => { if (v !== tr.on) setTrust(v) } }, text)))))]
+    out.push(h('ul', { class: 'pr-notes' }, h('li', null, t('tr.what')), h('li', null, t('tr.only')), h('li', null, t('tr.offKeeps'))))
+    if (tr.carried.length) {
+      out.push(h('div', { class: 'set-row', 'data-patch': '' },
+        h('span', { class: 'set-label' }, tn('tr.carried', tr.carried.length)),
+        BOOT.readOnly ? null : h('button', { class: 'link-btn small', type: 'button', 'aria-expanded': String(tu.open), 'aria-busy': tu.busy && !tu.open ? 'true' : null, 'data-key': 'tr-review', onclick: trustReview }, t('tr.review'))))
+      const items = tu.items || []
+      const todo = items.filter((x) => x.status === 'undo')
+      const body = tu.error ? [h('p', { class: 'small' }, t('tr.notRemoved', { msg: tu.error }))]
+          : [h('p', { class: 'small' }, todo.length ? t('tr.undoIntro') : t('tr.nothing')),
+            h('ul', { class: 'pr-notes' }, items.map((x) => h('li', null, t('tr.undoRow', { account: x.account, path: x.path, from: x.from }),
+              x.status === 'undo' ? null : h('span', { class: 'muted' }, ' · ', t(x.status === 'gone' ? 'tr.gone' : x.status === 'changed' ? 'tr.changed' : 'tr.notRemoved', { msg: x.why || '' }))))),
+            h('div', { class: 'row-actions', 'data-patch': '' },
+              h('button', { class: 'btn btn-sm', type: 'button', disabled: tu.busy || !todo.length, 'aria-busy': tu.busy ? 'true' : null, onclick: trustRemove }, t('tr.remove')),
+              h('button', { class: 'link-btn small', type: 'button', disabled: tu.busy, onclick: trustReview }, t('btn.cancel')))]
+      if (!BOOT.readOnly)
+        out.push(h('div', { class: 'reveal' + (tu.open ? ' is-open' : ''), 'data-patch': '', 'data-key': 'tr-undo', inert: tu.open ? undefined : true },
+          h('div', { class: 'reveal-in', 'data-patch': '' }, body)))
+    }
+    if (!BOOT.readOnly && !askBridged(BOOT, window))
+      out.push(h('p', { class: 'small' }, h('button', { class: 'link-btn small', type: 'button', 'data-key': 'tr-ask', onclick: () => openAsk({ text: t('ai.ask.trust') }) }, t('adv.ask'))))
+    return out
+  }
   function famTitleOf(fam) { const f = S.state && S.state.families.find((x) => x.id === fam); return f ? f.title : fam }
   // ---------- settings ----------
   // One header button holds what is set once and rarely changed: language, theme, Remote Control and Auto Handoff.
@@ -7194,6 +7270,7 @@ const MAIN = String.raw`
     if (S.state && (S.state.quotaChecks || []).length) out.push('checks')
     if (S.state && S.state.network) out.push('net')
     if (S.state && S.state.progress) out.push('progress')
+    if (S.state && S.state.trust) out.push('trust')
     return out
   }
   function renderSettingsButton() {
@@ -7308,6 +7385,7 @@ const MAIN = String.raw`
       { id: 'quota', title: t('set.g.quota'), items: checks, foot: t('set.quotaChecksHint', { n: every }) },
       { id: 'handoff', title: t('ah.button'), items: [ahLink(leave)].filter(Boolean), foot: t('set.ahHint') },
       { id: 'progress', title: t('pr.title'), items: secs.includes('progress') ? progressItems() : [], foot: t('pr.hint') },
+      { id: 'trust', title: t('tr.title'), items: secs.includes('trust') ? trustItems() : [], foot: t('tr.hint') },
       { id: 'network', title: t('net.title'), items: netItems, foot: t('net.hint') },
       { id: 'ai', title: t('set.g.ai'), items: ai, foot: t('set.aiHint') },
     ].filter((g) => g.items.length)
@@ -8009,7 +8087,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.reset', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.expired', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.advisor', 'ai.ask.network', 'ai.ask.unattended', 'ai.ask.progress', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.commands', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.reset', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.expired', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.advisor', 'ai.ask.trust', 'ai.ask.network', 'ai.ask.unattended', 'ai.ask.progress', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.commands', 'ai.ask.tool']
   // Network Guard (spec §3.35): one dialog with the switch, the allowed countries and the newest result per address.
   // Countries are never ticked for the user, the current one included: a wrong network would allow itself.
   const NET_COMMON = ['US', 'JP', 'SG', 'GB', 'DE', 'FR', 'NL', 'CA', 'AU', 'KR', 'TW', 'HK']

@@ -435,6 +435,31 @@ If `/advisor` answers "/advisor isn't available in this environment", a setting 
 
 sideby writes only `advisorModel` (or removes it for Off) and, with a model choice, that one `env` entry; it keeps everything else in the file, including the other `env` entries, writes a linked file at its real target, and never creates a `settings.json` (run `sideby doctor --fix` first). API accounts are left out: the Advisor needs a Claude sign-in.
 
+## Folder trust
+
+The first time a Claude account opens a folder, Claude Code asks "Is this a project you created or one you trust?" and remembers the answer for that account only. Start another account in the same folder and it asks again; pressing Enter there picks "No, exit" and ends the session, which also stops an Auto Handoff at the next account's first screen.
+
+Turn on carried trust and sideby reuses the answer you already gave: before it starts an interactive Claude session (`sideby run`, short commands, pick commands, `sideby next`, Auto Handoff, Let AI do it), when that account has not trusted the folder and another of your Claude accounts has, sideby copies that one trust mark into the account's `.claude.json` and prints one line:
+
+```
+sideby: claude:work now trusts ~/code/app, as claude:main does (claude.carryTrust; undo: sideby trust undo)
+```
+
+```sh
+sideby trust                    # on or off, and what sideby copied
+sideby trust on                 # shows the change, exit 10
+sideby trust on --yes           # turns it on
+sideby trust --dir ~/code/app   # while on: whether each Claude account trusts that folder
+sideby trust undo --yes         # takes back what sideby copied
+sideby trust off --yes          # stops copying; keeps what was copied
+```
+
+In the panel it is **Settings** → **All settings…** → **Folder trust**: one switch, **Reuse trust from my other Claude accounts**, and, once sideby copied something, **Review** lists each copy with **Remove**.
+
+It follows Claude Code's own rules and copies the same entry, never a wider one: in a git repository the trust of the repository's main checkout (a linked worktree uses its main checkout's), elsewhere the trust of the folder or a parent folder, never your home folder or `/`. A trusted parent folder does not cover a git repository inside it. Where sideby cannot tell from the files (a submodule, a separate git folder), it copies nothing; it never runs `git` in the folder. It never trusts a folder none of your accounts trusted.
+
+sideby writes only `projects["<folder>"].hasTrustDialogAccepted` (for the main account in `~/.claude.json`), keeps everything else in the file, never writes through a link, never creates the file, and skips the copy when Claude Code changed the file at the same moment; then it says so and Claude Code asks as before. Of `.claude.json` it reads nothing but that field. `sideby trust undo` takes a copy back only while it still holds what sideby wrote, and keeps anything Claude Code added since. A headless run (`-p`), `sideby login` and sessions you start with plain `claude` copy nothing.
+
 ## When an account hits its limit
 
 ```sh

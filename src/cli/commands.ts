@@ -5388,6 +5388,152 @@ export async function cmdProgress(a: ParsedArgs, io: Io): Promise<number> {
   return 0
 }
 
+/**
+ * `sideby trust` (spec §3.43, ADR-0078): carried folder trust between Claude accounts. Without a subcommand shows config
+ * `claude.carryTrust`, the carries sideby recorded and, while it is on, each Claude account's trust of the folder
+ * (`--dir`, default the current one): booleans only. `on` and `off` change the config, `undo` takes the copied marks
+ * back; each shows the change first and exits 10 until `--yes`.
+ */
+export async function cmdTrust(a: ParsedArgs, io: Io): Promise<number> {
+  const [sub, ...rest] = a.positionals
+  const asJson = a.flags.has('json')
+  const usage = 'usage: sideby trust [--dir <path>] | sideby trust on|off [--yes] | sideby trust undo [--yes]'
+  if (rest.length || a.rest.length || (sub !== undefined && !['status', 'on', 'off', 'undo'].includes(sub)))
+    throw new UsageError(usage)
+  const status = sub === undefined || sub === 'status'
+  for (const k of a.flags.keys())
+    if (k !== 'json' && !(k === 'dir' && status) && !(k === 'yes' && !status))
+      throw new UsageError(`--${k} does not go with \`sideby trust ${sub ?? ''}\`; ${usage}`)
+  const rt = await createRuntime()
+  const home = rt.paths.home
+  // Inside text too: a reason names a path in the middle of a sentence.
+  const show = (p: string) => tilde(p, home)
+  const what =
+    'Before sideby starts a Claude session in a folder one of your Claude accounts has not trusted yet, it copies the trust another of your Claude accounts already gave that folder, so Claude Code does not ask "Is this a project you created or one you trust?" again. It never trusts a folder none of your accounts trusted.'
+  if (sub === 'on' || sub === 'off') {
+    const r = await rt.trustSet(sub === 'on', { apply: a.flags.has('yes') })
+    const turnedOffNote =
+      'Turning it off keeps the trust sideby already copied; `sideby trust undo` takes it back.'
+    if (asJson) {
+      json(io, {
+        action: sub,
+        on: r.applied ? r.after : r.before,
+        changed: r.changed,
+        applied: r.applied,
+        before: r.before,
+        after: r.after,
+        file: show(r.file),
+      })
+    } else if (!r.changed) io.out(`Carrying folder trust was already ${sub}.`)
+    else if (!r.applied) {
+      io.out(`Change to ${show(r.file)}: claude.carryTrust ${r.before} → ${r.after}`)
+      io.out(c.dim(sub === 'on' ? what : turnedOffNote))
+      io.out(c.cyan(`Apply it with \`sideby trust ${sub} --yes\`.`))
+    } else {
+      io.out(`${c.green('✓')} Carrying folder trust is ${sub}.`)
+      io.out(
+        c.dim(
+          sub === 'on'
+            ? `${what} Each copy prints one line; \`sideby trust undo\` takes them back.`
+            : turnedOffNote,
+        ),
+      )
+    }
+    return r.changed && !r.applied ? 10 : 0
+  }
+  if (sub === 'undo') {
+    const apply = a.flags.has('yes')
+    const items = await rt.trustUndo({ apply })
+    const out = items.map((x) => ({
+      id: x.id,
+      account: x.account,
+      path: show(x.key),
+      from: x.from,
+      at: x.at,
+      status: x.status,
+      ...(x.why ? { why: show(x.why) } : {}),
+    }))
+    const todo = out.filter((x) => x.status === 'undo')
+    const stuck = out.filter((x) => x.status === 'blocked' || x.status === 'busy')
+    if (asJson) json(io, { action: 'undo', applied: apply, items: out })
+    else if (!out.length) io.out('sideby has not copied any folder trust, so there is nothing to undo.')
+    else {
+      const word: Record<string, string> = {
+        undo: 'will no longer trust',
+        undone: c.green('no longer trusts'),
+        changed: c.dim('left alone (changed since sideby copied it):'),
+        gone: c.dim('left alone (its .claude.json is gone):'),
+        blocked: c.yellow('not changed:'),
+        busy: c.yellow('not changed:'),
+      }
+      for (const x of out)
+        io.out(
+          `  ${x.account} ${word[x.status]} ${x.path}${c.dim(` (copied from ${x.from})`)}${x.why ? ` ${c.dim(x.why)}` : ''}`,
+        )
+      if (!apply && todo.length) io.out(c.cyan('Take it back with `sideby trust undo --yes`.'))
+      else if (!apply) io.out('Nothing to undo: each mark changed since sideby copied it.')
+      if (apply && stuck.length)
+        io.out(c.cyan('Fix what is named above, then run `sideby trust undo --yes` again.'))
+    }
+    if (!apply) return todo.length ? 10 : 0
+    return stuck.length ? 1 : 0
+  }
+  const dirFlag = a.flags.get('dir')
+  if (dirFlag === true) throw new UsageError(`--dir takes a folder; ${usage}`)
+  const dir = typeof dirFlag === 'string' ? resolve(dirFlag) : process.cwd()
+  const st = await rt.trustStatus(dir)
+  if (asJson) {
+    json(io, {
+      action: 'status',
+      on: st.on,
+      carried: st.carried.map(({ key, ...x }) => ({ ...x, path: show(key) })),
+      ...(st.dir ? { dir: show(st.dir) } : {}),
+      ...(st.root
+        ? {
+            root: {
+              kind: st.root.kind,
+              ...(st.root.path ? { path: show(st.root.path) } : {}),
+              ...(st.root.why ? { why: show(st.root.why) } : {}),
+            },
+          }
+        : {}),
+      ...(st.accounts
+        ? { accounts: st.accounts.map((x) => (x.problem ? { ...x, problem: show(x.problem) } : x)) }
+        : {}),
+    })
+    return 0
+  }
+  io.out(`Carry folder trust between Claude accounts: ${st.on ? c.green('on') : c.dim('off')}`)
+  if (!st.on) {
+    io.out(c.dim(what))
+    io.out(c.cyan('Turn it on with `sideby trust on`.'))
+  } else if (st.root) {
+    const where =
+      st.root.kind === 'git'
+        ? `git repository; trust is kept for ${show(st.root.path!)}`
+        : st.root.kind === 'folder'
+          ? 'not in a git repository; trust of this folder or a parent folder counts'
+          : `sideby cannot tell (${show(st.root.why!)}), so it copies nothing here`
+    io.out(`Folder: ${show(st.dir!)} (${where})`)
+    const width = Math.max(0, ...(st.accounts ?? []).map((x) => x.ref.length))
+    for (const x of st.accounts ?? []) {
+      const state =
+        x.trusts === true
+          ? c.green('trusts it')
+          : x.trusts === false
+            ? `asks${x.carryFrom ? c.dim(` · gets ${x.carryFrom}'s trust when sideby starts it here`) : ''}`
+            : c.dim(`cannot tell${x.problem ? `: ${show(x.problem)}` : ''}`)
+      io.out(`  ${x.ref.padEnd(width)}  ${state}`)
+    }
+  }
+  if (st.carried.length)
+    io.out(
+      `Copied by sideby: ${st.carried.length} ${st.carried.length === 1 ? 'mark' : 'marks'}${c.dim(' (see or take back with `sideby trust undo`)')}`,
+    )
+  if (st.on) io.out(c.dim('Turning it off keeps what was copied; `sideby trust undo` takes it back.'))
+  return 0
+}
+
 /** `sideby unattended …` (spec §3.37, ADR-0058): status, on and off, the Schedule, Pending Decisions and `defer`. */
 export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
   const [sub, ...rest] = a.positionals

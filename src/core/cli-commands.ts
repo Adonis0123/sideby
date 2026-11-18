@@ -137,6 +137,18 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
     feature: 'setting.advisor',
   },
   {
+    id: 'trust',
+    group: 'accounts',
+    usage: 'sideby trust [on|off|undo] [--dir <path>] [--yes]',
+    help: 'stop Claude asking "do you trust this folder?" again in another account: before sideby starts a Claude session, it copies the trust another of your Claude accounts already gave the folder (on|off, shows the change first; undo takes the copies back)',
+    summary: {
+      en: 'Let a Claude account reuse folder trust another account already gave',
+      zh: '让 Claude 账号沿用另一个账号已给过的文件夹信任',
+    },
+    example: 'sideby trust on',
+    feature: 'setting.trust',
+  },
+  {
     id: 'edit',
     group: 'accounts',
     usage: 'sideby edit <account> [--path] [--with <editor>]',
@@ -927,9 +939,9 @@ export function cliHelp(list: readonly CliCommand[] = CLI_COMMANDS): string {
 const HELP_TAIL = `Options:
   --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, advisor, remote-control, handoff,
                 families, commands, plugins, app, desktop, sessions, history, send, messages, edit, browser, update, local, ask,
-                terminal, key, try, autostart, menubar, config, network, unattended, progress)
+                terminal, key, try, autostart, menubar, config, network, unattended, progress, trust)
   -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, commands, desktop, edit, browser,
-                autostart, menubar, config, sessions, history, send, messages, network, unattended, progress
+                autostart, menubar, config, sessions, history, send, messages, network, unattended, progress, trust
   -v, --version show the version
 
 An <account> is <family>:<name> (claude:work) or just <name> when it is unique.

@@ -465,8 +465,17 @@ export const ConfigSchema = Type.Object(
                 "Give Claude API accounts `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` when sideby starts them, for gateways that reject Claude Code's `anthropic-beta` headers. The account's own proxy.env and a value already in the environment win. Off by default; `sideby advisor <model>` turns it on when it removes that variable from a settings file API accounts share.",
             }),
           ),
+          carryTrust: Type.Optional(
+            Type.Boolean({
+              description:
+                'Carry folder trust between Claude accounts (spec §3.43, ADR-0078): before sideby starts an interactive Claude session in a folder this account has not trusted yet, when another Claude account of yours already trusts it (the folder, a parent folder outside any git repository, or the repository\'s main checkout), sideby copies that one trust mark (`projects["<path>"].hasTrustDialogAccepted`) into this account\'s `.claude.json`, so Claude Code does not ask again. It never adds trust no account gave. Off by default; turning it off does not remove marks already copied (`sideby trust undo` does).',
+            }),
+          ),
         },
-        { additionalProperties: false, description: 'Claude Code launches (spec §3.41, ADR-0074).' },
+        {
+          additionalProperties: false,
+          description: 'Claude Code launches (spec §3.41, ADR-0074; `carryTrust`: spec §3.43, ADR-0078).',
+        },
       ),
     ),
     unattended: Type.Optional(
@@ -847,14 +856,16 @@ export function editConfigAdvisor(
 export type ClaudeConfig = NonNullable<Config['claude']>
 
 /**
- * The config `claude` key (spec §3.41): changed with `edit` (see `editConfigKey` for how the file is written); `edit`
- * returns undefined to remove the section, or null to leave the file as it is.
+ * The config `claude` key (spec §3.41, §3.43): changed with `edit` (see `editConfigKey` for how the file is written);
+ * `edit` returns undefined to remove the section, or null to leave the file as it is. With `dryRun`, shows the change
+ * without writing.
  */
 export function editConfigClaude(
   file: string,
   edit: (current: ClaudeConfig) => ClaudeConfig | undefined | null,
+  opts: { dryRun?: boolean } = {},
 ): Promise<{ changed: boolean; before: ClaudeConfig | undefined; after: ClaudeConfig | undefined }> {
-  return editConfigKey(file, 'claude', 'change the setting', (current) => edit(current ?? {}))
+  return editConfigKey(file, 'claude', 'change the setting', (current) => edit(current ?? {}), opts)
 }
 
 export type UnattendedConfig = NonNullable<Config['unattended']>

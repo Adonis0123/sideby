@@ -435,6 +435,31 @@ sideby advisor unlock off --yes # 不再解锁，模型保留
 
 sideby 只写 `advisorModel`（选关时删掉它），选模型时再删掉上面那一项 `env`；文件里其他内容不变，`env` 的其他条目也不变；链接的文件写到真实文件上；不会新建 `settings.json`（先运行 `sideby doctor --fix`）。API 账号不算：Advisor 要用 Claude 登录。
 
+## 文件夹信任
+
+Claude 账号第一次打开某个文件夹时，Claude Code 会问「Is this a project you created or one you trust?」，答案只记在这个账号里。在同一个文件夹里启动另一个账号，它会再问一遍；在这里按回车选的是「No, exit」，会话就结束了，Auto Handoff 也会停在下一个账号的第一个画面。
+
+打开「带过信任」后，sideby 会沿用你已经给过的回答：它启动交互式 Claude 会话前（`sideby run`、短命令、挑选命令、`sideby next`、Auto Handoff、让 AI 帮你做），这个账号还没信任这个文件夹、而你另一个 Claude 账号信任过时，sideby 把那一条信任标记复制进这个账号的 `.claude.json`，并打印一行：
+
+```
+sideby: claude:work now trusts ~/code/app, as claude:main does (claude.carryTrust; undo: sideby trust undo)
+```
+
+```sh
+sideby trust                    # 开没开，以及 sideby 复制过什么
+sideby trust on                 # 展示改动，退出码 10
+sideby trust on --yes           # 打开
+sideby trust --dir ~/code/app   # 开着时：每个 Claude 账号是否信任这个文件夹
+sideby trust undo --yes         # 撤回 sideby 复制的信任
+sideby trust off --yes          # 不再复制；已复制的保留
+```
+
+面板里在「设置」→「全部设置…」→「文件夹信任」：一个开关「沿用我其他 Claude 账号的信任」；sideby 复制过之后，「查看」逐条列出，可以「移除」。
+
+它按 Claude Code 自己的规则，复制同一条，从不放宽：在 git 仓库里看仓库主检出的信任（关联 worktree 用它主检出的），其他地方看这个文件夹或上级文件夹的信任，从不算你的主目录或 `/`。上级文件夹的信任不覆盖它下面的 git 仓库。从文件看不出来时（子模块、单独的 git 文件夹）什么都不复制；它从不在这个文件夹里运行 `git`。你哪个账号都没信任过的文件夹，它从不信任。
+
+sideby 只写 `projects["<文件夹>"].hasTrustDialogAccepted`（主账号写在 `~/.claude.json`），文件里其他内容不变；不经链接写，不新建文件；同一时刻 Claude Code 也改了这个文件时跳过，并说明原因，Claude Code 照常询问。`.claude.json` 里它只读这一个字段。`sideby trust undo` 只在这条仍是 sideby 写的内容时撤回，Claude Code 之后加的内容保留。无头运行（`-p`）、`sideby login` 和直接运行 `claude` 的会话都不复制。
+
 ## 账号撞上限额时
 
 ```sh

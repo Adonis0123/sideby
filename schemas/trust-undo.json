@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/trust-undo.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "action",
+    "applied",
+    "items"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "action": {
+      "type": "string",
+      "const": "undo"
+    },
+    "applied": {
+      "type": "boolean",
+      "description": "False when only shown (exit 10 when something would be taken back); true with --yes."
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "account",
+          "path",
+          "from",
+          "at",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The carry record; the Panel confirms only the ids it showed."
+          },
+          "account": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "The folder the mark is for."
+          },
+          "from": {
+            "type": "string",
+            "description": "The account whose trust was copied."
+          },
+          "at": {
+            "type": "string",
+            "description": "When it was copied (ISO time)."
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "undo"
+              },
+              {
+                "type": "string",
+                "const": "undone"
+              },
+              {
+                "type": "string",
+                "const": "changed"
+              },
+              {
+                "type": "string",
+                "const": "gone"
+              },
+              {
+                "type": "string",
+                "const": "blocked"
+              },
+              {
+                "type": "string",
+                "const": "busy"
+              }
+            ],
+            "description": "`undo`: would be taken back; `undone`: taken back; `changed`: the mark changed since sideby wrote it, left alone; `gone`: the file is gone; `blocked`/`busy`: not changed (`why`), kept for another try."
+          },
+          "why": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby trust undo --json"
+}
