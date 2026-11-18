@@ -329,10 +329,10 @@ it started, check the country the requests leave from. When it is not one you al
 seconds (the proxy is off, the network is down), stop and say what to do. It guards against a proxy that stopped
 or a node in the wrong country; it does not make use from an unsupported region allowed.
 
-sideby asks the vendor's own https://api.anthropic.com, chatgpt.com or api.openai.com /cdn-cgi/trace, through the
+sideby asks the vendor's own https://api.anthropic.com or chatgpt.com /cdn-cgi/trace, through the
 account's proxy settings, with no credential, account or identity, and keeps only the country and a hash of the
 address. Results are reused for 60 seconds. Off by default; off in CI. Sessions started without sideby (running
-claude or codex directly) are not checked. API accounts on a third-party endpoint are not checked.
+claude or codex directly) are not checked. API accounts are never checked.
 
 network        shows the setting and the newest result per address (no request)
 network check  asks every address now

@@ -8173,7 +8173,7 @@ const MAIN = String.raw`
         h('div', { class: 'muted small' }, [x.checkedAt ? t('net.checked', { when: ago(x.checkedAt) }) : null, x.error || null, x.accounts.join(', ')].filter(Boolean).join(' · ')),
         x.ipChanged ? h('div', { class: 'muted small' }, t('net.ipChanged')) : null)
     })
-    const skipped = n.accounts.filter((a) => a.skip === 'third-party' || a.skip === 'at-launch')
+    const skipped = n.accounts.filter((a) => a.skip === 'third-party' || a.skip === 'at-launch' || a.skip === 'api')
     const body = [
       h('p', { class: 'small' }, t('net.explain')),
       h('div', { class: 'row-actions' },

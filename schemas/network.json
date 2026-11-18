@@ -125,9 +125,13 @@
               {
                 "type": "string",
                 "const": "at-launch"
+              },
+              {
+                "type": "string",
+                "const": "api"
               }
             ],
-            "description": "third-party: an API account on another endpoint, not checked; at-launch: an API account, whose address is known only when it starts."
+            "description": "api: an API account, never checked; third-party: an endpoint set to a third party, not checked; at-launch: no longer given."
           }
         }
       }

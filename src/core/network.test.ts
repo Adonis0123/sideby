@@ -53,21 +53,23 @@ async function setup(h: FakeHome, network: object | undefined, loc = 'US') {
 }
 
 describe('networkTarget', () => {
-  it("checks the vendor's own domain, and nothing for a third-party endpoint", () => {
+  it("checks the vendor's own domain, nothing for a third-party endpoint, and never an API Account", () => {
     assert.deepEqual(networkTarget({ family: 'claude', kind: 'subscription' }, {}), { url: TRACE.anthropic })
     assert.deepEqual(
-      networkTarget({ family: 'claude', kind: 'api' }, { ANTHROPIC_BASE_URL: 'https://api.anthropic.com' }),
-      { url: TRACE.anthropic },
-    )
-    assert.deepEqual(
       networkTarget(
-        { family: 'claude', kind: 'api' },
+        { family: 'claude', kind: 'subscription' },
         { ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic' },
       ),
       { skip: 'third-party' },
     )
+    // API Accounts are never checked (ADR-0079), on the official endpoint too.
+    for (const ANTHROPIC_BASE_URL of ['https://api.anthropic.com', 'https://api.deepseek.com/anthropic'])
+      assert.deepEqual(networkTarget({ family: 'claude', kind: 'api' }, { ANTHROPIC_BASE_URL }), {
+        skip: 'api',
+      })
+    assert.deepEqual(networkTarget({ family: 'claude', kind: 'api' }, {}), { skip: 'api' })
     assert.deepEqual(networkTarget({ family: 'codex', kind: 'subscription' }, {}), { url: TRACE.chatgpt })
-    assert.deepEqual(networkTarget({ family: 'codex', kind: 'api' }, {}), { url: TRACE.openai })
+    assert.deepEqual(networkTarget({ family: 'codex', kind: 'api' }, {}), { skip: 'api' })
     assert.deepEqual(networkTarget({ family: 'grok', kind: 'subscription' }, {}), { skip: 'not-covered' })
   })
 })
@@ -173,11 +175,16 @@ describe('Launch', () => {
     })
   })
 
-  it('does not check an API Account on a third-party endpoint, nor in CI', async () => {
+  it('does not check an API Account, on any endpoint, nor in CI', async () => {
     await withFakeHome(async (h) => {
       const { rt, asked } = await setup(h, { guard: true, allow: ['US'] }, 'HK')
       await rt.prepareLaunch('claude:api', [], 'run')
+      // On the official endpoint too (ADR-0079): no request, no session hooks, no variables for them.
+      await h.write('.claude-official/proxy.env', 'ANTHROPIC_BASE_URL=https://api.anthropic.com\n', 0o600)
+      const official = await rt.prepareLaunch('claude:official', [], 'run')
       assert.deepEqual(asked, [])
+      assert.equal(official.networkArgs, undefined)
+      assert.ok(!official.args.includes('--settings'))
       const ci = await createRuntime({
         env: { ...h.env, CI: '1' },
         builtins,
@@ -259,7 +266,7 @@ describe('settings', () => {
       assert.ok(cold.targets.every((t) => t.status === 'not-checked'))
       assert.deepEqual(
         cold.accounts.find((a) => a.ref === 'claude:api'),
-        { ref: 'claude:api', skip: 'at-launch' },
+        { ref: 'claude:api', skip: 'api' },
       )
       const s = await rt.networkStatus({ check: true })
       assert.deepEqual(asked.sort(), [TRACE.anthropic, TRACE.chatgpt].sort())

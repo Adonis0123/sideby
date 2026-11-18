@@ -9,7 +9,7 @@ sideby network --json         # the setting and the newest result per address, f
 sideby network check --json   # ask every address now
 ```
 
-Each `targets[]` row is one address sideby asks (`api.anthropic.com` for Claude, `chatgpt.com` for Codex subscription accounts, `api.openai.com` for Codex API accounts) with `status` (`ok`, `blocked`, `unknown`, `not-checked`), `loc` (the country) and the `accounts` checked there. `accounts[].skip` says why an account is not checked: `third-party` (an API account on another endpoint) or `at-launch` (an API account, whose address is known only when it starts).
+Each `targets[]` row is one address sideby asks (`api.anthropic.com` for Claude, `chatgpt.com` for Codex) with `status` (`ok`, `blocked`, `unknown`, `not-checked`), `loc` (the country) and the `accounts` checked there. `accounts[].skip` says why an account is not checked: `api` (API accounts are never checked) or `third-party` (an endpoint set to a third party).
 
 ## Turn it on
 

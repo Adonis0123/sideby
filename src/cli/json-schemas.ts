@@ -2171,10 +2171,15 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
           url: Type.Optional(Type.String({ description: 'The address this account is checked at.' })),
           skip: Type.Optional(
             Type.Union(
-              [Type.Literal('not-covered'), Type.Literal('third-party'), Type.Literal('at-launch')],
+              [
+                Type.Literal('not-covered'),
+                Type.Literal('third-party'),
+                Type.Literal('at-launch'),
+                Type.Literal('api'),
+              ],
               {
                 description:
-                  'third-party: an API account on another endpoint, not checked; at-launch: an API account, whose address is known only when it starts.',
+                  'api: an API account, never checked; third-party: an endpoint set to a third party, not checked; at-launch: no longer given.',
               },
             ),
           ),

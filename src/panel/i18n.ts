@@ -1623,7 +1623,7 @@ const en = {
   'net.checked': 'checked {when}',
   'net.ipChanged': 'The exit address changed in the last day (same check; nothing is blocked for that).',
   'net.noTargets': 'No Claude or Codex account is checked here.',
-  'net.skipped': '{refs}: API accounts are checked when they start (a third-party endpoint is not checked).',
+  'net.skipped': '{refs}: API accounts are not checked.',
   'net.notCovered':
     'Only sessions sideby starts are checked; running claude or codex directly is not. sideby asks the vendor’s own /cdn-cgi/trace with your proxy settings and no credential, and keeps only the country.',
   'net.savedOn': 'Network check is on.',
@@ -3537,7 +3537,7 @@ const zh: Record<MessageKey, string> = {
   'net.checked': '{when}查过',
   'net.ipChanged': '出口 IP 最近一天变过（不会因此拦截）。',
   'net.noTargets': '这里没有要检查的 Claude 或 Codex 账号。',
-  'net.skipped': '{refs}：API 账号在启动时检查（第三方接口不检查）。',
+  'net.skipped': '{refs}：API 账号不检查。',
   'net.notCovered':
     '只检查 sideby 启动的会话，直接运行 claude 或 codex 不检查。sideby 带着你的代理设置访问服务商自己的 /cdn-cgi/trace，不带任何凭证，只保留国家或地区。',
   'net.savedOn': '网络检查已打开。',

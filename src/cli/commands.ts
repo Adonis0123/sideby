@@ -5206,6 +5206,7 @@ export async function cmdNetwork(a: ParsedArgs, io: Io): Promise<number> {
     const why = {
       'third-party': 'third-party endpoint, not checked',
       'at-launch': 'API account, checked when it starts',
+      api: 'API account, not checked',
       'not-covered': 'not covered',
     }
     for (const x of skipped) io.out(c.dim(`  ${x.ref}: ${why[x.skip!]}`))
