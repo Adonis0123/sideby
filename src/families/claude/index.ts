@@ -31,6 +31,7 @@ const LINKED = [
   'plugins',
   'hooks',
   'themes',
+  'keybindings.json',
   'CLAUDE.md',
 ]
 
