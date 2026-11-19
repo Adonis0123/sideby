@@ -25,7 +25,7 @@ A new account starts with the Main Account's skills, hooks, rules and settings. 
 
 | Host | Linked to the Main Account | Copied or synced | The account's own |
 |---|---|---|---|
-| Claude Code | `settings.json`, `settings.local.json`, `skills`, `commands`, `plugins`, `hooks`, `themes`, `CLAUDE.md` | MCP servers: the `mcpServers` entry of the account's `.claude.json`, kept equal to `~/.claude.json` | sign-in, the rest of `.claude.json`, sessions (`projects/`), history |
+| Claude Code | `settings.json`, `settings.local.json`, `skills`, `commands`, `plugins`, `hooks`, `themes`, `keybindings.json`, `CLAUDE.md` | MCP servers: the `mcpServers` entry of the account's `.claude.json`, kept equal to `~/.claude.json` | sign-in, the rest of `.claude.json`, sessions (`projects/`), history |
 | Codex | `AGENTS.md`, `hooks.json`, `plugins`, `rules`, `skills`; `config.toml` of a subscription account | — | sign-in (`auth.json`), sessions, history; `config.toml` of an API account |
 | Grok Build | `skills`, `installed-plugins` | `hooks`, `hooks-paths`, and `config.toml` of a subscription account: Grok refuses links there | sign-in (`auth.json`), `trusted_folders.toml` (copied once, then yours), sessions; `config.toml` of an API account |
 | pi | `AGENTS.md` | — | sign-in (`auth.json`), sessions, everything else |

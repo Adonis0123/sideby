@@ -93,6 +93,46 @@ describe('claude family', () => {
     })
   })
 
+  it('shares keybindings.json, so shortcuts other tools write to the Main Account reach every account', async () => {
+    await withFakeHome(async (h) => {
+      await mainAccount(h)
+      const bindings = JSON.stringify({
+        bindings: [{ context: 'Chat', bindings: { 'ctrl+alt+g': 'command:x' } }],
+      })
+      await h.write('.claude/keybindings.json', bindings)
+      for (const name of ['old', 'own'])
+        await h.write(`.claude-${name}/.claude.json`, JSON.stringify({ mcpServers: {} }), 0o600)
+      await h.write('.claude-own/keybindings.json', '{"bindings":[]}\n')
+      const rt = await createRuntime({ env: h.env, builtins })
+
+      const before = await rt.doctor()
+      const codeOf = (ref: string) =>
+        before.accounts
+          .find((a) => a.ref === ref)!
+          .findings.filter((f) => f.item === 'keybindings.json')
+          .map((f) => f.code)
+      assert.deepEqual(codeOf('claude:own'), ['link.real-file'])
+      assert.equal(codeOf('claude:old').length, 1)
+
+      await rt.doctor({ fix: true })
+      assert.equal(
+        await readlink(h.path('.claude-old', 'keybindings.json')),
+        h.path('.claude', 'keybindings.json'),
+      )
+      assert.equal(await readFile(h.path('.claude-old', 'keybindings.json'), 'utf8'), bindings)
+      // An account's own file is reported, never replaced.
+      assert.equal((await lstat(h.path('.claude-own', 'keybindings.json'))).isSymbolicLink(), false)
+      assert.equal(await readFile(h.path('.claude-own', 'keybindings.json'), 'utf8'), '{"bindings":[]}\n')
+
+      const res = await rt.createAccount('claude', 'fresh')
+      assert.equal(res.ok, true)
+      assert.equal(
+        await readlink(h.path('.claude-fresh', 'keybindings.json')),
+        h.path('.claude', 'keybindings.json'),
+      )
+    })
+  })
+
   it('reports unknown login state when .claude.json cannot be read, and models from proxy.env', async () => {
     await withFakeHome(async (h) => {
       await mainAccount(h)
