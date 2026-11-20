@@ -24,9 +24,12 @@ import {
   type SessionInput,
   type SessionRow,
 } from './history-index.ts'
-import { ProjectResolver, projectNames } from './history-project.ts'
+import { ProjectResolver, projectNames, projectsNamed } from './history-project.ts'
 import { accountLabels, hostResumeArgs, liveKey, referenceText } from './live-sessions.ts'
 import type { ProjectCategories } from './project-categories.ts'
+
+// The Project helpers live in history-project.ts; `projectsNamed` stays importable from here.
+export { projectsNamed }
 
 export type IndexState = 'building' | 'ready' | 'off' | 'unavailable'
 
@@ -181,7 +184,7 @@ function fence(key: string, work: Promise<unknown>): Promise<void> {
 }
 
 /** What a Session id may look like: the Hosts use UUIDs and similar plain names. */
-const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
+export const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
 
 export const historyIndexPath = (rt: Pick<Runtime, 'paths'>): string =>
   join(rt.paths.stateDir, 'history', 'index.sqlite')
@@ -621,18 +624,6 @@ async function resolveProject(idx: HistoryIndex, p: string, home: string): Promi
   throw new UserError(`no project named "${p}"; run \`sideby history projects\` to see them`)
 }
 
-/**
- * The Projects a name given to `--project` may mean: the one whose shown name it is, else every Project whose path
- * ends with it. A shown name is unique, so it wins over a path tail it shares with a longer path (`a/app` for
- * `/a/app` beside `/x/a/app`).
- */
-export function projectsNamed(names: ReadonlyMap<string, string>, p: string): string[] {
-  const all = [...names.keys()]
-  const named = all.filter((x) => names.get(x) === p)
-  if (named.length === 1) return named
-  return all.filter((x) => names.get(x) === p || x.endsWith(`/${p}`))
-}
-
 const SAFE = /^[\w@%+=:,./-]+$/
 const shq = (v: string) => (SAFE.test(v) ? v : `'${v.replaceAll("'", "'\\''")}'`)
 
@@ -1059,7 +1050,7 @@ async function show(
   const window: ShownMessage[] = []
   let n = 0
   try {
-    for await (const m of reader.messages(r.path)) {
+    for await (const { origin: _, ...m } of reader.messages(r.path)) {
       n++
       if (opts.before !== undefined && n >= opts.before) break
       window.push({ n, ...m })

@@ -51,7 +51,7 @@ Each file below holds rules as binding as this one. Read it before the work it n
 | When | Read |
 |---|---|
 | Finding where something lives in `src/`, `scripts/` or `docs/` | `docs/agents/map.md` |
-| Changing anything that reads or writes a Host directory or a shell rc file, or any hook entry (`network-hook`, `unattended-hook`, `progress-hook`, `handoff-hook`, `statusline-tap`), `tune`, the model and effort readers, `remote-control`, `messages inbound`, `send`, `desktop`, the Run Link, Session History, `browser`, `trust` (carried trust) or `shell-init` | `docs/agents/host-directories.md` |
+| Changing anything that reads or writes a Host directory or a shell rc file, or any hook entry (`network-hook`, `unattended-hook`, `progress-hook`, `handoff-hook`, `statusline-tap`), `tune`, the model and effort readers, `remote-control`, `messages inbound`, `send`, `desktop`, the Run Link, Session History, the Pending Decision follow-up check, `browser`, `trust` (carried trust) or `shell-init` | `docs/agents/host-directories.md` |
 | Trying the CLI or the Panel by hand with a demo HOME; updating the README in any words (then follow `.claude/skills/readme-assets/SKILL.md`); retaking README screenshots, menu bar pictures, the GIF, the banner or the intro video | `docs/agents/demo-home.md` |
 | Adding a Host as a new Family | `docs/agents/adding-a-family.md` |
 

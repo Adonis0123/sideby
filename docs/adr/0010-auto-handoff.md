@@ -34,6 +34,12 @@ The vendors' terms matter here. Anthropic's Consumer Terms (effective 2025-10-08
 - `FamilyDef` gains an optional `handoff` member, the config gains `handoff`, and the CLI gains `sideby handoff ready|setup|teardown` and a hidden hook entry. The hook entry runs on every tool call, so it has the same import limits as `statusline-tap`.
 - Two chains that reach the threshold at the same time may move to the same Account. They run side by side; there is no coordination.
 
+## Amendment (2026-11-20): the Brief carries the user's standing permissions as given
+
+Observed on 2026-11-20 with Claude Code 2.1.328: a Brief written for an unattended chain said "do nothing hard to undo (merging, deploying, sending, pushing)", while the user's project notes allowed some of those steps without asking. The next session took the Brief's wider rule as the user's and left the remaining work undone.
+
+Decision: the Brief rules every hook message gives (`RULES` in `src/handoff/messages.ts`, spec §3.17) also say: copy any standing permission or limit the user gave word for word, saying where it comes from (a file's path, or the user's message), and add no limit the user did not give. The next session can then check the source instead of trusting the Brief's wording. Unattended Mode's own rule for steps that are hard to undo (ADR-0058) still applies on top.
+
 ## Revisit when
 
 A vendor states that moving a task between a person's own subscriptions on one machine violates its terms, a Host ships its own cross-account handoff, or a Host exposes Quota and hooks well enough that the setup exception is no longer needed.

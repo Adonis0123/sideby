@@ -217,6 +217,129 @@ describe('sideby unattended', () => {
     })
   })
 
+  it('lists decisions by project with what the user wrote in afterwards, marks and reopens them (ADR-0078)', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}')
+      await h.mkdir('code/shop/.git')
+      await h.mkdir('code/shop/web')
+      await h.mkdir('code/blog')
+      const state = resolvePaths(h.env).stateDir
+      const base = Date.now() - 2 * 60 * 60_000
+      const at = (m: number) => new Date(base + m * 60_000)
+      const sid = (n: number) => `5e55000${n}-0000-4000-8000-00000000000${n}`
+      const human = (s: string, m: number, text: string) =>
+        JSON.stringify({
+          type: 'user',
+          sessionId: s,
+          timestamp: at(m).toISOString(),
+          origin: { kind: 'human' },
+          message: { role: 'user', content: text },
+        })
+      // shop: the user replied in session 1; session 2 got nothing after its decision. blog: replied too.
+      await h.write(`.claude/projects/-code-shop/${sid(1)}.jsonl`, `${human(sid(1), 20, 'Ship it.')}\n`)
+      await h.write(`.claude/projects/-code-shop/${sid(2)}.jsonl`, `${human(sid(2), 0, 'Start.')}\n`)
+      await h.write(`.claude/projects/-code-blog/${sid(3)}.jsonl`, `${human(sid(3), 30, 'Publish it.')}\n`)
+      const keep = (n: number, cwd: string) =>
+        addPendingDecision(
+          state,
+          {
+            kind: 'question',
+            family: 'claude',
+            account: 'claude:main',
+            sessionId: sid(n),
+            cwd: h.path(cwd),
+            text: `Q${n}?`,
+          },
+          at(10),
+        )
+      const shopReplied = await keep(1, 'code/shop')
+      const shopOpen = await keep(2, 'code/shop/web')
+      const blogReplied = await keep(3, 'code/blog')
+
+      const listed = json(h, ['pending'], 'unattended-pending')
+      const by = (id: string) => listed.pending.find((d: { id: string }) => d.id === id)
+      assert.deepEqual([by(shopReplied.id).state, by(shopReplied.id).projectName], ['replied', 'shop'])
+      assert.equal(by(shopReplied.id).repliedAt, at(20).toISOString())
+      assert.deepEqual([by(shopOpen.id).state, by(shopOpen.id).project], ['open', h.path('code/shop')])
+      assert.equal(by(blogReplied.id).state, 'replied')
+      assert.deepEqual(listed.projects, [
+        { project: h.path('code/shop'), projectName: 'shop', open: 1, replied: 1, done: 0 },
+        { project: h.path('code/blog'), projectName: 'blog', open: 0, replied: 1, done: 0 },
+      ])
+      const blogOnly = json(h, ['pending', '--project', 'blog'], 'unattended-pending')
+      assert.deepEqual(
+        blogOnly.pending.map((d: { id: string }) => d.id),
+        [blogReplied.id],
+      )
+      const text = cli(h, ['unattended', 'pending']).stdout
+      assert.match(text, /shop\s+1 untouched · 1 you wrote in afterwards/)
+      assert.match(text, /you wrote in the session afterwards \(\d+[mhd] ago\)/)
+      assert.ok(text.indexOf(shopOpen.id) < text.indexOf(shopReplied.id), 'open ones first')
+      // Writing in the session afterwards is not finishing it: the hint marks checked ones, never all replied ones.
+      assert.doesNotMatch(text, /done --replied|probably/)
+      assert.match(text, /not that it was finished/)
+      assert.match(text, /reopen <id>/)
+
+      // Only the replied one of shop.
+      const done = json(h, ['pending', 'done', '--replied', '--project', 'shop'], 'unattended-pending')
+      assert.deepEqual(done.done, [shopReplied.id])
+      assert.deepEqual(
+        done.pending.map((d: { id: string }) => d.id).sort(),
+        [shopOpen.id, blogReplied.id].sort(),
+      )
+      // Then the rest of shop, and the replied ones anywhere.
+      assert.deepEqual(json(h, ['pending', 'done', '--project', 'shop'], 'unattended-pending').done, [
+        shopOpen.id,
+      ])
+      assert.deepEqual(json(h, ['pending', 'done', '--replied'], 'unattended-pending').done, [blogReplied.id])
+      assert.match(cli(h, ['unattended', 'pending', 'done', '--replied']).stdout, /Nothing to mark/)
+
+      // Reopen one marked by mistake; a list reopens only the done ones and says which.
+      const back = json(h, ['pending', 'reopen', shopReplied.id], 'unattended-pending')
+      assert.deepEqual(back.reopened, [shopReplied.id])
+      assert.ok(
+        back.pending.some(
+          (d: { id: string; state: string }) => d.id === shopReplied.id && d.state === 'replied',
+        ),
+      )
+      const both = json(
+        h,
+        ['pending', 'reopen', '--ids', `${shopReplied.id},${shopOpen.id}`],
+        'unattended-pending',
+      )
+      assert.deepEqual(both.reopened, [shopOpen.id])
+      assert.match(cli(h, ['unattended', 'pending', 'reopen', shopOpen.id]).stdout, /Nothing to reopen/)
+      // --ids marks only the ones still open; the text answer reads no session record and names reopen.
+      const marked = json(
+        h,
+        ['pending', 'done', '--ids', `${shopOpen.id},${blogReplied.id}`],
+        'unattended-pending',
+      )
+      assert.deepEqual(marked.done, [shopOpen.id])
+      const said = cli(h, ['unattended', 'pending', 'done', shopReplied.id]).stdout
+      assert.match(said, /marked 1 decision done; 0 still open/)
+      assert.match(said, /reopen <id>/)
+      const none = cli(h, ['unattended', 'pending', 'done', '--ids', shopOpen.id]).stdout
+      assert.match(none, /Nothing to mark: those are done already/)
+
+      for (const args of [
+        ['reopen'],
+        ['reopen', shopOpen.id, '--ids', shopOpen.id],
+        ['done', '--ids', ','],
+        ['done', shopOpen.id, '--ids', shopOpen.id],
+        ['done', '--all', '--replied'],
+        ['done', shopOpen.id, '--project', 'shop'],
+        ['done'],
+        ['done', '--project', 'nope'],
+        ['--project', ''],
+      ]) {
+        const r = cli(h, ['unattended', 'pending', ...args])
+        assert.equal(r.status, 2, `${args.join(' ')}: ${r.stdout}${r.stderr}`)
+        assert.match(r.stderr, /usage|project|--ids/)
+      }
+    })
+  })
+
   it('refuses a question and a permission request through the real hook entry while on, and goes silent when off', async () => {
     await withFakeHome(async (h) => {
       json(h, ['on', '--for', '1h'])

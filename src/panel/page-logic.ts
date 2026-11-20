@@ -2126,6 +2126,49 @@ export function historyWhen(
   return { key: 'time.on', date: d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) }
 }
 
+/**
+ * When the words for `iso` (historyWhen, and the page's date, which shows the year only for another year) change
+ * next, as a time after `now`: the next minute under an hour, the next hour under a day, the next day under a week
+ * (the seventh is when they turn into a date), and after that the next New Year. Infinity for a time that is not a date.
+ */
+export function historyWhenNext(iso: string | undefined, now: number): number {
+  const ts = Date.parse(iso || '')
+  if (!Number.isFinite(ts)) return Number.POSITIVE_INFINITY
+  const ms = Math.max(0, now - ts)
+  if (ms < 7 * 86_400_000) {
+    const step = ms < 3_600_000 ? 60_000 : ms < 86_400_000 ? 3_600_000 : 86_400_000
+    return ts + (Math.floor(ms / step) + 1) * step
+  }
+  return new Date(new Date(now).getFullYear() + 1, 0, 1).getTime()
+}
+
+/**
+ * A date formatter that keeps one Intl.DateTimeFormat per locale and options: `toLocaleDateString(locale, options)`
+ * builds a new one on every call, which was most of the time a long list spent showing its dates.
+ */
+export function dateFormatter(): (date: Date, locale: string, options: Intl.DateTimeFormatOptions) => string {
+  const made = new Map<string, Intl.DateTimeFormat>()
+  return (date, locale, options) => {
+    const key = `${locale} ${JSON.stringify(options)}`
+    let f = made.get(key)
+    if (!f) {
+      f = new Intl.DateTimeFormat(locale, options)
+      made.set(key, f)
+    }
+    return f.format(date)
+  }
+}
+
+/** Everything a History row shows and its buttons act on, so a row drawn from the same can be kept as it is. */
+export function historyRowSig(
+  session: unknown,
+  words: readonly string[],
+  noProject: boolean,
+  lang: string,
+): string {
+  return JSON.stringify([lang, words, Boolean(noProject), session])
+}
+
 /** `text` cut into the parts that match one of `words` (any case) and the parts between, for highlighting. */
 export function highlightParts(text: string, words: readonly string[]): { text: string; hit: boolean }[] {
   const low = text.toLowerCase()
@@ -2546,6 +2589,90 @@ export function uaGroupPending<D extends { id: string; at: string; sessionId?: s
   return [...groups]
     .sort(([, a], [, b]) => newest(b) - newest(a))
     .map(([key, items]) => ({ key, first: items[0]!, items }))
+}
+
+/**
+ * Where a new toast goes among the shown ones: `replaces`, a keyed one with the same key and other text (the theme's
+ * toast, say); `merges`, one with the same text, and the same key when the new one has a key, so two marks that each
+ * carry an Undo stay two toasts with their own Undo.
+ */
+export function toastMerge<T extends { text: string; key: string | null }>(
+  shown: readonly T[],
+  text: string,
+  key?: string | null,
+): { replaces: T | undefined; merges: T | undefined } {
+  return {
+    replaces: key ? shown.find((x) => x.key === key && x.text !== text) : undefined,
+    merges: shown.find((x) => x.text === text && (!key || x.key === key)),
+  }
+}
+
+/**
+ * Pending Decisions grouped by Project, then by the Session that left them, as the Unattended page and `sideby
+ * unattended pending` show them (spec §3.37, ADR-0078). What nobody touched (`open`) comes first at every level: a
+ * Project with an open one before the others, the newest open one first, then the rest by their newest one, and the
+ * group without a Project (`project` '') last. Inside a Project a Session's open ones and its other ones are two
+ * blocks, so every open block comes before every replied one, each set ordered the same way; inside a block the
+ * replied ones before the done ones, each oldest first. Counts are per state.
+ */
+export function uaGroupByProject<
+  D extends {
+    id: string
+    at: string
+    sessionId?: string
+    project: string
+    projectName: string
+    state?: string
+  },
+>(
+  list: readonly D[],
+): {
+  key: string
+  project: string
+  name: string
+  open: number
+  replied: number
+  done: number
+  sessions: { key: string; first: D; items: D[] }[]
+}[] {
+  const rank = (d: D) => (d.state === 'replied' ? 1 : d.state === 'done' ? 2 : 0)
+  const time = (d: D) => Date.parse(d.at)
+  const order = (a: D, b: D) => rank(a) - rank(b) || time(a) - time(b) || a.id.localeCompare(b.id)
+  // Those with an open one first, the newest open one first; then by the newest one.
+  const lead = (items: readonly D[]): number[] => {
+    const open = items.filter((d) => rank(d) === 0).map(time)
+    return [open.length ? 0 : 1, -Math.max(...(open.length ? open : items.map(time)))]
+  }
+  const before = (a: readonly D[], b: readonly D[]) => {
+    const [x, y] = [lead(a), lead(b)]
+    return x[0]! - y[0]! || x[1]! - y[1]!
+  }
+  const projects = new Map<string, D[]>()
+  for (const d of list) projects.set(d.project, [...(projects.get(d.project) ?? []), d])
+  return [...projects]
+    .sort(([pa, a], [pb, b]) => Number(pa === '') - Number(pb === '') || before(a, b) || pa.localeCompare(pb))
+    .map(([project, items]) => {
+      const sessions = new Map<string, D[]>()
+      for (const d of items) {
+        const key = `${project}|${d.sessionId ? `s:${d.sessionId}` : 'none'}|${rank(d) === 0 ? 'open' : 'rest'}`
+        sessions.set(key, [...(sessions.get(key) ?? []), d])
+      }
+      const count = (r: number) => items.filter((d) => rank(d) === r).length
+      return {
+        key: `p:${project}`,
+        project,
+        name: items[0]!.projectName,
+        open: count(0),
+        replied: count(1),
+        done: count(2),
+        sessions: [...sessions]
+          .sort(([ka, a], [kb, b]) => before(a, b) || ka.localeCompare(kb))
+          .map(([key, s]) => {
+            const sorted = [...s].sort(order)
+            return { key, first: sorted[0]!, items: sorted }
+          }),
+      }
+    })
 }
 
 /**

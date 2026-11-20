@@ -560,6 +560,152 @@ if (variant !== 'empty') {
     ]),
   )
 
+  // Unattended Mode's Pending Decisions (spec §3.37), grouped by Project on the Unattended page: in `shop` (one session
+  // in the repository, where the user replied later, and one in a worktree that folds into it, where only sideby's and
+  // Claude Code's own notes came after), in `blog` (nobody came back), one kept outside any session, and one in `blog`
+  // marked done half an hour ago, for the done list and its Reopen.
+  const checkout = join(home, 'code/shop-worktrees/checkout-fix')
+  await mkdir(checkout, { recursive: true })
+  await writeFile(join(checkout, '.git'), `gitdir: ${join(shop, '.git/worktrees/checkout-fix')}\n`)
+  const night = {
+    shop: '4c1d105f-0000-4000-8000-000000000105',
+    checkout: '4c1d106f-0000-4000-8000-000000000106',
+    blog: '4c1d107f-0000-4000-8000-000000000107',
+  }
+  const blog = join(home, 'code/blog')
+  const turn = (
+    sid: string,
+    cwd: string,
+    ago: number,
+    role: 'user' | 'assistant',
+    text: string,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    type: role,
+    sessionId: sid,
+    cwd,
+    gitBranch: 'main',
+    entrypoint: 'cli',
+    timestamp: iso(-ago),
+    ...(role === 'user' ? { origin: { kind: 'human' } } : {}),
+    ...extra,
+    message:
+      role === 'user'
+        ? { role, content: text }
+        : { role, model: 'claude-opus-5-5', content: [{ type: 'text', text }] },
+  })
+  await write(
+    `.claude/projects/-code-shop/${night.shop}.jsonl`,
+    lines([
+      turn(night.shop, shop, 10 * H, 'user', 'Get the new checkout ready to ship.'),
+      turn(
+        night.shop,
+        shop,
+        9 * H,
+        'assistant',
+        'It is ready. Ship it tonight, or wait for the payment review?',
+      ),
+      turn(night.shop, shop, 7.5 * H, 'user', 'Wait for the payment review, then ship it tomorrow.'),
+      turn(night.shop, shop, 7.4 * H, 'assistant', 'Understood: it waits for the review.'),
+    ]),
+  )
+  await write(
+    `.claude-work/projects/-code-shop-worktrees-checkout-fix/${night.checkout}.jsonl`,
+    lines([
+      turn(
+        night.checkout,
+        checkout,
+        6 * H,
+        'user',
+        'Fix the cart total when a coupon and free shipping meet.',
+      ),
+      turn(
+        night.checkout,
+        checkout,
+        5 * H,
+        'assistant',
+        'Fixed, with a test. The old legacy-cart branch can go.',
+      ),
+      // Only notes came after: sideby's own (Claude Code keeps it as meta) and a background task's.
+      turn(night.checkout, checkout, 4.9 * H, 'user', 'Stop hook feedback: Nobody is here to answer.', {
+        isMeta: true,
+        origin: undefined,
+      }),
+      turn(night.checkout, checkout, 4.5 * H, 'user', '<task-notification>Build done</task-notification>', {
+        origin: { kind: 'task-notification' },
+      }),
+    ]),
+  )
+  await write(
+    `.claude-work/projects/-code-blog/${night.blog}.jsonl`,
+    lines([
+      turn(night.blog, blog, 3.5 * H, 'user', 'Write a post that announces the RSS feed.'),
+      turn(
+        night.blog,
+        blog,
+        3 * H,
+        'assistant',
+        'The post is written. Publish it now, or keep it as a draft?',
+      ),
+    ]),
+  )
+  const pendingDir = '.local/state/sideby/unattended/pending'
+  let n = 0
+  const decide = async (ago: number, d: Record<string, unknown>) => {
+    const at = now - ago
+    const id = `${at.toString(36)}-${(0xa0b0c0 + n++).toString(16)}`
+    await write(
+      `${pendingDir}/${id}.json`,
+      `${JSON.stringify({ id, at: new Date(at).toISOString(), ...d })}\n`,
+      0o600,
+    )
+  }
+  const claudeAt = (account: string, sessionId: string, cwd: string) => ({
+    family: 'claude',
+    account,
+    sessionId,
+    cwd,
+  })
+  await decide(9 * H, {
+    kind: 'question',
+    ...claudeAt('claude:main', night.shop, shop),
+    text: 'Ship the new checkout tonight, or wait for the payment review?\n- Wait for the review (recommended)\n- Ship tonight',
+  })
+  await decide(8.5 * H, {
+    kind: 'permission',
+    ...claudeAt('claude:main', night.shop, shop),
+    text: 'Bash: rm (Remove the old build folder)',
+  })
+  await decide(5 * H, {
+    kind: 'deferred',
+    ...claudeAt('claude:work', night.checkout, checkout),
+    text: 'Deleting the old `legacy-cart` branch is left for the user.',
+  })
+  await decide(3 * H, {
+    kind: 'question',
+    ...claudeAt('claude:work', night.blog, blog),
+    text: 'Publish the RSS post now, or keep it as a draft until Monday?\n- Keep it as a draft (recommended)\n- Publish now',
+  })
+  await decide(2.5 * H, {
+    kind: 'question',
+    ...claudeAt('claude:work', night.blog, blog),
+    text: 'Want me to also add a JSON feed?',
+    waited: 10,
+  })
+  await decide(1 * H, {
+    kind: 'deferred',
+    family: 'unknown',
+    text: 'Renew the staging certificate before Friday.',
+  })
+  await decide(4 * H, {
+    kind: 'deferred',
+    ...claudeAt('claude:work', night.blog, blog),
+    text: 'Moving the old drafts into `drafts/archive` is left for the user.',
+    doneAt: iso(-0.5 * H),
+  })
+  for (const dir of ['.local/state/sideby', '.local/state/sideby/unattended', pendingDir])
+    await chmod(join(home, dir), 0o700)
+
   // Claude quota as the status line wrapper would have cached it.
   const cache = (five: number, seven: number, at: number) =>
     JSON.stringify({

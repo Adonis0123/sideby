@@ -43,6 +43,42 @@ const PendingDecision = Type.Object({
   doneAt: Type.Optional(Type.String({ description: 'When it was marked done; ISO.' })),
 })
 
+/** One Pending Decision as `sideby unattended pending` lists it: with its Project, state and reply (ADR-0078). */
+const PendingRow = Type.Intersect([
+  PendingDecision,
+  Type.Object({
+    project: Type.String({
+      description:
+        'The Project: the git repository of its folder (a worktree counts as its main repository; a folder that is gone counts as the repository of the nearest folder still there), else the folder itself; "" when it has no folder.',
+    }),
+    projectName: Type.String({
+      description: 'The Project\'s short name, as Session History shows it; "" when it has no folder.',
+    }),
+    state: Type.Union([Type.Literal('open'), Type.Literal('replied'), Type.Literal('done')], {
+      description:
+        'done: marked done; replied: not marked, and the user typed in its session after it was kept (that does not tell whether it was finished); open: not marked, and nothing typed after it.',
+    }),
+    repliedAt: Type.Optional(
+      Type.String({ description: 'With `replied`: when the user first typed in the session after it; ISO.' }),
+    ),
+    replyCheck: Type.Optional(
+      Type.Union([Type.Literal('no-record'), Type.Literal('unsupported')], {
+        description:
+          'Why sideby could not tell whether the user typed in the session afterwards: its session record is gone, or sideby reads no session records of this Family. Only on an open one with a session id.',
+      }),
+    ),
+  }),
+])
+
+/** One Project's counts in `sideby unattended pending` (ADR-0078). */
+const PendingProject = Type.Object({
+  project: Type.String({ description: 'The Project, as in each row; "" for those without a folder.' }),
+  projectName: Type.String({ description: 'Its short name; "" for those without a folder.' }),
+  open: Type.Integer({ description: 'Open ones nobody typed after.' }),
+  replied: Type.Integer({ description: 'Open ones the user typed in their session after.' }),
+  done: Type.Integer({ description: 'Done ones (only with --all).' }),
+})
+
 /** The menu bar shortcut (`sideby menubar hotkey`, spec §3.31). */
 const hotkeyProps = {
   keys: Type.String({
@@ -2319,12 +2355,29 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
   'unattended-pending': Type.Object(
     {
       schemaVersion: Version,
-      pending: Type.Array(PendingDecision, {
-        description: 'Open Pending Decisions, oldest first; with --all the done ones too.',
+      pending: Type.Array(PendingRow, {
+        description:
+          "Open Pending Decisions, oldest first; with --all the done ones too; with --project only that Project's.",
       }),
-      done: Type.Optional(Type.Array(Str, { description: '`pending done`: the ids marked done.' })),
+      projects: Type.Array(PendingProject, {
+        description:
+          'Each Project with a listed one, as the Panel orders them: those with an open one first (the newest open one first), then the rest by their newest one, the one without a folder last.',
+      }),
+      done: Type.Optional(
+        Type.Array(Str, {
+          description: '`pending done`: the ids this call marked done (not ones done already).',
+        }),
+      ),
+      reopened: Type.Optional(
+        Type.Array(Str, {
+          description: '`pending reopen`: the ids this call opened again (not ones open already).',
+        }),
+      ),
     },
-    { title: 'sideby unattended pending [done <id>|--all] --json' },
+    {
+      title:
+        'sideby unattended pending [--project <name>] [done <id>|--ids|--all|--replied] [reopen <id>|--ids] --json',
+    },
   ),
   'unattended-defer': Type.Object(
     { schemaVersion: Version, decision: PendingDecision },

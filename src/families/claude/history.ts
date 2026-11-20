@@ -3,7 +3,7 @@
 // that Session started. The folder name is only an encoding of the working directory and may be cut, so the
 // directory is taken from the records' `cwd`, never decoded from the name.
 import { basename, dirname, join } from 'node:path'
-import type { HistoryFile, HistoryMessage, HistoryReader, ParsedSession, TitleSource } from '../history.ts'
+import type { HistoryFile, HistoryReader, ParsedSession, ReadMessage, TitleSource } from '../history.ts'
 import {
   blockText,
   dirEntries,
@@ -156,7 +156,16 @@ export const claudeHistory: HistoryReader = {
       const at = isoTime(rec.timestamp)
       if (rec.type === 'user') {
         const text = userText(rec)
-        if (text) yield { role: 'user', text, ...(at ? { at } : {}) } satisfies HistoryMessage
+        // Who made it, as Claude Code records it (seen in 2.1.312 to 2.1.325): `human` for a person, else a notification
+        // or a peer's message.
+        const origin = str((rec.origin as { kind?: unknown } | undefined)?.kind)
+        if (text)
+          yield {
+            role: 'user',
+            text,
+            ...(at ? { at } : {}),
+            ...(origin ? { origin } : {}),
+          } satisfies ReadMessage
       } else if (rec.type === 'assistant') {
         const text = assistantText(rec)
         if (text) yield { role: 'assistant', text, ...(at ? { at } : {}) }

@@ -141,11 +141,12 @@ import {
 } from '../core/unattended.ts'
 import { checkUnattendedEnded } from '../core/unattended-ended.ts'
 import {
-  listPendingDecisions,
-  markPendingDone,
-  type PendingDecision,
-  reopenPendingDecision,
-} from '../core/unattended-pending.ts'
+  type PendingOverview,
+  type PendingProject,
+  type PendingRow,
+  pendingOverview,
+} from '../core/unattended-followup.ts'
+import { listPendingDecisions, markPendingDone, reopenPendingDecisions } from '../core/unattended-pending.ts'
 import { readUnattendedConfig } from '../core/unattended-state.ts'
 import * as update from '../core/update.ts'
 import { buildId, localBuild, packageVersion } from '../core/version.ts'
@@ -509,8 +510,11 @@ export interface PanelTrust {
   carried: { account: string; path: string; from: string; at: string }[]
 }
 
-/** One Pending Decision as the Panel's Unattended page lists it, with the way back to its Session. */
-export interface PanelPendingDecision extends PendingDecision {
+/**
+ * One Pending Decision as the Panel's Unattended page lists it, with its Project, state and reply (ADR-0078; `project`
+ * and `cwd` shortened with `~`) and the way back to its Session.
+ */
+export interface PanelPendingDecision extends PendingRow {
   /** The Account's short name (its Alias when it has one). */
   accountLabel?: string
   /** The Session still runs: its label, so the Sessions page finds it. */
@@ -525,10 +529,14 @@ export interface PanelPendingDecision extends PendingDecision {
  */
 export type PanelUnattendedStatus = UnattendedStatus & { pendingIds: string[] }
 
-/** The Unattended page: the status and every open Pending Decision. */
+/** The Unattended page: the status and every open Pending Decision, with each Project's counts in page order. */
 export interface PanelUnattended {
   status: PanelUnattendedStatus
+  /** The open ones (`state` open or replied). */
   pending: PanelPendingDecision[]
+  projects: PendingProject[]
+  /** The ones marked done and kept (30 days), newest mark first, so one marked by mistake can be reopened. */
+  done: PanelPendingDecision[]
 }
 
 /** What a change on the Unattended page did, and the request that puts back what was there. */
@@ -1221,32 +1229,49 @@ async function unattendedView(
   const families = [...rt.families.keys()]
   const [status, decisions, accounts] = await Promise.all([
     unattendedStatus({ paths: rt.paths, families, readOnly }),
-    listPendingDecisions(rt.paths.stateDir, { prune: !readOnly }),
+    listPendingDecisions(rt.paths.stateDir, { prune: !readOnly, all: true }),
     rt.accounts(),
   ])
+  const open = decisions.filter((d) => !d.doneAt)
   const labels = accountLabels(rt, accounts)
-  const running = decisions.some((d) => d.sessionId)
+  const running = open.some((d) => d.sessionId)
     ? (await live(rt).catch(() => ({ sessions: [], problems: [] }))).sessions
     : []
   const home = rt.paths.home
-  return {
-    status: { ...status, pending: decisions.length, pendingIds: decisions.map((d) => d.id) },
-    pending: decisions.map((d): PanelPendingDecision => {
-      const label = d.account ? labels.get(d.account) : undefined
-      const session = d.sessionId ? running.find((s) => s.sessionId === d.sessionId) : undefined
-      const known = d.account && accounts.some((a) => a.ref === d.account)
-      const resume =
-        d.sessionId && SAFE_SESSION_ID.test(d.sessionId) && known
-          ? resumeCommandFor(d.family, d.account!, d.sessionId)
-          : undefined
-      return {
-        ...d,
-        ...(d.cwd ? { cwd: tildify(d.cwd, home) } : {}),
-        ...(label ? { accountLabel: label } : {}),
-        ...(session ? { live: { label: session.label, accountLabel: session.accountLabel } } : {}),
-        ...(resume ? { resume: d.cwd ? `cd ${shellArg(d.cwd)} && ${resume}` : resume } : {}),
-      }
+  // Each one's Project and whether the user replied in its session since (ADR-0078); a failure only leaves them out.
+  const overview = await pendingOverview({ decisions, accounts, stateDir: rt.paths.stateDir }).catch(
+    (): PendingOverview => ({
+      rows: decisions.map((d) => ({ ...d, project: '', projectName: '', state: d.doneAt ? 'done' : 'open' })),
+      projects: [],
     }),
+  )
+  const shown = (d: PendingRow): PanelPendingDecision => {
+    const label = d.account ? labels.get(d.account) : undefined
+    const session = d.sessionId ? running.find((s) => s.sessionId === d.sessionId) : undefined
+    const known = d.account && accounts.some((a) => a.ref === d.account)
+    const resume =
+      d.sessionId && SAFE_SESSION_ID.test(d.sessionId) && known
+        ? resumeCommandFor(d.family, d.account!, d.sessionId)
+        : undefined
+    return {
+      ...d,
+      project: d.project && tildify(d.project, home),
+      ...(d.cwd ? { cwd: tildify(d.cwd, home) } : {}),
+      ...(label ? { accountLabel: label } : {}),
+      ...(session ? { live: { label: session.label, accountLabel: session.accountLabel } } : {}),
+      ...(resume ? { resume: d.cwd ? `cd ${shellArg(d.cwd)} && ${resume}` : resume } : {}),
+    }
+  }
+  return {
+    status: { ...status, pending: open.length, pendingIds: open.map((d) => d.id) },
+    projects: overview.projects
+      .filter((p) => p.open + p.replied > 0)
+      .map((p) => ({ ...p, project: p.project && tildify(p.project, home) })),
+    pending: overview.rows.filter((d) => d.state !== 'done').map(shown),
+    done: overview.rows
+      .filter((d) => d.state === 'done')
+      .sort((a, b) => Date.parse(b.doneAt!) - Date.parse(a.doneAt!))
+      .map(shown),
   }
 }
 
@@ -2558,18 +2583,29 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         }
       },
     },
-    // Marks one Pending Decision done (or every open one with `all`), or with `done: false` opens one again.
+    // Marks one Pending Decision done (or every open one with `all`, or the `ids` the page showed: a Project's replied
+    // ones, ADR-0078), or with `done: false` opens them again.
     '/api/unattended/pending': {
       async run(body) {
         const id = optString(body, 'id')
         const all = body.all === true
-        if (!id && !all) throw new HttpError(400, '"id" or "all" is required')
+        const ids = body.ids
+        if (
+          ids !== undefined &&
+          (!Array.isArray(ids) ||
+            !ids.length ||
+            ids.length > 10_000 ||
+            !ids.every((x) => typeof x === 'string' && x.length <= 64))
+        )
+          throw new HttpError(400, '"ids" must be a list of Pending Decision ids')
+        const list = ids as string[] | undefined
+        if (!id && !all && !list) throw new HttpError(400, '"id", "ids" or "all" is required')
         const rt = await getRuntime()
         try {
           const changed =
-            body.done === false && id
-              ? [await reopenPendingDecision(rt.paths.stateDir, id)]
-              : await markPendingDone(rt.paths.stateDir, all ? 'all' : id!)
+            body.done === false && (id || list)
+              ? await reopenPendingDecisions(rt.paths.stateDir, list ?? [id!])
+              : await markPendingDone(rt.paths.stateDir, all ? 'all' : (list ?? id!))
           return { ids: changed.map((d) => d.id) }
         } catch (err) {
           throw new HttpError(400, (err as Error).message, 'no-pending')

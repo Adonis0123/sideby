@@ -223,6 +223,32 @@ export async function reopenPendingDecision(stateDir: string, id: string): Promi
   return open
 }
 
+/**
+ * Opens Pending Decisions marked done again, reading the folder once (the Panel's Undo after a bulk "Done", and
+ * `sideby unattended pending reopen`). Ids no Pending Decision has, and ones that are open already, are left out:
+ * it returns only the ones it opened. When none of the ids is there it throws.
+ */
+export async function reopenPendingDecisions(
+  stateDir: string,
+  ids: readonly string[],
+): Promise<PendingDecision[]> {
+  const want = new Set(ids)
+  const found = (await readAll(stateDir)).filter((d) => want.has(d.id))
+  if (!found.length)
+    throw new Error(
+      `no Pending Decision has the id "${ids[0] ?? ''}"; \`sideby unattended pending --all\` lists them`,
+    )
+  const out: PendingDecision[] = []
+  for (const d of found) {
+    if (!d.doneAt) continue
+    const { doneAt: _, ...open } = d
+    await ensureDir(stateDir)
+    await writeFileAtomic(fileOf(stateDir, d.id), `${JSON.stringify(open)}\n`, 0o600)
+    out.push(open)
+  }
+  return out
+}
+
 /** The open Pending Decision an id names: the whole id, or a start of it that only one has. */
 export async function findPendingDecision(
   stateDir: string,
@@ -236,27 +262,33 @@ export async function findPendingDecision(
 }
 
 /**
- * Marks Pending Decisions done: one by id (or a unique start of it), or every open one with `'all'`. Returns the ones
- * it marked; an id no Pending Decision has throws an Error whose message says how to list them.
+ * Marks Pending Decisions done: one by id (or a unique start of it), every open one with `'all'`, or a list of whole
+ * ids read in one go (ADR-0078; ids no Pending Decision has, and ones done already, are left out, so a list returns
+ * only the ones this call marked). An id, or a list, that names no Pending Decision throws an Error whose message
+ * says how to list them.
  */
 export async function markPendingDone(
   stateDir: string,
-  id: string | 'all',
+  id: string | 'all' | readonly string[],
   at: Date = new Date(),
 ): Promise<PendingDecision[]> {
+  const many = typeof id !== 'string'
+  const listed = new Set(many ? id : [])
   const targets =
     id === 'all'
       ? (await readAll(stateDir)).filter((d) => !d.doneAt)
-      : [await findPendingDecision(stateDir, id)].filter((d): d is PendingDecision => d !== undefined)
-  if (id !== 'all' && !targets.length)
-    throw new Error(`no Pending Decision has the id "${id}"; \`sideby unattended pending --all\` lists them`)
+      : many
+        ? (await readAll(stateDir)).filter((d) => listed.has(d.id))
+        : [await findPendingDecision(stateDir, id)].filter((d): d is PendingDecision => d !== undefined)
+  if (id !== 'all' && !targets.length && (!many || id.length))
+    throw new Error(
+      `no Pending Decision has the id "${many ? (id[0] ?? '') : id}"; \`sideby unattended pending --all\` lists them`,
+    )
   if (targets.length) await ensureDir(stateDir)
   const out: PendingDecision[] = []
   for (const d of targets) {
-    if (d.doneAt) {
-      out.push(d)
-      continue
-    }
+    // Only the ones this call marks: one done already (elsewhere, a moment ago) is left out, so an Undo never opens it.
+    if (d.doneAt) continue
     const done = { ...d, doneAt: at.toISOString() }
     await writeFileAtomic(fileOf(stateDir, d.id), `${JSON.stringify(done)}\n`, 0o600)
     out.push(done)

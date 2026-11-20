@@ -351,14 +351,16 @@ no country allowed; 2 malformed command line.`,
        sideby unattended schedule [add --days <days> --from HH:MM --to HH:MM [--name <name>] [--at <n>]] [--json]
        sideby unattended schedule remove <n> | preset weeknights [--json]
        sideby unattended wait [<minutes>|off] [--json]
-       sideby unattended pending [--all] [--json]
-       sideby unattended pending done <id> | --all [--json]
+       sideby unattended pending [--all] [--project <name>] [--json]
+       sideby unattended pending done <id> | --ids <a,b> | --all | --replied [--project <name>] | --project <name> [--json]
+       sideby unattended pending reopen <id> | --ids <a,b> [--json]
        sideby unattended defer "<text>" [--json]
 
 Unattended Mode: nobody is at the computer, so sessions sideby starts never stop to wait for a person. While it is on,
 a Claude or Codex session sideby started is not allowed to ask a question: the model takes the recommended option
-where it can be undone, and skips anything hard to undo (deleting, sending, publishing, deploying, paying). Each
-question it could not ask, and each thing it skipped (\`defer\`), is kept as a Pending Decision for when you are back.
+where it can be undone, and skips anything hard to undo (deleting, sending, publishing, deploying, paying) unless
+your own rules or project docs give standing permission for that kind of action. Each question it could not ask, and
+each thing it skipped (\`defer\`), is kept as a Pending Decision for when you are back.
 In Claude sessions, a permission prompt Claude Code is about to show (a command it wants a person to confirm, also in
 a subagent) is answered with "no" and how to do it without one, and kept as a Pending Decision too. A Claude turn
 that failed for a passing reason (an overloaded server, a dropped connection, a rate limit that is not a used-up
@@ -381,6 +383,13 @@ written into the account folders). Codex runs the hooks once you trust both \`un
 Grok, pi, desktop apps and sessions started without sideby are not covered. Pending Decisions stay on this computer;
 \`pending done\` marks them done, and they are deleted 30 days later. \`defer\` keeps a line from inside a session ("deploy left for the user").
 
+\`pending\` lists them by project (the repository of the folder the session worked in; a worktree counts as its
+repository), untouched ones first. "You wrote in the session afterwards" means you typed in that session after it
+was kept, read from the session's own record (Claude and Codex); it does not tell whether that finished it, so look
+at each one before marking it done. \`done <id>\` or \`--ids <a,b>\` marks the ones you checked; \`--replied\` marks
+every one you wrote in afterwards, \`--project <name>\` keeps to one project, and \`done --project <name>\` marks a
+whole project. \`reopen\` puts back one marked done by mistake.
+
 --days takes mon…sun, ranges and lists: mon-fri, sat,sun, fri-mon, weekdays, daily. Each change prints its undo.
 
 Examples:
@@ -389,6 +398,8 @@ Examples:
   sideby unattended schedule add --days sat,sun --from 01:00 --to 09:00 --name "Weekend nights"
   sideby unattended wait 30
   sideby unattended pending
+  sideby unattended pending --project shop
+  sideby unattended pending reopen <id>
   sideby unattended defer "deleting the old branch is left for the user"
 Exit: 0 shown or done; 1 no such Slot or Pending Decision; 2 a time or option it does not take (the message says
 which to use).`,
@@ -536,8 +547,8 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   next: { flags: ['dry-run', 'include-api', 'json', 'ignore-network', 'unattended'] },
   network: { flags: ['json', 'yes'] },
   unattended: {
-    flags: ['json', 'all', 'slot-end'],
-    valued: ['for', 'until', 'days', 'from', 'to', 'name', 'at'],
+    flags: ['json', 'all', 'slot-end', 'replied'],
+    valued: ['for', 'until', 'days', 'from', 'to', 'name', 'at', 'project', 'ids'],
   },
   progress: { flags: ['json'], valued: ['every'] },
   trust: { flags: ['json', 'yes'], valued: ['dir'] },

@@ -1456,6 +1456,23 @@ input.ua-time::placeholder { color: var(--faint); }
 .ua-sec-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .ua-sec-row .tab-count { margin-left: 4px; vertical-align: 1px; }
 .ua-groups { display: flex; flex-direction: column; }
+.ua-proj { margin-bottom: 20px; }
+.ua-proj-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.ua-proj-who { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; min-width: 0; }
+.ua-proj-name { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.ua-proj-name .ic { width: 15px; height: 15px; flex: none; color: var(--muted); }
+.ua-proj-sessions > .ua-group:last-child { margin-bottom: 0; }
+/* What was written in afterwards, and the done list: folded under a toggle (ADR-0078). */
+.ua-fold { margin-top: 8px; }
+.ua-fold-btn { margin-left: -4px; font-size: 13px; color: var(--muted); }
+.ua-fold-btn:hover { color: var(--text); }
+.ua-fold-btn .chev { width: 12px; height: 12px; }
+.ua-fold-body { margin-top: 8px; }
+.ua-fold-note { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; margin: 0 0 8px; }
+.ua-fold-note p { margin: 0; }
+.ua-done-fold { margin-top: 0; }
+.ua-done-list { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow); }
+.ua-item-meta { flex-wrap: wrap; }
 .ua-group { margin-bottom: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow); }
 .ua-group-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 12px 12px 16px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius-xl) var(--radius-xl) 0 0; }
 .ua-group-who { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; min-width: 0; }

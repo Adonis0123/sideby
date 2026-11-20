@@ -11,6 +11,7 @@ import {
   markPendingDone,
   PENDING_TEXT_MAX,
   pendingDir,
+  reopenPendingDecisions,
 } from './unattended-pending.ts'
 
 const at = (day: number, hour: number) => new Date(2026, 9, day, hour)
@@ -77,6 +78,8 @@ describe('Pending Decisions', () => {
       const c = await addPendingDecision(dir, { kind: 'deferred', family: 'claude', text: 'c' }, at(1, 3))
       const [doneA] = await markPendingDone(dir, a.id.slice(0, 10), at(2, 0))
       assert.equal(doneA?.doneAt, at(2, 0).toISOString())
+      // One done already is not marked again, so an Undo of this call would not open it.
+      assert.deepEqual(await markPendingDone(dir, a.id, at(2, 0)), [])
       assert.deepEqual(
         (await listPendingDecisions(dir, { now: at(2, 1) })).map((d) => d.id),
         [b.id, c.id],
@@ -93,6 +96,35 @@ describe('Pending Decisions', () => {
       assert.equal((await readdir(pendingDir(dir))).length, 2)
       await assert.rejects(markPendingDone(dir, 'nope'), /pending --all/)
       assert.equal(await findPendingDecision(dir, 'mv'), undefined)
+    })
+  })
+
+  it('marks and reopens a list of ids, returning only the ones this call changed (ADR-0078)', async () => {
+    await withFakeHome(async (h) => {
+      const dir = h.path('state')
+      const [a, b, c] = await Promise.all(
+        ['a', 'b', 'c'].map((text, i) =>
+          addPendingDecision(dir, { kind: 'deferred', family: 'claude', text }, at(1, i + 1)),
+        ),
+      )
+      await markPendingDone(dir, a!.id, at(2, 0))
+      // a is done already: the list marks b only, and a keeps the time it was marked.
+      const marked = await markPendingDone(dir, [a!.id, b!.id, 'not-there'], at(3, 0))
+      assert.deepEqual(
+        marked.map((d) => d.id),
+        [b!.id],
+      )
+      const all = await listPendingDecisions(dir, { all: true, now: at(3, 1) })
+      assert.equal(all.find((d) => d.id === a!.id)?.doneAt, at(2, 0).toISOString())
+      assert.deepEqual(await markPendingDone(dir, [a!.id, b!.id], at(4, 0)), [])
+      await assert.rejects(markPendingDone(dir, ['nope']), /pending --all/)
+      // Reopening: c is open already, so only a and b come back.
+      const reopened = await reopenPendingDecisions(dir, [a!.id, b!.id, c!.id])
+      assert.deepEqual(reopened.map((d) => d.id).sort(), [a!.id, b!.id].sort())
+      assert.ok(reopened.every((d) => d.doneAt === undefined))
+      assert.deepEqual(await reopenPendingDecisions(dir, [c!.id]), [])
+      assert.equal((await listPendingDecisions(dir, { now: at(4, 1) })).length, 3)
+      await assert.rejects(reopenPendingDecisions(dir, ['nope']), /pending --all/)
     })
   })
 

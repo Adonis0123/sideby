@@ -191,7 +191,7 @@ export function questionReason(
     const head = waited
       ? `${waited} 分钟没人回答：sideby 无人值守已开启${when}，会话不再等回答，${keep}。`
       : `未显示：sideby 无人值守已开启${when}，现在没人能回答，${keep}。`
-    return `${head}不要再问。能撤回的选择按推荐的选项继续，在最终汇报里写出这个问题和你的选择。删除、对外发送或发布、部署、付费等难撤回的操作不要做：跳过它，运行 \`sideby unattended defer "<一句话>"\` 记下，再继续做其余的事。`
+    return `${head}不要再问。能撤回的选择按推荐的选项继续，在最终汇报里写出这个问题和你的选择。删除、对外发送或发布、部署、付费等难撤回的操作不要做：跳过它，运行 \`sideby unattended defer "<一句话>"\` 记下，再继续做其余的事。用户自己的规则或项目文档已对这类操作常设授权的，照那份授权做。`
   }
   const when = session ? 'for this session' : until ? `until ${until}` : 'with no end set'
   const keep = kept
@@ -200,12 +200,15 @@ export function questionReason(
   const head = waited
     ? `No answer after ${minutesText(waited)}: sideby's Unattended Mode is on ${when}, so the session goes on without one, and ${keep}.`
     : `Not shown: sideby's Unattended Mode is on ${when}, so nobody is here to answer, and ${keep}.`
-  return `${head} Do not ask again. Where the choice can be undone, go on with the recommended option, and list the question and your choice in your final report. Do not do anything hard to undo (deleting, sending or posting anything outside, publishing, deploying, paying): skip it, record it with \`sideby unattended defer "<one sentence>"\`, and go on with the rest.`
+  return `${head} Do not ask again. Where the choice can be undone, go on with the recommended option, and list the question and your choice in your final report. Do not do anything hard to undo (deleting, sending or posting anything outside, publishing, deploying, paying): skip it, record it with \`sideby unattended defer "<one sentence>"\`, and go on with the rest. Where the user's own rules or project docs already give standing permission for that kind of action, follow that permission instead.`
 }
 
 const minutesText = (n: number): string => (n === 1 ? '1 minute' : `${n} minutes`)
 
-/** How much of the end of the model's last message is read to tell whether it ends on a question. */
+/**
+ * How much of the end of the model's last message is read to tell whether it ends on a question. The `需要你拍板`
+ * marker is looked for in the whole message instead (`endingQuestion`).
+ */
 export const QUESTION_TAIL = 600
 
 /**
@@ -254,10 +257,12 @@ function asks(pattern: RegExp, text: string): boolean {
 
 /**
  * The part of the model's last message that asks the user something, or undefined when it does not end on a
- * question. Code blocks (``` and ~~~), inline code and quoted lines (`> …`) are left out first, then the last
- * {@link QUESTION_TAIL} characters are read: a line that starts with the `需要你拍板` marker (from it to the end); a last line that ends with `?`
- * or `？`, or a list of options at the end right after such a line; or one of {@link QUESTION_PATTERNS} in the last
- * paragraph (and the one before it when the last is a list), unless a negation comes just before it ("无需你来决定").
+ * question. Code blocks (``` and ~~~), inline code and quoted lines (`> …`) are left out first. A line anywhere in
+ * the rest that starts with the `需要你拍板` / `Needs your decision` marker asks (from the first such line to the end):
+ * a report often goes on for a long while after it. Otherwise only the last {@link QUESTION_TAIL} characters are
+ * read: a last line that ends with `?` or `？`, or a list of options at the end right after such a line; or one of
+ * {@link QUESTION_PATTERNS} in the last paragraph (and the one before it when the last is a list), unless a negation
+ * comes just before it ("无需你来决定").
  */
 export function endingQuestion(message: string): string | undefined {
   // Judged on a copy where code and quotes are blanked out at the same length, so a span of it is the same span of
@@ -269,12 +274,12 @@ export function endingQuestion(message: string): string | undefined {
     .replace(/`[^`\n]*`/g, (m) => 'x'.repeat(m.length))
     .replace(/^[ \t]*>.*$/gm, blank)
   const stop = plain.trimEnd().length
+  const heading = DECIDE_HEADING.exec(plain.slice(0, stop))
+  if (heading) return written.slice(heading.index, stop).trim()
   const from = Math.max(0, stop - QUESTION_TAIL)
   const tail = plain.slice(from, stop)
   if (!tail.trim()) return undefined
   const kept = (at: number) => written.slice(from + at, stop).trim()
-  const heading = DECIDE_HEADING.exec(tail)
-  if (heading) return kept(heading.index)
   // Each paragraph with where it starts in the tail.
   const paragraphs: { at: number; text: string }[] = []
   let at = 0
@@ -318,7 +323,7 @@ export function stopReason(
     const head = waited
       ? `${waited} 分钟没人回复你的问题：sideby 无人值守已开启${when}，${keep}。这条不是用户的回复。`
       : `没人能回答：sideby 无人值守已开启${when}，${keep}。`
-    return `${head}不要等回复，也不要再问。能撤回的选择按推荐的选项继续，一直做到完。删除、对外发送或发布、部署、付费等难撤回的操作不要做：跳过它，运行 \`sideby unattended defer "<一句话>"\` 记下，再做完其余的事。最后写一份最终汇报，列出你做的每个选择和记下的每件事，不提任何问题。`
+    return `${head}不要等回复，也不要再问。能撤回的选择按推荐的选项继续，一直做到完。删除、对外发送或发布、部署、付费等难撤回的操作不要做：跳过它，运行 \`sideby unattended defer "<一句话>"\` 记下，再做完其余的事。用户自己的规则或项目文档已对这类操作常设授权的，照那份授权做。最后写一份最终汇报，列出你做的每个选择和记下的每件事，不提任何问题。`
   }
   const when = session ? 'for this session' : until ? `until ${until}` : 'with no end set'
   const keep = kept
@@ -327,7 +332,7 @@ export function stopReason(
   const head = waited
     ? `Nobody replied to your question for ${minutesText(waited)}: sideby's Unattended Mode is on ${when}, and ${keep}. This note is not the user's reply.`
     : `Nobody is here to answer: sideby's Unattended Mode is on ${when}, and ${keep}.`
-  return `${head} Do not wait for an answer and do not ask again. Where the choice can be undone, go on with the recommended option and carry on to the end. Do not do anything hard to undo (deleting, sending or posting anything outside, publishing, deploying, paying): skip it, record it with \`sideby unattended defer "<one sentence>"\`, and finish the rest. Then end with a final report that lists each choice you made and each item you recorded, without asking anything.`
+  return `${head} Do not wait for an answer and do not ask again. Where the choice can be undone, go on with the recommended option and carry on to the end. Do not do anything hard to undo (deleting, sending or posting anything outside, publishing, deploying, paying): skip it, record it with \`sideby unattended defer "<one sentence>"\`, and finish the rest. Where the user's own rules or project docs already give standing permission for that kind of action, follow that permission instead. Then end with a final report that lists each choice you made and each item you recorded, without asking anything.`
 }
 
 /** What a declined MCP form is kept as: the server's name and what it asked, never a field's value. */
