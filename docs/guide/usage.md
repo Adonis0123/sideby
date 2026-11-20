@@ -25,7 +25,7 @@ A new account starts with the Main Account's skills, hooks, rules and settings. 
 
 | Host | Linked to the Main Account | Copied or synced | The account's own |
 |---|---|---|---|
-| Claude Code | `settings.json`, `settings.local.json`, `skills`, `commands`, `plugins`, `hooks`, `themes`, `CLAUDE.md` | MCP servers: the `mcpServers` entry of the account's `.claude.json`, kept equal to `~/.claude.json` | sign-in, the rest of `.claude.json`, sessions (`projects/`), history |
+| Claude Code | `settings.json`, `settings.local.json`, `skills`, `commands`, `plugins`, `hooks`, `themes`, `keybindings.json`, `CLAUDE.md` | MCP servers: the `mcpServers` entry of the account's `.claude.json`, kept equal to `~/.claude.json` | sign-in, the rest of `.claude.json`, sessions (`projects/`), history |
 | Codex | `AGENTS.md`, `hooks.json`, `plugins`, `rules`, `skills`; `config.toml` of a subscription account | — | sign-in (`auth.json`), sessions, history; `config.toml` of an API account |
 | Grok Build | `skills`, `installed-plugins` | `hooks`, `hooks-paths`, and `config.toml` of a subscription account: Grok refuses links there | sign-in (`auth.json`), `trusted_folders.toml` (copied once, then yours), sessions; `config.toml` of an API account |
 | pi | `AGENTS.md` | — | sign-in (`auth.json`), sessions, everything else |
@@ -341,10 +341,10 @@ sideby network check               # ask now
 
 While it is on, sideby checks before it starts a Claude or Codex account, and before each message and tool call in a session it started. When the country is not allowed, or cannot be told (the proxy is off, the network is down), the start, the message or the tool call is stopped with the reason and what to do. Inside a session it first asks again for up to about 30 seconds, so a short outage does not drop a message, such as a background task's notice, that the tool will not send again. When such a message is stopped in a Claude session all the same, sideby keeps it and hands it to the session once the network is right again, so the session does not wait for nothing; the panel shows a banner with **Check again**. To go on once anyway: `sideby run <account> --ignore-network`. To stop checking, `sideby network off --yes` (or the switch in the panel); sessions already running follow it at once, and a message stopped in a session says so. Not sure what to allow, or something was blocked? **Let AI help** in the dialog or on the banner opens a task with your own AI: it checks where you are, asks which countries, and changes the setting only after you agree.
 
-- sideby asks the vendor's own `/cdn-cgi/trace` (`api.anthropic.com`, `chatgpt.com`, `api.openai.com`) through the account's proxy settings, so the check takes the same route as the requests. It sends no credential, account or identity, and keeps only the country and a hash of the address. A result is reused for 60 seconds, so most messages wait for nothing; a change of Wi-Fi or VPN is noticed at once, a node switch inside a proxy app within about a minute.
+- sideby asks the vendor's own `/cdn-cgi/trace` (`api.anthropic.com`, `chatgpt.com`) through the account's proxy settings, so the check takes the same route as the requests. It sends no credential, account or identity, and keeps only the country and a hash of the address. A result is reused for 60 seconds, so most messages wait for nothing; a change of Wi-Fi or VPN is noticed at once, a node switch inside a proxy app within about a minute.
 - Only sessions sideby starts are checked. Running `claude` or `codex` directly is not.
 - Codex runs the hook only after you trust it once: type `/hooks` in that account and trust `network-hook`. Until then Codex is checked only before it starts. A Claude session started with its own `--settings` is also checked only before it starts.
-- API accounts on another endpoint (DeepSeek and the like) are not checked. An `http://` proxy is supported; a SOCKS proxy cannot be checked through and is treated as "cannot tell".
+- API accounts (signed in with a key, on any endpoint) are never checked. An `http://` proxy is supported; a SOCKS proxy cannot be checked through and is treated as "cannot tell".
 - A changed exit address in the same country is only a notice.
 
 ## Unattended Mode
@@ -436,6 +436,31 @@ While the unlock is on, every Claude session sideby starts (`sideby run`, short 
 If `/advisor` answers "/advisor isn't available in this environment", a setting is turning off Claude Code's experimental features: usually `"env": {"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"}` in `settings.json`. sideby points it out (the panel shows **Turned off by a setting**), and when you pick a model the same preview lists `env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS "1" -> removed`. Removing it also turns Claude Code's other experimental features back on; nothing is written until you confirm, and **Undo** puts it back. Off never touches it. If you also have API accounts (say `claude:deepseek`) that share that file, their gateway may need the variable, because it stops Claude Code from sending `anthropic-beta` headers some gateways reject. Then the same preview also lists `sideby config: claude.apiBetasOff false -> true` and names them: from then on sideby adds `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` whenever it starts a Claude API account (a value in its `proxy.env` still wins), so the variable leaves the shared file without breaking them. API accounts are only ever started by sideby, so none is missed. `sideby advisor` says whether this is on, and **Undo** turns it back off with the file; `sideby config set claude.apiBetasOff false` turns it off on its own. If the variable is set in your shell instead, sideby leaves it alone: remove it from your shell profile, because it hides the Advisor in every session, those sideby starts too.
 
 sideby writes only `advisorModel` (or removes it for Off) and, with a model choice, that one `env` entry; it keeps everything else in the file, including the other `env` entries, writes a linked file at its real target, and never creates a `settings.json` (run `sideby doctor --fix` first). API accounts are left out: the Advisor needs a Claude sign-in.
+
+## Folder trust
+
+The first time a Claude account opens a folder, Claude Code asks "Is this a project you created or one you trust?" and remembers the answer for that account only. Start another account in the same folder and it asks again; pressing Enter there picks "No, exit" and ends the session, which also stops an Auto Handoff at the next account's first screen.
+
+Turn on carried trust and sideby reuses the answer you already gave: before it starts an interactive Claude session (`sideby run`, short commands, pick commands, `sideby next`, Auto Handoff, Let AI do it), when that account has not trusted the folder and another of your Claude accounts has, sideby copies that one trust mark into the account's `.claude.json` and prints one line:
+
+```
+sideby: claude:work now trusts ~/code/app, as claude:main does (claude.carryTrust; undo: sideby trust undo)
+```
+
+```sh
+sideby trust                    # on or off, and what sideby copied
+sideby trust on                 # shows the change, exit 10
+sideby trust on --yes           # turns it on
+sideby trust --dir ~/code/app   # while on: whether each Claude account trusts that folder
+sideby trust undo --yes         # takes back what sideby copied
+sideby trust off --yes          # stops copying; keeps what was copied
+```
+
+In the panel it is **Settings** → **All settings…** → **Folder trust**: one switch, **Reuse trust from my other Claude accounts**, and, once sideby copied something, **Review** lists each copy with **Remove**.
+
+It follows Claude Code's own rules and copies the same entry, never a wider one: in a git repository the trust of the repository's main checkout (a linked worktree uses its main checkout's), elsewhere the trust of the folder or a parent folder, never your home folder or `/`. A trusted parent folder does not cover a git repository inside it. Where sideby cannot tell from the files (a submodule, a separate git folder), it copies nothing; it never runs `git` in the folder. It never trusts a folder none of your accounts trusted.
+
+sideby writes only `projects["<folder>"].hasTrustDialogAccepted` (for the main account in `~/.claude.json`), keeps everything else in the file, never writes through a link, never creates the file, and skips the copy when Claude Code changed the file at the same moment; then it says so and Claude Code asks as before. Of `.claude.json` it reads nothing but that field. `sideby trust undo` takes a copy back only while it still holds what sideby wrote, and keeps anything Claude Code added since. A headless run (`-p`), `sideby login` and sessions you start with plain `claude` copy nothing.
 
 ## When an account hits its limit
 

@@ -121,6 +121,42 @@ export async function withClaudeHooks(
 }
 
 /**
+ * Claude `--settings` arguments with `dirs` added to the file's `permissions.additionalDirectories`, written as `out`.
+ * Claude Code 2.1.326 asks the user to trust every `--add-dir` folder it has not seen before the session starts, and
+ * exits on "No"; a folder from `--settings` becomes a working directory without that question (tried with Claude Code
+ * 2.1.326 on 2026-11-17). Each folder is listed as given and, when a link leads to it, by its real path too.
+ */
+export async function withClaudeDirs(
+  args: readonly string[],
+  dirs: readonly string[],
+  out: string,
+): Promise<string[]> {
+  const settings = await settingsOf(args)
+  const permissions =
+    settings.permissions && typeof settings.permissions === 'object' && !Array.isArray(settings.permissions)
+      ? (settings.permissions as Record<string, unknown>)
+      : {}
+  const had = Array.isArray(permissions.additionalDirectories) ? permissions.additionalDirectories : []
+  const add = dirs.flatMap((d) => {
+    try {
+      const real = realpathSync(d)
+      return real === d ? [d] : [d, real]
+    } catch {
+      return [d]
+    }
+  })
+  const additionalDirectories = [...new Set([...had, ...add])]
+  await mkdir(dirname(out), { recursive: true, mode: 0o700 })
+  await writeFileAtomic(
+    out,
+    `${JSON.stringify({ ...settings, permissions: { ...permissions, additionalDirectories } }, null, 2)}\n`,
+    0o600,
+  )
+  const at = args.indexOf('--settings')
+  return at === -1 ? [...args, '--settings', out] : args.map((a, i) => (i === at + 1 ? out : a))
+}
+
+/**
  * Auto Handoff's Claude hook arguments with the session's own sideby hooks (`sessionArgs`, from `sessionHookArgs`)
  * merged into one `--settings` file, written next to the session's file with `-handoff` added to its name.
  */

@@ -19,6 +19,15 @@ import {
   undoAdvisor,
 } from './core/advisor.ts'
 import {
+  carryLine,
+  carryTrust,
+  type TrustContext,
+  type TrustStatus,
+  trustStatus,
+  type UndoItem,
+  undoCarries,
+} from './core/claude-trust.ts'
+import {
   type AliasValue,
   addConfigAlias,
   addConfigPickCommand,
@@ -29,6 +38,7 @@ import {
   aliasRefs,
   type Config,
   type DisplayConfig,
+  editConfigClaude,
   editConfigDisplay,
   editConfigQuotaCheck,
   type HandoffSettings,
@@ -187,6 +197,7 @@ import {
 import { UNATTENDED_ENV } from './core/unattended-state.ts'
 import { inCi } from './core/update.ts'
 import { packageVersion } from './core/version.ts'
+import { claudeJsonOf } from './families/claude/index.ts'
 import { withClaudeMod } from './families/claude/mod.ts'
 import { BUILTIN_PLUGINS } from './families/index.ts'
 import { LOGIN_KEY_READERS } from './families/login-keys.ts'
@@ -590,6 +601,18 @@ export interface Runtime {
   /** Turns config `advisor.unlock` on or off. */
   advisorUnlock(on: boolean): Promise<{ ok: boolean; unlock: boolean; message: string }>
   /**
+   * Carried trust (spec §3.43, ADR-0078): config `claude.carryTrust` and the carries sideby recorded; with `dir` while
+   * it is on, each Claude Account's trust of that folder (booleans only). While it is off no `.claude.json` is read.
+   */
+  trustStatus(dir?: string): Promise<TrustStatus>
+  /** Turns config `claude.carryTrust` on or off; without `apply`, only says what would change. */
+  trustSet(
+    on: boolean,
+    opts: { apply: boolean },
+  ): Promise<{ changed: boolean; applied: boolean; before: boolean; after: boolean; file: string }>
+  /** Takes back the trust marks sideby copied, only where each still holds what sideby wrote; `apply` false previews. */
+  trustUndo(opts: { apply: boolean; only?: readonly { id: string; at: string }[] }): Promise<UndoItem[]>
+  /**
    * Which Account of a Family to move on to (spec §3.13), for a start the user asks for: past the Takeover Limit it
    * falls back to the least used Account under 100% (`tight`). Throws a UserError with code `no-quota-source`
    * when the Family cannot tell, `no-accounts` when it has none. `fetch` is as for `quota`; `never` reads only the kept
@@ -675,6 +698,11 @@ export async function createRuntime(
      * test of a Host that hangs need not wait the real time. Not part of the plugin or Portal contract.
      */
     limitReset?: { timeoutMs?: number }
+    /**
+     * Internal, for tests: the folder a Launch starts in (the Host inherits sideby's own) and where a carry's line goes
+     * (spec §3.43). Omitted, `process.cwd()` and stderr. Not part of the plugin or Portal contract.
+     */
+    trust?: { cwd?: () => string; print?: (line: string) => void }
   } = {},
 ): Promise<Runtime> {
   const env = opts.env ?? process.env
@@ -693,6 +721,34 @@ export async function createRuntime(
   const categories = loaded.categories && categoryReader(loaded.categories.def, loaded.categories.owner)
   const ignore = new Set(config.ignore ?? [])
   const now = opts.now ?? (() => new Date())
+
+  /** Where trust is read and written (spec §3.43): every Claude Account sideby knows, by the Family's own path rule. */
+  const trustCtx = (all: readonly Account[]): TrustContext => ({
+    accounts: all.filter((a) => a.family === 'claude'),
+    jsonOf: claudeJsonOf,
+    home: paths.home,
+    stateDir: paths.stateDir,
+  })
+  const printTrust = opts.trust?.print ?? ((line: string) => void process.stderr.write(`sideby: ${line}\n`))
+
+  /**
+   * Config `claude.carryTrust` on a Claude session about to start (spec §3.43, ADR-0078): copies another Account's trust
+   * of the folder when this one has none. Printed at once, not as a notice: Auto Handoff may prepare a Launch twice.
+   * Nothing it meets stops the Launch.
+   */
+  const carryAtLaunch = async (target: Account, all: readonly Account[]): Promise<void> => {
+    // Inside text too: a reason names a path in the middle of a sentence.
+    const show = (p: string) => p.split(`${paths.home}/`).join('~/')
+    try {
+      const r = await carryTrust(trustCtx(all), target, opts.trust?.cwd?.() ?? process.cwd(), { now: now() })
+      const line = carryLine(r, target.ref, show)
+      if (line) printTrust(line)
+    } catch (err) {
+      printTrust(
+        `could not carry folder trust to ${target.ref}: ${show((err as Error).message)}. Claude Code will ask whether you trust this folder`,
+      )
+    }
+  }
 
   /** Adds lines to what a Launch prints before it starts. */
   const addNotice = (p: PreparedLaunch, lines: readonly (string | undefined)[]) => {
@@ -1752,6 +1808,14 @@ export async function createRuntime(
       // Network Guard (spec §3.35) and Unattended Mode (§3.37): last, on the environment the Host gets, so the check
       // takes the Host's route.
       await sessionReady(p, command === 'run', opts)
+      // Carried trust (spec §3.43): only once nothing refused the Launch, for a session a person works in.
+      if (
+        command === 'run' &&
+        p.family.id === 'claude' &&
+        config.claude?.carryTrust === true &&
+        !claudeHeadless(p.args)
+      )
+        await carryAtLaunch(p.account, all)
       return p
     },
     async unattendedStatus() {
@@ -2282,6 +2346,31 @@ export async function createRuntime(
       await reloadAdvisorConfig()
       return r
     },
+    async trustStatus(dir) {
+      const fresh = await loadConfig(paths.configFile).catch(() => null)
+      if (fresh) config.claude = fresh.claude
+      return trustStatus(trustCtx(await accounts()), config.claude?.carryTrust === true, dir)
+    },
+    async trustSet(on, o) {
+      const r = await editConfigClaude(
+        paths.configFile,
+        (c) => {
+          if (on) return { ...c, carryTrust: true }
+          const { carryTrust: _drop, ...rest } = c
+          return Object.keys(rest).length ? rest : undefined
+        },
+        { dryRun: !o.apply },
+      )
+      if (o.apply && r.changed) config.claude = r.after
+      return {
+        changed: r.changed,
+        applied: o.apply && r.changed,
+        before: r.before?.carryTrust === true,
+        after: r.after?.carryTrust === true,
+        file: paths.configFile,
+      }
+    },
+    trustUndo: (o) => undoCarries(paths.stateDir, { apply: o.apply, ...(o.only ? { only: o.only } : {}) }),
     async advisorUnlock(on) {
       const r = await setAdvisorUnlock(paths.configFile, on)
       await reloadAdvisorConfig()
@@ -2425,4 +2514,17 @@ export async function createRuntime(
   }
   if (opts.desktop) bindDesktopDeps(rt, opts.desktop)
   return rt
+}
+
+/**
+ * Whether Claude's arguments ask for a headless run: `-p`/`--print`, also inside a group of short flags such as `-cp`
+ * (Claude Code's option parser reads `-cp` as `-c -p`). Before the first `--` only.
+ */
+function claudeHeadless(args: readonly string[]): boolean {
+  if (hasOption(args, ['-p', '--print'])) return true
+  for (const a of args) {
+    if (a === '--') return false
+    if (/^-[A-Za-z]{2,}$/.test(a) && a.includes('p')) return true
+  }
+  return false
 }

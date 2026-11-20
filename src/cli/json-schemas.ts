@@ -2207,10 +2207,15 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
           url: Type.Optional(Type.String({ description: 'The address this account is checked at.' })),
           skip: Type.Optional(
             Type.Union(
-              [Type.Literal('not-covered'), Type.Literal('third-party'), Type.Literal('at-launch')],
+              [
+                Type.Literal('not-covered'),
+                Type.Literal('third-party'),
+                Type.Literal('at-launch'),
+                Type.Literal('api'),
+              ],
               {
                 description:
-                  'third-party: an API account on another endpoint, not checked; at-launch: an API account, whose address is known only when it starts.',
+                  'api: an API account, never checked; third-party: an endpoint set to a third party, not checked; at-launch: no longer given.',
               },
             ),
           ),
@@ -2413,6 +2418,113 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       message: Type.Optional(Type.String({ description: 'on and off: one line for the user.' })),
     },
     { title: 'sideby progress [on|off] --json' },
+  ),
+  trust: Type.Object(
+    {
+      schemaVersion: Version,
+      action: Type.Literal('status'),
+      on: Type.Boolean({
+        description:
+          'Config `claude.carryTrust` (spec §3.43): before sideby starts an interactive Claude session, an account that does not trust the folder gets the trust another Claude account already gave it.',
+      }),
+      carried: Type.Array(
+        Type.Object({
+          account: Type.String({ description: 'The account that got the trust mark.' }),
+          path: Type.String({ description: 'The folder the mark is for, as sideby wrote it.' }),
+          from: Type.String({ description: 'The account whose trust was copied.' }),
+          at: Type.String({ description: 'When (ISO time).' }),
+        }),
+        { description: 'The marks sideby copied and `sideby trust undo` can take back, oldest first.' },
+      ),
+      dir: Type.Optional(
+        Type.String({
+          description: 'The folder asked about (its real path); only while on. Nothing is read while off.',
+        }),
+      ),
+      root: Type.Optional(
+        Type.Object(
+          {
+            kind: Type.Union([Type.Literal('git'), Type.Literal('folder'), Type.Literal('unclear')], {
+              description:
+                '`git`: trust is kept for the main checkout `path`; `folder`: the folder or a parent counts; `unclear`: sideby cannot tell from the files and copies nothing.',
+            }),
+            path: Type.Optional(Type.String()),
+            why: Type.Optional(Type.String({ description: 'With `unclear`: why.' })),
+          },
+          { description: 'Where Claude Code looks trust up for the folder; only while on.' },
+        ),
+      ),
+      accounts: Type.Optional(
+        Type.Array(
+          Type.Object({
+            ref: Str,
+            trusts: Type.Optional(
+              Type.Boolean({
+                description:
+                  'Whether this account trusts the folder; absent when sideby cannot tell (`problem`).',
+              }),
+            ),
+            problem: Type.Optional(
+              Type.String({ description: 'Why its .claude.json cannot be read; names the path only.' }),
+            ),
+            carryFrom: Type.Optional(
+              Type.String({ description: 'Starting this account here copies the trust of this account.' }),
+            ),
+          }),
+          { description: 'Each Claude account and its trust of the folder (booleans only); only while on.' },
+        ),
+      ),
+    },
+    { title: 'sideby trust [--dir <path>] --json' },
+  ),
+  'trust-set': Type.Object(
+    {
+      schemaVersion: Version,
+      action: Type.Union([Type.Literal('on'), Type.Literal('off')]),
+      on: Type.Boolean({ description: 'Whether config `claude.carryTrust` is on now.' }),
+      changed: Type.Boolean(),
+      applied: Type.Boolean({
+        description: 'False when only the change was shown; run again with --yes (exit 10).',
+      }),
+      before: Type.Boolean(),
+      after: Type.Boolean(),
+      file: Type.String({ description: 'The config file changed.' }),
+    },
+    { title: 'sideby trust on|off --json' },
+  ),
+  'trust-undo': Type.Object(
+    {
+      schemaVersion: Version,
+      action: Type.Literal('undo'),
+      applied: Type.Boolean({
+        description: 'False when only shown (exit 10 when something would be taken back); true with --yes.',
+      }),
+      items: Type.Array(
+        Type.Object({
+          id: Type.String({ description: 'The carry record; the Panel confirms only the ids it showed.' }),
+          account: Str,
+          path: Type.String({ description: 'The folder the mark is for.' }),
+          from: Type.String({ description: 'The account whose trust was copied.' }),
+          at: Type.String({ description: 'When it was copied (ISO time).' }),
+          status: Type.Union(
+            [
+              Type.Literal('undo'),
+              Type.Literal('undone'),
+              Type.Literal('changed'),
+              Type.Literal('gone'),
+              Type.Literal('blocked'),
+              Type.Literal('busy'),
+            ],
+            {
+              description:
+                '`undo`: would be taken back; `undone`: taken back; `changed`: the mark changed since sideby wrote it, left alone; `gone`: the file is gone; `blocked`/`busy`: not changed (`why`), kept for another try.',
+            },
+          ),
+          why: Type.Optional(Type.String()),
+        }),
+      ),
+    },
+    { title: 'sideby trust undo --json' },
   ),
   browser: Type.Object(
     {

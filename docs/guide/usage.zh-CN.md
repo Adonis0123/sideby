@@ -25,7 +25,7 @@ EMAIL 是账号登录的身份，取自宿主的登录文件（Claude Code、Cod
 
 | 宿主 | 链接到主账号 | 复制或同步 | 账号自己的 |
 |---|---|---|---|
-| Claude Code | `settings.json`、`settings.local.json`、`skills`、`commands`、`plugins`、`hooks`、`themes`、`CLAUDE.md` | MCP 服务器：账号 `.claude.json` 里的 `mcpServers` 一项，与 `~/.claude.json` 保持一致 | 登录、`.claude.json` 的其余内容、会话（`projects/`）、历史 |
+| Claude Code | `settings.json`、`settings.local.json`、`skills`、`commands`、`plugins`、`hooks`、`themes`、`keybindings.json`、`CLAUDE.md` | MCP 服务器：账号 `.claude.json` 里的 `mcpServers` 一项，与 `~/.claude.json` 保持一致 | 登录、`.claude.json` 的其余内容、会话（`projects/`）、历史 |
 | Codex | `AGENTS.md`、`hooks.json`、`plugins`、`rules`、`skills`；订阅账号的 `config.toml` | — | 登录（`auth.json`）、会话、历史；API 账号的 `config.toml` |
 | Grok Build | `skills`、`installed-plugins` | `hooks`、`hooks-paths`，以及订阅账号的 `config.toml`：Grok 不接受这些位置是链接 | 登录（`auth.json`）、`trusted_folders.toml`（复制一次，之后归账号自己）、会话；API 账号的 `config.toml` |
 | pi | `AGENTS.md` | — | 登录（`auth.json`）、会话和其他一切 |
@@ -341,10 +341,10 @@ sideby network check               # 现在查一次
 
 打开后，sideby 在启动 Claude 或 Codex 账号前，以及它启动的会话里每条消息、每次工具调用前都会检查。地区不在允许范围内，或者查不出来（代理没开、断网），这次启动、这条消息或这次工具调用就会被拦下，并说明原因和怎么办。会话中查不出时会先重试，最多约 30 秒，免得短暂断网把后台任务的完成通知这类工具不会重发的消息拦掉。这类消息在 Claude 会话里还是被拦了的话，sideby 会先扣住，等网络恢复后再交给会话，会话不会白等；面板顶部会出现横幅，带**重新检查**按钮。临时跳过一次：`sideby run <账号> --ignore-network`。不想检查了就运行 `sideby network off --yes`（或在面板里关掉），正在运行的会话也会马上放行，会话里的拦截提示也会这样说。不知道该允许哪些地区，或者被拦了不知道为什么？点对话框或横幅上的**让 AI 帮我**，会用你自己的 AI 开一个任务：它先查你现在在哪，再问你允许哪些地区，你同意后才改设置。
 
-- sideby 带着账号的代理设置，访问服务商自己的 `/cdn-cgi/trace`（`api.anthropic.com`、`chatgpt.com`、`api.openai.com`），所以检查和真实请求走同一条路。请求不带任何凭证、账号或身份，只保留国家或地区和地址的哈希。结果 60 秒内复用，大多数消息不用等；换 Wi-Fi、开关 VPN 能马上发现，代理软件里切换节点约一分钟内发现。
+- sideby 带着账号的代理设置，访问服务商自己的 `/cdn-cgi/trace`（`api.anthropic.com`、`chatgpt.com`），所以检查和真实请求走同一条路。请求不带任何凭证、账号或身份，只保留国家或地区和地址的哈希。结果 60 秒内复用，大多数消息不用等；换 Wi-Fi、开关 VPN 能马上发现，代理软件里切换节点约一分钟内发现。
 - 只检查 sideby 启动的会话。直接运行 `claude` 或 `codex` 不检查。
 - Codex 要先信任 hook 才会在会话中检查：在那个账号里输入 `/hooks`，信任 `network-hook`。之前只在启动前检查。自己带了 `--settings` 启动的 Claude 会话也只在启动前检查。
-- 指向第三方接口的 API 账号（DeepSeek 等）不检查。支持 `http://` 代理；SOCKS 代理没法通过它检查，按“查不出”处理。
+- API 账号（用密钥登录的账号，不管接口指向哪里）一律不检查。支持 `http://` 代理；SOCKS 代理没法通过它检查，按“查不出”处理。
 - 同一地区内出口 IP 变了，只提示，不拦截。
 
 ## 无人值守（Unattended Mode）
@@ -436,6 +436,31 @@ sideby advisor unlock off --yes # 不再解锁，模型保留
 如果 `/advisor` 显示「/advisor isn't available in this environment」，是有个设置关掉了 Claude Code 的实验功能，通常是 `settings.json` 里的 `"env": {"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"}`。sideby 会指出来（面板上写 **被设置关掉了**），选模型时同一个预览里会列出 `env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS "1" -> removed`。删掉它也会重新打开 Claude Code 的其他实验功能；你确认之前什么都不写，**撤销** 能放回去。选关不会动它。如果还有 API 账号（比如 `claude:deepseek`）共用这个文件，它们的网关可能需要这个变量：它让 Claude Code 不发 `anthropic-beta` 请求头，有些网关不接受这种请求头。这时同一个预览还会列出 `sideby config: claude.apiBetasOff false -> true` 并点名这些账号：之后 sideby 每次启动 Claude API 账号都会带上 `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`（它 `proxy.env` 里的值仍优先），变量从共用文件删掉也不影响它们。API 账号只能经 sideby 启动，所以不会漏。`sideby advisor` 会写明这一项开没开，**撤销** 会连同文件一起把它关回去；`sideby config set claude.apiBetasOff false` 可以单独关。如果这个变量设在你的 shell 里，sideby 不动它：请从 shell 配置文件里删掉，因为它让所有会话（包括 sideby 启动的）都没有 Advisor。
 
 sideby 只写 `advisorModel`（选关时删掉它），选模型时再删掉上面那一项 `env`；文件里其他内容不变，`env` 的其他条目也不变；链接的文件写到真实文件上；不会新建 `settings.json`（先运行 `sideby doctor --fix`）。API 账号不算：Advisor 要用 Claude 登录。
+
+## 文件夹信任
+
+Claude 账号第一次打开某个文件夹时，Claude Code 会问「Is this a project you created or one you trust?」，答案只记在这个账号里。在同一个文件夹里启动另一个账号，它会再问一遍；在这里按回车选的是「No, exit」，会话就结束了，Auto Handoff 也会停在下一个账号的第一个画面。
+
+打开「带过信任」后，sideby 会沿用你已经给过的回答：它启动交互式 Claude 会话前（`sideby run`、短命令、挑选命令、`sideby next`、Auto Handoff、让 AI 帮你做），这个账号还没信任这个文件夹、而你另一个 Claude 账号信任过时，sideby 把那一条信任标记复制进这个账号的 `.claude.json`，并打印一行：
+
+```
+sideby: claude:work now trusts ~/code/app, as claude:main does (claude.carryTrust; undo: sideby trust undo)
+```
+
+```sh
+sideby trust                    # 开没开，以及 sideby 复制过什么
+sideby trust on                 # 展示改动，退出码 10
+sideby trust on --yes           # 打开
+sideby trust --dir ~/code/app   # 开着时：每个 Claude 账号是否信任这个文件夹
+sideby trust undo --yes         # 撤回 sideby 复制的信任
+sideby trust off --yes          # 不再复制；已复制的保留
+```
+
+面板里在「设置」→「全部设置…」→「文件夹信任」：一个开关「沿用我其他 Claude 账号的信任」；sideby 复制过之后，「查看」逐条列出，可以「移除」。
+
+它按 Claude Code 自己的规则，复制同一条，从不放宽：在 git 仓库里看仓库主检出的信任（关联 worktree 用它主检出的），其他地方看这个文件夹或上级文件夹的信任，从不算你的主目录或 `/`。上级文件夹的信任不覆盖它下面的 git 仓库。从文件看不出来时（子模块、单独的 git 文件夹）什么都不复制；它从不在这个文件夹里运行 `git`。你哪个账号都没信任过的文件夹，它从不信任。
+
+sideby 只写 `projects["<文件夹>"].hasTrustDialogAccepted`（主账号写在 `~/.claude.json`），文件里其他内容不变；不经链接写，不新建文件；同一时刻 Claude Code 也改了这个文件时跳过，并说明原因，Claude Code 照常询问。`.claude.json` 里它只读这一个字段。`sideby trust undo` 只在这条仍是 sideby 写的内容时撤回，Claude Code 之后加的内容保留。无头运行（`-p`）、`sideby login` 和直接运行 `claude` 的会话都不复制。
 
 ## 账号撞上限额时
 

@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/trust.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "action",
+    "on",
+    "carried"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "action": {
+      "type": "string",
+      "const": "status"
+    },
+    "on": {
+      "type": "boolean",
+      "description": "Config `claude.carryTrust` (spec §3.43): before sideby starts an interactive Claude session, an account that does not trust the folder gets the trust another Claude account already gave it."
+    },
+    "carried": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "account",
+          "path",
+          "from",
+          "at"
+        ],
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "The account that got the trust mark."
+          },
+          "path": {
+            "type": "string",
+            "description": "The folder the mark is for, as sideby wrote it."
+          },
+          "from": {
+            "type": "string",
+            "description": "The account whose trust was copied."
+          },
+          "at": {
+            "type": "string",
+            "description": "When (ISO time)."
+          }
+        }
+      },
+      "description": "The marks sideby copied and `sideby trust undo` can take back, oldest first."
+    },
+    "dir": {
+      "type": "string",
+      "description": "The folder asked about (its real path); only while on. Nothing is read while off."
+    },
+    "root": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "git"
+            },
+            {
+              "type": "string",
+              "const": "folder"
+            },
+            {
+              "type": "string",
+              "const": "unclear"
+            }
+          ],
+          "description": "`git`: trust is kept for the main checkout `path`; `folder`: the folder or a parent counts; `unclear`: sideby cannot tell from the files and copies nothing."
+        },
+        "path": {
+          "type": "string"
+        },
+        "why": {
+          "type": "string",
+          "description": "With `unclear`: why."
+        }
+      },
+      "description": "Where Claude Code looks trust up for the folder; only while on."
+    },
+    "accounts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "ref"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "trusts": {
+            "type": "boolean",
+            "description": "Whether this account trusts the folder; absent when sideby cannot tell (`problem`)."
+          },
+          "problem": {
+            "type": "string",
+            "description": "Why its .claude.json cannot be read; names the path only."
+          },
+          "carryFrom": {
+            "type": "string",
+            "description": "Starting this account here copies the trust of this account."
+          }
+        }
+      },
+      "description": "Each Claude account and its trust of the folder (booleans only); only while on."
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby trust [--dir <path>] --json"
+}

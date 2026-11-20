@@ -22,6 +22,7 @@ src/
 │                 session-select.ts: which Live Session a target names, for `sessions copy`, `sessions open-run` and `send`
 │                 desktop-app.ts: `sideby desktop`, open a Family's Desktop App per Account (§3.20); definitions in families/desktop.ts (internal)
 │                 browser-profiles.ts: `sideby browser`, Browser Sign-ins from Chrome's Local Storage key names (§3.24); leveldb-keys.ts reads them; websites in families/browser.ts (internal)
+│                 claude-trust.ts: carried trust between Claude Accounts (§3.43, ADR-0078): which key trusts a folder, the one-field copy at Launch (`carryAtLaunch` in runtime.ts), its records and `sideby trust undo`
 ├── plugins/      loader (trust checks), hook bus, built-in account-script
 ├── families/     claude, codex, grok, pi, agy: each a Family Plugin; index.ts lists built-ins in load order
 │                 agy/ is a Main-only Family (ADR-0047); agy/quota.ts asks `agy -p /usage` for its Quota (ADR-0048)

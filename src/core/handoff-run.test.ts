@@ -37,6 +37,15 @@ if (process.env.SIDEBY_HANDOFF_DIR) fs.writeFileSync(path.join(process.env.SIDEB
   JSON.stringify({ runId: process.env.SIDEBY_HANDOFF_RUN, at: new Date().toISOString(), trigger: 'manual', sessionId: 's1' }))
 `
 
+// Records each start's `--settings` file as the Host sees it, in the chain directory: sideby removes the file when
+// the chain is over.
+const SEEN_SETTINGS = `
+const at = process.argv.indexOf('--settings')
+if (at !== -1 && process.env.SIDEBY_HANDOFF_DIR)
+  fs.appendFileSync(path.join(process.env.SIDEBY_HANDOFF_DIR, 'seen.jsonl'),
+    JSON.stringify({ file: process.argv[at + 1], settings: JSON.parse(fs.readFileSync(process.argv[at + 1], 'utf8')) }) + '\\n')
+`
+
 async function setup(h: FakeHome, handoff: object, accounts = ['001', '002']) {
   for (const a of accounts) await h.write(`.claude-${a}/projects/.keep`, '')
   await h.write('.config/sideby/config.json', JSON.stringify({ aliases: { cc001: 'claude:001' }, handoff }))
@@ -220,7 +229,8 @@ if (process.env.SIDEBY_HANDOFF_DIR) fs.writeFileSync(path.join(process.env.SIDEB
       assert.deepEqual(two.argv.slice(0, 2), ['--model', 'opus'])
       const dashes = two.argv.indexOf('--')
       assert.match(two.argv[dashes + 1]!, /handed over from claude:001.*Read .*1-claude-001\.md/)
-      assert.ok(two.argv.includes('--add-dir'))
+      // The chain directory comes through sideby's `--settings` file: `--add-dir` makes Claude Code ask for trust.
+      assert.ok(!two.argv.includes('--add-dir'))
       assert.ok(lines.some((l) => /handing over from claude:001 to claude:002/.test(l)))
     })
   })
@@ -318,14 +328,62 @@ if (process.env.SIDEBY_HANDOFF_DIR) fs.writeFileSync(path.join(process.env.SIDEB
       })
       const argv = (await readHostLog(h, 'claude')).find((r) => r.argv)!.argv
       const dashes = argv.indexOf('--')
-      assert.ok(argv.indexOf('--settings') < dashes && argv.indexOf('--add-dir') < dashes)
+      assert.ok(argv.indexOf('--settings') < dashes)
       assert.deepEqual(argv.slice(dashes), ['--', 'fix the tests'])
+    })
+  })
+
+  it('lets every Claude session of a chain write the chain directory through --settings, not --add-dir', async () => {
+    await withFakeHome(async (h) => {
+      await fakeHost(h, 'claude', { sleep: 20, onStart: SEEN_SETTINGS + READY_ON_FIRST_RUN })
+      const rt = await setup(h, { auto: true, sameFamily: true, countdownSeconds: 0 })
+      assert.equal(await runWithHandoff(rt, 'cc001', [], { err: () => {}, stdin: terminal() }), 0)
+      const starts = (await readHostLog(h, 'claude')).filter((r) => r.argv)
+      assert.equal(starts.length, 2)
+      const dir = starts[0]!.env.SIDEBY_HANDOFF_DIR!
+      for (const s of starts) assert.ok(!s.argv.includes('--add-dir'))
+      const lines = (await readFile(join(dir, 'seen.jsonl'), 'utf8')).trim().split('\n')
+      assert.equal(lines.length, 2)
+      for (const line of lines) {
+        const { file, settings } = JSON.parse(line)
+        assert.ok(settings.permissions.additionalDirectories.includes(dir))
+        assert.ok(settings.hooks.Stop, 'Auto Handoff hooks stay in the same file')
+        assert.ok(
+          !file.startsWith(dir),
+          'the session may write the chain directory, so the file is elsewhere',
+        )
+        // Removed once the chain is over.
+        await assert.rejects(readFile(file, 'utf8'))
+      }
+    })
+  })
+
+  it('still passes --add-dir to an Account that gives its own --settings, where sideby cannot add to the file', async () => {
+    await withFakeHome(async (h) => {
+      await fakeHost(h, 'claude', { sleep: 20, onStart: READY_ON_FIRST_RUN })
+      const rt = await setup(h, { auto: true, sameFamily: true, countdownSeconds: 0 })
+      await h.write('own-settings.json', '{}')
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({
+          aliases: { cc001: 'claude:001' },
+          accounts: { 'claude:002': { args: ['--settings', h.path('own-settings.json')] } },
+          handoff: { auto: true, sameFamily: true, countdownSeconds: 0 },
+        }),
+      )
+      assert.equal(await runWithHandoff(rt, 'cc001', [], { err: () => {}, stdin: terminal() }), 0)
+      const starts = (await readHostLog(h, 'claude')).filter((r) => r.argv)
+      assert.equal(starts.length, 2)
+      assert.ok(!starts[0]!.argv.includes('--add-dir'))
+      const two = starts[1]!.argv
+      assert.equal(two[two.indexOf('--settings') + 1], h.path('own-settings.json'))
+      assert.equal(two[two.indexOf('--add-dir') + 1], starts[0]!.env.SIDEBY_HANDOFF_DIR)
     })
   })
 
   it("puts Network Guard's hooks into Auto Handoff's one --settings file (spec §3.35)", async () => {
     await withFakeHome(async (h) => {
-      await fakeHost(h, 'claude', { sleep: 1 })
+      await fakeHost(h, 'claude', { sleep: 1, onStart: SEEN_SETTINGS })
       await setup(h, {})
       await h.write(
         '.config/sideby/config.json',
@@ -344,7 +402,10 @@ if (process.env.SIDEBY_HANDOFF_DIR) fs.writeFileSync(path.join(process.env.SIDEB
       assert.notEqual(handed, null, 'the network --settings does not read as the user’s own')
       const argv = (await readHostLog(h, 'claude')).find((r) => r.argv)!.argv
       assert.equal(argv.filter((a) => a === '--settings').length, 1)
-      const hooks = JSON.parse(await readFile(argv[argv.indexOf('--settings') + 1]!, 'utf8')).hooks
+      const dir = (await readHostLog(h, 'claude')).find((r) => r.argv)!.env.SIDEBY_HANDOFF_DIR!
+      const seen = JSON.parse(await readFile(join(dir, 'seen.jsonl'), 'utf8'))
+      assert.equal(seen.file, argv[argv.indexOf('--settings') + 1])
+      const hooks = seen.settings.hooks
       for (const e of ['PostToolUse', 'Stop', 'UserPromptSubmit', 'PreToolUse']) assert.ok(hooks[e], e)
     })
   })

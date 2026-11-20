@@ -329,10 +329,10 @@ it started, check the country the requests leave from. When it is not one you al
 seconds (the proxy is off, the network is down), stop and say what to do. It guards against a proxy that stopped
 or a node in the wrong country; it does not make use from an unsupported region allowed.
 
-sideby asks the vendor's own https://api.anthropic.com, chatgpt.com or api.openai.com /cdn-cgi/trace, through the
+sideby asks the vendor's own https://api.anthropic.com or chatgpt.com /cdn-cgi/trace, through the
 account's proxy settings, with no credential, account or identity, and keeps only the country and a hash of the
 address. Results are reused for 60 seconds. Off by default; off in CI. Sessions started without sideby (running
-claude or codex directly) are not checked. API accounts on a third-party endpoint are not checked.
+claude or codex directly) are not checked. API accounts are never checked.
 
 network        shows the setting and the newest result per address (no request)
 network check  asks every address now
@@ -422,6 +422,33 @@ Examples:
   sideby progress on --every 15
   sideby progress off
 Exit: 0 shown or done (also when nothing changed); 2 an interval or option it does not take.`,
+  trust: `sideby trust [--dir <path>] [--json]
+       sideby trust on|off [--yes] [--json]
+       sideby trust undo [--yes] [--json]
+
+Carry folder trust between Claude accounts. Claude Code asks "Is this a project you created or one you trust?" in
+every account that has not trusted a folder yet, and its default answer ends the session. With this on, before
+sideby starts an interactive Claude session (sideby run, short commands, pick commands, next, Auto Handoff, AI Tasks,
+Unattended Mode), when that account does not trust the folder and another of your Claude accounts does, sideby
+copies that one trust mark into the account's .claude.json, so Claude Code does not ask again. It reuses only trust
+you already gave; it never trusts a folder none of your accounts trusted. Each copy prints one line.
+
+Which trust counts, by Claude Code's own rules: in a git repository, the trust of the repository's main checkout (a
+linked worktree uses its main checkout's); elsewhere, the trust of the folder or a parent folder (never your home
+folder or /). When sideby cannot tell from the files (a submodule, a separate git folder), it copies nothing. It never
+runs git in the folder. A headless run (-p) and \`sideby login\` copy nothing.
+
+Without a subcommand: whether it is on, the marks sideby copied, and, while on, whether each Claude account trusts
+the folder (--dir, default the current one); nothing of .claude.json is read while it is off. \`on\` and \`off\`
+change config claude.carryTrust; turning it off keeps what was copied. \`undo\` takes the copied marks back, each
+only while it still holds what sideby wrote. Each shows the change first and makes it with --yes.
+
+Examples:
+  sideby trust on --yes
+  sideby trust --dir ~/code/app
+  sideby trust undo
+Exit: 0 shown or done; 10 a change was shown and waits for --yes; 1 undo left a mark it could not change (the line
+says why); 2 malformed command line.`,
   browser: `sideby browser [--enable|--disable] [--yes] [--json]
        sideby browser open <account> [--profile <folder|name>] [--json]
        sideby browser set <account> <folder|name> [--json]
@@ -524,6 +551,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
     valued: ['for', 'until', 'days', 'from', 'to', 'name', 'at', 'project', 'ids'],
   },
   progress: { flags: ['json'], valued: ['every'] },
+  trust: { flags: ['json', 'yes'], valued: ['dir'] },
   new: { flags: ['api', 'json', 'next'], valued: ['alias', 'vendor'] },
   alias: { flags: ['json', 'yes'], valued: ['pick'] },
   doctor: { flags: ['fix', 'force', 'json'] },
@@ -862,6 +890,8 @@ async function dispatch(
       return await cmds.cmdUnattended(parsed, io)
     case 'progress':
       return await cmds.cmdProgress(parsed, io)
+    case 'trust':
+      return await cmds.cmdTrust(parsed, io)
     case 'shell-init':
       return await cmds.cmdShellInit(parsed, io)
     case 'plugins':

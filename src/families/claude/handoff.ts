@@ -1,5 +1,7 @@
 // How Claude Code takes part in a Handoff (spec §3.17): hooks through `--settings`, which merges with the
-// Account's own settings hooks (verified 2026-10-09), and the Brief's directory through `--add-dir`.
+// Account's own settings hooks (verified 2026-10-09). The Brief's directory goes into that file's
+// `permissions.additionalDirectories` (`withClaudeDirs`): Claude Code 2.1.326 asks to trust an `--add-dir` folder it
+// has not seen, so `dirArgs` is used only where sideby cannot add to `--settings`.
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { locate, readObject } from '../../core/claude-settings-file.ts'

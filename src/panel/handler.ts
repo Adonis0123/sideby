@@ -498,6 +498,16 @@ export interface PanelState {
   unattended?: PanelUnattendedStatus
   /** Progress Reminders (spec §3.42): on or off, how often, and the choices; absent without Claude Accounts. */
   progress?: ProgressView
+  /**
+   * Carried trust (spec §3.43): config `claude.carryTrust` and the marks sideby copied, from sideby's own records (no
+   * `.claude.json` is read for it); absent with fewer than two Claude Accounts, unless it is on or has marks.
+   */
+  trust?: PanelTrust
+}
+
+export interface PanelTrust {
+  on: boolean
+  carried: { account: string; path: string; from: string; at: string }[]
 }
 
 /**
@@ -1121,6 +1131,7 @@ async function buildState(
     .catch(() => undefined)
   const showBrowser = browser && (browser.families.matched.length || browser.families.openOnly.length)
   const progress = accounts.some((a) => PROGRESS_FAMILIES.includes(a.family)) ? rt.progressView() : undefined
+  const trust = await panelTrust(rt, accounts).catch(() => undefined)
   const permissions = aiTaskPermissions(rt.config)
   return {
     schemaVersion: 1,
@@ -1171,6 +1182,18 @@ async function buildState(
     ...(network ? { network } : {}),
     ...(unattended ? { unattended } : {}),
     ...(progress ? { progress } : {}),
+    ...(trust ? { trust } : {}),
+  }
+}
+
+/** The Panel's view of carried trust (spec §3.43), or undefined when there is nothing to show. */
+async function panelTrust(rt: Runtime, accounts: readonly Account[]): Promise<PanelTrust | undefined> {
+  const st = await rt.trustStatus()
+  if (accounts.filter((a) => a.family === 'claude').length < 2 && !st.on && !st.carried.length)
+    return undefined
+  return {
+    on: st.on,
+    carried: st.carried.map(({ key, ...x }) => ({ ...x, path: tildify(key, rt.paths.home) })),
   }
 }
 
@@ -1997,6 +2020,56 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       apply: (rt) => rt.remoteControlOn(),
     }),
     '/api/remote-control/undo': previewedChange({ apply: (rt) => rt.remoteControlUndo() }),
+    // Carried trust (spec §3.43, ADR-0078): config `claude.carryTrust`, shown first like every config change; the
+    // switch sends `confirm` with the words it shows beside it.
+    '/api/trust/settings': {
+      writes: (body) => body.confirm === true,
+      async run(body) {
+        if (typeof body.on !== 'boolean') throw new HttpError(400, '"on" must be true or false')
+        const rt = await getRuntime()
+        const r = await rt.trustSet(body.on, { apply: optBool(body, 'confirm') })
+        return { ...r, file: tildify(r.file, rt.paths.home) }
+      },
+    },
+    // Takes back the trust marks sideby copied (`sideby trust undo`): without `confirm` what it would do, with it done.
+    '/api/trust/undo': {
+      writes: (body) => body.confirm === true,
+      async run(body) {
+        const rt = await getRuntime()
+        // Inside text too: a reason names a path in the middle of a sentence.
+        const show = (p: string) => p.split(`${rt.paths.home}/`).join('~/')
+        const apply = optBool(body, 'confirm')
+        // A confirmation names the carries the page showed: one made since (a Launch meanwhile) is not taken back unseen.
+        let only: { id: string; at: string }[] | undefined
+        if (apply) {
+          const list = body.items
+          if (
+            !Array.isArray(list) ||
+            !list.every(
+              (x) =>
+                x &&
+                typeof x === 'object' &&
+                typeof (x as { id?: unknown }).id === 'string' &&
+                /^[0-9a-f]{32}$/.test((x as { id: string }).id) &&
+                typeof (x as { at?: unknown }).at === 'string',
+            )
+          )
+            throw new HttpError(
+              400,
+              '"items" must list the shown carries as { id, at }; review the list again',
+            )
+          only = (list as { id: string; at: string }[]).map((x) => ({ id: x.id, at: x.at }))
+        }
+        const items = await rt.trustUndo({ apply, ...(only ? { only } : {}) })
+        return {
+          items: items.map(({ key, why, ...x }) => ({
+            ...x,
+            path: show(key),
+            ...(why ? { why: show(why) } : {}),
+          })),
+        }
+      },
+    },
     // Claude Code's advisor (spec §3.41, ADR-0074): the same change as `sideby advisor <model>|off [--account]`. It
     // writes `advisorModel` only into the files the page showed (`previewedChange`); a model also turns config
     // `advisor.unlock` on, and config `claude.apiBetasOff` where the variable leaves a file API Accounts share, both

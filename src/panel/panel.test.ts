@@ -1683,6 +1683,100 @@ describe('turning Remote Control off in the Panel (spec §3.22)', () => {
   })
 })
 
+describe('folder trust in the Panel (spec §3.43)', () => {
+  it('shows the switch with two Claude accounts, turns it on only with confirm, never on a read-only Panel, and lists and undoes copies', async () => {
+    await withFakeHome(async (h) => {
+      const { claudePlugin } = await import('../families/claude/index.ts')
+      const { carryTrust } = await import('../core/claude-trust.ts')
+      const { claudeJsonOf } = await import('../families/claude/index.ts')
+      const app = await h.mkdir('code/app')
+      await h.mkdir('.claude')
+      const proj = (trusted: boolean) =>
+        `${JSON.stringify({ projects: trusted ? { [app]: { hasTrustDialogAccepted: true } } : {} }, null, 2)}\n`
+      await h.write('.claude.json', proj(true), 0o600)
+      const work = await h.write('.claude-work/.claude.json', proj(false), 0o600)
+      const runtime = () => createRuntime({ env: h.env, builtins: [asBuiltin(claudePlugin)] })
+      const config = () => readFile(h.path('.config/sideby/config.json'), 'utf8').catch(() => null)
+      const ro = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`], readOnly: true }),
+      )
+      try {
+        const hdr = {
+          host: `127.0.0.1:${ro.port}`,
+          origin: `http://127.0.0.1:${ro.port}`,
+          'x-sideby-token': ro.handler.token,
+        }
+        assert.equal(
+          (await post(ro.port, '/api/trust/settings', { on: true, confirm: true }, hdr)).status,
+          403,
+        )
+        assert.equal((await post(ro.port, '/api/trust/undo', { confirm: true }, hdr)).status, 403)
+        assert.equal(await config(), null)
+      } finally {
+        await close(ro.server)
+      }
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({ runtime, allowedHosts: [`127.0.0.1:${p}`] }),
+      )
+      try {
+        const state = async () =>
+          JSON.parse((await request(port, 'GET', '/api/state', { host: `127.0.0.1:${port}` })).text)
+        const hdr = {
+          host: `127.0.0.1:${port}`,
+          origin: `http://127.0.0.1:${port}`,
+          'x-sideby-token': handler.token,
+        }
+        assert.deepEqual((await state()).trust, { on: false, carried: [] })
+        const preview = await post(port, '/api/trust/settings', { on: true }, hdr)
+        assert.deepEqual([preview.body.changed, preview.body.applied, await config()], [true, false, null])
+        const on = await post(port, '/api/trust/settings', { on: true, confirm: true }, hdr)
+        assert.deepEqual([on.body.applied, on.body.after], [true, true])
+        assert.equal((await state()).trust.on, true)
+        const rt = await runtime()
+        const accounts = (await rt.accounts()).filter((a) => a.family === 'claude')
+        const target = accounts.find((a) => a.name === 'work')!
+        const ctx = { accounts, jsonOf: claudeJsonOf, home: h.home, stateDir: rt.paths.stateDir }
+        assert.equal((await carryTrust(ctx, target, app, { now: new Date() })).status, 'carried')
+        const carried = (await state()).trust.carried
+        assert.deepEqual(
+          carried.map((x: { account: string; path: string; from: string }) => [x.account, x.path, x.from]),
+          [['claude:work', '~/code/app', 'claude:main']],
+        )
+        const look = await post(port, '/api/trust/undo', {}, hdr)
+        assert.deepEqual(
+          (look.body.items as { status: string }[]).map((x) => x.status),
+          ['undo'],
+        )
+        assert.equal(
+          await readFile(work, 'utf8'),
+          `${JSON.stringify({ projects: { [app]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`,
+        )
+        // A confirmation must name what the page showed.
+        assert.equal((await post(port, '/api/trust/undo', { confirm: true }, hdr)).status, 400)
+        // A carry made after the page looked (a Launch meanwhile) is not taken back unseen.
+        await h.mkdir('code/other')
+        const other = h.path('code/other')
+        const mainJson = JSON.parse(await readFile(h.path('.claude.json'), 'utf8'))
+        mainJson.projects[other] = { hasTrustDialogAccepted: true }
+        await writeFile(h.path('.claude.json'), `${JSON.stringify(mainJson, null, 2)}\n`)
+        assert.equal((await carryTrust(ctx, target, other, { now: new Date() })).status, 'carried')
+        const shown = (look.body.items as { id: string; at: string }[]).map(({ id, at }) => ({ id, at }))
+        const undone = await post(port, '/api/trust/undo', { confirm: true, items: shown }, hdr)
+        assert.deepEqual(
+          (undone.body.items as { status: string }[]).map((x) => x.status),
+          ['undone'],
+        )
+        assert.deepEqual(
+          (await state()).trust.carried.map((x: { path: string }) => x.path),
+          ['~/code/other'],
+        )
+      } finally {
+        await close(server)
+      }
+    })
+  })
+})
+
 describe('choosing the advisor in the Panel (spec §3.41)', () => {
   it('lists the files in the state, writes only the files the page showed, unlocks, never on a read-only Panel, and undoes', async () => {
     await withFakeHome(async (h) => {

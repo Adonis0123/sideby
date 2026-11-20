@@ -1623,7 +1623,7 @@ const en = {
   'net.checked': 'checked {when}',
   'net.ipChanged': 'The exit address changed in the last day (same check; nothing is blocked for that).',
   'net.noTargets': 'No Claude or Codex account is checked here.',
-  'net.skipped': '{refs}: API accounts are checked when they start (a third-party endpoint is not checked).',
+  'net.skipped': '{refs}: API accounts are not checked.',
   'net.notCovered':
     'Only sessions sideby starts are checked; running claude or codex directly is not. sideby asks the vendor’s own /cdn-cgi/trace with your proxy settings and no credential, and keeps only the country.',
   'net.savedOn': 'Network check is on.',
@@ -2012,6 +2012,33 @@ const en = {
   'pr.offToast': 'Progress updates off.',
   'pr.failed':
     'Could not change progress updates: {msg}. It is back as it was; try again, or run sideby progress in a terminal.',
+  'ai.ask.trust':
+    'Stop Claude asking whether I trust a folder in one account when another of my accounts already trusts it.',
+  'tr.title': 'Folder trust',
+  'tr.hint':
+    'Claude Code asks each account once whether you trust a folder, and pressing Enter at that question ends the session. sideby can reuse the answer you already gave in another account.',
+  'tr.switch': 'Reuse trust from my other Claude accounts',
+  'tr.what':
+    'Before sideby starts a Claude session in a folder this account has not trusted yet, it copies the trust another of your Claude accounts already gave that folder, so Claude Code does not ask again.',
+  'tr.only':
+    'It only reuses trust you already gave. A folder none of your accounts trusted still asks, as before.',
+  'tr.offKeeps': 'Turning it off keeps the trust already copied; you can take it back here.',
+  'tr.carried.one': 'sideby copied trust once',
+  'tr.carried.other': 'sideby copied trust {n} times',
+  'tr.review': 'Review',
+  'tr.undoIntro': 'Removing these makes Claude Code ask again in these folders:',
+  'tr.undoRow': '{account} · {path} · from {from}',
+  'tr.changed': 'changed since; left as it is',
+  'tr.gone': 'its file is gone',
+  'tr.remove': 'Remove',
+  'tr.nothing': 'Nothing left to remove: each one changed since sideby copied it.',
+  'tr.removed.one': 'Removed 1 copied trust.',
+  'tr.removed.other': 'Removed {n} copied trusts.',
+  'tr.notRemoved': 'Some could not be changed: {msg}',
+  'tr.onToast':
+    'Folder trust is reused now. Claude accounts sideby starts no longer ask where another account trusts the folder.',
+  'tr.offToast': 'Folder trust is no longer reused. What was copied stays.',
+  'tr.failed': 'Could not change folder trust: {msg}. Try again, or run sideby trust in a terminal.',
 }
 
 export type MessageKey = keyof typeof en
@@ -3533,7 +3560,7 @@ const zh: Record<MessageKey, string> = {
   'net.checked': '{when}查过',
   'net.ipChanged': '出口 IP 最近一天变过（不会因此拦截）。',
   'net.noTargets': '这里没有要检查的 Claude 或 Codex 账号。',
-  'net.skipped': '{refs}：API 账号在启动时检查（第三方接口不检查）。',
+  'net.skipped': '{refs}：API 账号不检查。',
   'net.notCovered':
     '只检查 sideby 启动的会话，直接运行 claude 或 codex 不检查。sideby 带着你的代理设置访问服务商自己的 /cdn-cgi/trace，不带任何凭证，只保留国家或地区。',
   'net.savedOn': '网络检查已打开。',
@@ -3896,6 +3923,30 @@ const zh: Record<MessageKey, string> = {
   'pr.everyToast': '进度提醒改为每 {n} 分钟一次。',
   'pr.offToast': '已关闭进度提醒。',
   'pr.failed': '没能改进度提醒：{msg}。已恢复原样；可以再试一次，或在终端运行 sideby progress。',
+  'ai.ask.trust': '我的一个 Claude 账号已经信任过的文件夹，别让其他账号再问我信不信任。',
+  'tr.title': '文件夹信任',
+  'tr.hint':
+    'Claude Code 会在每个账号里问一次你是否信任某个文件夹，在这个问题上直接按回车会结束会话。sideby 可以沿用你在另一个账号里已经给过的回答。',
+  'tr.switch': '沿用我其他 Claude 账号的信任',
+  'tr.what':
+    'sideby 在某个账号还没信任过的文件夹里启动 Claude 会话前，把你另一个 Claude 账号对这个文件夹的信任复制过来，Claude Code 就不会再问。',
+  'tr.only': '只沿用你已经给过的信任。你哪个账号都没信任过的文件夹，照样会问。',
+  'tr.offKeeps': '关掉后，已经复制的信任会保留；可以在这里撤回。',
+  'tr.carried.one': 'sideby 复制过 1 次信任',
+  'tr.carried.other': 'sideby 复制过 {n} 次信任',
+  'tr.review': '查看',
+  'tr.undoIntro': '移除后，Claude Code 会在这些文件夹里重新询问：',
+  'tr.undoRow': '{account} · {path} · 来自 {from}',
+  'tr.changed': '之后改过，保持原样',
+  'tr.gone': '文件已不在',
+  'tr.remove': '移除',
+  'tr.nothing': '没有可移除的：每一条在复制后都改过。',
+  'tr.removed.one': '已移除 1 条复制的信任。',
+  'tr.removed.other': '已移除 {n} 条复制的信任。',
+  'tr.notRemoved': '有几条没能改：{msg}',
+  'tr.onToast': '已开始沿用文件夹信任。sideby 启动的 Claude 账号，在别的账号信任过的文件夹里不再询问。',
+  'tr.offToast': '已不再沿用文件夹信任。已经复制的保留。',
+  'tr.failed': '没能改文件夹信任：{msg}。可以再试一次，或在终端运行 sideby trust。',
 }
 
 export const MESSAGES: Record<PanelLang, Record<string, string>> = { en, zh }

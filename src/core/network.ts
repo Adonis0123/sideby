@@ -29,11 +29,10 @@ export const GUARDED_FAMILIES = ['claude', 'codex'] as const
 export const TRACE = {
   anthropic: 'https://api.anthropic.com/cdn-cgi/trace',
   chatgpt: 'https://chatgpt.com/cdn-cgi/trace',
-  openai: 'https://api.openai.com/cdn-cgi/trace',
 } as const
 
 /** Where an Account's Egress is checked, or why it is not. */
-export type NetworkTarget = { url: string } | { skip: 'not-covered' | 'third-party' }
+export type NetworkTarget = { url: string } | { skip: 'not-covered' | 'third-party' | 'api' }
 
 function officialHost(value: string | undefined, host: string): boolean {
   if (!value) return true
@@ -45,22 +44,19 @@ function officialHost(value: string | undefined, host: string): boolean {
 }
 
 /**
- * The trace address that takes the same route as the Account's model requests: the vendor's own API domain for
- * a Subscription Account or an API Account on the official endpoint; none for a third-party endpoint.
- * `env` is the Launch environment (the Secret File already merged).
+ * The trace address that takes the same route as a Subscription Account's model requests: the vendor's own API
+ * domain; none for an endpoint set to a third party. API Accounts are never checked (ADR-0079).
+ * `env` is the Launch environment.
  */
 export function networkTarget(account: Pick<Account, 'family' | 'kind'>, env: Env): NetworkTarget {
+  if (!(GUARDED_FAMILIES as readonly string[]).includes(account.family)) return { skip: 'not-covered' }
+  if (account.kind === 'api') return { skip: 'api' }
   if (account.family === 'claude') {
     return officialHost(env.ANTHROPIC_BASE_URL, 'api.anthropic.com')
       ? { url: TRACE.anthropic }
       : { skip: 'third-party' }
   }
-  if (account.family === 'codex') {
-    if (account.kind === 'subscription') return { url: TRACE.chatgpt }
-    const base = env.OPENAI_BASE_URL || env.CODEX_API_BASE_URL
-    return officialHost(base, 'api.openai.com') ? { url: TRACE.openai } : { skip: 'third-party' }
-  }
-  return { skip: 'not-covered' }
+  return { url: TRACE.chatgpt }
 }
 
 export const networkDir = (stateDir: string) => join(stateDir, 'network')
@@ -252,11 +248,14 @@ export function withoutArgs(args: readonly string[], drop: readonly string[]): s
   return [...args]
 }
 
-/** Where one Account is checked, or why not: a third-party endpoint, or an API Account decided at Launch. */
+/**
+ * Where one Account is checked, or why not: an API Account (`api`), or an endpoint set to a third party.
+ * `at-launch` is no longer given (API Accounts were once checked at Launch); it stays in the type for readers.
+ */
 export interface NetworkAccountRow {
   ref: string
   url?: string
-  skip?: 'not-covered' | 'third-party' | 'at-launch'
+  skip?: 'not-covered' | 'third-party' | 'at-launch' | 'api'
 }
 
 export interface NetworkTargetStatus {
@@ -299,9 +298,9 @@ export async function networkOverview(opts: {
   const accounts: NetworkAccountRow[] = []
   for (const a of opts.accounts) {
     if (!(GUARDED_FAMILIES as readonly string[]).includes(a.family)) continue
-    // An API Account's endpoint and proxy live in its Secret File, which sideby reads only at Launch.
+    // API Accounts are never checked (ADR-0079), and their Secret File is not read for this.
     if (a.kind === 'api') {
-      accounts.push({ ref: a.ref, skip: 'at-launch' })
+      accounts.push({ ref: a.ref, skip: 'api' })
       continue
     }
     let env: Env
