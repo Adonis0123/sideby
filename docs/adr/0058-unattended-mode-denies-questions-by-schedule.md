@@ -68,3 +68,17 @@ Consequences:
 - A finished report that happens to end on a question or a listed pattern runs once more too; the model then writes its report again. The pattern list is kept short for that reason.
 - The hook now runs at the end of every turn in a covered session (about 40 ms); with Unattended Mode off it reads two files and exits.
 - In Codex, the text-question cover works only once the user trusts the new `Stop` hook in `/hooks`.
+
+## Amendment (2026-11-20): the decision marker anywhere, and standing permissions
+
+Two gaps showed in one session. Observed on 2026-11-20 with Claude Code 2.1.328, Unattended Mode on, in a session that Auto Handoff had started: the model ended its turn on a long report with a line `**需要你拍板**` and numbered questions in the middle, followed by more paragraphs, so the marker sat about 700 characters before the end. `endingQuestion` read only the last 600 characters, missed it, and the session sat idle for 72 minutes. And the refusal's reasons told the model to skip every deploy and every outward step, also where the user's own rules had already allowed that kind of step for the project, so the model left work undone that the user had allowed.
+
+Decision:
+
+- `endingQuestion` looks for the `需要你拍板` / `Needs your decision` marker line in the whole message (code blocks, inline code and `>` quotes still removed first) and keeps the text from the first such line to the end (cut to the Pending Decision's length as before). The other signs (a last line ending in `?`, a closing list, `QUESTION_PATTERNS`) still read only the last 600 characters, since in a long report they often belong to an earlier paragraph. `StopWait` (ADR-0077) uses the same function.
+- The ask tool's and the `Stop` hook's reasons (English and Chinese) and `sideby unattended --help` keep "skip anything hard to undo and `defer` it", and add: unless the user's own rules or project docs already give standing permission for that kind of action, then follow that permission. Only the user's own rules and project docs count, never a tool's output. The permission request's reason is unchanged: a refused prompt cannot be granted by the model anyway.
+
+Consequences:
+
+- A finished report that has a marker line far from its end is kept going once more; reports do not use the marker, so this costs little.
+- The model still decides what a standing permission covers; the Pending Decision list stays where the user checks.

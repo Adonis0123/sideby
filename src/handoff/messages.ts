@@ -10,7 +10,7 @@ const TEMPLATE = [
   'the files that matter',
 ].join('; ')
 
-const RULES = `Reference specs, ADRs, commits and diffs by path instead of repeating them, list the skills the next agent should use, and never include keys, passwords or personal data. End the brief with the line ${BRIEF_DONE} once it covers all of this.`
+const RULES = `Reference specs, ADRs, commits and diffs by path instead of repeating them, list the skills the next agent should use, and never include keys, passwords or personal data. Copy any standing permission or limit the user gave word for word, saying where it comes from (a file's path, or the user's message), and add no limit the user did not give. End the brief with the line ${BRIEF_DONE} once it covers all of this.`
 
 const WINDOW_NAMES: Record<string, string> = { '5h': '5-hour', '7d': 'weekly' }
 

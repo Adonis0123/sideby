@@ -37,9 +37,9 @@ sideby unattended schedule remove 2 --json            # the number `sideby unatt
 
 ## When a session was refused a question or a permission
 
-While Unattended Mode is on, do not end your turn on a question either: a turn that ends on one (a `需要你拍板` line, a last line ending in `?`, "Want me to …", "要不要 …") is sent back to you once with the same instructions. End with a final report instead.
+While Unattended Mode is on, do not end your turn on a question either: a turn that ends on one (a `需要你拍板` / `Needs your decision` line anywhere in the message, even with a long report after it, a last line ending in `?`, "Want me to …", "要不要 …") is sent back to you once with the same instructions. End with a final report instead.
 
-The refusal tells you what to do: go on with the recommended option where it can be undone, and list the question and your choice in your final report. A refused permission means Claude Code wanted a person to confirm that step: rewrite it so it needs none (literal paths, `"${VAR:?}"` for a variable in an `rm` target, plain bash syntax, `rm` as a command of its own), or skip it. For anything hard to undo (deleting, sending or posting outside, publishing, deploying, paying), skip it and record it:
+The refusal tells you what to do: go on with the recommended option where it can be undone, and list the question and your choice in your final report. A refused permission means Claude Code wanted a person to confirm that step: rewrite it so it needs none (literal paths, `"${VAR:?}"` for a variable in an `rm` target, plain bash syntax, `rm` as a command of its own), or skip it. For anything hard to undo (deleting, sending or posting outside, publishing, deploying, paying), skip it and record it, unless the user's own rules or project docs already give standing permission for that kind of action (then follow that permission):
 
 ```sh
 sideby unattended defer "deleting the old release branch is left for the user" --json

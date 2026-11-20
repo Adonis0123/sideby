@@ -358,8 +358,9 @@ no country allowed; 2 malformed command line.`,
 
 Unattended Mode: nobody is at the computer, so sessions sideby starts never stop to wait for a person. While it is on,
 a Claude or Codex session sideby started is not allowed to ask a question: the model takes the recommended option
-where it can be undone, and skips anything hard to undo (deleting, sending, publishing, deploying, paying). Each
-question it could not ask, and each thing it skipped (\`defer\`), is kept as a Pending Decision for when you are back.
+where it can be undone, and skips anything hard to undo (deleting, sending, publishing, deploying, paying) unless
+your own rules or project docs give standing permission for that kind of action. Each question it could not ask, and
+each thing it skipped (\`defer\`), is kept as a Pending Decision for when you are back.
 In Claude sessions, a permission prompt Claude Code is about to show (a command it wants a person to confirm, also in
 a subagent) is answered with "no" and how to do it without one, and kept as a Pending Decision too. A Claude turn
 that failed for a passing reason (an overloaded server, a dropped connection, a rate limit that is not a used-up

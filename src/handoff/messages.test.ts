@@ -14,12 +14,19 @@ describe('hook messages', () => {
     assert.match(m, /Write a handoff brief to \/x\/1-claude-001\.md/)
     assert.match(m, /Do not tell the user that the work will move to another account/)
     assert.doesNotMatch(m, /take over/)
+    // The next session keeps the user's standing permissions and limits as given, with no new limit of its own.
+    assert.match(
+      m,
+      /Copy any standing permission or limit the user gave word for word, saying where it comes from/,
+    )
+    assert.match(m, /add no limit the user did not give/)
   })
 
   it('the threshold message still says sideby starts the next account', () => {
     const m = thresholdMessage('/x/1.md', { label: '7d', usedPercent: 96, resetsAt: '2026-10-12T20:00:00Z' })
     assert.match(m, /sideby will start the next account/)
     assert.match(m, /<!-- handoff brief complete -->/)
+    assert.match(m, /standing permission or limit the user gave word for word/)
   })
 
   it('names the window, so the weekly window is not taken for the 5-hour one', () => {

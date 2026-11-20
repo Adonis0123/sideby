@@ -17,6 +17,7 @@ import {
   endingQuestion,
   permissionText,
   QUESTION_PATTERNS,
+  QUESTION_TAIL,
   questionText,
   runUnattendedHook,
 } from './hook.ts'
@@ -102,6 +103,11 @@ describe('unattended hook', () => {
       assert.equal(r.code, 2)
       assert.match(r.err, /recommended option/)
       assert.match(r.err, /sideby unattended defer/)
+      // A standing permission in the user's own rules or project docs still holds.
+      assert.match(
+        r.err,
+        /Where the user's own rules or project docs already give standing permission for that kind of action, follow that permission instead/,
+      )
       const [d, ...more] = await listPendingDecisions(resolvePaths(h.env).stateDir)
       assert.equal(more.length, 0)
       assert.equal(d?.kind, 'question')
@@ -122,6 +128,7 @@ describe('unattended hook', () => {
       const r = await run(h, ['codex', 'PreToolUse'], ask('request_user_input'), { LANG: 'zh_CN.UTF-8' })
       assert.equal(r.code, 2)
       assert.match(r.err, /无人值守已开启/)
+      assert.match(r.err, /用户自己的规则或项目文档已对这类操作常设授权的，照那份授权做/)
       assert.equal((await listPendingDecisions(resolvePaths(h.env).stateDir))[0]?.family, 'codex')
       assert.deepEqual(await run(h, ['codex', 'PreToolUse'], bash('rm -f $D/*')), { code: 0, err: '' })
       assert.equal((await run(h, ['codex', 'PreToolUse'], ask())).code, 0)
@@ -457,6 +464,10 @@ describe('unattended hook at the end of a turn', () => {
       assert.match(answer.reason, /Nobody is here to answer/)
       assert.match(answer.reason, /recommended option/)
       assert.match(answer.reason, /sideby unattended defer "<one sentence>"/)
+      assert.match(
+        answer.reason,
+        /Where the user's own rules or project docs already give standing permission for that kind of action, follow that permission instead/,
+      )
       assert.match(answer.reason, /final report/)
       assert.match(answer.reason, /kept your question/)
       const [d, ...more] = await listPendingDecisions(resolvePaths(h.env).stateDir)
@@ -491,6 +502,7 @@ describe('unattended hook at the end of a turn', () => {
       const answer = JSON.parse(r.out!)
       assert.equal(answer.decision, 'block')
       assert.match(answer.reason, /没人能回答/)
+      assert.match(answer.reason, /用户自己的规则或项目文档已对这类操作常设授权的，照那份授权做/)
       assert.match(answer.reason, /最终汇报/)
       assert.equal((await listPendingDecisions(resolvePaths(h.env).stateDir))[0]?.family, 'codex')
     })
@@ -595,6 +607,25 @@ describe('telling a question at the end of a message', () => {
     const early = `Should I keep the old API?\n\n${'Done with the rest. '.repeat(40)}`
     assert.equal(endingQuestion(early), undefined)
     assert.ok(endingQuestion(`${'x'.repeat(5000)}\n\nWant me to go on?`))
+  })
+
+  it('finds the decision marker anywhere, with a long report after it', () => {
+    const rest = `另外，${'旧分支已清理，测试全部通过，构建产物和上次一致。'.repeat(40)}`
+    const zh = `改完了两张卡片，第三张还差一处。\n\n**需要你拍板**\n1. 第三张卡片要不要再开一轮？我推荐开。\n\n${rest}`
+    assert.ok(zh.length - zh.indexOf('**需要你拍板**') > QUESTION_TAIL)
+    assert.equal(endingQuestion(zh), zh.slice(zh.indexOf('**需要你拍板**')))
+    const en = `Two of three cards are merged.\n\n## Needs your decision: ship the third card today or after review?\n\n${'The old branch is cleaned up and every test passes. '.repeat(20)}`
+    assert.equal(endingQuestion(en), en.slice(en.indexOf('## Needs your decision')).trim())
+  })
+
+  it('does not take the decision marker from a code block or a quote', () => {
+    const rest = 'Done with the rest; every test passes. '.repeat(20)
+    const fenced = `Here is the template I used:\n\n\`\`\`md\n**需要你拍板**\n1. A or B\n\`\`\`\n\n${rest}`
+    const quoted = `The rule says:\n\n> **Needs your decision**: ship or wait\n\n${rest}`
+    for (const m of [fenced, quoted]) {
+      assert.ok(m.trim().length > QUESTION_TAIL)
+      assert.equal(endingQuestion(m), undefined, m)
+    }
   })
 
   it('keeps every pattern working on an example of its own', () => {
