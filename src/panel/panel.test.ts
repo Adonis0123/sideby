@@ -2413,7 +2413,12 @@ describe('panel updates (spec §3.23, ADR-0021)', () => {
         assert.equal(r.status, 200, JSON.stringify(r.body))
         assert.deepEqual([r.body.switched, r.body.running], [true, 'local'])
         assert.equal(await readlink(globalPkg(d)), pkgDir(d))
-        assert.deepEqual(execs, [], 'an npm install knows its prefix; no npm call')
+        assert.deepEqual(
+          execs,
+          // Only the Local Build reading the config first (ADR-0080).
+          [`${process.execPath} ${join(pkgDir(d), 'dist/src/cli/main.js')} config get --json`],
+          'an npm install knows its prefix; no npm call',
+        )
       } finally {
         unbind()
         await close(on.server)

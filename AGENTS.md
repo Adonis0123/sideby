@@ -42,7 +42,7 @@ Before you commit, read your diff once for these.
 | Demo HOME for manual testing | `node scripts/demo-home.ts <dir> [normal\|empty\|error\|slow]` |
 | README media and copy that may be stale | `node scripts/readme-assets.ts` (then the `readme-assets` skill) |
 
-Tests run the `.ts` sources directly with Node 22.18+; no build is needed. Run `pnpm check` before you hand work back, then `pnpm local` so the maintainer sees the change in the Panel and CLI they already use (it switches only a build that compiles and starts; say so if it failed).
+Tests run the `.ts` sources directly with Node 22.18+; no build is needed. Run `pnpm check` before you hand work back, then `pnpm local` so the maintainer sees the change in the Panel and CLI they already use (it switches only a build that compiles, starts and can read the user's config; say so if it failed).
 
 ## Read when
 

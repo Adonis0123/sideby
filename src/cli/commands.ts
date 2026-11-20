@@ -34,6 +34,8 @@ import {
   editConfigAskPermissions,
   editConfigUpdate,
   loadConfig,
+  readConfig,
+  unknownConfigKeyNote,
 } from '../core/config.ts'
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import type { DoctorReport } from '../core/doctor.ts'
@@ -562,7 +564,19 @@ export async function cmdList(a: ParsedArgs, io: Io): Promise<number> {
   }
   for (const s of shown) for (const p of s.problems ?? []) io.err(c.yellow(`${s.ref}: ${p}`))
   for (const e of rt.pluginErrors) io.err(c.yellow(`plugin ${e.where}: ${e.message}`))
+  for (const note of await unknownConfigNotes(rt.paths.configFile)) io.err(c.yellow(`sideby: ${note}`))
   return 0
+}
+
+/**
+ * One line per config key this sideby does not know (ADR-0080), for the commands a person reads: `sideby list` and
+ * `sideby doctor`. Never from hooks or `--json` output on stdout.
+ */
+async function unknownConfigNotes(file: string): Promise<string[]> {
+  const read = await readConfig(file).catch(() => null)
+  if (!read?.unknownKeys.length) return []
+  const { packageVersion } = await import('../core/version.ts')
+  return read.unknownKeys.map((k) => unknownConfigKeyNote(k, packageVersion()))
 }
 
 export interface NewSuggestion {
@@ -997,6 +1011,7 @@ export async function cmdDoctor(a: ParsedArgs, io: Io): Promise<number> {
   const home = rt.paths.home
   for (const f of report.fixes)
     io.out(`${f.ok ? c.green('fixed') : c.red('not fixed')} ${f.account} ${f.item}: ${f.message}`)
+  for (const note of await unknownConfigNotes(rt.paths.configFile)) io.out(`${c.yellow('!')} ${note}`)
   for (const f of report.general)
     io.out(
       `${f.level === 'fail' ? c.red('✗') : c.yellow('!')} ${tilde(f.message, home)}${f.hint ? c.dim(` — ${f.hint}`) : ''}`,

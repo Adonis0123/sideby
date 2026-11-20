@@ -71,6 +71,25 @@ describe('pnpm local', () => {
     })
   })
 
+  it('does not go back to a build that cannot read the config (ADR-0080)', async () => {
+    await withFakeHome(async (h) => {
+      const d = dirsOf(h)
+      await switchIn(d, await stage(d, '20261016T100000-a'))
+      await switchIn(d, await stage(d, '20261016T110000-b'))
+      const checked: string[] = []
+      const refuse = async (dir: string) => {
+        checked.push(dir)
+        return 'The previous build cannot read your sideby config'
+      }
+      await assert.rejects(switchBack(d, refuse), /cannot read your sideby config/)
+      assert.deepEqual(checked, [join(d.dev, 'old', '20261016T100000-a')])
+      assert.equal(await runningId(d), '20261016T110000-b')
+      assert.deepEqual(await readdir(join(d.dev, 'old')), ['20261016T100000-a'])
+      assert.equal(await switchBack(d, async () => null), true)
+      assert.equal(await runningId(d), '20261016T100000-a')
+    })
+  })
+
   it('puts the npm package aside, links the global one to pkg, and --off puts it back', async () => {
     await withFakeHome(async (h) => {
       const d = dirsOf(h)

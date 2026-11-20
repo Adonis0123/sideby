@@ -8,14 +8,21 @@ import {
   ConfigError,
   configGet,
   describeConfigKey,
+  editConfigAccounts,
+  editConfigAdvisor,
+  editConfigClaude,
   editConfigDisplay,
   editConfigPanel,
   editConfigPath,
   editConfigQuotaCheck,
+  editConfigUnattended,
   handoffSettings,
   loadConfig,
   parseConfigValue,
+  readConfig,
+  removeConfigAlias,
   settableKeys,
+  unknownConfigKeyNote,
 } from './config.ts'
 
 const CONFIG = '.config/sideby/config.json'
@@ -67,12 +74,15 @@ describe('handoff settings', () => {
     })
   })
 
-  it('rejects an unknown policy and an unknown key', async () => {
+  it('rejects an unknown policy, and ignores an unknown key (ADR-0080)', async () => {
     await withFakeHome(async (h) => {
       await h.write(CONFIG, JSON.stringify({ handoff: { families: { claude: { policy: 'round-robin' } } } }))
       await assert.rejects(loadConfig(h.path(CONFIG)), ConfigError)
       await h.write(CONFIG, JSON.stringify({ handoff: { rotate: true } }))
-      await assert.rejects(loadConfig(h.path(CONFIG)), ConfigError)
+      assert.deepEqual(await readConfig(h.path(CONFIG)), {
+        config: { handoff: {} },
+        unknownKeys: ['handoff.rotate'],
+      })
     })
   })
 })
@@ -252,6 +262,173 @@ describe('config get|set|unset (spec §3.29)', () => {
       assert.deepEqual((await loadConfig(file)).panel, { theme: 'dark', language: 'zh' })
       await editConfigPanel(file, { theme: null, language: null })
       assert.equal((await loadConfig(file)).panel, undefined)
+    })
+  })
+})
+
+describe('keys a newer sideby wrote (spec §3.10, ADR-0080)', () => {
+  // What a newer sideby may leave: keys this one does not know, at the top and inside known objects.
+  const newer = {
+    $schema: 'x',
+    futureTop: { a: [1, { b: 2 }] },
+    claude: { futureKey: 1, carryTrust: true, apiBetasOff: true },
+    aliases: { cc1: 'claude:001', pk: { account: 'pi:main', args: ['-m', 'x'] } },
+    pickCommands: { cx: 'codex' },
+    accounts: { 'claude:001': { args: ['--model', 'opus'], futureArg: true } },
+    unattended: {
+      schedule: [
+        { days: ['mon'], start: '09:00', end: '17:00', futureSlot: 'a' },
+        { days: ['sat'], start: '10:00', end: '11:00', futureSlot: 'b' },
+      ],
+    },
+  }
+
+  it('loads them, leaves them out of the config and lists them; prints nothing', async () => {
+    await withFakeHome(async (h) => {
+      await h.write(CONFIG, JSON.stringify(newer))
+      const r = await readConfig(h.path(CONFIG))
+      assert.deepEqual(r.unknownKeys, [
+        'futureTop',
+        'claude.futureKey',
+        'accounts.claude:001.futureArg',
+        'unattended.schedule.0.futureSlot',
+        'unattended.schedule.1.futureSlot',
+      ])
+      assert.deepEqual(r.config.claude, { carryTrust: true, apiBetasOff: true })
+      assert.deepEqual(r.config.aliases, newer.aliases)
+      assert.deepEqual(r.config.pickCommands, newer.pickCommands)
+      assert.deepEqual(r.config.accounts, { 'claude:001': { args: ['--model', 'opus'] } })
+      assert.equal(r.config.unattended?.schedule?.length, 2)
+      assert.ok(!('futureTop' in r.config))
+      assert.deepEqual(await loadConfig(h.path(CONFIG)), r.config)
+      const note = unknownConfigKeyNote('claude.futureKey', '1.2.3')
+      assert.match(note, /sideby 1\.2\.3/)
+      assert.match(note, /newer sideby wrote it, or it is a typo/)
+      assert.match(note, /sideby update/)
+      assert.match(note, /sideby config unset claude\.futureKey --yes/)
+    })
+  })
+
+  it('still refuses a known key with a wrong value, also next to unknown keys', async () => {
+    await withFakeHome(async (h) => {
+      await h.write(CONFIG, JSON.stringify({ futureTop: 1, claude: { futureKey: 1, carryTrust: 'yes' } }))
+      await assert.rejects(loadConfig(h.path(CONFIG)), /\/claude\/carryTrust must be boolean/)
+      // Inside an alias object nothing but `account` and `args` is taken (ADR-0005).
+      await h.write(CONFIG, JSON.stringify({ aliases: { x: { account: 'pi:main', env: { K: 'v' } } } }))
+      await assert.rejects(loadConfig(h.path(CONFIG)), /aliases\/x/)
+      // A change refuses a broken file and says which key, not "run sideby list".
+      await h.write(CONFIG, JSON.stringify({ claude: { carryTrust: 'yes' } }))
+      await assert.rejects(
+        editConfigPath(h.path(CONFIG), 'panel.theme', 'dark'),
+        /claude\.carryTrust must be boolean/,
+      )
+    })
+  })
+
+  it('keeps them, their values and their order through every change', async () => {
+    await withFakeHome(async (h) => {
+      const file = h.path(CONFIG)
+      await h.write(CONFIG, `${JSON.stringify(newer, null, 2)}\n`)
+      const read = async () => JSON.parse(await readFile(file, 'utf8'))
+      // A change of the very object that holds an unknown key.
+      await editConfigClaude(file, (c) => ({ ...c, carryTrust: false }))
+      await editConfigPath(file, 'claude.apiBetasOff', undefined)
+      await editConfigPath(file, 'panel.theme', 'dark')
+      await editConfigAccounts(file, (a) => ({ ...a, 'claude:001': { args: ['--model', 'sonnet'] } }))
+      let data = await read()
+      assert.deepEqual(Object.keys(data), [
+        '$schema',
+        'futureTop',
+        'claude',
+        'aliases',
+        'pickCommands',
+        'accounts',
+        'unattended',
+        'panel',
+      ])
+      assert.deepEqual(data.futureTop, newer.futureTop)
+      assert.deepEqual(Object.entries(data.claude), [
+        ['futureKey', 1],
+        ['carryTrust', false],
+      ])
+      assert.deepEqual(data.accounts, { 'claude:001': { args: ['--model', 'sonnet'], futureArg: true } })
+      assert.deepEqual(data.aliases, newer.aliases)
+      assert.deepEqual(data.pickCommands, newer.pickCommands)
+      // A list item the change keeps keeps its unknown key; one it changes or removes goes with it.
+      await editConfigUnattended(file, (u) => ({
+        ...u,
+        schedule: [u!.schedule![1]!, { days: ['sun'], start: '01:00', end: '02:00' }],
+      }))
+      data = await read()
+      assert.deepEqual(data.unattended.schedule, [
+        { days: ['sat'], start: '10:00', end: '11:00', futureSlot: 'b' },
+        { days: ['sun'], start: '01:00', end: '02:00' },
+      ])
+      // A section emptied of known keys keeps the unknown ones; a record entry removed goes with its own.
+      await editConfigClaude(file, () => undefined)
+      await editConfigAccounts(file, () => ({}))
+      await removeConfigAlias(file, 'pk')
+      data = await read()
+      assert.deepEqual(data.claude, { futureKey: 1 })
+      assert.deepEqual(data.accounts, {})
+      assert.deepEqual(data.aliases, { cc1: 'claude:001' })
+      // Unset of the section itself removes all of it.
+      await editConfigPath(file, 'claude', undefined)
+      assert.ok(!('claude' in (await read())))
+      assert.deepEqual((await readConfig(file)).unknownKeys, [
+        'futureTop',
+        'unattended.schedule.0.futureSlot',
+      ])
+    })
+  })
+
+  it('keeps an unknown key in a section a helper removes when it is empty', async () => {
+    await withFakeHome(async (h) => {
+      const file = h.path(CONFIG)
+      await h.write(
+        CONFIG,
+        JSON.stringify({ advisor: { unlock: true, futureKey: 'x' }, display: { futureKey: 2 } }),
+      )
+      await editConfigAdvisor(file, () => undefined)
+      await editConfigDisplay(file, { families: ['codex'] })
+      const data = JSON.parse(await readFile(file, 'utf8'))
+      assert.deepEqual(data.advisor, { futureKey: 'x' })
+      assert.deepEqual(data.display, { futureKey: 2, families: ['codex'] })
+      // A section with only unknown keys left is not changed again.
+      const raw = await readFile(file, 'utf8')
+      assert.equal((await editConfigAdvisor(file, () => undefined)).changed, false)
+      assert.equal(await readFile(file, 'utf8'), raw)
+    })
+  })
+
+  it('refuses a new unknown key from config set, writing nothing', async () => {
+    await withFakeHome(async (h) => {
+      const file = h.path(CONFIG)
+      const raw = JSON.stringify({ claude: { futureKey: 1 } })
+      await h.write(CONFIG, raw)
+      await assert.rejects(editConfigPath(file, 'claude.typoKey', true), /not a config key/)
+      await assert.rejects(
+        editConfigPath(file, 'claude', { carryTrust: true, typoKey: 1 }),
+        /claude\.typoKey is not a config key/,
+      )
+      await assert.rejects(editConfigPath(file, 'claude.futureKey', 2), /not a config key/)
+      await assert.rejects(editConfigPath(file, 'typoTop', 1), /not a config key/)
+      assert.equal(await readFile(file, 'utf8'), raw)
+    })
+  })
+
+  it('config unset removes an unknown key the file has, and the object it leaves empty', async () => {
+    await withFakeHome(async (h) => {
+      const file = h.path(CONFIG)
+      const raw = JSON.stringify({ futureTop: true, claude: { futureKey: 1 }, panel: { theme: 'dark' } })
+      await h.write(CONFIG, raw)
+      const dry = await editConfigPath(file, 'claude.futureKey', undefined, { dryRun: true })
+      assert.deepEqual(dry, { key: 'claude.futureKey', before: 1, after: undefined, changed: true })
+      assert.equal(await readFile(file, 'utf8'), raw)
+      await editConfigPath(file, 'claude.futureKey', undefined)
+      await editConfigPath(file, 'futureTop', undefined)
+      assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), { panel: { theme: 'dark' } })
+      await assert.rejects(editConfigPath(file, 'futureTop', undefined), /not a config key/)
     })
   })
 })

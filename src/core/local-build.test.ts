@@ -7,7 +7,15 @@ import { join } from 'node:path'
 import { afterEach, describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
 import type { Env } from '../types.ts'
-import { globalPkg, type LocalDirs, linkGlobal, localStatus, pkgDir, switchLocal } from './local-build.ts'
+import {
+  configReadProblem,
+  globalPkg,
+  type LocalDirs,
+  linkGlobal,
+  localStatus,
+  pkgDir,
+  switchLocal,
+} from './local-build.ts'
 import { resolvePaths } from './paths.ts'
 import { bindUpdateDeps } from './update.ts'
 
@@ -92,7 +100,11 @@ describe('Local Build switch', () => {
       assert.equal(await versionAt(globalPkg(d)), '0.15.0')
       assert.deepEqual(
         ran,
-        ['sideby update --skill --yes'],
+        [
+          // The Local Build reads the config before it goes live (ADR-0080).
+          `${process.execPath} ${join(pkgDir(d), 'dist/src/cli/main.js')} config get --json`,
+          'sideby update --skill --yes',
+        ],
         'restoring installs nothing; the npm code brings the skill along',
       )
     })
@@ -265,6 +277,67 @@ describe('Local Build switch', () => {
       const same = await switchLocal(paths, d, 'npm', h.env)
       assert.equal(same.ok, true)
       assert.equal(same.unchanged, true)
+    })
+  })
+})
+
+describe('a build must read the config before it goes live (ADR-0080)', () => {
+  /** A build whose `sideby` prints `out` and exits with `code`, as an older build does on a newer config. */
+  async function buildThat(dir: string, code: number, out: string): Promise<void> {
+    await mkdir(join(dir, 'dist', 'src', 'cli'), { recursive: true })
+    await writeFile(
+      join(dir, 'dist', 'src', 'cli', 'main.js'),
+      `process.stdout.write(${JSON.stringify(out)}); process.exit(${code})\n`,
+    )
+  }
+  const oldError = `${JSON.stringify({ schemaVersion: 1, error: '/path/to/config.json: /claude/futureKey schema is false; see schemas/config.json', code: 'config' }, null, 2)}\n`
+
+  it('says what a build that cannot read the config said, and nothing for one that can', async () => {
+    await withFakeHome(async (h) => {
+      await buildThat(h.path('bad'), 1, oldError)
+      assert.equal(
+        await configReadProblem(h.path('bad'), h.env),
+        '/path/to/config.json: /claude/futureKey schema is false; see schemas/config.json',
+      )
+      await buildThat(h.path('good'), 0, '{"schemaVersion":1,"keys":[]}')
+      assert.equal(await configReadProblem(h.path('good'), h.env), null)
+      assert.match((await configReadProblem(h.path('missing'), h.env)) ?? '', /Cannot find module/)
+    })
+  })
+
+  it('runs the build with the same HOME and config folder, and no update check', async () => {
+    await withFakeHome(async (h) => {
+      const seen: { args: readonly string[]; env: Env }[] = []
+      await configReadProblem(h.path('b'), h.env, async (_file, args, opts) => {
+        seen.push({ args, env: opts.env })
+        return { code: 0, output: '' }
+      })
+      assert.deepEqual(seen[0]?.args.slice(1), ['config', 'get', '--json'])
+      assert.equal(seen[0]?.env.HOME, h.home)
+      assert.equal(seen[0]?.env.XDG_CONFIG_HOME, h.env.XDG_CONFIG_HOME)
+      assert.equal(seen[0]?.env.SIDEBY_NO_UPDATE_NOTIFIER, '1')
+    })
+  })
+
+  it('keeps the npm package when the Local Build cannot read the config', async () => {
+    await withFakeHome(async (h) => {
+      const d = dirsOf(h)
+      unbind = bindUpdateDeps({
+        fetch: async () => new Response(JSON.stringify({ latest: '0.15.0' }), { status: 200 }),
+        exec: async (_file, args) =>
+          args.includes('config') ? { code: 1, output: oldError } : { code: 0, output: '' },
+        restartPanel: async () => true,
+        startDetached: async () => true,
+      })
+      await pkgAt(globalPkg(d), '0.15.0')
+      await pkgAt(pkgDir(d), '0.15.0', localBuild)
+      const r = await switchLocal(resolvePaths(h.env), d, 'local', h.env)
+      assert.equal(r.ok, false)
+      assert.equal(r.running, 'npm')
+      assert.match(r.message, /cannot read your sideby config, so the running build was kept/)
+      assert.match(r.message, /futureKey schema is false/)
+      assert.match(r.message, /git rebase origin\/main/)
+      assert.ok((await lstat(globalPkg(d))).isDirectory(), 'the npm package stays')
     })
   })
 })

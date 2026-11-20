@@ -640,25 +640,183 @@ export function handoffSettings(config: Config): HandoffSettings {
 
 export class ConfigError extends UserError {}
 
-export async function loadConfig(file: string): Promise<Config> {
+// ---- Keys this sideby does not know (spec §3.10, ADR-0080). A newer sideby, or a typo, may leave a key the schema
+// does not have. Reading ignores it and reports it; writing keeps it where it was; only `config set` refuses a new one.
+
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/**
+ * The node whose keys are walked; none inside a union. An alias is a ref or `{ account, args }`, and anything else in
+ * that object stays an error (ADR-0005 keeps `env` out of aliases), as does every other value of a union.
+ */
+const objectForm = (node: SchemaNode): SchemaNode | undefined => (node.anyOf ? undefined : node)
+
+const recordChild = (node: SchemaNode, key: string): SchemaNode | undefined =>
+  Object.entries(node.patternProperties ?? {}).find(([re]) => new RegExp(re).test(key))?.[1]
+
+/** Whether `key` is one a closed object node does not declare. Record keys are the user's own names, never unknown. */
+const unknownIn = (node: SchemaNode, key: string): boolean =>
+  !!node.properties && !Object.hasOwn(node.properties, key) && node.additionalProperties === false
+
+/** The paths of keys in `value` that `node` does not declare, walking objects, records and arrays. */
+function findUnknown(node: SchemaNode, value: unknown, path: string[], out: string[][]): void {
+  if (Array.isArray(value)) {
+    if (node.items)
+      for (const [i, v] of value.entries()) findUnknown(node.items, v, [...path, String(i)], out)
+    return
+  }
+  const form = isObj(value) ? objectForm(node) : undefined
+  if (!form || !isObj(value)) return
+  for (const [k, v] of Object.entries(value)) {
+    if (unknownIn(form, k)) out.push([...path, k])
+    else {
+      const child =
+        form.properties && Object.hasOwn(form.properties, k) ? form.properties[k] : recordChild(form, k)
+      if (child) findUnknown(child, v, [...path, k], out)
+    }
+  }
+}
+
+/** A copy of `value` without the keys `node` does not declare. */
+function stripUnknown(node: SchemaNode, value: unknown): unknown {
+  if (Array.isArray(value)) return node.items ? value.map((v) => stripUnknown(node.items!, v)) : value
+  const form = isObj(value) ? objectForm(node) : undefined
+  if (!form || !isObj(value)) return value
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(value)) {
+    if (unknownIn(form, k)) continue
+    const child =
+      form.properties && Object.hasOwn(form.properties, k) ? form.properties[k] : recordChild(form, k)
+    out[k] = child ? stripUnknown(child, v) : v
+  }
+  return out
+}
+
+const hasUnknown = (node: SchemaNode, value: unknown): boolean => {
+  const found: string[][] = []
+  findUnknown(node, value, [], found)
+  return found.length > 0
+}
+
+/**
+ * Puts the unknown keys of `orig` back into `edited`, which an edit made from `orig` without them. An unknown key stays
+ * after the same sibling it followed; the known keys keep the edit's order. An object the edit removed keeps just its
+ * unknown keys (a section emptied of known keys is not the user asking to drop a newer sideby's setting), but a record
+ * entry the edit removed, or a list item it removed or changed, goes with its unknown keys (a list item has no name to
+ * match it by). `drop` is the path `config unset` named: there nothing is put back.
+ */
+function graftUnknown(node: SchemaNode, orig: unknown, edited: unknown, drop: string[] | null): unknown {
+  if ((drop && drop.length === 0) || !hasUnknown(node, orig)) return edited
+  if (Array.isArray(orig)) {
+    if (!Array.isArray(edited) || !node.items) return edited
+    const used = new Set<number>()
+    return edited.map((e) => {
+      const same = JSON.stringify(e)
+      const i = orig.findIndex(
+        (o, j) => !used.has(j) && JSON.stringify(stripUnknown(node.items!, o)) === same,
+      )
+      if (i < 0) return e
+      used.add(i)
+      return orig[i]
+    })
+  }
+  const form = objectForm(node)
+  if (!form || !isObj(orig)) return edited
+  const sub = (k: string) => (drop && drop[0] === k ? drop.slice(1) : null)
+  if (form.patternProperties && !form.properties) {
+    if (!isObj(edited)) return edited
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(edited)) {
+      const child = recordChild(form, k)
+      out[k] = child && Object.hasOwn(orig, k) ? graftUnknown(child, orig[k], v, sub(k)) : v
+    }
+    return out
+  }
+  if (!form.properties || (edited !== undefined && !isObj(edited))) return edited
+  const now = edited ?? {}
+  // Each kept key of `orig` that the edit does not have goes after the last key before it that the edit kept.
+  const after = new Map<string | null, [string, unknown][]>()
+  let anchor: string | null = null
+  for (const [k, v] of Object.entries(orig)) {
+    if (Object.hasOwn(now, k)) {
+      anchor = k
+      continue
+    }
+    let kept: unknown
+    if (unknownIn(form, k)) kept = sub(k)?.length === 0 ? undefined : v
+    else if (form.properties[k]) kept = graftUnknown(form.properties[k], v, undefined, sub(k))
+    if (kept !== undefined) after.set(anchor, [...(after.get(anchor) ?? []), [k, kept]])
+  }
+  const out: Record<string, unknown> = Object.fromEntries(after.get(null) ?? [])
+  for (const [k, v] of Object.entries(now)) {
+    const child = form.properties[k]
+    out[k] = child && Object.hasOwn(orig, k) ? graftUnknown(child, orig[k], v, sub(k)) : v
+    for (const [uk, uv] of after.get(k) ?? []) out[uk] = uv
+  }
+  return edited === undefined && Object.keys(out).length === 0 ? undefined : out
+}
+
+/** The first way `data` (unknown keys already left out) does not match the schema, or null. */
+function schemaProblem(data: unknown): { where: string; message: string } | null {
+  if (Value.Check(ConfigSchema, data)) return null
+  const first = [...Value.Errors(ConfigSchema, data)][0]
+  // A key the schema does not have shows up as "schema is false" or "must not have additional properties".
+  const extra = first?.message === 'schema is false' || first?.keyword === 'additionalProperties'
+  return {
+    where: first?.instancePath || '/',
+    message: extra ? 'is not a config key' : (first?.message ?? 'is invalid'),
+  }
+}
+
+/**
+ * What `sideby list` and `sideby doctor` say about a key this sideby does not know (ADR-0080): why it is there and
+ * what to do. Never printed by `loadConfig`, which hooks and `--json` commands use too.
+ */
+export function unknownConfigKeyNote(key: string, version: string): string {
+  return `config key "${key}" is not one sideby ${version} knows, so it is ignored: a newer sideby wrote it, or it is a typo. Run \`sideby update\` to get the newer sideby, or remove it with \`sideby config unset ${key} --yes\``
+}
+
+export interface ConfigRead {
+  config: Config
+  /** Keys in the file this sideby does not know, as dot paths (`claude.someKey`); left out of `config`. */
+  unknownKeys: string[]
+}
+
+/** `loadConfig`, and also the keys in the file this sideby does not know. */
+export async function readConfig(file: string): Promise<ConfigRead> {
   let raw: string
   try {
     raw = await readFile(file, 'utf8')
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {}
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { config: {}, unknownKeys: [] }
     throw new ConfigError(`cannot read ${file}: ${(err as Error).message}`)
   }
-  let data: unknown
+  let parsed: unknown
   try {
-    data = parseJsonSafely(raw, file)
+    parsed = parseJsonSafely(raw, file)
   } catch {
     throw new ConfigError(`${file} is not valid JSON; fix the syntax or delete the file`)
   }
-  if (!Value.Check(ConfigSchema, data)) {
-    const first = [...Value.Errors(ConfigSchema, data)][0]
-    const where = first?.instancePath || '/'
-    throw new ConfigError(`${file}: ${where} ${first?.message ?? 'is invalid'}; see schemas/config.json`)
-  }
+  const schema = ConfigSchema as unknown as SchemaNode
+  const found: string[][] = []
+  findUnknown(schema, parsed, [], found)
+  const data = found.length ? stripUnknown(schema, parsed) : parsed
+  const problem = schemaProblem(data)
+  if (problem) throw new ConfigError(`${file}: ${problem.where} ${problem.message}; see schemas/config.json`)
+  const config = checkLoaded(file, data as Config)
+  return { config, unknownKeys: found.map((p) => p.join('.')) }
+}
+
+/**
+ * Reads the config file; a missing file is `{}`. Keys this sideby does not know are left out and not an error
+ * (`readConfig` lists them); a known key with a wrong value is. Prints nothing.
+ */
+export async function loadConfig(file: string): Promise<Config> {
+  return (await readConfig(file)).config
+}
+
+function checkLoaded(file: string, data: Config): Config {
   const handoff = handoffSettings(data)
   if (handoff.prepareAt >= handoff.threshold)
     throw new ConfigError(
@@ -710,35 +868,14 @@ async function editConfigKey<K extends Exclude<keyof Config, '$schema'>>(
   key: K,
   retry: string,
   edit: (current: Config[K] | undefined) => Config[K] | null,
-  opts: { dryRun?: boolean } = {},
+  opts: { dryRun?: boolean; drop?: string[] } = {},
 ): Promise<{ changed: boolean; before: Config[K] | undefined; after: Config[K] | undefined }> {
-  const target = await configTarget(file)
-  let raw: string | null = null
-  try {
-    raw = await readFile(target, 'utf8')
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT')
-      throw new ConfigError(`cannot read ${file}: ${(err as Error).message}`)
-  }
-  let data: Record<string, unknown> = {}
-  if (raw !== null) {
-    let parsed: unknown
-    try {
-      parsed = parseJsonSafely(raw, file)
-    } catch {
-      throw new ConfigError(
-        `${file} is not valid JSON; nothing was changed. Fix the syntax and ${retry} again`,
-      )
-    }
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
-      throw new ConfigError(`${file} is not a JSON object; nothing was changed. Fix it and ${retry} again`)
-    if (!Value.Check(ConfigSchema, parsed))
-      throw new ConfigError(
-        `${file} does not match schemas/config.json; nothing was changed. Run \`sideby list\` to see why`,
-      )
-    data = parsed as Record<string, unknown>
-  }
-  const before = data[key] as Config[K] | undefined
+  const { target, raw, data } = await readConfigForEdit(file, retry)
+  // The edit and every check see only the keys this sideby knows; the others go back in when the file is written
+  // (ADR-0080), so a key the edit adds that the schema does not have is still refused.
+  const schema = ConfigSchema as unknown as SchemaNode
+  const known = stripUnknown(schema, data) as Record<string, unknown>
+  const before = known[key] as Config[K] | undefined
   const after = edit(before)
   if (after === null || JSON.stringify(after) === JSON.stringify(before))
     return { changed: false, before, after: before }
@@ -746,13 +883,13 @@ async function editConfigKey<K extends Exclude<keyof Config, '$schema'>>(
   const next: Record<string, unknown> =
     raw === null
       ? { $schema: 'https://unpkg.com/sideby/schemas/config.json', [key]: after }
-      : { ...data, [key]: after }
+      : { ...known, [key]: after }
   if (after === undefined) delete next[key]
-  if (!Value.Check(ConfigSchema, next)) {
-    const first = [...Value.Errors(ConfigSchema, next)][0]
-    const where = (first?.instancePath ?? '').replace(/^\//, '').split('/').join('.') || key
+  const problem = schemaProblem(next)
+  if (problem) {
+    const where = problem.where.replace(/^\//, '').split('/').join('.') || key
     throw new ConfigError(
-      `${where} ${first?.message ?? 'is invalid'}, so nothing was changed; \`sideby config get\` lists the keys and the values they take`,
+      `${where} ${problem.message}, so nothing was changed; \`sideby config get\` lists the keys and the values they take`,
       { code: 'bad-value' },
     )
   }
@@ -773,18 +910,101 @@ async function editConfigKey<K extends Exclude<keyof Config, '$schema'>>(
     throw new ConfigError(
       `handoff.prepareAt must be lower than handoff.threshold; fix them in ${file} and ${retry} again`,
     )
+  let out = next
+  if (raw !== null) {
+    const kept = schema.properties?.[key]
+      ? graftUnknown(schema.properties[key], data[key], after, opts.drop ?? null)
+      : after
+    // A section that holds only keys this sideby does not know stays as it is: nothing changes.
+    if (JSON.stringify(kept) === JSON.stringify(data[key])) return { changed: false, before, after: before }
+    out = { ...data, [key]: kept }
+    if (kept === undefined) delete out[key]
+  }
   if (opts.dryRun) return { changed: true, before, after }
+  await writeConfigFile(file, target, raw, out)
+  return { changed: true, before, after }
+}
+
+/** The config file for a change: its real path, its text (null when missing) and the JSON object in it. */
+async function readConfigForEdit(
+  file: string,
+  retry: string,
+): Promise<{ target: string; raw: string | null; data: Record<string, unknown> }> {
+  const target = await configTarget(file)
+  let raw: string | null = null
+  try {
+    raw = await readFile(target, 'utf8')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT')
+      throw new ConfigError(`cannot read ${file}: ${(err as Error).message}`)
+  }
+  if (raw === null) return { target, raw, data: {} }
+  let parsed: unknown
+  try {
+    parsed = parseJsonSafely(raw, file)
+  } catch {
+    throw new ConfigError(`${file} is not valid JSON; nothing was changed. Fix the syntax and ${retry} again`)
+  }
+  if (!isObj(parsed))
+    throw new ConfigError(`${file} is not a JSON object; nothing was changed. Fix it and ${retry} again`)
+  const problem = schemaProblem(stripUnknown(ConfigSchema as unknown as SchemaNode, parsed))
+  if (problem) {
+    const where = problem.where.replace(/^\//, '').split('/').join('.') || 'the file'
+    throw new ConfigError(
+      `${file}: ${where} ${problem.message}, so nothing was changed. Fix it in the file (schemas/config.json lists the values it takes) and ${retry} again`,
+    )
+  }
+  return { target, raw, data: parsed }
+}
+
+/** Writes `data` as 2-space JSON atomically, keeping the file's mode (0600 for a new file), only if it did not change. */
+async function writeConfigFile(
+  file: string,
+  target: string,
+  raw: string | null,
+  data: Record<string, unknown>,
+): Promise<void> {
   const st = raw === null ? null : await lstatOrNull(target)
   if (raw === null) await mkdir(dirname(target), { recursive: true, mode: 0o700 })
   const written = await writeIfUnchanged(
     target,
     raw === null ? null : sha256(raw),
-    `${JSON.stringify(next, null, 2)}\n`,
+    `${JSON.stringify(data, null, 2)}\n`,
     st ? st.mode & 0o777 : 0o600,
   )
   if (!written)
     throw new ConfigError(`${file} changed while sideby was writing it; nothing was changed. Try again`)
-  return { changed: true, before, after }
+}
+
+/**
+ * `sideby config unset <key>` for a key in the file this sideby does not know (ADR-0080): removes just that key, and
+ * objects it leaves empty. Null when the file has no such unknown key.
+ */
+async function unsetUnknownKey(
+  file: string,
+  key: string,
+  opts: { dryRun?: boolean },
+): Promise<ConfigChange | null> {
+  const { target, raw, data } = await readConfigForEdit(file, 'run the command')
+  const found: string[][] = []
+  findUnknown(ConfigSchema as unknown as SchemaNode, data, [], found)
+  const path = found.find((p) => p.join('.') === key)
+  if (!path) return null
+  const before = getIn(data, path)
+  if (!opts.dryRun) {
+    const next = structuredClone(data)
+    const chain: unknown[] = [next]
+    for (const seg of path.slice(0, -1)) chain.push((chain.at(-1) as Record<string, unknown>)[seg])
+    for (let i = path.length - 1; i >= 0; i--) {
+      const parent = chain[i] as Record<string, unknown> | unknown[]
+      const child = (parent as Record<string, unknown>)[path[i]!]
+      if (i < path.length - 1 && !isEmptyObject(child)) break
+      if (Array.isArray(parent)) break
+      delete parent[path[i]!]
+    }
+    await writeConfigFile(file, target, raw, next)
+  }
+  return { key, before, after: undefined, changed: true }
 }
 
 async function editConfigAliases(
@@ -1145,6 +1365,7 @@ type SchemaNode = {
   description?: string
   properties?: Record<string, SchemaNode>
   patternProperties?: Record<string, SchemaNode>
+  additionalProperties?: boolean | SchemaNode
   anyOf?: SchemaNode[]
   items?: SchemaNode
   enum?: string[]
@@ -1361,6 +1582,18 @@ export async function editConfigPath(
     checkHandoff?: (before: HandoffConfig | undefined, after: HandoffConfig | undefined) => void
   } = {},
 ): Promise<ConfigChange> {
+  // A key this sideby does not know (ADR-0080) can only be removed, and only where the file has it.
+  const segs = key.split('.')
+  if (
+    value === undefined &&
+    key &&
+    !segs.some((p) => !p || BAD_SEGMENT.has(p)) &&
+    segs[0] !== '$schema' &&
+    segs[0] !== 'plugins'
+  ) {
+    const removed = await unsetUnknownKey(file, key, opts)
+    if (removed) return removed
+  }
   const path = configKeyPath(key)
   if (path[0] === 'plugins' && value !== undefined && typeof value !== 'boolean')
     throw new ConfigError(`${key} takes true or false`, { code: 'bad-value' })
@@ -1382,7 +1615,8 @@ export async function editConfigPath(
         opts.checkHandoff?.(current as HandoffConfig | undefined, result as HandoffConfig | undefined)
       return result
     },
-    opts,
+    // `config unset` of a section removes it whole, also keys this sideby does not know; anything else keeps them.
+    { ...opts, ...(value === undefined ? { drop: path.slice(1) } : {}) },
   )
   const inner = path.slice(1)
   return { key, before: getIn(r.before, inner), after: getIn(r.after, inner), changed: r.changed }

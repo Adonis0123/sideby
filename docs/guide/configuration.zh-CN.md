@@ -54,6 +54,8 @@
 | `unattended.answerWait` | Claude 会话给你看的提问或确认框等你多少分钟（1 到 120），之后无人值守开着时会话不再等，没有回答也继续；`false` 是一直等。没设时 10。用 `sideby unattended wait <分钟>\|off` 设置。 |
 | `extraSharedItems.<family>` | 在内置清单之外加你自己的共享项，每项要写 Share Mode（`link`、`copy`、`link-or-copy`、`link-or-local`、`local`、`local-if-api`、`info`、`json-key`）。`path` 相对于账号目录，绝对路径和 `..` 会被拒绝。 |
 
+当前 sideby 不认识的键（较新的 sideby 写的，或者拼错了）会被忽略：命令照常运行，`sideby list` 和 `sideby doctor` 会写出这个键和怎么处理（`sideby update`，或 `sideby config unset <key> --yes`）。sideby 改配置时，这些键原样留在原位。认识的键填错了值，sideby 仍会停下，写明哪个键、怎么改。sideby 0.41.2 及更早版本遇到不认识的键也会停下，所以把配置拷到旧版本之前先升级。
+
 ## Shell 函数
 
 ```sh

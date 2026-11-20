@@ -20,6 +20,8 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import {
+  configReadProblem,
+  configReadRefusal,
   devDir,
   globalPkg,
   keptVersion,
@@ -29,6 +31,7 @@ import {
   npmEnv,
   offPlan,
   pkgDir,
+  REBUILD_FIX,
   switchLocal,
   unlinkGlobal,
 } from '../src/core/local-build.ts'
@@ -68,11 +71,19 @@ export async function switchIn(d: LocalDirs, stage: string): Promise<void> {
     await rm(join(d.dev, 'old', name), { recursive: true, force: true })
 }
 
-/** Swaps the running build with the newest old one; false when there is none. */
-export async function switchBack(d: LocalDirs): Promise<boolean> {
+/**
+ * Swaps the running build with the newest old one; false when there is none. `check` looks at the old build first and
+ * returns why it may not run (it cannot read the config, ADR-0080); then nothing moves and that reason is thrown.
+ */
+export async function switchBack(
+  d: LocalDirs,
+  check?: (dir: string) => Promise<string | null>,
+): Promise<boolean> {
   const old = (await readdir(join(d.dev, 'old')).catch(() => [] as string[])).sort()
   const prev = old.at(-1)
   if (!prev) return false
+  const problem = await check?.(join(d.dev, 'old', prev))
+  if (problem) throw new Error(problem)
   const swap = join(d.dev, `.back-${prev}`)
   await rename(join(d.dev, 'old', prev), swap)
   await switchIn(d, swap)
@@ -191,6 +202,12 @@ async function build(d: LocalDirs): Promise<{ stage: string; id: string; commit:
       `the new build did not start (sideby --version):\n${(smoke.stderr || smoke.stdout).slice(0, 2000)}`,
     )
   }
+  // A build cut before a newer sideby wrote the config may stop at every command (ADR-0080): try it first.
+  const problem = await configReadProblem(stage, process.env)
+  if (problem) {
+    await rm(stage, { recursive: true, force: true })
+    throw new Error(configReadRefusal('The new build', problem, REBUILD_FIX))
+  }
   return { stage, id, commit, dirty }
 }
 
@@ -212,7 +229,18 @@ async function main(argv: string[]): Promise<void> {
   if (argv.includes('--off')) return localOff(d)
   refuseOtherManagers(d)
   if (argv.includes('--back')) {
-    if (!(await switchBack(d))) throw new Error(`no earlier local build in ${join(d.dev, 'old')}`)
+    const check = async (dir: string) => {
+      const problem = await configReadProblem(dir, process.env)
+      return (
+        problem &&
+        configReadRefusal(
+          'The previous build',
+          problem,
+          'that build is older than it: stay on the running build, or remove the key it names with `sideby config unset <key> --yes` and run `pnpm local --back` again.',
+        )
+      )
+    }
+    if (!(await switchBack(d, check))) throw new Error(`no earlier local build in ${join(d.dev, 'old')}`)
     console.log(`Switched back to the previous local build (${await buildIdOf(pkgDir(d))}).`)
   } else {
     const b = await build(d)

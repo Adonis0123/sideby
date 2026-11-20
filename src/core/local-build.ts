@@ -120,6 +120,42 @@ export function offPlan(kept: string | null, latest: string | null): 'restore' |
   return (compareVersions(kept, latest) ?? -1) >= 0 ? 'restore' : 'install'
 }
 
+/**
+ * Whether the sideby in `dir` can read the user's config file (spec §3.10, ADR-0080): runs its `config get --json`,
+ * which reads only that file, in `env` so `HOME` and `XDG_CONFIG_HOME` name the same file the user's sideby reads.
+ * Null when it can, else what it said. A build older than the sideby that wrote the config may not: 0.41.2 and older
+ * stop at a key they do not know.
+ */
+export async function configReadProblem(
+  dir: string,
+  env: Env,
+  run: typeof runProgram = runProgram,
+): Promise<string | null> {
+  const r = await run(process.execPath, [join(dir, BIN), 'config', 'get', '--json'], {
+    env: { ...env, SIDEBY_NO_UPDATE_NOTIFIER: '1' },
+  }).catch((e: unknown) => ({ code: -1, output: e instanceof Error ? e.message : String(e) }))
+  if (r.code === 0) return null
+  // A `--json` error is `{ "error": "…" }`; anything else (a crash) is shown as it came, shortened.
+  const m = /"error":\s*("(?:[^"\\]|\\.)*")/.exec(r.output)
+  let said = r.output.trim()
+  if (m) {
+    try {
+      said = JSON.parse(m[1]!) as string
+    } catch {
+      // keep the raw output
+    }
+  }
+  return said.slice(0, 1000) || `it exited with code ${r.code}`
+}
+
+/** What `pnpm local` and the switch say when a build cannot read the config: the cause and what to do (`fix`). */
+export const configReadRefusal = (who: string, problem: string, fix: string): string =>
+  `${who} cannot read your sideby config, so the running build was kept. It said: ${problem}. If a newer sideby wrote that config, ${fix} If the config file itself is wrong, fix what the message names first.`
+
+/** The fix for a Local Build older than the config: build it again from a checkout that has the newer code. */
+export const REBUILD_FIX =
+  'this build is older than it: rebase the sideby checkout onto main (`git fetch origin && git rebase origin/main`) and run `pnpm local` again.'
+
 export interface LocalStatus {
   /** What the global `sideby` runs: the Local Build in `pkg`, an npm package, or neither (not installed, a link elsewhere). */
   running: 'local' | 'npm' | null
@@ -256,6 +292,8 @@ export async function switchLocal(
   let message: string
   try {
     if (to === 'local') {
+      const problem = await configReadProblem(pkgDir(d), env)
+      if (problem) return fail(configReadRefusal('The local build', problem, REBUILD_FIX))
       await linkGlobal(d)
       message = `the global sideby runs the local build ${before.local?.commit ?? ''}`.trim()
     } else {

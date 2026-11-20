@@ -54,6 +54,8 @@ Optional. `${XDG_CONFIG_HOME:-~/.config}/sideby/config.json`, schema in [`schema
 | `unattended.answerWait` | How many minutes (1 to 120) a question or a confirmation shown in a Claude session waits for you before, with Unattended Mode on, the session goes on without an answer; `false` waits however long. Not set: 10. `sideby unattended wait <minutes>\|off` sets it. |
 | `extraSharedItems.<family>` | Your own Shared Items on top of the built-in list, each with a Share Mode (`link`, `copy`, `link-or-copy`, `link-or-local`, `local`, `local-if-api`, `info`, `json-key`). `path` is relative to the account directory; absolute paths and `..` are rejected. |
 
+A key this sideby does not know, because a newer sideby wrote it or it is a typo, is ignored: every command still runs, and `sideby list` and `sideby doctor` name the key with what to do (`sideby update`, or `sideby config unset <key> --yes`). Changes sideby makes keep such keys where they are. A known key with a wrong value still stops sideby with the key and the fix. sideby 0.41.2 and older stop at an unknown key too, so update before you copy a config to an older install.
+
 ## Shell functions
 
 ```sh

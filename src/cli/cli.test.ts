@@ -79,6 +79,42 @@ describe('first run', () => {
   })
 })
 
+describe('a config written by a newer sideby (ADR-0080)', () => {
+  it('lists, checks and reads config; says which key it ignores; refuses a new one', async () => {
+    await withFakeHome(async (h) => {
+      await codexMain(h)
+      await fakeHost(h, 'codex')
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ futureTop: true, claude: { futureKey: 1, carryTrust: true } }),
+      )
+      const list = await sideby(h, ['list'])
+      assert.equal(list.code, 0, list.err)
+      assert.match(list.out, /codex:main/)
+      assert.match(list.err, /config key "claude\.futureKey" is not one sideby .* knows/)
+      assert.match(list.err, /sideby config unset futureTop --yes/)
+      const json = await sideby(h, ['list', '--json'])
+      assert.equal(json.code, 0)
+      checkSchema('list', json.out)
+      const doctor = await sideby(h, ['doctor'])
+      assert.match(doctor.out, /! config key "futureTop"/)
+      // Reading the config touches no Host directory (what `pnpm local` runs to check a build).
+      const before = await snapshot(h.home)
+      const get = await sideby(h, ['config', 'get', '--json'])
+      assert.equal(get.code, 0, get.err)
+      assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+      const typo = await sideby(h, ['config', 'set', 'claude.typoKey', 'true', '--yes', '--json'])
+      assert.notEqual(typo.code, 0)
+      assert.match(typo.out, /not a config key/)
+      assert.equal((await sideby(h, ['config', 'unset', 'futureTop', '--yes'])).code, 0)
+      assert.equal((await sideby(h, ['config', 'set', 'claude.carryTrust', 'false', '--yes'])).code, 0)
+      assert.deepEqual(JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8')), {
+        claude: { futureKey: 1, carryTrust: false },
+      })
+    })
+  })
+})
+
 describe('list identity', () => {
   it('shows the signed-in email in the table and in valid --json, and no token', async () => {
     await withFakeHome(async (h) => {
