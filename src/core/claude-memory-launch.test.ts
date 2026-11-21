@@ -8,7 +8,10 @@ import { describe, it } from 'node:test'
 import { type FakeHome, fakeHost, readHostLog, withFakeHome } from '../../testing/index.ts'
 import { claudeFamily, claudePlugin } from '../families/claude/index.ts'
 import { claudeProjectDirName } from '../families/claude/layout.ts'
+import { MESSAGES } from '../panel/i18n.ts'
+import { findingSentence } from '../panel/page-logic.ts'
 import { createRuntime } from '../runtime.ts'
+import type { LiveRuns } from './claude-memory.ts'
 import { runWithHandoff } from './handoff-run.ts'
 import { withClaudeSessionHooks } from './session-hooks.ts'
 
@@ -201,6 +204,69 @@ if (process.env.SIDEBY_HANDOFF_DIR) fs.writeFileSync(path.join(process.env.SIDEB
       // The same call while on does list them: the count above would have caught it.
       assert.ok(asks > 0)
       assert.deepEqual(on.projects?.[0]?.pending, [{ account: 'claude:work', files: 1 }])
+    })
+  })
+})
+
+describe('the memory finding in the Panel', () => {
+  it('reaches the Panel with its params and reads in Chinese, naming the session that holds the project', async () => {
+    await withFakeHome(async (h) => {
+      const app = await h.mkdir('code/app')
+      const name = claudeProjectDirName(app)
+      await h.write('.claude/settings.json', '{}\n')
+      await h.write('.claude-work/settings.json', '{}\n')
+      await h.write(`.claude-work/projects/${name}/memory/a.md`, 'a\n')
+      // The main account's index lists a note that is not there.
+      await h.write('.claude/projects/-code-site/memory/MEMORY.md', '- [Gone](gone.md)\n')
+      await h.write(
+        '.config/sideby/config.json',
+        JSON.stringify({ claude: { shareMemory: true }, aliases: { ccw: 'claude:work' } }),
+      )
+      let live: LiveRuns = {
+        runs: [{ cwd: app, sessionId: 'ad73ceaf-0001-4000-8000-000000000001', title: 'tidy login' }],
+      }
+      const rt = await createRuntime({ env: h.env, builtins, memory: { liveRuns: async () => live } })
+      type Sent = { code: string; item: string; fixable: boolean; params?: Record<string, string | number> }
+      // What the Panel gets: the report as JSON.
+      const finding = async () => {
+        const report = JSON.parse(JSON.stringify(await rt.doctor({ target: 'claude' }))) as {
+          accounts: { findings: Sent[] }[]
+        }
+        return report.accounts.flatMap((a) => a.findings).find((f) => f.code === 'memory.unfolded')!
+      }
+      const waiting = await finding()
+      assert.equal(waiting.fixable, false)
+      const zhWaiting = `这个账号有 1 个项目的记忆还没移进主账号，但这个账号有会话正在里面运行。等这些会话结束后再修复：${name} (ccw · tidy login · ad73ceaf)。`
+      assert.equal(findingSentence(waiting, MESSAGES.zh, MESSAGES.en), zhWaiting)
+      // What the Panel shows on load: the last check, read back from Doctor's history.
+      await rt.doctorWithHistory({ target: 'claude' })
+      const history = JSON.parse(JSON.stringify(await rt.doctorHistory())) as {
+        accounts: Record<string, { findings: Sent[] }>
+        general: Record<string, { findings: Sent[] }>
+      }
+      const kept = history.accounts['claude:work']!.findings.find((f) => f.code === 'memory.unfolded')!
+      assert.equal(findingSentence(kept, MESSAGES.zh, MESSAGES.en), zhWaiting)
+      const index = Object.values(history.general)
+        .flatMap((e) => e.findings)
+        .find((f) => f.code === 'memory.index')!
+      assert.equal(
+        findingSentence(index, MESSAGES.zh, MESSAGES.en),
+        '主账号里 1 个项目的记忆索引（MEMORY.md）和文件对不上：-code-site。Claude 只读 MEMORY.md 里列出的记忆；可以在那个项目里让 Claude 整理记忆索引。',
+      )
+      live = { unknown: 'a record Claude Code is rewriting' }
+      const unknown = await finding()
+      assert.equal(unknown.fixable, false)
+      assert.match(
+        findingSentence(unknown, MESSAGES.zh, MESSAGES.en),
+        /sideby 现在看不出这个账号有哪些会话在运行，所以先不移/,
+      )
+      live = { runs: [] }
+      const ready = await finding()
+      assert.equal(ready.fixable, true)
+      assert.equal(
+        findingSentence(ready, MESSAGES.zh, MESSAGES.en),
+        `这个账号有 1 个项目的记忆只存在自己这里，其他 Claude 账号看不到：${name}。`,
+      )
     })
   })
 })

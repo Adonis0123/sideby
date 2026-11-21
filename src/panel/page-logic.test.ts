@@ -29,6 +29,7 @@ import {
   dotsKeepKeyboard,
   enableOutcome,
   fileSize,
+  findingSentence,
   fixPrompt,
   foldSkips,
   foldToolCalls,
@@ -1231,7 +1232,11 @@ describe('whole-Panel UX pass (three-way audit, 2026-10-17)', () => {
     assert.doesNotMatch(body('nextTag'), /addEventListener\('click', \(\) => copyText/)
   })
   it("shows a Health finding in plain words, with the check's own text under Details", () => {
-    assert.match(body('findingRow'), /'finding\.' \+ f\.code/)
+    assert.match(body('findingRow'), /findingSentence\(f, MESSAGES\[lang\] \|\| \{\}, MESSAGES\.en\)/)
+    assert.match(
+      body('fixLine'),
+      /findingSentence\(f, MESSAGES\[lang\] \|\| \{\}, MESSAGES\.en, 'fixres\.'\)/,
+    )
     assert.match(body('findingRow'), /h\('details', \{ class: 'finding-raw' \}/)
     for (const code of [
       'link.real-file',
@@ -1242,6 +1247,41 @@ describe('whole-Panel UX pass (three-way audit, 2026-10-17)', () => {
       'json-key.drift',
     ])
       assert.ok(MESSAGES.zh[`finding.${code}` as keyof typeof MESSAGES.zh], code)
+  })
+  it("puts a finding into its code's sentence, by variant and count, in the Panel's language", () => {
+    const waiting = {
+      code: 'memory.unfolded',
+      item: 'projects/*/memory',
+      params: { form: 'waiting', n: 1, waiting: '-code-app (ccw · tidy login · ad73ceaf)' },
+    }
+    assert.equal(
+      findingSentence(waiting, MESSAGES.zh, MESSAGES.en),
+      '这个账号有 1 个项目的记忆还没移进主账号，但这个账号有会话正在里面运行。等这些会话结束后再修复：-code-app (ccw · tidy login · ad73ceaf)。',
+    )
+    assert.match(
+      findingSentence({ ...waiting, params: { ...waiting.params, n: 2 } }, MESSAGES.en, MESSAGES.en),
+      /for 2 projects, but sessions of this account/,
+    )
+    // A finding without params keeps its plain sentence; a code without one gives '' (the check's own text is shown).
+    assert.equal(
+      findingSentence({ code: 'missing', item: 'skills' }, MESSAGES.zh, MESSAGES.en),
+      '这个账号缺少 skills。',
+    )
+    assert.equal(findingSentence({ code: 'no.such', item: 'x' }, MESSAGES.zh, MESSAGES.en), '')
+    // One saved by an older sideby, without the values its sentence needs, shows the check's own text instead.
+    assert.equal(
+      findingSentence({ code: 'memory.unfolded', item: 'projects/*/memory' }, MESSAGES.zh, MESSAGES.en),
+      '',
+    )
+    assert.equal(
+      findingSentence(
+        { code: 'memory.unfolded', params: { form: 'unknown' } },
+        MESSAGES.zh,
+        MESSAGES.en,
+        'fixres.',
+      ),
+      'sideby 看不出这个账号有哪些会话在运行，所以什么都没移。稍后再试。',
+    )
   })
   it('keeps the colour of old quota and says its age in words', () => {
     assert.match(body('quotaBlock'), /q-asof/)

@@ -321,6 +321,11 @@ const FamilyDetail = Type.Intersect([
 
 const PluginError = Type.Object({ where: Str, message: Str })
 
+const FindingParams = Type.Record(Type.String(), Type.Union([Type.String(), Type.Number()]), {
+  description:
+    'Names and counts the Panel puts into its own translated sentence for `code`; `form` picks a variant of it. The `message` says the same in English.',
+})
+
 const Finding = Type.Object({
   level: Level,
   account: Str,
@@ -328,6 +333,7 @@ const Finding = Type.Object({
   code: Str,
   message: Str,
   hint: Type.Optional(Str),
+  params: Type.Optional(FindingParams),
   source: Str,
   fixable: Type.Boolean(),
 })
@@ -981,7 +987,14 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       ),
       general: Type.Array(Finding),
       fixes: Type.Array(
-        Type.Object({ account: Str, item: Str, code: Str, ok: Type.Boolean(), message: Str }),
+        Type.Object({
+          account: Str,
+          item: Str,
+          code: Str,
+          ok: Type.Boolean(),
+          message: Str,
+          params: Type.Optional(FindingParams),
+        }),
       ),
     },
     { title: 'sideby doctor --json' },

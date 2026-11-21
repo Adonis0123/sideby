@@ -1,6 +1,14 @@
 import { readdir } from 'node:fs/promises'
 import type { HookBus } from '../plugins/bus.ts'
-import type { Account, CheckResult, FamilyDef, Finding, FixResult, LoginProblem } from '../types.ts'
+import type {
+  Account,
+  CheckResult,
+  FamilyDef,
+  Finding,
+  FindingParams,
+  FixResult,
+  LoginProblem,
+} from '../types.ts'
 import { looksLikeBackup, mainDirOf } from './accounts.ts'
 import { lstatOrNull, permBits, statOrNull } from './fs-safe.ts'
 import { inspectSecretFile } from './secret-file.ts'
@@ -24,6 +32,7 @@ export interface FixOutcome {
   code: string
   ok: boolean
   message: string
+  params?: FindingParams
 }
 
 export interface DoctorReport {

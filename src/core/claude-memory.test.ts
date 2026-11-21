@@ -19,15 +19,16 @@ import { claudeProjectDirName } from '../families/claude/layout.ts'
 import type { Account } from '../types.ts'
 import {
   accountMemories,
-  claudeLiveCwds,
+  claudeLiveRuns,
   FOLD_STAGE,
   foldAccount,
   foldProject,
   indexProblems,
   indexTargets,
   keepInState,
-  type LiveCwds,
+  type LiveRuns,
   type MemoryDoctorContext,
+  memoryFindings,
   memoryStatus,
   memoryTarget,
   mergeIndex,
@@ -50,12 +51,13 @@ const at = new Date('2026-11-20T08:00:00Z')
 
 function ctx(
   h: FakeHome,
-  liveCwds: (a: Account) => Promise<LiveCwds> = async () => ({ cwds: [] }),
+  liveRuns: (a: Account) => Promise<LiveRuns> = async () => ({ runs: [] }),
 ): MemoryDoctorContext {
   return {
     mainDir: h.path('.claude'),
     stateDir: stateDir(h),
-    liveCwds,
+    liveRuns,
+    label: (a, r) => [a.ref, r.title, r.sessionId.slice(0, 8)].filter(Boolean).join(' · '),
     trash: (p) => keepInState(p, stateDir(h), at),
     now: () => at,
     show: (p) => p.split(`${h.home}/`).join('~/'),
@@ -271,6 +273,83 @@ describe("Doctor's fold of an account's own memory", () => {
     })
   })
 
+  describe('the memory finding while sessions of the account run', () => {
+    const run = (cwd: string) => ({
+      cwd,
+      sessionId: 'ad73ceaf-0001-4000-8000-000000000001',
+      title: 'tidy login',
+    })
+    async function seed(h: FakeHome, ...projects: string[]) {
+      await h.mkdir('.claude/projects')
+      const out: { path: string; name: string }[] = []
+      for (const p of projects) {
+        const path = await h.mkdir(`code/${p}`)
+        const name = claudeProjectDirName(path)
+        await h.write(`.claude-work/projects/${name}/memory/${p}.md`, `${p}\n`)
+        out.push({ path, name })
+      }
+      return out
+    }
+
+    it('offers no fix and names the session when every project waits for one', async () => {
+      await withFakeHome(async (h) => {
+        const [app] = await seed(h, 'app')
+        const c = ctx(h, async () => ({ runs: [run(app!.path)] }))
+        const [f] = await memoryFindings(c, work(h))
+        assert.equal(f?.code, 'memory.unfolded')
+        assert.equal(f?.fixable, false)
+        assert.equal(f?.fix, undefined)
+        const holds = `${app!.name} (claude:work · tidy login · ad73ceaf)`
+        assert.deepEqual(f?.params, { form: 'waiting', n: 1, waiting: holds })
+        assert.ok(
+          f?.message.includes(
+            `a session of claude:work works in it: ${holds}; it moves once that session ends`,
+          ),
+        )
+        assert.match(f?.hint ?? '', /wait until that session ends.*do not move memory files by hand/)
+        // A Fix run anyway (another surface, or a stale list) moves nothing and says why.
+        const r = await foldAccount(c, work(h))
+        assert.equal(r.ok, false)
+        assert.deepEqual(r.params, { form: 'waiting', waiting: holds })
+        assert.equal(await exists(h.path(`.claude-work/projects/${app!.name}/memory/app.md`)), true)
+      })
+    })
+
+    it('says how many move now and which wait when only some projects have a session', async () => {
+      await withFakeHome(async (h) => {
+        const [app, site] = await seed(h, 'app', 'site')
+        const c = ctx(h, async () => ({ runs: [run(app!.path)] }))
+        const [f] = await memoryFindings(c, work(h))
+        const holds = `${app!.name} (claude:work · tidy login · ad73ceaf)`
+        assert.equal(f?.fixable, true)
+        assert.deepEqual(f?.params, { form: 'some', n: 2, ready: 1, waiting: holds })
+        assert.ok(
+          f?.message.includes(
+            `the fix moves 1 project now, and these wait until their session ends: ${holds}`,
+          ),
+        )
+        const r = await f!.fix!()
+        assert.equal(r.ok, true, r.message)
+        assert.equal(await exists(h.path(`.claude/projects/${site!.name}/memory/site.md`)), true)
+        assert.equal(await exists(h.path(`.claude-work/projects/${app!.name}/memory/app.md`)), true)
+      })
+    })
+
+    it('says it cannot tell which sessions run instead of offering a fix', async () => {
+      await withFakeHome(async (h) => {
+        await seed(h, 'app')
+        const [f] = await memoryFindings(
+          ctx(h, async () => ({ unknown: 'a record Claude Code is rewriting' })),
+          work(h),
+        )
+        assert.equal(f?.fixable, false)
+        assert.equal(f?.params?.form, 'unknown')
+        assert.match(f?.message ?? '', /cannot tell which sessions of claude:work are running right now/)
+        assert.match(f?.hint ?? '', /check again in a moment.*Do not move memory files by hand/)
+      })
+    })
+  })
+
   it('leaves a project alone while a session of that account works in it, and moves nothing when it cannot tell', async () => {
     await withFakeHome(async (h) => {
       await h.mkdir('.claude/projects')
@@ -279,11 +358,16 @@ describe("Doctor's fold of an account's own memory", () => {
       await h.write(`.claude-work/projects/${name}/memory/a.md`, 'a\n')
       await h.write('.claude-work/projects/-other/memory/b.md', 'b\n')
       const r = await foldAccount(
-        ctx(h, async () => ({ cwds: [app] })),
+        ctx(h, async () => ({ runs: [{ cwd: app, sessionId: 'ad73ceaf-0001', title: 'tidy login' }] })),
         work(h),
       )
       assert.equal(r.ok, true)
-      assert.match(r.message, /left 1 project while a session of claude:work works there/)
+      assert.match(
+        r.message,
+        new RegExp(
+          `left 1 project while a session of claude:work works there: ${name} \\(claude:work · tidy login · ad73ceaf\\)`,
+        ),
+      )
       assert.equal(await exists(h.path(`.claude-work/projects/${name}/memory/a.md`)), true)
       assert.equal(await exists(h.path('.claude/projects/-other/memory/b.md')), true)
 
@@ -433,10 +517,10 @@ describe('review rounds: the fold never loses or mislinks memory', () => {
         await h.mkdir('.claude/projects')
         await h.write('.claude-work/projects/-p/memory/a.md', 'a\n')
         await h.write('.claude-work/sessions/4242.json', text)
-        const live = await claudeLiveCwds(work(h), procs)
+        const live = await claudeLiveRuns(work(h), procs)
         assert.ok('unknown' in live, JSON.stringify(live))
         const r = await foldAccount(
-          ctx(h, () => claudeLiveCwds(work(h), procs)),
+          ctx(h, () => claudeLiveRuns(work(h), procs)),
           work(h),
         )
         assert.equal(r.ok, false)
@@ -449,10 +533,19 @@ describe('review rounds: the fold never loses or mislinks memory', () => {
   it('reads a running session, and counts a record whose pid now belongs to another process as ended', async () => {
     await withFakeHome(async (h) => {
       await h.write('.claude-work/sessions/4242.json', record({ sessionId: 's1', cwd: '/srv/app' }))
-      assert.deepEqual(await claudeLiveCwds(work(h), procsWith(4242)), { cwds: ['/srv/app'] })
-      assert.deepEqual(await claudeLiveCwds(work(h), procsWith(4242, startMs + 60_000)), { cwds: [] })
-      assert.deepEqual(await claudeLiveCwds(work(h), procsWith(1)), { cwds: [] })
-      assert.deepEqual(await claudeLiveCwds({ ...work(h), dir: h.path('.claude-none') }, noPs), { cwds: [] })
+      assert.deepEqual(await claudeLiveRuns(work(h), procsWith(4242)), {
+        runs: [{ cwd: '/srv/app', sessionId: 's1', title: 'app' }],
+      })
+      await h.write(
+        '.claude-work/sessions/4242.json',
+        record({ sessionId: 's1', cwd: '/srv/app', name: 'tidy login', nameSource: 'user' }),
+      )
+      assert.deepEqual(await claudeLiveRuns(work(h), procsWith(4242)), {
+        runs: [{ cwd: '/srv/app', sessionId: 's1', title: 'tidy login' }],
+      })
+      assert.deepEqual(await claudeLiveRuns(work(h), procsWith(4242, startMs + 60_000)), { runs: [] })
+      assert.deepEqual(await claudeLiveRuns(work(h), procsWith(1)), { runs: [] })
+      assert.deepEqual(await claudeLiveRuns({ ...work(h), dir: h.path('.claude-none') }, noPs), { runs: [] })
     })
   })
 

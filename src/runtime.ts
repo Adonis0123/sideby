@@ -20,9 +20,9 @@ import {
   undoAdvisor,
 } from './core/advisor.ts'
 import {
-  claudeLiveCwds,
+  claudeLiveRuns,
   type FoldRecord,
-  type LiveCwds,
+  type LiveRuns,
   type MemoryDoctorContext,
   type MemoryStatus,
   mainMemoryFindings,
@@ -738,7 +738,7 @@ export async function createRuntime(
      * Internal, for tests: the working folders of an Account's Live Sessions (null: cannot tell) and where Doctor puts a
      * memory folder it emptied (spec §3.44). Omitted, the Claude session files with `ps`, and the system trash.
      */
-    memory?: { liveCwds?: (account: Account) => Promise<LiveCwds>; trash?: Trash }
+    memory?: { liveRuns?: (account: Account) => Promise<LiveRuns>; trash?: Trash }
   } = {},
 ): Promise<Runtime> {
   const env = opts.env ?? process.env
@@ -889,19 +889,24 @@ export async function createRuntime(
   }
 
   /** What Doctor's Shared Project Memory check and Fix use (spec §3.44, ADR-0081). */
-  const memoryCtx = (): MemoryDoctorContext => ({
-    mainDir: claudeMainDir(),
-    stateDir: paths.stateDir,
-    liveCwds:
-      opts.memory?.liveCwds ??
-      (async (a) => {
-        const { processView, systemDeps } = await import('./core/live-sessions-procs.ts')
-        return claudeLiveCwds(a, processView(systemDeps(env)))
-      }),
-    trash: opts.memory?.trash ?? systemTrash(env, paths.stateDir, now),
-    now,
-    show: (p) => p.split(`${paths.home}/`).join('~/'),
-  })
+  const memoryCtx = async (): Promise<MemoryDoctorContext> => {
+    const { accountLabels, sessionLabel } = await import('./core/live-sessions.ts')
+    const labels = accountLabels(rt, await accounts())
+    return {
+      mainDir: claudeMainDir(),
+      stateDir: paths.stateDir,
+      liveRuns:
+        opts.memory?.liveRuns ??
+        (async (a) => {
+          const { processView, systemDeps } = await import('./core/live-sessions-procs.ts')
+          return claudeLiveRuns(a, processView(systemDeps(env)))
+        }),
+      label: (a, run) => sessionLabel(labels.get(a.ref) ?? a.ref, run.title ?? '', run.sessionId),
+      trash: opts.memory?.trash ?? systemTrash(env, paths.stateDir, now),
+      now,
+      show: (p) => p.split(`${paths.home}/`).join('~/'),
+    }
+  }
 
   /** Puts every session hook into the Launch's arguments: one `--settings` for Claude, `-c hooks.*` for Codex. */
   const addSessionHooks = async (p: PreparedLaunch, list: readonly (SessionHookPart | null)[]) => {
@@ -1579,7 +1584,7 @@ export async function createRuntime(
       const freshMemory = await loadConfig(paths.configFile).catch(() => null)
       if (freshMemory) config.claude = freshMemory.claude
       const memoryOn = config.claude?.shareMemory === true && fams.has('claude')
-      const mctx = memoryOn ? memoryCtx() : null
+      const mctx = memoryOn ? await memoryCtx() : null
       const input = {
         home: paths.home,
         families: fams,

@@ -8,7 +8,13 @@ import type { LiveSessionStatus } from '../../core/live-sessions.ts'
 import { isoOf } from '../../core/live-sessions-procs.ts'
 import type { LiveSessionReader, RawLiveSession } from '../live-sessions.ts'
 import { claudeProjectDirName } from './layout.ts'
-import { readSessionRecord, recordRunsOn, recordStart, tailLinesWith } from './session-files.ts'
+import {
+  readSessionRecord,
+  recordRunsOn,
+  recordStart,
+  type SessionRecord,
+  tailLinesWith,
+} from './session-files.ts'
 
 const PID_FILE = /^(\d+)\.json$/
 
@@ -69,6 +75,24 @@ export async function claudeAiTitle(transcript: string): Promise<string | undefi
   return title
 }
 
+/**
+ * A running session's transcript (when it is there) and the title sideby shows for it: a name the user gave (`/rename`,
+ * `-n`), else Claude Code's own title, else a derived name (`<dir>-3f`), else the folder's name. Never throws.
+ */
+export async function claudeSessionTitle(
+  accountDir: string,
+  rec: SessionRecord,
+  sessionId: string,
+): Promise<{ title?: string; transcript?: string }> {
+  const cwd = str(rec.cwd)
+  const candidate = cwd ? claudeTranscript(accountDir, cwd, sessionId) : undefined
+  const transcript = candidate && (await statOrNull(candidate).catch(() => null)) ? candidate : undefined
+  const named = rec.nameSource !== 'derived' ? str(rec.name) : undefined
+  const aiTitle = named || !transcript ? undefined : await claudeAiTitle(transcript).catch(() => undefined)
+  const title = named ?? aiTitle ?? str(rec.name) ?? (cwd ? basename(cwd) : undefined)
+  return { ...(title ? { title } : {}), ...(transcript ? { transcript } : {}) }
+}
+
 export const claudeLiveSessions: LiveSessionReader = {
   family: 'claude',
   async read(account, procs, problems) {
@@ -107,13 +131,7 @@ export const claudeLiveSessions: LiveSessionReader = {
       }
       if (!recordRunsOn(rec, proc)) continue
       const cwd = str(rec.cwd)
-      const candidate = cwd ? claudeTranscript(account.dir, cwd, sessionId) : undefined
-      const transcript = candidate && (await statOrNull(candidate)) ? candidate : undefined
-      // A name the user gave (`/rename`, `-n`) wins; a derived one (`<dir>-3f`) loses to Claude Code's own title.
-      const named = rec.nameSource !== 'derived' ? str(rec.name) : undefined
-      const aiTitle =
-        named || !transcript ? undefined : await claudeAiTitle(transcript).catch(() => undefined)
-      const title = named ?? aiTitle ?? str(rec.name) ?? (cwd ? basename(cwd) : undefined)
+      const { title, transcript } = await claudeSessionTitle(account.dir, rec, sessionId)
       const startedFrom = claudeStartedFrom(rec.entrypoint)
       out.push({
         sessionId,

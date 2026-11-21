@@ -31,6 +31,7 @@ import {
   enableOutcome,
   expiredLogins,
   fileSize,
+  findingSentence,
   fixPrompt,
   foldSkips,
   foldToolCalls,
@@ -203,6 +204,7 @@ const LOGIC = [
   dateFormatter,
   runCodeSwap,
   switchFailure,
+  findingSentence,
   panelFixes,
   panelHint,
   panelLang,
@@ -3409,9 +3411,9 @@ const MAIN = String.raw`
   // A Finding in plain words (its code's sentence); the check's own text goes under "Details".
   function findingRow(f) {
     const own = panelFixes(f, skillFixable())
-    const key = 'finding.' + f.code
-    const plain = Object.hasOwn(MESSAGES.en, key) ? t(key, { item: f.item }) : ''
-    const fixHere = plain && f.fixable && !BOOT.readOnly && !own
+    const plain = findingSentence(f, MESSAGES[lang] || {}, MESSAGES.en)
+    // A finding whose sentence says some of it waits (Shared Project Memory) already says what Fix all does now.
+    const fixHere = plain && f.fixable && !BOOT.readOnly && !own && !(f.params && f.params.waiting)
     return h('li', { class: 'finding lvl-' + f.level },
       h('span', { class: 'dot', title: f.level }),
       h('div', { class: 'finding-body' },
@@ -3427,6 +3429,12 @@ const MAIN = String.raw`
             : f.hint && !plain ? h('p', { class: 'hint' }, panelHint(f.hint, f.fixable && !BOOT.readOnly, t('fix.hintAction'))) : null,
         // The check's own words (and any command to run) stay one click away.
         plain ? h('details', { class: 'finding-raw' }, h('summary', null, t('finding.raw')), h('p', { class: 'mono small' }, f.message), f.hint ? h('p', { class: 'mono small' }, f.hint) : null) : null))
+  }
+  // A Fix that did not fix: its plain sentence when the check gave one, the check's own words one click away.
+  function fixLine(f) {
+    const plain = findingSentence(f, MESSAGES[lang] || {}, MESSAGES.en, 'fixres.')
+    return h('li', null, h('b', null, f.account + ' · ' + f.item + colon()), plain || f.message,
+      plain ? h('details', { class: 'finding-raw' }, h('summary', null, t('finding.raw')), h('p', { class: 'mono small' }, f.message)) : null)
   }
   function renderCheckup() {
     const box = $('checkup')
@@ -3470,7 +3478,7 @@ const MAIN = String.raw`
       const failed = S.fixes.filter((f) => !f.ok)
       out.push(h('div', { class: 'fix-result ' + (failed.length ? 'is-warn' : 'is-ok'), role: 'status' },
         S.fixes.length ? t('fix.result', { ok: S.fixes.length - failed.length, n: S.fixes.length }) : t('fix.nothing'),
-        failed.length ? h('ul', null, failed.map((f) => h('li', null, h('b', null, f.account + ' · ' + f.item + colon()), f.message))) : null))
+        failed.length ? h('ul', null, failed.map(fixLine)) : null))
     }
     if (!findings) {
       if (busy || !S.state) out.push(h('span', { class: 'sk sk-line w70' }), h('span', { class: 'sk sk-line w50' }))

@@ -490,6 +490,36 @@ const en = {
   'finding.extra-check.error': 'An extra check could not finish.',
   'finding.fixHint': 'Click Fix all to fix it.',
   'finding.raw': 'Details',
+  'finding.memory.unfolded.one':
+    'This account keeps its own memory for 1 project that your other Claude accounts do not see: {projects}.',
+  'finding.memory.unfolded.other':
+    'This account keeps its own memory for {n} projects that your other Claude accounts do not see: {projects}.',
+  'finding.memory.unfolded.some':
+    'This account keeps its own memory for {n} projects. Fix all moves {ready} of them into the main account now; these wait until their session ends: {waiting}.',
+  'finding.memory.unfolded.waiting.one':
+    'This account keeps its own memory for 1 project, but a session of this account is working there. Fix it after that session ends: {waiting}.',
+  'finding.memory.unfolded.waiting.other':
+    'This account keeps its own memory for {n} projects, but sessions of this account are working in each of them. Fix them after those sessions end: {waiting}.',
+  'finding.memory.unfolded.unknown.one':
+    'This account keeps its own memory for 1 project ({projects}), but sideby cannot tell right now which of its sessions are running, so it does not move it yet. Run the check again in a moment.',
+  'finding.memory.unfolded.unknown.other':
+    'This account keeps its own memory for {n} projects ({projects}), but sideby cannot tell right now which of its sessions are running, so it does not move them yet. Run the check again in a moment.',
+  'finding.memory.link':
+    '{path} is a link. Claude Code does not write memory through a link, and sideby does not follow it; replace it with a real folder.',
+  'finding.memory.index.one':
+    'The memory index (MEMORY.md) of 1 project in the main account does not match its files: {projects}. Claude reads only what MEMORY.md lists; ask Claude in that project to tidy its memory index.',
+  'finding.memory.index.other':
+    'The memory index (MEMORY.md) of {n} projects in the main account does not match their files: {projects}. Claude reads only what MEMORY.md lists; ask Claude in each project to tidy its memory index.',
+  'finding.memory.name-mismatch':
+    'Claude Code named the project folder of {path} "{folder}", but sideby would name it "{derived}". Claude Code may have changed how it names project folders; turn shared memory off until you update sideby.',
+  'fixres.memory.unfolded.unknown':
+    'sideby cannot tell which sessions of this account are running, so it moved nothing. Try again in a moment.',
+  'fixres.memory.unfolded.waiting':
+    'Nothing moved: sessions of this account are still working in these projects. Fix them after those sessions end: {waiting}.',
+  'fixres.memory.unfolded.some.one':
+    'The project could not be moved fully into the main account and stays in this account for now: {left}.',
+  'fixres.memory.unfolded.some.other':
+    'Moved {moved} of {n} projects into the main account; these stay in this account for now: {left}.',
   'win.5h': '5-hour',
   'win.7d': 'Weekly',
   'win.5h.short': '5-hour',
@@ -2516,6 +2546,34 @@ const zh: Record<MessageKey, string> = {
   'finding.extra-check.error': '有一项额外检查没能完成。',
   'finding.fixHint': '点「全部修复」就能修好。',
   'finding.raw': '详情',
+  'finding.memory.unfolded.one':
+    '这个账号有 1 个项目的记忆只存在自己这里，其他 Claude 账号看不到：{projects}。',
+  'finding.memory.unfolded.other':
+    '这个账号有 {n} 个项目的记忆只存在自己这里，其他 Claude 账号看不到：{projects}。',
+  'finding.memory.unfolded.some':
+    '这个账号有 {n} 个项目的记忆还没移进主账号。「全部修复」现在移 {ready} 个；这些要等会话结束后再修复：{waiting}。',
+  'finding.memory.unfolded.waiting.one':
+    '这个账号有 1 个项目的记忆还没移进主账号，但这个账号有会话正在里面运行。等这些会话结束后再修复：{waiting}。',
+  'finding.memory.unfolded.waiting.other':
+    '这个账号有 {n} 个项目的记忆还没移进主账号，但这个账号有会话正在这些项目里运行。等这些会话结束后再修复：{waiting}。',
+  'finding.memory.unfolded.unknown.one':
+    '这个账号有 1 个项目的记忆还没移进主账号（{projects}），但 sideby 现在看不出这个账号有哪些会话在运行，所以先不移。稍后再运行检查。',
+  'finding.memory.unfolded.unknown.other':
+    '这个账号有 {n} 个项目的记忆还没移进主账号（{projects}），但 sideby 现在看不出这个账号有哪些会话在运行，所以先不移。稍后再运行检查。',
+  'finding.memory.link':
+    '{path} 是一个链接。Claude Code 不会通过链接写记忆，sideby 也不会跟着链接走；请把它换成真正的文件夹。',
+  'finding.memory.index.one':
+    '主账号里 1 个项目的记忆索引（MEMORY.md）和文件对不上：{projects}。Claude 只读 MEMORY.md 里列出的记忆；可以在那个项目里让 Claude 整理记忆索引。',
+  'finding.memory.index.other':
+    '主账号里 {n} 个项目的记忆索引（MEMORY.md）和文件对不上：{projects}。Claude 只读 MEMORY.md 里列出的记忆；可以在这些项目里让 Claude 整理记忆索引。',
+  'finding.memory.name-mismatch':
+    'Claude Code 给 {path} 起的项目文件夹名是「{folder}」，但 sideby 会起名为「{derived}」。Claude Code 可能改了起名方式；更新 sideby 之前先关掉共享记忆。',
+  'fixres.memory.unfolded.unknown': 'sideby 看不出这个账号有哪些会话在运行，所以什么都没移。稍后再试。',
+  'fixres.memory.unfolded.waiting':
+    '什么都没移：这个账号还有会话在这些项目里运行。等这些会话结束后再修复：{waiting}。',
+  'fixres.memory.unfolded.some.one': '这个项目没能完整移进主账号，暂时留在这个账号：{left}。',
+  'fixres.memory.unfolded.some.other':
+    '{n} 个项目里已有 {moved} 个移进主账号；这些暂时留在这个账号：{left}。',
   'win.5h': '5 小时额度',
   'win.7d': '每周额度',
   'win.5h.short': '5 小时',

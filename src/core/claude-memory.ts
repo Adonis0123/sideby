@@ -27,6 +27,7 @@ import {
 import { userInfo } from 'node:os'
 import { basename, dirname, extname, join, posix } from 'node:path'
 import { claudeProjectDirName } from '../families/claude/layout.ts'
+import { claudeSessionTitle } from '../families/claude/live-sessions.ts'
 import { readSessionRecord, recordRunsOn, recordStart } from '../families/claude/session-files.ts'
 import type { Account, CheckResult, Env, Finding, FixResult } from '../types.ts'
 import { trustRoot } from './claude-trust.ts'
@@ -230,35 +231,43 @@ export async function keepInState(path: string, stateDir: string, at: Date): Pro
   }
 }
 
-/** The working folders of an Account's Live Sessions, or why sideby cannot tell which run. */
-export type LiveCwds = { cwds: string[] } | { unknown: string }
+/** One Live Session of an Account: where it works, and what sideby shows for it. */
+export interface LiveRun {
+  cwd: string
+  sessionId: string
+  /** The session's title as `sideby sessions` shows it (`claudeSessionTitle`). */
+  title?: string
+}
+
+/** An Account's Live Sessions, or why sideby cannot tell which run. */
+export type LiveRuns = { runs: LiveRun[] } | { unknown: string }
 
 const PID_FILE = /^(\d+)\.json$/
 
 /**
- * The working folders of a Claude Account's Live Sessions, from Claude Code's `sessions/<pid>.json` files and the
- * process list. It fails closed: a record of a running process that cannot be read (one Claude Code is rewriting),
+ * A Claude Account's Live Sessions (working folder, session id, title), from Claude Code's `sessions/<pid>.json` files
+ * and the process list. It fails closed: a record of a running process that cannot be read (one Claude Code is rewriting),
  * lacks its session id, working folder or start time, or a process list that cannot be read, means sideby cannot
  * tell which Projects are in use, so the Fix moves nothing of that Account. Only a record whose process is gone, or
  * whose pid now belongs to another process (its start time differs), counts as ended.
  */
-export async function claudeLiveCwds(account: Account, procs: ProcessView): Promise<LiveCwds> {
+export async function claudeLiveRuns(account: Account, procs: ProcessView): Promise<LiveRuns> {
   const root = join(account.dir, 'sessions')
   let names: string[]
   try {
     names = await readdir(root)
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { cwds: [] }
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { runs: [] }
     return { unknown: `${root} cannot be read` }
   }
   const files = names.filter((n) => PID_FILE.test(n)).sort()
-  if (!files.length) return { cwds: [] }
+  if (!files.length) return { runs: [] }
   try {
     await procs.list()
   } catch (err) {
     return { unknown: `the running programs cannot be listed (${(err as Error).message})` }
   }
-  const cwds: string[] = []
+  const runs: LiveRun[] = []
   for (const name of files) {
     const proc = await procs.get(Number(PID_FILE.exec(name)![1]))
     if (!proc) continue
@@ -271,20 +280,30 @@ export async function claudeLiveCwds(account: Account, procs: ProcessView): Prom
     const cwd = typeof rec.cwd === 'string' && rec.cwd ? rec.cwd : undefined
     const id = typeof rec.sessionId === 'string' && rec.sessionId ? rec.sessionId : undefined
     if (!cwd || !id) return { unknown: `${file} does not say which ${cwd ? 'session' : 'folder'} it runs` }
-    cwds.push(cwd)
+    // Only for showing which session holds a Project: a title that cannot be read is left out.
+    const { title } = await claudeSessionTitle(account.dir, rec, id).catch(() => ({ title: undefined }))
+    runs.push({ cwd, sessionId: id, ...(title ? { title } : {}) })
   }
-  return { cwds }
+  return { runs }
 }
 
-/** The names of the session folders a Live Session in each of `cwds` uses for memory (its Project, and itself). */
-export async function liveProjects(cwds: readonly string[]): Promise<Set<string>> {
-  const out = new Set<string>()
-  for (const cwd of cwds) {
-    out.add(claudeProjectDirName(cwd))
-    const real = await realpath(cwd).catch(() => null)
-    if (real) out.add(claudeProjectDirName(real))
-    const root = await trustRoot(cwd)
-    if (root.kind !== 'unclear') out.add(claudeProjectDirName(root.path))
+/**
+ * The session folders each Live Session uses for memory (its Project, its own folder and that folder's real path),
+ * each with the sessions that work there.
+ */
+export async function liveProjects(runs: readonly LiveRun[]): Promise<Map<string, LiveRun[]>> {
+  const out = new Map<string, LiveRun[]>()
+  const add = (name: string, run: LiveRun) => {
+    const list = out.get(name) ?? []
+    if (!list.includes(run)) list.push(run)
+    out.set(name, list)
+  }
+  for (const run of runs) {
+    add(claudeProjectDirName(run.cwd), run)
+    const real = await realpath(run.cwd).catch(() => null)
+    if (real) add(claudeProjectDirName(real), run)
+    const root = await trustRoot(run.cwd)
+    if (root.kind !== 'unclear') add(claudeProjectDirName(root.path), run)
   }
   return out
 }
@@ -740,28 +759,58 @@ async function recordFolds(stateDir: string, add: readonly FoldRecord[]): Promis
 export interface MemoryDoctorContext {
   mainDir: string
   stateDir: string
-  /** The working folders of the Account's Live Sessions, or why sideby cannot tell (`claudeLiveCwds`). */
-  liveCwds: (account: Account) => Promise<LiveCwds>
+  /** The Account's Live Sessions, or why sideby cannot tell (`claudeLiveRuns`). Read again by every check and Fix. */
+  liveRuns: (account: Account) => Promise<LiveRuns>
+  /** The Session Label of one of them (`cc002 · knip cleanup · 61230c3d`). */
+  label: (account: Account, run: LiveRun) => string
   trash: Trash
   now: () => Date
   /** Shortens a path for a message (`~/…`). */
   show: (p: string) => string
 }
 
+const count = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+/** The first three of a list, then `…`. */
+const firstOf = (xs: readonly string[]) => `${xs.slice(0, 3).join(', ')}${xs.length > 3 ? ', …' : ''}`
+
+/** Which of `projects` wait for a Live Session of `account`, each as `<project> (<Session Label>, …)`; or why unknown. */
+async function waitingProjects(
+  ctx: MemoryDoctorContext,
+  account: Account,
+  projects: readonly string[],
+): Promise<{ waiting: Map<string, string> } | { unknown: string }> {
+  const running = await ctx
+    .liveRuns(account)
+    .catch((err): LiveRuns => ({ unknown: (err as Error).message || 'an error' }))
+  if ('unknown' in running) return running
+  const live = await liveProjects(running.runs)
+  const waiting = new Map<string, string>()
+  for (const p of projects) {
+    const runs = live.get(p)
+    if (runs) waiting.set(p, `${p} (${runs.map((r) => ctx.label(account, r)).join(', ')})`)
+  }
+  return { waiting }
+}
+
 /** Every Project of `account` with memory of its own, folded unless a Live Session of the Account works in it. */
 export async function foldAccount(ctx: MemoryDoctorContext, account: Account): Promise<FixResult> {
   const { list } = await accountMemories(account.dir)
   if (!list.length) return { ok: true, message: `${account.ref} keeps no memory of its own now` }
-  const running = await ctx.liveCwds(account)
-  if ('unknown' in running)
+  // Read again here, never taken from the check: a session may have started or ended since.
+  const live = await waitingProjects(
+    ctx,
+    account,
+    list.map((m) => m.project),
+  )
+  if ('unknown' in live)
     return {
       ok: false,
-      message: `sideby cannot tell which sessions of ${account.ref} are running (${ctx.show(running.unknown)}), so it moved nothing of ${account.ref}; run the fix again in a moment`,
+      message: `sideby cannot tell which sessions of ${account.ref} are running (${ctx.show(live.unknown)}), so it moved nothing of ${account.ref}; run the fix again in a moment`,
+      params: { form: 'unknown' },
     }
-  const live = await liveProjects(running.cwds)
   const outcomes: FoldOutcome[] = []
   for (const m of list) {
-    if (live.has(m.project)) {
+    if (live.waiting.has(m.project)) {
       outcomes.push({
         project: m.project,
         status: 'skipped',
@@ -791,32 +840,46 @@ export async function foldAccount(ctx: MemoryDoctorContext, account: Account): P
   ).catch(() => {})
   const parts: string[] = []
   if (done.length)
-    parts.push(
-      `moved ${account.ref}'s memory of ${done.length} ${done.length === 1 ? 'project' : 'projects'} into the main account`,
-    )
+    parts.push(`moved ${account.ref}'s memory of ${count(done.length, 'project')} into the main account`)
   const kept = outcomes.flatMap((o) => o.renamed)
   if (kept.length)
     parts.push(
-      `kept ${kept.length} ${kept.length === 1 ? 'file' : 'files'} that differed under a new name (${kept
-        .slice(0, 3)
-        .map((r) => r.to)
-        .join(', ')}${kept.length > 3 ? ', …' : ''})`,
+      `kept ${count(kept.length, 'file')} that differed under a new name (${firstOf(kept.map((r) => r.to))})`,
     )
   const where = [...new Set(done.map((o) => o.trashed).filter((t): t is string => !!t))]
-  if (where.length) parts.push(`the emptied folders went to ${where.map((w) => ctx.show(w)).join(', ')}`)
-  const skipped = outcomes.filter((o) => o.status === 'skipped')
-  if (skipped.length)
+  if (where.length) parts.push(`the moved files went to ${where.map((w) => ctx.show(w)).join(', ')}`)
+  const waits = [...live.waiting.values()]
+  if (waits.length)
     parts.push(
-      `left ${skipped.length} ${skipped.length === 1 ? 'project' : 'projects'} while a session of ${account.ref} works there (${skipped
-        .map((o) => o.project)
-        .join(', ')}); run the fix again once it ends`,
+      `left ${count(waits.length, 'project')} while a session of ${account.ref} works there: ${waits.join(', ')}; run the fix again once it ends`,
     )
   const failed = outcomes.filter((o) => o.status === 'failed' || o.status === 'partial')
   for (const f of failed) parts.push(`${f.project}: ${ctx.show(f.why ?? 'not moved')}`)
-  return { ok: failed.length === 0, message: parts.join('; ') || `nothing to move for ${account.ref}` }
+  const message = parts.join('; ') || `nothing to move for ${account.ref}`
+  if (failed.length)
+    return {
+      ok: false,
+      message,
+      params: {
+        form: 'some',
+        n: list.length,
+        moved: done.length - failed.filter((f) => f.status === 'partial').length,
+        left: firstOf(
+          outcomes.filter((o) => o.status !== 'moved' && o.status !== 'merged').map((o) => o.project),
+        ),
+      },
+    }
+  // Every Project waits for a session: nothing was fixed, and the Panel says which sessions to wait for.
+  if (!done.length && waits.length)
+    return { ok: false, message, params: { form: 'waiting', waiting: waits.join(', ') } }
+  return { ok: true, message }
 }
 
-/** Doctor's check of one Claude Account that is not the Main Account (only while config `claude.shareMemory` is on). */
+/**
+ * Doctor's check of one Claude Account that is not the Main Account (only while config `claude.shareMemory` is on).
+ * It reads the Account's Live Sessions to say which Projects wait for one, and offers no Fix when every Project waits
+ * or when it cannot tell which sessions run: the Fix would move nothing then.
+ */
 export async function memoryFindings(ctx: MemoryDoctorContext, account: Account): Promise<CheckResult[]> {
   if (account.family !== 'claude' || account.isMain) return []
   const { list, links } = await accountMemories(account.dir)
@@ -824,15 +887,43 @@ export async function memoryFindings(ctx: MemoryDoctorContext, account: Account)
   if (list.length) {
     const files = list.reduce((n, m) => n + m.files, 0)
     const names = list.map((m) => m.project)
-    out.push({
-      level: 'warn',
-      item: 'projects/*/memory',
-      code: 'memory.unfolded',
-      message: `${account.ref} keeps its own memory for ${list.length} ${list.length === 1 ? 'project' : 'projects'} (${files} ${files === 1 ? 'file' : 'files'}) that your other Claude accounts do not see: ${names.slice(0, 3).join(', ')}${names.length > 3 ? ', …' : ''}`,
-      hint: `\`sideby doctor ${account.ref} --fix\` moves it into the main account (shared memory is on); a file that differs is kept beside the main one under a new name, and emptied folders go to the trash`,
-      fixable: true,
-      fix: () => foldAccount(ctx, account),
-    })
+    const n = list.length
+    const base = `${account.ref} keeps its own memory for ${count(n, 'project')} (${count(files, 'file')}) that your other Claude accounts do not see`
+    const finding = { level: 'warn' as const, item: 'projects/*/memory', code: 'memory.unfolded' }
+    const live = await waitingProjects(ctx, account, names)
+    if ('unknown' in live)
+      out.push({
+        ...finding,
+        message: `${base}: ${firstOf(names)}; sideby cannot tell which sessions of ${account.ref} are running right now (${ctx.show(live.unknown)}), so it offers no fix yet`,
+        hint: `check again in a moment (\`sideby doctor ${account.ref}\`); sideby moves the memory once it can tell which sessions run. Do not move memory files by hand`,
+        params: { form: 'unknown', n, projects: firstOf(names) },
+        fixable: false,
+      })
+    else if (live.waiting.size === n) {
+      const waits = [...live.waiting.values()].join(', ')
+      out.push({
+        ...finding,
+        message: `${base}, but a session of ${account.ref} works in ${n === 1 ? 'it' : 'each of them'}: ${waits}; it moves once ${n === 1 ? 'that session ends' : 'those sessions end'}`,
+        hint: `wait until ${n === 1 ? 'that session ends' : 'those sessions end'}, then run \`sideby doctor ${account.ref} --fix\` (or Fix all in the Panel); do not move memory files by hand`,
+        params: { form: 'waiting', n, waiting: waits },
+        fixable: false,
+      })
+    } else {
+      const ready = n - live.waiting.size
+      const waits = [...live.waiting.values()].join(', ')
+      out.push({
+        ...finding,
+        message: live.waiting.size
+          ? `${base}: ${firstOf(names)}; the fix moves ${count(ready, 'project')} now, and these wait until their session ends: ${waits}`
+          : `${base}: ${firstOf(names)}`,
+        hint: `\`sideby doctor ${account.ref} --fix\` moves it into the main account (shared memory is on); a file that differs is kept beside the main one under a new name, and the moved files go to the trash${live.waiting.size ? '; run it again for the projects that wait once their session ends' : ''}`,
+        params: live.waiting.size
+          ? { form: 'some', n, ready, waiting: waits }
+          : { n, projects: firstOf(names) },
+        fixable: true,
+        fix: () => foldAccount(ctx, account),
+      })
+    }
   }
   for (const l of links)
     out.push({
@@ -841,6 +932,7 @@ export async function memoryFindings(ctx: MemoryDoctorContext, account: Account)
       code: 'memory.link',
       message: `${ctx.show(l)} is a link; Claude Code refuses memory writes through a link, and sideby does not follow it`,
       hint: 'replace the link with a real folder (move its files into the main account first), then run `sideby doctor --fix`',
+      params: { path: ctx.show(l) },
       fixable: false,
     })
   return out
@@ -998,6 +1090,7 @@ export async function mainMemoryFindings(
       code: 'memory.index',
       message: `the memory index (MEMORY.md) of ${bad.length} ${bad.length === 1 ? 'project' : 'projects'} in the main account does not match its files: ${bad.slice(0, 3).map(say).join(', ')}${bad.length > 3 ? ', …' : ''}`,
       hint: 'Claude reads only what MEMORY.md lists. Ask Claude in that project to tidy its memory index, or edit MEMORY.md in that folder; two accounts writing at the same moment can overwrite it',
+      params: { n: bad.length, projects: firstOf(bad.map((p) => p.project)) },
       source: 'core',
       fixable: false,
     })
@@ -1012,6 +1105,7 @@ export async function mainMemoryFindings(
       code: 'memory.name-mismatch',
       message: `Claude Code named the folder of ${ctx.show(first.cwd)} "${first.folder}" (${first.account}), but sideby would name it "${first.derived}"${odd.length > 1 ? ` (and ${odd.length - 1} more)` : ''}: Claude Code may have changed how it names project folders, so shared memory may land in another folder than Claude Code's own`,
       hint: 'turn shared memory off with `sideby memory off --yes` until sideby is updated (`sideby update`); the memory already in the main account stays',
+      params: { path: ctx.show(first.cwd), folder: first.folder, derived: first.derived },
       source: 'core',
       fixable: false,
     })

@@ -695,7 +695,12 @@ export type FindingLevel = 'ok' | 'warn' | 'fail'
 export interface FixResult {
   ok: boolean
   message: string
+  /** Values for the Panel's own sentence for this Fix's Finding code (`params.form` picks a variant); never a secret. */
+  params?: FindingParams
 }
+
+/** Values a Finding or a Fix gives the Panel to put into its translated sentence: names and counts only. */
+export type FindingParams = Record<string, string | number>
 
 export interface Finding {
   level: FindingLevel
@@ -708,6 +713,8 @@ export interface Finding {
   message: string
   /** What the user should do; never contains credential values. */
   hint?: string
+  /** Values for the Panel's translated sentence of `code` (`params.form` picks a variant); never a secret. */
+  params?: FindingParams
   /** `core` or the Plugin name. */
   source: string
   fixable: boolean

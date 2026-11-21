@@ -777,6 +777,34 @@ export async function runCodeSwap(io: {
     await io.readState()
   }
 }
+/**
+ * The plain sentence the Panel shows for a Finding, or for a Fix result with `prefix` `fixres.`: the message of
+ * `<prefix><code>`, `.<params.form>` added when the check names a variant and `.one`/`.other` by `params.n` when the
+ * message has both, in `table` (the Panel's language) or else in English, with `{item}` and every param put in. Empty
+ * when English has no message for it, or the Finding lacks a value the message needs (one saved by an older sideby):
+ * the check's own text is shown then.
+ */
+export function findingSentence(
+  f: { code: string; item?: string; params?: Record<string, string | number> },
+  table: Record<string, string>,
+  en: Record<string, string>,
+  prefix = 'finding.',
+): string {
+  const params = f.params || {}
+  const base = prefix + f.code + (params.form ? `.${params.form}` : '')
+  const key = Object.hasOwn(en, `${base}.one`) ? `${base}.${Number(params.n) === 1 ? 'one' : 'other'}` : base
+  if (!Object.hasOwn(en, key)) return ''
+  const text = Object.hasOwn(table, key) ? table[key]! : en[key]!
+  const vars: Record<string, string | number> = { item: f.item ?? '', ...params }
+  let missing = false
+  const out = text.replace(/\{(\w+)\}/g, (m, k: string) => {
+    if (Object.hasOwn(vars, k)) return String(vars[k])
+    missing = true
+    return m
+  })
+  return missing ? '' : out
+}
+
 export function panelFixes(f: { code?: string }, skillUpdatable: boolean): boolean {
   return skillUpdatable && f.code === 'skill.outdated'
 }
