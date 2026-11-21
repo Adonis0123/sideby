@@ -23,6 +23,9 @@ src/
 │                 desktop-app.ts: `sideby desktop`, open a Family's Desktop App per Account (§3.20); definitions in families/desktop.ts (internal)
 │                 browser-profiles.ts: `sideby browser`, Browser Sign-ins from Chrome's Local Storage key names (§3.24); leveldb-keys.ts reads them; websites in families/browser.ts (internal)
 │                 claude-trust.ts: carried trust between Claude Accounts (§3.43, ADR-0078): which key trusts a folder, the one-field copy at Launch (`carryAtLaunch` in runtime.ts), its records and `sideby trust undo`
+│                 claude-memory.ts: Shared Project Memory (§3.44, ADR-0081): the Main Account's memory folder of a Project for
+│                 a Launch (`memoryPrepared` in runtime.ts puts it into sideby's `--settings`), Doctor's fold of an Account's
+│                 own memory, the index and folder-name warnings, `sideby memory`
 ├── plugins/      loader (trust checks), hook bus, built-in account-script
 ├── families/     claude, codex, grok, pi, agy: each a Family Plugin; index.ts lists built-ins in load order
 │                 agy/ is a Main-only Family (ADR-0047); agy/quota.ts asks `agy -p /usage` for its Quota (ADR-0048)

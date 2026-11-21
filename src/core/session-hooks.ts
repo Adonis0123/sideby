@@ -18,6 +18,13 @@ export interface SessionHookPart {
   claude: ClaudeHooks
   /** Per Codex event, the inline TOML tables of its list, such as `{matcher="…",hooks=[{type="command",command="…"}]}`. */
   codex: Record<string, string[]>
+  /**
+   * Other top-level Claude settings it adds to the same file, such as `autoMemoryDirectory` (Shared Project Memory,
+   * ADR-0081). Claude only.
+   */
+  settings?: Record<string, unknown>
+  /** Added to the file's name when `settings` differ per Launch, so two Launches never share one file. */
+  fileKey?: string
 }
 
 /**
@@ -73,11 +80,12 @@ export async function sessionHookArgs(
     // A real folder of the user that nobody else can write to, so the file is never written through a link.
     const dir = (await ownedFolder(stateDir, [parts[0]!.id], { create: true, private: true }))!
     const name = `claude-settings${parts
-      .slice(1)
-      .map((p) => `-${p.id}`)
+      .map((p, i) => `${i ? `-${p.id}` : ''}${p.fileKey ? `-${p.fileKey}` : ''}`)
       .join('')}.json`
     const hooks = mergeClaudeHooks(...parts.map((p) => p.claude))
-    await writeFileAtomic(join(dir, name), `${JSON.stringify({ hooks }, null, 2)}\n`, 0o600)
+    const settings = Object.assign({}, ...parts.map((p) => p.settings ?? {})) as Record<string, unknown>
+    const body = { ...(Object.keys(hooks).length ? { hooks } : {}), ...settings }
+    await writeFileAtomic(join(dir, name), `${JSON.stringify(body, null, 2)}\n`, 0o600)
     return ['--settings', join(dir, name)]
   }
   if (family === 'codex') {
@@ -111,11 +119,13 @@ export async function withClaudeHooks(
   hookArgs: readonly string[],
   extra: ClaudeHooks,
   out: string,
+  /** Other top-level settings to add, such as the session's `autoMemoryDirectory` (ADR-0081). */
+  more: Record<string, unknown> = {},
 ): Promise<string[]> {
   const settings = await settingsOf(hookArgs)
   const hooks = mergeClaudeHooks(settings.hooks ?? {}, extra)
   await mkdir(dirname(out), { recursive: true, mode: 0o700 })
-  await writeFileAtomic(out, `${JSON.stringify({ ...settings, hooks }, null, 2)}\n`, 0o600)
+  await writeFileAtomic(out, `${JSON.stringify({ ...settings, ...more, hooks }, null, 2)}\n`, 0o600)
   const at = hookArgs.indexOf('--settings')
   return at === -1 ? [...hookArgs, '--settings', out] : hookArgs.map((a, i) => (i === at + 1 ? out : a))
 }
@@ -158,7 +168,8 @@ export async function withClaudeDirs(
 
 /**
  * Auto Handoff's Claude hook arguments with the session's own sideby hooks (`sessionArgs`, from `sessionHookArgs`)
- * merged into one `--settings` file, written next to the session's file with `-handoff` added to its name.
+ * merged into one `--settings` file, written next to the session's file with `-handoff` added to its name. The
+ * session file's other settings (`autoMemoryDirectory`, ADR-0081) come along.
  */
 export async function withClaudeSessionHooks(
   hookArgs: readonly string[],
@@ -167,6 +178,11 @@ export async function withClaudeSessionHooks(
   const at = sessionArgs.indexOf('--settings')
   const file = at === -1 ? undefined : sessionArgs[at + 1]
   if (!file) return [...hookArgs]
-  const extra = (await settingsOf(sessionArgs)).hooks ?? {}
-  return withClaudeHooks(hookArgs, extra, join(dirname(file), `${basename(file, '.json')}-handoff.json`))
+  const { hooks: extra = {}, ...more } = await settingsOf(sessionArgs)
+  return withClaudeHooks(
+    hookArgs,
+    extra,
+    join(dirname(file), `${basename(file, '.json')}-handoff.json`),
+    more,
+  )
 }

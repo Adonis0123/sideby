@@ -462,6 +462,26 @@ sideby trust off --yes          # 不再复制；已复制的保留
 
 sideby 只写 `projects["<文件夹>"].hasTrustDialogAccepted`（主账号写在 `~/.claude.json`），文件里其他内容不变；不经链接写，不新建文件；同一时刻 Claude Code 也改了这个文件时跳过，并说明原因，Claude Code 照常询问。`.claude.json` 里它只读这一个字段。`sideby trust undo` 只在这条仍是 sideby 写的内容时撤回，Claude Code 之后加的内容保留。无头运行（`-p`）、`sideby login` 和直接运行 `claude` 的会话都不复制。
 
+## 共享记忆
+
+Claude Code 会记住它在项目里学到的东西（自动记忆：一个 `MEMORY.md` 索引加几条笔记），但每个 Claude 账号各记一份。任务换到另一个账号，它在这个项目里就不知道前一个账号学到了什么。
+
+打开共享记忆后，sideby 在其他账号里启动的每个 Claude 会话（`sideby run`、短命令、挑选命令、`sideby next`、Auto Handoff、让 AI 帮你做）都读写主账号对这个项目的记忆 `~/.claude/projects/<项目>/memory`。sideby 用它自己的 `--settings` 文件把这个文件夹告诉 Claude Code；不建链接，因为 Claude Code 拒绝经链接写记忆。
+
+```sh
+sideby memory                    # 开没开、这个文件夹的记忆放在哪、还有哪些等着移
+sideby memory on                 # 显示改动，退出码 10
+sideby memory on --yes           # 打开
+sideby doctor claude --fix       # 把各账号已经写下的记忆移进主账号
+sideby memory off --yes          # 不再共用；已经在主账号里的记忆保留
+```
+
+面板里在「设置」→「全部设置…」→「共享记忆」：一个开关「让我的 Claude 账号共用项目记忆」。账号页的「全部修复」会把各账号自己写下的记忆移过来。
+
+项目和 Claude Code 用的一致：git 仓库的主检出（关联 worktree 和子文件夹都算它），不在 git 里就是文件夹本身；sideby 从不在文件夹里运行 `git`。拿不准时（子模块、单独的 git 文件夹），这个会话用账号自己的记忆，启动时会说明。主账号自己、headless 运行（`-p`）和你自己给了 `--settings` 的会话，也用自己的记忆。
+
+直接运行 `claude` 或由应用自己选账号启动的会话，仍然写账号自己的记忆。体检会报出来，修复时把它移进主账号：主账号没有的项目整个搬过去；同名但内容不同的笔记另存为 `<名字>.<账号>.md`，放在主账号那份旁边；`MEMORY.md` 补上缺的行；移走的文件装进一个文件夹移到废纸篓。移动时被改过的文件留到下次修复。那个账号有会话正在这个项目里运行时，等它结束再移。`MEMORY.md` 列了不存在的笔记、或漏列了已有的笔记（两个账号同时写可能互相覆盖），以及 Claude Code 给项目文件夹起名的方式看起来和 sideby 不一样时，体检也会提醒；后一种情况先关掉共享记忆，等更新 sideby。
+
 ## 账号撞上限额时
 
 ```sh

@@ -5550,6 +5550,110 @@ export async function cmdTrust(a: ParsedArgs, io: Io): Promise<number> {
   return 0
 }
 
+/** `sideby memory [status|on|off]` (spec §3.44, ADR-0081): Shared Project Memory between Claude accounts. */
+export async function cmdMemory(a: ParsedArgs, io: Io): Promise<number> {
+  const [sub, ...rest] = a.positionals
+  const asJson = a.flags.has('json')
+  const usage = 'usage: sideby memory [--dir <path>] | sideby memory on|off [--yes]'
+  if (rest.length || a.rest.length || (sub !== undefined && !['status', 'on', 'off'].includes(sub)))
+    throw new UsageError(usage)
+  const status = sub === undefined || sub === 'status'
+  for (const k of a.flags.keys())
+    if (k !== 'json' && !(k === 'dir' && status) && !(k === 'yes' && !status))
+      throw new UsageError(`--${k} does not go with \`sideby memory ${sub ?? ''}\`; ${usage}`)
+  const rt = await createRuntime()
+  const home = rt.paths.home
+  // Inside text too: a reason names a path in the middle of a sentence.
+  const show = (p: string) => tilde(p, home)
+  const what =
+    "Every Claude session sideby starts in another account reads and writes the main account's memory for its project, so what one account learned about a project the next one knows. `sideby doctor --fix` moves memory an account wrote on its own (sessions sideby did not start) into the main account."
+  const offNote =
+    'Turning it off stops sharing from the next session on; the memory already in the main account stays there.'
+  if (sub === 'on' || sub === 'off') {
+    const r = await rt.memorySet(sub === 'on', { apply: a.flags.has('yes') })
+    if (asJson) {
+      json(io, {
+        action: sub,
+        on: r.applied ? r.after : r.before,
+        changed: r.changed,
+        applied: r.applied,
+        before: r.before,
+        after: r.after,
+        file: show(r.file),
+      })
+    } else if (!r.changed) io.out(`Shared memory was already ${sub}.`)
+    else if (!r.applied) {
+      io.out(`Change to ${show(r.file)}: claude.shareMemory ${r.before} → ${r.after}`)
+      io.out(c.dim(sub === 'on' ? what : offNote))
+      io.out(c.cyan(`Apply it with \`sideby memory ${sub} --yes\`.`))
+    } else {
+      io.out(`${c.green('✓')} Shared memory is ${sub}.`)
+      io.out(
+        c.dim(
+          sub === 'on'
+            ? `${what} Run \`sideby doctor --fix\` to move what your accounts already wrote.`
+            : offNote,
+        ),
+      )
+    }
+    return r.changed && !r.applied ? 10 : 0
+  }
+  const dirFlag = a.flags.get('dir')
+  if (dirFlag === true) throw new UsageError(`--dir takes a folder; ${usage}`)
+  const dir = typeof dirFlag === 'string' ? resolve(dirFlag) : process.cwd()
+  const st = await rt.memoryStatus(dir)
+  if (asJson) {
+    json(io, {
+      action: 'status',
+      on: st.on,
+      main: show(st.main),
+      folded: st.folded,
+      ...(st.dir
+        ? {
+            dir: {
+              path: show(st.dir.path),
+              ...(st.dir.name ? { name: st.dir.name } : {}),
+              ...(st.dir.memory ? { memory: show(st.dir.memory) } : {}),
+              ...(st.dir.why ? { why: show(st.dir.why) } : {}),
+            },
+          }
+        : {}),
+      ...(st.projects ? { projects: st.projects } : {}),
+    })
+    return 0
+  }
+  io.out(`Shared memory between Claude accounts: ${st.on ? c.green('on') : c.dim('off')}`)
+  if (!st.on) {
+    io.out(c.dim(what))
+    io.out(c.cyan('Turn it on with `sideby memory on`.'))
+  } else {
+    if (st.dir)
+      io.out(
+        st.dir.memory
+          ? `Folder: ${show(st.dir.path)} → memory in ${show(st.dir.memory)}`
+          : `Folder: ${show(st.dir.path)} → ${c.dim(`keeps each account's own memory (${show(st.dir.why ?? 'sideby cannot tell')})`)}`,
+      )
+    const pending = (st.projects ?? []).filter((p) => p.pending.length)
+    const shared = (st.projects ?? []).filter((p) => p.main > 0).length
+    io.out(`Projects with shared memory: ${shared}${c.dim(` (in ${show(st.main)})`)}`)
+    if (pending.length) {
+      io.out(`Waiting to be moved into the main account (${pending.length}):`)
+      for (const p of pending.slice(0, 20))
+        io.out(`  ${p.name}  ${c.dim(p.pending.map((x) => `${x.account} ${x.files}`).join(', '))}`)
+      if (pending.length > 20) io.out(c.dim(`  … and ${pending.length - 20} more`))
+      io.out(c.cyan('Move them with `sideby doctor --fix`.'))
+    }
+  }
+  if (st.folded.length) {
+    const files = st.folded.reduce((n, f) => n + f.files, 0)
+    io.out(
+      `Moved by Doctor: ${files} ${files === 1 ? 'file' : 'files'} from ${st.folded.length} ${st.folded.length === 1 ? 'project folder' : 'project folders'}`,
+    )
+  }
+  if (st.on) io.out(c.dim(offNote))
+  return 0
+}
+
 /** `sideby unattended …` (spec §3.37, ADR-0058): status, on and off, the Schedule, Pending Decisions and `defer`. */
 export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
   const [sub, ...rest] = a.positionals

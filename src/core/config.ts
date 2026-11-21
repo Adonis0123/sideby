@@ -471,10 +471,17 @@ export const ConfigSchema = Type.Object(
                 'Carry folder trust between Claude accounts (spec §3.43, ADR-0078): before sideby starts an interactive Claude session in a folder this account has not trusted yet, when another Claude account of yours already trusts it (the folder, a parent folder outside any git repository, or the repository\'s main checkout), sideby copies that one trust mark (`projects["<path>"].hasTrustDialogAccepted`) into this account\'s `.claude.json`, so Claude Code does not ask again. It never adds trust no account gave. Off by default; turning it off does not remove marks already copied (`sideby trust undo` does).',
             }),
           ),
+          shareMemory: Type.Optional(
+            Type.Boolean({
+              description:
+                "Shared Project Memory (spec §3.44, ADR-0081): every interactive Claude session sideby starts in an account other than the main one reads and writes the main account's auto memory for its project (`~/.claude/projects/<project>/memory`, passed as `autoMemoryDirectory` through sideby's `--settings`), and `sideby doctor --fix` moves memory an account wrote on its own into the main account. Off by default; turning it off stops passing the folder and leaves the memory where it is.",
+            }),
+          ),
         },
         {
           additionalProperties: false,
-          description: 'Claude Code launches (spec §3.41, ADR-0074; `carryTrust`: spec §3.43, ADR-0078).',
+          description:
+            'Claude Code launches (spec §3.41, ADR-0074; `carryTrust`: spec §3.43, ADR-0078; `shareMemory`: spec §3.44, ADR-0081).',
         },
       ),
     ),

@@ -987,6 +987,7 @@ ${UI_CSS}
 .set-group > .reveal[data-key=pr-every] { margin-top: -8px; }
 .reveal[data-key=pr-every] > .reveal-in > .pr-every { padding-top: 8px; }
 .pr-notes { margin: 4px 0 0; padding-left: 16px; display: grid; gap: 4px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.mm-folded { margin: 12px 0 0; }
 .pr-every .seg-btn { white-space: nowrap; }
 :where(:root[data-width=phone]) .pr-every { flex-direction: column; align-items: flex-start; gap: 8px; }
 :where(:root[data-width=phone]) .pr-every .seg { max-width: 100%; }

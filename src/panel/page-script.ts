@@ -7360,6 +7360,38 @@ const MAIN = String.raw`
       out.push(h('p', { class: 'small' }, h('button', { class: 'link-btn small', type: 'button', 'data-key': 'tr-ask', onclick: () => openAsk({ text: t('ai.ask.trust') }) }, t('adv.ask'))))
     return out
   }
+  // Shared Project Memory (spec §3.44, ADR-0081): the switch writes config claude.shareMemory at once (the words beside
+  // it say what it does and what Fix all moves) and the toast offers the way back. Its state reads no account folder.
+  async function setMemory(on) {
+    const mm = S.state && S.state.memory
+    if (!mm) return
+    const was = mm.on
+    S.state.memory = Object.assign({}, mm, { on })
+    refreshSettings()
+    try {
+      await api('/api/memory/settings', { on, confirm: true })
+      toast(t(on ? 'mm.onToast' : 'mm.offToast'), { kind: 'ok', action: { label: t('toast.undo'), run: () => setMemory(was) }, duration: 8000 })
+    } catch (e) {
+      S.state.memory = Object.assign({}, S.state.memory, { on: was })
+      refreshSettings()
+      toast(t('mm.failed', { msg: e.message }), { kind: 'fail' })
+    }
+    load({ silent: true })
+  }
+  function memoryItems() {
+    const mm = S.state.memory
+    const label = t('mm.switch')
+    const out = [fm('memory', h('div', { class: 'set-row', 'data-patch': '' },
+      h('span', { class: 'set-label' }, label),
+      BOOT.readOnly ? h('span', { class: 'chip chip-sm' + (mm.on ? ' chip-ok' : '') }, mm.on ? t('ah.on') : t('ah.off'))
+        : h('div', { class: 'seg', role: 'group', 'aria-label': label, 'data-patch': '' }, [[true, t('ah.on')], [false, t('ah.off')]].map(([v, text]) =>
+          h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === mm.on), onclick: () => { if (v !== mm.on) setMemory(v) } }, text)))))]
+    out.push(h('ul', { class: 'pr-notes' }, h('li', null, t('mm.what')), h('li', null, t('mm.doctor')), h('li', null, t('mm.offKeeps'))))
+    if (mm.folded) out.push(h('p', { class: 'small muted mm-folded' }, tn('mm.folded', mm.folded)))
+    if (!BOOT.readOnly && !askBridged(BOOT, window))
+      out.push(h('p', { class: 'small' }, h('button', { class: 'link-btn small', type: 'button', 'data-key': 'mm-ask', onclick: () => openAsk({ text: t('ai.ask.memory') }) }, t('adv.ask'))))
+    return out
+  }
   function famTitleOf(fam) { const f = S.state && S.state.families.find((x) => x.id === fam); return f ? f.title : fam }
   // ---------- settings ----------
   // One header button holds what is set once and rarely changed: language, theme, Remote Control and Auto Handoff.
@@ -7378,6 +7410,7 @@ const MAIN = String.raw`
     if (S.state && S.state.network) out.push('net')
     if (S.state && S.state.progress) out.push('progress')
     if (S.state && S.state.trust) out.push('trust')
+    if (S.state && S.state.memory) out.push('memory')
     return out
   }
   function renderSettingsButton() {
@@ -7493,6 +7526,7 @@ const MAIN = String.raw`
       { id: 'handoff', title: t('ah.button'), items: [ahLink(leave)].filter(Boolean), foot: t('set.ahHint') },
       { id: 'progress', title: t('pr.title'), items: secs.includes('progress') ? progressItems() : [], foot: t('pr.hint') },
       { id: 'trust', title: t('tr.title'), items: secs.includes('trust') ? trustItems() : [], foot: t('tr.hint') },
+      { id: 'memory', title: t('mm.title'), items: secs.includes('memory') ? memoryItems() : [], foot: t('mm.hint') },
       { id: 'network', title: t('net.title'), items: netItems, foot: t('net.hint') },
       { id: 'ai', title: t('set.g.ai'), items: ai, foot: t('set.aiHint') },
     ].filter((g) => g.items.length)
@@ -8196,7 +8230,7 @@ const MAIN = String.raw`
     return Boolean(u && u.skillUpdate && u.skillUpdate.installed && u.skillUpdate.installed.length)
   }
   // Example phrases: a click puts one in the Let AI do it box (spec §3.28).
-  const AI_ASKS = ['ai.ask.quota', 'ai.ask.reset', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.expired', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.advisor', 'ai.ask.trust', 'ai.ask.network', 'ai.ask.unattended', 'ai.ask.pending', 'ai.ask.progress', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.commands', 'ai.ask.tool']
+  const AI_ASKS = ['ai.ask.quota', 'ai.ask.reset', 'ai.ask.pick', 'ai.ask.new', 'ai.ask.api', 'ai.ask.pin', 'ai.ask.hide', 'ai.ask.relogin', 'ai.ask.expired', 'ai.ask.fix', 'ai.ask.handoff', 'ai.ask.handoffRules', 'ai.ask.session', 'ai.ask.history', 'ai.ask.send', 'ai.ask.inbound', 'ai.ask.menubar', 'ai.ask.rc', 'ai.ask.advisor', 'ai.ask.trust', 'ai.ask.memory', 'ai.ask.network', 'ai.ask.unattended', 'ai.ask.pending', 'ai.ask.progress', 'ai.ask.theme', 'ai.ask.find', 'ai.ask.commands', 'ai.ask.tool']
   // Network Guard (spec §3.35): one dialog with the switch, the allowed countries and the newest result per address.
   // Countries are never ticked for the user, the current one included: a wrong network would allow itself.
   const NET_COMMON = ['US', 'JP', 'SG', 'GB', 'DE', 'FR', 'NL', 'CA', 'AU', 'KR', 'TW', 'HK']

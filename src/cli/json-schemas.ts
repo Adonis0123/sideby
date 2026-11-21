@@ -2526,6 +2526,76 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
     },
     { title: 'sideby trust undo --json' },
   ),
+  memory: Type.Object(
+    {
+      schemaVersion: Version,
+      action: Type.Literal('status'),
+      on: Type.Boolean({
+        description:
+          "Config `claude.shareMemory` (spec §3.44): Claude sessions sideby starts in other accounts read and write the main account's memory for their project, and `sideby doctor --fix` moves memory an account wrote on its own into the main account.",
+      }),
+      main: Type.String({ description: "The main account's folder that holds every project's memory." }),
+      folded: Type.Array(
+        Type.Object({
+          account: Type.String({ description: 'The account the memory came from.' }),
+          project: Type.String({ description: 'The project folder name under projects/.' }),
+          files: Type.Number({ description: 'How many files reached the main account.' }),
+          at: Type.String({ description: 'When (ISO time).' }),
+        }),
+        { description: 'What `sideby doctor --fix` moved into the main account, oldest first.' },
+      ),
+      dir: Type.Optional(
+        Type.Object(
+          {
+            path: Type.String({ description: 'The folder asked about (its real path).' }),
+            name: Type.Optional(Type.String({ description: 'Its project folder name under projects/.' })),
+            memory: Type.Optional(
+              Type.String({ description: 'Where its memory goes for every Claude account sideby starts.' }),
+            ),
+            why: Type.Optional(
+              Type.String({ description: 'Why sideby cannot tell; such a session keeps its own memory.' }),
+            ),
+          },
+          { description: 'Where the memory of the folder asked about goes; only while on.' },
+        ),
+      ),
+      projects: Type.Optional(
+        Type.Array(
+          Type.Object({
+            name: Type.String({ description: 'The project folder name under projects/.' }),
+            main: Type.Number({ description: "Files in the main account's memory folder for it." }),
+            pending: Type.Array(Type.Object({ account: Str, files: Type.Number() }), {
+              description:
+                'Accounts that keep memory of their own for it: what `sideby doctor --fix` would move.',
+            }),
+            folded: Type.Array(Type.Object({ account: Str, files: Type.Number() }), {
+              description: 'Files `sideby doctor --fix` already moved in, per account.',
+            }),
+          }),
+          {
+            description:
+              'Each project with memory in the main account or in an account of its own; only while on. Nothing is read while off.',
+          },
+        ),
+      ),
+    },
+    { title: 'sideby memory [--dir <path>] --json' },
+  ),
+  'memory-set': Type.Object(
+    {
+      schemaVersion: Version,
+      action: Type.Union([Type.Literal('on'), Type.Literal('off')]),
+      on: Type.Boolean({ description: 'Whether config `claude.shareMemory` is on now.' }),
+      changed: Type.Boolean(),
+      applied: Type.Boolean({
+        description: 'False when only the change was shown; run again with --yes (exit 10).',
+      }),
+      before: Type.Boolean(),
+      after: Type.Boolean(),
+      file: Type.String({ description: 'The config file changed.' }),
+    },
+    { title: 'sideby memory on|off --json' },
+  ),
   browser: Type.Object(
     {
       schemaVersion: Version,

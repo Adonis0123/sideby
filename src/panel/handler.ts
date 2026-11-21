@@ -503,11 +503,23 @@ export interface PanelState {
    * `.claude.json` is read for it); absent with fewer than two Claude Accounts, unless it is on or has marks.
    */
   trust?: PanelTrust
+  /**
+   * Shared Project Memory (spec §3.44): config `claude.shareMemory` and how many files Doctor moved into the Main Account,
+   * from the config and sideby's own records (no Account folder is read for it); absent with fewer than two Claude
+   * Accounts, unless it is on or Doctor moved something.
+   */
+  memory?: PanelMemory
 }
 
 export interface PanelTrust {
   on: boolean
   carried: { account: string; path: string; from: string; at: string }[]
+}
+
+export interface PanelMemory {
+  on: boolean
+  /** Files Doctor moved into the Main Account so far. */
+  folded: number
 }
 
 /**
@@ -1132,6 +1144,7 @@ async function buildState(
   const showBrowser = browser && (browser.families.matched.length || browser.families.openOnly.length)
   const progress = accounts.some((a) => PROGRESS_FAMILIES.includes(a.family)) ? rt.progressView() : undefined
   const trust = await panelTrust(rt, accounts).catch(() => undefined)
+  const memory = await panelMemory(rt, accounts).catch(() => undefined)
   const permissions = aiTaskPermissions(rt.config)
   return {
     schemaVersion: 1,
@@ -1183,7 +1196,16 @@ async function buildState(
     ...(unattended ? { unattended } : {}),
     ...(progress ? { progress } : {}),
     ...(trust ? { trust } : {}),
+    ...(memory ? { memory } : {}),
   }
+}
+
+/** The Panel's view of Shared Project Memory (spec §3.44), or undefined when there is nothing to show. */
+async function panelMemory(rt: Runtime, accounts: readonly Account[]): Promise<PanelMemory | undefined> {
+  const st = await rt.memoryOverview()
+  if (accounts.filter((a) => a.family === 'claude').length < 2 && !st.on && !st.folded.length)
+    return undefined
+  return { on: st.on, folded: st.folded.reduce((n, f) => n + f.files, 0) }
 }
 
 /** The Panel's view of carried trust (spec §3.43), or undefined when there is nothing to show. */
@@ -2028,6 +2050,17 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         if (typeof body.on !== 'boolean') throw new HttpError(400, '"on" must be true or false')
         const rt = await getRuntime()
         const r = await rt.trustSet(body.on, { apply: optBool(body, 'confirm') })
+        return { ...r, file: tildify(r.file, rt.paths.home) }
+      },
+    },
+    // Shared Project Memory (spec §3.44, ADR-0081): config `claude.shareMemory`, shown first like every config change;
+    // the switch sends `confirm` with the words it shows beside it.
+    '/api/memory/settings': {
+      writes: (body) => body.confirm === true,
+      async run(body) {
+        if (typeof body.on !== 'boolean') throw new HttpError(400, '"on" must be true or false')
+        const rt = await getRuntime()
+        const r = await rt.memorySet(body.on, { apply: optBool(body, 'confirm') })
         return { ...r, file: tildify(r.file, rt.paths.home) }
       },
     },

@@ -2039,6 +2039,23 @@ const en = {
     'Folder trust is reused now. Claude accounts sideby starts no longer ask where another account trusts the folder.',
   'tr.offToast': 'Folder trust is no longer reused. What was copied stays.',
   'tr.failed': 'Could not change folder trust: {msg}. Try again, or run sideby trust in a terminal.',
+  'ai.ask.memory': 'Let all my Claude accounts share what they remember about each project.',
+  'mm.title': 'Shared memory',
+  'mm.hint':
+    'Claude remembers what it learns about a project, but each account keeps its own memory. sideby can let all your Claude accounts share one memory per project.',
+  'mm.switch': 'Share project memory across my Claude accounts',
+  'mm.what':
+    "Claude sessions sideby starts in your other accounts read and write the main account's memory of the project, so the next account knows what the last one learned.",
+  'mm.doctor':
+    'Memory an account wrote on its own (a session started without sideby) stays there until you click Fix all on the Accounts page; then it moves into the main account. A file that differs is kept beside the main one under a new name, and the emptied folder goes to the trash.',
+  'mm.offKeeps':
+    'Turning it off stops sharing from the next session on. Memory already moved into the main account stays there; it is not moved back to each account.',
+  'mm.folded.one': 'So far, Fix all moved 1 memory file into the main account.',
+  'mm.folded.other': 'So far, Fix all moved {n} memory files into the main account.',
+  'mm.onToast':
+    "Shared memory is on. Claude accounts sideby starts from now on use the main account's memory; Fix all moves what they already wrote.",
+  'mm.offToast': 'Shared memory is off. Memory already in the main account stays.',
+  'mm.failed': 'Could not change shared memory: {msg}. Try again, or run sideby memory in a terminal.',
 }
 
 export type MessageKey = keyof typeof en
@@ -3947,6 +3964,22 @@ const zh: Record<MessageKey, string> = {
   'tr.onToast': '已开始沿用文件夹信任。sideby 启动的 Claude 账号，在别的账号信任过的文件夹里不再询问。',
   'tr.offToast': '已不再沿用文件夹信任。已经复制的保留。',
   'tr.failed': '没能改文件夹信任：{msg}。可以再试一次，或在终端运行 sideby trust。',
+  'ai.ask.memory': '让我所有 Claude 账号共用对每个项目的记忆。',
+  'mm.title': '共享记忆',
+  'mm.hint':
+    'Claude 会记住它在项目里学到的东西，但每个账号各记各的。sideby 可以让你所有 Claude 账号每个项目共用一份记忆。',
+  'mm.switch': '让我的 Claude 账号共用项目记忆',
+  'mm.what':
+    'sideby 在其他账号里启动的 Claude 会话，读写主账号对这个项目的记忆，下一个账号就知道上一个学到了什么。',
+  'mm.doctor':
+    '账号自己写下的记忆（不经 sideby 启动的会话）先留在那个账号里，在账号页点「全部修复」后移进主账号。同名但内容不同的文件换个名字放在主账号那份旁边，清空的文件夹移到废纸篓。',
+  'mm.offKeeps': '关掉后，从下一个会话起不再共用。已经移进主账号的记忆留在主账号，不会搬回各账号。',
+  'mm.folded.one': '「全部修复」已把 1 个记忆文件移进主账号。',
+  'mm.folded.other': '「全部修复」已把 {n} 个记忆文件移进主账号。',
+  'mm.onToast':
+    '已打开共享记忆。之后 sideby 启动的 Claude 账号用主账号的记忆；「全部修复」会把它们已经写下的移过来。',
+  'mm.offToast': '已关闭共享记忆。已经在主账号里的记忆保留。',
+  'mm.failed': '没能改共享记忆：{msg}。可以再试一次，或在终端运行 sideby memory。',
 }
 
 export const MESSAGES: Record<PanelLang, Record<string, string>> = { en, zh }

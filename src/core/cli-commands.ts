@@ -149,6 +149,18 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
     feature: 'setting.trust',
   },
   {
+    id: 'memory',
+    group: 'accounts',
+    usage: 'sideby memory [on|off] [--dir <path>] [--yes]',
+    help: "let every Claude account use the main account's memory of a project: sessions sideby starts read and write it, and doctor --fix moves memory an account wrote on its own into the main account (on|off, shows the change first)",
+    summary: {
+      en: 'Let every Claude account remember what the others learned about a project',
+      zh: '让每个 Claude 账号记得其他账号对项目学到的东西',
+    },
+    example: 'sideby memory on',
+    feature: 'setting.memory',
+  },
+  {
     id: 'edit',
     group: 'accounts',
     usage: 'sideby edit <account> [--path] [--with <editor>]',
@@ -939,9 +951,10 @@ export function cliHelp(list: readonly CliCommand[] = CLI_COMMANDS): string {
 const HELP_TAIL = `Options:
   --json        machine-readable output (list, new, next, alias, doctor, quota, tune, model, advisor, remote-control, handoff,
                 families, commands, plugins, app, desktop, sessions, history, send, messages, edit, browser, update, local, ask,
-                terminal, key, try, autostart, menubar, config, network, unattended, progress, trust)
+                terminal, key, try, autostart, menubar, config, network, unattended, progress, trust, memory)
   -h, --help    show this help; \`sideby <command> --help\` for new, alias, login, doctor, families, commands, desktop, edit, browser,
-                autostart, menubar, config, sessions, history, send, messages, network, unattended, progress, trust
+                autostart, menubar, config, sessions, history, send, messages, network, unattended, progress, trust,
+                memory
   -v, --version show the version
 
 An <account> is <family>:<name> (claude:work) or just <name> when it is unique.

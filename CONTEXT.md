@@ -34,6 +34,7 @@ Avoid: *profile* on its own (Codex already uses it for a config layer that does 
 - **Shared Item**: an entry in an Account directory that should match the Main Account, such as skills, hooks or the rules file.
 - **Share Mode**: how one Shared Item must look in an Account for that Family to start and stay consistent: a link, a copy, a local file, or information only.
 - **Drift**: a Shared Item that does not match its Share Mode.
+- **Shared Project Memory** (the Panel says *Shared memory*; 中文「共享项目记忆」): with config `claude.shareMemory`, every Claude Account that sideby starts reads and writes the Main Account's auto memory for the Project it works in, so what one Account learned about a Project the next one knows. Memory an Account wrote on its own is folded into the Main Account by Doctor (ADR-0081). Not a Shared Item: nothing is linked.
 
 ## Launching
 

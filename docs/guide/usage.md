@@ -462,6 +462,26 @@ It follows Claude Code's own rules and copies the same entry, never a wider one:
 
 sideby writes only `projects["<folder>"].hasTrustDialogAccepted` (for the main account in `~/.claude.json`), keeps everything else in the file, never writes through a link, never creates the file, and skips the copy when Claude Code changed the file at the same moment; then it says so and Claude Code asks as before. Of `.claude.json` it reads nothing but that field. `sideby trust undo` takes a copy back only while it still holds what sideby wrote, and keeps anything Claude Code added since. A headless run (`-p`), `sideby login` and sessions you start with plain `claude` copy nothing.
 
+## Shared memory
+
+Claude Code remembers what it learns about a project (auto memory: a `MEMORY.md` index and a few notes), but each Claude account keeps its own copy. Move a task to another account and it starts that project without what the first one learned.
+
+Turn on shared memory and every Claude session sideby starts in another account (`sideby run`, short commands, pick commands, `sideby next`, Auto Handoff, Let AI do it) reads and writes the main account's memory of that project, `~/.claude/projects/<project>/memory`. sideby passes that folder to Claude Code in its own `--settings` file; nothing is linked, because Claude Code refuses memory writes through a link.
+
+```sh
+sideby memory                    # on or off, where this folder's memory goes, what still waits to be moved
+sideby memory on                 # shows the change, exit 10
+sideby memory on --yes           # turns it on
+sideby doctor claude --fix       # moves memory your accounts already wrote into the main account
+sideby memory off --yes          # stops sharing; memory already in the main account stays
+```
+
+In the panel it is **Settings** → **All settings…** → **Shared memory**: one switch, **Share project memory across my Claude accounts**. **Fix all** on the Accounts page moves what accounts wrote on their own.
+
+The project is the one Claude Code uses: a git repository's main checkout (every linked worktree and subfolder shares it), elsewhere the folder itself; sideby never runs `git` in the folder. Where it cannot tell (a submodule, a separate git folder), the session keeps the account's own memory and the launch says so. The main account itself, a headless run (`-p`) and a session you give your own `--settings` keep their own memory too.
+
+Sessions started with plain `claude`, or by an app that picks the account itself, still write the account's own memory. Doctor reports it, and its fix moves it into the main account: a project the main account does not have moves whole; a note with the same name and other content is kept beside the main one as `<name>.<account>.md`; `MEMORY.md` gets the lines it lacks; the moved files go to the trash in one folder. A file that changes while it moves stays for the next fix. A project where a session of that account is running waits until it ends. Doctor also warns when a `MEMORY.md` lists a note that is missing or misses one that is there (two accounts writing at the same moment can overwrite it), and when Claude Code seems to name project folders differently from sideby; then turn shared memory off until you update sideby.
+
 ## When an account hits its limit
 
 ```sh

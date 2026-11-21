@@ -4,6 +4,7 @@ import {
   type AccountRefError,
   aliasesByAccount,
   discoverAccounts,
+  mainDirOf,
   resolveRef,
   startArgsOf,
 } from './core/accounts.ts'
@@ -18,6 +19,23 @@ import {
   setAdvisorUnlock,
   undoAdvisor,
 } from './core/advisor.ts'
+import {
+  claudeLiveCwds,
+  type FoldRecord,
+  type LiveCwds,
+  type MemoryDoctorContext,
+  type MemoryStatus,
+  mainMemoryFindings,
+  memoryFindings,
+  memoryHookPart,
+  memorySettingsLine,
+  memorySkipLine,
+  memoryStatus,
+  memoryTarget,
+  readFolds,
+  systemTrash,
+  type Trash,
+} from './core/claude-memory.ts'
 import {
   carryLine,
   carryTrust,
@@ -613,6 +631,19 @@ export interface Runtime {
   /** Takes back the trust marks sideby copied, only where each still holds what sideby wrote; `apply` false previews. */
   trustUndo(opts: { apply: boolean; only?: readonly { id: string; at: string }[] }): Promise<UndoItem[]>
   /**
+   * Shared Project Memory (spec §3.44, ADR-0081): config `claude.shareMemory`, the folds Doctor recorded and, only while
+   * on, each Project's memory in the Main Account and in each Account, and where `dir`'s memory goes. While off no
+   * Account folder is read.
+   */
+  memoryStatus(dir?: string): Promise<MemoryStatus>
+  /** Turns config `claude.shareMemory` on or off; without `apply`, only says what would change. */
+  memorySet(
+    on: boolean,
+    opts: { apply: boolean },
+  ): Promise<{ changed: boolean; applied: boolean; before: boolean; after: boolean; file: string }>
+  /** The setting and the folds Doctor recorded, from the config and sideby's own records only (no Account folder). */
+  memoryOverview(): Promise<{ on: boolean; folded: FoldRecord[] }>
+  /**
    * Which Account of a Family to move on to (spec §3.13), for a start the user asks for: past the Takeover Limit it
    * falls back to the least used Account under 100% (`tight`). Throws a UserError with code `no-quota-source`
    * when the Family cannot tell, `no-accounts` when it has none. `fetch` is as for `quota`; `never` reads only the kept
@@ -703,6 +734,11 @@ export async function createRuntime(
      * (spec §3.43). Omitted, `process.cwd()` and stderr. Not part of the plugin or Portal contract.
      */
     trust?: { cwd?: () => string; print?: (line: string) => void }
+    /**
+     * Internal, for tests: the working folders of an Account's Live Sessions (null: cannot tell) and where Doctor puts a
+     * memory folder it emptied (spec §3.44). Omitted, the Claude session files with `ps`, and the system trash.
+     */
+    memory?: { liveCwds?: (account: Account) => Promise<LiveCwds>; trash?: Trash }
   } = {},
 ): Promise<Runtime> {
   const env = opts.env ?? process.env
@@ -826,6 +862,47 @@ export async function createRuntime(
     return progressHookPart()
   }
 
+  /** The Main Claude Account's folder (`~/.claude`), where Shared Project Memory lives. */
+  const claudeMainDir = (): string => {
+    const f = families.get('claude')
+    return f ? mainDirOf(f, paths.home) : `${paths.home}/.claude`
+  }
+
+  /**
+   * Shared Project Memory on a Claude session sideby starts (spec §3.44, ADR-0081): the Main Account's memory folder of
+   * the Project, as `autoMemoryDirectory` in sideby's own `--settings` file. Not for the Main Account (that folder is
+   * already its own), a headless run, or a session given its own `--settings` (the notice says so).
+   */
+  const memoryPrepared = async (p: PreparedLaunch): Promise<SessionHookPart | null> => {
+    if (p.family.id !== 'claude' || config.claude?.shareMemory !== true || p.account.isMain) return null
+    if (claudeHeadless(p.args)) return null
+    if (hasOption(p.args, ['--settings'])) {
+      addNotice(p, [memorySettingsLine(p.env)])
+      return null
+    }
+    const t = await memoryTarget(claudeMainDir(), opts.trust?.cwd?.() ?? process.cwd())
+    if (t.status === 'skip') {
+      addNotice(p, [memorySkipLine(p.env, t.why.split(`${paths.home}/`).join('~/'))])
+      return null
+    }
+    return memoryHookPart(t.dir)
+  }
+
+  /** What Doctor's Shared Project Memory check and Fix use (spec §3.44, ADR-0081). */
+  const memoryCtx = (): MemoryDoctorContext => ({
+    mainDir: claudeMainDir(),
+    stateDir: paths.stateDir,
+    liveCwds:
+      opts.memory?.liveCwds ??
+      (async (a) => {
+        const { processView, systemDeps } = await import('./core/live-sessions-procs.ts')
+        return claudeLiveCwds(a, processView(systemDeps(env)))
+      }),
+    trash: opts.memory?.trash ?? systemTrash(env, paths.stateDir, now),
+    now,
+    show: (p) => p.split(`${paths.home}/`).join('~/'),
+  })
+
   /** Puts every session hook into the Launch's arguments: one `--settings` for Claude, `-c hooks.*` for Codex. */
   const addSessionHooks = async (p: PreparedLaunch, list: readonly (SessionHookPart | null)[]) => {
     const parts = list.filter((x): x is SessionHookPart => x !== null)
@@ -849,6 +926,8 @@ export async function createRuntime(
     if (!o.ignoreNetwork) parts.push(await guardPrepared(p, session))
     if (session) parts.push(await unattendedPrepared(p, Boolean(o.unattended)))
     if (session) parts.push(progressPrepared(p))
+    // Last: its file name says which Project's folder it holds.
+    if (session) parts.push(await memoryPrepared(p))
     await addSessionHooks(p, parts)
   }
 
@@ -1496,6 +1575,11 @@ export async function createRuntime(
           scope = { kind: 'account', ref: one.ref }
         }
       }
+      // Shared Project Memory (spec §3.44): checked only while on, and only when the run includes Claude.
+      const freshMemory = await loadConfig(paths.configFile).catch(() => null)
+      if (freshMemory) config.claude = freshMemory.claude
+      const memoryOn = config.claude?.shareMemory === true && fams.has('claude')
+      const mctx = memoryOn ? memoryCtx() : null
       const input = {
         home: paths.home,
         families: fams,
@@ -1510,6 +1594,8 @@ export async function createRuntime(
           ...(await checkAppData(loaded.plugins, paths.home, a, Boolean(o.force))),
           // Messages held in bypass permission mode (spec §3.32 step 2): the arguments the Account starts with.
           ...(await inboundFindings(a, startArgs(a))),
+          // Memory an Account wrote on its own, folded into the Main Account by the Fix (spec §3.44).
+          ...(mctx ? await memoryFindings(mctx, a) : []),
         ],
         loginProblem: (a: Account) => loginProblemFor(a),
       }
@@ -1527,6 +1613,14 @@ export async function createRuntime(
             : {}),
           home: paths.home,
         })
+        // The Main Account's memory index and folder names (spec §3.44); warnings only.
+        if (mctx)
+          extra.push(
+            ...(await mainMemoryFindings(
+              mctx,
+              all.filter((a) => a.family === 'claude'),
+            ).catch(() => [])),
+          )
         return extra.length ? { ...r, general: [...r.general, ...extra] } : r
       }
       let report = await withHandoff(await runDoctor(input))
@@ -2371,6 +2465,40 @@ export async function createRuntime(
       }
     },
     trustUndo: (o) => undoCarries(paths.stateDir, { apply: o.apply, ...(o.only ? { only: o.only } : {}) }),
+    async memoryStatus(dir) {
+      const fresh = await loadConfig(paths.configFile).catch(() => null)
+      if (fresh) config.claude = fresh.claude
+      // `accounts` walks the Host folders: asked only while the setting is on.
+      return memoryStatus(
+        { mainDir: claudeMainDir(), stateDir: paths.stateDir, accounts },
+        config.claude?.shareMemory === true,
+        dir,
+      )
+    },
+    async memorySet(on, o) {
+      const r = await editConfigClaude(
+        paths.configFile,
+        (c) => {
+          if (on) return { ...c, shareMemory: true }
+          const { shareMemory: _drop, ...rest } = c
+          return Object.keys(rest).length ? rest : undefined
+        },
+        { dryRun: !o.apply },
+      )
+      if (o.apply && r.changed) config.claude = r.after
+      return {
+        changed: r.changed,
+        applied: o.apply && r.changed,
+        before: r.before?.shareMemory === true,
+        after: r.after?.shareMemory === true,
+        file: paths.configFile,
+      }
+    },
+    async memoryOverview() {
+      const fresh = await loadConfig(paths.configFile).catch(() => null)
+      if (fresh) config.claude = fresh.claude
+      return { on: config.claude?.shareMemory === true, folded: await readFolds(paths.stateDir) }
+    },
     async advisorUnlock(on) {
       const r = await setAdvisorUnlock(paths.configFile, on)
       await reloadAdvisorConfig()

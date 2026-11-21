@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/memory.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "action",
+    "on",
+    "main",
+    "folded"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "action": {
+      "type": "string",
+      "const": "status"
+    },
+    "on": {
+      "type": "boolean",
+      "description": "Config `claude.shareMemory` (spec §3.44): Claude sessions sideby starts in other accounts read and write the main account's memory for their project, and `sideby doctor --fix` moves memory an account wrote on its own into the main account."
+    },
+    "main": {
+      "type": "string",
+      "description": "The main account's folder that holds every project's memory."
+    },
+    "folded": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "account",
+          "project",
+          "files",
+          "at"
+        ],
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "The account the memory came from."
+          },
+          "project": {
+            "type": "string",
+            "description": "The project folder name under projects/."
+          },
+          "files": {
+            "type": "number",
+            "description": "How many files reached the main account."
+          },
+          "at": {
+            "type": "string",
+            "description": "When (ISO time)."
+          }
+        }
+      },
+      "description": "What `sideby doctor --fix` moved into the main account, oldest first."
+    },
+    "dir": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The folder asked about (its real path)."
+        },
+        "name": {
+          "type": "string",
+          "description": "Its project folder name under projects/."
+        },
+        "memory": {
+          "type": "string",
+          "description": "Where its memory goes for every Claude account sideby starts."
+        },
+        "why": {
+          "type": "string",
+          "description": "Why sideby cannot tell; such a session keeps its own memory."
+        }
+      },
+      "description": "Where the memory of the folder asked about goes; only while on."
+    },
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "main",
+          "pending",
+          "folded"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The project folder name under projects/."
+          },
+          "main": {
+            "type": "number",
+            "description": "Files in the main account's memory folder for it."
+          },
+          "pending": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "account",
+                "files"
+              ],
+              "properties": {
+                "account": {
+                  "type": "string"
+                },
+                "files": {
+                  "type": "number"
+                }
+              }
+            },
+            "description": "Accounts that keep memory of their own for it: what `sideby doctor --fix` would move."
+          },
+          "folded": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "account",
+                "files"
+              ],
+              "properties": {
+                "account": {
+                  "type": "string"
+                },
+                "files": {
+                  "type": "number"
+                }
+              }
+            },
+            "description": "Files `sideby doctor --fix` already moved in, per account."
+          }
+        }
+      },
+      "description": "Each project with memory in the main account or in an account of its own; only while on. Nothing is read while off."
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  },
+  "title": "sideby memory [--dir <path>] --json"
+}

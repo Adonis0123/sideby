@@ -7,6 +7,7 @@ import { statOrNull } from '../../core/fs-safe.ts'
 import type { LiveSessionStatus } from '../../core/live-sessions.ts'
 import { isoOf } from '../../core/live-sessions-procs.ts'
 import type { LiveSessionReader, RawLiveSession } from '../live-sessions.ts'
+import { claudeProjectDirName } from './layout.ts'
 import { readSessionRecord, recordRunsOn, recordStart, tailLinesWith } from './session-files.ts'
 
 const PID_FILE = /^(\d+)\.json$/
@@ -39,7 +40,7 @@ const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v 
 
 /** The transcript Claude Code writes for a session: `projects/<cwd with every other character as ->/<id>.jsonl`. */
 export const claudeTranscript = (dir: string, cwd: string, id: string): string =>
-  join(dir, 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'), `${id}.jsonl`)
+  join(dir, 'projects', claudeProjectDirName(cwd), `${id}.jsonl`)
 
 const titleMemo = new Map<string, { sig: string; title: string | undefined }>()
 

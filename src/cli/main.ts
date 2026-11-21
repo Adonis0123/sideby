@@ -83,7 +83,8 @@ Exit: the host's exit code.`,
 Check every account's shared items against the main account, credential file modes (600), backup leftovers,
 and whether the installed sideby skill matches this version.
 
-  --fix     repair what is safe: add missing links, refresh copies, chmod 600, sync MCP servers
+  --fix     repair what is safe: add missing links, refresh copies, chmod 600, sync MCP servers; with shared
+            memory on (sideby memory), move memory an account wrote on its own into the main account
   --force   with --fix, also let a synced MCP list (json-key) drop entries the account has
 
 --fix never replaces a real file with a link and never changes where an existing link points; those are
@@ -449,6 +450,33 @@ Examples:
   sideby trust undo
 Exit: 0 shown or done; 10 a change was shown and waits for --yes; 1 undo left a mark it could not change (the line
 says why); 2 malformed command line.`,
+  memory: `sideby memory [--dir <path>] [--json]
+       sideby memory on|off [--yes] [--json]
+
+Share Claude's project memory between your Claude accounts. Claude Code keeps what it learns about a project (auto
+memory) per account, so a second account starts without it. With this on, every interactive Claude session sideby
+starts in an account other than the main one (sideby run, short commands, pick commands, next, Auto Handoff, AI
+Tasks, Unattended Mode) reads and writes the main account's memory for that project
+(~/.claude/projects/<project>/memory): sideby passes that folder as autoMemoryDirectory in its own --settings file.
+The project is the git repository's main checkout (a linked worktree and every subfolder share it), elsewhere the
+folder itself, as Claude Code names it; sideby never runs git in the folder.
+
+Memory an account wrote on its own (a session started with plain claude, or by an app) stays in that account until
+\`sideby doctor --fix\` moves it into the main account: a project the main account lacks moves whole; a file that
+differs is kept beside the main one as <name>.<account>.md; MEMORY.md gets the lines it lacks; the emptied folder goes
+to the trash. A project where a session of that account is running waits until it ends.
+
+Without a subcommand: whether it is on, what Doctor moved, and, while on, where this folder's memory goes (--dir,
+default the current one) and which projects still wait to be moved; nothing of the account folders is read while it
+is off. \`on\` and \`off\` change config claude.shareMemory; each shows the change first and makes it with --yes.
+Turning it off stops passing the folder; the memory already in the main account stays there. A headless run (-p),
+the main account itself and a session given its own --settings keep their own memory (the launch says so).
+
+Examples:
+  sideby memory on --yes
+  sideby memory --dir ~/code/app
+  sideby doctor claude --fix
+Exit: 0 shown or done; 10 a change was shown and waits for --yes; 2 malformed command line.`,
   browser: `sideby browser [--enable|--disable] [--yes] [--json]
        sideby browser open <account> [--profile <folder|name>] [--json]
        sideby browser set <account> <folder|name> [--json]
@@ -552,6 +580,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   },
   progress: { flags: ['json'], valued: ['every'] },
   trust: { flags: ['json', 'yes'], valued: ['dir'] },
+  memory: { flags: ['json', 'yes'], valued: ['dir'] },
   new: { flags: ['api', 'json', 'next'], valued: ['alias', 'vendor'] },
   alias: { flags: ['json', 'yes'], valued: ['pick'] },
   doctor: { flags: ['fix', 'force', 'json'] },
@@ -892,6 +921,8 @@ async function dispatch(
       return await cmds.cmdProgress(parsed, io)
     case 'trust':
       return await cmds.cmdTrust(parsed, io)
+    case 'memory':
+      return await cmds.cmdMemory(parsed, io)
     case 'shell-init':
       return await cmds.cmdShellInit(parsed, io)
     case 'plugins':
