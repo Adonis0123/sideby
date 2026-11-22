@@ -1,4 +1,4 @@
-// The one service layer the CLI and the Panel share. Frozen contract for v0.1 (plan: 审核修订).
+// The one service layer the CLI and the Panel share.
 
 import {
   type AccountRefError,
