@@ -262,6 +262,15 @@ export interface ResumeLaunch {
   run?: { args: string[] }
 }
 
+/** The Account a by-id resume starts in, and the Host arguments to start it with (`Runtime.resumeTarget`). */
+export interface ResumeTarget {
+  sessionId: string
+  account: Account
+  args: string[]
+  /** The session was never saved: `args` start a new session instead (ADR-0009). */
+  newSession?: true
+}
+
 /** What happened to the alias asked for with a new Account. */
 export interface AliasResult {
   name: string
@@ -520,6 +529,12 @@ export interface Runtime {
     userArgs: readonly string[],
     opts?: { ignoreNetwork?: boolean; unattended?: boolean },
   ): Promise<ResumeLaunch>
+  /**
+   * Where the Host arguments' by-id resume belongs (spec §3.13 "按 id 恢复", §3.15): the Account that holds the session
+   * (main included) with the arguments unchanged, or the one that started a never-saved session with the resume taken
+   * out; null when they resume nothing by id, the Family cannot route, or no Account has the session.
+   */
+  resumeTarget(familyId: string, userArgs: readonly string[]): Promise<ResumeTarget | null>
   /**
    * The Account's Quota. For an Account of a Same Login (spec §3.21) it is the group's freshest reading, with `from`
    * naming the Account it was read from when that is another one.
@@ -1993,6 +2008,21 @@ export async function createRuntime(
         launch: await rt.prepareLaunch(route.account.ref, userArgs, 'run', ro),
         ...id,
         account: route.account,
+      }
+    },
+    async resumeTarget(familyId, userArgs) {
+      const family = familyOf(familyId)
+      if (!family.resumedSession || !family.sessionWrittenAt) return null
+      const route = await findResumeRoute(family, await accounts(), userArgs)
+      if (!route.sessionId || !route.account) return null
+      if (!route.neverSaved)
+        return { sessionId: route.sessionId, account: route.account, args: [...userArgs] }
+      if (!family.withoutResume) return null
+      return {
+        sessionId: route.sessionId,
+        account: route.account,
+        args: family.withoutResume(userArgs),
+        newSession: true,
       }
     },
     async quota(account, o = {}) {

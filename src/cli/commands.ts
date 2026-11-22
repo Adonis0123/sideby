@@ -822,6 +822,19 @@ async function runPick(
   io: Io,
   opts: LaunchFlags = {},
 ): Promise<number> {
+  const pickFamily = rt.pickCommandFamily(name)
+  // A resumed session lives in one Account only, so it starts there whatever the Quota (spec §3.13 "按 id 恢复").
+  const target = pickFamily === undefined ? null : await rt.resumeTarget(pickFamily, args)
+  if (target) {
+    io.err(
+      c.dim(
+        target.newSession
+          ? `sideby: session ${target.sessionId} was never saved; starting a new session in ${target.account.ref}`
+          : `sideby: session ${target.sessionId} is in ${target.account.ref}; starting it there`,
+      ),
+    )
+    return runAccount(rt, target.account.ref, target.args, io, opts)
+  }
   const { choice, family } = await rt.pickChoice(name)
   if (choice.ref === null) {
     const now = rt.readContext().now

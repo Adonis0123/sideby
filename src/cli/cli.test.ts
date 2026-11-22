@@ -1095,6 +1095,28 @@ describe('next (Handoff, spec §3.13)', () => {
       assert.equal(one?.env.CLAUDE_CONFIG_DIR, undefined)
       assert.deepEqual(one?.argv.slice(-2), ['--print', 'hi'])
       assert.equal(two?.env.CLAUDE_CONFIG_DIR, h.path('.claude-lab'))
+      // A by-id resume starts the account that holds the session, whatever the quota (spec §3.13).
+      const sid = '43ad416d-f46d-4bcb-a1de-45103986a005'
+      await h.write(`.claude-work/projects/-repo/${sid}.jsonl`, '{}\n')
+      const resumed = await sideby(h, ['run', 'cc', '--', '--resume', sid])
+      assert.equal(resumed.code, 0, resumed.err)
+      assert.match(resumed.err, new RegExp(`session ${sid} is in claude:work; starting it there`))
+      assert.doesNotMatch(resumed.err, /the most room/)
+      // A session only started (never saved) opens a new one where it started, without the resume.
+      const unsaved = '11111111-2222-4333-8444-555555555555'
+      await mkdir(h.path(`.claude/session-env/${unsaved}`), { recursive: true })
+      const fresh = await sideby(h, ['run', 'cc', '--', '-r', unsaved, '--print', 'hi'])
+      assert.equal(fresh.code, 0, fresh.err)
+      assert.match(
+        fresh.err,
+        new RegExp(`session ${unsaved} was never saved; starting a new session in claude:main`),
+      )
+      const [, , three, four] = await readHostLog(h, 'claude')
+      assert.equal(three?.env.CLAUDE_CONFIG_DIR, h.path('.claude-work'))
+      assert.deepEqual(three?.argv.slice(-2), ['--resume', sid])
+      assert.equal(four?.env.CLAUDE_CONFIG_DIR, undefined)
+      assert.deepEqual(four?.argv.slice(-2), ['--print', 'hi'])
+      assert.ok(!four?.argv.includes(unsaved))
       // Every account past the Takeover Limit: the least used one under 100%, and the line says so.
       await cache(h, 'work', 86, 40, 1)
       await cache(h, 'lab', 99, 20, 5)
@@ -1104,7 +1126,7 @@ describe('next (Handoff, spec §3.13)', () => {
         tight.err,
         /cc → claude:work \(every claude account is past its limit, 85% of a 5-hour window or 95% of a weekly one; this one has the most left, 5h 86% used\)/,
       )
-      assert.equal((await readHostLog(h, 'claude'))[2]?.env.CLAUDE_CONFIG_DIR, h.path('.claude-work'))
+      assert.equal((await readHostLog(h, 'claude'))[4]?.env.CLAUDE_CONFIG_DIR, h.path('.claude-work'))
       // Every account with a window used up: nothing starts, and it says which comes back first.
       await cache(h, 'main', 100, 40, 3)
       await cache(h, 'work', 100, 50, 1)
@@ -1112,7 +1134,7 @@ describe('next (Handoff, spec §3.13)', () => {
       const full = await sideby(h, ['run', 'cc'])
       assert.equal(full.code, 1)
       assert.match(full.err, /cc: every signed-in claude account has used up its quota; claude:work is back /)
-      assert.equal((await readHostLog(h, 'claude')).length, 3)
+      assert.equal((await readHostLog(h, 'claude')).length, 5)
 
       // One namespace: an alias cannot take the name, and a pick command cannot take an alias's.
       const clash = await sideby(h, ['alias', 'add', 'cc', 'claude:work', '--json'])
