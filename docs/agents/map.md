@@ -45,6 +45,8 @@ src/
 ├── panel/        createPanelHandler, the standalone server, the inline page and theme.ts (host theme tokens);
 │                 page-logic.ts suggestName/suggestAlias also pick the name and short command for `new --next`
 │                 background.ts runs the server detached (`ui --background`, `--stop`)
+│                 changes.ts: the change feed (`GET /api/changes`, §3.45, ADR-0084) that watches Quota files while a page asks;
+│                 the folders of each Family are in families/quota-watch.ts (internal)
 ├── desktop/      `sideby app install|uninstall`: macOS app bundle, Linux .desktop entry, icon composited in pure Node
 ├── menubar/      the Menu Bar Item (§3.31, ADR-0034): script.ts is the JXA `osascript` runs, agent.ts its LaunchAgent, snapshot.ts what it shows
 │                 (`menubar snapshot --json`), hotkey.ts its shortcut, strings.ts its words in English and Chinese

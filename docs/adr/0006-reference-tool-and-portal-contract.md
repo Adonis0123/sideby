@@ -68,6 +68,10 @@ A Portal can show controls of its own for something the Panel shows too (an Unat
 
 ADR-0033's amendment adds `open?: { bridge: 'postMessage' }`, added like every other option (compatible) and checked when the handler is created. With it, a Panel inside a frame posts `{ type: 'local-tools:open', version: 1, path }` (an absolute path, never file content) to `window.parent` at its own origin when the user opens an account's settings file, for a Portal that opens files with an app the user chose there. The CSP and the Host, Origin and token checks do not change.
 
+## Amendment (2026-11-23): a held GET for Quota changes
+
+ADR-0084 adds `GET <basePath>/api/changes?since=<n>`, which the handler holds for up to 25 seconds while nothing changes, so the Panel reads its state about half a second after a Quota file changes. What any Portal must do: forward it like every other request, without buffering the answer or ending it sooner. A Portal that cuts it early only makes the page ask again, and the 20-second refresh keeps working. It needs no handler option, and the CSP and the Host, Origin and token checks do not change.
+
 ## Why not the others
 
 - **One package for every tool, sideby as a plugin of it**: one install, but sideby's published scope would change and one failing tool would break the others.

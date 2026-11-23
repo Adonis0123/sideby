@@ -17,10 +17,12 @@ import { createRuntime } from '../runtime.ts'
 import {
   bindPanelAutostart,
   createPanelHandler,
+  familyPlans,
   handoffByFamily,
   MAX_BODY_BYTES,
   type PanelAccount,
   type PanelState,
+  pickNowOf,
   readBudget,
 } from './handler.ts'
 import { MESSAGES } from './i18n.ts'
@@ -1191,6 +1193,15 @@ describe('panel handoff (spec §3.13)', () => {
         assert.deepEqual([task.kind, task.account], ['run', 'demo:lab'])
         assert.equal(calls.length, 1)
         assert.equal((await post(port, '/api/pick/start', { name: 'nope' }, good)).status, 400)
+        // The "Best to use now" card starts by tool, also without a Pick Command (spec §3.45).
+        await h.write('.config/sideby/config.json', JSON.stringify({ aliases: { dm2: 'demo:work' } }))
+        const byFamily = await post(port, '/api/pick/start', { family: 'demo' }, good)
+        assert.equal(byFamily.status, 200, JSON.stringify(byFamily.body))
+        assert.equal(byFamily.body.opened, true)
+        assert.equal(byFamily.body.name, undefined)
+        const started = await readTask(byFamily.body.task as string, (await withTerminal()).paths)
+        assert.deepEqual([started.kind, started.account], ['run', byFamily.body.picked])
+        assert.equal(calls.length, 2)
       } finally {
         await close(server)
       }
@@ -2306,6 +2317,23 @@ describe('panel next tag and Same Login (spec §3.21)', () => {
       'claude:001',
     )
     assert.deepEqual(handoffByFamily(rt, [acct('main', 100), acct('001', 100)], now), {})
+  })
+
+  it('gives the "Best to use now" card a pick for one login too, and says why there is none (spec §3.45)', () => {
+    const card = (list: PanelAccount[]) => pickNowOf(familyPlans(rt, list, now).claude!.plan)
+    assert.deepEqual(card([acct('main', 30)]), { pick: 'claude:main', hasQuota: true, reason: 'room' })
+    assert.deepEqual(card([acct('main', 100), acct('001', 100)]), {
+      pick: null,
+      hasQuota: true,
+      why: 'used-up',
+      earliestReset: { ref: 'claude:main', at: '2026-10-14T12:00:00.000Z' },
+    })
+    const none = { status: 'unavailable', reason: 'unrecognized' }
+    const noData = (name: string) => ({ ...acct(name, 0), quota: none }) as unknown as PanelAccount
+    assert.deepEqual(card([noData('main')]), { pick: null, hasQuota: false, why: 'no-quota' })
+    // Signed out with no quota either: signing in comes first.
+    const out = (name: string) => ({ ...noData(name), login: 'logged-out' }) as unknown as PanelAccount
+    assert.deepEqual(card([out('main'), out('001')]), { pick: null, hasQuota: false, why: 'signed-out' })
   })
 })
 

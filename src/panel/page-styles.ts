@@ -146,7 +146,7 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .theme-bad { color: var(--fail); }
 .theme-fade, .theme-fade * { transition: background-color var(--duration-base) var(--ease-out), color var(--duration-base) var(--ease-out), border-color var(--duration-base) var(--ease-out), fill var(--duration-base) var(--ease-out) !important; }
 @media (prefers-reduced-motion: reduce) { .theme-fade, .theme-fade * { transition: none !important; } }
-/* Summary: four quiet numbers in one surface. */
+/* Summary: the account to use now on a line of its own, then four quiet numbers, in one surface. */
 .summary[hidden], #checkup[hidden] { display: none; }
 .summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow); margin-bottom: 20px; overflow: hidden; }
 .stat { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; min-width: 0; padding: 16px 20px; border-left: 1px solid var(--border); text-align: left; }
@@ -160,6 +160,13 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .stat-btn[aria-pressed=true] { background: var(--selected); color: var(--brand); }
 .stat-warn .stat-value { color: var(--warn); }
 .stat-ok .stat-value { color: var(--ok); }
+.stat-pick { grid-column: 1 / -1; align-items: center; min-height: 56px; padding: 12px 20px; border-bottom: 1px solid var(--border); }
+.stat-pick + .stat { border-left: 0; }
+.stat-pick .stat-text { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 16px; }
+.stat-pick .stat-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.stat-acct .stat-value { font-family: var(--mono); font-size: 18px; letter-spacing: 0; }
+.stat-pick .stat-act { align-self: center; display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
+.sk-pick { height: 24px; width: 45%; }
 .label-tip { display: inline-flex; align-items: center; gap: 8px; }
 
 /* Toolbar */
@@ -1039,7 +1046,8 @@ ${UI_CSS}
 .sk-title { height: 12px; width: 22%; }
 .sk-bar { height: 8px; flex: 1; max-width: 160px; margin-left: auto; }
 .sk-line { height: 12px; margin: 8px 0; }
-.sk-stat { height: 40px; margin: 16px 20px; }
+/* As tall as a card's label, number and line under it, so the summary keeps its height when the numbers land. */
+.sk-stat { height: 47px; margin: 8px 0; }
 .w50 { width: 50%; } .w70 { width: 70%; }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 .view-in > * { animation: view-in var(--duration-base) var(--ease-out) both; }
@@ -1090,8 +1098,8 @@ ${UI_CSS}
   .toolbar > .btn-primary { width: var(--ctl-h); padding: 0; justify-content: center; }
   .toolbar > .btn-primary > span { display: none; }
   .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .stat:nth-child(3) { border-left: 0; }
-  .stat:nth-child(n+3) { border-top: 1px solid var(--border); }
+  .stat:nth-child(4) { border-left: 0; }
+  .stat:nth-child(n+4) { border-top: 1px solid var(--border); }
 }
 :root[data-width=phone] { --gutter: 14px; }
 :where(:root[data-width=phone]) {
@@ -1124,10 +1132,11 @@ ${UI_CSS}
   #accounts { --col-gap: 14px; }
   /* One window per line, so the reset time is never cut off. */
   .row > .quota { grid-template-columns: 1fr; row-gap: 12px; max-width: none; }
-  /* On a phone the summary keeps what needs a look and the next reset. */
-  .stat:nth-child(1), .stat:nth-child(3) { display: none; }
-  .stat:nth-child(n) { border-top: 0; }
-  .stat:nth-child(4) { border-left: 1px solid var(--border); }
+  /* On a phone the summary keeps the account to use now, what needs a look and the next reset. */
+  .stat:nth-child(2), .stat:nth-child(4) { display: none; }
+  .stat:nth-child(3) { border-left: 0; }
+  .stat:nth-child(5) { border-left: 1px solid var(--border); border-top: 0; }
+  .stat-pick { flex-direction: row; align-items: center; padding: 12px 12px; }
   .row-end .icon-btn { width: 36px; height: 36px; }
   .sess-row { grid-template-columns: auto minmax(0, 1fr); row-gap: 12px; }
   .sess-actions { grid-column: 2; }

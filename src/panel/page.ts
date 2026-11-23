@@ -80,6 +80,8 @@ function attr(value: string): string {
 // layout; the page script then follows the width as it changes.
 const SKELETON_ROW = `<div class="sk-row"><span class="sk sk-badge"></span><span class="sk sk-title"></span><span class="sk sk-bar"></span><span class="sk sk-bar"></span></div>`
 const SKELETON_STAT = `<div class="stat"><span class="sk sk-stat w70"></span></div>`
+/** The "Best to use now" card's place (spec §3.45), so the summary opens at its final size. */
+const SKELETON_PICK = `<div class="stat stat-pick"><span class="sk sk-pick"></span></div>`
 
 export function renderPage(opts: PageOptions): string {
   const nonce = opts.nonce ? ` nonce="${attr(opts.nonce)}"` : ''
@@ -154,7 +156,7 @@ export function renderPage(opts: PageOptions): string {
 <main class="wrap">
   <div id="banners"></div>
   <nav id="pages" class="pages" role="tablist" hidden></nav>
-  <section id="summary" class="summary" aria-busy="true">${SKELETON_STAT.repeat(4)}</section>
+  <section id="summary" class="summary" aria-busy="true">${SKELETON_PICK}${SKELETON_STAT.repeat(4)}</section>
   <section id="handoff-page" class="block page" aria-labelledby="h-handoff" hidden></section>
   <section id="tuning-page" class="block page" aria-labelledby="h-tuning" hidden></section>
   <section id="sessions-page" class="block page" aria-labelledby="h-sessions" hidden></section>

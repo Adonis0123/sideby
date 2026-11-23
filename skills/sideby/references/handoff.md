@@ -21,6 +21,8 @@ Use this when the user says an account hit its 5-hour or weekly limit ("usage li
 
    The two limits differ because one full 5-hour window costs only about a fifth of a week: a week at 87% is still `ready` and yellow, not red. When the user asks why such an account was picked, say that.
 
+   Each entry's `windows` lists every counted window not reset yet (`label`, `usedPercent`, `resetsAt`): say what is left in each, such as "claude:002 has 72% of its 5-hour window and 40% of its week left". The Panel's top line, **Best to use now**, shows the same pick and numbers for one tool and starts it on a click; point a user who is not in a terminal there.
+
    Each entry's `observedAt` says when its quota was recorded (`quotaFrom` when it was read from another account of the same login). An entry with `sameLoginAs` is signed in as the same login as the account you run in: it shares that quota and is never picked. If `hasQuota` is `false`, no account has quota data: the pick is only a guess, so say so and suggest turning quota on (see the routing table in SKILL.md) or letting the user choose.
 3. Give the user the command to run in their own terminal: `sideby next <family>` (starts the pick) or `sideby run <pick>`. Host arguments go after `--`. Do not run it yourself.
 4. Offer a handoff note: the new session starts empty, because each account keeps its own sessions. Write a short note the user can paste into it: the goal, what is done, what is in progress, the files involved, and the next step.

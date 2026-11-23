@@ -1305,6 +1305,19 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
               { description: 'The window closest to its own Takeover Limit; absent when none is open.' },
             ),
           ),
+          windows: Type.Optional(
+            Type.Array(
+              Type.Object({
+                label: Type.String({ description: 'Such as `5h` or `7d`.' }),
+                usedPercent: Type.Number({ description: 'Rounded; what is left is 100 minus it.' }),
+                resetsAt: Str,
+              }),
+              {
+                description:
+                  'Every counted window (no model name) that has not reset yet, so a caller can show what the pick has left; absent when none is open.',
+              },
+            ),
+          ),
           resetsAt: Type.Optional(
             Type.String({
               description:

@@ -77,7 +77,7 @@ import {
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import { editSettings, isEditor } from '../core/edit-settings.ts'
 import { UserError } from '../core/errors.ts'
-import { type HandoffPlan, type PickRecord, planHandoff } from '../core/handoff.ts'
+import { blocked, type HandoffPlan, type PickRecord, planHandoff } from '../core/handoff.ts'
 import { applyHandoffEnable, type EnablePlan, planHandoffEnable } from '../core/handoff-enable.ts'
 import { handoffOverview } from '../core/handoff-overview.ts'
 import { apiUndecided, handoffRulesView } from '../core/handoff-rules.ts'
@@ -151,6 +151,7 @@ import { listPendingDecisions, markPendingDone, reopenPendingDecisions } from '.
 import { readUnattendedConfig } from '../core/unattended-state.ts'
 import * as update from '../core/update.ts'
 import { buildId, localBuild, packageVersion } from '../core/version.ts'
+import { quotaWatchDirs } from '../families/quota-watch.ts'
 import { HOOK_FAMILIES } from '../handoff/hook.ts'
 import { MENUBAR_AGENT } from '../menubar/agent.ts'
 import {
@@ -164,6 +165,7 @@ import { MENUBAR_SCRIPT } from '../menubar/script.ts'
 import { renderNetworkPage } from '../network/page.ts'
 import type { AccountStatus, DoctorHistory, FamilyInfo, QuotaCheckInfo, Runtime } from '../runtime.ts'
 import type { Account, FamilyDef, FamilyLogo, QuotaResult, QuotaSetupPlan, UsageResult } from '../types.ts'
+import { createChangeFeed, stateQuotaDir } from './changes.ts'
 import { type OrcaDeps, orcaTabs, switchOrcaTab, systemOrca } from './orca.ts'
 import { renderPage } from './page.ts'
 import { AI_TASK_KINDS } from './page-logic.ts'
@@ -486,6 +488,11 @@ export interface PanelState {
    * limit (a Last Resort), `unknown` when it has no Quota data and the accounts with data are full.
    */
   handoffReason?: Record<string, 'expiring' | 'room' | 'tight' | 'unknown'>
+  /**
+   * Family → the "Best to use now" card's pick (spec §3.45): the same plan as `handoff`, also for a Family with one
+   * login, and when the running sessions are not known in time (ranked as if none ran).
+   */
+  pickNow?: Record<string, PickNow>
   /** Auto Handoff settings (spec §3.17) and the Families that can start one; readiness comes from /api/handoff/status. */
   autoHandoff: { settings: HandoffSettings; starters: string[]; apiUndecided: boolean }
   /** Claude settings files grouped as `sideby remote-control` shows them (spec §3.22); absent without Claude Accounts. */
@@ -727,6 +734,22 @@ async function localSwitchState(
   }
 }
 
+/** One Family's "Best to use now" (spec §3.45). */
+export interface PickNow {
+  /** The Account `sideby next` would pick; null when none can be started now. */
+  pick: string | null
+  /** Whether any Account of the Family has Quota data; without any there is no pick. */
+  hasQuota: boolean
+  /** Why the pick goes first, as `handoffReason`. */
+  reason?: 'expiring' | 'room' | 'tight' | 'unknown'
+  /** The Live Sessions of the pick's login, Pick Records included, when any. */
+  running?: number
+  /** Why there is no pick: no Quota data, every signed-in Account has a window used up, or none is signed in. */
+  why?: 'no-quota' | 'used-up' | 'signed-out'
+  /** With `used-up`: the Account that comes back first. */
+  earliestReset?: { ref: string; at: string }
+}
+
 /** The Live Sessions and Pick Records a pick counts (ADR-0083). */
 export interface PickLoad {
   live: ReadonlyMap<string, number>
@@ -752,14 +775,38 @@ export function handoffPlans(
   now: Date,
   load?: PickLoad,
 ): Record<string, HandoffPlan> {
+  return nextPicks(familyPlans(rt, accounts, now, load))
+}
+
+/**
+ * The plans that make a Next pick: a pick from Quota data, among two logins or more. Logins, not directories: a Same
+ * Login group (spec §3.21) is one Quota, so it alone is no alternative.
+ */
+function nextPicks(all: Record<string, { plan: HandoffPlan; logins: number }>): Record<string, HandoffPlan> {
   const out: Record<string, HandoffPlan> = {}
+  for (const [id, { plan, logins }] of Object.entries(all))
+    if (logins >= 2 && plan.pick && plan.hasQuota) out[id] = plan
+  return out
+}
+
+/**
+ * `sideby next`'s plan for every Family with a Quota source and a signed-in or unknown Subscription Account read
+ * already, with how many logins it has: the Next pick takes those with two or more, the "Best to use now" card
+ * (spec §3.45) every one.
+ */
+export function familyPlans(
+  rt: Runtime,
+  accounts: readonly PanelAccount[],
+  now: Date,
+  load?: PickLoad,
+): Record<string, { plan: HandoffPlan; logins: number }> {
+  const out: Record<string, { plan: HandoffPlan; logins: number }> = {}
   for (const [id, f] of rt.families) {
     // An Account still being read has no Quota yet; it is neither a pick nor an alternative until it has.
     const list = accounts.filter((a) => a.family === id && !a.pending)
-    // Count logins, not directories: a Same Login group (spec §3.21) is one Quota, so it alone is no alternative.
     const subs = list.filter((a) => a.kind === 'subscription')
     const logins = subs.filter((a, i) => !subs.slice(0, i).some((b) => a.sameLogin?.includes(b.ref))).length
-    if ((!f.readQuota && !f.fetchQuota) || logins < 2) continue
+    if ((!f.readQuota && !f.fetchQuota) || logins < 1) continue
     const plan = planHandoff(
       id,
       list.map((a) => ({
@@ -782,9 +829,35 @@ export function handoffPlans(
         ...(load ? { picks: load.picks, live: load.live } : {}),
       },
     )
-    if (plan.pick && plan.hasQuota) out[id] = plan
+    out[id] = { plan, logins }
   }
   return out
+}
+
+/** The "Best to use now" card's entry of a Family's plan (spec §3.45). */
+export function pickNowOf(plan: HandoffPlan): PickNow {
+  const chosen = plan.accounts.find((e) => e.ref === plan.pick)
+  if (plan.pick && plan.hasQuota) {
+    const reason: PickNow['reason'] =
+      plan.reason ?? (plan.tight ? 'tight' : chosen?.state === 'unknown' ? 'unknown' : undefined)
+    return {
+      pick: plan.pick,
+      hasQuota: true,
+      ...(reason ? { reason } : {}),
+      ...(chosen?.liveSessions ? { running: chosen.liveSessions } : {}),
+    }
+  }
+  // No Subscription Account that can start (signed out, or its sign-in expired): signing in comes first.
+  const subs = plan.accounts.filter((e) => e.kind === 'subscription')
+  if (!subs.some((e) => e.state !== 'logged-out' && !blocked(e)))
+    return { pick: null, hasQuota: plan.hasQuota, why: 'signed-out' }
+  if (!plan.hasQuota) return { pick: null, hasQuota: false, why: 'no-quota' }
+  return {
+    pick: null,
+    hasQuota: true,
+    why: 'used-up',
+    ...(plan.earliestReset ? { earliestReset: plan.earliestReset } : {}),
+  }
 }
 
 class HttpError extends Error {
@@ -1087,6 +1160,17 @@ function clearReadings(r: Readings): void {
   r.last.clear()
 }
 
+/** A read that began longer ago than this goes on after a file change: a cold first read can take a minute. */
+const REREAD_MS = 5000
+/**
+ * After a file Quota lands in changed (spec §3.45): the next state reads again instead of using a read from before
+ * the change. The last states stay, for slow rows meanwhile.
+ */
+function dropEarlyReadings(r: Readings, now: number): void {
+  for (const [ref, reading] of r.going)
+    if (reading.done || now - reading.started < REREAD_MS) r.going.delete(ref)
+}
+
 /**
  * The Account's state within `readBudget`. While its reads go on: its last complete state (`refreshing`), or else
  * the state without its usage once the rest is in (`usagePending`), or else a pending placeholder.
@@ -1252,9 +1336,18 @@ async function buildState(
     const ref = key.slice(0, key.indexOf('\0'))
     live.set(ref, (live.get(ref) ?? 0) + 1)
   }
-  const plans = keys
-    ? handoffPlans(rt, list, ctx.now, { live, picks: await readPickRecords(rt.paths.stateDir, ctx.now) })
-    : {}
+  // Unknown running sessions leave the Next pick out; the card ranks as if none ran, so it never reads "nothing".
+  const load = keys ? { live, picks: await readPickRecords(rt.paths.stateDir, ctx.now) } : undefined
+  const every = familyPlans(rt, list, ctx.now, load)
+  const plans = keys ? nextPicks(every) : {}
+  // A tool whose quota has only per-model windows (Antigravity CLI) never ranks by quota, so it gets no card.
+  const pickNow = Object.fromEntries(
+    Object.entries(every)
+      .filter(
+        ([f, { plan }]) => plan.hasQuota || !list.some((a) => a.family === f && a.quota?.status === 'ok'),
+      )
+      .map(([f, { plan }]) => [f, pickNowOf(plan)]),
+  )
   const handoff = Object.fromEntries(Object.entries(plans).map(([f, p]) => [f, p.pick!]))
   const handoffRunning = Object.fromEntries(
     Object.entries(plans).flatMap(([f, p]) => {
@@ -1319,6 +1412,7 @@ async function buildState(
     ...(Object.keys(handoff).length ? { handoff } : {}),
     ...(Object.keys(handoffRunning).length ? { handoffRunning } : {}),
     ...(Object.keys(handoffReason).length ? { handoffReason } : {}),
+    ...(Object.keys(pickNow).length ? { pickNow } : {}),
     ...(remoteControl.length ? { remoteControl: rcView(remoteControl, ctx.home) } : {}),
     ...(advisor.groups.length ? { advisor: advisorView(advisor, ctx.home) } : {}),
     ...(appProfiles.length
@@ -1737,6 +1831,14 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   const serial = writeQueue()
   const readings: Readings = { going: new Map(), last: new Map() }
   const getRuntime = typeof opts.runtime === 'function' ? opts.runtime : async () => opts.runtime as Runtime
+  // Quota files watched while a page asks (spec §3.45, ADR-0084).
+  const changes = createChangeFeed({
+    dirs: async () => {
+      const rt = await getRuntime()
+      return [stateQuotaDir(rt.paths.stateDir), ...quotaWatchDirs(await rt.accounts())]
+    },
+    onChange: () => dropEarlyReadings(readings, Date.now()),
+  })
   const sessionsSource = (opts as { [LIVE_SESSIONS_SOURCE]?: LiveSessionsSource })[LIVE_SESSIONS_SOURCE]
   const liveSessions = sessionsSource?.list ?? listLiveSessions
   // A change from this page can end a stretch of Unattended Mode: the plugins hear of it now, as after the CLI. The
@@ -2093,19 +2195,25 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
     },
     // Pick Commands (spec §3.13, ADR-0035): start the Account with the most room in the Preferred Terminal, add one
     // (a name that hides a command on PATH comes back as `confirm` until the page sends confirm: true), remove one.
+    // `family` instead of `name`: the "Best to use now" card (spec §3.45), the Family's Pick Command when it has one,
+    // else the same rules without one.
     '/api/pick/start': {
       async run(body) {
-        const name = optString(body, 'name')
-        if (!name) throw new HttpError(400, '"name" is required')
+        const fam = optString(body, 'family')
         const rt = await getRuntime()
+        const name =
+          optString(body, 'name') ??
+          (fam ? Object.entries(rt.config.pickCommands ?? {}).find(([, f]) => f === fam)?.[0] : undefined)
+        if (!name && !fam) throw new HttpError(400, '"name" or "family" is required')
         // This start counts for the next pick, so its record is written now (ADR-0083).
         let rec: PickRecord | undefined
-        const { family, choice } = await rt.pickChoice(name, {
+        const po = {
           record: true,
-          recorded: (r) => {
+          recorded: (r: PickRecord) => {
             rec = r
           },
-        })
+        }
+        const { family, choice } = name ? await rt.pickChoice(name, po) : await rt.familyPick(fam!, po)
         if (choice.ref === null)
           throw new UserError(
             choice.earliestReset
@@ -2124,7 +2232,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         if (!r.opened && rec) await rt.cancelPick(rec)
         return {
           ...r,
-          name,
+          ...(name ? { name } : {}),
           family,
           picked: choice.ref,
           reason: choice.reason,
@@ -3382,6 +3490,15 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         if (sub === '/api/autostart' || sub === '/api/menubar') {
           const rt = await getRuntime()
           send(res, 200, await loginItemView(rt, sub === '/api/menubar' ? MENUBAR_AGENT : PANEL_AGENT))
+          return true
+        }
+        // Held until a Quota file changes or 25 s pass (spec §3.45, ADR-0084).
+        if (sub === '/api/changes') {
+          const raw = new URL(req.url ?? '/', 'http://x').searchParams.get('since')
+          const since = method === 'GET' && raw !== null && /^\d{1,15}$/.test(raw) ? Number(raw) : null
+          const gone = new Promise((done) => res.once('close', done))
+          const answer = await changes.wait(since, gone)
+          if (!res.destroyed) send(res, 200, answer)
           return true
         }
         if (sub === '/api/state') {

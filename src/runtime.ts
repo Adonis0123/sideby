@@ -488,6 +488,14 @@ export interface Runtime {
     opts?: { record?: boolean; recorded?: (rec: PickRecord) => void },
   ): Promise<{ name: string; family: string; choice: PickChoice }>
   /**
+   * The Account a start in `family` makes now, by the rules of a Pick Command of that Family (`pickChoice`), whether
+   * or not it has one: the Panel's "Best to use now" card (spec §3.45). `record` as in `pickChoice`.
+   */
+  familyPick(
+    family: string,
+    opts?: { record?: boolean; recorded?: (rec: PickRecord) => void },
+  ): Promise<{ family: string; choice: PickChoice }>
+  /**
    * The Pick Command to offer for a Family: the existing one, else a free name following its Aliases (or cc, cx, gk),
    * with the command on PATH it would hide, or `name: null` when no such name is free (the user types one); null when
    * the Family has fewer than two Subscription Accounts. `all` saves discovering the Accounts again.
@@ -1894,6 +1902,9 @@ export async function createRuntime(
         throw new UserError(
           `no pick command "${name}"; add one with \`sideby alias add ${name} --pick <family>\``,
         )
+      return { name, ...(await rt.familyPick(family, po)) }
+    },
+    async familyPick(family, po = {}) {
       const f = familyOf(family)
       // API Accounts are never picked, also not as the fallback (ADR-0035).
       const subs = (await accounts()).filter((a) => a.family === f.id && a.kind !== 'api')
@@ -1928,13 +1939,13 @@ export async function createRuntime(
             po.recorded,
           )
         }
-        return { name, family, choice: { ref, reason: 'no-quota-data' } }
+        return { family, choice: { ref, reason: 'no-quota-data' } }
       }
       const plan = await rt.handoff(f.id, {
         picks: po.record ? (p) => choosePick(p, main).ref : 'read',
         ...(po.recorded ? { recorded: po.recorded } : {}),
       })
-      return { name, family, choice: choosePick(plan, main) }
+      return { family, choice: choosePick(plan, main) }
     },
     async pickSuggestion(familyId, given) {
       const f = families.get(familyId)

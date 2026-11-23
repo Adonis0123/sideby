@@ -628,6 +628,22 @@ export function nextReset(
 }
 
 /**
+ * Which tool the "Best to use now" card shows (spec §3.45): the one the family filter names, else the first in the
+ * page's group `order` with a pick, else the first with an entry, so the card says why nothing can be picked. Quota
+ * is never compared across tools. `others`: every other tool with an entry, in `order`, for the hover text.
+ */
+export function pickNowChoice(
+  pickNow: Record<string, { pick: string | null }> | undefined,
+  order: string[],
+  filter: string,
+): { family: string; others: string[] } | null {
+  const has = (f: string) => Boolean(pickNow && Object.hasOwn(pickNow, f))
+  const picks = order.filter((f) => has(f) && pickNow![f]!.pick)
+  const family = filter ? (has(filter) ? filter : null) : (picks[0] ?? order.find(has) ?? null)
+  return family ? { family, others: order.filter((f) => f !== family && has(f)) } : null
+}
+
+/**
  * A name to offer for a new Account of a Family, given its existing Account names (`main` included or not).
  * Numbered names (`001` … `007`) continue after the highest number with the same width (`008`); otherwise
  * `work`, then `work2`, `work3`, … whichever is free.

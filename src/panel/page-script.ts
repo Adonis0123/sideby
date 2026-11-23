@@ -75,6 +75,7 @@ import {
   panelMigration,
   panelPrefs,
   passedWindow,
+  pickNowChoice,
   pinnedIn,
   portalRefresh,
   quotaAskable,
@@ -201,6 +202,7 @@ const LOGIC = [
   longWindow,
   newAccountDir,
   nextReset,
+  pickNowChoice,
   canLeaveLocal,
   codeSwapOutcome,
   dateFormatter,
@@ -315,6 +317,10 @@ const MAIN = String.raw`
   // View state that is not saved: the search text, the attention filter, the Health check filter.
   const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, desktopRef: null, browserRef: null, appBusy: null, appRemove: null, copied: null, resetRef: null, appNew: null, highlight: null, fade: true, loginRefs: new Map(), order: { families: [], units: {} }, drag: null, arrange: null }
   const $ = (id) => document.getElementById(id)
+  // The change feed (spec §3.45, ADR-0084): seq, the server's count of Quota file changes this page has seen; ctl, the
+  // held request; watching, whether the server watches any file; retryAt, when to ask again after a failure or while
+  // nothing is watched; off, an older server without the feed.
+  const chg = { seq: null, ctl: null, watching: false, retryAt: 0, off: false }
 
   // ---------- preferences ----------
   // Kept in localStorage, which can be missing or throw (private windows, blocked storage): every access is guarded
@@ -1451,14 +1457,16 @@ const MAIN = String.raw`
   function renderUpdated() {
     const busy = S.loading && !S.silent
     const every = Math.round((S.fastUntil > Date.now() ? FAST_MS : AUTO_MS) / 1000)
-    const text = S.loading && !S.state ? t('top.loading') : busy ? t('top.refreshing') : S.loadedAt ? t('top.updated', { ago: agoShort(Date.now() - S.loadedAt), s: every }) : ''
+    // While Quota files are watched (spec §3.45), new numbers come as they land, not on the next round.
+    const live = chg.watching && every === AUTO_MS / 1000
+    const text = S.loading && !S.state ? t('top.loading') : busy ? t('top.refreshing') : S.loadedAt ? t(live ? 'top.updatedLive' : 'top.updated', { ago: agoShort(Date.now() - S.loadedAt), s: every }) : ''
     const el = $('updated')
     if (el.textContent !== text) el.textContent = text
     // A dot says whether the numbers are live: green while they refresh on their own, amber when they stopped.
     const stale = conn.lost || Boolean(S.loadError)
     el.classList.toggle('is-live', Boolean(S.loadedAt) && !stale)
     el.classList.toggle('is-stale', Boolean(S.loadedAt) && stale)
-    el.title = !S.loadedAt ? '' : (stale ? t('top.stale') + ' ' : '') + t('top.updatedTitle', { at: clock(new Date(S.loadedAt).toISOString()), s: Math.round((S.fastUntil > Date.now() ? FAST_MS : AUTO_MS) / 1000) })
+    el.title = !S.loadedAt ? '' : (stale ? t('top.stale') + ' ' : '') + t(live ? 'top.updatedTitleLive' : 'top.updatedTitle', { at: clock(new Date(S.loadedAt).toISOString()), s: every })
   }
   function renderTop() {
     renderUpdated()
@@ -1495,8 +1503,8 @@ const MAIN = String.raw`
   }
   function stat(label, value, sub, extra, opts) {
     const kids = [h('div', { class: 'stat-text' }, h('div', { class: 'stat-label' }, label), h('div', { class: 'stat-value' }, value), h('div', { class: 'stat-sub' }, sub)), extra]
-    if (opts && opts.onclick) return h('button', { class: 'stat stat-btn' + (opts.cls ? ' ' + opts.cls : ''), type: 'button', 'aria-pressed': String(Boolean(opts.pressed)), 'aria-label': t('stat.btnLabel', { label, value, sub, action: opts.title || '' }), title: opts.title, onclick: opts.onclick }, kids)
-    return h('div', { class: 'stat' + (opts && opts.cls ? ' ' + opts.cls : '') }, kids)
+    if (opts && opts.onclick) return h('button', { class: 'stat stat-btn' + (opts.cls ? ' ' + opts.cls : ''), type: 'button', 'aria-pressed': opts.pressed === undefined ? null : String(Boolean(opts.pressed)), 'aria-label': t('stat.btnLabel', { label, value, sub, action: opts.title || '' }), title: opts.title, onclick: opts.onclick }, kids)
+    return h('div', { class: 'stat' + (opts && opts.cls ? ' ' + opts.cls : ''), title: (opts && opts.title) || null }, kids)
   }
   function spark(daily, cls) {
     if (!Array.isArray(daily) || !daily.length) return null
@@ -1542,6 +1550,7 @@ const MAIN = String.raw`
     const daily = mergeDaily(usages.map((a) => a.usage.daily)).slice(-BOOT.usageDays)
     const nr = nextReset(list, now)
     patch(box, [
+      pickNowStat(list, now),
       stat(t('stat.accounts'), String(list.length), dots([tn('stat.families', famCount), apiCount ? tn('stat.api', apiCount) : null])),
       need
         ? stat(t('stat.attention'), String(need), needSub, h('span', { class: 'stat-act' }, t(ui.attention ? 'stat.attentionOff' : 'stat.attentionOn')), { cls: 'stat-warn', pressed: ui.attention, title: [needTitle, t(ui.attention ? 'stat.attentionOff' : 'stat.attentionOn')].join('\n'), onclick: () => { ui.attention = !ui.attention; renderSummary(); renderAccounts() } })
@@ -1551,6 +1560,52 @@ const MAIN = String.raw`
         nr ? t('time.in', { d: formatDuration(nr.at - now, lang) }) : '—',
         nr ? dots([h('span', { class: 'mono' }, nr.ref), winTitle(nr.label), clock(new Date(nr.at).toISOString())]) : t('stat.noQuota')),
     ])
+  }
+
+  // "Best to use now" (spec §3.45): the account sideby next would pick in one tool, the quota it has left, and one click
+  // that starts it. One value line and one line under it in every state, so the card keeps its size as answers change.
+  function pickNowStat(list, now) {
+    const pn = S.state.pickNow || {}
+    const shownFams = new Set(list.map((a) => a.family))
+    const choice = pickNowChoice(pn, familyOrder().filter((f) => shownFams.has(f)), prefs.family || '')
+    const card = (label, value, sub, extra, opts) => stat(label, value, sub, extra, Object.assign({ cls: 'stat-pick' }, opts, { cls: 'stat-pick' + (opts && opts.cls ? ' ' + opts.cls : '') }))
+    if (!choice) {
+      const reading = list.some((a) => a.kind === 'subscription' && (a.pending || a.usagePending))
+      return card(t('stat.pickNow'), '—', t(reading ? 'stat.pickReading' : prefs.family ? 'stat.pickNoSourceOne' : 'stat.pickNoSource'))
+    }
+    const fam = choice.family
+    const e = pn[fam]
+    const subs = list.filter((a) => a.family === fam && a.kind === 'subscription')
+    const label = [...shownFams].filter((f) => pn[f]).length > 1 ? t('stat.pickNowIn', { title: family(fam).title }) : t('stat.pickNow')
+    const shownName = (ref) => { const a = S.state.accounts.find((x) => x.ref === ref); return (a && a.aliases && a.aliases[0]) || ref }
+    // Why a tool has no pick, in a few words: "All used up · claude:main is back in 1h 35m".
+    const noPick = (x) => x.why === 'used-up' ? t('stat.pickUsedUp') + ' · ' + (x.earliestReset ? t('stat.pickBack', { ref: shownName(x.earliestReset.ref), when: t('time.in', { d: formatDuration(Math.max(0, Date.parse(x.earliestReset.at) - now), lang) }) }) : t('stat.pickWait')) : t(x.why === 'no-quota' ? 'stat.pickNoQuota' : 'stat.pickSignIn')
+    const others = choice.others.length ? t('stat.pickOthers', { list: '' }) + '\n' + choice.others.map((f) => family(f).title + colon() + (pn[f].pick ? shownName(pn[f].pick) : noPick(pn[f]))).join('\n') : null
+    if (!e.pick) {
+      if (e.why === 'used-up') {
+        const back = e.earliestReset ? t('stat.pickBack', { ref: shownName(e.earliestReset.ref), when: t('time.in', { d: formatDuration(Math.max(0, Date.parse(e.earliestReset.at) - now), lang) }) }) : t('stat.pickWait')
+        return card(label, t('stat.pickUsedUp'), back, null, { cls: 'stat-warn', title: [e.earliestReset ? clock(e.earliestReset.at) : null, others].filter(Boolean).join('\n') || null })
+      }
+      return card(label, '—', t(e.why === 'no-quota' ? 'stat.pickNoQuota' : 'stat.pickSignIn'), null, { title: [e.why === 'no-quota' ? t('stat.pickNoQuotaTip') : null, others].filter(Boolean).join('\n') || null })
+    }
+    const a = S.state.accounts.find((x) => x.ref === e.pick)
+    const left = pickLeft(a, now)
+    const sub = e.reason === 'unknown' ? t('stat.pickNoData') : e.reason === 'tight' ? t('stat.pickTight') + ' · ' + left : left
+    const keys = { expiring: 'acct.nextWhyExpiring', room: 'acct.nextWhyRoom', tight: 'acct.nextWhyTight', unknown: 'acct.nextWhyUnknown' }
+    const why = subs.length > 1 ? t(keys[e.reason] || 'acct.nextWhy', { title: family(fam).title }) : t('stat.pickOnly', { title: family(fam).title })
+    const act = BOOT.readOnly ? t('stat.pickCopyTip', { family: fam }) : t('stat.pickStartTip')
+    // A short command on the card: the account's full name heads the hover text.
+    const title = [shownName(e.pick) !== e.pick ? e.pick : null, why, e.running ? tn('acct.nextRunning', e.running) : null, others, act].filter(Boolean).join('\n')
+    return card(label, shownName(e.pick), sub, h('span', { class: 'stat-act' }, icon(BOOT.readOnly ? 'copy' : 'terminal'), t(BOOT.readOnly ? 'stat.pickCopy' : 'stat.pickStart')),
+      { cls: 'stat-acct' + (e.reason === 'tight' ? ' stat-warn' : ''), title, onclick: () => (BOOT.readOnly ? copyText('sideby next ' + fam) : startPick(null, fam)) })
+  }
+  // The quota an account has left in each counted window, shortest first: "5-hour 72% left · Weekly 40% left".
+  function pickLeft(a, now) {
+    const q = a && a.quota
+    if (!q || q.status !== 'ok') return t('stat.pickNoData')
+    const wins = (q.windows || []).filter((w) => !w.name).slice().sort((x, y) => (Number(x.windowMinutes) || 0) - (Number(y.windowMinutes) || 0))
+    if (!wins.length) return t('stat.pickNoData')
+    return wins.map((w) => passedWindow(w, q.observedAt, now) ? t('stat.pickReset', { w: winShort(w.label) }) : t('stat.pickLeft', { w: winShort(w.label), n: String(Math.max(0, 100 - Math.round(Number(w.usedPercent) || 0))) })).join(' · ')
   }
 
   // ---------- toolbar ----------
@@ -9303,13 +9358,16 @@ const MAIN = String.raw`
     const input = fam && document.getElementById('pk-name-' + fam)
     if (input) input.focus()
   }
-  async function startPick(name) {
+  // By the Pick Command's name, or by tool (the "Best to use now" card, spec §3.45).
+  async function startPick(name, fam) {
     if (BOOT.readOnly) { copyText(name, name); return }
     try {
-      const r = await api('/api/pick/start', { name })
+      const r = await api('/api/pick/start', name ? { name } : { family: fam })
       const why = r.reason === 'most-room' ? t(r.expiring ? 'pk.why.expiring' : r.running ? 'pk.why.roomRunning' : 'pk.why.room', { n: String(r.pressure), w: r.window ? winTitle(r.window) + ' ' : '', running: String(r.running || 0) }) : r.reason === 'tight' ? t('pk.why.tight', { n: String(r.pressure), w: r.window ? winTitle(r.window) + ' ' : '', limit: String(r.limit), longLimit: String(r.longLimit) }) : t(r.reason === 'others-full' ? 'pk.why.othersFull' : 'pk.why.noData')
-      if (r.opened) { toast(t('pk.started', { terminal: TERM_NAMES[r.terminal] || r.terminal, ref: r.picked, why })); return }
-      await copyText(name, name)
+      // The start counts for the next pick (ADR-0083): the card and the Next mark move on at once.
+      if (r.opened) { toast(t('pk.started', { terminal: TERM_NAMES[r.terminal] || r.terminal, ref: r.picked, why })); load({ silent: true }); return }
+      const cmd = name || 'sideby run ' + r.picked
+      await copyText(cmd, cmd)
       toast(r.automation ? t('login.automation', { terminal: TERM_NAMES[r.terminal] || r.terminal }) : t('login.failed'), { kind: 'info' })
     } catch (e) { toast(e.message, { kind: 'fail' }) }
   }
@@ -9712,6 +9770,7 @@ const MAIN = String.raw`
     sessionsTick()
     messagesTick()
     if (document.visibilityState !== 'visible' || !S.state) return
+    watchChanges()
     if (S.pending && !S.loading && !uiBusy()) { S.pending = false; renderAll() }
     const now = Date.now()
     // An Account still being read is asked for again soon, so it fills in without waiting for the next round.
@@ -9726,6 +9785,35 @@ const MAIN = String.raw`
     else if (!S.askingSince) S.askingSince = now
     const every = pending && now - S.pendingSince < 30_000 ? PENDING_MS : asking && now - S.askingSince < 30_000 ? ASKING_MS : now < S.fastUntil ? FAST_MS : AUTO_MS
     if (!S.loading && !conn.lost && !S.fixing && !S.checking && !dlg.busy && now - S.lastTry >= every) load({ silent: true })
+  }
+  // One request held open while the page is visible: the server answers it when a Quota file changes, and the page
+  // reads its state at once. Not through api(): a request this page stops when hidden is not a lost connection.
+  async function watchChanges() {
+    if (chg.ctl || chg.off || conn.lost || document.visibilityState !== 'visible' || Date.now() < chg.retryAt) return
+    const ctl = new AbortController()
+    chg.ctl = ctl
+    let res = null
+    let data = null
+    try {
+      res = await fetch(BOOT.basePath + '/api/changes' + (chg.seq === null ? '' : '?since=' + chg.seq), { cache: 'no-store', signal: ctl.signal })
+      if (res.ok) data = await res.json()
+    } catch {}
+    chg.ctl = null
+    if (res && res.status === 404) { chg.off = true; chg.watching = false; renderUpdated(); return }
+    if (!data || typeof data.seq !== 'number') {
+      if (!ctl.signal.aborted) chg.retryAt = Date.now() + 5000
+      return
+    }
+    chg.seq = data.seq
+    if (chg.watching !== Boolean(data.watching)) { chg.watching = Boolean(data.watching); renderUpdated() }
+    if (!data.watching) chg.retryAt = Date.now() + 60000
+    if (data.changed) quotaChanged()
+    watchChanges()
+  }
+  // A Quota file changed: read now, or, while a check, a fix or a dialog's work runs, at the first tick after it.
+  function quotaChanged() {
+    if (!conn.lost && !S.fixing && !S.checking && !dlg.busy) load({ silent: true })
+    else S.lastTry = 0
   }
   // Coming back to the page refreshes at once.
   function wake() {
@@ -10184,7 +10272,11 @@ const MAIN = String.raw`
   // The sessions too, so the Sessions page opens with its rows already there.
   loadSessions()
   setInterval(tick, 1000)
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') resetLeft(); wake() })
+  document.addEventListener('visibilitychange', () => {
+    // A hidden page holds no request: browsers give a site only a few connections.
+    if (document.visibilityState !== 'visible') { resetLeft(); if (chg.ctl) chg.ctl.abort() }
+    wake()
+  })
   window.addEventListener('blur', resetLeft)
   window.addEventListener('focus', wake)
   // A Portal that changed something the Panel shows says so (ADR-0006): read the state now instead of at the next

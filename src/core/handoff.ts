@@ -72,6 +72,11 @@ export interface HandoffEntry {
   /** That window: its label (`5h`, `7d`), used percent and own Takeover Limit; absent when no window is open. */
   window?: { label: string; usedPercent: number; limit: number }
   /**
+   * Every counted window (no model `name`) that has not reset, so a caller can show what the pick has left (spec
+   * §3.45); absent when none is open.
+   */
+  windows?: { label: string; usedPercent: number; resetsAt: string }[]
+  /**
    * For `full`: when the last window at or over its own Takeover Limit resets, so the Account is usable again. In a
    * plan for a start the user asks for (`lastResort`), an Account with a window used up is usable again once those
    * windows reset, and one with none used up is under the Takeover Limits again at this time.
@@ -164,6 +169,7 @@ function entry(
 ): HandoffEntry {
   const pressure = quotaPressure(c.quota, now)
   const use = limitUse(c.quota, now, limits)
+  const open = openWindows(c.quota, now)
   const base = {
     ref: c.ref,
     kind: c.kind,
@@ -177,6 +183,15 @@ function entry(
             usedPercent: Math.round(use.window.usedPercent),
             limit: limitOf(use.window, limits),
           },
+        }
+      : {}),
+    ...(open?.length
+      ? {
+          windows: open.map((w) => ({
+            label: w.label,
+            usedPercent: Math.round(w.usedPercent),
+            resetsAt: w.resetsAt,
+          })),
         }
       : {}),
     ...(c.quota.status === 'ok' ? { observedAt: c.quota.observedAt } : {}),

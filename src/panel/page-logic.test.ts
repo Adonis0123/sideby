@@ -72,6 +72,7 @@ import {
   panelMigration,
   panelPrefs,
   passedWindow,
+  pickNowChoice,
   pinnedIn,
   quotaAskable,
   quotaHighLevel,
@@ -254,6 +255,27 @@ describe('page logic', () => {
     })
     assert.equal(nextReset([stale], NOW), null)
     assert.equal(nextReset([stale, acct('a', { quota: quota(1, 1) })], NOW)?.ref, 'claude:a')
+  })
+
+  it('shows one tool on the "Best to use now" card, never comparing quota across tools (spec §3.45)', () => {
+    const pickNow = {
+      claude: { pick: null },
+      codex: { pick: 'codex:team' },
+      grok: { pick: 'grok:lab' },
+    }
+    const order = ['claude', 'codex', 'grok', 'pi']
+    // The first tool in the page's order with a pick; the others go to the hover text.
+    assert.deepEqual(pickNowChoice(pickNow, order, ''), { family: 'codex', others: ['claude', 'grok'] })
+    assert.deepEqual(pickNowChoice(pickNow, ['grok', 'codex'], ''), { family: 'grok', others: ['codex'] })
+    // The family filter wins, also for a tool with nothing to pick, so the card says why.
+    assert.deepEqual(pickNowChoice(pickNow, order, 'claude'), { family: 'claude', others: ['codex', 'grok'] })
+    assert.equal(pickNowChoice(pickNow, order, 'pi'), null)
+    // Nothing to pick anywhere: the first tool that has an entry.
+    assert.deepEqual(pickNowChoice({ codex: { pick: null }, claude: { pick: null } }, order, ''), {
+      family: 'claude',
+      others: ['codex'],
+    })
+    assert.equal(pickNowChoice(undefined, order, ''), null)
   })
 
   it('measures pressure from live windows only', () => {
