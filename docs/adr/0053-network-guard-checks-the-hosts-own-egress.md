@@ -60,3 +60,11 @@ Tried with Claude Code 2.1.325 on 2026-11-16, an interactive session with an iso
 - The check, its words and its block for typed prompts and tool calls are unchanged. Nothing is let through that was blocked before.
 - Codex has no background hook that can wake a session, so nothing is held there; whether Codex submits such prompts through `UserPromptSubmit` was not tried.
 - Cost: one background process per blocked Host-made prompt for as long as the exit stays wrong, and one small request a minute from each.
+
+## Amendment (2026-11-23): show the selected route and diagnose it offline
+
+A block used to say only that the proxy might be off. When the user had already exited the proxy app, that omitted the useful fact: this process still selected its old proxy address. Show the route chosen for this check as `direct` or a URL reduced to scheme, hostname and port. Credentials, path, query and fragment never enter the message, logs, cache or AI facts. Keep connection-refused wording, retries, allowed countries and fail-closed behavior; inside a session, mention that an older session may need restarting to inherit a changed proxy environment. Never switch the exit automatically.
+
+Add `sideby network diagnose [--json]` and the same Runtime operation behind a manual Panel button. It reads the existing cached Guard result and probes the selected proxy's local TCP listener. It sends no `/cdn-cgi/trace`, stores no proxy URL and changes no `networkOverview` grouping. A reachable listener proves only that a TCP connection opened, not that HTTP CONNECT, SOCKS or the upstream proxy works. `network check` remains the explicit online check, and opening the existing Network dialog keeps its current automatic-check behavior.
+
+The separate fixed AI Task `network-diagnose` receives only current errors, the redacted route, listener results and Guard check times. It uses the existing preview and confirmation, then the Preferred Terminal launch path. It is read-only and must not change network settings or code; the existing `network` settings task remains unchanged. No separate Network module, periodic diagnostic refresh, automatic online trace, DNS/TUN model or route switching is added.

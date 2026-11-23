@@ -18,13 +18,13 @@ agy also lists its conversations in `<account>/conversation_summaries.db` (SQLit
 
 Quota check (spec §3.26):
 
-- sideby runs agy with a folder of its own (`<state>/quota/agy-run/bin`, mode 700) first on PATH. It holds `open` and `xdg-open` scripts that open nothing and only create the empty file `SIDEBY_AGY_SIGN_IN_MARK` names (a per-check path in `<state>/quota/agy-run`); they keep nothing of the address. When the mark appears, sideby stops agy and the answer is `loginExpired: true` (ADR-0071) with "Antigravity CLI needs a new sign-in; run `sideby login agy:main`". If the folder is not safe to use, agy is not asked.
+- sideby runs agy with a folder of its own (`<state>/quota/agy-run/bin`, mode 700) first on PATH. It holds `open`, `xdg-open` and `sensible-browser` scripts (agy 1.5.14's binary names `sensible-browser`, which Linux and WSL builds may try) that open nothing and only create the empty file `SIDEBY_AGY_SIGN_IN_MARK` names (a per-check path in `<state>/quota/agy-run`); they keep nothing of the address. When the mark appears, sideby stops agy and the answer is `loginExpired: true` (ADR-0071) with "Antigravity CLI needs a new sign-in; run `sideby login agy:main`". If the folder is not safe to use, agy is not asked.
 - The check has its own limit of 15 seconds, under sideby's 20: SIGTERM, then SIGKILL 2 seconds later.
 - An Account whose login state is `unknown` can now have an Expired Login. agy's `readLoginEvents` returns nothing, so only that quota answer marks it, and a later good answer clears it.
 
 Session History (spec §3.33):
 
-- agy's reader opens `conversation_summaries.db` read-only. While agy has its `-wal` and `-shm` files, they are read as they are, so the newest rows show; otherwise the database is opened as `immutable`, so the read creates no file in agy's folder.
+- agy's reader opens `conversation_summaries.db` read-only. While agy has its `-wal` and `-shm` files, they are read as they are, so the newest rows show; otherwise the database is opened as `immutable`, so the read creates no file in agy's folder. Known exception: if the last agy exits between that check and the open, SQLite leaves a `-shm` and an empty `-wal` beside the database; agy reuses them on its next write and removes them on a clean close, so sideby accepts this rather than copying the database.
 - Each row is one Session, keyed by its `conversations/<id>.db` path, which sideby never opens. Rows with a `parent_conversation_id`, a `nesting_depth` above 0 or no title are left out. A Session keeps the id, agy's title, the first `file://` workspace as its folder and the last change time; it has no prompts or replies, so `history show` lists no messages.
 - `resumeArgs` is `--conversation <id>`, started with `sideby run agy:main --`.
 
