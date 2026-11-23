@@ -123,6 +123,12 @@ export async function fetchAgyQuota(
     return failed(
       `sideby's folder ${join(ctx.stateDir, 'quota')} is not safe to use; check its owner and mode`,
     )
+  // A folder whose path holds the PATH separator would split into other entries, and agy would find the real `open`.
+  if (folder.bin.includes(delimiter))
+    return failed(
+      `sideby's folder ${folder.bin} has "${delimiter}" in its path, so it cannot go first on PATH; move sideby's state folder`,
+    )
+  if (ctx.signal.aborted) return failed('the quota check was stopped')
   const mark = join(folder.dir, `sign-in-${randomBytes(8).toString('hex')}`)
   const child = spawn('agy', [...AGY_QUOTA_ARGS], {
     cwd: folder.dir,
@@ -174,6 +180,8 @@ export async function fetchAgyQuota(
         ),
       )
       const done = () => {
+        // A process agy started may still hold the output open; let go of it so sideby itself can exit.
+        child.stdout.destroy()
         if (signIn || existsSync(mark)) return resolve(needsSignIn(account))
         if (ctx.signal.aborted) return resolve(failed('the quota check was stopped'))
         let answer: unknown
