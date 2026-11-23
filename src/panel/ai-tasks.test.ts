@@ -10,7 +10,8 @@ import { diffSnapshots, type FakeHome, fakeHost, snapshot, withFakeHome } from '
 import type { ExecResult } from '../core/desktop-app.ts'
 import type { NetworkDiagnosis } from '../core/network.ts'
 import { createRuntime } from '../runtime.ts'
-import { createPanelHandler } from './handler.ts'
+import { createPanelHandler, PANEL_VIEW, type PanelHandlerOptions } from './handler.ts'
+import { networkDiagnoseTaskFacts } from './page-logic.ts'
 
 // Joined at run time so the source never holds a key-shaped string (leak-check).
 const KEY = ['fictional', 'panel', 'value', '42'].join('-')
@@ -28,9 +29,9 @@ async function seed(h: FakeHome) {
   await h.mkdir('apps/Terminal.app')
 }
 
-function runtimeFor(h: FakeHome, exec: Exec) {
-  return () =>
-    createRuntime({
+function runtimeFor(h: FakeHome, exec: Exec, legacyDiagnosis = false) {
+  return async () => {
+    const rt = await createRuntime({
       env: h.env,
       desktop: {
         platform: 'darwin',
@@ -40,10 +41,30 @@ function runtimeFor(h: FakeHome, exec: Exec) {
           return { code: exec.code, stdout: '', stderr: '' }
         },
       },
+      network: {
+        probe: async () => ({ reachable: false, error: 'ECONNREFUSED' }),
+        system: { platform: 'linux' },
+      },
     })
+    if (!legacyDiagnosis) return rt
+    return {
+      ...rt,
+      networkDiagnose: async () =>
+        ({
+          checkedAt: '2026-11-23T00:00:00.000Z',
+          targets: [{ url: 'https://api.anthropic.com/cdn-cgi/trace', guard: { status: 'not-checked' } }],
+        }) as unknown as NetworkDiagnosis,
+    }
+  }
 }
 
-async function serve(h: FakeHome, exec: Exec, readOnly = false) {
+async function serve(
+  h: FakeHome,
+  exec: Exec,
+  readOnly = false,
+  view: 'accounts' | 'network' = 'accounts',
+  legacyDiagnosis = false,
+) {
   let handler: ReturnType<typeof createPanelHandler> | undefined
   const server = createServer((req, res) => {
     void handler!(req, res).then((done) => {
@@ -53,10 +74,11 @@ async function serve(h: FakeHome, exec: Exec, readOnly = false) {
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
   const port = (server.address() as AddressInfo).port
   handler = createPanelHandler({
-    runtime: runtimeFor(h, exec),
+    runtime: runtimeFor(h, exec, legacyDiagnosis),
     allowedHosts: [`127.0.0.1:${port}`],
     readOnly,
-  })
+    [PANEL_VIEW]: view,
+  } as PanelHandlerOptions)
   const good = { origin: `http://127.0.0.1:${port}`, 'x-sideby-token': handler.token }
   const close = () =>
     new Promise<void>((r) => {
@@ -458,6 +480,34 @@ describe('AI Task routes', () => {
     })
   })
 
+  it('keeps Accounts diagnosis and prompt routes compatible with the original Runtime DTO', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      const exec: Exec = { calls: [], code: 0 }
+      const s = await serve(h, exec, false, 'accounts', true)
+      try {
+        const diagnosis = await post(s.port, '/api/network/diagnose', {}, s.good)
+        assert.equal(diagnosis.status, 200)
+        assert.equal(diagnosis.body.checkedAt, '2026-11-23T00:00:00.000Z')
+        // The Accounts click serializes the returned DTO before opening this same prompt route.
+        const facts = networkDiagnoseTaskFacts(diagnosis.body as unknown as NetworkDiagnosis)
+        assert.match(facts.join('\n'), /WARP: unavailable, unknown/)
+        assert.match(facts.join('\n'), /api\.anthropic\.com: proxy not reported/)
+        const preview = await post(
+          s.port,
+          '/api/ask/prompt',
+          { task: 'network-diagnose', lang: 'en', context: { networkDiagnose: facts } },
+          s.good,
+        )
+        assert.equal(preview.status, 200)
+        assert.match(String(preview.body.prompt), /api\.anthropic\.com: proxy not reported/)
+        assert.equal(exec.calls.length, 0)
+      } finally {
+        await s.close()
+      }
+    })
+  })
+
   it('previews the fixed read-only network diagnosis without starting a terminal', async () => {
     await withFakeHome(async (h) => {
       await seed(h)
@@ -506,6 +556,133 @@ describe('AI Task routes', () => {
           }
         }
         assert.equal(exec.calls.length, 0)
+      } finally {
+        await s.close()
+      }
+    })
+  })
+
+  it('starts a network diagnosis only after its confirmed prompt matches a fresh preview', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      await h.mkdir('apps/Orca.app')
+      const exec: Exec = { calls: [], code: 0 }
+      const s = await serve(h, exec, false, 'network')
+      const taskDir = h.path('.local/state/sideby/ask')
+      try {
+        const diagnosis = await post(s.port, '/api/network/diagnose', {}, s.good)
+        assert.equal(diagnosis.status, 200)
+        const facts = networkDiagnoseTaskFacts(diagnosis.body as unknown as NetworkDiagnosis)
+        const body = {
+          task: 'network-diagnose',
+          lang: 'en',
+          context: { networkDiagnose: facts },
+        }
+        const preview = await post(s.port, '/api/ask/prompt', body, s.good)
+        assert.equal(preview.status, 200)
+        const confirmedPrompt = preview.body.prompt
+        assert.equal(typeof confirmedPrompt, 'string')
+        assert.ok(confirmedPrompt)
+        assert.equal(exec.calls.length, 0, 'preview does not open Orca')
+
+        const missing = await post(s.port, '/api/ask', body, s.good)
+        assert.equal(missing.status, 400)
+        assert.equal(missing.body.code, 'network-prompt-required')
+        assert.match(String(missing.body.error), /preview again.*nothing was opened/i)
+        for (const confirmed of ['', ' ', null, 42]) {
+          const invalid = await post(s.port, '/api/ask', { ...body, confirmedPrompt: confirmed }, s.good)
+          assert.equal(invalid.status, 400)
+          assert.equal(invalid.body.code, 'network-prompt-required')
+        }
+        const mismatch = await post(
+          s.port,
+          '/api/ask',
+          { ...body, confirmedPrompt: `${confirmedPrompt}\nchanged` },
+          s.good,
+        )
+        assert.equal(mismatch.status, 400)
+        assert.equal(mismatch.body.code, 'network-prompt-mismatch')
+        assert.match(String(mismatch.body.error), /preview.*again.*nothing was opened/i)
+        const forgedBody = {
+          ...body,
+          context: { networkDiagnose: ['client supplied instructions'] },
+        }
+        const forgedPreview = await post(s.port, '/api/ask/prompt', forgedBody, s.good)
+        assert.equal(forgedPreview.status, 400)
+        assert.equal(forgedPreview.body.code, 'network-facts-mismatch')
+        const forgedSubmit = await post(s.port, '/api/ask', { ...forgedBody, confirmedPrompt }, s.good)
+        assert.equal(forgedSubmit.status, 400)
+        assert.equal(forgedSubmit.body.code, 'network-facts-mismatch')
+        const extra = await post(s.port, '/api/ask', { ...body, confirmedPrompt, unexpected: true }, s.good)
+        assert.equal(extra.status, 400)
+        assert.equal(exec.calls.length, 0, 'missing, invalid, stale and extra fields never open Orca')
+        assert.deepEqual(
+          await readdir(taskDir).catch(() => []),
+          [],
+          'no task file is written before confirmation',
+        )
+
+        const opened = await post(s.port, '/api/ask', { ...body, confirmedPrompt }, s.good)
+        assert.equal(opened.status, 200)
+        assert.equal(opened.body.opened, true)
+        assert.equal(opened.body.terminal, 'orca')
+        assert.equal(
+          exec.calls.filter((c) => c.args[0] === 'terminal' && c.args[1] === 'create').length,
+          1,
+          'only an exact match starts Orca once',
+        )
+        const tasks = await readdir(taskDir)
+        assert.equal(tasks.length, 1)
+        const task = JSON.parse(await readFile(join(taskDir, tasks[0]!), 'utf8'))
+        assert.equal(task.prompt, confirmedPrompt)
+      } finally {
+        await s.close()
+      }
+    })
+  })
+
+  it('writes the exact confirmed network prompt when the locale changes at the attachment boundary', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      await h.mkdir('apps/Orca.app')
+      const exec: Exec = { calls: [], code: 0 }
+      const s = await serve(h, exec, false, 'network')
+      const taskDir = h.path('.local/state/sideby/ask')
+      let lang = 'en_US.UTF-8'
+      let armLocaleChange = false
+      delete h.env.LC_ALL
+      delete h.env.LC_MESSAGES
+      Object.defineProperty(h.env, 'LANG', {
+        configurable: true,
+        get() {
+          if (armLocaleChange) {
+            armLocaleChange = false
+            queueMicrotask(() => {
+              lang = 'zh_CN.UTF-8'
+            })
+          }
+          return lang
+        },
+        set(value) {
+          lang = value
+        },
+      })
+      try {
+        const diagnosis = await post(s.port, '/api/network/diagnose', {}, s.good)
+        const facts = networkDiagnoseTaskFacts(diagnosis.body as unknown as NetworkDiagnosis)
+        const body = { task: 'network-diagnose', context: { networkDiagnose: facts } }
+        const preview = await post(s.port, '/api/ask/prompt', body, s.good)
+        assert.equal(preview.status, 200)
+        const confirmedPrompt = preview.body.prompt as string
+        assert.match(confirmedPrompt, /What to do/)
+        armLocaleChange = true
+        const opened = await post(s.port, '/api/ask', { ...body, confirmedPrompt }, s.good)
+        assert.equal(opened.status, 200)
+        const tasks = await readdir(taskDir)
+        assert.equal(tasks.length, 1)
+        const task = JSON.parse(await readFile(join(taskDir, tasks[0]!), 'utf8'))
+        assert.equal(task.prompt, confirmedPrompt)
+        assert.doesNotMatch(task.prompt, /要做的事/)
       } finally {
         await s.close()
       }

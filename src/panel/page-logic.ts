@@ -3,7 +3,10 @@
 // references to module scope or to each other except through parameters, and only type annotations as
 // TypeScript (they are stripped by Node and by the build, leaving plain JavaScript).
 
+import { networkDiagnoseTaskFacts } from 'network-portal'
 import type { HandoffSettings } from '../core/config.ts'
+
+export { networkDiagnoseTaskFacts }
 
 /** The parts of a PanelAccount the helpers read. */
 export interface LogicAccount {
@@ -1523,42 +1526,6 @@ export function networkTaskFacts(n: {
     )
   }
   for (const a of n.accounts) if (a.skip) out.push(`${a.ref}: not checked here (${a.skip})`)
-  return out
-}
-
-export function networkDiagnoseTaskFacts(d: {
-  checkedAt: string
-  targets: readonly {
-    url: string
-    proxy: string
-    guardSupport: string
-    listener: null | { host: string; port: number; reachable: boolean; error?: string }
-    guard: { status: string; loc?: string; checkedAt?: string; error?: string }
-  }[]
-}): string[] {
-  const out = [`diagnosed: ${d.checkedAt} (offline; no trace sent)`]
-  for (const t of d.targets) {
-    let host = t.url
-    try {
-      host = new URL(t.url).hostname
-    } catch {
-      /* keep the URL */
-    }
-    const listener = t.listener
-      ? `TCP ${t.listener.host}:${t.listener.port} ${t.listener.reachable ? 'reachable' : 'not reachable'}${t.listener.error ? ` (${t.listener.error})` : ''}; this does not prove the proxy protocol works`
-      : t.guardSupport === 'direct'
-        ? 'direct; no proxy TCP listener to test'
-        : 'no local TCP listener probe (remote proxy, invalid address, or no explicit port)'
-    const support =
-      t.guardSupport === 'unsupported'
-        ? '; Guard does not support this proxy scheme; configure HTTP CONNECT or direct before an online check'
-        : t.guardSupport === 'invalid'
-          ? '; proxy address invalid; correct it and start a new session'
-          : ''
-    out.push(
-      `${host}: proxy ${t.proxy}; ${listener}${support}; Guard ${t.guard.status}${t.guard.loc ? `, country ${t.guard.loc}` : ''}${t.guard.checkedAt ? `, checked ${t.guard.checkedAt}` : ', not checked yet'}${t.guard.error ? `, ${t.guard.error}` : ''}`,
-    )
-  }
   return out
 }
 

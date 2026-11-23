@@ -1,6 +1,7 @@
 // Network Guard's check (spec §3.35, ADR-0053). Every request goes through a fake fetcher or a local socket; no test
 // asks the network.
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { type AddressInfo, createServer as createTcpServer, type Socket } from 'node:net'
@@ -15,6 +16,7 @@ import {
   fetchTrace,
   judge,
   netPrint,
+  PROXY_VARS,
   parseTrace,
   plan,
   proxyFor,
@@ -57,6 +59,14 @@ describe('cache key and print', () => {
     const a = cacheKey(URL_A, { HTTPS_PROXY: 'http://user:secret@10.0.0.1:1' })
     assert.notEqual(a, cacheKey(URL_A, {}))
     assert.ok(!a.includes('secret'))
+  })
+  it('invalidates entries written before the NO_PROXY port semantics changed', () => {
+    const env = { HTTPS_PROXY: 'http://127.0.0.1:7890', NO_PROXY: 'api.anthropic.com:8443' }
+    const legacy = createHash('sha256')
+      .update(JSON.stringify([URL_A, ...PROXY_VARS.map((k) => env[k as keyof typeof env] ?? '')]))
+      .digest('hex')
+      .slice(0, 32)
+    assert.notEqual(cacheKey(URL_A, env), legacy)
   })
   it('changes with the interfaces and ignores loopback', () => {
     const i = (addr: string) =>

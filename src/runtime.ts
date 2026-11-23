@@ -138,6 +138,7 @@ import {
   type ListenerProbe,
   type NetworkDiagnosis,
   type NetworkOverview,
+  type NetworkSystemDeps,
   networkDiagnose,
   networkHookPart,
   networkOverview,
@@ -801,7 +802,7 @@ export async function createRuntime(
      * Internal, for tests: replaces Network Guard's request and the machine's network print (spec §3.35), so a
      * test never asks the network. Not part of the plugin or Portal contract.
      */
-    network?: { fetcher?: TraceFetcher; print?: string; probe?: ListenerProbe }
+    network?: { fetcher?: TraceFetcher; print?: string; probe?: ListenerProbe; system?: NetworkSystemDeps }
     /**
      * Internal, for tests: how long a Limit Reset request may take before it counts as unanswered (spec §3.40), so a
      * test of a Host that hangs need not wait the real time. Not part of the plugin or Portal contract.
@@ -2078,6 +2079,7 @@ export async function createRuntime(
         env,
         envFor: async (a) => accountEnv(familyOf(a.family), a, env),
         ...(opts.network?.probe ? { probe: opts.network.probe } : {}),
+        ...(opts.network?.system ? { system: opts.network.system } : {}),
         now,
       })
     },

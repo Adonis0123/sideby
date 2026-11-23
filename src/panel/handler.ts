@@ -19,7 +19,9 @@ import {
 } from '../core/app-profiles.ts'
 import {
   type AiTaskInput,
+  newTaskId,
   openLoginInTerminal,
+  openPromptTask,
   openRunInTerminal,
   pickTaskAccount,
   previewAttachments,
@@ -168,7 +170,7 @@ import type { Account, FamilyDef, FamilyLogo, QuotaResult, QuotaSetupPlan, Usage
 import { createChangeFeed, stateQuotaDir } from './changes.ts'
 import { type OrcaDeps, orcaTabs, switchOrcaTab, systemOrca } from './orca.ts'
 import { renderPage } from './page.ts'
-import { AI_TASK_KINDS } from './page-logic.ts'
+import { AI_TASK_KINDS, networkDiagnoseTaskFacts } from './page-logic.ts'
 import { tokenStyles } from './page-styles.ts'
 import { type PanelTheme, type ResolvedTheme, resolveTheme } from './theme.ts'
 import { BUILTIN_THEMES, DEFAULT_THEME_ID } from './themes.ts'
@@ -1831,6 +1833,31 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   const serial = writeQueue()
   const readings: Readings = { going: new Map(), last: new Map() }
   const getRuntime = typeof opts.runtime === 'function' ? opts.runtime : async () => opts.runtime as Runtime
+  // Recent facts this server actually returned, keyed by their complete redacted serialization. Client-supplied
+  // diagnosis text is only a lookup key: arbitrary instructions never become a fixed AI Task prompt.
+  const networkFacts = new Map<string, readonly string[]>()
+  const rememberNetworkFacts = (diagnosis: Awaited<ReturnType<Runtime['networkDiagnose']>>) => {
+    const facts = networkDiagnoseTaskFacts(diagnosis)
+    const key = JSON.stringify(facts)
+    networkFacts.delete(key)
+    networkFacts.set(key, facts)
+    while (networkFacts.size > 8) networkFacts.delete(networkFacts.keys().next().value!)
+    return diagnosis
+  }
+  const actualAskPrompt = async (rt: Runtime, input: AiTaskInput) => {
+    if (view === 'network') {
+      const supplied = input.context?.networkDiagnose
+      const facts = supplied && networkFacts.get(JSON.stringify(supplied))
+      if (!facts)
+        throw new HttpError(
+          400,
+          'Run the Network diagnosis again and use its current redacted facts; nothing was opened.',
+          'network-facts-mismatch',
+        )
+      input = { ...input, context: { ...input.context, networkDiagnose: facts } }
+    }
+    return promptForTask(rt, input, await previewAttachments(rt, input))
+  }
   // Quota files watched while a page asks (spec §3.45, ADR-0084).
   const changes = createChangeFeed({
     dirs: async () => {
@@ -1998,12 +2025,24 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       }
     },
   })
-  const checkNetworkAsk = (body: Record<string, unknown>) => {
+  const checkNetworkAsk = (body: Record<string, unknown>, confirmed = false) => {
     if (view !== 'network') return
     if (body.task !== 'network-diagnose')
       throw new HttpError(400, 'the Network Panel only runs its fixed diagnosis task')
-    if (Object.keys(body).some((k) => !['task', 'lang', 'context'].includes(k)))
-      throw new HttpError(400, 'the fixed network diagnosis accepts only task, lang and diagnostic context')
+    const allowed = ['task', 'lang', 'context', ...(confirmed ? ['confirmedPrompt'] : [])]
+    if (Object.keys(body).some((k) => !allowed.includes(k)))
+      throw new HttpError(
+        400,
+        confirmed
+          ? 'the fixed network diagnosis accepts only task, lang, diagnostic context and confirmedPrompt'
+          : 'the fixed network diagnosis accepts only task, lang and diagnostic context',
+      )
+    if (confirmed && (typeof body.confirmedPrompt !== 'string' || !body.confirmedPrompt.trim()))
+      throw new HttpError(
+        400,
+        'Preview again and send the exact prompt as confirmedPrompt; nothing was opened.',
+        'network-prompt-required',
+      )
     const context = body.context
     if (!context || typeof context !== 'object' || Array.isArray(context))
       throw new HttpError(400, 'the fixed network diagnosis requires its diagnostic context')
@@ -2032,7 +2071,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         checkNetworkAsk(body)
         const input = askInput(body)
         const rt = await getRuntime()
-        const { prompt, removedSecrets } = promptForTask(rt, input, await previewAttachments(rt, input))
+        const { prompt, removedSecrets } = await actualAskPrompt(rt, input)
         const pick = await pickTaskAccount(rt, input)
         return {
           prompt,
@@ -2049,20 +2088,29 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
     // Writes the task file and opens the terminal. An account the person picked, API ones too, is kept as `ask.account`.
     '/api/ask': {
       async run(body) {
-        checkNetworkAsk(body)
+        checkNetworkAsk(body, true)
         const input = askInput(body)
         const rt = await getRuntime()
-        const result = opened(
-          await startAiTask(
-            rt,
-            view === 'network'
-              ? { ...input, terminal: 'orca', remember: false }
-              : { ...input, remember: Boolean(input.account || input.terminal) },
-          ),
-        )
-        if (view !== 'network') return result
-        const { account: _account, ...withoutAccount } = result
-        return withoutAccount
+        if (view === 'network') {
+          const actual = await actualAskPrompt(rt, input)
+          if (actual.prompt !== body.confirmedPrompt)
+            throw new HttpError(
+              400,
+              'The network diagnosis prompt changed. Preview again and confirm the exact new prompt; nothing was opened.',
+              'network-prompt-mismatch',
+            )
+          // Write the exact server-generated prompt that was compared above; do not generate it again after an await.
+          const result = opened(
+            await openPromptTask(
+              rt,
+              { ...input, terminal: 'orca', remember: false },
+              { taskId: newTaskId(), ...actual, attachments: [] },
+            ),
+          )
+          const { account: _account, ...withoutAccount } = result
+          return withoutAccount
+        }
+        return opened(await startAiTask(rt, { ...input, remember: Boolean(input.account || input.terminal) }))
       },
     },
     // Runs `sideby login <ref>` in the person's terminal; no AI is involved (spec §3.28 "登录").
@@ -2980,7 +3028,8 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
     '/api/network/diagnose': {
       writes: () => false,
       async run() {
-        return (await getRuntime()).networkDiagnose()
+        const diagnosis = await (await getRuntime()).networkDiagnose()
+        return view === 'network' ? rememberNetworkFacts(diagnosis) : diagnosis
       },
     },
     // Network Guard's switch and countries (spec §3.35): config `network`, shown first like every config change.

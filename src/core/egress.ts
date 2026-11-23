@@ -1,6 +1,7 @@
 // The Egress check behind Network Guard (spec §3.35, ADR-0053). A leaf module: `network-hook` runs it on every prompt
-// and tool call, so it imports only Node built-ins and core/fs-safe.ts. It asks the vendor's own
-// `/cdn-cgi/trace` through the Host's proxy settings, keeps the country and a hash of the address, and decides.
+// and tool call, so it imports only Node built-ins, network-portal/proxy (zero runtime dependencies) and core/fs-safe.ts.
+// It asks the vendor's own `/cdn-cgi/trace` through the Host's proxy settings, keeps the country and a hash of the
+// address, and decides.
 import { createHash } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import { request as httpRequest } from 'node:http'
@@ -9,7 +10,10 @@ import { networkInterfaces } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { connect as tlsConnect } from 'node:tls'
+import { proxyFor, routeLabel } from 'network-portal/proxy'
 import { writeFileAtomic } from './fs-safe.ts'
+
+export { proxyFor, redactedProxy, routeLabel } from 'network-portal/proxy'
 
 /** Variables a launched Host reads for its proxy; the check uses the same ones, so it takes the same route. */
 export const PROXY_VARS = [
@@ -120,39 +124,10 @@ export type Sleep = (ms: number) => Promise<unknown>
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex')
 
-/** The proxy a request to `url` goes through under `env`, or null for a direct connection. */
-export function proxyFor(url: string, env: Env): string | null {
-  const host = new URL(url).hostname.toLowerCase()
-  const no = env.NO_PROXY ?? env.no_proxy ?? ''
-  for (const raw of no.split(',')) {
-    const p = raw.trim().toLowerCase().replace(/:\d+$/, '')
-    if (!p) continue
-    if (p === '*') return null
-    const bare = p.replace(/^\*?\./, '')
-    if (host === bare || host.endsWith(`.${bare}`)) return null
-  }
-  const v = env.HTTPS_PROXY || env.https_proxy || env.ALL_PROXY || env.all_proxy
-  return v ? v.trim() : null
-}
-
-/** The selected route safe to show: scheme, hostname and port only, or `direct`; never credentials or a path. */
-export function redactedProxy(proxy: string | null): string {
-  if (!proxy) return 'direct'
-  try {
-    const p = new URL(proxy.includes('://') ? proxy : `http://${proxy}`)
-    if (!p.hostname) return 'invalid'
-    return `${p.protocol}//${p.host}`
-  } catch {
-    return 'invalid'
-  }
-}
-
-/** The route `url` selects under `env`, safe for an error, diagnostic result or AI fact. */
-export const routeLabel = (url: string, env: Env): string => redactedProxy(proxyFor(url, env))
-
 /** The key a cached result is kept under: the URL and the proxy settings, never their values in clear. */
 export function cacheKey(url: string, env: Env): string {
-  return sha(JSON.stringify([url, ...PROXY_VARS.map((k) => env[k] ?? '')])).slice(0, 32)
+  // Version the routing algorithm: an older direct result must not authorize a route the new rules send through a proxy.
+  return sha(JSON.stringify(['proxy-selection-v2', url, ...PROXY_VARS.map((k) => env[k] ?? '')])).slice(0, 32)
 }
 
 /** A hash of the machine's own network addresses; it changes with Wi-Fi, a VPN or a TUN device. */

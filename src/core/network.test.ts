@@ -47,6 +47,8 @@ async function setup(h: FakeHome, network: object | undefined, loc = 'US') {
         return trace(loc)()
       },
       print: 'p',
+      probe: async () => ({ reachable: false, error: 'ECONNREFUSED' }),
+      system: { platform: 'linux' },
     },
   })
   return { rt, asked }
@@ -329,11 +331,34 @@ describe('settings', () => {
       const d = await rt.networkDiagnose()
       assert.deepEqual(asked, [])
       assert.equal(d.targets.length, 2)
+      assert.deepEqual(
+        d.targets.map((t) => t.url),
+        [TRACE.anthropic, TRACE.chatgpt],
+      )
       assert.ok(
         d.targets.every((t) => t.proxy === 'direct' && t.listener === null && t.guardSupport === 'direct'),
       )
       assert.ok(d.targets.every((t) => t.guard.status === 'ok' && t.guard.checkedAt))
       assert.ok(Value.Check(OUTPUT_SCHEMAS['network-diagnose']!, { schemaVersion: 1, ...d }))
+      const diagnosisWith = (proxy: object) => ({
+        schemaVersion: 1,
+        ...d,
+        system: { ...d.system, proxy },
+      })
+      for (const proxy of [
+        d.system.proxy,
+        { ...d.system.proxy, status: 'available' as const, autoDiscoveryEnabled: false },
+        { ...d.system.proxy, status: 'available' as const, autoDiscoveryEnabled: true },
+      ])
+        assert.ok(
+          Value.Check(OUTPUT_SCHEMAS['network-diagnose']!, diagnosisWith(proxy)),
+          JSON.stringify(proxy),
+        )
+      const { autoDiscoveryEnabled: _, ...withoutAutoDiscovery } = d.system.proxy
+      assert.equal(
+        Value.Check(OUTPUT_SCHEMAS['network-diagnose']!, diagnosisWith(withoutAutoDiscovery)),
+        false,
+      )
 
       const proxied = await createRuntime({
         env: { ...h.env, HTTPS_PROXY: 'socks5://user:password@127.0.0.1:10808/private' },
@@ -342,6 +367,7 @@ describe('settings', () => {
           fetcher: async () => assert.fail('diagnose must not trace'),
           print: 'p',
           probe: async () => ({ reachable: false, error: 'ECONNREFUSED' }),
+          system: { platform: 'linux' },
         },
       })
       const p = await proxied.networkDiagnose()
@@ -354,63 +380,6 @@ describe('settings', () => {
         error: 'ECONNREFUSED',
       })
       assert.doesNotMatch(JSON.stringify(p), /user|password|private/)
-    })
-  })
-  it('probes only local listeners, keeps IPv6 bare, and does not invent a proxy port', async () => {
-    await withFakeHome(async (h) => {
-      await setup(h, { guard: true, allow: ['US'] })
-      const cases = [
-        {
-          proxy: 'http://user:password@proxy.example.com:8080/private?token=secret',
-          wantProxy: 'http://proxy.example.com:8080',
-          support: 'http-connect',
-          probe: null,
-        },
-        {
-          proxy: 'user:password@127.0.0.1:10809/private?token=secret',
-          wantProxy: 'http://127.0.0.1:10809',
-          support: 'http-connect',
-          probe: { host: '127.0.0.1', port: 10809 },
-        },
-        { proxy: 'socks5://127.0.0.1', wantProxy: 'socks5://127.0.0.1', support: 'unsupported', probe: null },
-        {
-          proxy: 'https://proxy.example.com',
-          wantProxy: 'https://proxy.example.com',
-          support: 'unsupported',
-          probe: null,
-        },
-        {
-          proxy: 'http://[::1]:10809',
-          wantProxy: 'http://[::1]:10809',
-          support: 'http-connect',
-          probe: { host: '::1', port: 10809 },
-        },
-      ] as const
-      for (const item of cases) {
-        const probes: { host: string; port: number }[] = []
-        const rt = await createRuntime({
-          env: { ...h.env, HTTPS_PROXY: item.proxy },
-          builtins,
-          network: {
-            fetcher: async () => assert.fail('diagnose must not trace'),
-            print: 'p',
-            probe: async (host, port) => {
-              probes.push({ host, port })
-              return { reachable: true }
-            },
-          },
-        })
-        const d = await rt.networkDiagnose()
-        assert.ok(d.targets.every((t) => t.proxy === item.wantProxy && t.guardSupport === item.support))
-        if (item.probe) {
-          assert.deepEqual(probes, [item.probe, item.probe])
-          assert.deepEqual(d.targets[0]!.listener, { ...item.probe, reachable: true })
-        } else {
-          assert.deepEqual(probes, [])
-          assert.ok(d.targets.every((t) => t.listener === null))
-        }
-        assert.doesNotMatch(JSON.stringify(d), /user|password|private|token|secret/)
-      }
     })
   })
 })

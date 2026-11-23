@@ -14,6 +14,11 @@ const ReasonCode = Type.Union(
 const Level = Type.Union([Type.Literal('ok'), Type.Literal('warn'), Type.Literal('fail')])
 const Kind = Type.Union([Type.Literal('subscription'), Type.Literal('api')])
 const Version = Type.Literal(1)
+const NetworkProbeStatus = Type.Union([
+  Type.Literal('available'),
+  Type.Literal('unavailable'),
+  Type.Literal('error'),
+])
 
 /** One Pending Decision of Unattended Mode (spec §3.37). */
 const PendingDecision = Type.Object({
@@ -2279,6 +2284,58 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       checkedAt: Type.String({
         description: 'When this offline diagnosis ran (ISO), not the Guard cache time.',
       }),
+      system: Type.Object({
+        warp: Type.Object({
+          status: NetworkProbeStatus,
+          state: Type.Union([
+            Type.Literal('connected'),
+            Type.Literal('disconnected'),
+            Type.Literal('unknown'),
+          ]),
+          networkHealthy: Type.Optional(Type.Boolean()),
+          error: Type.Optional(Str),
+        }),
+        proxy: Type.Object({
+          status: NetworkProbeStatus,
+          pacEnabled: Type.Boolean(),
+          autoDiscoveryEnabled: Type.Boolean(),
+          protocols: Type.Array(
+            Type.Object({
+              protocol: Type.Union([Type.Literal('http'), Type.Literal('https'), Type.Literal('socks')]),
+              enabled: Type.Boolean(),
+              host: Type.Optional(
+                Type.String({ description: 'Loopback only; every other host is redacted.' }),
+              ),
+              port: Type.Optional(Type.Integer()),
+            }),
+          ),
+          exceptionCount: Type.Optional(Type.Integer()),
+          error: Type.Optional(Str),
+        }),
+        dns: Type.Object({
+          status: NetworkProbeStatus,
+          nameservers: Type.Array(Str),
+          error: Type.Optional(Str),
+        }),
+        route: Type.Object({
+          status: NetworkProbeStatus,
+          interface: Type.Optional(Str),
+          gateway: Type.Optional(Str),
+          error: Type.Optional(Str),
+        }),
+      }),
+      localProxyCandidates: Type.Array(
+        Type.Object({
+          label: Type.String({
+            description: 'The common configuration for this port, not an identified process.',
+          }),
+          protocol: Str,
+          host: Str,
+          port: Type.Integer(),
+          reachable: Type.Boolean({ description: 'TCP connect only; not proof of upstream connectivity.' }),
+          error: Type.Optional(Str),
+        }),
+      ),
       targets: Type.Array(
         Type.Object({
           url: Type.String({

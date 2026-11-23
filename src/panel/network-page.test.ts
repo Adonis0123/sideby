@@ -4,14 +4,30 @@ import type { AddressInfo } from 'node:net'
 import { describe, it } from 'node:test'
 import { runInNewContext } from 'node:vm'
 import type { NetworkDiagnosis } from '../core/network.ts'
-import { NETWORK_PAGE_SCRIPT, networkPageController } from '../network/page-script.ts'
 import type { Runtime } from '../runtime.ts'
 import { createPanelHandler, PANEL_VIEW, type PanelHandlerOptions } from './handler.ts'
-import { networkDiagnoseTaskFacts } from './page-logic.ts'
 import { PAGE_SCRIPT } from './page-script.ts'
 
 const DIAGNOSIS: NetworkDiagnosis = {
   checkedAt: '2026-11-23T10:00:00.000Z',
+  system: {
+    warp: { status: 'unavailable', state: 'unknown' },
+    proxy: {
+      status: 'available',
+      pacEnabled: false,
+      autoDiscoveryEnabled: false,
+      protocols: [
+        { protocol: 'http', enabled: true, host: '127.0.0.1', port: 7890 },
+        { protocol: 'https', enabled: false },
+        { protocol: 'socks', enabled: false },
+      ],
+    },
+    dns: { status: 'available', nameservers: ['192.0.2.53'] },
+    route: { status: 'available', interface: 'en0', gateway: '192.0.2.1' },
+  },
+  localProxyCandidates: [
+    { label: 'Clash mixed', protocol: 'HTTP / SOCKS', host: '127.0.0.1', port: 7897, reachable: false },
+  ],
   targets: [
     {
       url: 'https://api.example.com',
@@ -86,13 +102,7 @@ async function serve(view: 'accounts' | 'network' = 'network') {
       server.close(() => r())
       server.closeAllConnections()
     })
-  return { port, host, good, post, calls, close, handler: handler! }
-}
-
-async function controller(api: (path: string, body: unknown) => Promise<unknown>) {
-  const ctx: { make?: typeof networkPageController } = {}
-  runInNewContext(`${networkPageController.toString()}; this.make = networkPageController`, ctx)
-  return ctx.make!({ api, facts: networkDiagnoseTaskFacts, version: '1.2.3', lang: 'en' })
+  return { port, host, good, post, calls, close }
 }
 
 function deferred<T>() {
@@ -102,12 +112,17 @@ function deferred<T>() {
 }
 
 describe('network Panel routes', () => {
-  it('serves its own page and only the routes it needs', async () => {
+  it('serves the reusable page with sideby chrome and only the routes it needs', async () => {
     const s = await serve()
     try {
       const page = await request(s.port, 'GET', '/', { host: s.host })
       assert.equal(page.status, 200)
-      assert.match(page.text, /Network connection/)
+      assert.match(page.text, /<h1>Network<\/h1>/)
+      assert.match(page.text, /<link rel="icon" type="image\/svg\+xml" href="\/favicon\.svg\?v=[a-f0-9]+">/)
+      assert.match(page.text, /<img src="\/favicon\.svg\?v=[a-f0-9]+" alt="">/)
+      assert.doesNotMatch(page.text, /\/panel\/favicon\.svg/)
+      assert.match(page.text, /"tokenHeader":"x-sideby-token"/)
+      assert.match(page.text, /<footer class="foot muted small">sideby<\/footer>/)
       assert.doesNotMatch(page.text, /id="accounts"/)
       assert.match(String(page.headers['content-security-policy']), /default-src 'none'/)
       for (const path of ['/index.html', '/favicon.svg', '/icon.svg', '/api/health', '/api/session'])
@@ -153,7 +168,6 @@ describe('network Panel routes', () => {
     const s = await serve('accounts')
     try {
       assert.equal((await request(s.port, 'GET', '/', { host: s.host })).status, 200)
-      // The old view still owns its state route; this fake deliberately fails after route selection.
       assert.notEqual((await request(s.port, 'GET', '/api/state', { host: s.host })).status, 404)
     } finally {
       await s.close()
@@ -167,123 +181,8 @@ describe('network Panel routes', () => {
   })
 })
 
-describe('network Panel behaviour', () => {
-  it('starts with offline diagnosis only and renders empty and error states', async () => {
-    const paths: string[] = []
-    const c = await controller(async (path) => {
-      paths.push(path)
-      if (path === '/api/network/diagnose') return { checkedAt: DIAGNOSIS.checkedAt, targets: [] }
-      throw new Error(`unexpected ${path}`)
-    })
-    await c.start()
-    assert.deepEqual(paths, ['/api/network/diagnose'])
-    assert.deepEqual(c.state.diagnosis!.targets, [])
-    const failed = await controller(async () => {
-      throw new Error('offline failed')
-    })
-    await failed.start()
-    assert.equal(failed.state.error, 'offline failed')
-  })
-
-  it('clears the target-list busy state after the first diagnosis completes', () => {
-    const start = NETWORK_PAGE_SCRIPT.indexOf('function renderMain()')
-    const end = NETWORK_PAGE_SCRIPT.indexOf('function renderAsk()', start)
-    const source = NETWORK_PAGE_SCRIPT.slice(start, end)
-    const element = () => ({
-      attrs: {} as Record<string, string>,
-      children: [] as unknown[],
-      textContent: '',
-      hidden: false,
-      disabled: false,
-      append(...children: unknown[]) {
-        this.children.push(...children)
-      },
-      setAttribute(name: string, value: string) {
-        this.attrs[name] = value
-      },
-    })
-    const elements = new Map<string, ReturnType<typeof element>>()
-    const targets = element()
-    targets.attrs['aria-busy'] = 'true'
-    elements.set('targets', targets)
-    const state: { diagnosis: NetworkDiagnosis | null; loading: boolean } = { diagnosis: null, loading: true }
-    const ctx: { render?: () => void } = {}
-    Object.assign(ctx, {
-      BOOT: { lang: 'zh' },
-      lang: 'zh',
-      controller: { state },
-      document: { documentElement: {}, title: '' },
-      $: (id: string) => {
-        if (!elements.has(id)) elements.set(id, element())
-        return elements.get(id)
-      },
-      t: (key: string) => key,
-      h: () => ({}),
-      targetCard: () => ({}),
-      clear: (el: ReturnType<typeof element>) => {
-        el.children = []
-      },
-    })
-    runInNewContext(`${source}; this.render = renderMain`, ctx)
-    ctx.render!()
-    assert.equal(targets.attrs['aria-busy'], 'true')
-    state.diagnosis = { checkedAt: DIAGNOSIS.checkedAt, targets: [] }
-    state.loading = false
-    ctx.render!()
-    assert.equal(targets.attrs['aria-busy'], 'false')
-  })
-
-  it('shows the actual prompt and sends only fixed redacted facts', async () => {
-    const bodies: unknown[] = []
-    const c = await controller(async (path, body) => {
-      bodies.push(body)
-      if (path === '/api/network/diagnose') return DIAGNOSIS
-      if (path === '/api/ask/prompt') return { prompt: 'actual complete prompt\nline two' }
-      throw new Error(`unexpected ${path}`)
-    })
-    await c.start()
-    await c.openAsk()
-    assert.equal(c.state.ask!.prompt, 'actual complete prompt\nline two')
-    const body = bodies[1] as Record<string, unknown>
-    assert.equal(body.task, 'network-diagnose')
-    assert.equal(body.text, undefined)
-    assert.equal(body.attachments, undefined)
-    assert.equal(body.account, undefined)
-    assert.equal(body.family, undefined)
-    assert.deepEqual(JSON.parse(JSON.stringify(body.context)), {
-      networkDiagnose: networkDiagnoseTaskFacts(DIAGNOSIS),
-      version: '1.2.3',
-    })
-    assert.equal(JSON.stringify(body).includes('password'), false)
-  })
-
-  it('requires confirmation again when the second prompt differs', async () => {
-    let prompts = 0
-    let asks = 0
-    const bodies: unknown[] = []
-    const c = await controller(async (path, body) => {
-      if (path === '/api/network/diagnose') return DIAGNOSIS
-      if (path === '/api/ask/prompt') {
-        bodies.push(body)
-        prompts++
-        return { prompt: prompts === 1 ? 'first prompt' : 'changed prompt' }
-      }
-      if (path === '/api/ask') {
-        asks++
-        return { opened: true }
-      }
-      throw new Error(`unexpected ${path}`)
-    })
-    await c.start()
-    await c.openAsk()
-    await c.confirmAsk()
-    assert.equal(asks, 0)
-    assert.equal(c.state.ask!.prompt, 'changed prompt')
-    assert.equal(c.state.ask!.promptChanged, true)
-    assert.deepEqual(bodies[0], bodies[1])
-  })
-
-  it('does not apply a delayed accounts diagnosis to a reopened dialog', async () => {
+describe('accounts Network dialog integration', () => {
+  it('does not apply a delayed diagnosis to a reopened dialog', async () => {
     const at = PAGE_SCRIPT.indexOf('  async function netDiagnose()')
     const end = PAGE_SCRIPT.indexOf('\n  // Every change in the dialog applies', at)
     assert.ok(at >= 0 && end > at)
@@ -307,33 +206,5 @@ describe('network Panel behaviour', () => {
     await running
     assert.equal(reopened.diagnosis, null)
     assert.equal(reopened.diagnosing, true)
-  })
-
-  it('does not call ask when the dialog closes during the delayed second check', async () => {
-    let prompts = 0
-    let asks = 0
-    const second = deferred<{ prompt: string }>()
-    const c = await controller(async (path) => {
-      if (path === '/api/network/diagnose') return DIAGNOSIS
-      if (path === '/api/ask/prompt') {
-        prompts++
-        return prompts === 1 ? { prompt: 'same prompt' } : second.promise
-      }
-      if (path === '/api/ask') {
-        asks++
-        return { opened: true }
-      }
-      throw new Error(`unexpected ${path}`)
-    })
-    await c.start()
-    await c.openAsk()
-    const confirming = c.confirmAsk()
-    await new Promise<void>((r) => setImmediate(r))
-    assert.equal(prompts, 2)
-    c.closeAsk()
-    second.resolve({ prompt: 'same prompt' })
-    await confirming
-    assert.equal(asks, 0)
-    assert.equal(c.state.ask, null)
   })
 })

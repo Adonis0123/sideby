@@ -5,6 +5,8 @@
   "required": [
     "schemaVersion",
     "checkedAt",
+    "system",
+    "localProxyCandidates",
     "targets"
   ],
   "properties": {
@@ -15,6 +17,243 @@
     "checkedAt": {
       "type": "string",
       "description": "When this offline diagnosis ran (ISO), not the Guard cache time."
+    },
+    "system": {
+      "type": "object",
+      "required": [
+        "warp",
+        "proxy",
+        "dns",
+        "route"
+      ],
+      "properties": {
+        "warp": {
+          "type": "object",
+          "required": [
+            "status",
+            "state"
+          ],
+          "properties": {
+            "status": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "available"
+                },
+                {
+                  "type": "string",
+                  "const": "unavailable"
+                },
+                {
+                  "type": "string",
+                  "const": "error"
+                }
+              ]
+            },
+            "state": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "connected"
+                },
+                {
+                  "type": "string",
+                  "const": "disconnected"
+                },
+                {
+                  "type": "string",
+                  "const": "unknown"
+                }
+              ]
+            },
+            "networkHealthy": {
+              "type": "boolean"
+            },
+            "error": {
+              "type": "string"
+            }
+          }
+        },
+        "proxy": {
+          "type": "object",
+          "required": [
+            "status",
+            "pacEnabled",
+            "autoDiscoveryEnabled",
+            "protocols"
+          ],
+          "properties": {
+            "status": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "available"
+                },
+                {
+                  "type": "string",
+                  "const": "unavailable"
+                },
+                {
+                  "type": "string",
+                  "const": "error"
+                }
+              ]
+            },
+            "pacEnabled": {
+              "type": "boolean"
+            },
+            "autoDiscoveryEnabled": {
+              "type": "boolean"
+            },
+            "protocols": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "protocol",
+                  "enabled"
+                ],
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "http"
+                      },
+                      {
+                        "type": "string",
+                        "const": "https"
+                      },
+                      {
+                        "type": "string",
+                        "const": "socks"
+                      }
+                    ]
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "host": {
+                    "type": "string",
+                    "description": "Loopback only; every other host is redacted."
+                  },
+                  "port": {
+                    "type": "integer"
+                  }
+                }
+              }
+            },
+            "exceptionCount": {
+              "type": "integer"
+            },
+            "error": {
+              "type": "string"
+            }
+          }
+        },
+        "dns": {
+          "type": "object",
+          "required": [
+            "status",
+            "nameservers"
+          ],
+          "properties": {
+            "status": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "available"
+                },
+                {
+                  "type": "string",
+                  "const": "unavailable"
+                },
+                {
+                  "type": "string",
+                  "const": "error"
+                }
+              ]
+            },
+            "nameservers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "error": {
+              "type": "string"
+            }
+          }
+        },
+        "route": {
+          "type": "object",
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "available"
+                },
+                {
+                  "type": "string",
+                  "const": "unavailable"
+                },
+                {
+                  "type": "string",
+                  "const": "error"
+                }
+              ]
+            },
+            "interface": {
+              "type": "string"
+            },
+            "gateway": {
+              "type": "string"
+            },
+            "error": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "localProxyCandidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "label",
+          "protocol",
+          "host",
+          "port",
+          "reachable"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "The common configuration for this port, not an identified process."
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "reachable": {
+            "type": "boolean",
+            "description": "TCP connect only; not proof of upstream connectivity."
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      }
     },
     "targets": {
       "type": "array",

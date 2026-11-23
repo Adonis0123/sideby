@@ -2113,6 +2113,31 @@ describe('settings in config, start at login and Auto Handoff facts (spec §3.29
     for (const lang of ['en', 'zh']) {
       const facts = networkDiagnoseTaskFacts({
         checkedAt: '2026-11-23T01:00:00Z',
+        system: {
+          warp: { status: 'available', state: 'connected', networkHealthy: true },
+          proxy: {
+            status: 'available',
+            pacEnabled: true,
+            autoDiscoveryEnabled: true,
+            protocols: [
+              { protocol: 'http', enabled: true, host: '127.0.0.1', port: 7897 },
+              { protocol: 'https', enabled: true, host: 'private-proxy.example.com', port: 8080 },
+              { protocol: 'socks', enabled: false },
+            ],
+            exceptionCount: 2,
+          },
+          dns: { status: 'available', nameservers: ['192.0.2.53', 'private-dns.example.com'] },
+          route: { status: 'available', interface: 'en99', gateway: '192.0.2.1' },
+        },
+        localProxyCandidates: [
+          {
+            label: 'Clash mixed',
+            protocol: 'HTTP / SOCKS',
+            host: '127.0.0.1',
+            port: 7897,
+            reachable: true,
+          },
+        ],
         targets: [
           {
             url: 'https://api.anthropic.com/cdn-cgi/trace',
