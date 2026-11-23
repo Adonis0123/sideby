@@ -48,7 +48,7 @@ async function setup(h: FakeHome, network: object | undefined, loc = 'US') {
       },
       print: 'p',
       probe: async () => ({ reachable: false, error: 'ECONNREFUSED' }),
-      system: { platform: 'linux' },
+      system: { platform: 'win32' },
     },
   })
   return { rt, asked }
@@ -367,7 +367,7 @@ describe('settings', () => {
           fetcher: async () => assert.fail('diagnose must not trace'),
           print: 'p',
           probe: async () => ({ reachable: false, error: 'ECONNREFUSED' }),
-          system: { platform: 'linux' },
+          system: { platform: 'win32' },
         },
       })
       const p = await proxied.networkDiagnose()

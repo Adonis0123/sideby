@@ -2284,6 +2284,11 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       checkedAt: Type.String({
         description: 'When this offline diagnosis ran (ISO), not the Guard cache time.',
       }),
+      platform: Type.Optional(
+        Type.Union([Type.Literal('darwin'), Type.Literal('linux'), Type.Literal('other')], {
+          description: 'Which system reader ran. On linux the system proxy reports error not-applicable.',
+        }),
+      ),
       system: Type.Object({
         warp: Type.Object({
           status: NetworkProbeStatus,
@@ -2334,6 +2339,11 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
           port: Type.Integer(),
           reachable: Type.Boolean({ description: 'TCP connect only; not proof of upstream connectivity.' }),
           error: Type.Optional(Str),
+          processProxy: Type.Optional(
+            Type.Union([Type.Literal('HTTPS_PROXY'), Type.Literal('ALL_PROXY')], {
+              description: 'This 127.0.0.1 port is the one the process proxy variable names.',
+            }),
+          ),
         }),
       ),
       targets: Type.Array(

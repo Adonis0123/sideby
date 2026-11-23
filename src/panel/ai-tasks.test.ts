@@ -43,7 +43,7 @@ function runtimeFor(h: FakeHome, exec: Exec, legacyDiagnosis = false) {
       },
       network: {
         probe: async () => ({ reachable: false, error: 'ECONNREFUSED' }),
-        system: { platform: 'linux' },
+        system: { platform: 'win32' },
       },
     })
     if (!legacyDiagnosis) return rt
