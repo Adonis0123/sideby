@@ -335,8 +335,8 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .row-toggle[aria-expanded=true]:not(:hover) { background: transparent; color: var(--muted); }
 .fold-hit:hover .row-toggle[aria-expanded=true] { background: var(--hover); color: var(--text); }
 /* The details under a row's name (a Same Login's after a dashed line). Their left edge is the name's: the open arrow (--ctl-h-sm,
-   less its 14px of negative margins), 10px, the 26px mark, 10px and the pin's 18px. */
-.row-detail { grid-area: detail; display: flex; flex-wrap: wrap; gap: 12px 36px; margin: 12px 0 4px calc(var(--ctl-h-sm) + 50px); padding-top: 12px; border-top: 1px dashed var(--border); cursor: default; }
+   less its 16px of negative margins), 12px, the 26px mark, 12px and the pin's 20px. */
+.row-detail { grid-area: detail; display: flex; flex-wrap: wrap; gap: 12px 36px; margin: 12px 0 4px calc(var(--ctl-h-sm) + 54px); padding-top: 12px; border-top: 1px dashed var(--border); cursor: default; }
 .rd-item { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 /* An open account's details sit in one bordered panel under the name: four cells side by side (how it runs, its web
    sign-in, tokens, health), each a label above its value, with the same widths in every row. Without browser
@@ -865,8 +865,8 @@ ${UI_CSS}
 .app-row:first-child { border-top: 0; }
 .app-row > .ident { flex: 1; }
 .app-actions { flex: none; justify-content: flex-end; }
-/* The open arrow of an account row is --ctl-h-sm wide less its 14px of negative margins. */
-.app-gap { flex: none; width: calc(var(--ctl-h-sm) - 14px); }
+/* The open arrow of an account row is --ctl-h-sm wide less its 16px of negative margins. */
+.app-gap { flex: none; width: calc(var(--ctl-h-sm) - 16px); }
 .app-foot { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 12px; border-top: 1px solid var(--border); }
 .app-foot > .btn { align-self: flex-start; }
 .app-new { display: flex; gap: 8px; align-items: center; max-width: 420px; }
