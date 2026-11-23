@@ -49,6 +49,12 @@ export class FileMemo<T> {
   readonly stats = { hits: 0, misses: 0 }
   /** True when a pass changed what is remembered since the last `dump`. */
   dirty = false
+  /**
+   * Scopes a pass ended in since the last `takeFresh`. Only these are this process's own news: the others hold what
+   * the cache file had when this process started, which another sideby process sharing the state directory may since
+   * have replaced with newer parses.
+   */
+  readonly #fresh = new Set<string>()
   readonly persist?: MemoPersist
 
   constructor(persist?: MemoPersist) {
@@ -93,6 +99,7 @@ export class FileMemo<T> {
         if (!before || before.size !== seen.size || [...seen].some(([k, v]) => before.get(k) !== v))
           this.dirty = true
         this.#scopes.set(scope, seen)
+        this.#fresh.add(scope)
       },
     }
   }
@@ -103,6 +110,18 @@ export class FileMemo<T> {
     const out: MemoDump = {}
     for (const [scope, files] of this.#scopes)
       out[scope] = Object.fromEntries([...files].map(([path, e]) => [path, [e.sig, e.value]]))
+    return out
+  }
+
+  /** The scopes a pass ended in since the last call, for merging into the cache file; clears `dirty`. */
+  takeFresh(): MemoDump {
+    this.dirty = false
+    const out: MemoDump = {}
+    for (const scope of this.#fresh) {
+      const files = this.#scopes.get(scope)
+      if (files) out[scope] = Object.fromEntries([...files].map(([path, e]) => [path, [e.sig, e.value]]))
+    }
+    this.#fresh.clear()
     return out
   }
 
@@ -128,6 +147,7 @@ export class FileMemo<T> {
 
   clear(): void {
     this.#scopes.clear()
+    this.#fresh.clear()
     this.dirty = false
     this.stats.hits = 0
     this.stats.misses = 0

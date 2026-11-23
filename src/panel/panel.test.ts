@@ -233,6 +233,99 @@ describe('panel handler security', () => {
     })
   })
 
+  it('keeps showing the last state while a new read of the account is slow', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      let calls = 0
+      const slow = demoFamily({
+        async model(a) {
+          if (a.name === 'slow' && ++calls > 1) await new Promise((r) => setTimeout(r, 600))
+          return 'm1'
+        },
+        async readQuota() {
+          return {
+            status: 'ok',
+            source: 'test',
+            observedAt: new Date().toISOString(),
+            windows: [
+              {
+                label: '5h',
+                windowMinutes: 300,
+                usedPercent: 40,
+                resetsAt: new Date(Date.now() + 3_600_000).toISOString(),
+              },
+            ],
+          }
+        },
+      })
+      const make = () => createRuntime({ env: h.env, builtins: [asBuiltin(demoPlugin(slow))] })
+      await (await make()).createAccount('demo', 'slow')
+      const before = { ...readBudget }
+      readBudget.ms = 300
+      const { server, port } = await serve((port) =>
+        createPanelHandler({ runtime: make, allowedHosts: [`127.0.0.1:${port}`] }),
+      )
+      try {
+        const slowOf = async () =>
+          ((await (await fetch(`http://127.0.0.1:${port}/api/state`)).json()) as PanelState).accounts.find(
+            (a) => a.ref === 'demo:slow',
+          )!
+        const first = await slowOf()
+        assert.equal(first.pending, undefined)
+        assert.equal(first.quota?.status === 'ok' && first.quota.windows[0]?.usedPercent, 40)
+        // The next state reads again, and this read is slower than the state waits.
+        const again = await slowOf()
+        assert.equal(calls, 2)
+        assert.equal(again.pending, undefined, 'not back to "Reading…"')
+        assert.equal(again.refreshing, true)
+        assert.equal(again.quota?.status === 'ok' && again.quota.windows[0]?.usedPercent, 40)
+      } finally {
+        Object.assign(readBudget, before)
+        await close(server)
+      }
+    })
+  })
+
+  it('shows the quota before a slow usage read is done, and the usage on a later state', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const slow = demoFamily({
+        async readQuota() {
+          return { status: 'ok', source: 'test', observedAt: new Date().toISOString(), windows: [] }
+        },
+        async readUsage(a) {
+          if (a.name === 'slow') await new Promise((r) => setTimeout(r, 600))
+          return { status: 'unavailable', reason: 'no-session' }
+        },
+      })
+      const make = () => createRuntime({ env: h.env, builtins: [asBuiltin(demoPlugin(slow))] })
+      await (await make()).createAccount('demo', 'slow')
+      const before = { ...readBudget }
+      readBudget.ms = 100
+      const { server, port } = await serve((port) =>
+        createPanelHandler({ runtime: make, allowedHosts: [`127.0.0.1:${port}`] }),
+      )
+      try {
+        const slowOf = async () =>
+          ((await (await fetch(`http://127.0.0.1:${port}/api/state`)).json()) as PanelState).accounts.find(
+            (a) => a.ref === 'demo:slow',
+          )!
+        const first = await slowOf()
+        assert.equal(first.pending, undefined)
+        assert.equal(first.usagePending, true)
+        assert.equal(first.quota?.status, 'ok')
+        assert.equal(first.usage, undefined)
+        await new Promise((r) => setTimeout(r, 700))
+        const later = await slowOf()
+        assert.equal(later.usagePending, undefined)
+        assert.equal(later.usage?.status, 'unavailable')
+      } finally {
+        Object.assign(readBudget, before)
+        await close(server)
+      }
+    })
+  })
+
   it('does not show a read begun before a change once the change is made', async () => {
     await withFakeHome(async (h) => {
       await seedDemoMain(h.write)

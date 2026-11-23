@@ -2043,6 +2043,13 @@ const MAIN = String.raw`
   }
   function usageBlock(a) {
     const u = a.usage
+    // Its usage is still being parsed while the rest is in: two lines, as the numbers take, so the row keeps its height.
+    if (!u && a.usagePending) {
+      return h('div', { class: 'usage', 'aria-busy': 'true' },
+        h('div', { class: 'u-text' },
+          h('span', { class: 'u-num faint' }, '—'),
+          h('div', { class: 'u-sub' }, t('acct.reading', { host: famTitle(a) }))))
+    }
     if (!u) return h('div', { class: 'usage' })
     if (u.status !== 'ok') {
       const key = u.reason === 'no-session' ? 'usage.none' : u.reason === 'no-source' ? 'usage.noSource' : 'usage.unreadable'
@@ -9709,7 +9716,7 @@ const MAIN = String.raw`
     const now = Date.now()
     // An Account still being read is asked for again soon, so it fills in without waiting for the next round.
     // For half a minute: the server says "took too long" after a minute, which the normal round then shows.
-    const pending = S.state.accounts.some((a) => a.pending)
+    const pending = S.state.accounts.some((a) => a.pending || a.usagePending || a.refreshing)
     if (!pending) S.pendingSince = 0
     else if (!S.pendingSince) S.pendingSince = now
     // A Host being asked for its Quota behind the kept answer (spec §3.26): its row takes the new numbers as soon as

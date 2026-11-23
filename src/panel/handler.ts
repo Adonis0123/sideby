@@ -322,6 +322,10 @@ export type PanelAccount = (AccountStatus | (Account & Partial<AccountStatus>)) 
   modelInfo?: Omit<AccountModel, 'ref' | 'family'>
   /** Its reads take longer than the state waits (`readBudget`); they go on, and a later state carries them. */
   pending?: true
+  /** Its usage is still being read (the rest is current); a later state carries it. */
+  usagePending?: true
+  /** The last complete state, shown while a new read of the Account takes longer than the state waits. */
+  refreshing?: true
 }
 
 export type { DoctorHistory }
@@ -958,52 +962,72 @@ function optBool(body: Record<string, unknown>, key: string): boolean {
   return v
 }
 
-async function accountState(rt: Runtime, account: Account, families: FamilyInfo[]): Promise<PanelAccount> {
-  const errors: string[] = []
-  const guard = async <T>(p: Promise<T>): Promise<T | undefined> => {
-    try {
-      return await p
-    } catch (err) {
-      errors.push((err as Error).message)
-      return undefined
+type Settled<T> = { value?: T; error?: string }
+
+function settle<T>(p: Promise<T>): Promise<Settled<T>> {
+  return p.then(
+    (value) => ({ value }),
+    (err) => ({ error: (err as Error).message }),
+  )
+}
+
+/**
+ * Starts the reads of one Account. `full` is its whole state. Usage parses session logs and can take far longer than
+ * the rest on a cold start, so `quick()` gives the state without it (`usagePending`) once the rest is in, or null
+ * while it is not.
+ */
+function accountState(
+  rt: Runtime,
+  account: Account,
+  families: FamilyInfo[],
+): { full: Promise<PanelAccount>; quick: () => Promise<PanelAccount> | null } {
+  const status = settle(rt.status(account))
+  // The kept answer of a Quota check shows now; a stale one is asked again behind it (spec §3.26).
+  const quota = settle(rt.quota(account, { fetch: 'background' }))
+  const usage = settle(rt.usage(account))
+  let restIn = false
+  void Promise.all([status, quota]).then(() => {
+    restIn = true
+  })
+  const build = async (u: Settled<UsageResult> | undefined): Promise<PanelAccount> => {
+    const [s, q] = await Promise.all([status, quota])
+    const errors = [s.error, q.error, u?.error].filter((e): e is string => e !== undefined)
+    const fam = families.find((f) => f.id === account.family)
+    const base: PanelAccount = s.value ?? {
+      ...account,
+      familyTitle: fam?.title ?? account.family,
+      hostInstalled: fam?.installed ?? false,
+      login: 'unknown',
+    }
+    errors.push(...(s.value?.problems ?? []))
+    let modelInfo: PanelAccount['modelInfo']
+    if (rt.families.get(account.family)?.modelChoice) {
+      const used = u?.value
+      // Given even when empty: without it `accountModel` would wait for the usage itself.
+      const last =
+        used?.status === 'ok'
+          ? {
+              ...(used.lastModel ? { model: used.lastModel } : {}),
+              ...(used.lastEffort ? { effort: used.lastEffort } : {}),
+            }
+          : {}
+      try {
+        const { ref: _r, family: _f, ...rest } = await accountModel(rt, account, last)
+        modelInfo = rest
+      } catch (err) {
+        errors.push((err as Error).message)
+      }
+    }
+    return {
+      ...base,
+      ...(modelInfo ? { modelInfo } : {}),
+      ...(q.value ? { quota: q.value } : {}),
+      ...(u?.value ? { usage: u.value } : {}),
+      ...(u ? {} : { usagePending: true as const }),
+      ...(errors.length ? { error: errors.join('; ') } : {}),
     }
   }
-  const [status, quota, usage] = await Promise.all([
-    guard(rt.status(account)),
-    // The kept answer of a Quota check shows now; a stale one is asked again behind it (spec §3.26).
-    guard(rt.quota(account, { fetch: 'background' })),
-    guard(rt.usage(account)),
-  ])
-  const fam = families.find((f) => f.id === account.family)
-  const base: PanelAccount = status ?? {
-    ...account,
-    familyTitle: fam?.title ?? account.family,
-    hostInstalled: fam?.installed ?? false,
-    login: 'unknown',
-  }
-  errors.push(...(status?.problems ?? []))
-  let modelInfo: PanelAccount['modelInfo']
-  if (rt.families.get(account.family)?.modelChoice) {
-    const last =
-      usage?.status === 'ok'
-        ? {
-            ...(usage.lastModel ? { model: usage.lastModel } : {}),
-            ...(usage.lastEffort ? { effort: usage.lastEffort } : {}),
-          }
-        : {}
-    const info = await guard(accountModel(rt, account, last))
-    if (info) {
-      const { ref: _r, family: _f, ...rest } = info
-      modelInfo = rest
-    }
-  }
-  return {
-    ...base,
-    ...(modelInfo ? { modelInfo } : {}),
-    ...(quota ? { quota } : {}),
-    ...(usage ? { usage } : {}),
-    ...(errors.length ? { error: errors.join('; ') } : {}),
-  }
+  return { full: usage.then(build), quick: () => (restIn ? build(undefined) : null) }
 }
 
 export type RemoteControlView = Omit<RemoteControlGroup, 'file'> & { file: string }
@@ -1041,19 +1065,39 @@ function advisorView(st: AdvisorStatus, home: string): AdvisorView {
  * answer. Mutable for tests only.
  */
 export const readBudget = { ms: 2000, hungMs: 60_000 }
+/** How long a state waits, once `readBudget` is over, for an Account's state without its usage. */
+const QUICK_MS = 500
 /** An answer kept longer than this is not used: the next state reads the Account again. */
 const KEPT_MS = 30_000
-type Reading = { promise: Promise<PanelAccount>; started: number; done?: { state: PanelAccount; at: number } }
-/** Reads still going on, by Account ref; one map per Panel, since a Runtime may be made anew for every request. */
-type Readings = Map<string, Reading>
+type Reading = {
+  promise: Promise<PanelAccount>
+  quick: () => Promise<PanelAccount> | null
+  started: number
+  done?: { state: PanelAccount; at: number }
+}
+/**
+ * Reads still going on, and the last complete state of each Account, by ref. One per Panel, since a Runtime may be
+ * made anew for every request.
+ */
+type Readings = { going: Map<string, Reading>; last: Map<string, PanelAccount> }
 
-/** The Account's state within `readBudget`, or a pending placeholder while its reads go on. */
+/** Forgets every read and every last state: after a change, nothing read before it is shown. */
+function clearReadings(r: Readings): void {
+  r.going.clear()
+  r.last.clear()
+}
+
+/**
+ * The Account's state within `readBudget`. While its reads go on: its last complete state (`refreshing`), or else
+ * the state without its usage once the rest is in (`usagePending`), or else a pending placeholder.
+ */
 async function timedAccountState(
   rt: Runtime,
   account: Account,
   families: FamilyInfo[],
-  mine: Readings,
+  readings: Readings,
 ): Promise<PanelAccount> {
+  const mine = readings.going
   const fam = families.find((f) => f.id === account.family)
   const placeholder = async (extra: Partial<PanelAccount>): Promise<PanelAccount> => {
     // Its Same Login is known without the slow reads, so its rows stay grouped meanwhile.
@@ -1067,21 +1111,48 @@ async function timedAccountState(
       ...extra,
     }
   }
+  const last = (): PanelAccount | null => {
+    const st = readings.last.get(account.ref)
+    return st ? { ...st, refreshing: true } : null
+  }
+  // The state without usage still asks the model reader, which a plugin may make slow: it gets a short wait only.
+  const partial = async (r: Reading): Promise<PanelAccount | null> => {
+    const quick = r.quick()
+    if (!quick) return null
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<null>((done) => {
+      timer = setTimeout(() => done(null), QUICK_MS)
+    })
+    try {
+      return await Promise.race([quick.catch(() => null), late])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
   let r = mine.get(account.ref)
   if (r?.done && Date.now() - r.done.at > KEPT_MS) r = undefined
-  // A read still going after `readBudget.hungMs` has hung (a plugin reader, a Host that never answers).
+  // A read still going after `readBudget.hungMs` has hung (a plugin reader, a Host that never answers). A first read
+  // on a cold start can parse usage for longer than that: while the rest is in, it goes on.
   if (r && !r.done && Date.now() - r.started > readBudget.hungMs) {
-    // Dropped, so the next state starts a new read; this one says what happened instead of spinning on.
+    const early = last() ? null : await partial(r)
+    if (early) return early
+    // Dropped, so the next state starts a new read; this one shows the last state, or says what happened instead
+    // of spinning on.
     mine.delete(account.ref)
+    const shown = last()
+    if (shown) return shown
     return placeholder({
       error: `reading this account took longer than ${Math.round(readBudget.hungMs / 1000)} s; refresh to try again`,
     })
   }
   if (!r) {
-    const fresh: Reading = { promise: accountState(rt, account, families), started: Date.now() }
+    const read = accountState(rt, account, families)
+    const fresh: Reading = { promise: read.full, quick: read.quick, started: Date.now() }
     fresh.promise.then(
       (state) => {
         fresh.done = { state, at: Date.now() }
+        // Not a read a change has since dropped: its state is from before the change.
+        if (mine.get(account.ref) === fresh) readings.last.set(account.ref, state)
       },
       () => undefined,
     )
@@ -1107,7 +1178,7 @@ async function timedAccountState(
     if (mine.get(account.ref) === reading) mine.delete(account.ref)
     return state
   }
-  return placeholder({ pending: true })
+  return last() ?? (await partial(reading)) ?? placeholder({ pending: true })
 }
 
 async function buildState(
@@ -1140,7 +1211,8 @@ async function buildState(
     ? await rt.networkStatus().catch(() => undefined)
     : undefined
   // Reads of Accounts that are gone are dropped.
-  for (const ref of opts.readings.keys()) if (!accounts.some((a) => a.ref === ref)) opts.readings.delete(ref)
+  for (const map of [opts.readings.going, opts.readings.last])
+    for (const ref of map.keys()) if (!accounts.some((a) => a.ref === ref)) map.delete(ref)
   const aliases = aliasesByAccount(aliasRefs(rt.config.aliases), accounts)
   // Asks in flight before the reads start: one that ends while they run may have left a row with the older numbers.
   const askingOf = () =>
@@ -1663,7 +1735,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   const openBridge = resolveBridge('open', opts.open)
   const token = randomBytes(32).toString('base64url')
   const serial = writeQueue()
-  const readings: Readings = new Map()
+  const readings: Readings = { going: new Map(), last: new Map() }
   const getRuntime = typeof opts.runtime === 'function' ? opts.runtime : async () => opts.runtime as Runtime
   const sessionsSource = (opts as { [LIVE_SESSIONS_SOURCE]?: LiveSessionsSource })[LIVE_SESSIONS_SOURCE]
   const liveSessions = sessionsSource?.list ?? listLiveSessions
@@ -3359,7 +3431,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       // Reads that record history (doctor) also run in this queue, so overlapping checks merge in order.
       const result = await (route.queued === false ? route.run(body) : serial(() => route.run(body)))
       // A change may concern an Account whose read began before it: the next state reads again.
-      if (route.writes?.(body) ?? true) readings.clear()
+      if (route.writes?.(body) ?? true) clearReadings(readings)
       send(res, 200, result)
       return true
     } catch (err) {

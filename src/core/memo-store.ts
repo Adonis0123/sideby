@@ -1,6 +1,11 @@
-// Keeps the persisted FileMemos (core/file-memo.ts) in `<stateDir>/cache/file-memo.json`, so a new process does not
+// Keeps the persisted FileMemos (core/file-memo.ts) in `<stateDir>/cache/file-memo-2.json`, so a new process does not
 // parse every session log again: the Panel worker starts cold after each restart, reinstall or language switch,
 // and parsing the logs of a busy HOME takes seconds, while reading this file back takes milliseconds.
+//
+// Several sideby processes share a state directory (a Panel worker, a background Panel, launchers that wait for hours).
+// Each one writes only the scopes it read itself since its last write, into what the file holds at that moment, so a
+// process that loaded the file long ago never puts its old parses back over newer ones. An older sideby that is still
+// running writes the whole of `cache/file-memo.json`; this file has another name, so it cannot undo these merges.
 //
 // The file holds token counts, session ids and log paths, never a credential; it is written atomically with mode
 // 600. Anything unexpected in it (another format, a parse error, a memo version that changed) is ignored and the
@@ -22,7 +27,7 @@ interface CacheFile {
 }
 
 export function memoCachePath(stateDir: string): string {
-  return join(stateDir, 'cache', 'file-memo.json')
+  return join(stateDir, 'cache', 'file-memo-2.json')
 }
 
 export interface MemoStore {
@@ -53,12 +58,22 @@ export function memoStore(
   let lastWrite = Number.NEGATIVE_INFINITY
   let timer: ReturnType<typeof setTimeout> | undefined
 
-  const load = async () => {
+  /** The cache file's memos, or null when it is missing or not one this sideby can read. */
+  const readCache = async (): Promise<CacheFile['memos'] | null> => {
     try {
       const data = JSON.parse(await readFile(file, 'utf8')) as Partial<CacheFile>
-      if (data?.format !== FORMAT || !data.memos || typeof data.memos !== 'object') return
+      return data?.format === FORMAT && data.memos && typeof data.memos === 'object' ? data.memos : null
+    } catch {
+      return null
+    }
+  }
+
+  const load = async () => {
+    try {
+      const memos = await readCache()
+      if (!memos) return
       for (const [name, memo] of persistedMemos) {
-        const saved = data.memos[name]
+        const saved = memos[name]
         if (saved && saved.version === memo.persist?.version && saved.data && typeof saved.data === 'object')
           memo.restore(saved.data)
       }
@@ -70,9 +85,19 @@ export function memoStore(
   const write = async () => {
     if (![...persistedMemos.values()].some((m) => m.dirty)) return
     lastWrite = now()
-    const out: CacheFile = { format: FORMAT, memos: {} }
-    for (const [name, memo] of persistedMemos)
-      out.memos[name] = { version: memo.persist?.version ?? 0, data: memo.dump() }
+    // Taken before the file is read again, so a pass that ends meanwhile counts toward the next write.
+    const fresh = [...persistedMemos].map(([name, memo]) => [name, memo, memo.takeFresh()] as const)
+    // Memos this process does not know (another sideby's) are kept as they are.
+    const out: CacheFile = { format: FORMAT, memos: { ...(await readCache()) } }
+    for (const [name, memo, scopes] of fresh) {
+      const version = memo.persist?.version ?? 0
+      const saved = out.memos[name]
+      // A memo of another version is dropped whole, as `load` would.
+      const data: MemoDump =
+        saved?.version === version && saved.data && typeof saved.data === 'object' ? { ...saved.data } : {}
+      Object.assign(data, scopes)
+      out.memos[name] = { version, data }
+    }
     try {
       await mkdir(join(stateDir, 'cache'), { recursive: true, mode: 0o700 })
       await writeFileAtomic(file, JSON.stringify(out))

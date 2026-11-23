@@ -57,6 +57,44 @@ describe('memoStore', () => {
     })
   })
 
+  it('keeps the newer parses another process wrote for scopes this one did not read again', async () => {
+    await withFakeHome(async (h) => {
+      const dir = join(h.home, 'state')
+      const at = (n: number): FileStats => ({ ...st, mtimeMs: n })
+      const refresh = async (scope: string, n: number) => {
+        const p = memo.pass(scope)
+        await p.get('/log', at(n), async () => ({ n }))
+        p.done()
+      }
+      const newProcess = async () => {
+        memo.clear()
+        resetMemoStores()
+        await memoStore(dir).ready()
+      }
+      // The file as process 1 will leave it later: scope x at its newer version 2.
+      await newProcess()
+      await refresh('x', 2)
+      await memoStore(dir).save()
+      const newer = await readFile(memoCachePath(dir), 'utf8')
+      // Process 2 starts while the file still holds x at version 1.
+      await newProcess()
+      await refresh('x', 1)
+      await memoStore(dir).save()
+      await newProcess()
+      assert.equal(memo.size('x'), 1)
+      // Process 1 writes x = 2 meanwhile; process 2 then reads only y and writes.
+      await writeFile(memoCachePath(dir), newer)
+      await refresh('y', 5)
+      await memoStore(dir).save()
+
+      await newProcess()
+      const x = memo.pass('x')
+      assert.deepEqual(await x.get('/log', at(2), async () => ({ n: -1 })), { n: 2 }, 'process 1 kept its x')
+      const y = memo.pass('y')
+      assert.deepEqual(await y.get('/log', at(5), async () => ({ n: -1 })), { n: 5 })
+    })
+  })
+
   it('writes once after the reads stop, and not again within the interval', async () => {
     await withFakeHome(async (h) => {
       const dir = join(h.home, 'state')
