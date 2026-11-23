@@ -16,7 +16,7 @@ type Sqlite = typeof import('node:sqlite')
 let sqlite: Promise<Sqlite | undefined> | undefined
 
 /** `node:sqlite` without its experimental warning (ADR-0042); undefined when this Node has none. */
-function loadSqlite(): Promise<Sqlite | undefined> {
+export function loadSqlite(): Promise<Sqlite | undefined> {
   sqlite ??= (async () => {
     const emit = process.emitWarning
     process.emitWarning = ((w: string | Error, ...rest: unknown[]) => {

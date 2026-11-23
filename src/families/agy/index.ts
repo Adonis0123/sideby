@@ -50,6 +50,11 @@ export const agyFamily: FamilyDef = {
   async loginState(): Promise<LoginState> {
     return 'unknown'
   },
+  // agy keeps no record sideby reads for this: only a quota check that met agy's sign-in page marks the login
+  // expired (`loginExpired`, ADR-0082), and a later good answer clears it.
+  async readLoginEvents() {
+    return {}
+  },
   fetchQuota: agyQuotaFetch,
 }
 

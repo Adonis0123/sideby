@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFile, writeFile } from 'node:fs/promises'
+import { access, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../../testing/index.ts'
@@ -7,7 +7,7 @@ import { defProblems } from '../../plugins/check.ts'
 import { mainOnlyProblem } from '../../plugins/loader.ts'
 import { createRuntime } from '../../runtime.ts'
 import { agyFamily, agyPlugin } from './index.ts'
-import { AGY_QUOTA_ARGS, agyQuota } from './quota.ts'
+import { AGY_QUOTA_ARGS, agyQuota, fetchAgyQuota } from './quota.ts'
 
 const builtins = [{ plugin: agyPlugin, version: '0.1.0', description: '', defaultEnabled: true }]
 const MAIN = '.gemini/antigravity-cli'
@@ -312,6 +312,109 @@ describe('Antigravity CLI quota (ADR-0048)', () => {
       const q = await rt.quota(await rt.resolve('agy:main'))
       assert.equal(q.status, 'unavailable')
       assert.deepEqual(await agyRuns(h), [])
+    })
+  })
+})
+
+/**
+ * A fake `agy` that, like agy 1.5.14 whose sign-in cannot be refreshed (2026-11-23), prints a sign-in link on stderr,
+ * runs `open <link>` from PATH and waits for the sign-in; on SIGTERM it prints its JSON error and exits. `<bin>/open`
+ * stands for the user's browser and records that it was asked.
+ */
+async function signInAgy(h: FakeHome): Promise<string> {
+  const opened = join(h.bin, 'browser-opened')
+  await writeFile(join(h.bin, 'open'), `#!/bin/sh\necho "$@" >> ${JSON.stringify(opened)}\n`, { mode: 0o755 })
+  await writeFile(
+    join(h.bin, 'agy'),
+    `#!${process.execPath}
+const answer = () => { process.stdout.write(JSON.stringify(${JSON.stringify(signedOut)})); process.exit(1) }
+process.on('SIGTERM', answer)
+process.stderr.write('Authentication required. Please visit the URL to log in:\\n  https://example.invalid/secret-link\\n')
+require('node:child_process').spawnSync('open', ['https://example.invalid/secret-link'], { stdio: 'ignore' })
+setTimeout(answer, 60000)
+`,
+    { mode: 0o755 },
+  )
+  return opened
+}
+
+/** A fake `agy` that does not answer and ignores SIGTERM; it writes its pid to `<bin>/agy.pid`. */
+async function stuckAgy(h: FakeHome): Promise<string> {
+  const pidFile = join(h.bin, 'agy.pid')
+  await writeFile(
+    join(h.bin, 'agy'),
+    `#!${process.execPath}
+process.on('SIGTERM', () => {})
+require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid))
+// Ends by itself after 30 s, so a check that never stops it fails the test instead of hanging the run.
+setTimeout(() => process.exit(0), 30000)
+`,
+    { mode: 0o755 },
+  )
+  return pidFile
+}
+
+const exists = (p: string) =>
+  access(p).then(
+    () => true,
+    () => false,
+  )
+
+describe('Antigravity CLI quota never opens a browser (ADR-0082)', () => {
+  it('stops agy when it asks for a browser sign-in, opens nothing and says to sign in again', {
+    timeout: 15_000,
+  }, async () => {
+    await withFakeHome(async (h) => {
+      await h.mkdir(MAIN)
+      const opened = await signInAgy(h)
+      const rt = await createRuntime({ env: h.env, builtins })
+      const account = await rt.resolve('agy:main')
+      const started = Date.now()
+      const q = await rt.quota(account)
+      assert.ok(Date.now() - started < 10_000, 'agy was stopped at once, not after its sign-in wait')
+      assert.equal(await exists(opened), false, 'the browser was asked to open the sign-in page')
+      assert.equal(q.status, 'unavailable')
+      if (q.status !== 'unavailable') return
+      assert.match(q.detail ?? '', /needs a new sign-in; run `sideby login agy:main`/)
+      assert.doesNotMatch(JSON.stringify(q), /secret-link|authentication failed/)
+      // The menu bar and the Panel show it as a sign-in to renew, although agy's login state is unknown.
+      assert.equal((await rt.loginProblem(account))?.kind, 'expired')
+      // A later good answer clears it.
+      await fakeAgy(h, 'ok')
+      assert.equal((await rt.quota(account, { fetch: 'force' })).status, 'ok')
+      assert.equal(await rt.loginProblem(account), undefined)
+    })
+  })
+
+  it('ends an agy that never answers and ignores SIGTERM, within its own time limit', {
+    timeout: 15_000,
+  }, async () => {
+    await withFakeHome(async (h) => {
+      await h.mkdir(MAIN)
+      const pidFile = await stuckAgy(h)
+      const rt = await createRuntime({ env: h.env, builtins })
+      const account = await rt.resolve('agy:main')
+      const started = Date.now()
+      const q = await fetchAgyQuota(
+        account,
+        {
+          home: h.home,
+          now: new Date(),
+          stateDir: join(h.home, '.local', 'state', 'sideby'),
+          env: h.env,
+          hostEnv: h.env,
+          // Never aborts: the check must stop agy by itself.
+          signal: new AbortController().signal,
+        },
+        { timeoutMs: 500 },
+      )
+      assert.ok(Date.now() - started < 8_000)
+      assert.equal(q.status, 'unavailable')
+      if (q.status !== 'unavailable') return
+      assert.match(q.detail ?? '', /no answer within/)
+      assert.equal(q.loginExpired, undefined)
+      const pid = Number(await readFile(pidFile, 'utf8'))
+      assert.throws(() => process.kill(pid, 0), /ESRCH/, 'agy is still running')
     })
   })
 })

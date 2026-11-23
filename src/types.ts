@@ -284,8 +284,9 @@ export interface FamilyDef {
   /**
    * When the Host last said this Account's login expired, and when it last showed it working, from the Host's own
    * records only (ADR-0071): never a token, the Keychain or an expiry field of a credential file. Called only for a
-   * signed-in Subscription Account; an error counts as nothing known. Without it the Family's logins never show as
-   * expired.
+   * Subscription Account whose login state is `logged-in` or `unknown`; an error counts as nothing known. Without it
+   * the Family's logins never show as expired; a Family with no such records returns `{}`, and then only its
+   * `fetchQuota` answers (`loginExpired`) tell.
    */
   readLoginEvents?(account: Account, ctx: ReadContext): Promise<LoginEvents>
   model?(account: Account): Promise<string | undefined>

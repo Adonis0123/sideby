@@ -1344,7 +1344,9 @@ export async function createRuntime(
   ): Promise<LoginProblem | undefined> => {
     const f = families.get(a.family)
     if (!f?.readLoginEvents || a.kind === 'api') return undefined
-    if ((login ?? (await loginOf(a))) !== 'logged-in') return undefined
+    // `unknown` too: a Host whose sign-in sideby cannot see (agy, ADR-0082) still says when it needs a new one.
+    const state = login ?? (await loginOf(a))
+    if (state !== 'logged-in' && state !== 'unknown') return undefined
     const ctx = readContext()
     await memos.ready()
     let events: Awaited<ReturnType<NonNullable<FamilyDef['readLoginEvents']>>> | undefined

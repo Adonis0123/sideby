@@ -4,6 +4,7 @@ import type { Dirent } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Account, FamilyDef, FamilyHistory, HistoryMessage, ParsedSession } from '../types.ts'
+import { agyHistory } from './agy/history.ts'
 import { claudeHistory } from './claude/history.ts'
 import { codexHistory } from './codex/history.ts'
 import { grokHistory } from './grok/history.ts'
@@ -35,7 +36,7 @@ export interface HistoryReader extends Omit<FamilyHistory, 'resumeArgs' | 'toolT
 }
 
 const READERS: ReadonlyMap<string, HistoryReader> = new Map(
-  [claudeHistory, codexHistory, grokHistory, piHistory].map((r) => [r.family, r]),
+  [claudeHistory, codexHistory, grokHistory, piHistory, agyHistory].map((r) => [r.family, r]),
 )
 
 const PLUGIN_READERS = new WeakMap<FamilyHistory, HistoryReader>()

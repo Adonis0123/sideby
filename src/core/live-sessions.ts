@@ -89,6 +89,8 @@ export const liveKey = (account: string, sessionId: string): string => `${accoun
 export function hostResumeArgs(family: string, id: string): string {
   if (family === 'codex') return `resume ${id}`
   if (family === 'claude' || family === 'grok') return `--resume ${id}`
+  // agy 1.5.14 `--help`: `--conversation` resumes a previous conversation by id (2026-11-23).
+  if (family === 'agy') return `--conversation ${id}`
   return `--session ${id}`
 }
 
