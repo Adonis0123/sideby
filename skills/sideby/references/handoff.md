@@ -1,6 +1,6 @@
 # Handoff: keep working on another account
 
-Use this when the user says an account hit its 5-hour or weekly limit ("usage limit reached", "rate limited", "resets at …") and wants to keep working, or asks which account has room. sideby recommends the account of the same family that is furthest from its limits (lowest `limitUse`), and the user starts it. Only Auto Handoff, which the user turns on in the config, moves a running task by itself (see below).
+Use this when the user says an account hit its 5-hour or weekly limit ("usage limit reached", "rate limited", "resets at …") and wants to keep working, or asks which account has room. sideby recommends the account of the same family with the most room per running session, and the user starts it. Only Auto Handoff, which the user turns on in the config, moves a running task by itself (see below).
 
 ## Steps
 
@@ -9,11 +9,13 @@ Use this when the user says an account hit its 5-hour or weekly limit ("usage li
 
    | `state` | Meaning | Can be picked |
    |---|---|---|
-   | `ready` | Subscription account with every live window under its own limit. `pressure` is its fullest live window in percent; `limitUse` is the percent of its own limit that its closest window has used, and `window` names that window (`label`, `usedPercent`, `limit`) | Yes, lowest `limitUse` first |
+   | `ready` | Subscription account with every live window under its own limit. `pressure` is its fullest live window in percent; `limitUse` is the percent of its own limit that its closest window has used, and `window` names that window (`label`, `usedPercent`, `limit`) | Yes: an `expiring` one first, then the most room per running session, `(100 − limitUse) / (liveSessions + 1)` |
    | `unknown` | No quota data yet (not asked yet, quota checks are off, or the ask failed) | Yes, after `ready` |
    | `api` | API account, pay per use | Only with `--include-api` |
    | `full` | A live window is at or past its own Takeover Limit: a 5-hour window at the Auto Handoff threshold − 10 (85% by default), a weekly or longer window at the threshold (95% by default); `resetsAt` is when it is usable again | Only as a last resort, see below |
    | `logged-out` | Needs `sideby login <ref>` | No |
+
+   `liveSessions` counts the sessions running on the account's login (any app started them) plus picks sideby made in the last two minutes that have not shown up yet, so tasks started together spread over the accounts. `expiring` on a `ready` entry is a weekly (or longer) window that resets within 24 hours while every window is still at least 10 points under its limit: that room is lost at the reset, so the account goes first. `reason` on the plan says why the pick won: `expiring` ("claude:006's weekly quota resets tomorrow with 23% left, so it goes first") or `room` ("claude:002 has the most room per running session").
 
    When no subscription account is `ready` or `unknown`, the pick is the `full` one with no window used up (`pressure` under 100%) and the lowest `limitUse`, ahead of API accounts, and the plan has `tight: { limit, longLimit }` (the 5-hour and the weekly limit). Tell the user every account is past its limit and the pick has the most left (for example "every claude account is past its limit; claude:008 has the most left, its 5-hour window at 88%"), so they know it may run out soon. Auto Handoff never does this.
 

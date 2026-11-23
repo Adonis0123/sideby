@@ -11,6 +11,7 @@ import type { Runtime } from '../runtime.ts'
 import type { Account, Env, HandoffHookEvent } from '../types.ts'
 import { aliasArgs } from './config.ts'
 import { UserError } from './errors.ts'
+import type { PickRecord } from './handoff.ts'
 import { finishBrief } from './handoff-brief.ts'
 import {
   briefPath,
@@ -188,18 +189,25 @@ function limitUntil(ready: ReadyFile, now: Date = new Date()): string {
     : new Date(now.getTime() + LIMIT_WAIT_FALLBACK_MS).toISOString()
 }
 
-/** The decision, or `none` with the reason when sideby cannot tell (an account removed mid-chain, say). */
+/**
+ * The decision, or `none` with the reason when sideby cannot tell (an account removed mid-chain, say). Counts the Live
+ * Sessions into the ranking (ADR-0083); `record` when the handoff starts its pick, so a Pick Record is written.
+ */
 async function decide(
   rt: Runtime,
   account: Account,
   used: readonly UsedAccount[],
   to?: string,
   manual = false,
+  /** Set when the handoff starts its pick: a Pick Record is written and given here. */
+  recorded?: (rec: PickRecord) => void,
 ): Promise<HandoffDecision> {
   try {
     return await rt.handoffDecision(account, used, {
       ...(to !== undefined ? { to } : {}),
       ...(manual ? { manual: true } : {}),
+      picks: recorded ? 'record' : 'read',
+      ...(recorded ? { recorded } : {}),
     })
   } catch (err) {
     return { kind: 'none', reason: (err as Error).message }
@@ -268,6 +276,21 @@ export async function runWithHandoff(
   let hop: Hop = { ref, args: [...aliasArgs(own), ...userArgs] }
   let n = 1
   const chainSettings = join(rt.paths.stateDir, 'handoff', 'chains', `${chain}-claude.json`)
+  // The Pick Record of the hop about to start (ADR-0083): taken back unless that Host really starts.
+  let picked: PickRecord | undefined
+  const dropPicked = async () => {
+    const rec = picked
+    picked = undefined
+    if (rec) await rt.cancelPick(rec)
+  }
+  // The record is kept once the Host process exists; a Host that cannot start (ENOENT) leaves it to `dropPicked`.
+  const started = (p: Parameters<typeof spawnHost>[0]) => {
+    const host = spawnHost(p)
+    host.child.once('spawn', () => {
+      picked = undefined
+    })
+    return host
+  }
 
   try {
     for (;;) {
@@ -275,7 +298,9 @@ export async function runWithHandoff(
         n === 1 ? firstLaunch : await rt.prepareLaunch(hop.ref, hop.args, 'run', launchOpts)
       const account = launch.account
       const h = launch.family.handoff
-      if (!h) return await runHost(launch)
+      if (!h) {
+        return await started(launch).exited
+      }
       const elig = n === 1 ? firstElig : await h.eligibility(withoutNetwork(launch), account, launch.env)
       const canStart = h.starts.length > 0 && elig.start && HOOK_FAMILIES.includes(account.family)
       if (!canStart && elig.reason) io.err(`sideby: ${account.ref} will not hand over: ${elig.reason}`)
@@ -312,7 +337,9 @@ export async function runWithHandoff(
       hops.hops.push({ ref: account.ref, startedAt: new Date().toISOString() })
       await writeJsonFile(join(dir, FILES.chain), hops)
       if (launch.notice) io.err(launch.notice)
-      if (!canStart) return await runHost({ ...launch, args, env })
+      if (!canStart) {
+        return await started({ ...launch, args, env }).exited
+      }
 
       // Plan writes run one after another, and none lands after this hop is over: a late one would carry this
       // run's id into the next hop's plan.json and silence its hook.
@@ -346,7 +373,7 @@ export async function runWithHandoff(
       }
       await writePlan()
       const refresh = setInterval(() => void writePlan(), PLAN_REFRESH_MS)
-      const host = spawnHost({ ...launch, args, env })
+      const host = started({ ...launch, args, env })
       const exited = host.exited.then((code) => ({ kind: 'exit' as const, code }))
       // Nothing to move on to (or better to wait): leave the session alone, keep listening (the user may still ask to
       // move on while it waits, ADR-0018), and say why once it ends.
@@ -365,7 +392,9 @@ export async function runWithHandoff(
           outcome = got
           break
         }
-        const d = await decide(rt, account, hops.hops, got.ready.to, got.ready.trigger === 'manual')
+        const d = await decide(rt, account, hops.hops, got.ready.to, got.ready.trigger === 'manual', (r) => {
+          picked = r
+        })
         if (d.kind === 'pick') {
           outcome = { ...got, decision: d }
           break
@@ -404,6 +433,8 @@ export async function runWithHandoff(
         new Promise<null>((r) => setTimeout(() => r(null), grace).unref()),
       ])
       if (!ended) {
+        // Nothing starts, so the pick's record is taken back (ADR-0083).
+        await dropPicked()
         io.err(
           `sideby: ${account.ref} did not exit within ${grace / 1000}s, so nothing was handed over; exit it yourself, then start the next account with \`sideby run ${decision.ref}\``,
         )
@@ -442,6 +473,7 @@ export async function runWithHandoff(
         (await countdown(io, settings.countdownSeconds, decision.ref, account.ref))
       ) {
         io.err(`sideby: staying in ${account.ref}`)
+        await dropPicked()
         if (!ready.sessionId) {
           io.err(
             `sideby: the session id is unknown, so start ${account.ref} yourself; the Brief is at ${done.path}`,
@@ -459,6 +491,7 @@ export async function runWithHandoff(
       try {
         next = await rt.resolve(decision.ref)
       } catch (err) {
+        await dropPicked()
         io.err(
           `sideby: cannot start ${decision.ref}: ${(err as Error).message}; the Brief is at ${done.path}`,
         )
@@ -473,6 +506,8 @@ export async function runWithHandoff(
       n++
     }
   } finally {
+    // A pick whose Host never started (its launch failed, say) does not count for the next pick.
+    await dropPicked()
     // Read by Claude Code while a session runs, so it goes only once the chain's last Host is over.
     await rm(chainSettings, { force: true })
   }

@@ -337,7 +337,10 @@ sideby network allow US JP --yes   # 允许请求从这些地区发出
 sideby network on --yes            # 打开
 sideby network                     # 查看设置和每个地址最近的结果
 sideby network check               # 现在查一次
+sideby network diagnose            # 离线查看路由、TCP listener 和缓存 Guard 状态
 ```
+
+面板里的**诊断连接**，或 `sideby network diagnose --json`，只能手动触发，而且只读。它不发 trace，只显示当前选中的脱敏代理（只留协议、主机和端口，无代理显示 `direct`）、本地回环地址的 TCP listener 结果和缓存 Guard 结果及检查时间。它不解析或连接远程代理，非 HTTP 代理未写端口时不猜默认端口；CLI 还跳过通用更新检查和 Unattended ended 通知的联网或写盘副作用。Clash、v2rayN 或其他代理软件的 direct、HTTP、SOCKS 设置都按同一方式识别。listener 能连上不代表 HTTP CONNECT、SOCKS 或上游代理可用。Guard 只支持 HTTP CONNECT；SOCKS 或 HTTPS 路由标为 `guardSupport: "unsupported"` 时，请配置 HTTP 代理或使用直连，sideby 不会自行切换出口。**让 AI 诊断**打开独立的固定只读任务，只带这些 facts；直接运行 `sideby ask --task network-diagnose` 也会现场生成同一组 facts。预览和任务文件写入前会清除 URL userinfo，不带无关上下文或安装、写入命令，也不修改网络设置或代码。打开网络对话框时原有的自动在线检查保持不变。
 
 打开后，sideby 在启动 Claude 或 Codex 账号前，以及它启动的会话里每条消息、每次工具调用前都会检查。地区不在允许范围内，或者查不出来（代理没开、断网），这次启动、这条消息或这次工具调用就会被拦下，并说明原因和怎么办。会话中查不出时会先重试，最多约 30 秒，免得短暂断网把后台任务的完成通知这类工具不会重发的消息拦掉。这类消息在 Claude 会话里还是被拦了的话，sideby 会先扣住，等网络恢复后再交给会话，会话不会白等；面板顶部会出现横幅，带**重新检查**按钮。临时跳过一次：`sideby run <账号> --ignore-network`。不想检查了就运行 `sideby network off --yes`（或在面板里关掉），正在运行的会话也会马上放行，会话里的拦截提示也会这样说。不知道该允许哪些地区，或者被拦了不知道为什么？点对话框或横幅上的**让 AI 帮我**，会用你自己的 AI 开一个任务：它先查你现在在哪，再问你允许哪些地区，你同意后才改设置。
 
@@ -502,7 +505,8 @@ sideby next claude -- --model opus  # 宿主参数放在 -- 之后
 ```
 
 - 每种窗口有自己的上限，好让换过去的账号有余量干活。5 小时窗口用到 85% 以上、或每周（及更长）窗口用到 95% 以上的账号，排在所有余量更多的账号后面。两条线都跟着自动接力阈值走：5 小时窗口比阈值低 10，更长的窗口就等于阈值。一个用满的 5 小时窗口只占一周额度的五分之一左右，所以每周用了 87% 仍够好几个 5 小时窗口干活。
-- 没过上限的账号里，离上限最远的先选。注释写出起决定作用的那个窗口：`7d 87% of 95%`。已过重置时间的窗口重新按 0% 算。
+- 没过上限的账号里，按「每个会话分到的余量」选：余量除以这个登录上已在跑的会话数加一，大的先选。同时开很多任务时，它们会分摊到各个账号，不会都挤到最空的那个。sideby 刚启动的会话还没出现时，最多按 2 分钟算作一个在跑的会话。注释写出起决定作用的那个窗口和在跑的会话数：`7d 87% of 95%; 2 running`。已过重置时间的窗口重新按 0% 算。
+- 每周额度在 24 小时内重置的账号先选，趁重置前把余量用掉；前提是每个窗口离上限都还有至少 10 个点，不然新会话很快又要交接：`Next: claude:006 (its weekly quota resets tomorrow 4:59 PM with 23% left, so it goes first)`。
 - 所有账号都过了上限时，`next` 仍然启动剩得最多、没有窗口用完的那个，并说明：`Next: claude:lab (every claude account is past its limit (85% of a 5-hour window, 95% of a weekly one); this one has the most left, 5h 91% of 85%)`。它可能很快用完。自动接力不会这样接手。
 - 还没有额度数据的账号排在有余量的账号后面。API 账号按次花钱，加 `--include-api` 才参与。
 - 已登录的账号都有窗口用完时什么都不启动，并告诉你哪个账号最先恢复。所有账号都还没有额度数据时也不启动，因为那样的推荐只是猜测：`sideby quota claude` 会说明原因，或用 `sideby run` 自己选。
@@ -531,7 +535,7 @@ sideby handoff disable --yes
 这些设置都存在 config 文件的 `handoff` 下（见[配置](configuration.zh-CN.md)的 schema）。
 
 - **什么时候。** 最满的窗口到 80%（`prepareAt`）时，会话被要求开始写接力说明并随时更新；某个窗口快用完时，它做完当前一步、更新接力说明、结束这一轮。「快用完」按窗口分别判断（`adaptive`，默认开）：会话跑完一轮后，某个窗口剩下的额度不够最近单轮最大用量的 1.5 倍时就接力，范围在 `prepareAt` 到 99% 之间。5 小时窗口里轻活能用到 97–99% 左右，重活会早一些接力；每周窗口一般在 98–99%。还没跑完一轮时，以及 `adaptive: false` 时，每个窗口都在 95%（`threshold`）接力。提示和终端会写明是哪个窗口，例如「weekly (7d) quota is at 98%, back at Sun 20:00」，不会把每周额度误当成 5 小时额度。接力说明最后一行写 `<!-- handoff brief complete -->` 才算写完；否则会再要求一次，还没写完时 sideby 保留已写的部分，再补上从会话记录里找到的内容。满了的窗口 30 分钟内就重置时（`waitIfResetWithinMinutes`），sideby 选择等待，不接力：会话保留完整上下文，额度恢复后 Claude Code 自己接着做。额度到 95% 时会话里会显示一行说明，真撞到上限时再发一个桌面通知（支持 OSC 9 或 777 的终端，如 iTerm2、WezTerm、Ghostty）。想立刻换号，就在会话里输入 `! sideby handoff ready`：`!` 让命令不经过模型直接运行，额度用完时模型没法回话。只有会话能自己续上时 sideby 才等：Claude Code 要开着「Continue automatically at usage limit」（账号 `settings.json` 里的 `autoContinueAtUsageLimit`，默认开）；写在托管设置或项目设置里的这个开关 sideby 看不到。Codex 和 Grok 从不等。
-- **交给谁。** `policy: "order"` 按你写的列表（账号或短命令，可以跨家族）；不写时选本家族余量最多的账号；开了 `otherFamilies` 再按 `familyOrder` 换其他工具（每个工具里余量多的在前）；开了 `api` 最后才是 API 账号。一条链里每个账号只用一次，除非它当初交出去时那个额度窗口已经重置（这时它重新成为候选，规则照旧）；你手动交出去的账号，等它自己的额度显示有余量（每个窗口都在上限以下，见[账号撞上限额时](#账号撞上限额时)）才会回来，额度未知时不回；跳过已满和未登录的账号（5 小时窗口到 `threshold` 减 10、或每周窗口到 `threshold` 的也跳过，默认 95% 时分别是 85% 和 95%），也跳过不同组织的账号（先比 organization，没有就比 email 域名），除非它写在 `crossOrganization` 里。和旧账号是同一登录的账号一律跳过，`order` 里写了也跳过：它们是同一份额度。
+- **交给谁。** `policy: "order"` 按你写的列表（账号或短命令，可以跨家族）；不写时选本家族每个会话分到余量最多的账号（同 `next`）；开了 `otherFamilies` 再按 `familyOrder` 换其他工具（每个工具里余量多的在前）；开了 `api` 最后才是 API 账号。一条链里每个账号只用一次，除非它当初交出去时那个额度窗口已经重置（这时它重新成为候选，规则照旧）；你手动交出去的账号，等它自己的额度显示有余量（每个窗口都在上限以下，见[账号撞上限额时](#账号撞上限额时)）才会回来，额度未知时不回；跳过已满和未登录的账号（5 小时窗口到 `threshold` 减 10、或每周窗口到 `threshold` 的也跳过，默认 95% 时分别是 85% 和 95%），也跳过不同组织的账号（先比 organization，没有就比 email 域名），除非它写在 `crossOrganization` 里。和旧账号是同一登录的账号一律跳过，`order` 里写了也跳过：它们是同一份额度。
 - **谁可以接手。** 只开 `auto` 时，只交给你写进 `order` 的其他工具的账号。同一家厂商的两个账号之间接力（cc001 → cc002）还要写 `"sameFamily": true`。厂商可能认为这是在绕过用量限制并处理账号，风险由你承担。`"otherFamilies": true` 让本工具没有能接手的账号时，按 `familyOrder` 换其他 AI 工具。`"api": true` 让 API 账号最后接手；它们按次计费，sideby 不限制花费，请在服务商后台设上限。0.22 之前不用这个设置 API 账号也会接手；如果你开着自动接力又有 API 账号，面板和 `sideby handoff status` 会问你一次：不让它们接手，还是让它们接手。没有账号能接手时，sideby 会说开哪个设置就能有。
 - **额度窗口。** 工具给出的每个窗口都算（5 小时、每周、计费周期）：会话最满的那个窗口到阈值就接力，每个窗口用同一个阈值；没有日额度。谁来接手则按窗口分别判断，每周窗口的线更高（见[账号撞上限额时](#账号撞上限额时)）。
 - **接力之前。** 有 10 秒倒计时（`countdownSeconds`）；按回车留下，sideby 会在原账号里续接刚才的会话。

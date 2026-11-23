@@ -599,3 +599,27 @@ describe('selectNext and an Expired Login (ADR-0071)', () => {
     )
   })
 })
+
+describe('selectNext spreads by Room per Session (ADR-0083)', () => {
+  const s = settings({ auto: true, sameFamily: true })
+  const base = { origin, aliases: {}, used: [], now: NOW, settings: s }
+
+  it('passes over the emptiest Account when its login already runs more sessions per room', () => {
+    const busy = acct('claude:002', { quota: quota(10), sameLogin: ['claude:004'] })
+    const partner = acct('claude:004', { quota: quota(10), sameLogin: ['claude:002'], liveSessions: 3 })
+    const free = acct('claude:003', { quota: quota(40) })
+    assert.deepEqual(selectNext({ ...base, candidates: [origin, busy, partner, free] }), pick('claude:003'))
+    assert.deepEqual(
+      selectNext({ ...base, candidates: [origin, busy, { ...partner, liveSessions: 0 }, free] }),
+      pick('claude:002'),
+    )
+  })
+
+  it('counts a Pick Record of a handoff made a moment ago', () => {
+    const a = acct('claude:002', { quota: quota(10) })
+    const b = acct('claude:003', { quota: quota(40) })
+    const picks = [{ ref: 'claude:002', at: inMinutes(-1), liveAtPick: 0 }]
+    assert.deepEqual(selectNext({ ...base, candidates: [origin, a, b] }), pick('claude:002'))
+    assert.deepEqual(selectNext({ ...base, candidates: [origin, a, b], picks }), pick('claude:003'))
+  })
+})

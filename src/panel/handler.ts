@@ -20,7 +20,7 @@ import {
 import {
   type AiTaskInput,
   openLoginInTerminal,
-  openPickInTerminal,
+  openRunInTerminal,
   pickTaskAccount,
   previewAttachments,
   promptForTask,
@@ -77,7 +77,7 @@ import {
 import { openDesktopApp, withDesktopApps } from '../core/desktop-app.ts'
 import { editSettings, isEditor } from '../core/edit-settings.ts'
 import { UserError } from '../core/errors.ts'
-import { planHandoff } from '../core/handoff.ts'
+import { type HandoffPlan, type PickRecord, planHandoff } from '../core/handoff.ts'
 import { applyHandoffEnable, type EnablePlan, planHandoffEnable } from '../core/handoff-enable.ts'
 import { handoffOverview } from '../core/handoff-overview.ts'
 import { apiUndecided, handoffRulesView } from '../core/handoff-rules.ts'
@@ -105,6 +105,7 @@ import { listMessages, type MessageReceipt, sendMessage } from '../core/messages
 import { type AccountModel, accountModel, setAccountModel } from '../core/model-choice.ts'
 import { GUARDED_FAMILIES, type NetworkChange, type NetworkOverview, setNetwork } from '../core/network.ts'
 import { tildify } from '../core/paths.ts'
+import { readPickRecords } from '../core/pick-records.ts'
 import { PROGRESS_FAMILIES, type ProgressView } from '../core/progress.ts'
 import { validEvery } from '../core/progress-state.ts'
 import { quotaAsking } from '../core/quota-fetch.ts'
@@ -160,6 +161,7 @@ import {
   setMenubarHotkey,
 } from '../menubar/hotkey.ts'
 import { MENUBAR_SCRIPT } from '../menubar/script.ts'
+import { renderNetworkPage } from '../network/page.ts'
 import type { AccountStatus, DoctorHistory, FamilyInfo, QuotaCheckInfo, Runtime } from '../runtime.ts'
 import type { Account, FamilyDef, FamilyLogo, QuotaResult, QuotaSetupPlan, UsageResult } from '../types.ts'
 import { type OrcaDeps, orcaTabs, switchOrcaTab, systemOrca } from './orca.ts'
@@ -226,6 +228,11 @@ export interface PanelHandlerOptions {
  * does not export it); it may change without notice.
  */
 export const LIVE_SESSIONS_SOURCE: unique symbol = Symbol('sideby.panel.liveSessions')
+/**
+ * Internal: a property under this key of the handler options serves only the Network view (`src/network/panel.ts`).
+ * Not part of the Portal contract (`src/index.ts` does not export it); it may change without notice.
+ */
+export const PANEL_VIEW: unique symbol = Symbol('sideby.panel.view')
 export interface LiveSessionsSource {
   list?: (rt: Runtime) => Promise<LiveSessionsResult>
   copyText?: typeof sessionCopyText
@@ -468,6 +475,13 @@ export interface PanelState {
    * at least two subscription Accounts, some Quota data and a pick; API Accounts are left out as in the CLI default.
    */
   handoff?: Record<string, string>
+  /** Family → the Live Sessions of the login of its `handoff` pick, Pick Records included, when any (ADR-0083). */
+  handoffRunning?: Record<string, number>
+  /**
+   * Family → why its `handoff` pick goes first: `expiring` or `room` under its limits (ADR-0083), `tight` past every
+   * limit (a Last Resort), `unknown` when it has no Quota data and the accounts with data are full.
+   */
+  handoffReason?: Record<string, 'expiring' | 'room' | 'tight' | 'unknown'>
   /** Auto Handoff settings (spec §3.17) and the Families that can start one; readiness comes from /api/handoff/status. */
   autoHandoff: { settings: HandoffSettings; starters: string[]; apiUndecided: boolean }
   /** Claude settings files grouped as `sideby remote-control` shows them (spec §3.22); absent without Claude Accounts. */
@@ -709,13 +723,32 @@ async function localSwitchState(
   }
 }
 
+/** The Live Sessions and Pick Records a pick counts (ADR-0083). */
+export interface PickLoad {
+  live: ReadonlyMap<string, number>
+  picks: readonly PickRecord[]
+}
+
 /** The `handoff` map of the Panel state, from the statuses and Quota already read for the page. */
 export function handoffByFamily(
   rt: Runtime,
   accounts: readonly PanelAccount[],
   now: Date,
+  load?: PickLoad,
 ): Record<string, string> {
   const out: Record<string, string> = {}
+  for (const [id, plan] of Object.entries(handoffPlans(rt, accounts, now, load))) out[id] = plan.pick!
+  return out
+}
+
+/** The plan behind each pick of `handoffByFamily`, spread by Room per Session when `load` is given (ADR-0083). */
+export function handoffPlans(
+  rt: Runtime,
+  accounts: readonly PanelAccount[],
+  now: Date,
+  load?: PickLoad,
+): Record<string, HandoffPlan> {
+  const out: Record<string, HandoffPlan> = {}
   for (const [id, f] of rt.families) {
     // An Account still being read has no Quota yet; it is neither a pick nor an alternative until it has.
     const list = accounts.filter((a) => a.family === id && !a.pending)
@@ -733,12 +766,19 @@ export function handoffByFamily(
         login: a.login ?? 'unknown',
         ...(a.loginProblem ? { loginProblem: a.loginProblem } : {}),
         quota: a.quota ?? { status: 'unavailable', reason: 'unrecognized' },
+        ...(a.sameLogin ? { sameLogin: a.sameLogin } : {}),
+        ...(load ? { liveSessions: load.live.get(a.ref) ?? 0 } : {}),
       })),
       now,
       // The same plan as `sideby next`: the same Takeover Limits, and past them the least used Account (a Last Resort).
-      { limits: takeoverLimits(rt.handoffSettings().threshold), lastResort: true },
+      {
+        limits: takeoverLimits(rt.handoffSettings().threshold),
+        lastResort: true,
+        // Counted over every Account, also one still being read, so a Same Login partner's sessions count.
+        ...(load ? { picks: load.picks, live: load.live } : {}),
+      },
     )
-    if (plan.pick && plan.hasQuota) out[id] = plan.pick
+    if (plan.pick && plan.hasQuota) out[id] = plan
   }
   return out
 }
@@ -1072,8 +1112,19 @@ async function timedAccountState(
 
 async function buildState(
   rt: Runtime,
-  opts: { version: string; build: string; readOnly: boolean; updates: boolean; readings: Readings },
+  opts: {
+    version: string
+    build: string
+    readOnly: boolean
+    updates: boolean
+    readings: Readings
+    /** The Live Sessions now, as `liveKey`s, for spreading the Next pick (ADR-0083). */
+    /** Null when they are not known in time: the Next pick is then left out rather than guessed. */
+    live?: () => Promise<Set<string> | null>
+  },
 ): Promise<PanelState> {
+  // Read alongside the Accounts, so waiting for it adds little.
+  const liveNow = opts.live?.() ?? Promise.resolve(new Set<string>())
   const ctx = rt.readContext()
   const [families, accounts, history, quotaSetups, remoteControl, advisor, upd] = await Promise.all([
     rt.familyInfo(),
@@ -1122,7 +1173,31 @@ async function buildState(
       ...(withArgs.length ? { aliasArgs: Object.fromEntries(withArgs) } : {}),
     }
   })
-  const handoff = handoffByFamily(rt, list, ctx.now)
+  // The Next pick counts Live Sessions and Pick Records as `sideby next` does; it only reads them (ADR-0083).
+  const keys = await liveNow
+  const live = new Map<string, number>()
+  for (const key of keys ?? []) {
+    const ref = key.slice(0, key.indexOf('\0'))
+    live.set(ref, (live.get(ref) ?? 0) + 1)
+  }
+  const plans = keys
+    ? handoffPlans(rt, list, ctx.now, { live, picks: await readPickRecords(rt.paths.stateDir, ctx.now) })
+    : {}
+  const handoff = Object.fromEntries(Object.entries(plans).map(([f, p]) => [f, p.pick!]))
+  const handoffRunning = Object.fromEntries(
+    Object.entries(plans).flatMap(([f, p]) => {
+      const n = p.accounts.find((e) => e.ref === p.pick)?.liveSessions ?? 0
+      return n ? [[f, n]] : []
+    }),
+  )
+  const handoffReason: NonNullable<PanelState['handoffReason']> = Object.fromEntries(
+    Object.entries(plans).flatMap(([f, p]) => {
+      const why: NonNullable<PanelState['handoffReason']>[string] | null =
+        p.reason ??
+        (p.tight ? 'tight' : p.accounts.find((e) => e.ref === p.pick)?.state === 'unknown' ? 'unknown' : null)
+      return why ? [[f, why]] : []
+    }),
+  )
   const pickOffers: Record<string, { name: string | null; shadows?: string }> = {}
   for (const f of families) {
     const offer = await rt.pickSuggestion(f.id, accounts).catch(() => null)
@@ -1170,6 +1245,8 @@ async function buildState(
     ...(Object.keys(pickOffers).length ? { pickOffers } : {}),
     shellSetup: { ...shellSt, rc: tildify(shellSt.rc, ctx.home), block: setupBlock(shellSt.shell) },
     ...(Object.keys(handoff).length ? { handoff } : {}),
+    ...(Object.keys(handoffRunning).length ? { handoffRunning } : {}),
+    ...(Object.keys(handoffReason).length ? { handoffReason } : {}),
     ...(remoteControl.length ? { remoteControl: rcView(remoteControl, ctx.home) } : {}),
     ...(advisor.groups.length ? { advisor: advisorView(advisor, ctx.home) } : {}),
     ...(appProfiles.length
@@ -1571,6 +1648,9 @@ function layerTheme(colors: ResolvedColors, portal: ResolvedTheme): ResolvedThem
 
 export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   const basePath = normalizeBase(opts.basePath)
+  const view = (opts as { [PANEL_VIEW]?: 'accounts' | 'network' })[PANEL_VIEW] ?? 'accounts'
+  if (view !== 'accounts' && view !== 'network')
+    throw new TypeError('panel view must be "accounts" or "network"')
   const allowed = new Set(opts.allowedHosts.map((h) => h.toLowerCase()))
   const readOnly = Boolean(opts.readOnly)
   const version = opts.version ?? PANEL_VERSION
@@ -1603,16 +1683,26 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   const history = () => (historyMod ??= import('../core/history.ts'))
   // Which Sessions run now, for the "running" mark of History rows: read at most every 5 s, given 3 s.
   const LIVE_FIRST_MS = 300
-  let liveMark: { at: number; ids: Promise<Set<string>>; last?: Set<string> } | undefined
+  // How long the page state waits for the first list of running sessions before it leaves the Next pick out.
+  const LIVE_STATE_MS = 3_000
+  // `complete`: the running programs were listed and every Account read in time, so a count of none means none. One
+  // Account whose files cannot be read does not make it incomplete, or one broken folder would hide every Next pick.
+  type LiveScan = { ids: Set<string>; complete: boolean }
+  let liveMark: { at: number; ids: Promise<LiveScan>; last?: LiveScan } | undefined
   // Which past Sessions run now. A search never waits for that list once one is known: it answers with the last
   // one while a fresh one is read, and waits at most LIVE_FIRST_MS for the very first.
-  const liveIds = async (rt: Runtime): Promise<Set<string>> => {
+  const liveRead = (rt: Runtime) => {
     if (!liveMark || Date.now() - liveMark.at > 5_000) {
       const ids = (
         sessionsSource?.list ? sessionsSource.list(rt) : listLiveSessions(rt, { deadlineMs: 3_000 })
       )
-        .then((r) => new Set(r.sessions.map((x) => liveKey(x.account, x.sessionId))))
-        .catch(() => new Set<string>())
+        .then(
+          (r): LiveScan => ({
+            ids: new Set(r.sessions.map((x) => liveKey(x.account, x.sessionId))),
+            complete: !r.partial,
+          }),
+        )
+        .catch((): LiveScan => ({ ids: new Set(), complete: false }))
       const last = liveMark?.last
       liveMark = { at: Date.now(), ids, ...(last ? { last } : {}) }
       const mark = liveMark
@@ -1620,17 +1710,25 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         mark.last = v
       })
     }
-    if (liveMark.last) return liveMark.last
+    return liveMark
+  }
+  // The last complete list known, else the one being read, given `waitMs`; past that the last list, even an
+  // incomplete one, or `late` when there is none.
+  const liveWithin = async <L>(rt: Runtime, waitMs: number, late: L): Promise<LiveScan | L> => {
+    const mark = liveRead(rt)
+    if (mark.last?.complete) return mark.last
     let timer: NodeJS.Timeout | undefined
-    const late = new Promise<Set<string>>((r) => {
-      timer = setTimeout(() => r(new Set()), LIVE_FIRST_MS)
+    const gave = new Promise<LiveScan | L>((r) => {
+      timer = setTimeout(() => r(mark.last ?? late), waitMs)
     })
     try {
-      return await Promise.race([liveMark.ids, late])
+      return await Promise.race([mark.ids, gave])
     } finally {
       clearTimeout(timer)
     }
   }
+  const liveIds = async (rt: Runtime): Promise<Set<string>> =>
+    (await liveWithin(rt, LIVE_FIRST_MS, null))?.ids ?? new Set<string>()
   const toolScans = new Map<string, ToolScan>()
   const dropIdleScans = () => {
     for (const [id, scan] of toolScans)
@@ -1726,6 +1824,20 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       }
     },
   })
+  const checkNetworkAsk = (body: Record<string, unknown>) => {
+    if (view !== 'network') return
+    if (body.task !== 'network-diagnose')
+      throw new HttpError(400, 'the Network Panel only runs its fixed diagnosis task')
+    if (Object.keys(body).some((k) => !['task', 'lang', 'context'].includes(k)))
+      throw new HttpError(400, 'the fixed network diagnosis accepts only task, lang and diagnostic context')
+    const context = body.context
+    if (!context || typeof context !== 'object' || Array.isArray(context))
+      throw new HttpError(400, 'the fixed network diagnosis requires its diagnostic context')
+    if (Object.keys(context).some((k) => !['networkDiagnose', 'version'].includes(k)))
+      throw new HttpError(400, 'the fixed network diagnosis accepts only networkDiagnose and version facts')
+    if (!Array.isArray((context as Record<string, unknown>).networkDiagnose))
+      throw new HttpError(400, 'the fixed network diagnosis requires networkDiagnose facts')
+  }
   const routes: Record<string, Route> = {
     // AI Tasks (spec §3.28, ADR-0027). The prompt and the account it would use, read only: for the confirm area,
     // the copy fallback and the read-only Panel.
@@ -1743,6 +1855,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       writes: () => false,
       queued: false,
       async run(body) {
+        checkNetworkAsk(body)
         const input = askInput(body)
         const rt = await getRuntime()
         const { prompt, removedSecrets } = promptForTask(rt, input, await previewAttachments(rt, input))
@@ -1750,17 +1863,32 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return {
           prompt,
           removedSecrets,
-          account: 'account' in pick ? pick.account.ref : null,
-          ...('reason' in pick ? { reason: pick.reason } : {}),
+          ...(view === 'network'
+            ? {}
+            : {
+                account: 'account' in pick ? pick.account.ref : null,
+                ...('reason' in pick ? { reason: pick.reason } : {}),
+              }),
         }
       },
     },
     // Writes the task file and opens the terminal. An account the person picked, API ones too, is kept as `ask.account`.
     '/api/ask': {
       async run(body) {
+        checkNetworkAsk(body)
         const input = askInput(body)
         const rt = await getRuntime()
-        return opened(await startAiTask(rt, { ...input, remember: Boolean(input.account || input.terminal) }))
+        const result = opened(
+          await startAiTask(
+            rt,
+            view === 'network'
+              ? { ...input, terminal: 'orca', remember: false }
+              : { ...input, remember: Boolean(input.account || input.terminal) },
+          ),
+        )
+        if (view !== 'network') return result
+        const { account: _account, ...withoutAccount } = result
+        return withoutAccount
       },
     },
     // Runs `sideby login <ref>` in the person's terminal; no AI is involved (spec §3.28 "登录").
@@ -1898,7 +2026,14 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const name = optString(body, 'name')
         if (!name) throw new HttpError(400, '"name" is required')
         const rt = await getRuntime()
-        const { family, choice } = await rt.pickChoice(name)
+        // This start counts for the next pick, so its record is written now (ADR-0083).
+        let rec: PickRecord | undefined
+        const { family, choice } = await rt.pickChoice(name, {
+          record: true,
+          recorded: (r) => {
+            rec = r
+          },
+        })
         if (choice.ref === null)
           throw new UserError(
             choice.earliestReset
@@ -1906,8 +2041,15 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
               : `No ${family} account can be used now; sign one in first.`,
             { code: 'none-usable' },
           )
-        // The terminal runs the Pick Command itself, so it picks again as it starts and prints which and why.
-        const r = opened(await openPickInTerminal(rt, name))
+        // The terminal starts exactly the Account picked here, the one the answer names; picking again there could
+        // start another. A terminal that did not open starts nothing, so the record is taken back.
+        const r = opened(
+          await openRunInTerminal(rt, choice.ref).catch(async (err) => {
+            if (rec) await rt.cancelPick(rec)
+            throw err
+          }),
+        )
+        if (!r.opened && rec) await rt.cancelPick(rec)
         return {
           ...r,
           name,
@@ -1915,6 +2057,8 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           picked: choice.ref,
           reason: choice.reason,
           ...('pressure' in choice ? { pressure: choice.pressure, window: choice.window } : {}),
+          ...('expiring' in choice && choice.expiring ? { expiring: true } : {}),
+          ...('running' in choice && choice.running ? { running: choice.running } : {}),
           ...('limit' in choice ? { limit: choice.limit, longLimit: choice.longLimit } : {}),
         }
       },
@@ -2652,6 +2796,13 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return (await getRuntime()).networkStatus({ check: true })
       },
     },
+    // Manual offline diagnosis: cached Guard state and a local TCP probe, never an online trace.
+    '/api/network/diagnose': {
+      writes: () => false,
+      async run() {
+        return (await getRuntime()).networkDiagnose()
+      },
+    },
     // Network Guard's switch and countries (spec §3.35): config `network`, shown first like every config change.
     '/api/network/settings': {
       writes: (body) => body.confirm === true,
@@ -3046,6 +3197,16 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       const host = (req.headers.host ?? '').toLowerCase()
       if (!allowed.has(host)) throw new HttpError(403, 'host not allowed')
       const method = req.method ?? 'GET'
+      const networkGetRoutes = new Set([
+        '/',
+        '/index.html',
+        '/favicon.svg',
+        '/icon.svg',
+        '/api/health',
+        '/api/session',
+      ])
+      if (view === 'network' && (method === 'GET' || method === 'HEAD') && !networkGetRoutes.has(sub))
+        throw new HttpError(404, 'not found')
 
       if (method === 'GET' || method === 'HEAD') {
         if (sub === '/' || sub === '/index.html') {
@@ -3053,7 +3214,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           // The theme and language in config (spec §3.29), so the first paint has them; a config that cannot be
           // read leaves the defaults, and /api/state reports the problem.
           const panel =
-            method === 'HEAD'
+            method === 'HEAD' || view === 'network'
               ? undefined
               : await getRuntime().then(
                   (rt) => rt.config.panel,
@@ -3063,7 +3224,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           // preview` set, for this load only. A Theme that cannot be read leaves the default and Settings says why.
           const preview = new URL(req.url ?? '/', 'http://x').searchParams.get('theme') === 'preview'
           const colors =
-            method === 'HEAD'
+            method === 'HEAD' || view === 'network'
               ? undefined
               : await getRuntime().then(
                   async (rt) =>
@@ -3095,21 +3256,23 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           res.end(
             method === 'HEAD'
               ? undefined
-              : renderPage({
-                  basePath,
-                  token,
-                  nonce,
-                  version,
-                  build,
-                  local,
-                  readOnly,
-                  theme: pageTheme,
-                  lang,
-                  updates,
-                  ...(ask ? { ask } : {}),
-                  ...(openBridge ? { open: openBridge } : {}),
-                  ...(panel ? { panel } : {}),
-                }),
+              : view === 'network'
+                ? renderNetworkPage({ basePath, token, nonce, version, theme, lang })
+                : renderPage({
+                    basePath,
+                    token,
+                    nonce,
+                    version,
+                    build,
+                    local,
+                    readOnly,
+                    theme: pageTheme,
+                    lang,
+                    updates,
+                    ...(ask ? { ask } : {}),
+                    ...(openBridge ? { open: openBridge } : {}),
+                    ...(panel ? { panel } : {}),
+                  }),
           )
           return true
         }
@@ -3153,7 +3316,20 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           send(
             res,
             200,
-            await buildState(await getRuntime(), { version, build, readOnly, updates, readings }),
+            await buildState(await getRuntime(), {
+              version,
+              build,
+              readOnly,
+              updates,
+              readings,
+              // The Next pick waits for the running sessions, so it never shows a pick that moves once they are known.
+              // A scan that could not list the running programs or left Accounts out counts as not known, like one
+              // that came too late.
+              live: async () => {
+                const scan = await liveWithin(await getRuntime(), LIVE_STATE_MS, null)
+                return scan?.complete ? scan.ids : null
+              },
+            }),
           )
           return true
         }
@@ -3162,6 +3338,8 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       }
 
       if (method !== 'POST') throw new HttpError(405, 'method not allowed')
+      const networkPostRoutes = new Set(['/api/network/diagnose', '/api/ask/prompt', '/api/ask'])
+      if (view === 'network' && !networkPostRoutes.has(sub)) throw new HttpError(404, 'not found')
       const route = Object.hasOwn(routes, sub) ? routes[sub] : undefined
       const upload = Object.hasOwn(uploads, sub) ? uploads[sub] : undefined
       if (!route && !upload) throw new HttpError(404, 'not found')

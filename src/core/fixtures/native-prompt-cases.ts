@@ -10,6 +10,7 @@ export const NATIVE_CONTEXT = {
   terminals: ['Ghostty', 'Terminal'],
   theme: 'Sky (sky)',
   handoff: ['Auto Handoff: on', 'Threshold: 90%'],
+  networkDiagnose: ['diagnosed: 2026-11-23T01:00:00Z (offline; no trace sent)', 'api.anthropic.com: proxy direct; direct; no proxy TCP listener to test; Guard unknown, checked 2026-11-23T00:59:00Z, the connection was refused (is the proxy running?)'],
   findings: [
     { code: 'link.dangling', account: 'claude:work', item: 'settings.json', message: 'points nowhere', hint: 'relink it' },
     { message: 'second problem' },
@@ -31,11 +32,12 @@ export function nativePromptCases(kinds: readonly string[]): NativeCase[] {
   const out: NativeCase[] = []
   for (const lang of ['en', 'zh'])
     for (const task of kinds) {
+      const fixed = task === 'network-diagnose'
       out.push({ name: `${lang} ${task} bare`, input: { task, lang }, attachments: [] })
       out.push({
         name: `${lang} ${task} full`,
-        input: { task, lang, text: 'please help with this', context: NATIVE_CONTEXT },
-        attachments: NATIVE_ATTACHMENTS,
+        input: { task, lang, ...(fixed ? {} : { text: 'please help with this' }), context: NATIVE_CONTEXT },
+        attachments: fixed ? [] : NATIVE_ATTACHMENTS,
       })
     }
   return out

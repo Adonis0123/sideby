@@ -33,6 +33,7 @@ const e = (
   state,
   pressure,
   limitUse: window ? (window.usedPercent / window.limit) * 100 : pressure,
+  liveSessions: 0,
   ...(window ? { window } : {}),
 })
 const w5 = (usedPercent: number) => ({ label: '5h', usedPercent, limit: 85 })

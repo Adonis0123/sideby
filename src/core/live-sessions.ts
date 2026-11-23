@@ -60,6 +60,11 @@ export interface LiveSessionsResult {
   sessions: LiveSession[]
   /** One line per Account or Family that could not be read; never aborts the listing. */
   problems: string[]
+  /**
+   * Set when the running programs could not be listed or the deadline left Accounts unread: a count from it may be
+   * short. A problem with one Account's files alone does not set it.
+   */
+  partial?: boolean
 }
 
 export type SessionCopyAs = 'reference' | 'id' | 'resume'
@@ -194,6 +199,7 @@ export async function listLiveSessions(
   const procs = processView(deps ?? systemDeps(rt.env), ctl.signal)
   const found: LiveSession[] = []
   const pending = new Set(readable.map((a) => a.ref))
+  let partial = false
   const work = (async () => {
     try {
       await procs.list()
@@ -203,6 +209,7 @@ export async function listLiveSessions(
         `could not list running programs (${(err as Error).message}); sideby needs \`ps\` on PATH to tell which sessions still run`,
       )
       pending.clear()
+      partial = true
       return
     }
     await Promise.all(
@@ -229,6 +236,7 @@ export async function listLiveSessions(
   const done = Promise.all([work, keptRead]).then(() => 'done' as const)
   if ((await Promise.race([done, late])) === 'late') {
     ctl.abort()
+    if (pending.size) partial = true
     if (pending.size || !keptNow)
       problems.push(
         pending.size
@@ -240,7 +248,11 @@ export async function listLiveSessions(
   // Past the deadline, what sideby keeps counts only if it was read in time.
   const sessions = withStatus(found, keptNow ?? { decisions: [], receipts: [] })
   // One unreadable process is met by every Account of its Family: say it once.
-  return { sessions: sortSessions(sessions), problems: [...new Set(problems)] }
+  return {
+    sessions: sortSessions(sessions),
+    problems: [...new Set(problems)],
+    ...(partial ? { partial: true } : {}),
+  }
 }
 
 export type ReferenceFields = Pick<

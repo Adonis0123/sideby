@@ -21,7 +21,7 @@ import { editConfigAsk, editConfigTerminal } from './config.ts'
 import { depsFor } from './desktop-app.ts'
 import { UserError } from './errors.ts'
 import { writeFileAtomic } from './fs-safe.ts'
-import { planHandoff } from './handoff.ts'
+import { type HandoffCandidate, type PickRecord, planHandoff } from './handoff.ts'
 import { type Paths, resolvePaths } from './paths.ts'
 import { type ProbeDeps, runProbe, spawnProbe } from './probe.ts'
 import { takeoverLimits } from './quota-levels.ts'
@@ -39,9 +39,19 @@ import {
   wslDistro,
 } from './terminal.ts'
 
+/**
+ * The Account an AI Task starts in: the one named, the remembered one, else the pick `sideby next` would make across
+ * Families. `record`: the caller starts the automatic pick, so a Pick Record is written for it (ADR-0083) and given
+ * to `recorded`, the token that takes it back.
+ */
 export async function pickTaskAccount(
   rt: Runtime,
-  opts: { family?: string; account?: string } = {},
+  opts: {
+    family?: string
+    account?: string
+    record?: boolean
+    recorded?: (rec: PickRecord) => void
+  } = {},
 ): Promise<{ account: Account } | { reason: 'no-accounts' | 'none-signed-in' | 'all-full' }> {
   const all = (await rt.accounts()).filter((a) => !opts.family || a.family === opts.family)
   if (opts.account) {
@@ -56,17 +66,33 @@ export async function pickTaskAccount(
   if (preferred && (preferred.kind === 'api' || (await rt.status(preferred)).login === 'logged-in'))
     return { account: preferred }
   if (!all.length) return { reason: 'no-accounts' }
-  const candidates = []
+  const candidates: HandoffCandidate[] = []
   for (const a of all) {
     if (a.kind !== 'subscription' || (await rt.status(a)).login !== 'logged-in') continue
-    candidates.push({ ...a, login: 'logged-in' as const, quota: await rt.quota(a, { fetch: 'never' }) })
+    candidates.push({
+      ...a,
+      login: 'logged-in' as const,
+      quota: await rt.quota(a, { fetch: 'never' }),
+      sameLogin: await rt.sameLogin(a),
+    })
   }
   if (!candidates.length) return { reason: 'none-signed-in' }
-  // As `sideby next`: past the Takeover Limits, the Account closest to room with no window used up (a Last Resort, §3.13).
-  const plan = planHandoff('', candidates, rt.readContext().now, {
-    limits: takeoverLimits(rt.handoffSettings().threshold),
-    lastResort: true,
-  })
+  // As `sideby next`: by Room per Session (ADR-0083); past the Takeover Limits, the Account closest to room with no
+  // window used up (a Last Resort, §3.13).
+  const plan = await rt.pickLoad(
+    opts.record === true,
+    (live, picks) => {
+      const counted = candidates.map((c) => ({ ...c, liveSessions: live.get(c.ref) ?? 0 }))
+      const result = planHandoff('', counted, rt.readContext().now, {
+        limits: takeoverLimits(rt.handoffSettings().threshold),
+        lastResort: true,
+        picks,
+      })
+      return { result, candidates: counted }
+    },
+    (p) => p.pick,
+    opts.recorded,
+  )
   const account = all.find((a) => a.ref === plan.pick)
   return account ? { account } : { reason: 'all-full' }
 }
@@ -378,9 +404,9 @@ export function taskContext(c: unknown, fail: (message: string) => Error): AiTas
     } else if (k === 'handoff') {
       if (!Array.isArray(v) || v.length > 100) throw fail('"context.handoff" must be a list')
       out.handoff = v.map((x) => str(x, 'each of "context.handoff"'))
-    } else if (k === 'network') {
-      if (!Array.isArray(v) || v.length > 100) throw fail('"context.network" must be a list')
-      out.network = v.map((x) => str(x, 'each of "context.network"'))
+    } else if (k === 'network' || k === 'networkDiagnose') {
+      if (!Array.isArray(v) || v.length > 100) throw fail(`"context.${k}" must be a list`)
+      out[k] = v.map((x) => str(x, `each of "context.${k}"`))
     } else if (k === 'findings') {
       if (!Array.isArray(v) || v.length > 100) throw fail('"context.findings" must be a list')
       out.findings = v.map((f) => {
@@ -398,8 +424,19 @@ export function taskContext(c: unknown, fail: (message: string) => Error): AiTas
   return out
 }
 
+function refuseFixedTaskExtras(input: AiTaskInput, attachments: readonly Attachment[] = []) {
+  if (input.task !== 'network-diagnose') return
+  const unsafeFacts = input.context?.networkDiagnose?.some((fact) => fact.includes('@'))
+  if (input.text?.trim() || input.uploads?.length || input.files?.length || attachments.length || unsafeFacts)
+    throw new UserError(
+      'The fixed network diagnosis uses only its current redacted diagnostic facts; remove added text and attachments, then try again.',
+      { code: 'fixed-task-input' },
+    )
+}
+
 /** The attachments a prompt shown before the task exists lists: uploads still staged, the user's files in place. */
 export async function previewAttachments(rt: Runtime, input: AiTaskInput): Promise<Attachment[]> {
+  refuseFixedTaskExtras(input)
   if (input.uploads?.length) return stagedAttachments(rt.paths, input.uploads)
   if (input.files?.length) return checkAttachmentFiles(input.files)
   return []
@@ -416,6 +453,7 @@ export function taskLang(rt: Runtime, lang?: string): string {
 }
 
 export function promptForTask(rt: Runtime, input: AiTaskInput, attachments: readonly Attachment[] = []) {
+  refuseFixedTaskExtras(input, attachments)
   if (input.task && !AI_TASK_KINDS.includes(input.task as AiTaskKind))
     throw new UserError(`Choose a task: ${AI_TASK_KINDS.join(', ')}; rerun \`sideby ask\`.`)
   let removedSecrets = false
@@ -543,7 +581,15 @@ export async function openPromptTask(
   },
 ) {
   const { taskId, prompt, removedSecrets, attachments } = written
-  const pick = await pickTaskAccount(rt, input)
+  // Only an automatic pick writes a record; a named or remembered account has none to take back.
+  let rec: PickRecord | undefined
+  const pick = await pickTaskAccount(rt, {
+    ...input,
+    record: true,
+    recorded: (r) => {
+      rec = r
+    },
+  })
   // Without an account the prompt is copied instead; the saved attachments stay where it says, until the cleanup.
   if ('reason' in pick)
     return {
@@ -559,13 +605,19 @@ export async function openPromptTask(
       removedSecrets,
       attachments,
     }
-  if (input.remember && input.account && rt.config.ask?.account !== pick.account.ref) {
-    const saved = await editConfigAsk(rt.paths.configFile, pick.account.ref)
-    rt.config.ask = saved.after
+  try {
+    if (input.remember && input.account && rt.config.ask?.account !== pick.account.ref) {
+      const saved = await editConfigAsk(rt.paths.configFile, pick.account.ref)
+      rt.config.ask = saved.after
+    }
+    // A terminal the person picked is kept as their preferred one, as `sideby terminal --set` would.
+    if (input.remember && input.terminal && rt.config.terminal?.preferred !== input.terminal)
+      await setPreferredTerminal(rt, input.terminal)
+  } catch (err) {
+    // Nothing starts, so the pick's record is taken back (ADR-0083).
+    if (rec) await rt.cancelPick(rec)
+    throw err
   }
-  // A terminal the person picked is kept as their preferred one, as `sideby terminal --set` would.
-  if (input.remember && input.terminal && rt.config.terminal?.preferred !== input.terminal)
-    await setPreferredTerminal(rt, input.terminal)
   const task: TaskFile = {
     kind: 'prompt',
     account: pick.account.ref,
@@ -574,11 +626,13 @@ export async function openPromptTask(
     ...(written.cwd ? { cwdInHome: true as const } : {}),
   }
   if (attachments.length) task.attachments = attachments.map(({ path, kind }) => ({ path, kind }))
-  return {
-    ...(await openTask(rt, task, input.terminal, undefined, taskId)),
-    removedSecrets,
-    attachments,
-  }
+  // A terminal that did not open starts nothing: the pick's record is taken back (ADR-0083).
+  const opened = await openTask(rt, task, input.terminal, undefined, taskId).catch(async (err) => {
+    if (rec) await rt.cancelPick(rec)
+    throw err
+  })
+  if (!opened.opened && rec) await rt.cancelPick(rec)
+  return { ...opened, removedSecrets, attachments }
 }
 export async function openLoginInTerminal(rt: Runtime, ref: string) {
   const account = await rt.resolve(ref)
@@ -589,18 +643,6 @@ export async function openLoginInTerminal(rt: Runtime, ref: string) {
 export async function openRunInTerminal(rt: Runtime, ref: string) {
   const account = await rt.resolve(ref)
   return openTask(rt, { kind: 'run', account: account.ref, cwd: rt.paths.home })
-}
-
-/**
- * Starts a Pick Command in the Preferred Terminal (spec §3.13): the terminal runs it as `sideby run <name>` does, so it
- * picks the Account when it starts and says which there.
- */
-export async function openPickInTerminal(rt: Runtime, name: string) {
-  if (rt.pickCommandFamily(name) === undefined)
-    throw new UserError(
-      `No short command "${name}" picks an account; add one in the Panel or with \`sideby alias add ${name} --pick <family>\`.`,
-    )
-  return openTask(rt, { kind: 'run', account: name, cwd: rt.paths.home })
 }
 
 /** The probe arguments for `model`, or the plain probe; refuses a model the Family cannot choose or a malformed name. */

@@ -330,6 +330,16 @@ const en = {
   'acct.nextWhy':
     'Of the {title} accounts, this one has the most quota left, so it is the one to use next. sideby never switches by itself.',
   'acct.nextCopy': 'Copy the command that starts it',
+  'acct.nextWhyRoom':
+    'Of the {title} accounts, this one leaves the most quota for each session already running on it, so new work spreads instead of piling onto one account. sideby never switches by itself.',
+  'acct.nextWhyExpiring':
+    "Of the {title} accounts, this one's weekly or monthly quota resets within a day, and what is left would be lost then, so use it first. sideby never switches by itself.",
+  'acct.nextWhyTight':
+    'Every {title} account is past its limit; this one has the most left, so it is the one to use next. It may run out soon. sideby never switches by itself.',
+  'acct.nextWhyUnknown':
+    'The {title} accounts with quota data are full; this one has no quota data yet, so it is the one to try next. sideby never switches by itself.',
+  'acct.nextRunning.one': '1 session running on it',
+  'acct.nextRunning.other': '{n} sessions running on it',
   'stat.needWho': '{names}',
   'stat.needWhoMore': '{names} and {n} more',
   'acct.sameLogin': 'Same login as {names}',
@@ -746,6 +756,8 @@ const en = {
   'ask.copyPrompt': 'Copy prompt',
   'ask.promptShown': 'the prompt',
   'ask.showPrompt': 'See the prompt',
+  'ask.actualPrompt': 'Exact prompt to send',
+  'ask.promptChanged': 'The prompt changed. Review the new prompt and confirm again; nothing was opened.',
   'ask.readOnly':
     'This panel is read-only, so it cannot open a terminal. Copy the prompt and paste it into any AI.',
   'ask.opened': 'Opened {terminal} with {ref}. Carry on there.',
@@ -816,7 +828,9 @@ const en = {
   'pk.offerNoNameShort': 'Add short command',
   'pk.namePh': 'e.g. cc',
   'pk.started': 'Opened {ref} in {terminal} ({why}).',
-  'pk.why.room': '{w}{n}% used, most quota left',
+  'pk.why.room': '{w}{n}% used, most quota left for each running session',
+  'pk.why.roomRunning': '{w}{n}% used, {running} running, most quota left for each session',
+  'pk.why.expiring': '{w}{n}% used; its weekly or monthly quota resets within a day, so it goes first',
   'pk.why.tight':
     'every account is past its limit ({limit}% of a 5-hour window, {longLimit}% of a weekly one); this one has the most left, {w}{n}% used',
   'pk.why.noData': 'no quota data yet',
@@ -889,6 +903,10 @@ const en = {
   'ask.ex.network.1': 'I am in the US; stop everything when the proxy drops',
   'ask.ex.network.2': 'Allow only my Japan and Singapore nodes',
   'ask.ex.network.3': 'A message was blocked; help me check the proxy',
+  'ask.title.network-diagnose': 'Let AI diagnose',
+  'ask.task.network-diagnose':
+    'AI explains the offline route, listener and cached Guard facts. It is read-only and changes nothing.',
+  'ask.ph.network-diagnose': 'No added text; the current diagnosis is included automatically',
   'ask.ph.theme': 'What feel do you want? A website or a color works too.',
   'ask.ex.theme.1': 'Quiet and gray, like Notion',
   'ask.ex.theme.2': 'Green, like my company site',
@@ -1645,6 +1663,24 @@ const en = {
     'Choose at least one country to turn it on. sideby never chooses for you, not even the current one.',
   'net.now': 'Where your requests leave from',
   'net.recheck': 'Check again',
+  'net.diagnose': 'Diagnose connection',
+  'net.diagnoseRefresh': 'Refresh diagnosis',
+  'net.diagnosing': 'Diagnosing…',
+  'net.diagnoseOffline':
+    'Offline only: reads the Guard cache and tests a selected local proxy TCP listener. It sends no online trace and never connects to a remote proxy.',
+  'net.diagnoseRoute': 'Selected route: {proxy}',
+  'net.diagnoseDirect': 'Direct connection; no proxy listener to test.',
+  'net.diagnoseNoLocalProbe':
+    'No local TCP listener probe: the proxy is remote, invalid, or has no explicit port for its scheme.',
+  'net.diagnoseListenerUp': 'TCP listener reachable at {host}:{port}.',
+  'net.diagnoseListenerDown': 'TCP listener not reachable at {host}:{port} ({error}).',
+  'net.diagnoseTcpLimit':
+    'TCP reachability does not prove that HTTP CONNECT, SOCKS or the upstream proxy works.',
+  'net.diagnoseUnsupported':
+    'This proxy scheme is not supported by Network Guard, which supports HTTP CONNECT only. Configure an HTTP proxy or direct connection, then check again.',
+  'net.diagnoseInvalid':
+    'The proxy address is invalid. Correct it in the environment and start a new session.',
+  'net.diagnoseChecked': 'Diagnosed {when}',
   'net.ok': 'allowed',
   'net.blocked': 'not allowed',
   'net.unknown': 'cannot tell',
@@ -2397,6 +2433,16 @@ const zh: Record<MessageKey, string> = {
   'acct.next': '建议使用',
   'acct.nextWhy': '{title} 的账号里，这个剩余额度最多，接下来用它最合适。sideby 不会自己切换。',
   'acct.nextCopy': '复制启动它的命令',
+  'acct.nextWhyRoom':
+    '{title} 的账号里，按已在跑的会话分摊后，这个每个会话分到的额度最多，新任务会分散开，不挤在一个账号上。sideby 不会自己切换。',
+  'acct.nextWhyExpiring':
+    '{title} 的账号里，这个的周额度或月额度一天内就重置，剩下的到时会作废，所以先用它。sideby 不会自己切换。',
+  'acct.nextWhyTight':
+    '{title} 的账号都已到上限，这个剩得最多，接下来用它，可能很快用完。sideby 不会自己切换。',
+  'acct.nextWhyUnknown':
+    '{title} 里有额度数据的账号都满了，这个还没有额度数据，接下来先试它。sideby 不会自己切换。',
+  'acct.nextRunning.one': '它上面有 1 个会话在跑',
+  'acct.nextRunning.other': '它上面有 {n} 个会话在跑',
   'stat.needWho': '{names}',
   'stat.needWhoMore': '{names} 等 {n} 个',
   'acct.sameLogin': '与 {names} 同一登录',
@@ -2788,6 +2834,8 @@ const zh: Record<MessageKey, string> = {
   'ask.copyPrompt': '复制提示词',
   'ask.promptShown': '提示词',
   'ask.showPrompt': '查看提示词',
+  'ask.actualPrompt': '将发送的完整提示词',
+  'ask.promptChanged': '提示词有变化。请查看新提示词后再次确认；这次没有打开终端。',
   'ask.readOnly': '这个面板是只读的，不能打开终端。复制提示词，贴给任何 AI 就行。',
   'ask.opened': '已用 {ref} 打开 {terminal}，请到那边继续。',
   'ask.failed': '{terminal} 没有打开。',
@@ -2852,7 +2900,9 @@ const zh: Record<MessageKey, string> = {
   'pk.offerNoNameShort': '添加短命令',
   'pk.namePh': '例如 cc',
   'pk.started': '已在 {terminal} 启动 {ref}（{why}）。',
-  'pk.why.room': '{w}已用 {n}%，剩余额度最多',
+  'pk.why.room': '{w}已用 {n}%，按在跑的会话分摊后额度最多',
+  'pk.why.roomRunning': '{w}已用 {n}%，有 {running} 个会话在跑，每个会话分到的额度最多',
+  'pk.why.expiring': '{w}已用 {n}%；它的周额度或月额度一天内重置，所以先用它',
   'pk.why.tight':
     '所有账号都已到上限（5 小时窗口 {limit}%，每周窗口 {longLimit}%）；这个剩得最多，{w}已用 {n}%',
   'pk.why.noData': '还没有额度数据',
@@ -2921,6 +2971,9 @@ const zh: Record<MessageKey, string> = {
   'ask.ex.network.1': '我在美国，代理一断就全部拦住',
   'ask.ex.network.2': '只允许日本和新加坡节点',
   'ask.ex.network.3': '消息被拦了，帮我查查代理',
+  'ask.title.network-diagnose': '让 AI 诊断',
+  'ask.task.network-diagnose': 'AI 只读解释离线路由、listener 和缓存检查结果，不修改任何设置或文件。',
+  'ask.ph.network-diagnose': '无需补充；会自动带上当前诊断',
   'ask.ph.theme': '想要什么感觉？给个网址或颜色也行。',
   'ask.ex.theme.1': '素净的灰色，像 Notion',
   'ask.ex.theme.2': '绿色，和我们公司官网一样',
@@ -3627,6 +3680,21 @@ const zh: Record<MessageKey, string> = {
   'net.pickFirst': '至少选一个地区才能打开。sideby 不替你选，当前所在的地区也不会自动选上。',
   'net.now': '现在的请求从哪里发出',
   'net.recheck': '重新检查',
+  'net.diagnose': '诊断连接',
+  'net.diagnoseRefresh': '刷新诊断',
+  'net.diagnosing': '正在诊断…',
+  'net.diagnoseOffline':
+    '只读离线诊断：读取缓存并测试本地代理的 TCP listener，不发在线 trace，也不连接远程代理。',
+  'net.diagnoseRoute': '本次选择的路由：{proxy}',
+  'net.diagnoseDirect': '直连，没有代理 listener 要测试。',
+  'net.diagnoseNoLocalProbe': '未探测本地 TCP listener：代理在远程、地址无效，或该协议没有明确端口。',
+  'net.diagnoseListenerUp': 'TCP listener 可连接：{host}:{port}。',
+  'net.diagnoseListenerDown': 'TCP listener 连不上：{host}:{port}（{error}）。',
+  'net.diagnoseTcpLimit': 'TCP 能连接不代表 HTTP CONNECT、SOCKS 或上游代理协议可用。',
+  'net.diagnoseUnsupported':
+    'Network Guard 只支持 HTTP CONNECT，不支持这个代理协议。请配置 HTTP 代理或直连后再检查。',
+  'net.diagnoseInvalid': '代理地址无效。请修正环境变量，再新开会话。',
+  'net.diagnoseChecked': '{when}诊断过',
   'net.ok': '允许',
   'net.blocked': '不允许',
   'net.unknown': '查不出',

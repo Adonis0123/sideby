@@ -1,7 +1,7 @@
 // Network Guard at Launch and in sessions sideby starts (spec §3.35, ADR-0053). Requests go through the Runtime's
 // internal fake fetcher; Host directories are snapshotted to show nothing is written into them.
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { describe, it } from 'node:test'
 import { Value } from 'typebox/value'
 import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
@@ -10,7 +10,7 @@ import { OUTPUT_SCHEMAS } from '../cli/json-schemas.ts'
 import { claudePlugin } from '../families/claude/index.ts'
 import { codexPlugin } from '../families/codex/index.ts'
 import { createRuntime } from '../runtime.ts'
-import { NETWORK_ENV, RETRY_BUDGET_MS } from './egress.ts'
+import { NETWORK_ENV, RETRY_BUDGET_MS, redactedProxy } from './egress.ts'
 import { UserError } from './errors.ts'
 import {
   networkTarget,
@@ -75,6 +75,16 @@ describe('networkTarget', () => {
 })
 
 describe('Launch', () => {
+  it('redacts proxy credentials and reports direct explicitly', () => {
+    assert.equal(
+      redactedProxy('http://user:password@127.0.0.1:10809/path?token=secret#fragment'),
+      'http://127.0.0.1:10809',
+    )
+    assert.equal(redactedProxy('socks5://user:password@127.0.0.1:10808/private'), 'socks5://127.0.0.1:10808')
+    assert.equal(redactedProxy(null), 'direct')
+    assert.equal(redactedProxy('http://user:password@not a host'), 'invalid')
+  })
+
   it('asks nothing while off', async () => {
     await withFakeHome(async (h) => {
       const { rt, asked } = await setup(h, undefined)
@@ -135,11 +145,47 @@ describe('Launch', () => {
         assert.ok(err instanceof UserError)
         assert.equal(err.code, 'network-blocked')
         assert.match(err.message, /exits in HK/)
+        assert.match(err.message, /direct/)
         assert.match(err.message, /--ignore-network/)
         return true
       })
       const p = await rt.prepareLaunch('claude:001', [], 'run', { ignoreNetwork: true })
       assert.equal(p.networkArgs, undefined)
+    })
+  })
+
+  it('shows the redacted selected proxy on connection refusal and never persists it', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}')
+      await h.write('.config/sideby/config.json', JSON.stringify({ network: { guard: true, allow: ['US'] } }))
+      const rt = await createRuntime({
+        env: {
+          ...h.env,
+          LANG: 'en_US.UTF-8',
+          HTTPS_PROXY: 'http://user:password@127.0.0.1:10809/private?token=secret',
+        },
+        builtins,
+        network: {
+          fetcher: async () => {
+            const e = new Error('connect ECONNREFUSED') as NodeJS.ErrnoException
+            e.code = 'ECONNREFUSED'
+            throw e
+          },
+          print: 'p',
+        },
+      })
+      await assert.rejects(rt.prepareLaunch('claude:main', [], 'run'), (err: unknown) => {
+        const message = (err as UserError).message
+        assert.match(message, /http:\/\/127\.0\.0\.1:10809/)
+        assert.match(message, /connection was refused/)
+        assert.doesNotMatch(message, /user|password|private|token|secret/)
+        return true
+      })
+      const dir = `${rt.paths.stateDir}/network`
+      for (const file of await readdir(dir)) {
+        const text = await readFile(`${dir}/${file}`, 'utf8')
+        assert.doesNotMatch(text, /user|password|private|token|secret|10809/)
+      }
     })
   })
 
@@ -272,6 +318,99 @@ describe('settings', () => {
       assert.deepEqual(asked.sort(), [TRACE.anthropic, TRACE.chatgpt].sort())
       assert.ok(s.targets.every((t) => t.status === 'ok' && t.loc === 'US'))
       assert.ok(Value.Check(OUTPUT_SCHEMAS.network!, { schemaVersion: 1, ...s }))
+    })
+  })
+
+  it('diagnoses cached Guard state and TCP listeners without an online trace', async () => {
+    await withFakeHome(async (h) => {
+      const { rt, asked } = await setup(h, { guard: true, allow: ['US'] })
+      await rt.networkStatus({ check: true })
+      asked.length = 0
+      const d = await rt.networkDiagnose()
+      assert.deepEqual(asked, [])
+      assert.equal(d.targets.length, 2)
+      assert.ok(
+        d.targets.every((t) => t.proxy === 'direct' && t.listener === null && t.guardSupport === 'direct'),
+      )
+      assert.ok(d.targets.every((t) => t.guard.status === 'ok' && t.guard.checkedAt))
+      assert.ok(Value.Check(OUTPUT_SCHEMAS['network-diagnose']!, { schemaVersion: 1, ...d }))
+
+      const proxied = await createRuntime({
+        env: { ...h.env, HTTPS_PROXY: 'socks5://user:password@127.0.0.1:10808/private' },
+        builtins,
+        network: {
+          fetcher: async () => assert.fail('diagnose must not trace'),
+          print: 'p',
+          probe: async () => ({ reachable: false, error: 'ECONNREFUSED' }),
+        },
+      })
+      const p = await proxied.networkDiagnose()
+      assert.ok(p.targets.every((t) => t.proxy === 'socks5://127.0.0.1:10808'))
+      assert.ok(p.targets.every((t) => t.guardSupport === 'unsupported'))
+      assert.deepEqual(p.targets[0]!.listener, {
+        host: '127.0.0.1',
+        port: 10808,
+        reachable: false,
+        error: 'ECONNREFUSED',
+      })
+      assert.doesNotMatch(JSON.stringify(p), /user|password|private/)
+    })
+  })
+  it('probes only local listeners, keeps IPv6 bare, and does not invent a proxy port', async () => {
+    await withFakeHome(async (h) => {
+      await setup(h, { guard: true, allow: ['US'] })
+      const cases = [
+        {
+          proxy: 'http://user:password@proxy.example.com:8080/private?token=secret',
+          wantProxy: 'http://proxy.example.com:8080',
+          support: 'http-connect',
+          probe: null,
+        },
+        {
+          proxy: 'user:password@127.0.0.1:10809/private?token=secret',
+          wantProxy: 'http://127.0.0.1:10809',
+          support: 'http-connect',
+          probe: { host: '127.0.0.1', port: 10809 },
+        },
+        { proxy: 'socks5://127.0.0.1', wantProxy: 'socks5://127.0.0.1', support: 'unsupported', probe: null },
+        {
+          proxy: 'https://proxy.example.com',
+          wantProxy: 'https://proxy.example.com',
+          support: 'unsupported',
+          probe: null,
+        },
+        {
+          proxy: 'http://[::1]:10809',
+          wantProxy: 'http://[::1]:10809',
+          support: 'http-connect',
+          probe: { host: '::1', port: 10809 },
+        },
+      ] as const
+      for (const item of cases) {
+        const probes: { host: string; port: number }[] = []
+        const rt = await createRuntime({
+          env: { ...h.env, HTTPS_PROXY: item.proxy },
+          builtins,
+          network: {
+            fetcher: async () => assert.fail('diagnose must not trace'),
+            print: 'p',
+            probe: async (host, port) => {
+              probes.push({ host, port })
+              return { reachable: true }
+            },
+          },
+        })
+        const d = await rt.networkDiagnose()
+        assert.ok(d.targets.every((t) => t.proxy === item.wantProxy && t.guardSupport === item.support))
+        if (item.probe) {
+          assert.deepEqual(probes, [item.probe, item.probe])
+          assert.deepEqual(d.targets[0]!.listener, { ...item.probe, reachable: true })
+        } else {
+          assert.deepEqual(probes, [])
+          assert.ok(d.targets.every((t) => t.listener === null))
+        }
+        assert.doesNotMatch(JSON.stringify(d), /user|password|private|token|secret/)
+      }
     })
   })
 })

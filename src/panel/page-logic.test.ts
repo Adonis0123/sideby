@@ -61,6 +61,7 @@ import {
   messageChip,
   messageNews,
   messageToCheck,
+  networkDiagnoseTaskFacts,
   networkTaskFacts,
   newAccountDir,
   nextReset,
@@ -1553,6 +1554,21 @@ describe('stripSecrets', () => {
     assert.equal(stripSecrets(`Authorization: Bearer ${jwt}`).text, 'Authorization: Bearer [key removed]')
     assert.equal(stripSecrets(`AWS_ACCESS_KEY_ID=${akia}`).text, 'AWS_ACCESS_KEY_ID=[key removed]')
   })
+  it('redacts URL userinfo together with its path, query and fragment', () => {
+    assert.deepEqual(
+      stripSecrets('Proxy http://user:password@127.0.0.1:10809/private?token=secret#frag, next'),
+      {
+        text: 'Proxy http://127.0.0.1:10809, next',
+        removed: true,
+      },
+    )
+  })
+  it('redacts scheme-less proxy userinfo together with its path, query and fragment', () => {
+    assert.deepEqual(stripSecrets('Proxy user:password@127.0.0.1:10809/private?token=secret#frag, next'), {
+      text: 'Proxy 127.0.0.1:10809, next',
+      removed: true,
+    })
+  })
   it('keeps words that only look close to an AWS key id or a JWT', () => {
     const text = [
       'AKIAabcdefghijklmnop is lowercase, AKIA0123 is short',
@@ -2070,6 +2086,54 @@ describe('settings in config, start at login and Auto Handoff facts (spec §3.29
       assert.match(p, /--yes/)
       assert.match(p, /api\.anthropic\.com: not-checked \(claude:work\)/)
       assert.match(p, /claude:deepseek: not checked here \(third-party\)/)
+    }
+    // The fixed diagnostic task stays read-only and separate from network settings.
+    for (const lang of ['en', 'zh']) {
+      const facts = networkDiagnoseTaskFacts({
+        checkedAt: '2026-11-23T01:00:00Z',
+        targets: [
+          {
+            url: 'https://api.anthropic.com/cdn-cgi/trace',
+            proxy: 'socks5://127.0.0.1:10808',
+            guardSupport: 'unsupported',
+            listener: { host: '127.0.0.1', port: 10808, reachable: false, error: 'ECONNREFUSED' },
+            guard: {
+              status: 'unknown',
+              checkedAt: '2026-11-23T00:59:00Z',
+              error: 'the connection was refused (is the proxy running?)',
+            },
+          },
+        ],
+      })
+      const p = taskPrompt(
+        {
+          task: 'network-diagnose',
+          text: 'Also check http://user:password@proxy.example.com:8080/private?token=secret#fragment',
+          context: {
+            account: 'claude:private',
+            networkDiagnose: [
+              ...facts,
+              'raw http://user:password@127.0.0.1:10809/private?token=secret#fragment',
+              'scheme-less user:password@127.0.0.1:10810/private?token=secret#fragment',
+            ],
+            findings: [{ account: 'claude:private', message: 'unrelated health finding' }],
+            quotaReason: 'unrelated quota reason',
+            version: '9.9.9',
+          },
+          attachments: [{ path: '/tmp/unrelated-diagnostic.png', kind: 'image' }],
+          lang,
+        },
+        stripSecrets,
+      )
+      assert.match(p, /sideby network diagnose --json/)
+      assert.match(p, /socks5:\/\/127\.0\.0\.1:10808/)
+      assert.match(p, /ECONNREFUSED/)
+      assert.match(p, /HTTP CONNECT/)
+      assert.match(p, /read-only|只读/)
+      assert.doesNotMatch(p, /network allow|--yes|pull request|npx skills add/)
+      assert.doesNotMatch(p, /In my words|我的原话|Also check|proxy\.example\.com/)
+      assert.doesNotMatch(p, /user|password|private|token|secret|fragment|unrelated|9\.9\.9/)
+      assert.doesNotMatch(p, /Attached files|附件|unrelated-diagnostic/)
     }
     // An update that failed: the AI starts from `sideby update --json` with the Panel's error, and checks the proxy.
     for (const lang of ['en', 'zh']) {

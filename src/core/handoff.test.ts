@@ -1,12 +1,18 @@
 import assert from 'node:assert/strict'
+import { readFile, stat } from 'node:fs/promises'
+import { join } from 'node:path'
 import { describe, it } from 'node:test'
+import { fakeHost, withFakeHome } from '../../testing/index.ts'
 import {
   longWindow as panelLongWindow,
   quotaPressure as panelPressure,
   windowState as panelWindowState,
 } from '../panel/page-logic.ts'
+import { createRuntime } from '../runtime.ts'
 import type { QuotaResult } from '../types.ts'
 import { type HandoffCandidate, planHandoff } from './handoff.ts'
+import { takeFileLock } from './lock.ts'
+import { withPickRecords } from './pick-records.ts'
 import {
   isLongWindow,
   limitUse,
@@ -401,5 +407,199 @@ describe('planHandoff and an Expired Login (ADR-0071)', () => {
     })
     assert.equal(plan.pick, null)
     assert.equal(plan.earliestReset, undefined)
+  })
+})
+
+describe('Room per Session (spec §3.13 "分摊选号", ADR-0083)', () => {
+  // 5h at `five`%, weekly at `seven`% resetting in `weekIn` hours.
+  const q = (five: number, seven = 0, weekIn = 100) => quota([five, 2], [seven, weekIn])
+
+  it('passes over the emptiest Account when it already runs more sessions per room', () => {
+    const a = cand('a', q(10), { liveSessions: 3 })
+    const b = cand('b', q(40))
+    const plan = planHandoff('claude', [a, b], NOW)
+    assert.equal(plan.pick, 'claude:b')
+    assert.equal(plan.reason, 'room')
+    assert.deepEqual(
+      plan.accounts.map((e) => [e.ref, e.liveSessions]),
+      [
+        ['claude:b', 0],
+        ['claude:a', 3],
+      ],
+    )
+    assert.equal(planHandoff('claude', [{ ...a, liveSessions: 0 }, b], NOW).pick, 'claude:a')
+  })
+
+  it('counts the Live Sessions of the whole Same Login group', () => {
+    const a = cand('a', q(10), { sameLogin: ['claude:a2'] })
+    const a2 = cand('a2', q(10), { sameLogin: ['claude:a'], liveSessions: 3 })
+    const b = cand('b', q(40))
+    const plan = planHandoff('claude', [a, a2, b], NOW)
+    assert.equal(plan.pick, 'claude:b')
+    assert.equal(plan.accounts.find((e) => e.ref === 'claude:a')?.liveSessions, 3)
+  })
+
+  it('puts weekly room that resets within 24 hours before more room elsewhere', () => {
+    const soon = cand('soon', q(10, 77, 10))
+    const roomy = cand('roomy', q(5, 10))
+    const plan = planHandoff('claude', [roomy, soon], NOW)
+    assert.equal(plan.pick, 'claude:soon')
+    assert.equal(plan.reason, 'expiring')
+    assert.deepEqual(plan.accounts[0]?.expiring, { label: '7d', usedPercent: 77, resetsAt: at(10) })
+    // A day and an hour away it is not expiring: room decides.
+    assert.equal(planHandoff('claude', [roomy, cand('soon', q(10, 77, 25))], NOW).pick, 'claude:roomy')
+    // Under 10 points from its limit (93% of 95) a new Session would soon hand over again: room decides.
+    const thin = planHandoff('claude', [roomy, cand('soon', q(10, 93, 10))], NOW)
+    assert.equal(thin.pick, 'claude:roomy')
+    assert.equal(thin.accounts.find((e) => e.ref === 'claude:soon')?.expiring, undefined)
+  })
+
+  it('counts a Pick Record until it expires or its Session shows up', () => {
+    const a = cand('a', q(10), { liveSessions: 1 })
+    const b = cand('b', q(50))
+    const rec = (ageSeconds: number, liveAtPick: number) => [
+      { ref: 'claude:a', at: new Date(NOW.getTime() - ageSeconds * 1000).toISOString(), liveAtPick },
+    ]
+    assert.equal(planHandoff('claude', [a, b], NOW).pick, 'claude:a')
+    const fresh = planHandoff('claude', [a, b], NOW, { picks: rec(30, 1) })
+    assert.equal(fresh.pick, 'claude:b', 'a record not yet arrived counts as one more session')
+    assert.equal(fresh.accounts.find((e) => e.ref === 'claude:a')?.liveSessions, 2)
+    assert.equal(planHandoff('claude', [a, b], NOW, { picks: rec(150, 1) }).pick, 'claude:a', 'expired')
+    assert.equal(planHandoff('claude', [a, b], NOW, { picks: rec(30, 0) }).pick, 'claude:a', 'arrived')
+    // A pick that waited for the lock reads its clock after the peer that wrote this one.
+    assert.equal(planHandoff('claude', [a, b], NOW, { picks: rec(-1, 1) }).pick, 'claude:b', 'just after now')
+  })
+
+  it('a preview reads Pick Records and writes none; a start writes one, so the next pick spreads', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}\n')
+      await h.write('.claude.json', JSON.stringify({ oauthAccount: { id: 'main' } }), 0o600)
+      for (const n of ['work', 'lab']) {
+        await h.write(`.claude-${n}/settings.json`, '{}\n')
+        await h.write(`.claude-${n}/.claude.json`, JSON.stringify({ oauthAccount: { id: n } }), 0o600)
+      }
+      await fakeHost(h, 'claude')
+      const iso = (hours: number) => new Date(Date.now() + hours * 3600_000).toISOString()
+      for (const [name, five] of [
+        ['main', 95],
+        ['work', 40],
+        ['lab', 10],
+      ] as const)
+        await h.write(
+          `.local/state/sideby/quota/claude/${name}.json`,
+          JSON.stringify({
+            observedAt: iso(-0.1),
+            windows: [{ label: '5h', windowMinutes: 300, usedPercent: five, resetsAt: iso(2) }],
+          }),
+        )
+      const rt = await createRuntime({ env: h.env, picks: { liveSessions: async () => new Map() } })
+      const records = h.path('.local/state/sideby/picks/records.json')
+      assert.equal((await rt.handoff('claude', { picks: 'read' })).pick, 'claude:lab')
+      await assert.rejects(stat(records), 'a preview writes no record')
+      assert.equal((await rt.handoff('claude', { picks: (p) => p.pick })).pick, 'claude:lab')
+      const [rec] = JSON.parse(await readFile(records, 'utf8'))
+      assert.equal(rec.ref, 'claude:lab')
+      assert.equal(rec.liveAtPick, 0)
+      assert.equal((await rt.handoff('claude', { picks: 'read' })).pick, 'claude:work')
+    })
+  })
+
+  it('two picks of one login that have not arrived end one by one as their Sessions show up', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}\n')
+      await h.write('.claude.json', JSON.stringify({ oauthAccount: { id: 'main' } }), 0o600)
+      await h.write('.claude-lab/settings.json', '{}\n')
+      await h.write('.claude-lab/.claude.json', JSON.stringify({ oauthAccount: { id: 'lab' } }), 0o600)
+      await fakeHost(h, 'claude')
+      const iso = (hours: number) => new Date(Date.now() + hours * 3600_000).toISOString()
+      // lab's weekly room resets within a day, so every pick goes there.
+      for (const [name, seven, weekIn] of [
+        ['main', 10, 100],
+        ['lab', 60, 10],
+      ] as const)
+        await h.write(
+          `.local/state/sideby/quota/claude/${name}.json`,
+          JSON.stringify({
+            observedAt: iso(-0.1),
+            windows: [{ label: '7d', windowMinutes: 10080, usedPercent: seven, resetsAt: iso(weekIn) }],
+          }),
+        )
+      const live = new Map<string, number>()
+      const rt = await createRuntime({ env: h.env, picks: { liveSessions: async () => live } })
+      const start = { picks: (p: { pick: string | null }) => p.pick }
+      assert.equal((await rt.handoff('claude', start)).pick, 'claude:lab')
+      assert.equal((await rt.handoff('claude', start)).pick, 'claude:lab')
+      const lab = async () =>
+        (await rt.handoff('claude', { picks: 'read' })).accounts.find((e) => e.ref === 'claude:lab')
+      assert.equal((await lab())?.liveSessions, 2)
+      live.set('claude:lab', 1)
+      assert.equal((await lab())?.liveSessions, 2, 'one arrived, one still on its way')
+      live.set('claude:lab', 2)
+      assert.equal((await lab())?.liveSessions, 2, 'both arrived')
+    })
+  })
+
+  it('a start drops records that arrived, so one never counts again when an older Session ends', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}\n')
+      await h.write('.claude.json', JSON.stringify({ oauthAccount: { id: 'main' } }), 0o600)
+      await h.write('.claude-lab/settings.json', '{}\n')
+      await h.write('.claude-lab/.claude.json', JSON.stringify({ oauthAccount: { id: 'lab' } }), 0o600)
+      await fakeHost(h, 'claude')
+      const iso = (hours: number) => new Date(Date.now() + hours * 3600_000).toISOString()
+      for (const [name, five] of [
+        ['main', 50],
+        ['lab', 10],
+      ] as const)
+        await h.write(
+          `.local/state/sideby/quota/claude/${name}.json`,
+          JSON.stringify({
+            observedAt: iso(-0.1),
+            windows: [{ label: '5h', windowMinutes: 300, usedPercent: five, resetsAt: iso(2) }],
+          }),
+        )
+      // lab was picked with 1 Session running; a second one has shown up since.
+      await h.write(
+        '.local/state/sideby/picks/records.json',
+        JSON.stringify([{ ref: 'claude:lab', at: new Date().toISOString(), liveAtPick: 1 }]),
+      )
+      const live = new Map([['claude:lab', 2]])
+      const rt = await createRuntime({ env: h.env, picks: { liveSessions: async () => live } })
+      assert.equal((await rt.handoff('claude', { picks: (p) => p.pick })).pick, 'claude:main')
+      // The older Session ends: the arrived record was dropped by that start, so lab counts its one Session only.
+      live.set('claude:lab', 1)
+      const plan = await rt.handoff('claude', { picks: 'read' })
+      assert.equal(plan.accounts.find((e) => e.ref === 'claude:lab')?.liveSessions, 1)
+    })
+  })
+
+  it('a pick that cannot get the lock writes nothing, so it never puts back an older list', async () => {
+    await withFakeHome(async (h) => {
+      const state = h.path('.local/state/sideby')
+      const file = await h.write(
+        '.local/state/sideby/picks/records.json',
+        JSON.stringify([{ ref: 'claude:a', at: new Date().toISOString(), liveAtPick: 0 }]),
+      )
+      // Another pick holds the lock for longer than this one waits.
+      const release = await takeFileLock(join(state, 'picks', 'pick.lock'), {
+        staleMs: 60_000,
+        beatMs: 1_000,
+      })
+      assert.ok(release)
+      try {
+        const before = await readFile(file, 'utf8')
+        const got = await withPickRecords(
+          state,
+          () => new Date(),
+          true,
+          async (picks) => picks.length,
+          () => ({ ref: 'claude:b', liveAtPick: 0 }),
+        )
+        assert.equal(got, 1, 'it still picks, from what it read')
+        assert.equal(await readFile(file, 'utf8'), before)
+      } finally {
+        await release()
+      }
+    })
   })
 })

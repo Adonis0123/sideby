@@ -1,6 +1,7 @@
 // Network Guard (spec §3.35, ADR-0053): which address each Account's Egress is checked at, the check before a
 // Launch, and the hooks that keep checking inside a session sideby starts. The check itself is core/egress.ts.
 import { mkdir, readFile } from 'node:fs/promises'
+import { createConnection } from 'node:net'
 import { join } from 'node:path'
 import type { Account, Env } from '../types.ts'
 import type { Config } from './config.ts'
@@ -12,8 +13,10 @@ import {
   judge,
   NETWORK_ENV,
   prefersChinese,
+  proxyFor,
   readEntry,
   refresh,
+  routeLabel,
   type TraceFetcher,
   type Verdict,
   verdict,
@@ -108,6 +111,7 @@ export async function guardLaunch(opts: {
         ref: opts.label || opts.account.ref,
         at: 'launch',
         zh: prefersChinese(opts.env),
+        proxy: routeLabel(target.url, opts.env),
       }),
       { code: v.status === 'blocked' ? 'network-blocked' : 'network-unknown' },
     )
@@ -356,6 +360,98 @@ export async function networkOverview(opts: {
 }
 
 export type NetworkOverview = Awaited<ReturnType<typeof networkOverview>>
+
+export type ListenerProbe = (
+  host: string,
+  port: number,
+  timeoutMs: number,
+) => Promise<{ reachable: boolean; error?: string }>
+
+/** A local TCP connection attempt; its result says nothing about the proxy protocol or upstream connectivity. */
+export const probeListener: ListenerProbe = (host, port, timeoutMs) =>
+  new Promise((resolve) => {
+    const socket = createConnection({ host, port })
+    let done = false
+    const finish = (reachable: boolean, error?: string) => {
+      if (done) return
+      done = true
+      socket.destroy()
+      resolve({ reachable, ...(error ? { error } : {}) })
+    }
+    socket.setTimeout(timeoutMs)
+    socket.once('connect', () => finish(true))
+    socket.once('timeout', () => finish(false, 'timeout'))
+    socket.once('error', (e) => finish(false, (e as NodeJS.ErrnoException).code || 'failed'))
+  })
+
+export interface NetworkDiagnosis {
+  /** When this offline diagnosis was made (ISO), not when the cached Guard entries were checked. */
+  checkedAt: string
+  targets: {
+    url: string
+    /** The current process's selected proxy with credentials/path removed, or `direct`. */
+    proxy: string
+    /** Whether Network Guard can use this route: HTTP CONNECT only; direct needs no proxy protocol. */
+    guardSupport: 'direct' | 'http-connect' | 'unsupported' | 'invalid'
+    /** Null for direct, a remote proxy, an unreadable address, or a non-HTTP proxy without an explicit port. */
+    listener: null | { host: string; port: number; reachable: boolean; error?: string }
+    guard: {
+      status: NetworkTargetStatus['status']
+      loc?: string
+      checkedAt?: string
+      error?: string
+    }
+  }[]
+}
+
+/**
+ * Offline, read-only diagnosis: cached Guard state plus the route visible to this sideby process and a local TCP probe.
+ * Unlike `networkOverview({check:true})`, it never calls a trace fetcher, resolves a remote proxy, or writes a cache entry.
+ */
+export async function networkDiagnose(
+  opts: Parameters<typeof networkOverview>[0] & { probe?: ListenerProbe },
+): Promise<NetworkDiagnosis> {
+  const overview = await networkOverview({ ...opts, check: false })
+  const targets: NetworkDiagnosis['targets'] = []
+  for (const target of overview.targets) {
+    const raw = proxyFor(target.url, opts.env)
+    const proxy = routeLabel(target.url, opts.env)
+    let guardSupport: NetworkDiagnosis['targets'][number]['guardSupport'] = raw ? 'invalid' : 'direct'
+    let listener: NetworkDiagnosis['targets'][number]['listener'] = null
+    if (raw && proxy !== 'invalid') {
+      // `proxy` is already redacted; parse this rather than the raw environment value at the output boundary.
+      const parsed = new URL(proxy.includes('://') ? proxy : `http://${proxy}`)
+      guardSupport = parsed.protocol === 'http:' ? 'http-connect' : 'unsupported'
+      // Offline diagnosis never resolves or connects to a remote proxy. URL keeps IPv6 brackets in `hostname`;
+      // `createConnection` needs the bare address. Only HTTP has a defined default port for this check.
+      const host = parsed.hostname.startsWith('[') ? parsed.hostname.slice(1, -1) : parsed.hostname
+      const local = host === 'localhost' || host === '::1' || /^127(?:\.\d{1,3}){3}$/.test(host)
+      const port = parsed.port ? Number(parsed.port) : parsed.protocol === 'http:' ? 80 : null
+      if (local && port !== null)
+        listener = {
+          host,
+          port,
+          ...(await (opts.probe ?? probeListener)(host, port, 1000).catch(() => ({
+            reachable: false,
+            error: 'failed',
+          }))),
+        }
+    }
+    targets.push({
+      url: target.url,
+      proxy,
+      guardSupport,
+      listener,
+      guard: {
+        status: target.status,
+        ...(target.loc ? { loc: target.loc } : {}),
+        ...(target.checkedAt ? { checkedAt: target.checkedAt } : {}),
+        ...(target.error ? { error: target.error } : {}),
+      },
+    })
+  }
+  return { checkedAt: (opts.now?.() ?? new Date()).toISOString(), targets }
+}
 
 export interface NetworkChange {
   guard?: boolean

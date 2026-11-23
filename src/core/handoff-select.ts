@@ -2,7 +2,7 @@
 // Quota and identity, this decides. Each Account's state and the pressure ranking come from `planHandoff` (§3.13).
 import type { Account, AccountIdentity, LoginProblem, LoginState, QuotaResult } from '../types.ts'
 import type { HandoffSettings } from './config.ts'
-import { type HandoffEntry, planHandoff } from './handoff.ts'
+import { type HandoffEntry, type PickRecord, planHandoff } from './handoff.ts'
 import { takeoverLimits, windowReset } from './quota-levels.ts'
 
 export interface SelectCandidate {
@@ -24,6 +24,8 @@ export interface SelectCandidate {
   receive: boolean
   /** A session stopped at the limit continues by itself at the reset (`FamilyHandoff.resumesAtReset`); set for the origin. */
   resumesAtReset?: boolean
+  /** Its own Live Sessions now; a Family's ranking sums them over each Same Login (ADR-0083). */
+  liveSessions?: number
 }
 
 /** An Account the Handoff Order lists that was left out, and why (spec §3.21). */
@@ -163,6 +165,8 @@ export function selectNext(input: {
   to?: string
   /** The user asked to hand over (`sideby handoff ready`): never wait for a reset (ADR-0018). */
   manual?: boolean
+  /** Pick Records: the unexpired ones count as Live Sessions of their login when ranking (ADR-0083). */
+  picks?: readonly PickRecord[]
 }): HandoffDecision {
   const { origin, settings: s, now } = input
   const refOf = (name: string) => input.aliases[name] ?? name
@@ -185,7 +189,7 @@ export function selectNext(input: {
       fam,
       input.candidates.filter((c) => c.family === fam),
       now,
-      { includeApi: true, limits },
+      { includeApi: true, limits, ...(input.picks ? { picks: input.picks } : {}) },
     ).accounts.map((e) => byRef.get(e.ref)!)
   let list: SelectCandidate[]
   if (family?.policy === 'order') {

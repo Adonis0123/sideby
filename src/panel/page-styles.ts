@@ -788,6 +788,7 @@ textarea.ask-text { min-height: 64px; resize: vertical; border-radius: var(--rad
 input[type=password]:focus, textarea.ask-text:focus { border-color: var(--focus); }
 textarea.ask-text:focus-visible, input[type=password]:focus-visible { outline: var(--focus-outline); outline-offset: 2px; box-shadow: var(--focus-ring); }
 textarea::placeholder { color: var(--faint); }
+.ask-prompt { margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font-family: var(--mono); font-size: 12px; line-height: 1.55; }
 .ask-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .ask-chips .chip { font: inherit; font-size: 12px; text-align: left; white-space: normal; }
 .ask-attach-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }

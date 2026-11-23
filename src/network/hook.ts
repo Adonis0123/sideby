@@ -18,6 +18,7 @@ import {
   prefersChinese,
   readNetworkConfig,
   refresh,
+  routeLabel,
   type Sleep,
   type TraceFetcher,
   verdict,
@@ -273,7 +274,7 @@ export async function runNetworkHook(
     }
     await decided('blocked')
     err.write(
-      `${blockMessage(v, allow, { ref: env.SIDEBY_LABEL || env.SIDEBY_ACCOUNT, at: moment, zh: prefersChinese(env) })}\n`,
+      `${blockMessage(v, allow, { ref: env.SIDEBY_LABEL || env.SIDEBY_ACCOUNT, at: moment, zh: prefersChinese(env), proxy: routeLabel(url, env) })}\n`,
     )
     return 2
   } catch {
@@ -281,8 +282,8 @@ export async function runNetworkHook(
     err.write(
       `${
         prefersChinese(env)
-          ? '已拦截：sideby 的网络检查出错，没能确认网络出口。重新发送试试；一直出错就运行 `sideby network check`。'
-          : "Blocked: sideby's network check failed and could not tell this network's exit. Try again; if it keeps failing, run `sideby network check`."
+          ? `已拦截：sideby 的网络检查出错，没能确认网络出口。本次检查使用${routeLabel(url, env) === 'direct' ? '直连（direct）' : `代理 \`${routeLabel(url, env)}\``}。重新发送试试；旧会话可能要重开才能继承新的代理环境；一直出错就运行 \`sideby network diagnose\`。`
+          : `Blocked: sideby's network check failed and could not tell this network's exit. This check used ${routeLabel(url, env) === 'direct' ? 'a direct connection (direct)' : `proxy \`${routeLabel(url, env)}\``}. Try again; an older session may need restarting to inherit a changed proxy environment; if it keeps failing, run \`sideby network diagnose\`.`
       }\n`,
     )
     return 2

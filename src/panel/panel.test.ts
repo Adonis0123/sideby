@@ -1094,8 +1094,8 @@ describe('panel handoff (spec §3.13)', () => {
         )
         const { readTask } = await import('../core/ask.ts')
         const task = await readTask(r.body.task as string, (await withTerminal()).paths)
-        // The terminal runs the pick command itself, so it picks again there and prints which and why.
-        assert.deepEqual([task.kind, task.account], ['run', 'dmx'])
+        // The terminal starts exactly the account the answer names (ADR-0083).
+        assert.deepEqual([task.kind, task.account], ['run', 'demo:lab'])
         assert.equal(calls.length, 1)
         assert.equal((await post(port, '/api/pick/start', { name: 'nope' }, good)).status, 400)
       } finally {

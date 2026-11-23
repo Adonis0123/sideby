@@ -321,7 +321,7 @@ Examples:
   sideby config unset panel.language --yes
 Exit: 0 shown, saved or nothing to change; 10 a change was shown and waits for --yes; 1 not a key, a value the key
 does not take, or the file changed meanwhile; 2 malformed command line.`,
-  network: `sideby network [check] [--json]
+  network: `sideby network [check|diagnose] [--json]
        sideby network allow <country>... [--yes] [--json]
        sideby network on|off [--yes] [--json]
 
@@ -337,13 +337,17 @@ claude or codex directly) are not checked. API accounts are never checked.
 
 network        shows the setting and the newest result per address (no request)
 network check  asks every address now
+network diagnose  offline and read-only: redacted proxy or direct, local TCP listener, and cached Guard state
 allow          sets the allowed countries (two letters, such as US JP); on and off turn it on and off
+Only a loopback listener is probed; remote proxies are not resolved or connected.
+A reachable TCP listener does not prove the proxy protocol works. SOCKS is shown but Guard supports HTTP CONNECT only.
 To skip it once: sideby run <account> --ignore-network (also sideby next --ignore-network).
 
 Examples:
   sideby network allow US JP --yes
   sideby network on --yes
   sideby network check
+  sideby network diagnose --json
 Exit: 0 shown or changed; 10 a change was shown and waits for --yes; 1 a country code that is not one, or on with
 no country allowed; 2 malformed command line.`,
   unattended: `sideby unattended [status] [--json]
@@ -801,19 +805,22 @@ export async function main(argv: string[]): Promise<number> {
     // parseArgs keeps the last value of an option; `ask --attach` may be given several times.
     if (cmd === 'ask') (parsed as import('./commands.ts').AskArgs).attach = repeatedValues(own, 'attach')
     if (cmd === 'send') (parsed as import('./commands.ts').SendArgs).images = repeatedValues(own, 'image')
+    // Offline diagnosis has no command-wide notification side effects: no ended checkpoint, update request/cache,
+    // or after-command work. Other commands keep the usual behavior.
+    const offlineDiagnose = cmd === 'network' && parsed.positionals[0] === 'diagnose'
     // A stretch of Unattended Mode that ended is noticed when a command starts (spec §3.37); its plugin event runs
     // alongside the command and is waited for before exiting.
-    if (cmd !== 'update-check' && !(cmd === 'ui' && parsed.flags.has('serve-detached'))) {
+    if (!offlineDiagnose && cmd !== 'update-check' && !(cmd === 'ui' && parsed.flags.has('serve-detached'))) {
       const { noticeUnattendedEnded } = await import('../core/unattended-ended.ts')
       ended = await noticeUnattendedEnded(process.env)
     }
     const cmds = await import('./commands.ts')
-    if (wantsJson && noticeAllowed(cmd, parsed)) {
+    if (!offlineDiagnose && wantsJson && noticeAllowed(cmd, parsed)) {
       notice = await jsonNoticeFor()
       cmds.setJsonNotice(notice)
     }
     const code = await dispatch(cmd, parsed, io, cmds)
-    if (!wantsJson && noticeAllowed(cmd, parsed)) await afterCommand()
+    if (!offlineDiagnose && !wantsJson && noticeAllowed(cmd, parsed)) await afterCommand()
     return code
   } catch (err) {
     const usage = err instanceof UsageError

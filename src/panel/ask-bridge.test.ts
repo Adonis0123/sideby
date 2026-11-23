@@ -168,6 +168,40 @@ describe('Panel ask bridge', () => {
     for (const task of AI_TASK_KINDS.filter((t) => t !== 'free'))
       assert.ok(PAGE_SCRIPT.includes(`openAsk({ task: '${task}'`), `the ${task} entry uses openAsk`)
   })
+
+  it('does not submit a fixed diagnosis when its delayed prompt check finishes after the dialog closes', async () => {
+    const at = PAGE_SCRIPT.indexOf('  async function askOpen()')
+    const src = PAGE_SCRIPT.slice(at, PAGE_SCRIPT.indexOf('\n\n  // Sign in:', at))
+    let release!: (value: { prompt: string }) => void
+    const pending = new Promise<{ prompt: string }>((resolve) => {
+      release = resolve
+    })
+    const calls: string[] = []
+    const ctx: Record<string, unknown> = {
+      ak: { task: 'network-diagnose', prompt: 'same', busy: false },
+      dlg: { kind: 'ask', el: { close: () => {} } },
+      askUploadsDone: async () => {},
+      renderAsk: () => {},
+      askBody: () => ({ task: 'network-diagnose' }),
+      api: async (path: string) => {
+        calls.push(path)
+        if (path === '/api/ask/prompt') return pending
+        return { opened: true, terminal: 'orca', account: 'claude:main' }
+      },
+      toast: () => {},
+      t: (key: string) => key,
+      termName: (id: string) => id,
+      copyText: () => {},
+    }
+    runInNewContext(`${src}; this.askOpen = askOpen`, ctx)
+    const opening = (ctx.askOpen as () => Promise<void>)()
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    assert.deepEqual(calls, ['/api/ask/prompt'])
+    ;(ctx.dlg as { kind: string | null }).kind = null
+    release({ prompt: 'same' })
+    await opening
+    assert.deepEqual(calls, ['/api/ask/prompt'], 'closing the dialog must cancel the confirmed submission')
+  })
 })
 
 describe('ai-tasks.json', () => {

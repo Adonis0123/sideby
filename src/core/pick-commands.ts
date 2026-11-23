@@ -24,8 +24,12 @@ export function suggestPickName(
 
 /** What a Pick Command starts this time, or why it starts nothing. */
 export type PickChoice =
-  /** `pressure`: the used percent of `window`, the window closest to its own Takeover Limit. */
-  | { ref: string; reason: 'most-room'; pressure: number; window: string }
+  /**
+   * `pressure`: the used percent of `window`, the window closest to its own Takeover Limit. `running`: the Live
+   * Sessions of its login, Pick Records included, when any; `expiring`: its weekly room resets within 24 hours, which
+   * is why it goes first (ADR-0083).
+   */
+  | { ref: string; reason: 'most-room'; pressure: number; window: string; running?: number; expiring?: true }
   /**
    * A Last Resort (spec §3.13): every Account is past its Takeover Limits (`limit` for Short Windows, `longLimit` for
    * Long ones); this one is the furthest from them.
@@ -62,7 +66,14 @@ export function choosePick(plan: HandoffPlan, mainRef: string | null): PickChoic
         longLimit: plan.tight.longLimit,
       }
     return e.state === 'ready' && e.pressure !== null
-      ? { ref: plan.pick, reason: 'most-room', pressure: w.usedPercent, window: w.label }
+      ? {
+          ref: plan.pick,
+          reason: 'most-room',
+          pressure: w.usedPercent,
+          window: w.label,
+          ...(e.liveSessions ? { running: e.liveSessions } : {}),
+          ...(plan.reason === 'expiring' ? { expiring: true as const } : {}),
+        }
       : { ref: plan.pick, reason: 'others-full' }
   }
   return {
@@ -81,7 +92,13 @@ export function pickLine(name: string, choice: Exclude<PickChoice, { ref: null }
     `${c.window ? `${c.window} ` : ''}${c.pressure}% used`
   if (choice.reason === 'tight')
     return `${name} → ${choice.ref} (every ${family} account is past its limit, ${choice.limit}% of a 5-hour window or ${choice.longLimit}% of a weekly one; this one has the most left, ${used(choice)})`
-  if (choice.reason === 'most-room') return `${name} → ${choice.ref} (${used(choice)}, the most room)`
+  if (choice.reason === 'most-room') {
+    if (choice.expiring)
+      return `${name} → ${choice.ref} (${used(choice)}; its weekly or monthly quota resets within a day, so it goes first)`
+    return choice.running
+      ? `${name} → ${choice.ref} (${used(choice)}, ${choice.running} running, the most room per session)`
+      : `${name} → ${choice.ref} (${used(choice)}, the most room)`
+  }
   if (choice.reason === 'others-full')
     return `${name} → ${choice.ref} (no quota data for it yet; the accounts with data are full)`
   return `${name} → ${choice.ref} (no quota data yet; \`sideby quota\` shows why)`

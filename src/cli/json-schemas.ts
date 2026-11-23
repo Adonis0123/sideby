@@ -1276,8 +1276,25 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
           }),
           limitUse: Type.Union([Type.Number(), Type.Null()], {
             description:
-              'Limit Use: the percent of its own Takeover Limit that the closest window has used (a weekly 87% under 95 is 91.6); null without quota. Ready accounts rank by it, lowest first.',
+              'Limit Use: the percent of its own Takeover Limit that the closest window has used (a weekly 87% under 95 is 91.6); null without quota. Ready accounts rank by the room it leaves per running session, (100 - limitUse) / (liveSessions + 1), highest first; a Last Resort by it, lowest first.',
           }),
+          liveSessions: Type.Number({
+            description:
+              "The Live Sessions of the account's Same Login group, plus Pick Records: starts sideby made in the last 2 minutes that have not shown up as a Live Session yet (ADR-0083).",
+          }),
+          expiring: Type.Optional(
+            Type.Object(
+              {
+                label: Type.String({ description: 'Such as `7d`.' }),
+                usedPercent: Type.Number({ description: 'Rounded.' }),
+                resetsAt: Str,
+              },
+              {
+                description:
+                  'For ready: its counted weekly (or longer) window that resets within 24 hours; such an account ranks before every other ready one, since that room is lost at the reset (ADR-0083).',
+              },
+            ),
+          ),
           window: Type.Optional(
             Type.Object(
               {
@@ -1353,6 +1370,12 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
               'Set when nothing can be picked and some accounts are full (every one has a window used up): the first to come back.',
           },
         ),
+      ),
+      reason: Type.Optional(
+        Type.Union([Type.Literal('expiring'), Type.Literal('room')], {
+          description:
+            'Why a ready pick goes first (ADR-0083): expiring, its weekly room resets within 24 hours; room, it has the most room per running session.',
+        }),
       ),
     },
     { title: 'sideby next --json' },
@@ -2236,6 +2259,62 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       ),
     },
     { title: 'sideby network [check] --json' },
+  ),
+  'network-diagnose': Type.Object(
+    {
+      schemaVersion: Version,
+      checkedAt: Type.String({
+        description: 'When this offline diagnosis ran (ISO), not the Guard cache time.',
+      }),
+      targets: Type.Array(
+        Type.Object({
+          url: Type.String({
+            description: 'The Guard trace address whose cached result is shown; it is not requested.',
+          }),
+          proxy: Type.String({
+            description: 'Selected proxy reduced to scheme, hostname and port, or direct/invalid.',
+          }),
+          guardSupport: Type.Union(
+            [
+              Type.Literal('direct'),
+              Type.Literal('http-connect'),
+              Type.Literal('unsupported'),
+              Type.Literal('invalid'),
+            ],
+            { description: 'Guard supports direct and HTTP CONNECT; SOCKS/HTTPS proxies are unsupported.' },
+          ),
+          listener: Type.Union(
+            [
+              Type.Null(),
+              Type.Object({
+                host: Str,
+                port: Type.Integer(),
+                reachable: Type.Boolean({
+                  description: 'TCP connect only; not proof that the proxy protocol works.',
+                }),
+                error: Type.Optional(Str),
+              }),
+            ],
+            {
+              description:
+                'Local loopback TCP listener only; null for direct, remote or invalid proxies, and non-HTTP proxies without an explicit port.',
+            },
+          ),
+          guard: Type.Object({
+            status: Type.Union([
+              Type.Literal('ok'),
+              Type.Literal('blocked'),
+              Type.Literal('unknown'),
+              Type.Literal('not-checked'),
+            ]),
+            loc: Type.Optional(Str),
+            checkedAt: Type.Optional(Type.String({ description: 'When the cached Guard check ran (ISO).' })),
+            error: Type.Optional(Str),
+          }),
+        }),
+      ),
+    },
+    { title: 'sideby network diagnose --json' },
   ),
   'network-set': Type.Object(
     {

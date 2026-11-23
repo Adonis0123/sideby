@@ -41,7 +41,8 @@
           "kind",
           "state",
           "pressure",
-          "limitUse"
+          "limitUse",
+          "liveSessions"
         ],
         "properties": {
           "ref": {
@@ -104,7 +105,33 @@
                 "type": "null"
               }
             ],
-            "description": "Limit Use: the percent of its own Takeover Limit that the closest window has used (a weekly 87% under 95 is 91.6); null without quota. Ready accounts rank by it, lowest first."
+            "description": "Limit Use: the percent of its own Takeover Limit that the closest window has used (a weekly 87% under 95 is 91.6); null without quota. Ready accounts rank by the room it leaves per running session, (100 - limitUse) / (liveSessions + 1), highest first; a Last Resort by it, lowest first."
+          },
+          "liveSessions": {
+            "type": "number",
+            "description": "The Live Sessions of the account's Same Login group, plus Pick Records: starts sideby made in the last 2 minutes that have not shown up as a Live Session yet (ADR-0083)."
+          },
+          "expiring": {
+            "type": "object",
+            "required": [
+              "label",
+              "usedPercent",
+              "resetsAt"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "Such as `7d`."
+              },
+              "usedPercent": {
+                "type": "number",
+                "description": "Rounded."
+              },
+              "resetsAt": {
+                "type": "string"
+              }
+            },
+            "description": "For ready: its counted weekly (or longer) window that resets within 24 hours; such an account ranks before every other ready one, since that room is lost at the reset (ADR-0083)."
           },
           "window": {
             "type": "object",
@@ -204,6 +231,19 @@
         }
       },
       "description": "Set when nothing can be picked and some accounts are full (every one has a window used up): the first to come back."
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "expiring"
+        },
+        {
+          "type": "string",
+          "const": "room"
+        }
+      ],
+      "description": "Why a ready pick goes first (ADR-0083): expiring, its weekly room resets within 24 hours; room, it has the most room per running session."
     },
     "_notice": {
       "type": "object",

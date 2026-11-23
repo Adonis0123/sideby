@@ -144,6 +144,16 @@
           ]
         },
         {
+          "id": "network-diagnose",
+          "native": true,
+          "title": { "en": "Let AI diagnose", "zh": "让 AI 诊断" },
+          "placeholder": {
+            "en": "No added text; the current diagnosis is included automatically",
+            "zh": "无需补充；会自动带上当前诊断"
+          },
+          "examples": []
+        },
+        {
           "id": "update",
           "native": true,
           "title": { "en": "Let AI fix the update", "zh": "让 AI 帮我更新" },

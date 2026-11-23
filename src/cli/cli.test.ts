@@ -872,7 +872,7 @@ describe('next (Handoff, spec §3.13)', () => {
       await cache(h, 'lab', 10, 20)
       const r = await sideby(h, ['next', 'claude', '--', '--print', 'hi'])
       assert.equal(r.code, 0, r.err)
-      assert.match(r.out, /Next: claude:lab \(furthest from its limits, 7d 20% of 95%\)/)
+      assert.match(r.out, /Next: claude:lab \(the most room per running session, 7d 20% of 95%\)/)
       assert.match(r.out, /handoff note/)
       const [rec] = await readHostLog(h, 'claude')
       assert.equal(rec?.env.CLAUDE_CONFIG_DIR, h.path('.claude-lab'))

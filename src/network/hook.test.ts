@@ -79,7 +79,63 @@ describe('network hook', () => {
         2,
       )
       assert.match(bad.lines.join(''), /香港（HK）/)
+      assert.match(bad.lines.join(''), /direct/)
+      assert.match(bad.lines.join(''), /旧会话可能要重开/)
       assert.match(bad.lines.join(''), /sideby run cc008 --ignore-network/)
+    })
+  })
+
+  it('keeps connection-refused guidance and redacts the session proxy', async () => {
+    await withFakeHome(async (h) => {
+      const err = sink()
+      const env = {
+        ...sessionEnv(h.path('net'), 'US'),
+        LANG: 'en_US.UTF-8',
+        HTTPS_PROXY: 'http://user:password@127.0.0.1:10809/private?token=secret',
+      }
+      const fetcher = async () => {
+        const e = new Error('connect ECONNREFUSED') as NodeJS.ErrnoException
+        e.code = 'ECONNREFUSED'
+        throw e
+      }
+      assert.equal(await runNetworkHook(['claude', 'UserPromptSubmit'], env, err, { fetcher, print: 'p' }), 2)
+      const text = err.lines.join('')
+      assert.match(text, /http:\/\/127\.0\.0\.1:10809/)
+      assert.match(text, /connection was refused/)
+      assert.match(text, /older session may need restarting/)
+      assert.doesNotMatch(text, /user|password|private|token|secret/)
+    })
+  })
+
+  it('gives SOCKS and HTTPS proxies an HTTP CONNECT or direct next step', async () => {
+    await withFakeHome(async (h) => {
+      for (const [scheme, lang] of [
+        ['socks5', 'en_US.UTF-8'],
+        ['https', 'zh_CN.UTF-8'],
+      ] as const) {
+        const err = sink()
+        const env = {
+          ...sessionEnv(h.path(`net-${scheme}`), 'US'),
+          LANG: lang,
+          HTTPS_PROXY: `${scheme}://127.0.0.1:10808`,
+        }
+        const clock = fakeTime()
+        const fetcher = async () => {
+          throw new Error(`a ${scheme} proxy is not supported`)
+        }
+        assert.equal(
+          await runNetworkHook(['claude', 'UserPromptSubmit'], env, err, {
+            fetcher,
+            print: 'p',
+            now: clock.now,
+            sleep: clock.sleep,
+          }),
+          2,
+        )
+        const text = err.lines.join('')
+        assert.match(text, /HTTP CONNECT/)
+        assert.match(text, lang.startsWith('zh') ? /HTTP 代理或直连/ : /HTTP proxy or a direct connection/)
+      }
     })
   })
 

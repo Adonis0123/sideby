@@ -62,6 +62,7 @@ import {
   messageChip,
   messageNews,
   messageToCheck,
+  networkDiagnoseTaskFacts,
   networkTaskFacts,
   newAccountDir,
   nextReset,
@@ -181,6 +182,7 @@ const LOGIC = [
   handoffChangeOf,
   handoffHintAccount,
   handoffTaskFacts,
+  networkDiagnoseTaskFacts,
   networkTaskFacts,
   inDisplayOrder,
   loginClusters,
@@ -2525,11 +2527,12 @@ const MAIN = String.raw`
   // The Account 'sideby next <family>' would pick; the server ranks it with the CLI's rule (spec §3.13).
   // "Suggested": a click says what it means and offers the command, instead of copying without a word.
   function nextTag(a) {
-    const b = h('button', { class: 'tag tag-ok tag-btn', type: 'button', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', title: t('acct.nextWhy', { title: famTitle(a) }) }, t('acct.next'))
+    const b = h('button', { class: 'tag tag-ok tag-btn', type: 'button', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', title: t(nextWhyKey(a), { title: famTitle(a) }) }, t('acct.next'))
     b.addEventListener('click', (e) => {
       e.stopPropagation()
       openPopover(b, 'next', t('acct.next'), () => [
-        h('p', { class: 'next-why' }, t('acct.nextWhy', { title: famTitle(a) })),
+        h('p', { class: 'next-why' }, t(nextWhyKey(a), { title: famTitle(a) })),
+        nextRunning(a) ? h('p', { class: 'next-why' }, tn('acct.nextRunning', nextRunning(a))) : null,
         h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { closeMenu(true); copyText('sideby next ' + a.family) } }, icon('copy'), t('acct.nextCopy')),
         h('code', { class: 'next-cmd' }, 'sideby next ' + a.family),
       ])
@@ -2537,6 +2540,14 @@ const MAIN = String.raw`
     return b
   }
   function isNext(a) { return Boolean(S.state && S.state.handoff && S.state.handoff[a.family] === a.ref) }
+  // Sessions already running on the Next pick's login (ADR-0083); 0 when none or not known.
+  function nextRunning(a) { return (S.state && S.state.handoffRunning && S.state.handoffRunning[a.family]) || 0 }
+  // Why the pick goes first, as the Panel state says (ADR-0083); the general line when it says nothing.
+  function nextWhyKey(a) {
+    const why = S.state && S.state.handoffReason && S.state.handoffReason[a.family]
+    const keys = { expiring: 'acct.nextWhyExpiring', room: 'acct.nextWhyRoom', tight: 'acct.nextWhyTight', unknown: 'acct.nextWhyUnknown' }
+    return keys[why] || 'acct.nextWhy'
+  }
   function row(a, now, cols) {
     if (ui.arrange) return arrangeRow(a, [a])
     const open = isOpen(a)
@@ -8261,7 +8272,7 @@ const MAIN = String.raw`
   function openNet() {
     const n = netState()
     if (!n) return
-    net = { guard: n.guard, allow: [...n.allow], checking: false }
+    net = { guard: n.guard, allow: [...n.allow], checking: false, diagnosing: false, diagnosis: null }
     showDialog('net')
     renderNet()
     // Opening it answers "where am I now" at once, unless a result is fresh.
@@ -8276,6 +8287,22 @@ const MAIN = String.raw`
     net.checking = false
     if (dlg.kind === 'net') renderNet()
     renderBanners()
+  }
+  async function netDiagnose() {
+    const mine = net
+    if (!mine) return
+    mine.diagnosing = true
+    if (dlg.kind === 'net') renderNet()
+    try {
+      const diagnosis = await api('/api/network/diagnose', {})
+      if (net !== mine) return
+      mine.diagnosis = diagnosis
+    } catch (e) {
+      if (net !== mine) return
+      toast(t('net.checkFailed', { msg: e.message }), { kind: 'fail' })
+    }
+    mine.diagnosing = false
+    if (dlg.kind === 'net') renderNet()
   }
   // Every change in the dialog applies at once, like a system setting, and its toast carries the undo. Changes are
   // saved one after another in the order clicked; a failed one puts the dialog back to what the config holds.
@@ -8325,6 +8352,16 @@ const MAIN = String.raw`
         x.ipChanged ? h('div', { class: 'muted small' }, t('net.ipChanged')) : null)
     })
     const skipped = n.accounts.filter((a) => a.skip === 'third-party' || a.skip === 'at-launch' || a.skip === 'api')
+    const diagnosis = net.diagnosis
+    const diagnosisRows = diagnosis ? diagnosis.targets.map((x) => {
+      const listener = x.listener
+      return h('li', { class: 'rc-row', 'data-key': 'net-diagnosis-' + x.url },
+        h('div', null, h('code', null, new URL(x.url).hostname), ' ', h('b', null, t('net.diagnoseRoute', { proxy: x.proxy }))),
+        h('div', { class: 'muted small' }, listener ? t(listener.reachable ? 'net.diagnoseListenerUp' : 'net.diagnoseListenerDown', { host: listener.host, port: listener.port, error: listener.error || 'failed' }) : t(x.guardSupport === 'direct' ? 'net.diagnoseDirect' : 'net.diagnoseNoLocalProbe')),
+        h('div', { class: 'muted small' }, [x.guard.status, x.guard.loc || null, x.guard.checkedAt ? t('net.checked', { when: ago(x.guard.checkedAt) }) : t('net.notChecked'), x.guard.error || null].filter(Boolean).join(' · ')),
+        x.guardSupport === 'unsupported' ? h('div', { class: 'small warn' }, t('net.diagnoseUnsupported')) : null,
+        x.guardSupport === 'invalid' ? h('div', { class: 'small warn' }, t('net.diagnoseInvalid')) : null)
+    }) : []
     const body = [
       h('p', { class: 'small' }, t('net.explain')),
       h('div', { class: 'row-actions' },
@@ -8336,6 +8373,14 @@ const MAIN = String.raw`
       h('div', { class: 'set-row' }, h('span', { class: 'set-label' }, t('net.now')),
         h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'net-check', disabled: net.checking, 'aria-busy': net.checking ? 'true' : null, onclick: netCheck }, net.checking ? spinner() : icon('refresh'), t('net.recheck'))),
       rows.length ? h('ul', { class: 'rc-list', 'data-patch': '' }, rows) : h('p', { class: 'small muted' }, t('net.noTargets')),
+      h('div', { class: 'set-row' }, h('span', { class: 'set-label' }, t('net.diagnose')),
+        h('div', { class: 'row-actions' },
+          h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'net-diagnose', disabled: net.diagnosing, 'aria-busy': net.diagnosing ? 'true' : null, onclick: netDiagnose }, net.diagnosing ? spinner() : icon('refresh'), t(diagnosis ? 'net.diagnoseRefresh' : 'net.diagnose')),
+          diagnosis ? h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'net-diagnose-ask', onclick: askNetworkDiagnose }, icon('bot'), t('ask.title.network-diagnose')) : null)),
+      h('p', { class: 'small muted' }, t('net.diagnoseOffline')),
+      diagnosis ? h('p', { class: 'small muted' }, t('net.diagnoseChecked', { when: ago(diagnosis.checkedAt) })) : null,
+      diagnosisRows.length ? h('ul', { class: 'rc-list', 'data-patch': '' }, diagnosisRows) : null,
+      diagnosis ? h('p', { class: 'small muted' }, t('net.diagnoseTcpLimit')) : null,
       skipped.length ? h('p', { class: 'small muted' }, t('net.skipped', { refs: skipped.map((a) => a.ref).join(', ') })) : null,
       h('p', { class: 'small muted' }, t('net.notCovered')),
       BOOT.readOnly ? h('p', { class: 'small' }, t('rc.readOnlyBoth')) : null,
@@ -8351,6 +8396,10 @@ const MAIN = String.raw`
     const n = netState()
     if (!n) return
     openAsk({ task: 'network', context: { network: networkTaskFacts(n), version: BOOT.version } })
+  }
+  function askNetworkDiagnose() {
+    if (!net || !net.diagnosis) return
+    openAsk({ task: 'network-diagnose', context: { networkDiagnose: networkDiagnoseTaskFacts(net.diagnosis), version: BOOT.version } })
   }
   // Where the problem shows: a banner on every page while the guard is on and the exit is wrong or unknown.
   function netBanner() {
@@ -8547,13 +8596,14 @@ const MAIN = String.raw`
   }
   function askBody() {
     const body = { task: ak.task, lang }
+    const fixed = ak.task === 'network-diagnose'
     const text = ak.els && ak.els.text ? ak.els.text.value.trim() : ak.text
-    if (text) body.text = text
+    if (!fixed && text) body.text = text
     if (ak.context) body.context = ak.context
     if (ak.account && ak.accountChanged) body.account = ak.account
     if (ak.terminal && ak.terminalChanged) body.terminal = ak.terminal
     const ids = ak.files.filter((f) => f.status === 'ready').map((f) => f.id)
-    if (ids.length) body.attachments = ids
+    if (!fixed && ids.length) body.attachments = ids
     return body
   }
   function openAsk(opts) {
@@ -8561,7 +8611,7 @@ const MAIN = String.raw`
     closeMenu()
     // In a Portal that offers AI Tasks itself (createPanelHandler's ask bridge), the task goes to its dialog.
     if (askBridge(BOOT, opts, window)) return
-    ak = { task: opts.task || 'free', text: opts.text || '', context: opts.context || null, account: null, accountChanged: false, terminal: null, terminalChanged: false, pick: null, reason: null, terms: null, loading: true, busy: false, result: null, error: null, removed: false, files: [], els: {} }
+    ak = { task: opts.task || 'free', text: opts.text || '', context: opts.context || null, account: null, accountChanged: false, terminal: null, terminalChanged: false, pick: null, reason: null, terms: null, loading: true, busy: false, result: null, error: null, removed: false, files: [], els: {}, prompt: null, promptChanged: false }
     showDialog('ask')
     hookDrops()
     const mine = ak
@@ -8583,6 +8633,7 @@ const MAIN = String.raw`
       if (ak !== mine) return
       ak.pick = pick.account
       ak.reason = pick.reason || null
+      if (ak.task === 'network-diagnose') ak.prompt = pick.prompt
       if (!ak.accountChanged) ak.account = pick.account
       ak.terms = terms
       if (terms && !ak.terminalChanged) ak.terminal = terms.guess.id
@@ -8613,6 +8664,12 @@ const MAIN = String.raw`
       h('div', { class: 'ask-chips' }, copy.chips.map((k) => h('button', { class: 'chip chip-btn', type: 'button', onclick: () => { e.text.value = t(k); ak.text = e.text.value; warnNow(); e.text.focus() } }, t(k)))))
     return [h('div', { class: 'field' }, label, e.warn), askAttachField(), chips]
   }
+  function askFixedPrompt() {
+    return h('div', { class: 'field' },
+      h('span', null, t('ask.actualPrompt')),
+      ak.promptChanged ? h('p', { class: 'note note-warn', role: 'status' }, t('ask.promptChanged')) : null,
+      h('pre', { class: 'ask-prompt', id: 'ak-prompt' }, ak.prompt || ''))
+  }
 
   // Attachments (spec §3.28 "附件"): pasted, dropped or picked files upload at once, one request each, so a wrong
   // type or a file that is too big is named right away. The page shows image thumbnails from the file itself as a
@@ -8623,7 +8680,7 @@ const MAIN = String.raw`
   // Which open dialog takes pasted or dropped files now: the AI Task's or "Send to it"'s, until it shows its result.
   function fileDropTarget() {
     if (BOOT.readOnly) return null
-    if (dlg.kind === 'ask' && ak && !ak.result) return askAddFiles
+    if (dlg.kind === 'ask' && ak && ak.task !== 'network-diagnose' && !ak.result) return askAddFiles
     if (dlg.kind === 'send' && sd && !sd.result) return sendAddFiles
     return null
   }
@@ -8698,7 +8755,7 @@ const MAIN = String.raw`
     ])
   }
   function askAddFiles(list) {
-    if (!ak || !list.length) return
+    if (!ak || ak.task === 'network-diagnose' || !list.length) return
     ak.attachFull = false
     for (const file of list) {
       if (ak.files.filter((f) => f.status !== 'error').length >= ATTACH_MAX) { ak.attachFull = true; break }
@@ -8841,7 +8898,7 @@ const MAIN = String.raw`
       body.push(askResult())
       if (ak.result.removedSecrets) body.push(h('p', { class: 'small muted' }, t('ask.keyRemoved')))
     } else {
-      body.push(askTextField(), askConfirm(), askYourself())
+      body.push(ak.task === 'network-diagnose' ? askFixedPrompt() : askTextField(), askConfirm(), askYourself())
       const canOpen = !BOOT.readOnly && !ak.loading && !ak.error && ak.account
       if (canOpen) {
         const term = termName(ak.terminal || 'terminal')
@@ -8872,10 +8929,23 @@ const MAIN = String.raw`
     renderAsk()
     try {
       await askUploadsDone()
-      if (ak !== mine) return
+      if (ak !== mine || dlg.kind !== 'ask') return
       renderAsk()
-      const r = await api('/api/ask', askBody())
-      if (ak !== mine) return
+      const body = askBody()
+      if (ak.task === 'network-diagnose') {
+        const check = await api('/api/ask/prompt', body)
+        if (ak !== mine || dlg.kind !== 'ask') return
+        if (check.prompt !== ak.prompt) {
+          ak.prompt = check.prompt
+          ak.promptChanged = true
+          ak.busy = false
+          renderAsk()
+          return
+        }
+        ak.promptChanged = false
+      }
+      const r = await api('/api/ask', body)
+      if (ak !== mine || dlg.kind !== 'ask') return
       ak.busy = false
       if (r.opened) {
         toast(t('ask.opened', { terminal: termName(r.terminal), ref: r.account }))
@@ -8894,7 +8964,7 @@ const MAIN = String.raw`
       renderAsk()
       copyText(r.command, t('ask.copiedCmd'))
     } catch (e) {
-      if (ak !== mine) return
+      if (ak !== mine || dlg.kind !== 'ask') return
       ak.busy = false
       toast(e.message, { kind: 'fail' })
       renderAsk()
@@ -9230,7 +9300,7 @@ const MAIN = String.raw`
     if (BOOT.readOnly) { copyText(name, name); return }
     try {
       const r = await api('/api/pick/start', { name })
-      const why = r.reason === 'most-room' ? t('pk.why.room', { n: String(r.pressure), w: r.window ? winTitle(r.window) + ' ' : '' }) : r.reason === 'tight' ? t('pk.why.tight', { n: String(r.pressure), w: r.window ? winTitle(r.window) + ' ' : '', limit: String(r.limit), longLimit: String(r.longLimit) }) : t(r.reason === 'others-full' ? 'pk.why.othersFull' : 'pk.why.noData')
+      const why = r.reason === 'most-room' ? t(r.expiring ? 'pk.why.expiring' : r.running ? 'pk.why.roomRunning' : 'pk.why.room', { n: String(r.pressure), w: r.window ? winTitle(r.window) + ' ' : '', running: String(r.running || 0) }) : r.reason === 'tight' ? t('pk.why.tight', { n: String(r.pressure), w: r.window ? winTitle(r.window) + ' ' : '', limit: String(r.limit), longLimit: String(r.longLimit) }) : t(r.reason === 'others-full' ? 'pk.why.othersFull' : 'pk.why.noData')
       if (r.opened) { toast(t('pk.started', { terminal: TERM_NAMES[r.terminal] || r.terminal, ref: r.picked, why })); return }
       await copyText(name, name)
       toast(r.automation ? t('login.automation', { terminal: TERM_NAMES[r.terminal] || r.terminal }) : t('login.failed'), { kind: 'info' })

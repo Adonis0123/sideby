@@ -509,6 +509,73 @@ it('shared Panel launch helpers open prompt and login tasks through injected exe
   })
 })
 
+it('starts the fixed read-only network diagnosis through preferred Orca without a real AI session', async () => {
+  await withFakeHome(async (h) => {
+    const { readTask, startAiTask } = await import('../core/ask.ts')
+    await h.write('.claude/settings.json', '{}')
+    await h.write('.claude.json', '{"oauthAccount":{}}', 0o600)
+    await h.write('.config/sideby/config.json', JSON.stringify({ terminal: { preferred: 'orca' } }))
+    const apps = await h.mkdir('apps/Orca.app')
+    const calls: string[][] = []
+    const rt = await createRuntime({
+      env: h.env,
+      desktop: {
+        platform: 'darwin',
+        appDirs: [join(apps, '..')],
+        exec: async (_cmd, args) => {
+          calls.push([...args])
+          return { code: 0, stdout: '', stderr: '' }
+        },
+      },
+    })
+    const result = await startAiTask(rt, {
+      task: 'network-diagnose',
+      context: {
+        networkDiagnose: ['api.anthropic.com: proxy direct; Guard not-checked'],
+      },
+    })
+    assert.equal(result.opened, true)
+    assert.equal(result.terminal, 'orca')
+    const task = await readTask(result.task!, rt.paths)
+    assert.match(task.prompt!, /fixed read-only task/)
+    assert.match(task.prompt!, /proxy direct/)
+    assert.doesNotMatch(task.prompt!, /In my words|proxy\.example\.com/)
+    assert.doesNotMatch(task.prompt!, /user|password|private|token|secret|fragment|npx skills add/)
+    const launch = calls.find((args) => args[0] === 'terminal' && args[1] === 'create')
+    assert.ok(launch)
+    assert.deepEqual(launch.slice(0, 4), ['terminal', 'create', '--worktree', 'active'])
+    const command = launch[launch.indexOf('--command') + 1]!
+    assert.match(command, /ask --run '[a-f0-9]{16}'/)
+    assert.match(command, /--state-dir/)
+  })
+})
+
+it('rejects fixed network diagnosis text and attachments before writing the task', async () => {
+  await withFakeHome(async (h) => {
+    const { startAiTask } = await import('../core/ask.ts')
+    const file = h.path('diagnostic.png')
+    await writeFile(file, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+    const rt = await createRuntime({ env: h.env })
+    const before = await snapshot(h.home)
+    await assert.rejects(
+      startAiTask(rt, { task: 'network-diagnose', text: 'user:password@proxy.example.com:8080/private' }),
+      /remove added text and attachments/,
+    )
+    await assert.rejects(
+      startAiTask(rt, { task: 'network-diagnose', files: [file] }),
+      /remove added text and attachments/,
+    )
+    await assert.rejects(
+      startAiTask(rt, {
+        task: 'network-diagnose',
+        context: { networkDiagnose: ['raw http://user:pass@word@127.0.0.1:10809/private'] },
+      }),
+      /redacted diagnostic facts/,
+    )
+    assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
+  })
+})
+
 it('Ctrl-C cancels key input and restores terminal mode', async () => {
   const { readKeyLine } = await import('./commands.ts')
   const input = Object.assign(new PassThrough(), {
@@ -800,6 +867,24 @@ it('ask --task terminal prints the terminal prompt, and an unknown task lists ev
     const bad = await cli(h, ['ask', '--task', 'bogus', '--print'])
     assert.equal(bad.code, 2)
     assert.match(bad.err, /--task free\|fix\|quota\|account\|host\|plugin\|terminal/)
+  })
+})
+
+it('ask --task network-diagnose builds current offline facts without starting an AI', async () => {
+  await withFakeHome(async (h) => {
+    await h.write('.claude/settings.json', '{}')
+    await h.write('.claude.json', '{"oauthAccount":{}}', 0o600)
+    const print = await cli(h, ['ask', '--task', 'network-diagnose', '--print'], {
+      ...h.env,
+      HTTPS_PROXY: 'socks5://127.0.0.1',
+      LANG: 'en_US.UTF-8',
+    })
+    assert.equal(print.code, 0, print.err)
+    assert.match(print.out, /diagnosed: .* \(offline; no trace sent\)/)
+    assert.match(print.out, /proxy socks5:\/\/127\.0\.0\.1/)
+    assert.match(print.out, /no local TCP listener probe/)
+    assert.match(print.out, /Guard not-checked/)
+    assert.doesNotMatch(print.out, /npx skills add/)
   })
 })
 

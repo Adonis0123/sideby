@@ -71,7 +71,14 @@ import { applyFixes, type DoctorReport, runDoctor } from './core/doctor.ts'
 import { hostSettingsFile } from './core/edit-settings.ts'
 import type { TraceFetcher } from './core/egress.ts'
 import { UserError } from './core/errors.ts'
-import { type HandoffPlan, planHandoff } from './core/handoff.ts'
+import {
+  activePicks,
+  type HandoffCandidate,
+  type HandoffPlan,
+  loginLoad,
+  type PickRecord,
+  planHandoff,
+} from './core/handoff.ts'
 import { handoffFindings, tapState } from './core/handoff-doctor.ts'
 import {
   type HandoffDecision,
@@ -128,7 +135,10 @@ import {
   guardLaunch,
   guardOn,
   ipChangedLine,
+  type ListenerProbe,
+  type NetworkDiagnosis,
   type NetworkOverview,
+  networkDiagnose,
   networkHookPart,
   networkOverview,
   networkSettingsLine,
@@ -469,8 +479,14 @@ export interface Runtime {
   addPickCommand(name: string, family: string, opts?: { yes?: boolean }): Promise<AliasEditResult>
   /** The Family a Pick Command picks in, or undefined when `name` is not one. */
   pickCommandFamily(name: string): string | undefined
-  /** The Account the Pick Command `name` starts now, or why it starts nothing (ADR-0035). */
-  pickChoice(name: string): Promise<{ name: string; family: string; choice: PickChoice }>
+  /**
+   * The Account the Pick Command `name` starts now, or why it starts nothing (ADR-0035). With `record` the caller
+   * starts it, so a Pick Record is written for it (ADR-0083) and given to `recorded`; without, it is a preview.
+   */
+  pickChoice(
+    name: string,
+    opts?: { record?: boolean; recorded?: (rec: PickRecord) => void },
+  ): Promise<{ name: string; family: string; choice: PickChoice }>
   /**
    * The Pick Command to offer for a Family: the existing one, else a free name following its Aliases (or cc, cx, gk),
    * with the command on PATH it would hide, or `name: null` when no such name is free (the user types one); null when
@@ -501,6 +517,8 @@ export interface Runtime {
   ): Promise<PreparedLaunch>
   /** Network Guard's state (spec §3.35): the cached result per address, or with `check` one request per address. */
   networkStatus(opts?: { check?: boolean }): Promise<NetworkOverview>
+  /** Offline route, TCP listener and cached Guard diagnosis; never sends a trace. */
+  networkDiagnose(): Promise<NetworkDiagnosis>
   /**
    * Unattended Mode (spec §3.37): whether it is on and why, until when, the Schedule, the open Pending Decisions and
    * which Families' sessions it covers. Read fresh on every call.
@@ -663,8 +681,19 @@ export interface Runtime {
    * falls back to the least used Account under 100% (`tight`). Throws a UserError with code `no-quota-source`
    * when the Family cannot tell, `no-accounts` when it has none. `fetch` is as for `quota`; `never` reads only the kept
    * answers (the menu bar's cache-only snapshot, spec §3.31).
+   * `picks` counts Live Sessions and Pick Records into the ranking (ADR-0083): `read` for a preview; a function for a
+   * start, naming the Account the caller will start (or null), for which a Pick Record is written under the pick lock.
    */
-  handoff(familyId: string, opts?: { includeApi?: boolean; fetch?: QuotaFetchMode }): Promise<HandoffPlan>
+  handoff(
+    familyId: string,
+    opts?: {
+      includeApi?: boolean
+      fetch?: QuotaFetchMode
+      picks?: 'read' | ((plan: HandoffPlan) => string | null)
+      /** Gets the Pick Record written, the token `cancelPick` takes back when the start does not happen. */
+      recorded?: (rec: PickRecord) => void
+    },
+  ): Promise<HandoffPlan>
   /** The config `handoff` settings with every default filled in (spec §3.17). */
   handoffSettings(): HandoffSettings
   /**
@@ -672,13 +701,39 @@ export interface Runtime {
    * candidate; `used` lists the chain's Accounts so far, as refs or as its hops (an Account whose hop recorded a window
    * that has reset since may be picked again, ADR-0060). `ahead` decides early what happens once the origin's fullest
    * window reaches the threshold, as plan.json and the Panel need. `to` names the only candidate (`handoff ready --to`);
-   * `manual` (`handoff ready`) never waits for a reset.
+   * `manual` (`handoff ready`) never waits for a reset. `picks` counts Live Sessions and Pick Records into the ranking
+   * (ADR-0083); `record` also writes a Pick Record for a pick, as the real handoff that starts it does, and gives it to
+   * `recorded`.
    */
   handoffDecision(
     origin: Account,
     used: readonly UsedAccount[],
-    opts?: { ahead?: boolean; to?: string; manual?: boolean },
+    opts?: {
+      ahead?: boolean
+      to?: string
+      manual?: boolean
+      picks?: 'read' | 'record'
+      recorded?: (rec: PickRecord) => void
+    },
   ): Promise<HandoffDecision>
+  /**
+   * One pick spread by Room per Session (ADR-0083): counts the Live Sessions of every Account and reads the Pick
+   * Records, and gives both to `rank`, which says which candidates it ranked. With `record`, `started` names the
+   * Account the caller will start and its Pick Record (its login's load now) is written, all under one lock; records
+   * that arrived or expired are dropped then. Never from a hook entry.
+   */
+  pickLoad<T>(
+    record: boolean,
+    rank: (
+      live: ReadonlyMap<string, number>,
+      picks: readonly PickRecord[],
+    ) => { result: T; candidates: readonly HandoffCandidate[] },
+    started: (result: T) => string | null,
+    /** Gets the record written, if any: the token for `cancelPick`. */
+    recorded?: (rec: PickRecord) => void,
+  ): Promise<T>
+  /** Takes back exactly this Pick Record, when the start it was written for did not happen after all. */
+  cancelPick(rec: PickRecord): Promise<void>
   readContext(): ReadContext
 }
 
@@ -738,7 +793,7 @@ export async function createRuntime(
      * Internal, for tests: replaces Network Guard's request and the machine's network print (spec §3.35), so a
      * test never asks the network. Not part of the plugin or Portal contract.
      */
-    network?: { fetcher?: TraceFetcher; print?: string }
+    network?: { fetcher?: TraceFetcher; print?: string; probe?: ListenerProbe }
     /**
      * Internal, for tests: how long a Limit Reset request may take before it counts as unanswered (spec §3.40), so a
      * test of a Host that hangs need not wait the real time. Not part of the plugin or Portal contract.
@@ -754,6 +809,11 @@ export async function createRuntime(
      * memory folder it emptied (spec §3.44). Omitted, the Claude session files with `ps`, and the system trash.
      */
     memory?: { liveRuns?: (account: Account) => Promise<LiveRuns>; trash?: Trash }
+    /**
+     * Internal, for tests: the Live Sessions of each Account a pick counts (ADR-0083). Omitted, `listLiveSessions`
+     * with `ps`. Not part of the plugin or Portal contract.
+     */
+    picks?: { liveSessions?: () => Promise<ReadonlyMap<string, number>> }
   } = {},
 ): Promise<Runtime> {
   const env = opts.env ?? process.env
@@ -1479,6 +1539,21 @@ export async function createRuntime(
     }
   }
 
+  // The Live Sessions of each Account, for spreading picks (ADR-0083). A listing that fails counts none: the pick
+  // still happens, ranked as before.
+  const liveSessionCounts = async (): Promise<ReadonlyMap<string, number>> => {
+    if (opts.picks?.liveSessions) return opts.picks.liveSessions()
+    try {
+      const { listLiveSessions } = await import('./core/live-sessions.ts')
+      const n = new Map<string, number>()
+      for (const s of (await listLiveSessions(rt, { deadlineMs: 3_000 })).sessions)
+        n.set(s.account, (n.get(s.account) ?? 0) + 1)
+      return n
+    } catch {
+      return new Map()
+    }
+  }
+
   const rt: Runtime = {
     paths,
     config,
@@ -1813,7 +1888,7 @@ export async function createRuntime(
         ? config.pickCommands[name]
         : undefined
     },
-    async pickChoice(name) {
+    async pickChoice(name, po = {}) {
       const family = rt.pickCommandFamily(name)
       if (family === undefined)
         throw new UserError(
@@ -1828,9 +1903,38 @@ export async function createRuntime(
           { code: 'no-accounts' },
         )
       const main = subs.find((a) => a.isMain)?.ref ?? null
-      if (!f.readQuota && !f.fetchQuota)
-        return { name, family, choice: { ref: main ?? subs[0]!.ref, reason: 'no-quota-data' } }
-      return { name, family, choice: choosePick(await rt.handoff(f.id), main) }
+      if (!f.readQuota && !f.fetchQuota) {
+        const ref = main ?? subs[0]!.ref
+        // Nothing to rank, but a start still counts for the next pick (ADR-0083).
+        if (po.record) {
+          const groups = await groupsOf(subs)
+          await rt.pickLoad(
+            true,
+            () => ({
+              result: ref,
+              candidates: subs.map(
+                (a): HandoffCandidate => ({
+                  ref: a.ref,
+                  name: a.name,
+                  isMain: a.isMain,
+                  kind: a.kind,
+                  login: 'unknown',
+                  quota: { status: 'unavailable', reason: 'no-source' },
+                  ...(groups.get(a.ref) ? { sameLogin: groups.get(a.ref)! } : {}),
+                }),
+              ),
+            }),
+            (r) => r,
+            po.recorded,
+          )
+        }
+        return { name, family, choice: { ref, reason: 'no-quota-data' } }
+      }
+      const plan = await rt.handoff(f.id, {
+        picks: po.record ? (p) => choosePick(p, main).ref : 'read',
+        ...(po.recorded ? { recorded: po.recorded } : {}),
+      })
+      return { name, family, choice: choosePick(plan, main) }
     },
     async pickSuggestion(familyId, given) {
       const f = families.get(familyId)
@@ -1952,6 +2056,17 @@ export async function createRuntime(
         ...(o.check ? { check: true } : {}),
         ...(opts.network?.fetcher ? { fetcher: opts.network.fetcher } : {}),
         ...(opts.network?.print ? { print: opts.network.print } : {}),
+        now,
+      })
+    },
+    async networkDiagnose() {
+      return networkDiagnose({
+        accounts: await accounts(),
+        config,
+        stateDir: paths.stateDir,
+        env,
+        envFor: async (a) => accountEnv(familyOf(a.family), a, env),
+        ...(opts.network?.probe ? { probe: opts.network.probe } : {}),
         now,
       })
     },
@@ -2595,12 +2710,55 @@ export async function createRuntime(
       // The Takeover Limits follow the user's Handoff Threshold, so `sideby next` and Auto Handoff agree on "full".
       // A start the user asks for may still go past them (a Last Resort, spec §3.13); Auto Handoff never does.
       const limits = takeoverLimits(handoffSettings(config).threshold)
-      return planHandoff(f.id, candidates, readContext().now, {
-        ...o,
-        limits,
-        lastResort: true,
-        ...(from ? { from } : {}),
-      })
+      const { picks: mode, recorded, ...rest } = o
+      const plan = (list: typeof candidates, picks?: readonly PickRecord[]) =>
+        planHandoff(f.id, list, readContext().now, {
+          ...rest,
+          limits,
+          lastResort: true,
+          ...(from ? { from } : {}),
+          ...(picks ? { picks } : {}),
+        })
+      if (!mode) return plan(candidates)
+      return rt.pickLoad(
+        typeof mode === 'function',
+        (live, picks) => {
+          const counted = candidates.map((c) => ({ ...c, liveSessions: live.get(c.ref) ?? 0 }))
+          return { result: plan(counted, picks), candidates: counted }
+        },
+        (p) => (typeof mode === 'function' ? mode(p) : null),
+        recorded,
+      )
+    },
+    async pickLoad(record, rank, started, recorded) {
+      const { withPickRecords } = await import('./core/pick-records.ts')
+      let seen: { live: ReadonlyMap<string, number>; candidates: readonly HandoffCandidate[] } | undefined
+      return withPickRecords(
+        paths.stateDir,
+        now,
+        record,
+        async (picks) => {
+          const live = await liveSessionCounts()
+          const r = rank(live, picks)
+          seen = { live, candidates: r.candidates }
+          return r.result
+        },
+        (result, picks, at) => {
+          const ref = started(result)
+          if (!ref || !seen) return null
+          // Its login's load at the pick, Pick Records included; records that arrived or expired are dropped.
+          return {
+            ref,
+            liveAtPick: loginLoad(seen.candidates, picks, at, seen.live).get(ref) ?? seen.live.get(ref) ?? 0,
+            keep: activePicks(picks, seen.candidates, at, seen.live),
+          }
+        },
+        recorded,
+      )
+    },
+    async cancelPick(rec) {
+      const { dropPickRecord } = await import('./core/pick-records.ts')
+      await dropPickRecord(paths.stateDir, rec).catch(() => {})
     },
     handoffSettings: () => handoffSettings(config),
     async handoffDecision(origin, used, opts = {}) {
@@ -2663,17 +2821,29 @@ export async function createRuntime(
       } catch {
         // cannot tell: do not wait
       }
-      return selectNext({
-        origin: self,
-        candidates,
-        settings: handoffSettings(config),
-        aliases: aliasRefs(config.aliases),
-        used,
-        now: now(),
-        ...(opts.ahead ? { ahead: true } : {}),
-        ...(opts.to !== undefined ? { to: opts.to } : {}),
-        ...(opts.manual ? { manual: true } : {}),
-      })
+      const decide = (list: SelectCandidate[], picks?: readonly PickRecord[]) =>
+        selectNext({
+          origin: list.find((c) => c.ref === origin.ref)!,
+          candidates: list,
+          settings: handoffSettings(config),
+          aliases: aliasRefs(config.aliases),
+          used,
+          now: now(),
+          ...(opts.ahead ? { ahead: true } : {}),
+          ...(opts.to !== undefined ? { to: opts.to } : {}),
+          ...(opts.manual ? { manual: true } : {}),
+          ...(picks ? { picks } : {}),
+        })
+      if (!opts.picks) return decide(candidates)
+      return rt.pickLoad(
+        opts.picks === 'record',
+        (live, picks) => {
+          const counted = candidates.map((c) => ({ ...c, liveSessions: live.get(c.ref) ?? 0 }))
+          return { result: decide(counted, picks), candidates: counted }
+        },
+        (d) => (d.kind === 'pick' ? d.ref : null),
+        opts.recorded,
+      )
     },
     readContext,
   }

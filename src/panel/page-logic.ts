@@ -1424,8 +1424,9 @@ export function loginKey(refs: readonly string[]): string {
  * 16 capitals or digits), and a JWT (three base64url parts joined by dots, the first starting `eyJ`). Then any run of
  * 32 or more letters, digits, `_`, `-` or `+` that mixes letters and digits, unless the whitespace-free word it sits
  * in is a URL or a file path (it has a `/`); a 40-character git SHA is such a run. Everything else, whitespace and
- * newlines included, stays as it was. `removed` says whether anything was taken out, so the caller can point the
- * user to the key box.
+ * newlines included, stays as it was, except a URL with userinfo is reduced to scheme and host (credentials, path,
+ * query and fragment removed). `removed` says whether anything was taken out, so the caller can point the user to the
+ * key box.
  */
 export function stripSecrets(text: string): { text: string; removed: boolean } {
   const mark = '[key removed]'
@@ -1436,6 +1437,33 @@ export function stripSecrets(text: string): { text: string; removed: boolean } {
       () => {
         removed = true
         return mark
+      },
+    )
+    // URL userinfo is a credential too. Keep only its origin, and drop path/query/fragment with it; this also covers
+    // a proxy URL pasted into the fixed network diagnosis task before its prompt is previewed or written to disk.
+    w = w.replace(/\b[a-z][a-z\d+.-]*:\/\/\S+/gi, (value) => {
+      const trailing = /[),.;!?]+$/.exec(value)?.[0] ?? ''
+      try {
+        const url = new URL(value.slice(0, value.length - trailing.length))
+        if (!url.username && !url.password) return value
+        removed = true
+        return `${url.protocol}//${url.host}${trailing}`
+      } catch {
+        return value
+      }
+    })
+    // Proxy environment values also allow user:password@host without a scheme. Keep only the host and port.
+    w = w.replace(
+      /(?<![A-Za-z0-9_@])[^:@\s/]+:[^@\s/]+@(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)(?::\d{1,5})?(?:[/?#]\S*)?/g,
+      (value) => {
+        const trailing = /[),.;!?]+$/.exec(value)?.[0] ?? ''
+        try {
+          const url = new URL(`http://${value.slice(0, value.length - trailing.length)}`)
+          removed = true
+          return `${url.host}${trailing}`
+        } catch {
+          return value
+        }
       },
     )
     if (w.includes('/')) return w
@@ -1482,6 +1510,42 @@ export function networkTaskFacts(n: {
   return out
 }
 
+export function networkDiagnoseTaskFacts(d: {
+  checkedAt: string
+  targets: readonly {
+    url: string
+    proxy: string
+    guardSupport: string
+    listener: null | { host: string; port: number; reachable: boolean; error?: string }
+    guard: { status: string; loc?: string; checkedAt?: string; error?: string }
+  }[]
+}): string[] {
+  const out = [`diagnosed: ${d.checkedAt} (offline; no trace sent)`]
+  for (const t of d.targets) {
+    let host = t.url
+    try {
+      host = new URL(t.url).hostname
+    } catch {
+      /* keep the URL */
+    }
+    const listener = t.listener
+      ? `TCP ${t.listener.host}:${t.listener.port} ${t.listener.reachable ? 'reachable' : 'not reachable'}${t.listener.error ? ` (${t.listener.error})` : ''}; this does not prove the proxy protocol works`
+      : t.guardSupport === 'direct'
+        ? 'direct; no proxy TCP listener to test'
+        : 'no local TCP listener probe (remote proxy, invalid address, or no explicit port)'
+    const support =
+      t.guardSupport === 'unsupported'
+        ? '; Guard does not support this proxy scheme; configure HTTP CONNECT or direct before an online check'
+        : t.guardSupport === 'invalid'
+          ? '; proxy address invalid; correct it and start a new session'
+          : ''
+    out.push(
+      `${host}: proxy ${t.proxy}; ${listener}${support}; Guard ${t.guard.status}${t.guard.loc ? `, country ${t.guard.loc}` : ''}${t.guard.checkedAt ? `, checked ${t.guard.checkedAt}` : ', not checked yet'}${t.guard.error ? `, ${t.guard.error}` : ''}`,
+    )
+  }
+  return out
+}
+
 /** The kinds of AI Task (spec §3.28); anything else is refused. */
 export const AI_TASK_KINDS = [
   'free',
@@ -1496,6 +1560,7 @@ export const AI_TASK_KINDS = [
   'menubar',
   'hotkey',
   'network',
+  'network-diagnose',
   'update',
 ] as const
 export type AiTaskKind = (typeof AI_TASK_KINDS)[number]
@@ -1676,6 +1741,8 @@ export function taskPrompt(
       handoff?: readonly string[]
       /** Network Guard facts, one per line, as `networkTaskFacts` gives them (`network` task, spec §3.35). */
       network?: readonly string[]
+      /** Offline route/listener/cache facts for the fixed read-only `network-diagnose` task. */
+      networkDiagnose?: readonly string[]
       /** The error the last Update Check or Update showed (`update` task, spec §3.23). */
       updateError?: string
     }
@@ -1719,13 +1786,17 @@ export function taskPrompt(
         cHandoff: '自动接力现在的设置（来自 `sideby handoff status --json`）：',
         network:
           '帮我设置 sideby 的网络检查：请求要从我没允许的国家或地区发出时（比如代理断了、节点切错了），拦下 Claude 和 Codex。',
+        'network-diagnose': '根据下面的离线诊断 facts，向我解释当前网络异常和最可能的下一步。',
         cNetwork: '网络检查现在的情况（来自 `sideby network --json`）：',
+        cNetworkDiagnose: '离线诊断（来自 `sideby network diagnose --json`）：',
         update: '帮我把 sideby 和它的 skill 更新到最新版：面板检查更新或更新时出错了，请找出原因并修好。',
         cUpdate: '面板上的报错：',
         pUpdate:
           '先运行 `sideby update --json`，看它能不能连上 npm、最新版是多少、是哪种安装方式（`canRun`）。连不上时先查网络：要走代理的话，看启动 sideby 的终端里有没有 `HTTPS_PROXY`、代理开没开；在中国大陆可以用镜像 `SIDEBY_UPDATE_REGISTRY=https://registry.npmmirror.com`，要写进 shell 配置文件前先问我。能更新时，`sideby update --json` 已经给出预览（退出码 10），我同意后再跑 `sideby update --yes --json`。`canRun` 为 `false` 时（npx、项目依赖、没有写权限的全局目录），把输出里的 `command` 给我，告诉我在哪里运行。skill 比 sideby 新不是问题，更新 sideby 就好。最后再跑一次 `sideby update --json`，确认 sideby 和 skill 都已是最新。',
         pNetwork:
           '先运行 `sideby network check --json`，告诉我现在每个地址的请求从哪里发出。问我允许哪些国家或地区；不要替我决定，也不要因为现在在哪就把它加进去（网络不对时那正是错的地区）。我说了以后，先不加 `--yes` 跑 `sideby network allow <代码>... --json` 和 `sideby network on --json` 给我看预览，我同意后再加 `--yes`。告诉我：只检查 sideby 启动的会话；Codex 要在 `/hooks` 里信任一次 `network-hook`；临时跳过一次用 `sideby run <账号> --ignore-network`。被拦过的话，先帮我查代理（开没开、哪个节点），再跑 `sideby network check --json` 确认。它只防代理出意外，不会让在不支持的地区使用变得合规；不要帮我隐藏所在地（时区、指纹之类）。',
+        pNetworkDiagnose:
+          '只解释这些 facts。TCP listener 可连接不代表 HTTP CONNECT、SOCKS 或上游代理可用。看到 SOCKS 或 HTTPS 代理时，明确说当前 Guard 只支持 HTTP CONNECT，建议我配置 HTTP 代理或直连。需要新的出口国家结果时，让我自己运行 `sideby network check --json`。不要修改网络、配置、代码或文件，不要切换出口，也不要运行任何写入命令。',
         pHandoff:
           '先运行 `sideby handoff status --json` 和 `sideby quota --json`，看清每个账号的额度来源和用量。只用 `sideby handoff enable …` 或 `sideby config set handoff.<键> <值>` 改设置；先不加 `--yes` 给我看预览，我同意后再加 `--yes`。没有额度数据的账号排在顺序后面，并告诉我怎么让它显示额度。',
         cAccount: '账号：',
@@ -1739,7 +1810,10 @@ export function taskPrompt(
         cNoTerminals: '本机没找到 sideby 支持的终端',
         cLang: '面板语言：中文（请用中文和我交流）',
         r1: '先用 sideby skill，怎么做见它的 references/ai-tasks.md。没装 skill 就先问我，我同意后运行 `npx skills add Adonis0123/sideby -g`。',
+        r1ReadOnly:
+          '装了 sideby skill 就看它的 references/ai-tasks.md；没装就只说明，不安装，也不运行其他写入命令。',
         r2: '会改文件的命令先给我看预览，我同意后才加 `--yes`。',
+        rReadOnly: '这是固定只读任务：不得修改网络、配置、代码或文件，不得切换出口，不得自动运行在线检查。',
         r3: '不要替我登录，也不要让我把密钥发给你：密钥由我自己用 `sideby key <账号>` 输入。',
         pFix: '先运行 `sideby doctor --json` 看清问题；能自动修的交给 `sideby doctor --fix`。修完再跑一次 `sideby doctor`，告诉我还剩什么。',
         pQuota: '用 `sideby quota --json` 和 `sideby doctor --json` 看原因。',
@@ -1788,7 +1862,10 @@ export function taskPrompt(
         cHandoff: 'Auto Handoff now (from `sideby handoff status --json`):',
         network:
           "Help me set up sideby's network check: stop Claude and Codex when my requests would leave from a country I did not allow (for example when the proxy stopped or a node in the wrong country is picked).",
+        'network-diagnose':
+          'Explain the current network problem and the most likely next step from the offline diagnosis facts below.',
         cNetwork: 'Network check now (from `sideby network --json`):',
+        cNetworkDiagnose: 'Offline diagnosis (from `sideby network diagnose --json`):',
         update:
           'Bring sideby and its skill up to date: the Panel showed an error while checking for or installing an update. Find out why and fix it.',
         cUpdate: 'The error the Panel showed: ',
@@ -1796,6 +1873,8 @@ export function taskPrompt(
           'Run `sideby update --json` first to see whether it reaches npm, the latest version and how sideby is installed (`canRun`). When it cannot reach npm, check the network: behind a proxy, whether the terminal that starts sideby has `HTTPS_PROXY` and the proxy is on; in mainland China the mirror `SIDEBY_UPDATE_REGISTRY=https://registry.npmmirror.com` helps, but ask me before writing it into a shell config file. When it can update, `sideby update --json` already shows the change (exit 10); run `sideby update --yes --json` after I agree. When `canRun` is false (npx, a project dependency, a global folder I cannot write), give me the `command` from its output and tell me where to run it. A skill newer than sideby is fine: updating sideby is enough. Finish with `sideby update --json` again to confirm sideby and the skill are current.',
         pNetwork:
           "Run `sideby network check --json` first and tell me where each address's requests leave from now. Ask me which countries to allow; never decide for me, and never add the current country because it is current (on a wrong network that is the wrong one). Once I say, run `sideby network allow <codes>... --json` and `sideby network on --json` without `--yes` to show me the change, and add `--yes` after I agree. Tell me: only sessions sideby starts are checked; in Codex I trust `network-hook` once in `/hooks`; `sideby run <account> --ignore-network` skips it once. If something was blocked, help me check the proxy (is it on, which node) first, then run `sideby network check --json` to confirm. It guards against proxy accidents; it does not make use from an unsupported region allowed, and never help hide where I am (time zone, fingerprints).",
+        pNetworkDiagnose:
+          'Explain these facts only. A reachable TCP listener does not prove that HTTP CONNECT, SOCKS or the upstream proxy works. For a SOCKS or HTTPS proxy, say that Guard currently supports HTTP CONNECT only and suggest configuring an HTTP proxy or a direct connection. If a fresh egress country is needed, ask me to run `sideby network check --json` myself. Do not change the network, configuration, code or files, do not switch the exit, and do not run any write command.',
         pHandoff:
           'Run `sideby handoff status --json` and `sideby quota --json` first to see where each account gets its quota and how much is used. Change settings only with `sideby handoff enable …` or `sideby config set handoff.<key> <value>`; show me the preview without `--yes` first, and add `--yes` only after I agree. Put accounts without quota data last in the order, and tell me how to make them show it.',
         cAccount: 'Account: ',
@@ -1809,7 +1888,11 @@ export function taskPrompt(
         cNoTerminals: 'No supported terminal is installed here',
         cLang: 'Panel language: English (talk to me in English)',
         r1: 'Use the sideby skill; its references/ai-tasks.md says how. If the skill is not installed, ask me first, and with my yes run `npx skills add Adonis0123/sideby -g`.',
+        r1ReadOnly:
+          'If the sideby skill is installed, read its references/ai-tasks.md. If not, just say so; do not install it or run any other write command.',
         r2: 'Show me the preview of any command that changes files; add `--yes` only after I agree.',
+        rReadOnly:
+          'This is a fixed read-only task: do not change the network, configuration, code or files, switch the exit, or automatically run an online check.',
         r3: 'Never sign in for me and never ask me to send you an API key: I enter keys myself with `sideby key <account>`.',
         pFix: 'Run `sideby doctor --json` first; `sideby doctor --fix` fixes what it can by itself. When you are done, run `sideby doctor` and tell me what is left.',
         pQuota: 'Use `sideby quota --json` and `sideby doctor --json` to see why.',
@@ -1829,12 +1912,19 @@ export function taskPrompt(
           'When it works, ask me whether to make this terminal built into sideby. Only with my yes, add a row to the terminal table in src/core/terminal.ts of the sideby repository with tests, follow its CONTRIBUTING.md to open a pull request, and first remove my own account names, paths and emails.',
       }
   const task = AI_TASK_KINDS.indexOf(input.task as AiTaskKind) >= 0 ? input.task : 'free'
+  const fixedReadOnly = task === 'network-diagnose'
   const sentence = (L as Record<string, string>)[task] || L.free
-  const what = task === 'free' ? text || sentence : text ? sentence + '\n' + L.says + text : sentence
+  const what = fixedReadOnly
+    ? sentence
+    : task === 'free'
+      ? text || sentence
+      : text
+        ? sentence + '\n' + L.says + text
+        : sentence
   const facts: string[] = []
-  if (account) facts.push('- ' + L.cAccount + account)
-  if (family) facts.push('- ' + L.cFamily + family)
-  const findings = c.findings || []
+  if (!fixedReadOnly && account) facts.push('- ' + L.cAccount + account)
+  if (!fixedReadOnly && family) facts.push('- ' + L.cFamily + family)
+  const findings = fixedReadOnly ? [] : c.findings || []
   if (findings.length) {
     facts.push('- ' + L.cFindings)
     findings.forEach((f, i) => {
@@ -1852,7 +1942,7 @@ export function taskPrompt(
       if (hint) facts.push('     ' + hint)
     })
   }
-  const reason = clean(c.quotaReason)
+  const reason = fixedReadOnly ? '' : clean(c.quotaReason)
   if (reason) facts.push('- ' + L.cQuota + reason)
   if (task === 'terminal') {
     const custom = clean(c.terminalCustom)
@@ -1872,20 +1962,34 @@ export function taskPrompt(
     const lines = (c.network || []).map(clean).filter(Boolean)
     if (lines.length) facts.push('- ' + L.cNetwork, ...lines.map((l) => '  - ' + l))
   }
+  if (task === 'network-diagnose') {
+    const lines = (c.networkDiagnose || []).map(clean).filter(Boolean)
+    if (lines.length) facts.push('- ' + L.cNetworkDiagnose, ...lines.map((l) => '  - ' + l))
+  }
   if (task === 'update') {
     const err = clean(c.updateError)
     if (err) facts.push('- ' + L.cUpdate + err)
   }
-  const version = clean(c.version)
+  const version = fixedReadOnly ? '' : clean(c.version)
   if (version) facts.push('- ' + L.cVersion + version)
   facts.push('- ' + L.cLang)
-  const pointer = (L as Record<string, string>)['p' + task.charAt(0).toUpperCase() + task.slice(1)]
+  const pointerKey =
+    task === 'network-diagnose' ? 'pNetworkDiagnose' : 'p' + task.charAt(0).toUpperCase() + task.slice(1)
+  const pointer = (L as Record<string, string>)[pointerKey]
   const parts = [L.task + '\n' + what, L.context + '\n' + facts.join('\n')]
-  const attached = attachedSection(input.attachments || [], input.lang)
+  const attached = fixedReadOnly ? '' : attachedSection(input.attachments || [], input.lang)
   if (attached) parts.push(attached)
-  parts.push(L.rules + '\n- ' + L.r1 + '\n- ' + L.r2 + '\n- ' + L.r3)
+  parts.push(
+    L.rules +
+      '\n- ' +
+      (fixedReadOnly ? L.r1ReadOnly : L.r1) +
+      '\n- ' +
+      (fixedReadOnly ? L.rReadOnly : L.r2) +
+      '\n- ' +
+      L.r3,
+  )
   if (pointer) parts.push(L.pointers + '\n' + pointer)
-  parts.push(task === 'terminal' ? L.shareTerminal : L.share)
+  if (task !== 'network-diagnose') parts.push(task === 'terminal' ? L.shareTerminal : L.share)
   return parts.join('\n\n')
 }
 

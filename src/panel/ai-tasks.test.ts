@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { diffSnapshots, type FakeHome, fakeHost, snapshot, withFakeHome } from '../../testing/index.ts'
 import type { ExecResult } from '../core/desktop-app.ts'
+import type { NetworkDiagnosis } from '../core/network.ts'
 import { createRuntime } from '../runtime.ts'
 import { createPanelHandler } from './handler.ts'
 
@@ -451,6 +452,60 @@ describe('AI Task routes', () => {
           (await request(s.port, 'GET', '/api/terminals', { host: `127.0.0.1:${s.port}` })).text,
         )
         assert.deepEqual(next.guess, { id: 'iterm2', source: 'config' })
+      } finally {
+        await s.close()
+      }
+    })
+  })
+
+  it('previews the fixed read-only network diagnosis without starting a terminal', async () => {
+    await withFakeHome(async (h) => {
+      await seed(h)
+      const exec: Exec = { calls: [], code: 0 }
+      const s = await serve(h, exec)
+      try {
+        const diagnosis = await post(s.port, '/api/network/diagnose', {}, s.good)
+        assert.equal(diagnosis.status, 200)
+        const diagnosisBody = diagnosis.body as unknown as NetworkDiagnosis
+        assert.equal(diagnosisBody.targets[0]?.proxy, 'direct')
+        const facts = [
+          `diagnosed: ${diagnosisBody.checkedAt} (offline; no trace sent)`,
+          'api.anthropic.com: proxy direct; no listener; Guard not-checked',
+        ]
+        const preview = await post(
+          s.port,
+          '/api/ask/prompt',
+          {
+            task: 'network-diagnose',
+            lang: 'en',
+            context: { networkDiagnose: facts },
+          },
+          s.good,
+        )
+        assert.equal(preview.status, 200)
+        assert.match(String(preview.body.prompt), /fixed read-only task/)
+        assert.match(String(preview.body.prompt), /proxy direct/)
+        assert.doesNotMatch(String(preview.body.prompt), /network allow|--yes|pull request|npx skills add/)
+        assert.doesNotMatch(String(preview.body.prompt), /user|password|private|token|secret|fragment/)
+        assert.doesNotMatch(String(preview.body.prompt), /In my words|proxy\.example\.com/)
+        for (const path of ['/api/ask/prompt', '/api/ask']) {
+          for (const extra of [
+            { text: 'user:password@proxy.example.com:8080/private' },
+            { attachments: ['0123456789abcdef'] },
+            { context: { networkDiagnose: ['raw http://user:pass@word@127.0.0.1:10809/private'] } },
+          ]) {
+            const rejected = await post(
+              s.port,
+              path,
+              { task: 'network-diagnose', lang: 'en', context: { networkDiagnose: facts }, ...extra },
+              s.good,
+            )
+            assert.equal(rejected.status, 400)
+            assert.match(String(rejected.body.error), /remove added text and attachments/)
+            assert.doesNotMatch(rejected.text, /user|password/)
+          }
+        }
+        assert.equal(exec.calls.length, 0)
       } finally {
         await s.close()
       }

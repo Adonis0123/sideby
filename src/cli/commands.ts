@@ -87,6 +87,7 @@ import {
   type AiTaskKind,
   hiddenIn,
   inDisplayOrder,
+  networkDiagnoseTaskFacts,
   pinnedIn,
   resetWhen,
   suggestAlias,
@@ -835,7 +836,7 @@ async function runPick(
     )
     return runAccount(rt, target.account.ref, target.args, io, opts)
   }
-  const { choice, family } = await rt.pickChoice(name)
+  const { choice, family } = await rt.pickChoice(name, { record: true })
   if (choice.ref === null) {
     const now = rt.readContext().now
     const why = choice.earliestReset
@@ -899,7 +900,12 @@ export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
     )
   const includeApi = a.flags.has('include-api')
   const rt = await createRuntime()
-  const plan = await rt.handoff(family, { includeApi })
+  // A preview (`--json`, `--dry-run`) reads the Pick Records; a start writes one for its pick (ADR-0083).
+  const preview = a.flags.has('json') || a.flags.has('dry-run')
+  const plan = await rt.handoff(family, {
+    includeApi,
+    picks: preview ? 'read' : (p) => (p.pick && p.hasQuota ? p.pick : null),
+  })
   if (a.flags.has('json')) {
     json(io, plan)
     return plan.pick && plan.hasQuota ? 0 : 1
@@ -915,12 +921,14 @@ export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
     e.window
       ? `${e.window.label} ${e.window.usedPercent}% of ${e.window.limit}%`
       : `${Math.round(e.pressure ?? 0)}%`
+  // Live Sessions of its login, Pick Records included: picks spread by the room each one leaves (ADR-0083).
+  const running = (e: (typeof plan.accounts)[number]) => (e.liveSessions ? `; ${e.liveSessions} running` : '')
   const note = (e: (typeof plan.accounts)[number]): string => {
     if (e.sameLoginAs) return `same login as ${e.sameLoginAs}, which shares its quota; skipped`
     if (e.skip?.reason === 'login-expired')
       return `sign-in expired; skipped, sign in with \`${e.skip.command}\``
-    if (e.state === 'ready') return `closest to its limit: ${closest(e)}`
-    if (e.state === 'unknown') return 'no quota data yet'
+    if (e.state === 'ready') return `closest to its limit: ${closest(e)}${running(e)}`
+    if (e.state === 'unknown') return `no quota data yet${running(e)}`
     if (e.state === 'api')
       return includeApi ? 'API account, pay per use' : 'left out; add --include-api to use it'
     if (low(e)) {
@@ -985,14 +993,18 @@ export async function cmdNext(a: ParsedArgs, io: Io): Promise<number> {
     )
     return 1
   }
+  // A weekly window "7d" reads as "weekly"; any other Long Window by its label.
+  const longName = (label: string) => (label === '7d' ? 'weekly' : label)
   const reason =
-    picked.state === 'ready'
-      ? `furthest from its limits, ${closest(picked)}`
-      : plan.tight
-        ? `every ${family} account is past its limit (${plan.tight.limit}% of a 5-hour window, ${plan.tight.longLimit}% of a weekly one); this one has the most left, ${closest(picked)}`
-        : picked.state === 'unknown'
-          ? 'no account with known room; this one has no quota data yet'
-          : 'API account, pay per use'
+    plan.reason === 'expiring' && picked.expiring
+      ? `its ${longName(picked.expiring.label)} quota resets ${resetWhen(picked.expiring.resetsAt, now.getTime(), 'en')} with ${100 - picked.expiring.usedPercent}% left, so it goes first`
+      : picked.state === 'ready'
+        ? `the most room per running session, ${closest(picked)}${picked.liveSessions ? ` with ${picked.liveSessions} running` : ''}`
+        : plan.tight
+          ? `every ${family} account is past its limit (${plan.tight.limit}% of a 5-hour window, ${plan.tight.longLimit}% of a weekly one); this one has the most left, ${closest(picked)}`
+          : picked.state === 'unknown'
+            ? 'no account with known room; this one has no quota data yet'
+            : 'API account, pay per use'
   io.out(`\nNext: ${c.bold(plan.pick)} (${reason}).`)
   if (a.flags.has('dry-run')) {
     io.out(`Start it with \`${runCmd}\`.`)
@@ -3231,6 +3243,9 @@ export async function cmdAsk(a: AskArgs, io: Io, runtime?: Runtime): Promise<num
     account: a.flags.get('account') as string | undefined,
     terminal: a.flags.get('terminal') as string | undefined,
     files: a.attach ?? [],
+    ...(task === 'network-diagnose'
+      ? { context: { networkDiagnose: networkDiagnoseTaskFacts(await rt.networkDiagnose()) } }
+      : {}),
   }
   // The files are checked before anything else; `--print` lists them where they are and copies nothing.
   const preview = promptForTask(rt, input, await previewAttachments(rt, input))
@@ -5157,6 +5172,47 @@ export async function cmdNetwork(a: ParsedArgs, io: Io): Promise<number> {
   const { setNetwork } = await import('../core/network.ts')
   const rt = await createRuntime()
   const asJson = a.flags.has('json')
+  if (sub === 'diagnose') {
+    if (rest.length || a.rest.length) throw new UsageError('usage: sideby network diagnose [--json]')
+    const d = await rt.networkDiagnose()
+    if (asJson) {
+      json(io, d)
+      return 0
+    }
+    io.out(
+      `Offline diagnosis: checked ${clock(d.checkedAt, rt.readContext().now)}; no online trace was sent.`,
+    )
+    for (const t of d.targets) {
+      io.out(`${new URL(t.url).hostname}: ${t.proxy}`)
+      if (t.listener)
+        io.out(
+          `  TCP listener ${t.listener.reachable ? c.green('reachable') : c.red('not reachable')} (${t.listener.host}:${t.listener.port}${t.listener.error ? `, ${t.listener.error}` : ''}).`,
+        )
+      else if (t.guardSupport !== 'direct')
+        io.out('  No local TCP listener probe (remote proxy, invalid address, or no explicit port).')
+      if (t.guardSupport === 'unsupported')
+        io.out(
+          c.yellow(
+            '  Network Guard supports HTTP CONNECT only; this proxy scheme is not supported. Configure an HTTP proxy or direct connection, then run `sideby network check`.',
+          ),
+        )
+      else if (t.guardSupport === 'invalid')
+        io.out(
+          c.yellow(
+            '  The proxy address is invalid; correct it in the environment, then start a new session.',
+          ),
+        )
+      io.out(
+        `  Guard cache: ${t.guard.status}${t.guard.loc ? `, ${t.guard.loc}` : ''}${t.guard.checkedAt ? `, checked ${clock(t.guard.checkedAt, rt.readContext().now)}` : ', not checked yet'}${t.guard.error ? `, ${t.guard.error}` : ''}.`,
+      )
+    }
+    if (!d.targets.length) io.out('No Claude or Codex trace target is configured.')
+    io.out(
+      c.dim('A reachable TCP listener does not prove that HTTP CONNECT, SOCKS or the upstream proxy works.'),
+    )
+    io.out(c.cyan('For a fresh online country check, run `sideby network check`.'))
+    return 0
+  }
   if (sub === 'on' || sub === 'off' || sub === 'allow') {
     if (sub !== 'allow' && rest.length) throw new UsageError(`usage: sideby network ${sub} [--yes]`)
     if (sub === 'allow' && !rest.length)
@@ -5186,7 +5242,7 @@ export async function cmdNetwork(a: ParsedArgs, io: Io): Promise<number> {
   }
   if ((sub !== undefined && sub !== 'check') || rest.length || a.rest.length)
     throw new UsageError(
-      'usage: sideby network [check] | sideby network on|off [--yes] | sideby network allow <country>... [--yes]',
+      'usage: sideby network [check|diagnose] | sideby network on|off [--yes] | sideby network allow <country>... [--yes]',
     )
   const s = await rt.networkStatus(sub === 'check' ? { check: true } : {})
   if (asJson) {

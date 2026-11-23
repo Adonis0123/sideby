@@ -135,6 +135,21 @@ export function proxyFor(url: string, env: Env): string | null {
   return v ? v.trim() : null
 }
 
+/** The selected route safe to show: scheme, hostname and port only, or `direct`; never credentials or a path. */
+export function redactedProxy(proxy: string | null): string {
+  if (!proxy) return 'direct'
+  try {
+    const p = new URL(proxy.includes('://') ? proxy : `http://${proxy}`)
+    if (!p.hostname) return 'invalid'
+    return `${p.protocol}//${p.host}`
+  } catch {
+    return 'invalid'
+  }
+}
+
+/** The route `url` selects under `env`, safe for an error, diagnostic result or AI fact. */
+export const routeLabel = (url: string, env: Env): string => redactedProxy(proxyFor(url, env))
+
 /** The key a cached result is kept under: the URL and the proxy settings, never their values in clear. */
 export function cacheKey(url: string, env: Env): string {
   return sha(JSON.stringify([url, ...PROXY_VARS.map((k) => env[k] ?? '')])).slice(0, 32)
@@ -456,7 +471,7 @@ function reasonZh(reason: string): string {
 export function blockMessage(
   v: Pick<Verdict, 'status' | 'entry' | 'attempts' | 'triedMs'>,
   allow: readonly string[],
-  opts: { ref?: string; at: CheckMoment; zh: boolean },
+  opts: { ref?: string; at: CheckMoment; zh: boolean; proxy?: string },
 ): string {
   const ref = opts.ref || '<account>'
   const allowed = allow.map((c) => countryLabel(c, opts.zh)).join(opts.zh ? '、' : ', ')
@@ -464,6 +479,11 @@ export function blockMessage(
   const reason = v.entry.error ?? 'no answer within 3 seconds'
   const tries = v.attempts ?? 1
   const secs = Math.max(1, Math.round((v.triedMs ?? 0) / 1000))
+  const route = opts.proxy ?? 'direct'
+  const routeZh = route === 'direct' ? '本次检查使用直连（direct）。' : `本次检查使用代理 \`${route}\`。`
+  const unsupported = /^(?!http:)[a-z][a-z\d+.-]*:\/\//i.test(route)
+  const protocolNextZh = unsupported ? '当前 Guard 只支持 HTTP CONNECT；请配置 HTTP 代理或直连后再重试。' : ''
+  const restartZh = opts.at === 'launch' ? '' : '如果刚改过代理环境，旧会话可能要重开才能继承。'
   if (opts.zh) {
     const tried = tries > 1 ? `试了 ${tries} 次（约 ${secs} 秒）仍` : ''
     const what =
@@ -481,7 +501,7 @@ export function blockMessage(
       opts.at === 'launch'
         ? `临时跳过：\`${skip}\`。`
         : `不想检查了：运行 \`sideby network off --yes\`，正在运行的会话也会马上放行；只跳过一次就新开会话：\`${skip}\`。`
-    return `${what}${next}${skipZh}`
+    return `${what}${routeZh}${next}${protocolNextZh}${restartZh}${skipZh}`
   }
   const tried = tries > 1 ? ` after ${tries} tries in about ${secs} s` : ''
   const what =
@@ -494,9 +514,20 @@ export function blockMessage(
       : opts.at === 'prompt'
         ? 'Check that the proxy is on and the node is right, then send the message again.'
         : 'Check that the proxy is on and the node is right, then let it continue.'
+  const routeEn =
+    route === 'direct'
+      ? 'This check used a direct connection (direct).'
+      : `This check used proxy \`${route}\`.`
+  const protocolNextEn = unsupported
+    ? ' Network Guard supports HTTP CONNECT only; configure an HTTP proxy or a direct connection, then retry.'
+    : ''
+  const restartEn =
+    opts.at === 'launch'
+      ? ''
+      : ' If you just changed the proxy environment, an older session may need restarting to inherit it.'
   const skipEn =
     opts.at === 'launch'
       ? `To skip once: \`${skip}\`.`
       : `To stop checking, run \`sideby network off --yes\`; sessions already running follow it at once. To skip once, start a new session: \`${skip}\`.`
-  return `${what} ${next} ${skipEn}`
+  return `${what} ${routeEn} ${next}${protocolNextEn}${restartEn} ${skipEn}`
 }
