@@ -774,8 +774,9 @@ async function readIdentity(f: FamilyDef, account: Account): Promise<AccountIden
 }
 
 /**
- * An Account's Login Key (ADR-0028), only for grouping a Same Login: it stays inside `groupsOf` and never reaches an
- * output, an error, a log or a cache. Undefined for a Family without a reader, or on any problem.
+ * An Account's Login Key (ADR-0028), for grouping a Same Login (`groupsOf`) and for a Limit Reset's login check
+ * (`loginKeyNow`, ADR-0072). It stays inside the Runtime and never reaches an output, an error, a log or a cache.
+ * Undefined for a Family without a reader, or on any problem.
  */
 async function readLoginKey(account: Account): Promise<string | undefined> {
   const read = LOGIN_KEY_READERS.get(account.family)
@@ -1003,8 +1004,8 @@ export async function createRuntime(
   }
 
   /**
-   * Network Guard, Unattended Mode and Progress Reminders on a prepared Launch, in that order; hooks only for a session
-   * (`run`).
+   * Network Guard, Unattended Mode, Progress Reminders and Shared Project Memory on a prepared Launch, in that order;
+   * all but Network Guard only for a session (`run`).
    */
   const sessionReady = async (
     p: PreparedLaunch,
@@ -1549,7 +1550,7 @@ export async function createRuntime(
   }
 
   // The Live Sessions of each Account, for spreading picks (ADR-0083). A listing that fails counts none: the pick
-  // still happens, ranked as before.
+  // still happens, ranked as if no Account had a Live Session.
   const liveSessionCounts = async (): Promise<ReadonlyMap<string, number>> => {
     if (opts.picks?.liveSessions) return opts.picks.liveSessions()
     try {
@@ -2022,7 +2023,8 @@ export async function createRuntime(
         ...inputs,
         // Claude Code's advisor (spec §3.41, ADR-0074): unlocked in Claude subscription sessions while config says so.
         ...(config.advisor?.unlock === true ? { advisorUnlock: true } : {}),
-        // Claude API Accounts get the variable that turns experimental betas off, moved here from a shared settings file.
+        // Claude API Accounts get the variable that turns experimental betas off at Launch, so a settings file that
+        // Subscription Accounts share never carries it (ADR-0074).
         ...(config.claude?.apiBetasOff === true ? { apiBetasOff: true } : {}),
         // Config `ask.permissions: account` (ADR-0070): the AI Task keeps the Account's own arguments, as `run` does.
         ...(opts.aiTask && aiTaskPermissions(config) === 'checked' ? { aiTask: true } : {}),

@@ -54,7 +54,6 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [
 ]
 
 export const CLI_COMMANDS: readonly CliCommand[] = [
-  // ---------- Accounts ----------
   {
     id: 'list',
     group: 'accounts',
@@ -240,7 +239,6 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
       zh: '恢复默认顺序，保留置顶和隐藏',
     },
   },
-  // ---------- Start and open ----------
   {
     id: 'run',
     group: 'start',
@@ -317,7 +315,6 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
       zh: '自己指定 Chrome 用户，或让 sideby 重新找',
     },
   },
-  // ---------- Short commands ----------
   {
     id: 'alias.add',
     group: 'shortcuts',
@@ -379,7 +376,6 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
     summary: { en: 'Make new terminals load your short commands', zh: '让新开的终端自动加载短命令' },
     example: 'sideby shell-init setup',
   },
-  // ---------- Quota and usage ----------
   {
     id: 'quota',
     group: 'quota',
@@ -437,7 +433,6 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
     example: 'sideby tune claude',
     feature: 'page.tuning',
   },
-  // ---------- Auto Handoff ----------
   {
     id: 'handoff.status',
     group: 'handoff',
@@ -497,7 +492,6 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
     help: 'remove it',
     summary: { en: "Remove Grok's handoff hook file", zh: '删掉 Grok 的接力 hook 文件' },
   },
-  // ---------- Sessions and messages ----------
   {
     id: 'sessions',
     group: 'sessions',
@@ -593,7 +587,6 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
     example: 'sideby progress on --every 10',
     feature: 'setting.progress',
   },
-  // ---------- Health and safety ----------
   {
     id: 'doctor',
     group: 'health',
@@ -652,7 +645,6 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
     example: 'sideby unattended wait 30',
     feature: 'action.unattended-wait',
   },
-  // ---------- Panel and app ----------
   {
     id: 'ui',
     group: 'panel',
@@ -742,7 +734,6 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
     help: 'your own Themes (JSON, colors only)',
     summary: { en: 'Import, export or remove your own themes', zh: '导入、导出或删除自己的主题' },
   },
-  // ---------- Settings and updates ----------
   {
     id: 'config.get',
     group: 'settings',
@@ -819,7 +810,6 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
       zh: '给 sideby 开发者：在本地构建和 npm 包之间切换',
     },
   },
-  // ---------- Help, AI and plugins ----------
   {
     id: 'commands',
     group: 'help',

@@ -408,8 +408,8 @@ export async function syncHistory(rt: Runtime, opts: { force?: boolean } = {}): 
         const parsed = await reader.parse(file, account)
         if (s.retired) return
         let input: SessionInput | undefined
-        // A Session id goes into a resume command the user may run, so only plain ids are kept.
         if (parsed) parsed.parent ??= file.parent
+        // A Session id goes into a resume command the user may run, so only plain ids are kept.
         if (parsed && SAFE_ID.test(parsed.sessionId) && (!parsed.parent || SAFE_ID.test(parsed.parent))) {
           const p = await projects.resolve(parsed.cwd, parsed.gitRoot)
           input = {
@@ -767,7 +767,7 @@ export const splitWords = (q: string | undefined): string[] =>
   [...(q ?? '').matchAll(/"([^"]*)"?|(\S+)/g)].map((m) => (m[1] ?? m[2] ?? '').trim()).filter(Boolean)
 
 /**
- * Sessions matching `q`, best first (relevance times a recency boost that halves every 7 days), or newest first
+ * Sessions matching `q`, best first (relevance times a recency boost that is half at 30 days), or newest first
  * without words. Answers from what is built; `wait` waits for the current sync first (the CLI's first run).
  * `live` names Sessions running now, as `<account>\0<sessionId>`.
  */

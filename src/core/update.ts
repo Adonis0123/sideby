@@ -1,5 +1,6 @@
-// Update Check, Update Notice, Install Method, Update and Auto Update (spec §3.23, ADR-0021). The Update Check is the
-// only network request sideby makes on its own: one GET for the `latest` dist-tag, carrying nothing about the user.
+// Update Check, Update Notice, Install Method, Update and Auto Update (spec §3.23, ADR-0021). The Update Check is one
+// of the two network requests sideby makes on its own (the other is Network Guard, ADR-0053): one GET for the
+// `latest` dist-tag, carrying nothing about the user.
 // Everything it learns goes to one state file shared by the CLI and every Panel.
 import { spawn } from 'node:child_process'
 import { access, constants, mkdir, readdir, readFile, realpath, rm } from 'node:fs/promises'
@@ -84,7 +85,6 @@ export interface InstallMethod {
   prefix?: string
 }
 
-/** Swapped in tests through `bindUpdateDeps`; the real machine otherwise. */
 /**
  * Whether `sideby autostart --refresh --json` rewrote the login item: it exits 0 also when nothing changed or the
  * rewrite was refused, so only its `changed: true` counts.
@@ -98,6 +98,7 @@ export function autostartRefreshed(code: number | null, stdout: string): boolean
   }
 }
 
+/** Swapped in tests through `bindUpdateDeps`; the real machine otherwise. */
 export interface UpdateDeps {
   fetch: typeof fetch
   now: () => Date
@@ -284,8 +285,6 @@ export const updateMachine = (): UpdateDeps => deps()
 /** The lock every install shares (`update-install.lock`), so a Local Build switch never races an Update. */
 export const takeInstallLock = (paths: Paths) => takeLock(paths, 'update-install.lock').catch(() => null)
 
-// ---- versions
-
 /** `latest` is newer than `current`. */
 export const isNewer = (latest: string | undefined, current: string): latest is string =>
   latest !== undefined && compareVersions(latest, current) === 1
@@ -299,8 +298,6 @@ export function sameLine(from: string, to: string): boolean {
   const b = parseVersion(to)?.core
   return Boolean(a && b && a[0] === b[0])
 }
-
-// ---- switches
 
 const set = (v: string | undefined) => v !== undefined && v !== '' && v !== '0' && v.toLowerCase() !== 'false'
 
@@ -331,8 +328,6 @@ export function checksOff(env: Env, config: UpdateSettings, local = localBuild()
   return checksOffWhy(env, config, local)?.text ?? null
 }
 
-// ---- registry
-
 /** The registry checks and installs use: `SIDEBY_UPDATE_REGISTRY` (http or https only), else npm's. */
 function registryOf(env: Env): string {
   const base = (env.SIDEBY_UPDATE_REGISTRY || DEFAULT_REGISTRY).replace(/\/+$/, '')
@@ -354,8 +349,6 @@ function shownRegistry(base: string): string {
     return 'the registry in SIDEBY_UPDATE_REGISTRY'
   }
 }
-
-// ---- cache
 
 const cacheFile = (p: Paths) => join(p.stateDir, 'update.json')
 const str = (v: unknown): v is string => typeof v === 'string'
@@ -435,8 +428,6 @@ export function autoPending(cache: UpdateCache, current: string, config: UpdateS
   return !a.ok && !(age(a.at, now) < AUTO_RETRY_MS)
 }
 
-// ---- the check
-
 /** Asks the registry for the `latest` dist-tag. Throws with a message that names the registry and what to do. */
 export async function fetchLatest(env: Env): Promise<string> {
   const base = registryOf(env)
@@ -481,7 +472,7 @@ export async function refreshUpdateCheck(paths: Paths, env: Env): Promise<Update
 const LOCK_MAX_MS = 60 * 60 * 1000
 /** A lock file another process has just created and not yet written to. */
 const LOCK_WRITE_GRACE_MS = 60 * 1000
-/** How often a holder touches its lock, and how long a lock nobody touched counts as held. */
+/** How often a holder touches its lock; one nobody touched for `LOCK_STALE_MS` is free. */
 const LOCK_BEAT_MS = 15 * 1000
 const LOCK_STALE_MS = 2 * 60 * 1000
 
@@ -505,8 +496,6 @@ async function takeLock(paths: Paths, name: string): Promise<(() => Promise<void
     writeGraceMs: LOCK_WRITE_GRACE_MS,
   }).catch(() => null)
 }
-
-// ---- the notice
 
 /**
  * The Update Notice line the CLI may print now, or null. Once per new version per day; `current` is the running
@@ -672,8 +661,6 @@ export function afterCommandPlan(
   }
 }
 
-// ---- Install Method
-
 /** Where the running copy comes from (spec §3.23 table); reads only paths. */
 export async function installMethod(env: Env): Promise<InstallMethod> {
   const d = deps()
@@ -772,8 +759,6 @@ export function updateCommand(
   }
 }
 
-// ---- running sessions
-
 const runningDir = (p: Paths) => join(p.stateDir, 'running')
 
 /**
@@ -808,8 +793,6 @@ export async function runningSessions(paths: Paths): Promise<number[]> {
   }
   return out
 }
-
-// ---- Update
 
 export interface UpdatePlan {
   current: string

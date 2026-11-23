@@ -322,7 +322,6 @@ const MAIN = String.raw`
   // nothing is watched; off, an older server without the feed.
   const chg = { seq: null, ctl: null, watching: false, retryAt: 0, off: false }
 
-  // ---------- preferences ----------
   // Kept in localStorage, which can be missing or throw (private windows, blocked storage): every access is guarded
   // and the defaults apply.
   const PREFS_KEY = 'sideby.panel.v2'
@@ -357,7 +356,6 @@ const MAIN = String.raw`
       }
     // The categories of the side list, in the order the user dragged them to.
     p.histCatOrder = Array.isArray(raw.histCatOrder) ? raw.histCatOrder.filter((c) => typeof c === 'string' && c).slice(0, HIST_FOLD_MAX) : []
-    // The categories folded in the side list.
     p.histCatFold = {}
     if (raw.histCatFold && typeof raw.histCatFold === 'object')
       for (const k of Object.keys(raw.histCatFold).filter((k) => raw.histCatFold[k] === true).slice(0, HIST_FOLD_MAX)) p.histCatFold[k] = true
@@ -377,7 +375,6 @@ const MAIN = String.raw`
   function viewPrefs() { return panelPrefs(cfgPanel, { theme: prefs.theme, lang: prefs.lang }, CFG) }
   let lang = panelLang(BOOT.lang, viewPrefs().language, navigator.language)
 
-  // ---------- text ----------
   function t(key, vars) {
     const table = MESSAGES[lang] || {}
     let s = Object.hasOwn(table, key) ? table[key] : Object.hasOwn(MESSAGES.en, key) ? MESSAGES.en[key] : key
@@ -572,7 +569,6 @@ const MAIN = String.raw`
     return out
   }
 
-  // ---------- updating in place ----------
   // A refresh rebuilds the markup, then keeps every existing element whose markup did not change, so focus, hover,
   // text selection and scroll stay put and only changed rows are swapped. Children match by data-key, else by
   // position; a data-patch container that changed is updated child by child instead of being replaced. Rows carry
@@ -747,7 +743,6 @@ const MAIN = String.raw`
     return svg
   }
 
-  // ---------- server calls ----------
   // The token is per server process: after sideby ui restarts, the first write gets 403 "bad-token". The page then
   // fetches the new token from api/session and sends that same request once more; the server refused it before
   // running it, so the retry cannot apply anything twice. A request that got no answer is never replayed.
@@ -797,7 +792,6 @@ const MAIN = String.raw`
     }
   }
 
-  // ---------- connection ----------
   // A request that cannot reach the server shows a small notice and polls api/health, waiting 1 s and then up to 5 s
   // between tries. Once it answers, the page renews its token and reloads the state; writes are left for the user.
   const conn = { lost: false, timer: 0, delay: 1000 }
@@ -831,7 +825,6 @@ const MAIN = String.raw`
     $('conn').hidden = !conn.lost
   }
 
-  // ---------- toasts ----------
   // Bottom center, newest last, at most three. The same text again restarts its timer instead of stacking.
   // Hovering a toast pauses it, so an Undo stays reachable.
   const toasts = []
@@ -897,7 +890,6 @@ const MAIN = String.raw`
     setTimeout(done, 1000)
   }
 
-  // ---------- small parts ----------
   function ago(iso) {
     const ts = Date.parse(iso)
     if (!Number.isFinite(ts)) return ''
@@ -1062,7 +1054,6 @@ const MAIN = String.raw`
   document.addEventListener('pointerdown', hideDataTip, true)
   window.addEventListener('scroll', hideDataTip, true)
 
-  // ---------- floating panels: menus and popovers ----------
   // One shared base for everything that floats next to a button: it is placed under (or above) its anchor, kept
   // inside the window, closed by a click outside, Escape or a resize, and only one is open at a time. One taller than
   // the room it gets scrolls inside itself (menuPlacement), and that scroll never closes it; a scroll of the page
@@ -1422,7 +1413,6 @@ const MAIN = String.raw`
     return b
   }
 
-  // ---------- Doctor history ----------
   // Health comes from the Doctor history, which keeps the latest result per Account: an Account that was
   // never checked shows "Not checked", never "Healthy".
   function entries() {
@@ -1453,7 +1443,6 @@ const MAIN = String.raw`
   }
   function setupFor(fam) { return S.state && S.state.quotaSetups.find((s) => s.family === fam) }
 
-  // ---------- header and summary ----------
   function renderUpdated() {
     const busy = S.loading && !S.silent
     const every = Math.round((S.fastUntil > Date.now() ? FAST_MS : AUTO_MS) / 1000)
@@ -1608,7 +1597,6 @@ const MAIN = String.raw`
     return wins.map((w) => passedWindow(w, q.observedAt, now) ? t('stat.pickReset', { w: winShort(w.label) }) : t('stat.pickLeft', { w: winShort(w.label), n: String(Math.max(0, 100 - Math.round(Number(w.usedPercent) || 0))) })).join(' · ')
   }
 
-  // ---------- toolbar ----------
   const tb = {}
   function seg(label, options, value, onPick) {
     const btns = options.map((o) => h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(o[0] === value), title: o[2] || null, 'aria-label': o[2] || t('tb.segLabel', { group: label, option: o[1] }), onclick: () => {
@@ -1697,7 +1685,6 @@ const MAIN = String.raw`
     }
   })
 
-  // ---------- accounts ----------
   // One column per Quota window label. 5h and 7d always have one, so rows of every group line up under the same
   // header; a label only some account reports (such as 60m) adds a column, at most three in all.
   const KNOWN_WINDOWS = { '5h': 300, '7d': 10080 }
@@ -3422,7 +3409,6 @@ const MAIN = String.raw`
     setTimeout(() => el.classList.remove('flash'), 2600)
   }
 
-  // ---------- Health check ----------
   async function runCheck() {
     if (S.checking || S.fixing) return
     S.checking = true
@@ -3579,7 +3565,6 @@ const MAIN = String.raw`
       extra ? h('span', { class: 'note-sub' }, extra) : null)
   }
 
-  // ---------- dialogs ----------
   const dlg = { el: null, kind: null, busy: false, onClose: null }
   function ensureDialog() {
     if (dlg.el) return dlg.el
@@ -4945,7 +4930,6 @@ const MAIN = String.raw`
     renderHistorySide()
     historyChanged(false)
   }
-  // ---------- grouping the list ----------
   // A "Display" popover by the filters picks how the list is grouped; a group folds from its header and stays
   // folded in this browser. The server pages through the groups in order and counts folded ones without their rows.
   function groupName(by) {
@@ -5270,7 +5254,6 @@ const MAIN = String.raw`
     Promise.resolve(loadHistory(false, d.sessions.length, true)).then(loadProjects)
   }
 
-  // ---------- reading one past session ----------
   // Read only. The newest 200 messages first, older ones on request; a run of tool calls is one line. The dialog
   // opens once the messages are in, at its final size, scrolled to the end.
   const hv = { data: null, open: {}, loading: false }
@@ -5929,7 +5912,6 @@ const MAIN = String.raw`
     load()
   }
 
-  // ---------- auto handoff ----------
   // Settings come with /api/state; readiness (which runs a check of the sideby on PATH) only when the dialog opens.
   let ah = null
   const HINT_QUIET_MS = 24 * 3600000
@@ -6252,7 +6234,6 @@ const MAIN = String.raw`
     setKids(dlg.el, dialogFrame(t('md.title') + ' · ' + a.ref, a.family, body, foot))
   }
 
-  // ---------- the Auto Handoff page ----------
   // Off: one sentence and one button. On: where each account's work would go next, the last hand-overs and what is
   // still missing. Turning on is one plan shown first (hp.preview) and one confirmation; no commands to copy.
   const hp = { data: null, plan: null, loading: false, error: null, preview: null, previewing: false, applying: false, failed: null, changed: false, busyOff: false, askSame: false, askApi: false }
@@ -6451,7 +6432,8 @@ const MAIN = String.raw`
     const st = ahState().settings
     return st.sameFamily && st.otherFamilies ? null : h('p', { class: 'note', 'data-enter': 'none-hint' }, t('hp.noneAll'))
   }
-  // Up to ADR-0046 API accounts took over by themselves; this asks once, where Auto Handoff is on.
+  // A user who turned Auto Handoff on before API accounts needed their own switch has not chosen yet (ADR-0046);
+  // this asks once, and either answer ends the question.
   function hpApiBanner() {
     const st = ahState()
     if (!st || !st.apiUndecided || BOOT.readOnly) return null
@@ -6564,7 +6546,6 @@ const MAIN = String.raw`
     renderPageChrome()
   }
 
-  // ---------- words ----------
   // A moment relative to now: "08:00" today, else "tomorrow 08:00", "Mon 08:00" or "Nov 3 08:00".
   function uaDayWord(ms, now) {
     const w = uaWhen(ms, now)
@@ -6603,7 +6584,6 @@ const MAIN = String.raw`
     return [t('ua.off'), p.next ? uaAt('next', p.next.at) : null]
   }
 
-  // ---------- the header badge ----------
   // "Unattended · until 08:00" while it is on, to the page in one click. It fades in and out; a refresh with the same
   // words leaves it alone.
   function renderUaBadge() {
@@ -6635,7 +6615,6 @@ const MAIN = String.raw`
     }
   }
 
-  // ---------- motion ----------
   // Like patch, and a [data-ua] part that was not there grows in while one that went away shrinks out where it was.
   // A first draw animates nothing; reduced motion only switches.
   function uaPatch(box, kids) {
@@ -6684,7 +6663,6 @@ const MAIN = String.raw`
     a.finished.then(end, end)
   }
 
-  // ---------- turning it on and off ----------
   function uaOpenChooser() {
     const st = uaStatusNow()
     if (!st) return
@@ -6760,7 +6738,6 @@ const MAIN = String.raw`
     uaRedraw()
   }
 
-  // ---------- the Schedule ----------
   // Each row keeps an id while the page shows it, so a removed Slot is the row that leaves and an edited one stays the
   // same element (focus stays in its time field). A Schedule changed elsewhere matches rows by what they cover.
   function uaSchedule() {
@@ -6899,7 +6876,6 @@ const MAIN = String.raw`
     return out
   }
 
-  // ---------- Pending Decisions ----------
   function uaWhenShort(iso) {
     const ms = Date.parse(iso)
     const now = Date.now()
@@ -7127,7 +7103,6 @@ const MAIN = String.raw`
       })))]
   }
 
-  // ---------- the page ----------
   function uaCoverage(st) {
     const have = new Set(S.state.accounts.map((a) => a.family))
     const lines = [h('li', null, t('ua.coverLine'))]
@@ -7474,9 +7449,8 @@ const MAIN = String.raw`
     return out
   }
   function famTitleOf(fam) { const f = S.state && S.state.families.find((x) => x.id === fam); return f ? f.title : fam }
-  // ---------- settings ----------
-  // One header button holds what is set once and rarely changed: language, theme, Remote Control and Auto Handoff.
-  // A dot on it says Remote Control starts by itself, so that state stays visible after its banner is gone.
+  // One header button opens the settings; settingsSections() lists the sections that have something to show
+  // right now, and the button hides when none do. A dot on it says Remote Control starts by itself, so that state stays visible after its banner is gone.
   function settingsSections() {
     const out = []
     if (!LANG_FIXED) out.push('lang')
@@ -7540,7 +7514,7 @@ const MAIN = String.raw`
     return setLink(leave, t('ai.title'), t(skillInstalled() ? 'ai.installed' : 'ai.notInstalled'), skillInstalled() ? 'chip-ok' : '', () => openAsk(), true)
   }
   // The dialog's sections, in order: General, Menu bar, Accounts, Quota checks, Auto Handoff, Progress updates,
-  // Network check, Let AI help. Each is
+  // Folder trust, Shared memory, Network check, Let AI help. Each is
   // { id, title, items, foot }: foot is the one line that explains the whole section.
   function settingsGroups(leave) {
     const secs = settingsSections()
@@ -9613,7 +9587,6 @@ const MAIN = String.raw`
     return h('button', { class: 'link-btn small', type: 'button', 'aria-label': full, 'data-tip': full, onclick: () => openPick(fam) }, offer.name ? t('pk.offerShort', { name: offer.name }) : t('pk.offerNoNameShort'))
   }
 
-  // ---------- banners ----------
   // Offered once on macOS (spec §3.31), when quota shows and the menu bar item is off; "No thanks" is for good.
   function menubarHint() {
     if (BOOT.readOnly || prefs.mbHintDone) return null
@@ -9702,7 +9675,6 @@ const MAIN = String.raw`
     exb.el = el
   }
 
-  // ---------- loading ----------
   function renderAll() { renderTop(); renderBanners(); renderSummary(); renderFamilyFilter(); renderAccounts(); renderCheckup(); renderPageChrome() }
   // A load that starts while another runs is queued, never dropped, so a change made meanwhile (a new
   // account, a fix) always ends up on screen; and only the newest response is ever rendered. A silent load is a
@@ -10216,7 +10188,6 @@ const MAIN = String.raw`
     setKids(dlg.el, dialogFrame(t('upd.title'), null, body, foot))
   }
 
-  // ---------- start ----------
   $('ver').textContent = BOOT.version ? 'sideby v' + BOOT.version : 'sideby'
   $('ver').disabled = !BOOT.updates
   $('ver').addEventListener('click', () => openVerPop($('ver')))

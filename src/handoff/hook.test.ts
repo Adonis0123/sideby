@@ -647,7 +647,7 @@ describe('handoff hook with Progress Reminders', () => {
       assert.equal((await readJsonFile<ReadyFile>(join(dir, FILES.ready)))?.trigger, 'threshold')
     })
     await withFakeHome(async (h) => {
-      // Without a reminder, IdleWatch's own wake-up turn hands over at its Stop as before.
+      // Without a reminder, IdleWatch's own wake-up turn hands over at its own Stop.
       await progressOn(h)
       const { env, dir } = await setup(h)
       await pressure(env, 96)

@@ -1882,7 +1882,6 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   // Session History loads node:sqlite only when the page first asks for it.
   let historyMod: Promise<HistoryModule> | undefined
   const history = () => (historyMod ??= import('../core/history.ts'))
-  // Which Sessions run now, for the "running" mark of History rows: read at most every 5 s, given 3 s.
   const LIVE_FIRST_MS = 300
   // How long the page state waits for the first list of running sessions before it leaves the Next pick out.
   const LIVE_STATE_MS = 3_000
@@ -1890,8 +1889,9 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   // Account whose files cannot be read does not make it incomplete, or one broken folder would hide every Next pick.
   type LiveScan = { ids: Set<string>; complete: boolean }
   let liveMark: { at: number; ids: Promise<LiveScan>; last?: LiveScan } | undefined
-  // Which past Sessions run now. A search never waits for that list once one is known: it answers with the last
-  // one while a fresh one is read, and waits at most LIVE_FIRST_MS for the very first.
+  // Which Sessions run now, for the "running" mark of History rows: read at most every 5 s, given 3 s. A search
+  // never waits for that list once one is known: it answers with the last one while a fresh one is read, and waits
+  // at most LIVE_FIRST_MS for the very first.
   const liveRead = (rt: Runtime) => {
     if (!liveMark || Date.now() - liveMark.at > 5_000) {
       const ids = (
@@ -2052,8 +2052,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
       throw new HttpError(400, 'the fixed network diagnosis requires networkDiagnose facts')
   }
   const routes: Record<string, Route> = {
-    // AI Tasks (spec §3.28, ADR-0027). The prompt and the account it would use, read only: for the confirm area,
-    // the copy fallback and the read-only Panel.
+    // AI Tasks (spec §3.28, ADR-0027).
     // Frees a staged upload the person removed from the dialog, so it stops counting toward the staging limit.
     '/api/ask/attach/remove': {
       async run(body) {
@@ -2064,6 +2063,8 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return { removed: await removeStaged(rt.paths, ids as string[]) }
       },
     },
+    // The prompt and the account it would use, read only: for the confirm area, the copy fallback and the read-only
+    // Panel.
     '/api/ask/prompt': {
       writes: () => false,
       queued: false,
@@ -2714,10 +2715,6 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return { switched: true }
       },
     },
-    // "Send to it" (spec §3.32 step 2): text and the screenshots staged through SEND_ATTACH_ROUTE go to one Live
-    // Session through sendMessage, which keeps the Message as a file before any delivery. The page sends only the
-    // Session id. It writes files, so a read-only Panel refuses it (writes defaults to true); it runs beside the
-    // write queue because a delivery may wait on the Host.
     // Opens the Run Board of a Session (spec §3.32 step 2b, ADR-0041). The page sends only the Session id: the board
     // file is found again here, from the Session Index, and checked again. It starts a program, so a read-only Panel
     // refuses it (writes defaults to true).
@@ -2731,6 +2728,10 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return { opened: true, board: tildify(r.board, rt.paths.home) }
       },
     },
+    // "Send to it" (spec §3.32 step 2): text and the screenshots staged through SEND_ATTACH_ROUTE go to one Live
+    // Session through sendMessage, which keeps the Message as a file before any delivery. The page sends only the
+    // Session id. It writes files, so a read-only Panel refuses it (writes defaults to true); it runs beside the
+    // write queue because a delivery may wait on the Host.
     '/api/sessions/send': {
       queued: false,
       async run(body) {

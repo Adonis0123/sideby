@@ -274,7 +274,7 @@ export function withoutArgs(args: readonly string[], drop: readonly string[]): s
 
 /**
  * Where one Account is checked, or why not: an API Account (`api`), or an endpoint set to a third party.
- * `at-launch` is no longer given (API Accounts were once checked at Launch); it stays in the type for readers.
+ * `at-launch` is never given (API Accounts are not checked, ADR-0079); it stays in the type for `--json` readers.
  */
 export interface NetworkAccountRow {
   ref: string

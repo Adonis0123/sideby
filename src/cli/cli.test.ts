@@ -1726,7 +1726,7 @@ describe('setup by an agent (spec §3.16)', () => {
       assert.equal(enable.featureId, 'action.handoff-on')
       assert.equal(enable.panel, 'Auto Handoff page')
 
-      // Words still search the Search Catalog, with the same output as before.
+      // Words search the Search Catalog instead of listing the commands.
       const found = await sideby(h, ['commands', 'language', '--json'])
       assert.equal(found.code, 0)
       const hits = checkSchema('commands', found.out) as { results: { id: string }[] }
@@ -3037,7 +3037,8 @@ describe('Panel CLI parity', () => {
       ])
       assert.doesNotMatch(enabled.out, /must not be returned/)
 
-      // The Handoff Rules (ADR-0046): every rule with the settings that change it, and the new switches.
+      // The Handoff Rules (ADR-0046): every rule with the settings that change it, and the `handoff enable` switches
+      // (`--other-ai`, `--ai-order`, `--api`).
       const rules = await sideby(h, ['handoff', 'rules', '--json'])
       assert.equal(rules.code, 0, rules.out)
       const view = checkSchema('handoff-rules', rules.out) as {

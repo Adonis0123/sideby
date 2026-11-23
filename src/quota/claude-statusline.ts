@@ -152,7 +152,7 @@ async function analyze(ctx: ReadContext): Promise<Analysis> {
 /**
  * Adds `refreshInterval` to a status line sideby wrapped earlier (ADR-0056). The backup's wrapped hash follows the new
  * bytes only while it named the file as it was, so teardown still restores the original; otherwise it stays as it is
- * and teardown refuses as before.
+ * and teardown still refuses.
  */
 async function applyUpgrade(ctx: ReadContext, a: Required<Analysis>, mode: number): Promise<QuotaSetupPlan> {
   const { upgrade: _, ...plan } = a.plan

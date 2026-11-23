@@ -21,8 +21,8 @@ import { listJsonl } from './usage.ts'
 const DAY_MS = 86_400_000
 const SETTINGS_MAX_BYTES = 1_000_000
 
-/** Context window of a model, from the table or the records: a context that grew past 200K is a 1M window. */
 export const isKnownClaudeModel = (id: string) => id.startsWith('claude-')
+/** Context window of a model, from the table or the records: a context that grew past 200K is a 1M window. */
 const windowOf = (maxCtx: number) => (maxCtx > 200_000 ? 1_000_000 : 200_000)
 
 /**

@@ -60,8 +60,6 @@ export const NO_THEME = 'default'
 const reserved = (id: string) => Boolean(builtin(id)) || id === NO_THEME
 const DEFAULT = builtin(DEFAULT_THEME_ID) as BuiltinTheme
 
-// ---- Reading and checking a Theme File
-
 /** Checks parsed JSON as a Theme File. Problems make it unusable; warnings are keys that were ignored. */
 export function checkThemeData(data: unknown): { theme?: ThemeFile; problems: string[]; warnings: string[] } {
   const problems: string[] = []
@@ -136,8 +134,6 @@ export async function readThemeFile(
   }
 }
 
-// ---- Listing
-
 export async function listThemes(paths: Paths): Promise<ThemeEntry[]> {
   const out: ThemeEntry[] = BUILTIN_THEMES.map((t) => ({
     id: t.id,
@@ -188,8 +184,6 @@ export async function listThemes(paths: Paths): Promise<ThemeEntry[]> {
 const swatchesOf = (l: PanelThemeTokens, d: PanelThemeTokens) =>
   [l.bg, l.accentSoft, l.primary, d.bg].filter((c): c is string => typeof c === 'string')
 
-// ---- Resolving a Theme to tokens
-
 /** A Theme File's colors before the contrast check: base, then accent roles, then the file's own tokens. */
 export function themeColors(theme: ThemeFile): { light: PanelThemeTokens; dark: PanelThemeTokens } {
   const base = builtin(theme.base ?? DEFAULT_THEME_ID) as BuiltinTheme
@@ -231,8 +225,6 @@ function adjust(id: string, c: { light: PanelThemeTokens; dark: PanelThemeTokens
     }
   return { id, light, dark, adjusted }
 }
-
-// ---- Accent roles from one color
 
 // Lightness and chroma of the maintainer's leaf scales, step 1 to 12; step 9 becomes the accent itself.
 const SCALE_LIGHT: [number, number][] = [
@@ -326,8 +318,6 @@ export function accentTokens(hex: string): { light: PanelThemeTokens; dark: Pane
   }
 }
 
-// ---- Contrast
-
 export interface ContrastPair {
   mode: 'light' | 'dark'
   fg: keyof PanelThemeTokens
@@ -385,8 +375,6 @@ function passing(fg: string, bg: string, min: number): string {
   return darker ? '#000000' : '#ffffff'
 }
 
-// ---- Switching
-
 /** Sets `panel.colorTheme`, keeping what it was so `undo` can put it back. */
 export async function useTheme(
   paths: Paths,
@@ -424,8 +412,6 @@ export async function undoTheme(paths: Paths): Promise<{ before: string; after: 
   await rm(undoFile(paths), { force: true })
   return { before: now, after: rec.before }
 }
-
-// ---- Files
 
 /** Writes a checked Theme File into the themes folder. */
 export async function saveThemeFile(paths: Paths, id: string, theme: ThemeFile): Promise<string> {
@@ -487,8 +473,6 @@ export async function previewColors(paths: Paths): Promise<ResolvedColors | unde
     return undefined
   }
 }
-
-// ---- OKLCH and WCAG contrast
 
 const lin = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
 const unlin = (c: number) => (c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055)

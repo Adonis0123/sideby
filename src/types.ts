@@ -357,8 +357,8 @@ export interface HandoffEligibility {
 export interface FamilyHandoff {
   /**
    * What this Family can start: `quota` before the limit (prepare and threshold, from its Quota), `limit` after a
-   * turn failed at the limit. Empty: it can only receive. Plugin Families can only receive for now: the hook entry
-   * loads built-in readers only.
+   * turn failed at the limit. Empty: it can only receive. Plugin Families can only receive: the hook entry loads
+   * built-in readers only.
    */
   starts: readonly ('quota' | 'limit')[]
   /** Host arguments that load sideby's hooks for one run; omitted when the hooks come from `hookSetup`. */

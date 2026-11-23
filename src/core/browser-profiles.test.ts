@@ -129,8 +129,6 @@ async function bin(h: FakeHome, rel: string, data: Buffer) {
   await writeFile(h.path(rel), data)
 }
 
-// --- fixtures ----------------------------------------------------------------------------------------------------
-
 const CHROME = 'Library/Application Support/Google/Chrome'
 const CLAUDE_MAIN = '11111111-2222-4333-8444-555555555555'
 const CLAUDE_WORK = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
@@ -267,8 +265,6 @@ async function refused(p: Promise<unknown>, code: string) {
     return true
   })
 }
-
-// --- tests -------------------------------------------------------------------------------------------------------
 
 describe('leveldb key names', () => {
   it('decompresses Snappy literals and copies', () => {

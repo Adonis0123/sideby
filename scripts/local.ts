@@ -54,13 +54,13 @@ async function buildIdOf(dir: string): Promise<string> {
   return `unknown-${randomBytes(3).toString('hex')}`
 }
 
-/** Moves the running build to `old/<id>` and `stage` into its place: two renames, never a half-written `pkg`. */
 /** What a published package holds besides `dist`: package.json and its `files`, read from it so the two never drift. */
 export async function copiedFiles(root = ROOT): Promise<string[]> {
   const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as { files?: string[] }
   return ['package.json', ...(pkg.files ?? []).filter((f) => f !== 'dist')]
 }
 
+/** Moves the running build to `old/<id>` and `stage` into its place: two renames, never a half-written `pkg`. */
 export async function switchIn(d: LocalDirs, stage: string): Promise<void> {
   const pkg = pkgDir(d)
   await mkdir(join(d.dev, 'old'), { recursive: true })

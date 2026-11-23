@@ -116,7 +116,7 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .ver-pill.has-update { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 .ver-pill.has-update::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .logo { display: inline-flex; flex: none; width: 40px; height: 40px; border-radius: var(--radius-xl); background: var(--logo-bg); box-shadow: inset 0 0 0 1px var(--logo-line); }
-/* The painted mark (core/brand-mark.ts), 3 px in from the tile's edge; desktop/icon.ts lays the app icon out the same way. */
+/* The painted mark (core/brand-mark.ts), 4 px in from the tile's edge; desktop/icon.ts insets the app icon by MARK_INSET (3 of 40 px) instead. */
 .logo img { display: block; width: 100%; height: 100%; padding: 4px; box-sizing: border-box; object-fit: contain; }
 .top-actions { display: flex; align-items: center; gap: 8px; }
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -169,7 +169,6 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .sk-pick { height: 24px; width: 45%; }
 .label-tip { display: inline-flex; align-items: center; gap: 8px; }
 
-/* Toolbar */
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
 .search { position: relative; flex: 1 1 160px; min-width: 120px; display: block; }
 .search-ic { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--faint); pointer-events: none; }
@@ -204,7 +203,6 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .acct-head h2 { display: flex; align-items: baseline; gap: 12px; }
 #acct-count { font-weight: 400; }
 
-/* Family groups */
 .group { margin-bottom: 16px; min-width: 0; }
 .group-list { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow); }
 .group-head { display: flex; align-items: center; gap: 12px; padding: 8px 12px 8px 8px; min-height: 48px; flex-wrap: wrap; }
@@ -442,7 +440,8 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .ctx-anchor { position: fixed; width: 0; height: 0; pointer-events: none; }
 .row-notes { grid-area: notes; display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 
-/* Quota meters: percent and countdown over a bar colored by level (ok, warn at 60%, fail at 85% used). */
+/* Quota meters: percent and countdown over a bar colored by level (core/quota-levels.ts: warn at 60%, fail at 85% used;
+   long windows warn at 85%, fail at 95%). */
 .quota { display: grid; grid-template-columns: repeat(var(--qr, var(--qn)), minmax(0, 1fr)); column-gap: var(--col-gap); row-gap: 4px; min-width: 0; }
 .row > .quota { grid-template-columns: repeat(var(--qn), var(--q-w)); }
 .meter { min-width: 0; }
@@ -502,7 +501,6 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 /* In the wide list the column titles name the windows; elsewhere each meter carries its label. */
 .rows .m-label, .rows .m-unit { display: none; }
 
-/* Chips and badges */
 .badge { flex: none; display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: var(--radius-xl); color: var(--on-badge); font-weight: 600; font-size: 12px; letter-spacing: .02em; }
 .badge-logo { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
 .badge svg { display: block; width: 20px; height: 20px; fill: currentColor; }
@@ -538,7 +536,6 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .dot-ok { background: var(--ok-bar); } .dot-fail { background: var(--fail-bar); } .dot-warn { background: var(--warn-bar); }
 .title-logo { display: flex; align-items: center; gap: 8px; min-width: 0; }
 
-/* Cards view */
 /* Cards in a row share one height, so their foot lines and buttons line up; the foot sits at the bottom. */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
 .panel, .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow); }
@@ -618,7 +615,6 @@ a.btn:hover { text-decoration: none; }
 .btn:focus-visible { border-color: var(--focus); }
 .note a, .banner a { color: inherit; text-decoration: underline; text-underline-offset: 2px; font-weight: 600; }
 
-/* Notes and banners */
 .note { background: var(--surface-2); border-radius: var(--radius-sm); padding: 8px 12px; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
 .note b { color: inherit; }
 .note-read .read-why { overflow-wrap: anywhere; }
@@ -755,7 +751,6 @@ a.btn:hover { text-decoration: none; }
 .copy { display: flex; align-items: center; gap: 8px; max-width: 100%; min-width: 0; }
 .copy code { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 4px 8px; overflow-x: auto; white-space: nowrap; color: var(--text); min-width: 0; }
 
-/* Health check */
 .diff { margin: 0; max-height: 260px; overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 0; font-family: var(--mono); font-size: 12px; line-height: 1.55; }
 .diff span { display: block; padding: 0 12px; white-space: pre; }
 .diff .add { background: var(--ok-soft); color: var(--ok); } .diff .del { background: var(--fail-soft); color: var(--fail); } .diff .hunk { color: var(--faint); }
@@ -775,7 +770,6 @@ a.btn:hover { text-decoration: none; }
 .fix-result.is-ok { background: var(--ok-soft); color: var(--ok); } .fix-result.is-warn { background: var(--warn-soft); color: var(--warn); }
 .fix-result ul { margin: 8px 0 0; padding-left: 20px; }
 
-/* Forms */
 .form { display: flex; flex-direction: column; gap: 16px; }
 .field { display: flex; flex-direction: column; gap: 8px; border: 0; padding: 0; margin: 0; min-width: 0; }
 /* A picker's wrapper (.select-wrap) is a span too, but no label: its button and menu keep their own type. */
@@ -898,7 +892,6 @@ ${UI_CSS}
 .steps li { min-width: 0; }
 .steps li > span:not(.copy) { display: block; margin-bottom: 4px; }
 
-/* Dialog */
 .dialog { padding: 0; border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--surface); color: var(--text); width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 48px); box-shadow: var(--float-shadow); }
 .dialog[open] { display: flex; }
 .dialog::backdrop { background: var(--scrim); }
@@ -911,7 +904,6 @@ ${UI_CSS}
 .dlg-body { padding: 12px 20px 16px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
 .dlg-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 var(--radius-xl) var(--radius-xl); }
 
-/* Menu, tooltips, toasts */
 .menu { position: fixed; z-index: 40; min-width: 230px; max-width: min(380px, calc(100vw - 16px)); padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--float-shadow); overflow-y: auto; overscroll-behavior: contain; }
 .menu-item { display: flex; align-items: center; gap: 12px; width: 100%; height: 32px; padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
 .menu-item .ic { flex: none; color: var(--muted); }
@@ -1028,7 +1020,6 @@ ${UI_CSS}
 @keyframes toast-bump { 50% { transform: scale(1.03); } }
 .conn { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 55; display: flex; align-items: center; gap: 8px; max-width: calc(100vw - 24px); padding: 8px 16px; border-radius: var(--radius-pill); background: var(--warn-soft); color: var(--warn); border: 1px solid var(--border); box-shadow: var(--float-shadow); font-size: 13px; font-weight: 600; }
 
-/* Empty, loading and filtered states */
 .empty { text-align: center; padding: 36px 20px; background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--radius-xl); display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .empty-sm { padding: 28px 20px; }
 /* The empty state is a block of its own, apart from what follows it (Grok Bot windows). */
@@ -1149,8 +1140,8 @@ ${UI_CSS}
   .dlg-head { padding: 16px 16px 4px; } .dlg-body { padding: 12px 16px 16px; } .dlg-foot { padding: 12px 16px; flex-wrap: wrap; }
 }
 /* A change of layout band runs as a short View Transition (page-script.ts followWidth): each block below moves and
-   resizes to its new place while its old and new look cross-fade; the rest of the page cross-fades as one. Same
-   length and ease as a Portal's sliding sidebar (.26s, quick start, soft landing), so both read as one move. */
+   resizes to its new place while its old and new look cross-fade; the rest of the page cross-fades as one. It runs
+   for --duration-slow with --ease-out (quick start, soft landing). */
 ::view-transition-group(*) { animation-duration: var(--duration-slow); animation-timing-function: var(--ease-out); }
 /* Old and new looks keep their own size (pinned top left) instead of stretching to the moving box, so text never
    grows or shrinks on the way. */

@@ -118,8 +118,10 @@ async function whileRunning<T>(rt: Runtime, fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Runs the Account with Auto Handoff when it applies (spec §3.17), else the Host as usual. */
-/** `opts.aiTask`: an AI Task's Host, started without permission bypasses (ADR-0031); `sideby run` leaves it out. */
+/**
+ * Runs the Account with Auto Handoff when it applies (spec §3.17), else the Host as usual. `opts.aiTask`: an AI Task's
+ * Host, started without permission bypasses (ADR-0031); `sideby run` leaves it out.
+ */
 async function runAccount(
   rt: Runtime,
   ref: string,
@@ -245,7 +247,6 @@ function displayOrdered(accounts: Account[], rt: Runtime): Account[] {
   )
 }
 
-/** Drop deleted accounts and unloaded Families only when saving a display change. */
 /**
  * Groups the Display Order may name (spec §3.25): every Family, and every desktop app with windows of its own (Grok
  * Bot, `grok-bot`), each with the names it holds.
@@ -264,6 +265,7 @@ async function orderGroups(rt: Runtime, accounts: Account[]): Promise<Map<string
   return out
 }
 
+/** Drop deleted accounts and unloaded Families only when saving a display change. */
 function cleanDisplay(rt: Runtime, groups: Map<string, string[]>): DisplayConfig {
   const d = rt.displayOrder()
   const clean = (lists: Record<string, string[]> | undefined) =>
@@ -4560,7 +4562,6 @@ export async function cmdHistory(a: ParsedArgs, io: Io): Promise<number> {
   return 0
 }
 
-/** The most Sessions one `sideby history` page lists. */
 const HISTORY_PAGE_MAX = 500
 
 /** What to try when a search lists nothing, by what the search was narrowed by. */
@@ -6130,10 +6131,6 @@ export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
   )
 }
 
-/**
- * `sideby commands <words>` (spec §3.36, ADR-0054): the Search Catalog the Panel's Command Palette searches, read-only.
- * Titles and places are in English, as every other command prints; the words may be English or Chinese.
- */
 /** One command of the Command List as `sideby commands --json` gives it (spec §3.38). */
 function commandOut(cmd: CliCommand) {
   const place = cmd.feature ? SEARCH_CATALOG.find((e) => e.id === cmd.feature) : undefined
@@ -6188,6 +6185,10 @@ function listCommands(a: ParsedArgs, io: Io): number {
   return 0
 }
 
+/**
+ * `sideby commands <words>` (spec §3.36, ADR-0054): the Search Catalog the Panel's Command Palette searches, read-only.
+ * Titles and places are in English, as every other command prints; the words may be English or Chinese.
+ */
 export function cmdCommands(a: ParsedArgs, io: Io): number {
   const query = a.positionals.join(' ').trim()
   if (!query) return listCommands(a, io)

@@ -685,10 +685,6 @@ export function panelHint(hint: string, fixable: boolean, action: string): strin
 }
 
 /**
- * Whether the Panel fixes Finding `f` with a button of its own: a sideby skill behind this version while the
- * Update plan says sideby may update it (`skillUpdatable`). Such Findings stay out of the prompt for an AI agent.
- */
-/**
  * A Local Build the Panel can leave for npm itself (ADR-0024): the global `sideby` still runs it and the Panel may
  * write. Then switching to the release is the update, offered as a button instead of the `pnpm local --off` command.
  */
@@ -824,6 +820,10 @@ export function findingSentence(
   return missing ? '' : out
 }
 
+/**
+ * Whether the Panel fixes Finding `f` with a button of its own: a sideby skill behind this version while the
+ * Update plan says sideby may update it (`skillUpdatable`). Such Findings stay out of the prompt for an AI agent.
+ */
 export function panelFixes(f: { code?: string }, skillUpdatable: boolean): boolean {
   return skillUpdatable && f.code === 'skill.outdated'
 }
@@ -2054,10 +2054,6 @@ export function panelMigration(
 }
 
 /**
- * The line under the start-at-login switch (spec §3.29) as a message key, whether it is on, whether the switch can
- * be moved, and the action beside it: `fix` turns it on again so it starts this sideby. Read-only: no switch, no action.
- */
-/**
  * A key press in the Panel's shortcut recorder as config `menubar.hotkey` writes it (`ctrl+opt+s`), or null while only
  * modifiers are held or the key is not a letter or digit. Reads `code`, not `key`: on a Mac ⌥S types "ß".
  */
@@ -2088,6 +2084,10 @@ export function hotkeyPressKind(code: string): 'key' | 'wait' | 'unsupported' {
   return 'unsupported'
 }
 
+/**
+ * The line under the start-at-login switch (spec §3.29) as a message key, whether it is on, whether the switch can
+ * be moved, and the action beside it: `fix` turns it on again so it starts this sideby. Read-only: no switch, no action.
+ */
 export function autostartNote(
   s: { supported: boolean; state: string; current: boolean; loaded?: boolean } | null,
   readOnly: boolean,
@@ -2219,7 +2219,6 @@ export function widthFollower<T>(
 
 // ---------- Session History (spec §3.33) ----------
 
-/** When a History row was last active: "x min ago" within a week, then its date (key `time.on`). */
 /**
  * Whether the end of a list is close enough to load its next page: within `margin` px of the bottom of what can be
  * seen, which is the viewport where the list's box grows with its rows (the page scrolls, not the box).
@@ -2228,6 +2227,7 @@ export function tailInView(tailTop: number, boxBottom: number, viewHeight: numbe
   return tailTop < Math.min(boxBottom, viewHeight) + margin
 }
 
+/** When a History row was last active: "x min ago" within a week, then its date (key `time.on`). */
 export function historyWhen(
   iso: string | undefined,
   now: number,

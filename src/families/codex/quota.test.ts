@@ -386,7 +386,7 @@ describe('Codex fetched quota', () => {
   })
 })
 
-// Limit Resets (ADR-0072): read from the answer sideby already asks for; batch 1 only reads and shows them.
+// Limit Resets (ADR-0072): read from the answer sideby already asks for.
 describe('Codex Limit Resets', () => {
   const AT = '2026-11-12T10:00:00.000Z'
   const CREDIT = 'credit-fake-0001'

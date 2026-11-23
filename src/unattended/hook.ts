@@ -351,7 +351,6 @@ const FILE_TOOLS: Readonly<Record<string, string>> = {
   NotebookEdit: 'notebook_path',
 }
 
-/** Words that run the next word as the command: the program is the word after them (and their options). */
 /** Programs that run another one, each with its options that take a value of their own (`sudo -u root`, `nice -n 10`). */
 const WRAPPERS: Record<string, readonly string[]> = {
   sudo: ['-u', '-g', '-C', '-h', '-p', '-U', '-r', '-t', '-T', '-D', '--user', '--group'],

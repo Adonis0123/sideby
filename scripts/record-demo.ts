@@ -162,7 +162,7 @@ await page('Emulation.setDeviceMetricsOverride', {
 })
 await page('Page.addScriptToEvaluateOnNewDocument', { source: QUIET_PANEL })
 await page('Page.navigate', { url: panelUrl })
-// Token usage moved behind a click (6ea716b); the 7-day quota of claude:work is what the scene zooms into.
+// Token usage sits behind a click, so the scene zooms into claude:work's 7-day quota instead.
 await until(panelLoaded(), 'the Panel to load quota')
 await new Promise((r) => setTimeout(r, 800))
 // Where the scene zooms and rings: the Claude Code group, work's 7-day window and the account marked Suggested

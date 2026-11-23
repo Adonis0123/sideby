@@ -120,7 +120,7 @@ const decisionName = (id: string) => sha256(id).slice(0, 32)
 
 /**
  * Keeps the decision for a prompt the Host made (`ok` or `blocked`, nothing of the prompt) where `Held` finds it, and
- * removes decisions nobody read. A failure changes nothing: `Held` then hands nothing over, as before it existed.
+ * removes decisions nobody read. A failure changes nothing: `Held` then finds no decision and hands nothing over.
  */
 async function keepDecision(dir: string, id: string, decision: Decision, now: number): Promise<void> {
   try {
