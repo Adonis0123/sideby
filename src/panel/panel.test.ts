@@ -439,13 +439,33 @@ describe('panel server', () => {
   it('serves the page and API, reuses a running panel, and shifts past a busy port', async () => {
     await withFakeHome(async (h) => {
       await seedDemoMain(h.write)
-      const blocker = createServer((_q, res) => res.end('busy'))
-      await new Promise<void>((r) => blocker.listen(0, '127.0.0.1', r))
-      const busyPort = (blocker.address() as AddressInfo).port
+      // The owner of the fake HOME, not of the real one every test process shares: a Panel another process started
+      // could otherwise answer on the next port as ours. busyPort + 1 is held until just before the Panel starts, so
+      // an embedded handler of a parallel test (its health names no owner, so it counts as ours) cannot sit there.
+      const owner = panelOwner(h.home)
+      let blocker: ReturnType<typeof createServer> | undefined
+      let busyPort = 0
+      for (let i = 0; i < 20 && !blocker; i++) {
+        const b = createServer((_q, res) => res.end('busy'))
+        await new Promise<void>((r) => b.listen(0, '127.0.0.1', r))
+        const p = (b.address() as AddressInfo).port
+        const next = createServer()
+        const held = await new Promise<boolean>((r) => {
+          next.once('error', () => r(false))
+          next.listen(p + 1, '127.0.0.1', () => r(true))
+        })
+        if (held) {
+          await close(next)
+          blocker = b
+          busyPort = p
+        } else await close(b)
+      }
+      assert.ok(blocker, 'found no free port pair')
       const logs: string[] = []
       const srv = await startPanelServer({
         runtimeFactory: factory(h),
         port: busyPort,
+        owner,
         log: (s) => logs.push(s),
       })
       try {
@@ -455,7 +475,7 @@ describe('panel server', () => {
         const page = await (await fetch(srv.url)).text()
         assert.match(page, /sideby/)
         const port = Number(new URL(srv.url).port)
-        const again = await startPanelServer({ runtimeFactory: factory(h), port, log: () => {} })
+        const again = await startPanelServer({ runtimeFactory: factory(h), port, owner, log: () => {} })
         assert.equal(again.reused, true)
         assert.equal(again.url, srv.url)
       } finally {
