@@ -59,7 +59,8 @@ async function main(argv: string[]): Promise<void> {
   if (problem) throw new Error(problem)
   step('npm', ['version', bump, '-m', '🔖 chore(release): v%s'])
   const version = (JSON.parse(git('show', 'HEAD:package.json')) as { version: string }).version
-  step('git', ['push', '--follow-tags', 'origin', 'main'])
+  // Only this release's tag: --follow-tags would also push any other annotated tag reachable from main.
+  step('git', ['push', '--atomic', 'origin', 'main', `refs/tags/v${version}`])
   if (!(await waitForRegistry(version)))
     throw new Error(
       `npm did not serve ${version} within ${WAIT_MS / 60_000} minutes; look at the Release workflow on GitHub, then run \`pnpm local --off\` once it is published`,

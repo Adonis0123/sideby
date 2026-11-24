@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Adonis0123/npm-release-guide/main/schemas/release.v1.schema.json",
+  "version": 1,
+  "publish": { "workflow": "release.yml", "environment": "npm" },
+  "versioning": {
+    "zeroMajor": "minor",
+    "preid": "beta",
+    "publicInterface": [
+      "src/index.ts",
+      "src/types.ts",
+      "src/runtime.ts",
+      "src/panel/handler.ts",
+      "src/panel/theme.ts",
+      "src/cli/**",
+      "testing/index.ts",
+      "schemas/**"
+    ]
+  }
+}

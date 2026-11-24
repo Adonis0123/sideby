@@ -3,3 +3,6 @@ dist/
 *.tgz
 .review-handoff/
 .DS_Store
+# `npx skills` links project skills here for OpenClaw because this folder exists; only skills/sideby ships.
+/skills/*
+!/skills/sideby/

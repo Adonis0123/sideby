@@ -1,0 +1,114 @@
+{
+  "skill_name": "npm-version-guide",
+  "evals": [
+    {
+      "id": 1,
+      "should_trigger": true,
+      "prompt": "我的包现在是 0.4.2，上次发版以后加了一个新参数，修了两个 bug。这次该升哪个版本？我不懂 semver，你帮我定，然后把版本号改好。",
+      "expected_output": "Runs scripts/suggest-version.mjs first, explains in one plain Chinese sentence that nothing breaks for users and that on 0.x a feature or fix gives a patch (0.4.3), says npm version will create a local commit and tag, asks one yes/no question (including saving .agents/release.json if it does not exist), and only after a yes reads the version hooks and runs npm version 0.4.3. Does not publish or push.",
+      "files": [],
+      "expectations": [
+        "The Agent ran scripts/suggest-version.mjs before choosing a level",
+        "The Agent did not ask the Publisher to classify each commit",
+        "The Agent proposed exactly 0.4.3 and explained it in one plain sentence",
+        "The Agent asked a single yes/no question that covered the version and, if proposed, the settings file",
+        "The Agent read preversion/version/postversion scripts before running npm version",
+        "The Agent did not run npm publish, git push or push a tag",
+        "The reply is in Chinese"
+      ]
+    },
+    {
+      "id": 2,
+      "should_trigger": true,
+      "prompt": "Which version should the next release of this package be? It's at 2.3.1. The script you ran said a commit called \"Update things\" needs review and someone removed the old `legacy` command from bin.",
+      "expected_output": "Runs the script, treats the removed bin command as a Breaking Change and answers 3.0.0. Reads only the needs_ai commit with git show. States the result in one sentence and may offer to set it with one yes/no question; changes nothing unless the Publisher says yes.",
+      "files": [],
+      "expectations": [
+        "The Agent treated the removed bin command as a Breaking Change",
+        "The Agent proposed exactly 3.0.0",
+        "The Agent inspected only the needs_ai commit, not every commit",
+        "The Agent ran no npm version without a yes, and asked at most one yes/no question",
+        "The Agent did not publish or push"
+      ]
+    },
+    {
+      "id": 3,
+      "should_trigger": true,
+      "prompt": "想先发一个 beta 给几个人试，正式版之前别让大家 npm install 装到。现在是 1.2.0，加了新功能。",
+      "expected_output": "Proposes the exact Pre-release 1.3.0-beta.0 from the script, explains it is only installed when asked for by name or Release Tag (published under next, so latest stays 1.2.0), asks yes or no, runs npm version 1.3.0-beta.0 after a yes, and does not publish.",
+      "files": [],
+      "expectations": [
+        "The Agent proposed the exact Pre-release 1.3.0-beta.0",
+        "The npm version command used that exact Pre-release version, not a plain minor",
+        "The Agent explained that plain installs keep getting latest and the beta goes under the next Release Tag",
+        "The Agent did not run npm publish itself",
+        "The reply is in Chinese"
+      ]
+    },
+    {
+      "id": 4,
+      "should_trigger": true,
+      "prompt": "I shipped 1.5.0 yesterday and it turns out it renamed an option, so it broke people. Should I unpublish it or change the version? What now?",
+      "expected_output": "Explains that a released version must not change and unpublishing is limited and permanent; recommends a new minor release (1.6.0) that restores the old option name, telling users which version is affected, and optionally deprecating 1.5.0 through npm-publish-guide or a handoff line. Does not run unpublish or deprecate itself.",
+      "files": [],
+      "expectations": [
+        "The Agent said a released version must not be modified",
+        "The Agent recommended a new minor version (1.6.0) that restores backward compatibility",
+        "The Agent did not run npm unpublish or npm deprecate in its own shell",
+        "Deprecation, if suggested, was routed to npm-publish-guide or a one-line handoff for the Publisher's own terminal"
+      ]
+    },
+    {
+      "id": 6,
+      "should_trigger": true,
+      "prompt": "帮我把版本号定好改好就行，今天先不发布。项目里两个 skill 都装了。",
+      "expected_output": "Runs the script, gets one yes on the exact version, runs npm version, then reports package name, exact version, release type and local state (commit and tag, nothing pushed) and stops. Does not load npm-publish-guide, push the tag or start a release.",
+      "files": [],
+      "expectations": [
+        "The Agent ran npm version only after one yes on the exact version",
+        "The final message lists package name, exact version, release type and local commit/tag state",
+        "The Agent did not push the commit or the tag",
+        "The Agent did not continue into npm-publish-guide's release steps",
+        "The reply is in Chinese"
+      ]
+    },
+    {
+      "id": 7,
+      "should_trigger": true,
+      "prompt": "Current version is 2.4.0 and we added a feature. I only want a beta for testers this week, not a real release. Set the version please.",
+      "expected_output": "Proposes 2.5.0-beta.0 (not 2.5.0), mentions it goes out under the next Release Tag so latest stays 2.4.0, asks yes or no, then runs npm version 2.5.0-beta.0.",
+      "files": [],
+      "expectations": [
+        "The Agent proposed 2.5.0-beta.0",
+        "The Agent never offered or set 2.5.0 as the version",
+        "The npm version command used the exact Pre-release version",
+        "The Agent did not publish or push"
+      ]
+    },
+    {
+      "id": 8,
+      "should_trigger": false,
+      "prompt": "npm install fails with ERESOLVE: could not resolve peer dependency react@18 for my app. Which version of react should I install?",
+      "expected_output": "The skill does not trigger. The Agent troubleshoots the dependency conflict in the user's app without suggesting a Version Bump of any package.",
+      "files": [],
+      "expectations": [
+        "The npm-version-guide skill was not loaded",
+        "No npm version command was proposed"
+      ]
+    },
+    {
+      "id": 9,
+      "should_trigger": true,
+      "prompt": "帮我把版本号改好准备发版。上次发版的提交是“🔖 chore(release): v1.4.0”，这次只修了一个 bug。package.json 里没有 release 脚本。",
+      "expected_output": "Runs scripts/suggest-version.mjs, sees release_script none and release_commit_format '🔖 chore(release): v%s', proposes exactly 1.4.1 in one Chinese yes/no question, and after a yes runs npm version 1.4.1 -m \"🔖 chore(release): v%s\". Does not push or publish.",
+      "files": [],
+      "expectations": [
+        "The Agent ran scripts/suggest-version.mjs before choosing a level",
+        "The Agent proposed exactly 1.4.1",
+        "The npm version command used the message '🔖 chore(release): v%s', not a different format",
+        "The Agent did not push or publish",
+        "The reply is in Chinese"
+      ]
+    }
+  ]
+}

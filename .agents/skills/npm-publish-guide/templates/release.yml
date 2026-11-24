@@ -1,0 +1,124 @@
+# Publishes the package to npm through Trusted Publishing when a version tag (v1.2.3) is pushed.
+# Copy to .github/workflows/release.yml. Keep the file name: npm matches it exactly (case-sensitive),
+# and it must equal the --file value given to `npm trust github` (F-12).
+# No npm token is used anywhere; GitHub proves who is publishing (F-11).
+#
+# Lines marked "PACKAGE MANAGER" are the only ones to change. The default is npm.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Must equal the --env value given to `npm trust github`. The GitHub environment "npm"
+    # should allow only tags matching v* (rule type "tag", not "branch").
+    environment: npm
+    # Monorepo: when the package is in a subfolder (for example packages/foo), uncomment these two
+    # lines so every "run" step works there. The workflow file itself stays at the repository root.
+    # defaults:
+    #   run:
+    #     working-directory: packages/foo
+    permissions:
+      contents: read
+      id-token: write # Trusted Publishing needs this (F-11)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # PACKAGE MANAGER: pnpm only. Uncomment the next line. Without a "version:" input it needs
+      # "packageManager": "pnpm@<version>" in package.json.
+      # - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24 # Trusted Publishing needs Node 22.14.0 or later (F-02)
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      # PACKAGE MANAGER: bun only. Add a step here that installs bun (for example oven-sh/setup-bun, pinned to a commit SHA).
+
+      - name: Use npm 11.5.1 or later (needed for Trusted Publishing, F-02)
+        run: |
+          npm install -g npm@11.21.0 # pinned: this job can publish; bump deliberately
+          npm -v
+          node -e '
+            const v = process.argv[1]
+            const [a, b, c] = v.split(".").map(Number)
+            if (!(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))))) {
+              console.error("::error::npm " + v + " is older than 11.5.1; Trusted Publishing needs 11.5.1 or later.")
+              process.exit(1)
+            }
+          ' "$(npm -v)"
+
+      # PACKAGE MANAGER: pick the install line that matches the lockfile in the repository.
+      #   npm  (package-lock.json): npm ci --ignore-scripts
+      #   pnpm (pnpm-lock.yaml):    pnpm install --frozen-lockfile --ignore-scripts
+      #   yarn (yarn.lock):         yarn install --immutable   (Yarn 1: yarn install --frozen-lockfile --ignore-scripts)
+      #   bun  (bun.lock):          bun install --frozen-lockfile --ignore-scripts
+      #   no lockfile:              npm install --ignore-scripts
+      # --ignore-scripts keeps dependency install scripts away from a job that can publish.
+      # Remove it only if the build fails because a dependency needs its install script.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Tag matches package.json version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          expected="v$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$expected" ]; then
+            echo "::error::Tag $TAG does not match package.json ($expected). Delete this tag, then release again with npm version."
+            exit 1
+          fi
+
+      # PACKAGE MANAGER: with pnpm/yarn/bun, "npm run" still works here; it runs the package.json script.
+      - name: Build (skipped when package.json has no build script)
+        run: npm run build --if-present
+
+      # Turn on when package.json has a real "test" script (the npm init placeholder always fails).
+      # - name: Test
+      #   run: npm run test --if-present
+
+      # E404 means this version is not on npm yet (F-71); any other failure stops the job,
+      # so a network or registry problem never looks like "not published".
+      - name: Skip if this version is already on npm
+        id: npm
+        run: |
+          spec="$(node -p "const p = require('./package.json'); p.name + '@' + p.version")"
+          if out="$(npm view "$spec" version 2>"$RUNNER_TEMP/npm-view.err")"; then
+            if [ -n "$out" ]; then
+              echo "::notice::$spec is already on npm; skipping npm publish."
+              echo "published=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "published=false" >> "$GITHUB_OUTPUT"
+            fi
+          elif grep -q E404 "$RUNNER_TEMP/npm-view.err"; then
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          else
+            cat "$RUNNER_TEMP/npm-view.err"
+            echo "::error::Could not check whether $spec is on npm (see above)."
+            exit 1
+          fi
+
+      # Always npm publish, whatever the package manager: Trusted Publishing is an npm CLI feature (F-02),
+      # and bun cannot add Provenance (F-59). Provenance is added automatically for a public repository
+      # and a public package (F-14).
+      # A pre-release version (1.2.0-beta.1) needs an explicit dist-tag (F-53); it goes out under the dist-tag "next".
+      - name: Publish to npm
+        if: steps.npm.outputs.published == 'false'
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          case "$version" in
+            *-*) npm publish --access public --tag next ;;
+            *) npm publish --access public ;;
+          esac

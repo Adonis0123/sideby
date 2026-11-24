@@ -145,7 +145,8 @@ Follow `docs/agents/adding-a-family.md`.
 
 - Commit messages: emoji + Conventional Commits, for example `✨ feat(codex): read quota from rollout files`. `changelogithub` builds release notes from them.
 - Never run `npm publish` by hand. The only exception is the one-time first publish described in `docs/release.md`.
-- Releases go through tags only, with `pnpm release <patch|minor>` (`scripts/release.ts`): it runs `npm version <patch|minor> -m "🔖 chore(release): v%s"` and `git push --follow-tags`, waits until the registry serves the version, then runs `pnpm local --off` when a Local Build was live, so the maintainer is back on the published package. `.github/workflows/release.yml` publishes with npm trusted publishing and provenance. Wait for CI on `main` to be green before releasing; a release run that fails on a test publishes nothing.
+- Releases go through tags only, with `pnpm release <patch|minor>` (`scripts/release.ts`): it runs `npm version <patch|minor> -m "🔖 chore(release): v%s"` and `git push --atomic origin main refs/tags/v<version>` (only this release's tag), waits until the registry serves the version, then runs `pnpm local --off` when a Local Build was live, so the maintainer is back on the published package. `.github/workflows/release.yml` publishes with npm trusted publishing and provenance. Wait for CI on `main` to be green before releasing; a release run that fails on a test publishes nothing.
 - Never add a long-lived npm token, never use `pull_request_target`, and keep every action pinned to a full commit SHA with the version in a trailing comment.
 - Roll back with `npm deprecate`, never `npm unpublish`.
+- The npm-version-guide skill (`.agents/skills/`, settings in `.agents/release.json`) may suggest the level; the release itself still goes through `pnpm release`, never the skill's own `npm version` and push steps.
 - Do not push, tag or create releases unless the maintainer asks.

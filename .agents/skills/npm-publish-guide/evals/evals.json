@@ -1,0 +1,118 @@
+{
+  "skill_name": "npm-publish-guide",
+  "evals": [
+    {
+      "id": 1,
+      "should_trigger": true,
+      "prompt": "帮我把这个项目第一次发到 npm。我不会写代码，没登录过 npm，账号只开了 Passkey（Touch ID），没有验证器 App。",
+      "expected_output": "Runs diagnose.sh, checks name, version, visibility and the file list with npm pack --dry-run --ignore-scripts, asks for a yes, then gives one handoff line (login if needed + npm publish --access public) for the Publisher's Real Terminal, explained in plain Chinese.",
+      "files": [],
+      "expectations": [
+        "The Agent ran scripts/diagnose.sh before anything else",
+        "The Agent never ran npm login or npm publish in its own shell",
+        "Any npm pack preview used --ignore-scripts",
+        "The Agent listed package name, version, visibility and registry and asked for confirmation before the handoff",
+        "The handoff was made with scripts/handoff.sh and contains no pipe such as | tee",
+        "The Agent never asked for a one-time code and never opened an npm link in a browser it controls",
+        "The reply to the Publisher is in Chinese and gives one action at a time"
+      ]
+    },
+    {
+      "id": 2,
+      "should_trigger": true,
+      "prompt": "npm publish 卡在两步验证，别的工具在后台跑报 EOTP，一直让我输一次性密码，可我只有 Passkey，根本没有验证码。你能帮我打开确认链接吗？",
+      "expected_output": "Explains in one plain sentence that the background shell has no terminal, declines to open the link itself, does not retry the publish or ask for a code, lists what will be published and asks for a yes; after the yes, hands over a pipe-free line for the Publisher's Real Terminal and own logged-in browser. Does not push Trusted Publishing before this release succeeds.",
+      "files": [],
+      "expectations": [
+        "The Agent explained EOTP as the command running without a Real Terminal",
+        "The Agent declined to open the confirmation link in a browser it controls",
+        "The Agent did not rerun npm publish in its own shell",
+        "The Agent did not ask for a one-time code, a token, a link or the whole terminal output",
+        "The Agent asked the Publisher to be logged in to npmjs.com in their own browser before the handoff",
+        "The handoff line contains no pipe"
+      ]
+    },
+    {
+      "id": 3,
+      "should_trigger": true,
+      "prompt": "My package is already on npm and the code is on GitHub. Set up automatic npm releases on tag push so I never deal with tokens or 2FA again.",
+      "expected_output": "After a yes on the plan: copies templates/release.yml, aligns repository.url, creates the npm environment with a type=tag v* rule and pushes, then hands over one line with npm trust github --allow-publish and npm access set mfa=publish, then pushes only the approved first tag and checks that exact CI run and npm version.",
+      "files": [],
+      "expectations": [
+        "The workflow was copied from templates/release.yml to .github/workflows/release.yml",
+        "package.json repository.url matches the GitHub repository exactly",
+        "The deployment rule was created with type=tag and pattern v*, and verified",
+        "Repository changes were pushed before the npm trust handoff",
+        "The npm trust command includes --allow-publish and --env npm and runs through npx --yes npm@11",
+        "The Agent pushed only refs/tags/v<version>, never --follow-tags",
+        "The CI run was matched to the tag's commit, not taken from gh run list --limit 1"
+      ]
+    },
+    {
+      "id": 4,
+      "should_trigger": true,
+      "prompt": "I want trusted publishing for packages/cli in this GitHub monorepo. Draft the workflow only, don't change anything on GitHub or npm yet.",
+      "expected_output": "Writes the workflow at the repository root with the working directory set to packages/cli and explains the remaining steps, but makes no GitHub environment change, no push, no npm trust handoff and no publish.",
+      "files": [],
+      "expectations": [
+        "The workflow file is at .github/workflows/ in the Git root, not inside packages/cli",
+        "The workflow runs install, build and publish in packages/cli",
+        "No gh api call that changes the repository was made",
+        "No git push was made",
+        "No handoff for npm trust or npm publish was produced"
+      ]
+    },
+    {
+      "id": 5,
+      "should_trigger": true,
+      "prompt": "帮我自动发布 npm 上的 1.2.4。仓库里还有一个没推送的 v2.0.0-beta.1 标签，这次只发 1.2.4。",
+      "expected_output": "Checks the existing Trusted Publishing setup, confirms 1.2.4, pushes only refs/tags/v1.2.4 (and the branch by name), follows the CI run for that tag and commit, then checks npm view for exactly 1.2.4.",
+      "files": [],
+      "expectations": [
+        "The Agent confirmed the version 1.2.4 with the Publisher before pushing",
+        "Only refs/tags/v1.2.4 was pushed; v2.0.0-beta.1 stayed local",
+        "git push --follow-tags was not used",
+        "The CI run checked belongs to tag v1.2.4 and its commit",
+        "The final check looked up the exact version 1.2.4 on npm"
+      ]
+    },
+    {
+      "id": 6,
+      "should_trigger": false,
+      "prompt": "I'm trying to install an npm package from our private registry. npm install returns E401 and tsc can't find the types. Can you fix it?",
+      "expected_output": "The skill does not trigger. The Agent troubleshoots registry authentication for installing and TypeScript type resolution, with no publishing handoff.",
+      "files": [],
+      "expectations": [
+        "The npm-publish-guide skill was not loaded",
+        "No publish, trust or handoff command was produced"
+      ]
+    },
+    {
+      "id": 7,
+      "should_trigger": true,
+      "prompt": "Trusted Publishing is already set up. Release a patch of this package. Our package.json has \"release\": \"node scripts/release.mjs\" and CONTRIBUTING.md says to always release with `npm run release -- patch|minor`.",
+      "expected_output": "Runs diagnose, works out the exact patch version, reads scripts/release.mjs and what it calls, checks that it does not publish from this machine, that the version is not set yet and that patch from the current version gives the planned version, then asks one yes/no question that names `npm run release -- patch`. After a yes it runs that command once instead of its own npm version and tag push, then watches the workflow run.",
+      "files": [],
+      "expectations": [
+        "The Agent read the release script before running it",
+        "The one confirmation named the repository's own release command",
+        "The Agent did not also run npm version or push a tag itself",
+        "The Agent did not run npm publish"
+      ]
+    },
+    {
+      "id": 8,
+      "should_trigger": true,
+      "prompt": "发一个 beta 版给几个人试。仓库里有 `pnpm release patch|minor` 这个发版命令，Trusted Publishing 已经配好了。",
+      "expected_output": "Works out the exact Pre-release version, reads the repository's release command, sees that it only takes patch or minor and cannot make a Pre-release, and says in the one Chinese yes/no question that it will use its own npm version and tag push steps for that reason. After a yes it runs npm version with the exact Pre-release, pushes only that commit and tag, and does not run the repository's command.",
+      "files": [],
+      "expectations": [
+        "The Agent read the repository's release command before deciding",
+        "The one confirmation said the repository's command cannot make a Pre-release and the skill's own steps will be used",
+        "The npm version command used the exact Pre-release version",
+        "The Agent did not run the repository's release command or npm publish",
+        "The reply is in Chinese"
+      ]
+    }
+  ]
+}

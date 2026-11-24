@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "skills": {
+    "npm-publish-guide": {
+      "source": "Adonis0123/npm-release-guide",
+      "commit": "9a952f7b8dbd94d118894f61847b0f96c8794ca8",
+      "sourceType": "github",
+      "skillPath": "skills/npm-publish-guide/SKILL.md",
+      "computedHash": "8cdcb267a7015b0a4621bd16060b75fb241e502db4bdacdd0d7b3631023bb861"
+    },
+    "npm-version-guide": {
+      "source": "Adonis0123/npm-release-guide",
+      "commit": "9a952f7b8dbd94d118894f61847b0f96c8794ca8",
+      "sourceType": "github",
+      "skillPath": "skills/npm-version-guide/SKILL.md",
+      "computedHash": "97c51f2e8e164e9b6cf272f6a46cc3362be2d565b2f51e2b2ff0a2ca7ec8eb22"
+    }
+  }
+}
