@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       network-portal:
-        specifier: 0.1.1
-        version: 0.1.1
+        specifier: 0.1.3
+        version: 0.1.3
       typebox:
         specifier: ^1.3.34
         version: 1.4.3
@@ -246,8 +246,8 @@ packages:
       react-dom:
         optional: true
 
-  network-portal@0.1.1:
-    resolution: {integrity: sha512-TseezOrtBFLc0WIbxx9/olkc6/p4TU3KLCezdicn7sMYG5leZfwf9b7fpjF8v1E0tZpY/aDpOtDATacHH0+2Jg==}
+  network-portal@0.1.3:
+    resolution: {integrity: sha512-6wm3RVB+oJ8Tl7ybarh2MX2EseBt0R6DmwKMf0ojJikuQPlWcYBkhVamA6bIO3I1SYj1t8SzDNAf7Bu/OqWSLQ==}
     engines: {node: '>=22.18.0'}
     hasBin: true
 
@@ -391,7 +391,7 @@ snapshots:
       framer-motion: 14.7.1
       tslib: 2.9.1
 
-  network-portal@0.1.1: {}
+  network-portal@0.1.3: {}
 
   tslib@2.9.1: {}
 
