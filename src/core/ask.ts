@@ -58,12 +58,13 @@ export async function pickTaskAccount(
     const a = await rt.resolve(opts.account)
     if (opts.family && a.family !== opts.family)
       throw new UserError('Choose an account of the requested family; run `sideby list`.')
-    if (a.kind === 'api' || (await rt.status(a)).login === 'logged-in') return { account: a }
+    // A named Account runs unless known to be signed out: an `unknown` one (a Keychain sign-in) asks in its Host.
+    if (a.kind === 'api' || (await rt.status(a)).login !== 'logged-out') return { account: a }
     return { reason: 'none-signed-in' }
   }
-  // A remembered choice may be an API Account; only the automatic pick below skips them.
+  // A remembered choice may be an API Account or one of unknown sign-in; only the automatic pick below skips them.
   const preferred = all.find((a) => a.ref === rt.config.ask?.account)
-  if (preferred && (preferred.kind === 'api' || (await rt.status(preferred)).login === 'logged-in'))
+  if (preferred && (preferred.kind === 'api' || (await rt.status(preferred)).login !== 'logged-out'))
     return { account: preferred }
   if (!all.length) return { reason: 'no-accounts' }
   const candidates: HandoffCandidate[] = []

@@ -184,6 +184,34 @@ it('only API accounts are never selected automatically', async () => {
   })
 })
 
+it('offers and runs a named account whose sign-in sideby cannot read, but never picks it', async () => {
+  await withFakeHome(async (h) => {
+    await h.write('.claude/settings.json', '{}')
+    const base = await createRuntime({ env: h.env })
+    for (const login of ['unknown', 'logged-out'] as const) {
+      const rt = {
+        ...base,
+        status: async (a: Parameters<typeof base.status>[0]) => ({ ...(await base.status(a)), login }),
+      }
+      const known = login === 'unknown'
+      const { taskChoices } = await import('./task-spec.ts')
+      const out = await taskChoices(rt)
+      assert.deepEqual(out.accounts, [{ ref: 'claude:main', label: 'claude:main', signedIn: known }])
+      assert.equal(out.account, null)
+      assert.deepEqual(
+        await pickTaskAccount(rt, { account: 'claude:main' }),
+        known ? { account: await base.resolve('claude:main') } : { reason: 'none-signed-in' },
+      )
+      rt.config.ask = { account: 'claude:main' }
+      assert.deepEqual(
+        await pickTaskAccount(rt),
+        known ? { account: await base.resolve('claude:main') } : { reason: 'none-signed-in' },
+      )
+      delete rt.config.ask
+    }
+  })
+})
+
 it('keeps task directories at 700, refuses a linked one, and removes tasks older than an hour', async () => {
   await withFakeHome(async (h) => {
     const { readdir, rename, mkdir, symlink, writeFile } = await import('node:fs/promises')

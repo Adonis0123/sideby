@@ -229,12 +229,18 @@ export async function taskChoices(rt: Runtime) {
   const pick = await pickTaskAccount(rt)
   const signedIn: { ref: string; label: string; signedIn: boolean }[] = []
   const api: typeof signedIn = []
+  // `unknown`: the sign-in is in the Keychain, which sideby never reads (agy); offered, since only the Host can tell.
+  const unknown: typeof signedIn = []
   const signedOut: typeof signedIn = []
   const all = [...(await rt.accounts())].sort((a, b) => (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0))
   for (const a of all) {
-    if (a.kind === 'api') api.push({ ref: a.ref, label: `${a.ref} · API`, signedIn: true })
-    else if ((await rt.status(a)).login === 'logged-in')
-      signedIn.push({ ref: a.ref, label: a.ref, signedIn: true })
+    if (a.kind === 'api') {
+      api.push({ ref: a.ref, label: `${a.ref} · API`, signedIn: true })
+      continue
+    }
+    const login = (await rt.status(a)).login
+    if (login === 'logged-in') signedIn.push({ ref: a.ref, label: a.ref, signedIn: true })
+    else if (login === 'unknown') unknown.push({ ref: a.ref, label: a.ref, signedIn: true })
     else signedOut.push({ ref: a.ref, label: a.ref, signedIn: false })
   }
   const t = await terminals(rt)
@@ -242,7 +248,7 @@ export async function taskChoices(rt: Runtime) {
   return {
     schemaVersion: 1 as const,
     account: 'account' in pick ? pick.account.ref : null,
-    accounts: [...signedIn, ...api, ...signedOut],
+    accounts: [...signedIn, ...api, ...unknown, ...signedOut],
     terminal: t.guess.id,
     terminals: t.installed.map((i) => ({ id: i.id, label: name(i.id) })),
     reason: 'reason' in pick ? pick.reason : null,
