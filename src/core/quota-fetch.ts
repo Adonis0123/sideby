@@ -1,9 +1,10 @@
 // When sideby calls a Family's `fetchQuota`, and what it shows from the answer (spec §3.26, ADR-0025): the last answer
-// is kept per Account, asked again only when it is older than the Family's `everyMinutes`, when one of its windows
-// passed its published reset time (once per reset instant, ADR-0073) or the user refreshes, and not while a local
-// reading newer than that covers all of it (`localCovers`); one fetch per Account at
-// a time, in this process and across processes, at most four fetches on the machine at once, 20 seconds each; the
-// newer of the kept answer and the local reading is shown.
+// is kept per Account, asked again only when it is older than the Family's `everyMinutes` (`activeEveryMinutes` while
+// the login is in use, ADR-0085), when one of its windows passed its published reset time (once per reset instant,
+// ADR-0073) or the user refreshes, and not while a local reading newer than that covers all of it (`localCovers`);
+// one fetch per Account at a time, in this process and across processes, at most four fetches on the machine at once,
+// 20 seconds each; the newer of the kept answer and the local reading is shown, except that a newer local window lower
+// than the kept one of the same window loses to it.
 import { mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type {
@@ -66,7 +67,59 @@ export interface QuotaAskHint {
    * due.
    */
   changedAt?: () => Promise<number | undefined>
+  /**
+   * When this login was last used on this computer (real ms; the newest local Usage `lastActivityAt` of the Account
+   * and its Same Login), read when called and only when it can change the interval (`activeEveryMinutes`, ADR-0085).
+   */
+  lastActive?: () => Promise<number | undefined>
 }
+
+/** How recent a local use must be for the login to count as in use (`activeEveryMinutes`, ADR-0085). */
+export const IN_USE_MS = 5 * 60_000
+
+/**
+ * `fq` with the interval this read goes by (ADR-0085): `activeEveryMinutes` while the login was used within
+ * `IN_USE_MS`, else `everyMinutes` as it is. The use is read only when the two intervals could judge differently: the
+ * kept answer's ask, or the local reading, is older than the short interval and younger than the long one.
+ */
+export async function pacedFetch(
+  fq: QuotaFetch,
+  kept: QuotaStoreEntry | null,
+  local: QuotaResult | null | undefined,
+  hint: QuotaAskHint,
+  now: Date,
+): Promise<QuotaFetch> {
+  const short = fq.activeEveryMinutes
+  if (!hint.lastActive || !(typeof short === 'number' && short > 0 && short < fq.everyMinutes)) return fq
+  const between = (at: number) => {
+    const age = now.getTime() - at
+    return age >= short * 60_000 && age < fq.everyMinutes * 60_000
+  }
+  const keptAt = Date.parse(kept?.attemptedAt ?? '')
+  const localAt = local?.status === 'ok' ? Date.parse(local.observedAt) : Number.NaN
+  if (!between(keptAt) && !between(localAt)) return fq
+  const used = await hint.lastActive().catch(() => undefined)
+  const since = used === undefined ? Number.NaN : now.getTime() - used
+  if (!(since < IN_USE_MS && since >= -60_000)) return fq
+  // A view of `fq`, not a copy: a plugin's `fetch` may live on a prototype and use `this`.
+  return Object.create(fq, { everyMinutes: { value: short, enumerable: true } }) as QuotaFetch
+}
+
+/** How far apart two reset times of one window may be: `/usage` gives minutes, the status line seconds (ADR-0085). */
+const SAME_RESET_MS = 5 * 60_000
+
+/** Whether two windows are the same window of the vendor: same group and label, reset times a few minutes apart. */
+const sameWindow = (a: QuotaWindow, b: QuotaWindow): boolean =>
+  (a.name ?? '') === (b.name ?? '') &&
+  a.label === b.label &&
+  Math.abs(Date.parse(a.resetsAt) - Date.parse(b.resetsAt)) <= SAME_RESET_MS
+
+/**
+ * Whether `local` is a lower reading of the same window as `fetched`, by a whole point at least: `/usage` rounds to
+ * whole percents and the status line does not, so 34.6 against 35 is one reading.
+ */
+const lowerThan = (local: QuotaWindow, fetched: QuotaWindow): boolean =>
+  sameWindow(local, fetched) && fetched.usedPercent - local.usedPercent >= 1
 
 /** Whether the ask that gave `entry` began at or after `notBefore` (real ms); false when it does not say. */
 const beganAfter = (entry: QuotaStoreEntry | null, notBefore: number): boolean =>
@@ -75,7 +128,7 @@ const beganAfter = (entry: QuotaStoreEntry | null, notBefore: number): boolean =
 /**
  * Whether a local reading stands in for a due ask (spec §3.26): it was taken within `everyMinutes`, after every
  * window of the kept answer was read and after each of their reset times that has passed, and it shows every window
- * the kept answer holds. A kept model-group window the local reading cannot see (Claude Code's status line has only
+ * the kept answer holds, none of them lower than the kept one (ADR-0085). A kept model-group window the local reading cannot see (Claude Code's status line has only
  * the plan-wide ones), or a kept count of Limit Resets, still needs the Host. Never for a Family whose local records
  * can replay old numbers (`localFallbackOnly`, Codex), nor before a first answer is kept.
  */
@@ -97,6 +150,9 @@ export function localCovers(
   return kept.quota.windows.every((w) => {
     const own = mine.get(`${w.name ?? ''}\0${w.label}`)
     if (!own) return false
+    // Lower than the kept reading of the same window: shown, the kept number wins (`shownQuota`), so only the Host
+    // can move it (ADR-0085).
+    if (lowerThan(own, w)) return false
     const at = Date.parse(own.observedAt ?? local.observedAt)
     if (!fresh(at)) return false
     // Read before the kept window was: it tells nothing newer.
@@ -406,12 +462,12 @@ const tight = (kept: QuotaStoreEntry | null): boolean =>
   (kept?.quota?.windows ?? []).some((w: QuotaWindow) => !w.name && windowLevel(w) !== 'ok')
 
 /**
- * The kept answer for `account`, after asking again when `mode` says so and it is due: older than `everyMinutes`, or
- * one of its windows passed its published reset time since it was taken and that instant was not asked for yet
- * (ADR-0073).
+ * The kept answer for `account`, after asking again when `mode` says so and it is due: older than `everyMinutes`
+ * (`activeEveryMinutes` while the login is in use, ADR-0085), or one of its windows passed its published reset time
+ * since it was taken and that instant was not asked for yet (ADR-0073).
  */
 export async function fetchedQuota(
-  fq: QuotaFetch,
+  family: QuotaFetch,
   account: Account,
   ctx: ReadContext,
   hostEnv: Env,
@@ -421,6 +477,8 @@ export async function fetchedQuota(
   const file = quotaStoreFile(ctx.stateDir, account.family, account.name)
   const kept = await readQuotaStore(file)
   if (mode === 'never') return kept
+  // Every judgement below, the one under the lock and the timeout's message included, uses this read's interval.
+  const fq = mode === 'force' ? family : await pacedFetch(family, kept, hint.local, hint, ctx.now)
   // A local reading that is newer than the Family asks, and shows all the kept answer holds, spares the Host.
   if (mode !== 'force' && localCovers(fq, hint.local, kept, ctx.now)) return kept
   const stale = olderThanInterval(fq, kept, ctx.now)
@@ -485,7 +543,8 @@ export function loginProblemOf(
 
 /**
  * What sideby shows from a Family that fetches Quota: the newer reading, or the kept answer when local events can
- * replay old snapshots (`localFallbackOnly`); else why there is none (`off` is why fetching is off, or null).
+ * replay old snapshots (`localFallbackOnly`); else why there is none (`off` is why fetching is off, or null). Under a
+ * newer local reading, a kept window higher than the local one of the same window stays (ADR-0085).
  */
 export function shownQuota(
   local: QuotaResult | null,
@@ -499,25 +558,35 @@ export function shownQuota(
   const own = local?.status === 'ok' ? local : null
   if (fetched && own) {
     if (localFallbackOnly || Date.parse(own.observedAt) <= Date.parse(fetched.observedAt)) return fetched
+    // A fetched window shown under the newer local reading keeps the time and source it was read at: that reading did
+    // not cover it (ADR-0073).
+    const stamped = (w: QuotaWindow): QuotaWindow => {
+      const observedAt = w.observedAt ?? fetched.observedAt
+      const source = w.source ?? fetched.source
+      return {
+        ...w,
+        ...(observedAt !== own.observedAt ? { observedAt } : {}),
+        ...(source !== own.source ? { source } : {}),
+      }
+    }
+    // Within one window the use only grows: a local window lower than the fetched one of the same window repeats
+    // older numbers, and the fetched one shows (ADR-0085). Only this way round: a newer fetched answer that fell may
+    // follow a Limit Reset, which sideby cannot see for Claude Code.
+    let lowered = false
+    const windows = own.windows.map((w) => {
+      const higher = fetched.windows.find((f) => lowerThan(w, f))
+      if (!higher) return w
+      lowered = true
+      return stamped(higher)
+    })
     // A local reading (Claude's status line) sees only the plan-wide windows. Keep the fetched model-group windows it
     // cannot see, so a group's line (such as Fable) does not come and go with whichever reading is newer.
     const seen = new Set(own.windows.map((w) => `${w.name ?? ''}\0${w.label}`))
-    // Those windows keep the time and source they were read at: the newer reading did not cover them (ADR-0073).
-    const groups = fetched.windows
-      .filter((w) => w.name && !seen.has(`${w.name}\0${w.label}`))
-      .map((w): QuotaWindow => {
-        const observedAt = w.observedAt ?? fetched.observedAt
-        const source = w.source ?? fetched.source
-        return {
-          ...w,
-          ...(observedAt !== own.observedAt ? { observedAt } : {}),
-          ...(source !== own.source ? { source } : {}),
-        }
-      })
+    const groups = fetched.windows.filter((w) => w.name && !seen.has(`${w.name}\0${w.label}`)).map(stamped)
     // A local reading knows nothing of Limit Resets; the Host's own count stays, with its own read time.
     const limitResets = own.limitResets ?? fetched.limitResets
-    if (!groups.length && !limitResets) return own
-    return { ...own, windows: [...own.windows, ...groups], ...(limitResets ? { limitResets } : {}) }
+    if (!lowered && !groups.length && !limitResets) return own
+    return { ...own, windows: [...windows, ...groups], ...(limitResets ? { limitResets } : {}) }
   }
   if (fetched) return fetched
   if (own) return kept?.error ? { ...own, fetchError: kept.error } : own

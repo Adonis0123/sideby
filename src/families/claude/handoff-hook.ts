@@ -4,8 +4,12 @@ import { openWindows } from '../../core/quota-levels.ts'
 import { field, type HookReader } from '../../handoff/reader.ts'
 import { accountNameFromEnv, cacheStateDir, readQuotaCache } from './quota-cache.ts'
 
-/** Claude Code's wording when a subscription window is used up (as opposed to an overloaded server). */
-const USED_UP = /usage limit|limit reached|out of (extra )?usage/i
+/**
+ * Claude Code's wording when a subscription window is used up (as opposed to an overloaded server or a throttle).
+ * Since 2.1.312 it says "You've hit your 5-hour limit" or "You've hit your weekly limit"; "rate limit" is a throttle.
+ */
+const USED_UP =
+  /usage[ _]limit|(?<!rate )limit reached|out of (?:extra )?usage|hit your [\w -]{0,24}(?<!rate )limit/i
 
 export const claudeHookReader: HookReader = {
   async windows(_input, env, now) {

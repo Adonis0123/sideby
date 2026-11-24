@@ -25,6 +25,17 @@ describe('Claude hook reader', () => {
     )
     assert.equal(hit({ error: 'server_error', error_details: 'usage limit reached' }, 99), false)
   })
+  it('knows the "hit your … limit" wording of Claude Code 2.1.312 and later while the cache lags', () => {
+    const msg = "You've hit your 5-hour limit · resets 9:40pm (Asia/Singapore)"
+    assert.equal(hit({ error: 'rate_limit', last_assistant_message: msg }, 35), true)
+    assert.equal(
+      hit({ error: 'rate_limit', last_assistant_message: "You've hit your weekly limit" }, null),
+      true,
+    )
+    // A throttle is not a used-up Quota.
+    assert.equal(hit({ error: 'rate_limit', error_details: "You've hit your rate limit" }, 35), false)
+    assert.equal(hit({ error: 'rate_limit', error_details: 'Rate limit reached' }, 35), false)
+  })
 })
 
 describe('Grok hook reader', () => {

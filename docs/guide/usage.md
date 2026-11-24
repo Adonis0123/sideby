@@ -105,13 +105,13 @@ sideby quota claude --refresh   # ask again now instead of using the last answer
 ```
 
 - sideby runs `claude -p /usage --no-session-persistence --output-format json` with the account's own config directory, with your hooks and MCP servers off, in a folder of sideby's own. Claude Code answers with its own login and starts no model turn: tried with Claude Code 2.1.314 on 2026-10-30, the answer cost nothing, took about 4 s and saved no session. sideby keeps only the percents and reset times; the rest of the answer (your sessions, skills, MCP servers) is never kept.
-- It asks at most every 15 minutes per account. The panel asks in the background while it is open, and **Refresh** in the panel or the menu bar asks again at once.
+- It asks at most every 15 minutes per account, and every 5 minutes while the account is in use on this computer (a session wrote to its log in the last 5 minutes), because a long turn can fill the 5-hour limit in a quarter of an hour. The panel asks in the background while it is open, and **Refresh** in the panel or the menu bar asks again at once.
 - A weekly limit for one model only (`Current week (<model>)` in Claude Code) shows under that model's name and does not decide which account is picked.
 - Turn it off in the panel's **Settings › Quota checks**, with `sideby quota check claude off`, or with `"quota": { "check": { "claude": false } }` in the config. It is off in CI. A signed-out account, or one with an API key, is not asked. When an ask fails (Claude Code too old to answer, signed out), sideby says why and keeps the last numbers it had.
 
 ### Live quota during a session
 
-While a session runs, Claude Code also hands its quota to the status line command after every reply. sideby shows whichever reading is newer. Auto Handoff reads only this one, so it needs a one-time, reversible change:
+While a session runs, Claude Code also hands its quota to the status line command after every reply. sideby shows whichever reading is newer, except that a newer status line number lower than the `/usage` answer for the same window is taken as old: within one window the use only grows, so the higher number shows. Auto Handoff reads only this one, so it needs a one-time, reversible change:
 
 ```sh
 npm i -g sideby                   # the status line calls `sideby` on every refresh

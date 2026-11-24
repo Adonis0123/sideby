@@ -9,6 +9,7 @@ import {
   fetchedQuota,
   localCovers,
   loginProblemOf,
+  pacedFetch,
   passedResets,
   quotaAsking,
   shownQuota,
@@ -912,5 +913,137 @@ test('an answer asked for before a Limit Reset was used is not kept after it, an
       },
     })
     assert.equal(unknown?.quota?.windows[0]?.usedPercent, 71)
+  })
+})
+
+// The higher reading of one window, and a shorter interval while the login is in use (ADR-0085).
+test('a newer local window lower than the kept one of the same window shows the kept one, with its own time', () => {
+  // `/usage` gives the reset to the minute, the status line to the second.
+  const at = (label: string, usedPercent: number, resetsAt: string): QuotaWindow => ({
+    ...win(label, usedPercent),
+    resetsAt,
+  })
+  const answer = kept('2026-11-24T13:00:00Z', [
+    at('5h', 80, '2026-11-24T13:40:00.000Z'),
+    at('7d', 30, '2026-11-28T09:00:00.000Z'),
+  ])
+  const q = shownQuota(
+    local('2026-11-24T13:05:00Z', [
+      at('5h', 35, '2026-11-24T13:39:42.000Z'),
+      at('7d', 31, '2026-11-28T09:00:00.000Z'),
+    ]),
+    answer,
+    null,
+  )
+  assert.equal(q.status, 'ok')
+  if (q.status !== 'ok') return
+  assert.equal(q.source, 'claude statusline')
+  const five = q.windows.find((w) => w.label === '5h')!
+  assert.equal(five.usedPercent, 80)
+  assert.equal(five.observedAt, '2026-11-24T13:00:00Z')
+  assert.equal(five.source, 'claude /usage')
+  // The higher local window keeps its own numbers and the reading's time.
+  const week = q.windows.find((w) => w.label === '7d')!
+  assert.equal(week.usedPercent, 31)
+  assert.equal(week.observedAt, undefined)
+  // Another reset time is another window: the newer reading shows.
+  const next = shownQuota(
+    local('2026-11-24T13:45:00Z', [at('5h', 2, '2026-11-24T18:40:00.000Z')]),
+    answer,
+    null,
+  )
+  assert.equal(next.status === 'ok' && next.windows.find((w) => w.label === '5h')?.usedPercent, 2)
+  // Only that way round: a newer kept answer that fell (after a Limit Reset, say) shows as it is.
+  const fell = shownQuota(
+    local('2026-11-24T12:55:00Z', [at('5h', 90, '2026-11-24T13:40:00.000Z')]),
+    answer,
+    null,
+  )
+  assert.equal(fell.status === 'ok' && fell.windows.find((w) => w.label === '5h')?.usedPercent, 80)
+  // `/usage` rounds to whole percents: 79.6 against 80 is the same reading, and the newer one shows.
+  const close = shownQuota(
+    local('2026-11-24T13:05:00Z', [at('5h', 79.6, '2026-11-24T13:40:00.000Z')]),
+    answer,
+    null,
+  )
+  assert.equal(close.status === 'ok' && close.windows[0]?.usedPercent, 79.6)
+})
+
+test('a local reading lower than the kept one of the same window does not stand in for a due ask', () => {
+  const windows = [resetting('5h', 600), resetting('7d', 600)]
+  const store: QuotaStoreEntry = {
+    version: 1,
+    attemptedAt: iso(0),
+    quota: { status: 'ok', windows, observedAt: iso(0), source: 'host' },
+  }
+  const lower = [{ ...windows[0]!, usedPercent: 10 }, windows[1]!]
+  const read = (w: QuotaWindow[]) =>
+    ({ status: 'ok', windows: w, observedAt: iso(18), source: 'local' }) as const
+  const now = new Date(T0 + 20 * 60_000)
+  assert.equal(localCovers({ everyMinutes: 15 }, read(windows), store, now), true)
+  assert.equal(localCovers({ everyMinutes: 15 }, read(lower), store, now), false)
+  const rounded = [{ ...windows[0]!, usedPercent: 39.6 }, windows[1]!]
+  assert.equal(localCovers({ everyMinutes: 15 }, read(rounded), store, now), true, 'less than a point lower')
+})
+
+test('the interval is activeEveryMinutes while the login was used in the last 5 minutes, read only when it matters', async () => {
+  const fq: QuotaFetch = {
+    everyMinutes: 15,
+    activeEveryMinutes: 5,
+    summary: 'test',
+    fetch: async () => local(iso(0), []),
+  }
+  const store = (minutes: number): QuotaStoreEntry => ({ ...kept(iso(minutes), [win('5h', 40)]) })
+  const now = new Date(T0 + 20 * 60_000)
+  let reads = 0
+  const usedAt = (minutes: number | undefined) => ({
+    lastActive: async () => {
+      reads++
+      return minutes === undefined ? undefined : T0 + minutes * 60_000
+    },
+  })
+  // Asked 8 minutes ago, used 2 minutes ago: 5 minutes. Used 7 minutes ago, or never: 15.
+  assert.equal((await pacedFetch(fq, store(12), null, usedAt(18), now)).everyMinutes, 5)
+  assert.equal((await pacedFetch(fq, store(12), null, usedAt(13), now)).everyMinutes, 15)
+  assert.equal((await pacedFetch(fq, store(12), null, usedAt(undefined), now)).everyMinutes, 15)
+  assert.equal(reads, 3)
+  // Asked 2 or 30 minutes ago, with no local reading in between: both intervals agree, so Usage is not read.
+  assert.equal((await pacedFetch(fq, store(18), null, usedAt(19), now)).everyMinutes, 15)
+  assert.equal((await pacedFetch(fq, store(-10), null, usedAt(19), now)).everyMinutes, 15)
+  assert.equal(reads, 3)
+  // A local reading 8 minutes old decides whether it may stand in, so it is read then.
+  const reading = local(iso(12), [win('5h', 40)])
+  assert.equal((await pacedFetch(fq, store(-10), reading, usedAt(19), now)).everyMinutes, 5)
+  assert.equal(reads, 4)
+  // A Family without the field keeps its interval; the view still fetches through the Family.
+  const plain: QuotaFetch = { everyMinutes: 15, summary: 'test', fetch: fq.fetch }
+  assert.equal(await pacedFetch(plain, store(12), null, usedAt(18), now), plain)
+  const paced = await pacedFetch(fq, store(12), null, usedAt(18), now)
+  assert.equal(paced.fetch, fq.fetch)
+  assert.equal(paced.summary, 'test')
+})
+
+test('a login in use is asked again after 5 minutes, an idle one after 15', async () => {
+  await withFakeHome(async (h) => {
+    const a = acct(h, 'work')
+    const file = quotaStoreFile(ctxAt(h, 0).stateDir, 'claude', 'work')
+    let asks = 0
+    const fq: QuotaFetch = {
+      everyMinutes: 15,
+      activeEveryMinutes: 5,
+      summary: 'test',
+      fetch: async () => {
+        asks++
+        return { status: 'ok', windows: [resetting('5h', 600)], observedAt: iso(7), source: 'claude /usage' }
+      },
+    }
+    await writeQuotaStore(file, kept(iso(0), [resetting('5h', 600)]))
+    const idle = { lastActive: async () => T0 - 60 * 60_000 }
+    await fetchedQuota(fq, a, ctxAt(h, 7), {}, 'wait', idle)
+    assert.equal(asks, 0, 'idle: 7 minutes is inside 15')
+    const busy = { lastActive: async () => T0 + 6 * 60_000 }
+    await fetchedQuota(fq, a, ctxAt(h, 7), {}, 'wait', busy)
+    assert.equal(asks, 1, 'in use: 7 minutes is past 5')
+    assert.equal((await readQuotaStore(file))?.quota?.observedAt, iso(7))
   })
 })

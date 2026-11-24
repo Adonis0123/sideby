@@ -10,7 +10,7 @@ export type FetchedQuota = Extract<QuotaResult, { status: 'ok' }>
 
 export interface QuotaStoreEntry {
   version: 1
-  /** When the latest fetch finished, good or not; the next one waits `everyMinutes` from here. */
+  /** When the latest fetch finished, good or not; the next one waits `everyMinutes` (`activeEveryMinutes` in use) from here. */
   attemptedAt: string
   /**
    * When that fetch began asking the Host (the real clock). What it answers is the Quota of some moment after this,

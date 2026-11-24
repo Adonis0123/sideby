@@ -1674,7 +1674,7 @@ const en = {
   'set.g.quota': 'Quota checks',
   'set.g.ai': 'Let AI help',
   'set.quotaChecksHint':
-    'Each tool asks for its own quota, at most every {n} minutes per account. sideby does not read their sign-ins.',
+    'Each tool asks for its own quota, at most every {n} minutes per account; Claude Code every 5 minutes while the account is in use. sideby does not read their sign-ins.',
   'set.ahHint': 'When an account is about to run out, the task moves on to another account by itself.',
   'net.title': 'Network check',
   'net.hint':
@@ -3717,7 +3717,8 @@ const zh: Record<MessageKey, string> = {
   'set.g.accounts': '账号',
   'set.g.quota': '额度查询',
   'set.g.ai': '让 AI 帮我',
-  'set.quotaChecksHint': '各工具自己查询每个账号的额度，最多每 {n} 分钟一次。sideby 不读它们的登录信息。',
+  'set.quotaChecksHint':
+    '各工具自己查询每个账号的额度，最多每 {n} 分钟一次；Claude Code 账号在用时每 5 分钟一次。sideby 不读它们的登录信息。',
   'set.ahHint': '账号额度快用完时，任务自己换到另一个账号接着做。',
   'net.title': '网络检查',
   'net.hint': '请求要从你没允许的国家或地区发出时（比如代理断了），拦下 Claude 和 Codex。',

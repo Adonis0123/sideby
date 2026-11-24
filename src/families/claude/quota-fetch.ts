@@ -251,6 +251,9 @@ export async function fetchClaudeQuota(account: Account, ctx: QuotaFetchContext)
 
 export const claudeQuotaFetch: QuotaFetch = {
   everyMinutes: 15,
-  summary: 'Ask Claude Code for each account’s quota (its /usage command, no model turn) every 15 minutes',
+  // A long turn can fill the 5-hour window between two asks of 15 minutes (ADR-0085).
+  activeEveryMinutes: 5,
+  summary:
+    'Ask Claude Code for each account’s quota (its /usage command, no model turn) every 15 minutes, every 5 while the account is in use',
   fetch: fetchClaudeQuota,
 }

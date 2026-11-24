@@ -1145,6 +1145,25 @@ export async function createRuntime(
               ),
           }
         : {}),
+      // While the login is in use on this computer, a Family may be asked more often (ADR-0085): the newest local
+      // Usage activity of this Account and its Same Login, the source ADR-0051 also goes by.
+      ...(families.get(account.family)?.fetchQuota?.activeEveryMinutes
+        ? {
+            lastActive: async () => {
+              const f = familyOf(account.family)
+              const others = peers.length
+                ? (await discoverAccounts(f, paths.home, ignore)).filter((a) => peers.includes(a.ref))
+                : []
+              let newest: number | undefined
+              for (const a of [account, ...others]) {
+                const u = await rt.usage(a).catch(() => null)
+                const at = u?.status === 'ok' ? Date.parse(u.lastActivityAt ?? '') : Number.NaN
+                if (Number.isFinite(at) && (newest === undefined || at > newest)) newest = at
+              }
+              return newest
+            },
+          }
+        : {}),
       // An answer asked for before a Limit Reset was used for this Account's login is not kept after it (ADR-0072).
       ...(families.get(account.family)?.limitReset?.use
         ? {

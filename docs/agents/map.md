@@ -11,8 +11,9 @@ src/
 │                 tuning.ts: the pure replay that estimates a Compaction Threshold (§3.18); the per-Family readers are families/<id>/tuning.ts
 │                 skill-check.ts compares an installed sideby skill with this version
 │                 share-meaning.ts: the one-line meaning of each Shared Item that `sideby families` prints
-│                 quota-fetch.ts and quota-store.ts: when a Family's `fetchQuota` is asked (age, a passed reset time, one ask per
-│                 Account across processes, four on the machine), and its kept answers (§3.26);
+│                 quota-fetch.ts and quota-store.ts: when a Family's `fetchQuota` is asked (age, use in the last 5
+│                 minutes, a passed reset time, one ask per Account across processes, four on the machine), and its kept
+│                 answers (§3.26);
 │                 quota-levels.ts: warning levels, how old each Quota window is (`windowAge`, ADR-0073) and when "use a reset" is a
 │                 visible button (`limitResetOffer`), for the CLI, Panel and menu
 │                 limit-reset.ts: the operation records and the per-login lock of using a Limit Reset (§3.40, ADR-0072); the flow

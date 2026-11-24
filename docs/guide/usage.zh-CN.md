@@ -105,13 +105,13 @@ sideby quota claude --refresh   # 不用上次的结果，现在再问一次
 ```
 
 - sideby 用该账号自己的配置目录运行 `claude -p /usage --no-session-persistence --output-format json`，关掉你的 hook 和 MCP 服务器，工作目录是 sideby 自己的文件夹。Claude Code 用自己的登录回答，不开模型回合：2026-10-30 用 Claude Code 2.1.314 实测，这次回答不花钱，约 4 秒，不保存会话。sideby 只留下百分比和重置时间，回答里的其他内容（你的会话、skill、MCP 服务器）一概不存。
-- 每个账号最多每 15 分钟问一次。面板开着时在后台问；面板或状态栏里的**刷新**会立刻再问。
+- 每个账号最多每 15 分钟问一次；账号正在这台电脑上用时（最近 5 分钟有会话写记录）每 5 分钟问一次，因为一个长回合十几分钟就可能用满 5 小时额度。面板开着时在后台问；面板或状态栏里的**刷新**会立刻再问。
 - 只管某一个模型的每周额度（Claude Code 里的 `Current week (<模型>)`）以模型名显示，不影响选哪个账号。
 - 在面板**设置 › 额度查询**里关掉，或运行 `sideby quota check claude off`，或在配置里写 `"quota": { "check": { "claude": false } }`。CI 里不问。未登录的账号、用 API key 的账号不问。问失败时（Claude Code 版本太旧、没登录），sideby 说明原因，并保留上次的数字。
 
 ### 会话进行中的实时额度
 
-会话进行时，Claude Code 每次回复后也会把额度交给 status line 命令。sideby 显示两份里较新的那份。自动接力只读这一份，所以它需要做一次可还原的改动：
+会话进行时，Claude Code 每次回复后也会把额度交给 status line 命令。sideby 显示两份里较新的那份；但同一个窗口里，较新的 status line 数字比 `/usage` 的低时，当它是旧数字：同一窗口的用量只会涨，所以显示高的那份。自动接力只读这一份，所以它需要做一次可还原的改动：
 
 ```sh
 npm i -g sideby                   # status line 每次刷新都会调用 sideby

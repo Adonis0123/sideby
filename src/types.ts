@@ -449,13 +449,19 @@ export interface ReadContext {
 
 /**
  * How sideby asks for a Family's Quota when that costs a request (spec §3.26). sideby keeps each Account's last
- * answer in its state directory and calls `fetch` at most every `everyMinutes`, or when the user refreshes; never
- * from the status line or the handoff hook, for an API Account or a signed-out one, in CI, or when the user turned it
- * off (config `quota.check.<family>: false`).
+ * answer in its state directory and calls `fetch` at most every `everyMinutes` (`activeEveryMinutes` while the login
+ * is in use), or when the user refreshes; never from the status line or the handoff hook, for an API Account or a
+ * signed-out one, in CI, or when the user turned it off (config `quota.check.<family>: false`).
  */
 export interface QuotaFetch {
   /** At most one `fetch` per Account in this many minutes, unless the user refreshes. */
   everyMinutes: number
+  /**
+   * A shorter interval, in minutes, used instead of `everyMinutes` while the login was used on this computer in the
+   * last 5 minutes (its local Usage `lastActivityAt`, the Account's or a Same Login's; ADR-0085). Left out, or not
+   * shorter than `everyMinutes`, the interval never changes.
+   */
+  activeEveryMinutes?: number
   /** What a fetch does, in one plain sentence, shown next to the setting that turns it off. */
   summary: string
   /**
