@@ -117,7 +117,7 @@ import { openRunBoard, withRuns } from '../core/run-link.ts'
 import { SECRET_VAR_NAME, secretVarFor, setSecret } from '../core/secret-file.ts'
 import { readHandoffChains, withHandoffs } from '../core/session-handoffs.ts'
 import { SKILL_INSTALL } from '../core/skill-check.ts'
-import { launchArgs, TERMINALS } from '../core/terminal.ts'
+import { TERMINALS } from '../core/terminal.ts'
 import {
   checkThemeData,
   listThemes,

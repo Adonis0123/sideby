@@ -10,7 +10,7 @@ import { networkInterfaces } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { connect as tlsConnect } from 'node:tls'
-import { proxyFor, routeLabel } from 'network-portal/proxy'
+import { proxyFor } from 'network-portal/proxy'
 import { writeFileAtomic } from './fs-safe.ts'
 
 export { proxyFor, redactedProxy, routeLabel } from 'network-portal/proxy'
