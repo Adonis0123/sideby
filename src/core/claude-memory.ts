@@ -24,7 +24,6 @@ import {
   unlink,
   utimes,
 } from 'node:fs/promises'
-import { userInfo } from 'node:os'
 import { basename, dirname, extname, join, posix } from 'node:path'
 import { claudeProjectDirName } from '../families/claude/layout.ts'
 import { claudeSessionTitle } from '../families/claude/live-sessions.ts'
@@ -42,6 +41,12 @@ import {
 } from './fs-safe.ts'
 import type { ProcessView } from './live-sessions-procs.ts'
 import type { SessionHookPart } from './session-hooks.ts'
+import {
+  keepInState as keepInTrashFolder,
+  systemTrash as systemTrashIn,
+  type Trash,
+  type TrashResult,
+} from './trash.ts'
 
 /** The index Claude Code keeps in each memory folder. */
 export const MEMORY_INDEX = 'MEMORY.md'
@@ -169,66 +174,14 @@ async function stagedFiles(stage: string): Promise<number> {
   return (await readdir(stage).catch(() => [] as string[])).filter((n) => n !== '.DS_Store').length
 }
 
-/** Where a folder sideby emptied went: the system trash, or sideby's own folder (named). */
-export type TrashResult = { ok: true; to: string } | { ok: false; why: string }
+export type { Trash, TrashResult }
 
-export type Trash = (path: string) => Promise<TrashResult>
-
-/**
- * Moves `path` to the system trash with the `trash` command on PATH (macOS 14 and later ship `/usr/bin/trash`; Linux
- * has `trash-cli`), only when HOME is the user's own home (a demo or test HOME never reaches the real trash). Without
- * one, it moves the folder into `<state>/memory/trash/` and names it there. Never deletes anything.
- */
 export function systemTrash(env: Env, stateDir: string, now: () => Date): Trash {
-  return async (path) => {
-    // The home of the user's account (the password database), not `$HOME`: a demo or test HOME sets `$HOME`.
-    const own = await Promise.all([
-      realpath(env.HOME ?? '').catch(() => ''),
-      realpath(userHome()).catch(() => ''),
-    ])
-    if (own[0] && own[0] === own[1]) {
-      const { which } = await import('./launch.ts')
-      const bin = await which('trash', env)
-      if (bin) {
-        const { execFile } = await import('node:child_process')
-        const ok = await new Promise<boolean>((resolve) =>
-          execFile(bin, [path], { env: env as NodeJS.ProcessEnv, timeout: 30_000 }, (err) => resolve(!err)),
-        )
-        if (ok && !(await lstatOrNull(path))) return { ok: true, to: 'the trash' }
-      }
-    }
-    return keepInState(path, stateDir, now())
-  }
+  return systemTrashIn(env, stateDir, now, ['memory', 'trash'])
 }
 
-function userHome(): string {
-  try {
-    return userInfo().homedir
-  } catch {
-    return ''
-  }
-}
-
-/** Moves `path` into `<state>/memory/trash/<time>-<name>`; the folder is the user's own (700). */
-export async function keepInState(path: string, stateDir: string, at: Date): Promise<TrashResult> {
-  try {
-    const dir = await ownedFolder(stateDir, ['memory', 'trash'], { create: true, private: true })
-    if (!dir) return { ok: false, why: "sideby's state folder cannot be used" }
-    const stamp = at.toISOString().replace(/[:.]/g, '-')
-    const parts = path.split(/[\\/]+/).filter(Boolean)
-    const label = parts
-      .slice(-4)
-      .join('_')
-      .replace(/[^A-Za-z0-9._-]/g, '-')
-    const to = join(dir, `${stamp}-${label}`)
-    await rename(path, to)
-    return { ok: true, to }
-  } catch (err) {
-    return {
-      ok: false,
-      why: `${path} could not be moved (${(err as NodeJS.ErrnoException).code ?? 'error'})`,
-    }
-  }
+export function keepInState(path: string, stateDir: string, at: Date): Promise<TrashResult> {
+  return keepInTrashFolder(path, stateDir, at, ['memory', 'trash'])
 }
 
 /** One Live Session of an Account: where it works, and what sideby shows for it. */

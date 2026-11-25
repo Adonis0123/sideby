@@ -70,6 +70,23 @@ A shell that loads eval "$(sideby shell-init zsh)" (\`sideby shell-init setup\` 
 the change at its next prompt; a shell started before this version needs a new terminal once.
 Exit: 0 done (also when it already exists or is absent); 1 invalid, reserved or taken; 2 malformed;
 10 a pick command would hide a command on PATH, run again with --yes.`,
+  remove: `sideby remove <account|short command> [--yes] [--json]
+sideby rm <account|short command> [--yes] [--json]
+
+Move a non-main account's directory (and its desktop app data, if any) to the trash, then remove short
+commands, display order, pins, hidden entries, handoff order entries and quota cache pointing to it.
+Main accounts cannot be removed (sibling accounts link to them); hide them instead with \`sideby hide\`.
+Accounts with a live session or running desktop app are refused until closed.
+
+Without --yes, prints the removal plan and exits 10 without touching disk or config.
+
+Examples:
+  sideby remove claude:work
+  sideby remove claude:work --yes
+  sideby rm cc008 --yes --json
+
+Exit: 0 moved to trash; 1 main account, live session, running desktop app, or error; 10 plan shown, rerun with --yes; 2 malformed.`,
+  rm: `Alias for \`sideby remove\`. Run \`sideby remove --help\` for details.`,
   login: `sideby login <account>
 
 Run the host's own sign-in for one account: claude auth login, codex login, grok login. For pi it starts pi;
@@ -575,6 +592,8 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   pin: { flags: ['json'] },
   hide: { flags: ['json'] },
   unhide: { flags: ['json'] },
+  remove: { flags: ['yes', 'json'] },
+  rm: { flags: ['yes', 'json'] },
   unpin: { flags: ['json'] },
   order: { flags: ['json', 'families', 'reset'] },
   run: { flags: [] },
@@ -882,6 +901,9 @@ async function dispatch(
     case 'hide':
     case 'unhide':
       return await cmds.cmdHide(parsed, io, cmd === 'hide')
+    case 'remove':
+    case 'rm':
+      return await cmds.cmdRemove(parsed, io)
     case 'order':
       return await cmds.cmdOrder(parsed, io)
     case 'list':

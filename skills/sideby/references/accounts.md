@@ -72,3 +72,12 @@ A pick command is a short command bound to a tool (Family), not to one account: 
 - `sideby alias list --json` lists both kinds (`kind: "pick"` or `"account"`); `sideby alias rm <short>` removes either. Pick commands and short commands share one set of names.
 - The user types the name in a new terminal; you never run it (it starts an interactive session). A shell alias of the same name in their rc (`alias cc=…`) still wins: when the name does not start sideby, tell them to remove that alias.
 - Do not edit `pickCommands` in the config by hand.
+
+## Remove a non-main account
+
+Use `sideby remove <account|short command> --json` (or `sideby rm <account|short command> --json`).
+
+1. Run without `--yes` first. It exits 10 and prints the removal plan (`dir`, optional `appData`, `aliases`, `sameLogin`, `configCleanup`).
+2. Show the user the folder path, any short commands or config entries that will be cleaned, and note that it moves to the trash (recoverable) and never removes other accounts of a Same Login.
+3. Only after the user confirms, run `sideby remove <ref> --yes --json`.
+4. Main accounts cannot be removed (sibling accounts link to them); suggest `sideby hide <ref>` instead. Accounts with a live session or running desktop app are refused until closed.

@@ -27,6 +27,8 @@ src/
 │                 claude-memory.ts: Shared Project Memory (§3.44, ADR-0081): the Main Account's memory folder of a Project for
 │                 a Launch (`memoryPrepared` in runtime.ts puts it into sideby's `--settings`), Doctor's fold of an Account's
 │                 own memory, the index and folder-name warnings, `sideby memory`
+│                 trash.ts: shared `systemTrash` / `keepInState` helper (moves to system trash or `<state>/trash/`, never deletes)
+│                 remove.ts: Account removal plan & execution (§3.46, ADR-0087): Main Account and active-session guards, trash move, config/cache cleanup
 ├── plugins/      loader (trust checks), hook bus, built-in account-script
 ├── families/     claude, codex, grok, pi, agy: each a Family Plugin; index.ts lists built-ins in load order
 │                 agy/ is a Main-only Family (ADR-0047); agy/quota.ts asks `agy -p /usage` for its Quota (ADR-0048)

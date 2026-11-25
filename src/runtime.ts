@@ -66,7 +66,7 @@ import {
   removeConfigPickCommand,
 } from './core/config.ts'
 import { type CreateResult, createAccount } from './core/create.ts'
-import { bindDesktopDeps, checkAppData, type DesktopDeps } from './core/desktop-app.ts'
+import { bindDesktopDeps, checkAppData, type DesktopDeps, desktopStatuses } from './core/desktop-app.ts'
 import { applyFixes, type DoctorReport, runDoctor } from './core/doctor.ts'
 import { hostSettingsFile } from './core/edit-settings.ts'
 import type { TraceFetcher } from './core/egress.ts'
@@ -176,6 +176,7 @@ import {
   turnRemoteControlOn,
   undoRemoteControlOff,
 } from './core/remote-control.ts'
+import { applyRemoveAccount, planRemoveAccount, type RemovePlan, type RemoveResult } from './core/remove.ts'
 import { findResumeRoute } from './core/resume.ts'
 import {
   type LoginMember,
@@ -196,6 +197,7 @@ import {
   writeShellInitFile,
   writeShellInitStamp,
 } from './core/shell-init.ts'
+import { systemTrash as systemTrashIn } from './core/trash.ts'
 import {
   groupSuggestion,
   MAX_COMPACT_WINDOW,
@@ -467,6 +469,10 @@ export interface Runtime {
   addAlias(alias: string, target: string, args?: readonly string[]): Promise<AliasEditResult>
   /** Removes a short command from the config, then rewrites every `shellInitFile`. */
   removeAlias(alias: string): Promise<AliasEditResult>
+  /** Previews removing a non-main Account (spec §3.46, ADR-0087) without touching disk or config. */
+  removeAccountPlan(ref: string): Promise<RemovePlan>
+  /** Moves a non-main Account to the trash and cleans up its aliases, display entries, handoff order and cache. */
+  removeAccount(ref: string): Promise<RemoveResult & { shellInitFiles?: ShellInitWrite[] }>
   /**
    * Gives an Alias a new name: the new one starts the same Account with the same arguments, then the old one is
    * removed and every `shellInitFile` rewritten. Refuses a Pick Command, a missing alias and a taken name.
@@ -824,6 +830,7 @@ export async function createRuntime(
      * with `ps`. Not part of the plugin or Portal contract.
      */
     picks?: { liveSessions?: () => Promise<ReadonlyMap<string, number>> }
+    remove?: { trash?: Trash }
   } = {},
 ): Promise<Runtime> {
   const env = opts.env ?? process.env
@@ -1881,6 +1888,56 @@ export async function createRuntime(
       const r = await removeConfigAlias(paths.configFile, alias)
       config.aliases = r.aliases
       return aliasEdit(alias, r.status, r.status === 'removed' ? before : undefined)
+    },
+    async removeAccountPlan(ref) {
+      const account = await rt.resolve(ref)
+      const familyTitle = families.get(account.family)?.title ?? account.family
+      const sameLogin = await rt.sameLogin(account)
+      return planRemoveAccount({
+        account,
+        familyTitle,
+        config,
+        configFile: paths.configFile,
+        home: paths.home,
+        stateDir: paths.stateDir,
+        sameLogin,
+        liveSessionCount: async () => (await liveSessionCounts()).get(account.ref) ?? 0,
+        desktopRunning: async () => {
+          const map = await desktopStatuses(rt, [account]).catch(() => new Map())
+          return Boolean(map.get(account.ref)?.running)
+        },
+        trash: opts.remove?.trash ?? systemTrashIn(env, paths.stateDir, now, ['trash']),
+      })
+    },
+    async removeAccount(ref) {
+      const account = await rt.resolve(ref)
+      const familyTitle = families.get(account.family)?.title ?? account.family
+      const sameLogin = await rt.sameLogin(account)
+      const result = await applyRemoveAccount({
+        account,
+        familyTitle,
+        config,
+        configFile: paths.configFile,
+        home: paths.home,
+        stateDir: paths.stateDir,
+        sameLogin,
+        liveSessionCount: async () => (await liveSessionCounts()).get(account.ref) ?? 0,
+        desktopRunning: async () => {
+          const map = await desktopStatuses(rt, [account]).catch(() => new Map())
+          return Boolean(map.get(account.ref)?.running)
+        },
+        trash: opts.remove?.trash ?? systemTrashIn(env, paths.stateDir, now, ['trash']),
+      })
+      const fresh = await loadConfig(paths.configFile)
+      config.aliases = fresh.aliases
+      config.display = fresh.display
+      config.handoff = fresh.handoff
+      config.accounts = fresh.accounts
+      const shellInitFiles = result.removedAliases.length ? await rt.writeShellInitFiles() : []
+      return {
+        ...result,
+        ...(shellInitFiles.length ? { shellInitFiles } : {}),
+      }
     },
     async addPickCommand(name, familyId, o = {}) {
       const f = familyOf(familyId)

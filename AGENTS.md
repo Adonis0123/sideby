@@ -120,7 +120,7 @@ Shared Item paths must be relative and stay inside the account directory: config
 
 - Every `--json` output has `schemaVersion: 1`, and an optional `_notice` (`update`, `skill`; spec §3.23) that never changes the result. A `--json` error is `{ schemaVersion, error, code }` (plus `_notice`); `error` stays a string. Adding a field keeps the version; removing, renaming or changing meaning bumps it and needs an ADR.
 - Every user-facing error says what to do next.
-- Exit code 10 means a change was shown and waits for `--yes` (`quota setup`, `quota reset`, `handoff setup`, `update`, `browser --enable|--disable`, `network on|off|allow`, `advisor <model>|off|undo`, `advisor unlock`, `trust on|off|undo` and `memory on|off`). Doctor never uses it: it exits 1 only for `fail` Findings.
+- Exit code 10 means a change was shown and waits for `--yes` (`quota setup`, `quota reset`, `handoff setup`, `update`, `browser --enable|--disable`, `network on|off|allow`, `advisor <model>|off|undo`, `advisor unlock`, `trust on|off|undo`, `memory on|off` and `remove`). Doctor never uses it: it exits 1 only for `fail` Findings.
 
 ## Tests
 

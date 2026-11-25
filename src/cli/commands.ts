@@ -375,6 +375,59 @@ export async function cmdHide(a: ParsedArgs, io: Io, hide: boolean): Promise<num
   return 0
 }
 
+export async function cmdRemove(a: ParsedArgs, io: Io): Promise<number> {
+  if (a.positionals.length !== 1 || a.rest.length)
+    throw new UsageError('usage: sideby remove <account|short command> [--yes] [--json]')
+  const target = a.positionals[0]!
+  const rt = await createRuntime()
+  const yes = a.flags.has('yes')
+  const asJson = a.flags.has('json')
+  if (!yes) {
+    const plan = await rt.removeAccountPlan(target)
+    if (plan.blocked) throw new UserError(plan.blocked.message, { code: plan.blocked.code })
+    if (asJson) {
+      json(io, {
+        ref: plan.ref,
+        family: plan.family,
+        name: plan.name,
+        dir: plan.dir,
+        ...(plan.appData ? { appData: plan.appData } : {}),
+        aliases: plan.aliases,
+        sameLogin: plan.sameLogin,
+        configCleanup: plan.configCleanup,
+        removed: false,
+        next: `sideby remove ${plan.ref} --yes`,
+      })
+      return 10
+    }
+    const lines = [
+      `Plan to remove ${plan.ref} (moves to trash, never permanently deleted):`,
+      `  Account folder: ${plan.dir}`,
+    ]
+    if (plan.appData) lines.push(`  Desktop app data: ${plan.appData}`)
+    if (plan.configCleanup.length) lines.push(`  Config cleanup: ${plan.configCleanup.join(', ')}`)
+    if (plan.sameLogin.length)
+      lines.push(`  Same login kept: ${plan.sameLogin.join(', ')} (only ${plan.ref} will be moved)`)
+    lines.push('', `Run \`sideby remove ${plan.ref} --yes\` to move it to the trash.`)
+    io.out(lines.join('\n'))
+    return 10
+  }
+  const result = await rt.removeAccount(target)
+  if (asJson) {
+    json(io, {
+      ...result,
+      removed: true,
+    })
+    return 0
+  }
+  const lines = [`Moved ${result.ref} (${result.dir}) to ${result.trashedTo}.`]
+  if (result.appDataTrashedTo) lines.push(`Moved desktop app data to ${result.appDataTrashedTo}.`)
+  if (result.removedAliases.length) lines.push(`Removed short commands: ${result.removedAliases.join(', ')}.`)
+  if (result.sameLoginKept.length) lines.push(`Kept same-login accounts: ${result.sameLoginKept.join(', ')}.`)
+  io.out(lines.join('\n'))
+  return 0
+}
+
 export async function cmdOrder(a: ParsedArgs, io: Io): Promise<number> {
   const reset = a.flags.has('reset')
   const families = a.flags.has('families')

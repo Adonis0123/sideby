@@ -401,7 +401,7 @@
     }
   },
   "tests": {
-    "total": 2141,
+    "total": 2145,
     "files": {
       "mods/claude/hooks/register.test.ts": 7,
       "scripts/budget.test.ts": 7,
@@ -491,6 +491,7 @@
       "src/core/quota-levels.test.ts": 10,
       "src/core/quota-store.test.ts": 4,
       "src/core/remote-control.test.ts": 8,
+      "src/core/remove.test.ts": 4,
       "src/core/resume.test.ts": 13,
       "src/core/run-link.test.ts": 11,
       "src/core/safety.test.ts": 28,
@@ -599,6 +600,12 @@
         "reason": "pure logic callable without rendering: the subprocess and wait counters in scripts/budget.ts",
         "from": 2139,
         "to": 2141
+      },
+      {
+        "date": "2026-11-25",
+        "reason": "Account removal moves account directories to trash and mutates config/aliases (data writes, ADR-0087)",
+        "from": 2141,
+        "to": 2145
       }
     ]
   },

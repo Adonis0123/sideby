@@ -599,6 +599,11 @@ a.btn:hover { text-decoration: none; }
 .btn-ghost:disabled { background: transparent; border-color: transparent; }
 .btn-danger { border-color: var(--fail); color: var(--fail); }
 .btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--fail) 10%, transparent); border-color: var(--fail); color: var(--fail); }
+.menu-item-danger:not(:disabled) { color: var(--fail); }
+.menu-item-danger:not(:disabled):hover, .menu-item-danger:not(:disabled):focus-visible { background: color-mix(in srgb, var(--fail) 10%, transparent); color: var(--fail); }
+.rm-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.rm-row { display: flex; gap: 10px; align-items: baseline; font-size: 13px; }
+.rm-k { color: var(--muted); flex: 0 0 auto; }
 /* A busy button is disabled but keeps its variant, so a running action does not look unavailable. */
 .btn[aria-busy=true]:disabled { cursor: progress; color: var(--muted); }
 .btn-primary[aria-busy=true]:disabled { background: var(--primary); border-color: var(--primary-border); color: var(--on-primary); opacity: .85; }

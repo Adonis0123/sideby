@@ -1117,7 +1117,7 @@ describe('Display Order in the page (spec §3.25)', () => {
     // A Same Login row lists the shared actions once; each other directory is one item that opens its own actions.
     assert.match(
       body('accountMenu'),
-      /sub: \[up, '-', \{ header: [\s\S]*\.\.\.dirItems\(m\), \.\.\.dirTools\(m\)\]/,
+      /sub: \[up, '-', \{ header: [\s\S]*\.\.\.dirItems\(m\), \.\.\.dirTools\(m\)/,
     )
     assert.match(body('accountMenu'), /t\('menu\.groupOtherDirs'\)/)
     assert.match(body('arrangeRow'), /togglePin\(a\)/)

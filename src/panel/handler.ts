@@ -3241,6 +3241,35 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         return { display: await rt.setDisplayOrder(display) }
       },
     },
+    '/api/accounts/remove': {
+      async run(body) {
+        const ref = optString(body, 'ref')
+        if (!ref) throw new HttpError(400, '"ref" is required')
+        const confirm = optBool(body, 'confirm')
+        const rt = await getRuntime()
+        if (!confirm) {
+          const plan = await rt.removeAccountPlan(ref)
+          return {
+            plan: {
+              ...plan,
+              dir: tildify(plan.dir, rt.paths.home),
+              ...(plan.appData ? { appData: tildify(plan.appData, rt.paths.home) } : {}),
+            },
+          }
+        }
+        const removed = await rt.removeAccount(ref)
+        return {
+          removed: {
+            ...removed,
+            dir: tildify(removed.dir, rt.paths.home),
+            trashedTo: tildify(removed.trashedTo, rt.paths.home),
+            ...(removed.appDataTrashedTo
+              ? { appDataTrashedTo: tildify(removed.appDataTrashedTo, rt.paths.home) }
+              : {}),
+          },
+        }
+      },
+    },
     // Asks every Family that fetches Quota again now, and waits (spec §3.26); the page reloads its state after. With
     // `account`, only that Account (its Same Login is asked once): the one ask after a jump to the vendor's page.
     '/api/quota/refresh': {

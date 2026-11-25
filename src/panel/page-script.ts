@@ -729,6 +729,7 @@ const MAIN = String.raw`
     eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
     alert: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 8v5M12 16h.01',
     eyeOff: 'M3 3l18 18M10.6 5.1A10.8 10.8 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.2M6.6 6.6A17.4 17.4 0 0 0 2 12s3.5 7 10 7a10.4 10.4 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2',
+    trash: 'M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6',
   }
   function icon(name, cls) {
     const svg = document.createElementNS(SVG_NS, 'svg')
@@ -1092,7 +1093,7 @@ const MAIN = String.raw`
   function menuKids(el, items, from) {
     return items.filter(Boolean).map((it) => it === '-' ? h('div', { class: 'menu-sep', role: 'separator' })
       : it.header ? h('div', { class: 'menu-head', role: 'presentation' }, it.header)
-      : h('button', { class: 'menu-item' + (it.back ? ' menu-back' : it.sub ? ' menu-sub' : ''), type: 'button', role: 'menuitem', tabindex: '-1', disabled: it.disabled, 'aria-haspopup': it.sub && !it.back ? 'true' : null, 'data-from': it === from ? '' : null, onclick: () => {
+      : h('button', { class: 'menu-item' + (it.back ? ' menu-back' : it.sub ? ' menu-sub' : '') + (it.danger ? ' menu-item-danger' : ''), type: 'button', role: 'menuitem', tabindex: '-1', disabled: it.disabled, title: it.title || null, 'aria-haspopup': it.sub && !it.back ? 'true' : null, 'data-from': it === from ? '' : null, onclick: () => {
         if (it.sub) {
           // Back lands on the item that opened the list; a list opens on its first item.
           swapKids(el, menuKids(el, it.sub, it.back ? it.from : null))
@@ -1333,14 +1334,16 @@ const MAIN = String.raw`
     back.from = fold
     const dirs = (others || []).map((m) => {
       const up = { icon: 'chevronLeft', label: t('menu.back'), back: true, sub: null, from: null }
-      const item = { icon: 'folder', label: m.name, hint: (m.aliases || [])[0], sub: [up, '-', { header: m.name + ((m.aliases || []).length ? ' · ' + m.aliases[0] : '') }, ...dirItems(m), ...dirTools(m)] }
+      const rm = removeItem(m)
+      const item = { icon: 'folder', label: m.name, hint: (m.aliases || [])[0], sub: [up, '-', { header: m.name + ((m.aliases || []).length ? ' · ' + m.aliases[0] : '') }, ...dirItems(m), ...dirTools(m), rm ? '-' : null, rm] }
       up.from = item
       return { up, item }
     })
+    const rm = removeItem(a)
     const items = [pinItem(a), ...hideItems(a),
       opens.length ? '-' : null, opens.length ? { header: t('menu.groupOpen') } : null, ...opens,
       '-', { header: t('menu.groupCopy') }, run, ...(fold ? [fold] : more),
-      '-', { header: t('menu.groupManage') }, resetItem(a), signInItem, key, aliasItem(a), ...dirTools(a), likeItem(a),
+      '-', { header: t('menu.groupManage') }, resetItem(a), signInItem, key, aliasItem(a), ...dirTools(a), likeItem(a), rm ? '-' : null, rm,
       ...(dirs.length ? ['-', { header: t('menu.groupOtherDirs') }, ...dirs.map((d) => d.item)] : [])]
     back.sub = items
     for (const d of dirs) d.up.sub = items
@@ -1660,8 +1663,12 @@ const MAIN = String.raw`
         seg(t('tb.view'), [['list', [icon('list'), h('span', null, t('tb.list'))], t('tb.list')], ['cards', [icon('grid'), h('span', null, t('tb.cards'))], t('tb.cards')]], prefs.view, (v) => { prefs.view = v; ui.fade = true; redo() }))),
       emails ? fm('emails', h('label', { class: 'dp-row dp-check' },
         h('input', { type: 'checkbox', checked: prefs.hideEmail, onchange: (e) => { prefs.hideEmail = e.target.checked; redo() } }),
-        h('span', null, t('tb.hideEmails')))) : null)
+        h('span', null, t('tb.hideEmails')))) : null,
+      hiddenCount() ? fm('hidden', h('label', { class: 'dp-row dp-check' },
+        h('input', { type: 'checkbox', checked: Boolean(ui.showHidden), onchange: (e) => { ui.showHidden = e.target.checked; renderFamilyFilter(); renderAccounts(); refreshPopover('display') } }),
+        h('span', null, t('hide.showInView', { n: hiddenCount() })))) : null)
   }
+  function hiddenCount() { return S.state ? S.state.accounts.length - visibleAccounts().length : 0 }
   function renderFamilyFilter() {
     if (!tb.family) return
     const list = S.state ? listedAccounts() : []
@@ -3090,7 +3097,10 @@ const MAIN = String.raw`
     const exists = (n) => S.state.accounts.some((x) => x.family === a.family && x.name === n)
     const list = hiddenOf(a.family).filter((n) => !names.includes(n) && exists(n))
     const hide = !hiddenIn(a, { hidden: displayOf().hidden })
-    if (hide) list.push(...names.filter(exists))
+    if (hide) {
+      list.push(...names.filter(exists))
+      if (!ui.arrange) ui.showHidden = false
+    }
     next.hidden[a.family] = list
     saveDisplay(before, next, 'hide.failed').then((ok) => { if (ok) afterHide(hide, a.ref, () => toggleHide(a)) })
   }
@@ -3098,6 +3108,7 @@ const MAIN = String.raw`
     const before = displayOf()
     const next = copyDisplay(before)
     const hide = !famHidden(fam)
+    if (hide && !ui.arrange) ui.showHidden = false
     next.hiddenFamilies = hide ? next.hiddenFamilies.concat(fam) : next.hiddenFamilies.filter((x) => x !== fam)
     saveDisplay(before, next, 'hide.failed').then((ok) => { if (ok) afterHide(hide, family(fam).title, () => toggleHideFamily(fam)) })
   }
@@ -3133,7 +3144,80 @@ const MAIN = String.raw`
     return h('div', { class: 'empty empty-sm', 'data-key': 'all-hidden' },
       h('h3', null, t('hide.allTitle')),
       h('p', { class: 'muted' }, t('hide.allBody')),
-      h('button', { class: 'btn', type: 'button', onclick: toggleShowHidden }, icon('eye'), t('hide.show')))
+      h('button', { class: 'btn', type: 'button', onclick: BOOT.readOnly ? toggleShowHidden : startArrange }, icon('eye'), t('hide.show')))
+  }
+  function removeItem(a) {
+    if (BOOT.readOnly) return null
+    if (a.isMain) return { icon: 'trash', label: t('remove.menu'), disabled: true, title: t('remove.mainHint') }
+    return { icon: 'trash', label: t('remove.menu'), danger: true, run: () => openRemoveAccount(a) }
+  }
+  const rmState = { account: null, loading: false, busy: false, plan: null, error: null }
+  async function openRemoveAccount(a) {
+    rmState.account = a
+    rmState.loading = true
+    rmState.busy = false
+    rmState.plan = null
+    rmState.error = null
+    showDialog('remove')
+    dlg.onClose = () => { rmState.account = null; rmState.plan = null; rmState.error = null; rmState.loading = false; rmState.busy = false }
+    renderRemoveAccount()
+    try {
+      const r = await api('/api/accounts/remove', { ref: a.ref, confirm: false })
+      if (rmState.account && rmState.account.ref === a.ref) rmState.plan = r.plan
+    } catch (e) {
+      if (rmState.account && rmState.account.ref === a.ref) rmState.error = e.message
+    } finally {
+      if (rmState.account && rmState.account.ref === a.ref) {
+        rmState.loading = false
+        renderRemoveAccount()
+      }
+    }
+  }
+  async function confirmRemoveAccount() {
+    const a = rmState.account
+    if (!a || rmState.busy || rmState.loading || (rmState.plan && rmState.plan.blocked)) return
+    rmState.busy = true
+    dlg.busy = true
+    renderRemoveAccount()
+    try {
+      const r = await api('/api/accounts/remove', { ref: a.ref, confirm: true })
+      dlg.busy = false
+      dlg.el.close()
+      toast(t('remove.done', { ref: r.removed.ref, to: r.removed.trashedTo }))
+      load({ silent: true })
+    } catch (e) {
+      rmState.busy = false
+      dlg.busy = false
+      rmState.error = e.message
+      renderRemoveAccount()
+    }
+  }
+  function renderRemoveAccount() {
+    const a = rmState.account
+    if (!a) return
+    const p = rmState.plan
+    const body = []
+    if (rmState.loading) {
+      body.push(h('p', { class: 'muted' }, spinner(), ' ', t('remove.loading')))
+    } else if (rmState.error) {
+      body.push(h('p', { class: 'note-fail-text' }, rmState.error))
+    } else if (p) {
+      body.push(h('p', { class: 'muted' }, t('remove.intro')))
+      if (p.blocked) body.push(h('p', { class: 'note-fail-text' }, p.blocked.message))
+      const rows = [
+        h('div', { class: 'rm-row' }, h('span', { class: 'rm-k' }, t('remove.dir')), h('code', { class: 'mono' }, p.dir)),
+      ]
+      if (p.appData) rows.push(h('div', { class: 'rm-row' }, h('span', { class: 'rm-k' }, t('remove.appData')), h('code', { class: 'mono' }, p.appData)))
+      if (p.configCleanup && p.configCleanup.length) rows.push(h('div', { class: 'rm-row' }, h('span', { class: 'rm-k' }, t('remove.cleanup')), h('span', null, p.configCleanup.join(', '))))
+      body.push(h('div', { class: 'rm-list' }, rows))
+      if (p.sameLogin && p.sameLogin.length) body.push(h('p', { class: 'muted small' }, t('remove.sameLogin', { ref: p.ref, others: p.sameLogin.join(', ') })))
+    }
+    const disabled = rmState.loading || rmState.busy || Boolean(rmState.error) || !p || Boolean(p.blocked)
+    const foot = [
+      h('button', { class: 'btn', type: 'button', disabled: rmState.busy, onclick: () => dlg.el.close() }, t('btn.cancel')),
+      h('button', { class: 'btn btn-danger', type: 'button', disabled, onclick: confirmRemoveAccount }, t(rmState.busy ? 'remove.busy' : 'remove.yes')),
+    ]
+    setKids(dlg.el, dialogFrame(t('remove.title', { ref: a.ref }), a.family, body, foot))
   }
 
   // The arrange mode: the only place to drag (spec §3.25). It starts from the order on screen, saves each move at
@@ -3356,8 +3440,9 @@ const MAIN = String.raw`
     const now = Date.now()
     $('toolbar').hidden = !all.length
     if (!all.length) { setKids(count, null); patch(box, [emptyState()].concat(appGroups())); return }
-    const listed = listedAccounts()
     const hiddenN = all.length - visibleAccounts().length
+    if (!hiddenN && ui.showHidden) ui.showHidden = false
+    const listed = listedAccounts()
     if (!listed.length) { setKids(count, null); patch(box, [allHiddenState()].concat(appGroups())); return }
     const shown = listed.filter((a) => (!prefs.family || a.family === prefs.family) && matchesQuery(a, ui.query, famTitle(a)) && (!ui.attention || reasonsOf(a, now).length))
     const filtered = shown.length !== listed.length
@@ -3365,7 +3450,7 @@ const MAIN = String.raw`
       ? [t('count.filtered', { n: shown.length, total: listed.length }), ' ', h('button', { class: 'link-btn', type: 'button', onclick: clearFilters }, t('filter.clear'))]
       : tn('count.accounts', listed.length))
     const apps = appGroups()
-    const tail = hiddenN && !ui.arrange ? [hiddenBar(hiddenN)] : []
+    const tail = []
     if (!shown.length && !apps.length) { patch(box, [noMatch()].concat(tail)); return }
     ui.loginRefs = new Map()
     for (const x of loginClusters(shown)) if (Array.isArray(x)) for (const a of x) ui.loginRefs.set(a.ref, loginMembers(x)[0].ref)

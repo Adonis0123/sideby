@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.tgz
 .review-handoff/
+.archify/
 .DS_Store
 # `npx skills` links project skills here for OpenClaw because this folder exists; only skills/sideby ships.
 /skills/*

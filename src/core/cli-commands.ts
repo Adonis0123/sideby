@@ -203,6 +203,18 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
     feature: 'setting.order',
   },
   {
+    id: 'remove',
+    group: 'accounts',
+    usage: 'sideby remove|rm <account|short command> [--yes] [--json]',
+    help: 'move a non-main account to the trash and clean its config',
+    summary: {
+      en: 'Move a non-main account to the trash and clean up its short commands',
+      zh: '将非主账号移入废纸篓并清理它的短命令与配置',
+    },
+    example: 'sideby remove claude:work',
+    feature: 'setting.order',
+  },
+  {
     id: 'order',
     group: 'accounts',
     usage: 'sideby order [--json]',
