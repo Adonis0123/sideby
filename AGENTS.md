@@ -29,7 +29,7 @@ Before you commit, read your diff once for these.
 |---|---|
 | Install | `pnpm install --frozen-lockfile` |
 | Full gate (typecheck, biome, tests, leak-check, budget) | `pnpm check` |
-| Comment and test budget (`.budget.json`, totals may only shrink) | `pnpm budget` (`--tighten` locks in a drop; `--raise-tests "<reason>"` for a justified new test) |
+| Comment, test, test-subprocess and test-wait budget (`.budget.json`, totals may only shrink) | `pnpm budget` (`--tighten` locks in a drop or adds a missing metric; `--raise-tests "<reason>"` for a justified new test, `--raise-spawns "<reason>"` for a justified subprocess; waits and comments have no raise flag) |
 | All tests | `pnpm test` |
 | One test file | `node --test src/core/share-modes.test.ts` |
 | Format and auto-fix | `pnpm format` |
@@ -131,6 +131,8 @@ Shared Item paths must be relative and stay inside the account directory: config
 - Write paths: snapshot the fake Host directories before and after (`snapshot`, `diffSnapshots`) and assert no unexpected writes.
 - Fixtures live under `fixtures/` with fake values only; leak-check rejects real credentials, home paths and credential-shaped files elsewhere.
 - Test CLI behaviour in-process first: `sideby()` (or `runMain`) from `src/cli/cli-test-helpers.ts` runs `main()` in the test process against a fake HOME, or call the `cmd*` function with parsed arguments, as `src/cli/sessions-open-run.test.ts` does. `sidebySpawn` (`spawnMain`) runs a real child process: use it for one smoke test per command (its exit code and `--json` shape) and where only a child process behaves right (what the bin entry does, a server in the test process that sideby connects to, signals sent to sideby). `SIDEBY_TEST_SPAWN=1` spawns every call, to tell an in-process difference from a real failure. Split a test file that takes more than about 15 s on its own.
+- `pnpm budget` also counts subprocess starts in tests (`sidebySpawn`, `spawnMain`, `spawn*`/`execFile*(process.execPath`, and the call sites of a local helper that wraps one) and fails when they grow; record a needed one with `pnpm budget --raise-spawns "<reason>"`. It fails too when awaited waits of 1 s or more (`setTimeout(r, N)` in a Promise, `await sleep|delay|setTimeout(N)`) grow; inject a fake clock or a short timeout option instead, there is no raise flag.
+- `pnpm test` prints a WARNING on stderr (never a failure) for each test file that ran longer than 15 s (`scripts/test-time-reporter.ts`): split it or move its CLI calls in-process.
 - Do not run `sideby doctor --fix`, `new`, `login` or `quota setup` against the real HOME. Real-host checks are read-only: `list`, `doctor` without `--fix`, `quota`. For anything else, use a demo HOME (`scripts/demo-home.ts`).
 
 ## Change process

@@ -1,6 +1,6 @@
 {
   "comments": {
-    "total": 9814,
+    "total": 9813,
     "files": {
       "mods/claude/hooks/register.js": 15,
       "mods/claude/hooks/register.test.ts": 9,
@@ -105,7 +105,7 @@
       "src/core/handoff-overview.ts": 6,
       "src/core/handoff-rules.test.ts": 1,
       "src/core/handoff-rules.ts": 6,
-      "src/core/handoff-run.test.ts": 13,
+      "src/core/handoff-run.test.ts": 12,
       "src/core/handoff-run.ts": 50,
       "src/core/handoff-select.test.ts": 18,
       "src/core/handoff-select.ts": 54,
@@ -400,10 +400,10 @@
     }
   },
   "tests": {
-    "total": 2139,
+    "total": 2141,
     "files": {
       "mods/claude/hooks/register.test.ts": 7,
-      "scripts/budget.test.ts": 5,
+      "scripts/budget.test.ts": 7,
       "scripts/chrome.test.ts": 4,
       "scripts/demo-mark.test.ts": 3,
       "scripts/design-system.test.ts": 6,
@@ -591,7 +591,50 @@
         "reason": "reproduces the Orca agent-view plugin bug fixed in #35 by failing first",
         "from": 2138,
         "to": 2139
+      },
+      {
+        "date": "2026-11-25",
+        "reason": "pure logic callable without rendering: the subprocess and wait counters in scripts/budget.ts",
+        "from": 2139,
+        "to": 2141
       }
     ]
+  },
+  "spawns": {
+    "total": 104,
+    "files": {
+      "src/cli/ask-test-helpers.ts": 1,
+      "src/cli/cli-commands.test.ts": 5,
+      "src/cli/cli-config.test.ts": 7,
+      "src/cli/cli-handoff.test.ts": 4,
+      "src/cli/cli-next.test.ts": 4,
+      "src/cli/cli-run.test.ts": 7,
+      "src/cli/cli-sessions.test.ts": 4,
+      "src/cli/cli-test-helpers.ts": 3,
+      "src/cli/cli-tuning.test.ts": 3,
+      "src/cli/cli-update-parity.test.ts": 9,
+      "src/cli/expired-login-cli.test.ts": 1,
+      "src/cli/history-cli.test.ts": 2,
+      "src/cli/memory-cli.test.ts": 7,
+      "src/cli/progress-cli.test.ts": 5,
+      "src/cli/trust-cli.test.ts": 1,
+      "src/cli/unattended-cli.test.ts": 5,
+      "src/core/browser-profiles.test.ts": 3,
+      "src/core/task-spec.test.ts": 3,
+      "src/core/unattended-ended.test.ts": 4,
+      "src/core/unattended.test.ts": 1,
+      "src/desktop/app.test.ts": 4,
+      "src/families/codex/limit-reset-test-helpers.ts": 1,
+      "src/families/grok/same-login.test.ts": 1,
+      "src/panel/background.test.ts": 18,
+      "src/plugins/plugins.test.ts": 1
+    },
+    "history": []
+  },
+  "waits": {
+    "total": 3,
+    "files": {
+      "src/panel/panel.test.ts": 3
+    }
   }
 }

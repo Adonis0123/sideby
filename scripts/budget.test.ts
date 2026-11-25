@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { countComments, countTests } from './budget.ts'
+import { countComments, countSpawns, countTests, countWaits } from './budget.ts'
 
 const src = (...lines: string[]) => lines.join('\n')
 
@@ -30,5 +30,42 @@ describe('pnpm budget counter', () => {
       ),
       2,
     )
+  })
+})
+
+describe('pnpm budget subprocess and wait counters', () => {
+  it('counts node subprocess starts, a local wrapper by its call sites, not ones in strings or comments', () => {
+    const wrapped = src(
+      'function cli(h, args) {',
+      '  return new Promise((resolve) => {',
+      '    const child = spawn(',
+      '      process.execPath,',
+      '      [MAIN, ...args],',
+      '    )',
+      '  })',
+      '}',
+      "it('a', async () => {",
+      "  await cli(h, ['list'])",
+      "  await cli(h, ['doctor'])",
+      "  await sidebySpawn(h, ['quota'])",
+      '  // spawn(process.execPath)',
+      "  await write('bin/x', `spawn(process.execPath, ['-e', ''])`)",
+      '  assert.match(out, /run `sideby/)',
+      '  await sidebySpawn(h, [])',
+      '})',
+    )
+    assert.equal(countSpawns(wrapped), 4)
+  })
+
+  it('counts awaited waits of 1 s or more, not shorter ones, timeouts or timers in fake Host scripts', () => {
+    const waits = src(
+      'await new Promise((r) => setTimeout(r, 1500))',
+      'await sleep(1_000)',
+      'await new Promise((r) => setTimeout(r, 999))',
+      'await takeLock(file, { timeoutMs: 2000 })',
+      "await write('host', `setTimeout(answer, 60000)`)",
+      'setTimeout(() => child.kill(), 5000)',
+    )
+    assert.equal(countWaits(waits), 2)
   })
 })

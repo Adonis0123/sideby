@@ -11,7 +11,7 @@
 // 600. Anything unexpected in it (another format, a parse error, a memo version that changed) is ignored and the
 // logs are parsed again, which gives the same results.
 import { mkdir, readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { type MemoDump, persistedMemos } from './file-memo.ts'
 import { writeFileAtomic } from './fs-safe.ts'
 
@@ -42,7 +42,7 @@ export interface MemoStore {
   save(): Promise<void>
 }
 
-const stores = new Map<string, MemoStore>()
+const stores = new Map<string, { store: MemoStore; close(): Promise<void> }>()
 
 /** One store per state directory and process. */
 export function memoStore(
@@ -51,12 +51,13 @@ export function memoStore(
   delayMs = SAVE_DELAY_MS,
 ): MemoStore {
   const known = stores.get(stateDir)
-  if (known) return known
+  if (known) return known.store
   const file = memoCachePath(stateDir)
   let loading: Promise<void> | undefined
   let writing: Promise<void> | undefined
   let lastWrite = Number.NEGATIVE_INFINITY
   let timer: ReturnType<typeof setTimeout> | undefined
+  let closed = false
 
   /** The cache file's memos, or null when it is missing or not one this sideby can read. */
   const readCache = async (): Promise<CacheFile['memos'] | null> => {
@@ -83,7 +84,7 @@ export function memoStore(
   }
 
   const write = async () => {
-    if (![...persistedMemos.values()].some((m) => m.dirty)) return
+    if (closed || ![...persistedMemos.values()].some((m) => m.dirty)) return
     lastWrite = now()
     // Taken before the file is read again, so a pass that ends meanwhile counts toward the next write.
     const fresh = [...persistedMemos].map(([name, memo]) => [name, memo, memo.takeFresh()] as const)
@@ -129,11 +130,28 @@ export function memoStore(
       timer.unref?.()
     },
   }
-  stores.set(stateDir, store)
+  const close = async () => {
+    closed = true
+    if (timer) clearTimeout(timer)
+    timer = undefined
+    while (writing) await writing
+  }
+  stores.set(stateDir, { store, close })
   return store
 }
 
-/** Forgets the per-directory stores (for tests). */
+/** Forgets the per-directory stores and drops their pending writes (for tests). */
 export function resetMemoStores(): void {
+  for (const { close } of stores.values()) void close()
   stores.clear()
+}
+
+/** WHY: for tests; a pending write under `dir` would recreate it after the test removed it. */
+export async function closeMemoStores(dir: string): Promise<void> {
+  const prefix = dir.endsWith(sep) ? dir : dir + sep
+  for (const [stateDir, { close }] of stores)
+    if (stateDir.startsWith(prefix)) {
+      stores.delete(stateDir)
+      await close()
+    }
 }

@@ -3,6 +3,7 @@
 import { chmod, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { closeMemoStores } from '../src/core/memo-store.ts'
 import type { Env } from '../src/types.ts'
 
 export interface FakeHome {
@@ -56,7 +57,9 @@ export async function withFakeHome<T>(fn: (h: FakeHome) => Promise<T>): Promise<
   try {
     return await fn(h)
   } finally {
-    await rm(base, { recursive: true, force: true })
+    await closeMemoStores(base)
+    // WHY: a fake Host still ending (one signalled at exit) may append to its log while the tree is removed.
+    await rm(base, { recursive: true, force: true, maxRetries: 3 })
   }
 }
 

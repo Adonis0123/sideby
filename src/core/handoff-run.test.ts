@@ -30,11 +30,18 @@ const builtins = [claudePlugin, codexPlugin].map((plugin) => ({
   defaultEnabled: true,
 }))
 
-/** The hook's job, done by the fake Host on its first run: mark the run ready, then wait to be ended. */
+/**
+ * The hook's job, done by the fake Host on its first run: mark the run ready, then wait to be ended.
+ * WHY: written through a rename like the real hook's; a half-written file read on the watch event waits a poll (1 s).
+ */
 const READY_ON_FIRST_RUN = `
 if (process.argv.includes('--')) process.exit(0)
-if (process.env.SIDEBY_HANDOFF_DIR) fs.writeFileSync(path.join(process.env.SIDEBY_HANDOFF_DIR, 'ready.json'),
-  JSON.stringify({ runId: process.env.SIDEBY_HANDOFF_RUN, at: new Date().toISOString(), trigger: 'manual', sessionId: 's1' }))
+if (process.env.SIDEBY_HANDOFF_DIR) {
+  const readyTmp = path.join(process.env.SIDEBY_HANDOFF_DIR, 'ready.json.tmp')
+  fs.writeFileSync(readyTmp,
+    JSON.stringify({ runId: process.env.SIDEBY_HANDOFF_RUN, at: new Date().toISOString(), trigger: 'manual', sessionId: 's1' }))
+  fs.renameSync(readyTmp, path.join(process.env.SIDEBY_HANDOFF_DIR, 'ready.json'))
+}
 `
 
 // Records each start's `--settings` file as the Host sees it, in the chain directory: sideby removes the file when
@@ -48,7 +55,10 @@ if (at !== -1 && process.env.SIDEBY_HANDOFF_DIR)
 
 async function setup(h: FakeHome, handoff: object, accounts = ['001', '002']) {
   for (const a of accounts) await h.write(`.claude-${a}/projects/.keep`, '')
-  await h.write('.config/sideby/config.json', JSON.stringify({ aliases: { cc001: 'claude:001' }, handoff }))
+  await h.write(
+    '.config/sideby/config.json',
+    JSON.stringify({ aliases: { cc001: 'claude:001' }, handoff, quota: { check: { claude: false } } }),
+  )
   // The hook command must find a sideby with the hook entry on PATH; this one only answers the check.
   await writeFile(join(h.bin, 'sideby'), '#!/bin/sh\necho ok\n')
   await chmod(join(h.bin, 'sideby'), 0o755)
@@ -58,6 +68,15 @@ async function setup(h: FakeHome, handoff: object, accounts = ['001', '002']) {
 function terminal(): PassThrough & { isTTY: boolean; setRawMode: () => void } {
   return Object.assign(new PassThrough(), { isTTY: true, setRawMode: () => {} })
 }
+
+/**
+ * The fake Host ends on its own as soon as sideby has acted: once `file` in the chain directory is there, or gone.
+ * WHY: a fixed sleep either slows every run or, on a busy machine, ends the Host before sideby decided.
+ */
+const endOnce = (file: string, state: 'there' | 'gone') => `
+const endFile = path.join(process.env.SIDEBY_HANDOFF_DIR || '.', ${JSON.stringify(file)})
+setInterval(() => { if (fs.existsSync(endFile) === ${state === 'there'}) process.exit(0) }, 10)
+`
 
 /** The first run hits its usage limit (what the StopFailure hook writes), then idles until it is ended. */
 const LIMIT_ON_FIRST_RUN = READY_ON_FIRST_RUN.replace("trigger: 'manual'", "trigger: 'limit'")
@@ -153,7 +172,7 @@ describe('runWithHandoff', () => {
       const atThreshold = `${READY_ON_FIRST_RUN.replace("trigger: 'manual'", "trigger: 'threshold'")}
 if (process.env.SIDEBY_HANDOFF_DIR) fs.writeFileSync(path.join(process.env.SIDEBY_HANDOFF_DIR, 'started'), '{}')
 `
-      await fakeHost(h, 'claude', { sleep: 2, onStart: atThreshold })
+      await fakeHost(h, 'claude', { sleep: 20, onStart: atThreshold + endOnce(FILES.request, 'there') })
       // Only one account: nothing can take over.
       const rt = await setup(h, { auto: true, sameFamily: true, countdownSeconds: 0 }, ['001'])
       const lines: string[] = []
@@ -179,7 +198,7 @@ if (process.env.SIDEBY_HANDOFF_DIR) fs.writeFileSync(path.join(process.env.SIDEB
 
   it('at the limit with a reset soon, says why once the session ends on its own', async () => {
     await withFakeHome(async (h) => {
-      await fakeHost(h, 'claude', { sleep: 1, onStart: LIMIT_ON_FIRST_RUN })
+      await fakeHost(h, 'claude', { sleep: 20, onStart: LIMIT_ON_FIRST_RUN + endOnce(FILES.ready, 'gone') })
       await fullSoon(h)
       const rt = await setup(h, { auto: true, sameFamily: true, countdownSeconds: 0 })
       const lines: string[] = []
@@ -302,7 +321,7 @@ if (process.env.SIDEBY_HANDOFF_DIR) fs.writeFileSync(path.join(process.env.SIDEB
 
   it('writes a plan that already says wait when the fullest window resets soon, so the hook does not interrupt', async () => {
     await withFakeHome(async (h) => {
-      await fakeHost(h, 'claude', { sleep: 1 })
+      await fakeHost(h, 'claude')
       const resetsAt = new Date(Date.now() + 20 * 60_000).toISOString()
       await writeQuotaCache(cacheStateDir(h.env), '001', {
         version: 1,
@@ -320,7 +339,7 @@ if (process.env.SIDEBY_HANDOFF_DIR) fs.writeFileSync(path.join(process.env.SIDEB
 
   it('puts sideby’s options before the user’s own --, so they are not read as prompt text', async () => {
     await withFakeHome(async (h) => {
-      await fakeHost(h, 'claude', { sleep: 1 })
+      await fakeHost(h, 'claude')
       const rt = await setup(h, { auto: true, sameFamily: true, countdownSeconds: 0 })
       await runWithHandoff(rt, 'cc001', ['--model', 'opus', '--', 'fix the tests'], {
         err: () => {},
@@ -383,7 +402,7 @@ if (process.env.SIDEBY_HANDOFF_DIR) fs.writeFileSync(path.join(process.env.SIDEB
 
   it("puts Network Guard's hooks into Auto Handoff's one --settings file (spec §3.35)", async () => {
     await withFakeHome(async (h) => {
-      await fakeHost(h, 'claude', { sleep: 1, onStart: SEEN_SETTINGS })
+      await fakeHost(h, 'claude', { onStart: SEEN_SETTINGS })
       await setup(h, {})
       await h.write(
         '.config/sideby/config.json',
@@ -431,8 +450,8 @@ if (process.env.SIDEBY_HANDOFF_DIR) fs.writeFileSync(path.join(process.env.SIDEB
 
   it('leaves a Host that will not exit running and starts nothing else', async () => {
     await withFakeHome(async (h) => {
-      // WHY: it outlives the 300 ms grace by a margin, then exits on its own instead of running out its 3 s sleep.
-      const stubborn = `${READY_ON_FIRST_RUN}\nprocess.removeAllListeners('SIGTERM'); process.on('SIGTERM', () => setTimeout(() => process.exit(0), 1200))`
+      // WHY: it outlives the 100 ms grace by a margin, then exits on its own instead of running out its 3 s sleep.
+      const stubborn = `${READY_ON_FIRST_RUN}\nprocess.removeAllListeners('SIGTERM'); process.on('SIGTERM', () => setTimeout(() => process.exit(0), 400))`
       await fakeHost(h, 'claude', { sleep: 3, onStart: stubborn })
       const rt = await setup(h, { auto: true, sameFamily: true, countdownSeconds: 0 })
       const lines: string[] = []
@@ -441,7 +460,7 @@ if (process.env.SIDEBY_HANDOFF_DIR) fs.writeFileSync(path.join(process.env.SIDEB
         'cc001',
         [],
         { err: (l) => lines.push(l), stdin: terminal() },
-        { exitGraceMs: 300 },
+        { exitGraceMs: 100 },
       )
       assert.equal(code, 0)
       assert.equal((await readHostLog(h, 'claude')).filter((r) => r.argv).length, 1)
@@ -451,7 +470,7 @@ if (process.env.SIDEBY_HANDOFF_DIR) fs.writeFileSync(path.join(process.env.SIDEB
 
   it('does not end the session when nothing can take over', async () => {
     await withFakeHome(async (h) => {
-      await fakeHost(h, 'claude', { sleep: 1, onStart: READY_ON_FIRST_RUN })
+      await fakeHost(h, 'claude', { sleep: 20, onStart: READY_ON_FIRST_RUN + endOnce(FILES.ready, 'gone') })
       const rt = await setup(h, { auto: true, sameFamily: true, countdownSeconds: 0 }, ['001'])
       const lines: string[] = []
       await runWithHandoff(rt, 'cc001', [], { err: (l) => lines.push(l), stdin: terminal() })
