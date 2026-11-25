@@ -1,11 +1,10 @@
 // Shared by the src/cli/ask*.test.ts files. Kept out of dist/ by tsconfig.build.json.
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
 import { PassThrough } from 'node:stream'
-import { fileURLToPath } from 'node:url'
 import { Value } from 'typebox/value'
 import type { FakeHome } from '../../testing/index.ts'
 import type { Env } from '../types.ts'
+import { runMain, spawnMain } from './cli-test-helpers.ts'
 import { OUTPUT_SCHEMAS } from './json-schemas.ts'
 
 // Joined at run time so the source never holds a key-shaped string (leak-check).
@@ -16,21 +15,15 @@ export function cli(
   args: string[],
   env: Env = h.env,
 ): Promise<{ code: number | null; out: string; err: string }> {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [fileURLToPath(new URL('./main.ts', import.meta.url)), ...args], {
-      env: env as NodeJS.ProcessEnv,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    let out = '',
-      err = ''
-    child.stdout.on('data', (d) => {
-      out += d
-    })
-    child.stderr.on('data', (d) => {
-      err += d
-    })
-    child.on('close', (code) => resolve({ code, out, err }))
-  })
+  return runMain(args, { env })
+}
+
+export function cliSpawn(
+  h: FakeHome,
+  args: string[],
+  env: Env = h.env,
+): Promise<{ code: number | null; out: string; err: string }> {
+  return spawnMain(args, { env })
 }
 export function shape(name: string, out: string) {
   const data = JSON.parse(out)

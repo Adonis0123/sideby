@@ -6,7 +6,7 @@ import { diffSnapshots, fakeHost, readHostLog, snapshot, withFakeHome } from '..
 import { taskWorkDir, writeTask } from '../core/ask.ts'
 import { createRuntime } from '../runtime.ts'
 import { parseArgs } from './args.ts'
-import { cli, FAKE_KEY, shape } from './ask-test-helpers.ts'
+import { cli, cliSpawn, FAKE_KEY, shape } from './ask-test-helpers.ts'
 import { cmdAsk } from './commands.ts'
 
 it('ask --run drops the Codex bypass flags for an AI Task only (ADR-0031)', async () => {
@@ -90,7 +90,7 @@ it('CLI print, empty fallback, terminal persistence, key refusal, probe and plug
     assert.equal(empty.code, 1)
     assert.equal(shape('ask', empty.out).reason, 'no-accounts')
     assert.match(String(shape('ask', empty.out).detail), /sideby new <family> --next/)
-    const unknown = await cli(h, ['terminal', '--set', 'bogus', '--json'])
+    const unknown = await cliSpawn(h, ['terminal', '--set', 'bogus', '--json'])
     assert.equal(unknown.code, 1)
     assert.match(unknown.out, /terminal, iterm2, ghostty.*custom.*sideby terminal/)
     const noTemplate = await cli(h, ['terminal', '--set', 'custom', '--json'])
@@ -108,19 +108,19 @@ it('CLI print, empty fallback, terminal persistence, key refusal, probe and plug
     assert.equal(shape('terminal', (await cli(h, ['terminal', '--unset', '--json'])).out).preferred, null)
     await h.write('.claude/settings.json', '{}')
     await h.write('.claude-api/proxy.env', 'ANTHROPIC_AUTH_TOKEN=fictional-secret-value\n', 0o600)
-    assert.equal((await cli(h, ['key', 'claude:main', '--json'])).code, 1)
+    assert.equal((await cliSpawn(h, ['key', 'claude:main', '--json'])).code, 1)
     const key = await cli(h, ['key', 'claude:api', '--json'])
     assert.equal(key.code, 1)
     assert.match(key.out, /tty-required/)
     await fakeHost(h, 'claude', { exitCode: 1, onStart: 'console.log(process.env.ANTHROPIC_AUTH_TOKEN)' })
-    const preview = await cli(h, ['try', 'claude:api', '--json'])
+    const preview = await cliSpawn(h, ['try', 'claude:api', '--json'])
     assert.equal(preview.code, 10)
     assert.equal(shape('try', preview.out).confirmed, false)
     const probe = await cli(h, ['try', 'claude:api', '--yes', '--json'])
     assert.equal(probe.code, 1)
     assert.match(String(shape('try', probe.out).output), /\*\*\*/)
     assert.ok(!probe.out.includes('fictional-secret-value'))
-    const created = await cli(h, ['plugins', 'new', 'sample', '--json'])
+    const created = await cliSpawn(h, ['plugins', 'new', 'sample', '--json'])
     assert.equal(created.code, 0)
     shape('plugins-new', created.out)
     assert.equal((await cli(h, ['plugins', 'new', 'sample', '--json'])).code, 1)

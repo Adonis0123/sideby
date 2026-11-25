@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { diffSnapshots, fakeHost, readHostLog, snapshot, withFakeHome } from '../../testing/index.ts'
-import { checkSchema, codexMain, sideby } from './cli-test-helpers.ts'
+import { checkSchema, codexMain, sideby, sidebySpawn } from './cli-test-helpers.ts'
 
 describe('sideby update (spec §3.23)', () => {
   /** A registry on localhost answering `latest`, so the test never leaves the machine. */
@@ -25,7 +25,7 @@ describe('sideby update (spec §3.23)', () => {
       const { packageVersion } = await import('../core/version.ts')
       const same = await fakeRegistry(packageVersion())
       try {
-        const r = await sideby(h, ['update', '--json'], { SIDEBY_UPDATE_REGISTRY: same.url })
+        const r = await sidebySpawn(h, ['update', '--json'], { SIDEBY_UPDATE_REGISTRY: same.url })
         assert.equal(r.code, 0, r.err)
         const data = checkSchema('update', r.out)
         assert.equal(data.available, false)
@@ -35,17 +35,17 @@ describe('sideby update (spec §3.23)', () => {
       const newer = await fakeRegistry('99.0.0')
       try {
         // These tests run from the source checkout, which sideby never updates itself.
-        const r = await sideby(h, ['update', '--json'], { SIDEBY_UPDATE_REGISTRY: newer.url })
+        const r = await sidebySpawn(h, ['update', '--json'], { SIDEBY_UPDATE_REGISTRY: newer.url })
         assert.equal(r.code, 1)
         const data = checkSchema('update', r.out)
         assert.deepEqual(
           [data.available, data.canRun, data.command],
           [true, false, 'git pull && pnpm install'],
         )
-        const text = await sideby(h, ['update'], { SIDEBY_UPDATE_REGISTRY: newer.url })
+        const text = await sidebySpawn(h, ['update'], { SIDEBY_UPDATE_REGISTRY: newer.url })
         assert.match(text.err, /cannot update itself: it runs from a source checkout/)
         // The cache now knows 99.0.0, but without a terminal no command prints a notice.
-        const list = await sideby(h, ['list'], { SIDEBY_NO_UPDATE_NOTIFIER: '' })
+        const list = await sidebySpawn(h, ['list'], { SIDEBY_NO_UPDATE_NOTIFIER: '' })
         assert.doesNotMatch(list.err, /is available/)
       } finally {
         await newer.close()
@@ -162,7 +162,7 @@ describe('Panel CLI parity', () => {
       const hostDirs = ['.claude', '.claude-work', '.claude-team', '.claude-lab', '.claude-extra']
       const before = await Promise.all(hostDirs.map((dir) => snapshot(h.path(dir))))
       const loginBefore = await readFile(h.path('.claude.json'), 'utf8')
-      const pin = await sideby(h, ['pin', 'cx', '--json'])
+      const pin = await sidebySpawn(h, ['pin', 'cx', '--json'])
       assert.equal(pin.code, 0, pin.out)
       const data = checkSchema('pin', pin.out)
       assert.equal(data.changed, true)
@@ -175,7 +175,7 @@ describe('Panel CLI parity', () => {
       const full = await sideby(h, ['pin', 'claude:extra', '--json'])
       assert.equal(full.code, 1)
       assert.match(String(checkSchema('error', full.out).error), /unpin/i)
-      const unpin = await sideby(h, ['unpin', 'cx', '--json'])
+      const unpin = await sidebySpawn(h, ['unpin', 'cx', '--json'])
       assert.equal(unpin.code, 0)
       assert.equal(checkSchema('unpin', unpin.out).pinned, false)
       config = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8'))
@@ -209,7 +209,7 @@ describe('Panel CLI parity', () => {
       await fakeHost(h, 'codex')
       const hostDirs = ['.claude', '.claude-work', '.claude-old', '.codex']
       const before = await Promise.all(hostDirs.map((dir) => snapshot(h.path(dir))))
-      const hide = await sideby(h, ['hide', 'claude:work', '--json'])
+      const hide = await sidebySpawn(h, ['hide', 'claude:work', '--json'])
       assert.equal(hide.code, 0, hide.out)
       const data = checkSchema('hide', hide.out)
       assert.equal(data.kind, 'account')
@@ -243,12 +243,12 @@ describe('Panel CLI parity', () => {
       const refs = JSON.stringify(menu)
       assert.doesNotMatch(refs, /claude:work|codex:main/)
       assert.match(refs, /claude:old/)
-      const order = checkSchema('order', (await sideby(h, ['order', '--reset', '--json'])).out)
+      const order = checkSchema('order', (await sidebySpawn(h, ['order', '--reset', '--json'])).out)
       assert.deepEqual((order.display as { hiddenFamilies?: string[] }).hiddenFamilies, ['codex'])
       assert.ok(
         (order.families as { family: string; hidden: boolean }[]).find((f) => f.family === 'codex')?.hidden,
       )
-      const blocked = await sideby(h, ['unhide', 'codex:main', '--json'])
+      const blocked = await sidebySpawn(h, ['unhide', 'codex:main', '--json'])
       assert.equal(blocked.code, 1)
       assert.match(String(checkSchema('error', blocked.out).error), /sideby unhide codex/)
       assert.equal((await sideby(h, ['unhide', 'codex'])).code, 0)

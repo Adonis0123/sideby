@@ -2,14 +2,14 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { describe, it } from 'node:test'
 import { diffSnapshots, type FakeHome, fakeHost, snapshot, withFakeHome } from '../../testing/index.ts'
-import { checkSchema, sideby } from './cli-test-helpers.ts'
+import { checkSchema, sideby, sidebySpawn } from './cli-test-helpers.ts'
 
 describe('remote-control (spec §3.22)', () => {
   it('shows the state, previews turning it off with exit 10, writes only with --yes, and undoes it', async () => {
     await withFakeHome(async (h) => {
       await h.write('.claude/settings.json', '{"model":"sonnet","remoteControlAtStartup":true}\n')
       await fakeHost(h, 'claude')
-      const status = checkSchema('remote-control', (await sideby(h, ['remote-control', '--json'])).out)
+      const status = checkSchema('remote-control', (await sidebySpawn(h, ['remote-control', '--json'])).out)
       assert.deepEqual(
         (status.groups as { state: string; accounts: string[] }[]).map((g) => [g.state, g.accounts]),
         [['on', ['claude:main']]],
@@ -64,7 +64,7 @@ describe('advisor (spec §3.41)', () => {
     await withFakeHome(async (h) => {
       await h.write('.claude/settings.json', '{"model":"sonnet"}\n')
       await fakeHost(h, 'claude')
-      const status = checkSchema('advisor', (await sideby(h, ['advisor', '--json'])).out)
+      const status = checkSchema('advisor', (await sidebySpawn(h, ['advisor', '--json'])).out)
       assert.deepEqual(
         [
           status.unlock,
@@ -165,7 +165,7 @@ describe('tune (spec §3.18)', () => {
         ['tune', 'claude', '--json'],
         ['tune', 'claude:main', '--json'],
       ]) {
-        const r = await sideby(h, args)
+        const r = await sidebySpawn(h, args)
         assert.equal(r.code, 0, args.join(' '))
         const data = checkSchema('tune', r.out)
         assert.equal(data.schemaVersion, 1)

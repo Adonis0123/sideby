@@ -2,27 +2,21 @@
 // with its preview and exit 10, the status with booleans only, a `sideby run` that copies the trust before the Host
 // starts, and an undo that puts the file back.
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
-import { fileURLToPath } from 'node:url'
 import { Value } from 'typebox/value'
 import { type FakeHome, fakeHost, withFakeHome } from '../../testing/index.ts'
+import { runMain, spawnMain } from './cli-test-helpers.ts'
 import { OUTPUT_SCHEMAS } from './json-schemas.ts'
 
-const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url))
 const MARKER = 'not-a-secret-marker-only-for-this-test'
 
 function sideby(h: FakeHome, args: string[], cwd: string) {
-  return new Promise<{ code: number | null; out: string; err: string }>((resolve) => {
-    const child = spawn(process.execPath, [MAIN, ...args], { env: h.env as NodeJS.ProcessEnv, cwd })
-    let out = ''
-    let err = ''
-    child.stdout.on('data', (d: Buffer) => (out += d))
-    child.stderr.on('data', (d: Buffer) => (err += d))
-    child.on('exit', (code) => resolve({ code, out, err }))
-  })
+  return runMain(args, { env: h.env, cwd })
+}
+function sidebySpawn(h: FakeHome, args: string[], cwd: string) {
+  return spawnMain(args, { env: h.env, cwd })
 }
 
 function checkSchema(name: string, text: string) {
@@ -136,7 +130,7 @@ describe('sideby trust', () => {
 
   it('says what to use for an option that does not go with the subcommand', async () => {
     await withFakeHome(async (h) => {
-      const r = await sideby(h, ['trust', 'on', '--dir', '.', '--json'], h.home)
+      const r = await sidebySpawn(h, ['trust', 'on', '--dir', '.', '--json'], h.home)
       assert.equal(r.code, 2)
       const e = checkSchema('error', r.out)
       assert.match(e.error as string, /--dir does not go with `sideby trust on`; usage: sideby trust/)

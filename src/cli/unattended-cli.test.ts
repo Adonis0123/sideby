@@ -19,18 +19,23 @@ import { UserError } from '../core/errors.ts'
 import { resolvePaths } from '../core/paths.ts'
 import { addPendingDecision } from '../core/unattended-pending.ts'
 import { parseArgs, UsageError } from './args.ts'
+import { runMain, spawnMain } from './cli-test-helpers.ts'
 import { cmdUnattended } from './commands.ts'
 import { OUTPUT_SCHEMAS } from './json-schemas.ts'
 
 const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url))
 
-function cli(h: FakeHome, args: string[], extra: { input?: string; env?: Record<string, string> } = {}) {
-  return spawnSync(process.execPath, [MAIN, ...args], {
-    env: { ...h.env, ...extra.env } as NodeJS.ProcessEnv,
-    encoding: 'utf8',
-    input: extra.input ?? '',
-    timeout: 30_000,
-  })
+async function cli(
+  h: FakeHome,
+  args: string[],
+  extra: { input?: string; env?: Record<string, string> } = {},
+) {
+  const r = await runMain(args, { env: { ...h.env, ...extra.env }, input: extra.input ?? '' })
+  return { status: r.code, stdout: r.out, stderr: r.err }
+}
+async function cliSpawn(h: FakeHome, args: string[], extra: { input?: string } = {}) {
+  const r = await spawnMain(args, { env: h.env, input: extra.input ?? '' })
+  return { status: r.code, stdout: r.out, stderr: r.err }
 }
 
 /**
@@ -54,8 +59,8 @@ async function inProcess(h: FakeHome, args: string[]): Promise<number> {
 
 const usageMatching = (re: RegExp) => (e: unknown) => e instanceof UsageError && re.test(e.message)
 
-function json(h: FakeHome, args: string[], schema = 'unattended', env: Record<string, string> = {}) {
-  const r = cli(h, ['unattended', ...args, '--json'], { env })
+async function json(h: FakeHome, args: string[], schema = 'unattended', env: Record<string, string> = {}) {
+  const r = await cli(h, ['unattended', ...args, '--json'], { env })
   assert.equal(r.status, 0, r.stderr || r.stdout)
   const value = JSON.parse(r.stdout)
   // Checked on a second parse, so the guard does not narrow `value` to the schema's static type (unknown).
@@ -69,11 +74,11 @@ function json(h: FakeHome, args: string[], schema = 'unattended', env: Record<st
 describe('sideby unattended', () => {
   it('shows the state, turns it on for a while and off, with JSON that matches its schema', async () => {
     await withFakeHome(async (h) => {
-      const first = json(h, [])
+      const first = await json(h, [])
       assert.equal(first.on, false)
       assert.equal(first.configured, false)
       assert.equal(first.coverage.claude, 'not-covered')
-      const on = json(h, ['on', '--for', '60m'])
+      const on = await json(h, ['on', '--for', '60m'])
       assert.equal(on.on, true)
       assert.equal(on.reason, 'manual')
       assert.equal(on.changed, true)
@@ -82,11 +87,11 @@ describe('sideby unattended', () => {
       assert.equal(on.coverage.codex, 'needs-trust')
       assert.equal(on.coverage.grok, 'not-covered')
       assert.ok(Date.parse(on.until) > Date.now() + 59 * 60 * 1000)
-      assert.equal(json(h, ['status']).on, true)
-      const off = json(h, ['off'])
+      assert.equal((await json(h, ['status'])).on, true)
+      const off = await json(h, ['off'])
       assert.equal(off.on, false)
       assert.match(off.undo, /^sideby unattended on --until /)
-      const human = cli(h, ['unattended'])
+      const human = await cli(h, ['unattended'])
       assert.equal(human.status, 0)
       assert.match(human.stdout, /Unattended Mode: off/)
       assert.match(human.stdout, /Covers Claude sessions sideby starts/)
@@ -95,7 +100,7 @@ describe('sideby unattended', () => {
 
   it('refuses times and options it does not take, saying what to use (exit 2)', async () => {
     await withFakeHome(async (h) => {
-      const r = cli(h, ['unattended', 'on', '--for', '73h', '--json'])
+      const r = await cliSpawn(h, ['unattended', 'on', '--for', '73h', '--json'])
       assert.equal(r.status, 2, `${r.stdout}${r.stderr}`)
       const out = JSON.parse(r.stdout)
       assert.equal(out.schemaVersion, 1)
@@ -137,14 +142,14 @@ describe('sideby unattended', () => {
   it('sets how long a question waits for you (Answer Wait), with an undo that runs', async () => {
     await withFakeHome(async (h) => {
       // 10 minutes until someone changes it, also before the feature is set up.
-      assert.equal(json(h, []).answerWait, 10)
-      const set = json(h, ['wait', '30'])
+      assert.equal((await json(h, [])).answerWait, 10)
+      const set = await json(h, ['wait', '30'])
       assert.deepEqual(
         [set.answerWait, set.changed, set.undo, set.configured],
         [30, true, 'sideby unattended wait 10', true],
       )
-      assert.equal(json(h, ['wait', '30']).changed, false)
-      const off = json(h, ['wait', 'off'])
+      assert.equal((await json(h, ['wait', '30'])).changed, false)
+      const off = await json(h, ['wait', 'off'])
       assert.deepEqual([off.answerWait, off.undo], [null, 'sideby unattended wait 30'])
       const config = JSON.parse(await readFile(h.path('.config/sideby/config.json'), 'utf8'))
       assert.equal(config.unattended.answerWait, false)
@@ -154,10 +159,10 @@ describe('sideby unattended', () => {
         timeout: 30_000,
       })
       assert.equal(undo.status, 0, undo.stdout + undo.stderr)
-      assert.equal(json(h, ['wait']).answerWait, 30)
-      const human = cli(h, ['unattended', 'wait'])
+      assert.equal((await json(h, ['wait'])).answerWait, 30)
+      const human = await cli(h, ['unattended', 'wait'])
       assert.match(human.stdout, /after 30 minutes with Unattended Mode on, the session goes on/)
-      assert.match(cli(h, ['unattended']).stdout, /If nobody answers: after 30 minutes/)
+      assert.match((await cli(h, ['unattended'])).stdout, /If nobody answers: after 30 minutes/)
       // What went on without an answer says how long it waited.
       await addPendingDecision(resolvePaths(h.env).stateDir, {
         kind: 'question',
@@ -167,14 +172,14 @@ describe('sideby unattended', () => {
         text: 'Which framework should I use?',
         waited: 30,
       })
-      assert.equal(json(h, ['pending'], 'unattended-pending').pending[0].waited, 30)
-      assert.match(cli(h, ['unattended', 'pending']).stdout, /question · no answer for 30 min/)
+      assert.equal((await json(h, ['pending'], 'unattended-pending')).pending[0].waited, 30)
+      assert.match((await cli(h, ['unattended', 'pending'])).stdout, /question · no answer for 30 min/)
     })
   })
 
   it('edits the Schedule and prints an undo command that runs', async () => {
     await withFakeHome(async (h) => {
-      const added = json(h, [
+      const added = await json(h, [
         'schedule',
         'add',
         '--days',
@@ -188,11 +193,11 @@ describe('sideby unattended', () => {
       ])
       assert.deepEqual(added.schedule[0].days, ['mon', 'fri', 'sat', 'sun'])
       assert.equal(added.schedule[0].end, '08:00')
-      assert.equal(json(h, ['schedule', 'preset', 'weeknights']).schedule.length, 2)
-      const again = json(h, ['schedule', 'preset', 'weeknights'])
+      assert.equal((await json(h, ['schedule', 'preset', 'weeknights'])).schedule.length, 2)
+      const again = await json(h, ['schedule', 'preset', 'weeknights'])
       assert.equal(again.changed, false)
       assert.equal(again.schedule.length, 2)
-      const removed = json(h, ['schedule', 'remove', '1'])
+      const removed = await json(h, ['schedule', 'remove', '1'])
       assert.deepEqual(
         removed.schedule.map((s: { name: string }) => s.name),
         ['Weeknights'],
@@ -208,7 +213,7 @@ describe('sideby unattended', () => {
         config.unattended.schedule.map((s: { name: string }) => s.name),
         ["A user's Slot", 'Weeknights'],
       )
-      const human = cli(h, ['unattended', 'schedule'])
+      const human = await cli(h, ['unattended', 'schedule'])
       assert.match(human.stdout, /1\. A user's Slot {2}fri-mon 23:00-08:00 \(next day\)/)
     })
   })
@@ -216,28 +221,29 @@ describe('sideby unattended', () => {
   it('keeps what a session defers, with its account and session, and marks decisions done', async () => {
     await withFakeHome(async (h) => {
       const env = { SIDEBY_ACCOUNT: 'claude:work', CLAUDE_CODE_SESSION_ID: 's1' }
-      const one = json(h, ['defer', 'deleting', 'the', 'old', 'branch'], 'unattended-defer', env).decision
+      const one = (await json(h, ['defer', 'deleting', 'the', 'old', 'branch'], 'unattended-defer', env))
+        .decision
       assert.equal(one.text, 'deleting the old branch')
       assert.equal(one.family, 'claude')
       assert.equal(one.account, 'claude:work')
       assert.equal(one.sessionId, 's1')
       assert.equal(one.kind, 'deferred')
-      json(h, ['defer', 'deploy'], 'unattended-defer', { CODEX_THREAD_ID: 't1' })
-      const listed = json(h, ['pending'], 'unattended-pending').pending
+      await json(h, ['defer', 'deploy'], 'unattended-defer', { CODEX_THREAD_ID: 't1' })
+      const listed = (await json(h, ['pending'], 'unattended-pending')).pending
       assert.equal(listed.length, 2)
       assert.equal(listed[1].family, 'codex')
-      assert.equal(json(h, []).pending, 2)
-      const done = json(h, ['pending', 'done', one.id], 'unattended-pending')
+      assert.equal((await json(h, [])).pending, 2)
+      const done = await json(h, ['pending', 'done', one.id], 'unattended-pending')
       assert.deepEqual(done.done, [one.id])
       assert.equal(done.pending.length, 1)
-      json(h, ['pending', 'done', '--all'], 'unattended-pending')
-      assert.equal(json(h, ['pending'], 'unattended-pending').pending.length, 0)
+      await json(h, ['pending', 'done', '--all'], 'unattended-pending')
+      assert.equal((await json(h, ['pending'], 'unattended-pending')).pending.length, 0)
       assert.ok(
-        json(h, ['pending', '--all'], 'unattended-pending').pending.every(
+        (await json(h, ['pending', '--all'], 'unattended-pending')).pending.every(
           (d: { doneAt?: string }) => d.doneAt,
         ),
       )
-      const human = cli(h, ['unattended', 'pending'])
+      const human = await cli(h, ['unattended', 'pending'])
       assert.match(human.stdout, /Nothing is waiting for you/)
     })
   })
@@ -281,7 +287,7 @@ describe('sideby unattended', () => {
       const shopOpen = await keep(2, 'code/shop/web')
       const blogReplied = await keep(3, 'code/blog')
 
-      const listed = json(h, ['pending'], 'unattended-pending')
+      const listed = await json(h, ['pending'], 'unattended-pending')
       const by = (id: string) => listed.pending.find((d: { id: string }) => d.id === id)
       assert.deepEqual([by(shopReplied.id).state, by(shopReplied.id).projectName], ['replied', 'shop'])
       assert.equal(by(shopReplied.id).repliedAt, at(20).toISOString())
@@ -291,12 +297,12 @@ describe('sideby unattended', () => {
         { project: h.path('code/shop'), projectName: 'shop', open: 1, replied: 1, done: 0 },
         { project: h.path('code/blog'), projectName: 'blog', open: 0, replied: 1, done: 0 },
       ])
-      const blogOnly = json(h, ['pending', '--project', 'blog'], 'unattended-pending')
+      const blogOnly = await json(h, ['pending', '--project', 'blog'], 'unattended-pending')
       assert.deepEqual(
         blogOnly.pending.map((d: { id: string }) => d.id),
         [blogReplied.id],
       )
-      const text = cli(h, ['unattended', 'pending']).stdout
+      const text = (await cli(h, ['unattended', 'pending'])).stdout
       assert.match(text, /shop\s+1 untouched · 1 you wrote in afterwards/)
       assert.match(text, /you wrote in the session afterwards \(\d+[mhd] ago\)/)
       assert.ok(text.indexOf(shopOpen.id) < text.indexOf(shopReplied.id), 'open ones first')
@@ -306,45 +312,50 @@ describe('sideby unattended', () => {
       assert.match(text, /reopen <id>/)
 
       // Only the replied one of shop.
-      const done = json(h, ['pending', 'done', '--replied', '--project', 'shop'], 'unattended-pending')
+      const done = await json(h, ['pending', 'done', '--replied', '--project', 'shop'], 'unattended-pending')
       assert.deepEqual(done.done, [shopReplied.id])
       assert.deepEqual(
         done.pending.map((d: { id: string }) => d.id).sort(),
         [shopOpen.id, blogReplied.id].sort(),
       )
       // Then the rest of shop, and the replied ones anywhere.
-      assert.deepEqual(json(h, ['pending', 'done', '--project', 'shop'], 'unattended-pending').done, [
+      assert.deepEqual((await json(h, ['pending', 'done', '--project', 'shop'], 'unattended-pending')).done, [
         shopOpen.id,
       ])
-      assert.deepEqual(json(h, ['pending', 'done', '--replied'], 'unattended-pending').done, [blogReplied.id])
-      assert.match(cli(h, ['unattended', 'pending', 'done', '--replied']).stdout, /Nothing to mark/)
+      assert.deepEqual((await json(h, ['pending', 'done', '--replied'], 'unattended-pending')).done, [
+        blogReplied.id,
+      ])
+      assert.match((await cli(h, ['unattended', 'pending', 'done', '--replied'])).stdout, /Nothing to mark/)
 
       // Reopen one marked by mistake; a list reopens only the done ones and says which.
-      const back = json(h, ['pending', 'reopen', shopReplied.id], 'unattended-pending')
+      const back = await json(h, ['pending', 'reopen', shopReplied.id], 'unattended-pending')
       assert.deepEqual(back.reopened, [shopReplied.id])
       assert.ok(
         back.pending.some(
           (d: { id: string; state: string }) => d.id === shopReplied.id && d.state === 'replied',
         ),
       )
-      const both = json(
+      const both = await json(
         h,
         ['pending', 'reopen', '--ids', `${shopReplied.id},${shopOpen.id}`],
         'unattended-pending',
       )
       assert.deepEqual(both.reopened, [shopOpen.id])
-      assert.match(cli(h, ['unattended', 'pending', 'reopen', shopOpen.id]).stdout, /Nothing to reopen/)
+      assert.match(
+        (await cli(h, ['unattended', 'pending', 'reopen', shopOpen.id])).stdout,
+        /Nothing to reopen/,
+      )
       // --ids marks only the ones still open; the text answer reads no session record and names reopen.
-      const marked = json(
+      const marked = await json(
         h,
         ['pending', 'done', '--ids', `${shopOpen.id},${blogReplied.id}`],
         'unattended-pending',
       )
       assert.deepEqual(marked.done, [shopOpen.id])
-      const said = cli(h, ['unattended', 'pending', 'done', shopReplied.id]).stdout
+      const said = (await cli(h, ['unattended', 'pending', 'done', shopReplied.id])).stdout
       assert.match(said, /marked 1 decision done; 0 still open/)
       assert.match(said, /reopen <id>/)
-      const none = cli(h, ['unattended', 'pending', 'done', '--ids', shopOpen.id]).stdout
+      const none = (await cli(h, ['unattended', 'pending', 'done', '--ids', shopOpen.id])).stdout
       assert.match(none, /Nothing to mark: those are done already/)
 
       for (const args of [
@@ -368,7 +379,7 @@ describe('sideby unattended', () => {
 
   it('refuses a question and a permission request through the real hook entry while on, and goes silent when off', async () => {
     await withFakeHome(async (h) => {
-      json(h, ['on', '--for', '1h'])
+      await json(h, ['on', '--for', '1h'])
       const input = JSON.stringify({
         hook_event_name: 'PreToolUse',
         tool_name: 'AskUserQuestion',
@@ -376,11 +387,11 @@ describe('sideby unattended', () => {
         session_id: 's1',
         cwd: '/tmp',
       })
-      const refused = cli(h, ['unattended-hook', 'claude', 'PreToolUse'], { input })
+      const refused = await cliSpawn(h, ['unattended-hook', 'claude', 'PreToolUse'], { input })
       assert.equal(refused.status, 2)
       assert.equal(refused.stdout, '')
       assert.match(refused.stderr, /recommended option/)
-      const [d] = json(h, ['pending'], 'unattended-pending').pending
+      const [d] = (await json(h, ['pending'], 'unattended-pending')).pending
       assert.equal(d.sessionId, 's1')
       assert.equal(d.text, 'Which?\n- A\n- B')
       // A permission request is answered on stdout, which Claude Code reads once the process has exited.
@@ -392,11 +403,11 @@ describe('sideby unattended', () => {
         agent_id: 'a1',
         agent_type: 'general-purpose',
       })
-      const denied = cli(h, ['unattended-hook', 'claude', 'PermissionRequest'], { input: request })
+      const denied = await cliSpawn(h, ['unattended-hook', 'claude', 'PermissionRequest'], { input: request })
       assert.equal(denied.status, 0)
       assert.equal(denied.stderr, '')
       assert.equal(JSON.parse(denied.stdout).hookSpecificOutput.decision.behavior, 'deny')
-      const kept = json(h, ['pending'], 'unattended-pending').pending
+      const kept = (await json(h, ['pending'], 'unattended-pending')).pending
       assert.deepEqual(
         kept.map((x: { kind: string; agentType?: string }) => [x.kind, x.agentType]),
         [
@@ -404,11 +415,11 @@ describe('sideby unattended', () => {
           ['permission', 'general-purpose'],
         ],
       )
-      json(h, ['off'])
-      const allowed = cli(h, ['unattended-hook', 'claude', 'PreToolUse'], { input })
+      await json(h, ['off'])
+      const allowed = await cliSpawn(h, ['unattended-hook', 'claude', 'PreToolUse'], { input })
       assert.equal(allowed.status, 0)
       assert.equal(allowed.stdout + allowed.stderr, '')
-      const prompt = cli(h, ['unattended-hook', 'claude', 'PermissionRequest'], { input: request })
+      const prompt = await cliSpawn(h, ['unattended-hook', 'claude', 'PermissionRequest'], { input: request })
       assert.equal(prompt.status, 0)
       assert.equal(prompt.stdout + prompt.stderr, '')
     })
@@ -427,10 +438,10 @@ export default { name: 'notify', register(api) {
 `,
       )
       await h.write('.config/sideby/config.json', JSON.stringify({ pluginDirs: ['~/plugins/notify'] }))
-      json(h, ['on', '--for', '1h'])
-      json(h, ['defer', 'left the release for the user'], 'unattended-defer')
-      json(h, ['off'])
-      assert.equal(cli(h, ['unattended']).status, 0)
+      await json(h, ['on', '--for', '1h'])
+      await json(h, ['defer', 'left the release for the user'], 'unattended-defer')
+      await json(h, ['off'])
+      assert.equal((await cli(h, ['unattended'])).status, 0)
       const lines = (await readFile(out, 'utf8')).trim().split('\n')
       assert.equal(lines.length, 1)
       const ctx = JSON.parse(lines[0]!)
@@ -449,7 +460,7 @@ describe('--unattended', () => {
       await h.write('.claude-001/settings.json', '{}')
       await fakeHost(h, 'claude')
       const before = await snapshot(h.path('.claude-001'))
-      const r = cli(h, ['run', 'claude:001', '--unattended', '--', 'hello'])
+      const r = await cli(h, ['run', 'claude:001', '--unattended', '--', 'hello'])
       assert.equal(r.status, 0, r.stderr)
       const [rec] = await readHostLog(h, 'claude')
       assert.equal(rec?.env.SIDEBY_UNATTENDED, '1')
@@ -460,13 +471,13 @@ describe('--unattended', () => {
       assert.ok(rec!.argv.includes('hello'))
       assert.deepEqual(diffSnapshots(before, await snapshot(h.path('.claude-001'))), [])
       // A short command passes its arguments after `--`, as its shell function does.
-      assert.equal(cli(h, ['alias', 'add', 'cc1', 'claude:001']).status, 0)
-      assert.equal(cli(h, ['run', 'cc1', '--', '--unattended']).status, 0)
+      assert.equal((await cli(h, ['alias', 'add', 'cc1', 'claude:001'])).status, 0)
+      assert.equal((await cli(h, ['run', 'cc1', '--', '--unattended'])).status, 0)
       const second = (await readHostLog(h, 'claude'))[1]
       assert.equal(second?.env.SIDEBY_UNATTENDED, '1')
       assert.ok(!second!.argv.includes('--unattended'))
       // Without it, and before the feature is used, the session gets nothing.
-      assert.equal(cli(h, ['run', 'claude:001']).status, 0)
+      assert.equal((await cli(h, ['run', 'claude:001'])).status, 0)
       const third = (await readHostLog(h, 'claude'))[2]
       assert.equal(third?.env.SIDEBY_UNATTENDED, undefined)
       assert.ok(!third!.argv.includes('--settings'))

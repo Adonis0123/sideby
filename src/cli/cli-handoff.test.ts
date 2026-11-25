@@ -10,7 +10,7 @@ import {
   snapshot,
   withFakeHome,
 } from '../../testing/index.ts'
-import { checkSchema, MAIN, sideby } from './cli-test-helpers.ts'
+import { checkSchema, MAIN, sideby, sidebySpawn } from './cli-test-helpers.ts'
 
 describe('resume (spec §3.15)', () => {
   const ID = '0a4964a7-fb75-40c0-a9eb-f0755cc54449'
@@ -26,7 +26,7 @@ describe('resume (spec §3.15)', () => {
   it('starts the Account that holds the session, and runs the Host unchanged otherwise', async () => {
     await withFakeHome(async (h) => {
       await claudeWithSession(h, { accounts: { 'claude:work': { args: ['--model', 'opus'] } } })
-      const routed = await sideby(h, ['resume', 'claude', '--', '--resume', ID], {
+      const routed = await sidebySpawn(h, ['resume', 'claude', '--', '--resume', ID], {
         ANTHROPIC_API_KEY: 'leak',
       })
       assert.equal(routed.code, 0, routed.err)
@@ -163,7 +163,7 @@ describe('setup by an agent (spec §3.16)', () => {
         '.config/sideby/config.json',
         `${JSON.stringify({ extraSharedItems: { claude: [{ path: 'scripts', mode: 'link' }] } })}\n`,
       )
-      const r = await sideby(h, ['families', 'claude', '--json'])
+      const r = await sidebySpawn(h, ['families', 'claude', '--json'])
       assert.equal(r.code, 0, r.err)
       const data = checkSchema('families', r.out) as unknown as {
         families: {
@@ -373,7 +373,7 @@ describe('setup by an agent (spec §3.16)', () => {
       assert.ok(text.out.indexOf('\nAccounts\n') > text.out.indexOf('Common'))
       assert.match(text.out, /sideby run <account> \[-- args\] {2,}Start the AI tool as one account/)
 
-      const r = await sideby(h, ['commands', '--json'])
+      const r = await sidebySpawn(h, ['commands', '--json'])
       assert.equal(r.code, 0, r.err)
       const data = checkSchema('commands-list', r.out) as {
         common: string[]
@@ -552,7 +552,7 @@ describe('sideby handoff status, enable and disable (spec §3.17)', () => {
     await withFakeHome(async (h) => {
       await h.write('.claude-001/projects/.keep', '')
       await h.write('.grok/skills/.keep', '')
-      const r = await sideby(h, ['handoff', 'status', '--json'])
+      const r = await sidebySpawn(h, ['handoff', 'status', '--json'])
       assert.equal(r.code, 0, r.err)
       const st = checkSchema('handoff-status', r.out) as {
         auto: boolean

@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { type FakeHome, fakeHost, readHostLog, withFakeHome } from '../../testing/index.ts'
-import { checkSchema, codexMain, sideby } from './cli-test-helpers.ts'
+import { checkSchema, codexMain, sideby, sidebySpawn } from './cli-test-helpers.ts'
 
 describe('next (Handoff, spec §3.13)', () => {
   const iso = (hours: number) => new Date(Date.now() + hours * 3600_000).toISOString()
@@ -49,11 +49,11 @@ describe('next (Handoff, spec §3.13)', () => {
       await claudeAccounts(h)
       await cache(h, 'main', 95, 40)
       await cache(h, 'work', 30, 50)
-      const dry = await sideby(h, ['next', 'claude', '--dry-run'])
+      const dry = await sidebySpawn(h, ['next', 'claude', '--dry-run'])
       assert.equal(dry.code, 0, dry.err)
       assert.match(dry.out, /Next: claude:work/)
       assert.match(dry.out, /sideby run claude:work/)
-      const j = await sideby(h, ['next', 'claude', '--json'])
+      const j = await sidebySpawn(h, ['next', 'claude', '--json'])
       assert.equal(j.code, 0, j.err)
       const plan = checkSchema('next', j.out) as { pick: string; accounts: { ref: string; state: string }[] }
       assert.equal(plan.pick, 'claude:work')
@@ -194,7 +194,7 @@ describe('next (Handoff, spec §3.13)', () => {
       // A name that hides a command on PATH waits for --yes and writes nothing.
       await writeFile(join(h.bin, 'cc'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
       const configBefore = await readFile(h.path('.config/sideby/config.json'), 'utf8')
-      const ask = await sideby(h, ['alias', 'add', 'cc', '--pick', 'claude', '--json'])
+      const ask = await sidebySpawn(h, ['alias', 'add', 'cc', '--pick', 'claude', '--json'])
       assert.equal(ask.code, 10, ask.err)
       const asked = checkSchema('alias', ask.out)
       assert.equal(asked.status, 'confirm')
@@ -304,7 +304,7 @@ describe('next (Handoff, spec §3.13)', () => {
     await withFakeHome(async (h) => {
       const env = { SHELL: '/bin/zsh' }
       await h.write('.zshrc', 'export EDITOR=vim\n')
-      const preview = await sideby(h, ['shell-init', 'setup', '--json'], env)
+      const preview = await sidebySpawn(h, ['shell-init', 'setup', '--json'], env)
       assert.equal(preview.code, 10, preview.err)
       const data = checkSchema('shell-init-setup', preview.out)
       assert.deepEqual([data.status, data.shell, data.rc], ['confirm', 'zsh', '~/.zshrc'])

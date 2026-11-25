@@ -1,24 +1,17 @@
 // Expired Login (ADR-0071) through the CLI: `list`, `doctor`, `next` and `login`.
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
 import { describe, it } from 'node:test'
-import { fileURLToPath } from 'node:url'
 import { Value } from 'typebox/value'
 import { diffSnapshots, type FakeHome, fakeHost, snapshot, withFakeHome } from '../../testing/index.ts'
+import { runMain, spawnMain } from './cli-test-helpers.ts'
 import { confirmLogin } from './commands.ts'
 import { OUTPUT_SCHEMAS } from './json-schemas.ts'
 
-const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url))
-
-function sideby(h: FakeHome, args: string[]): Promise<{ code: number | null; out: string; err: string }> {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [MAIN, ...args], { env: h.env as NodeJS.ProcessEnv })
-    let out = ''
-    let err = ''
-    child.stdout.on('data', (d: Buffer) => (out += d))
-    child.stderr.on('data', (d: Buffer) => (err += d))
-    child.on('exit', (code) => resolve({ code, out, err }))
-  })
+function sideby(h: FakeHome, args: string[]) {
+  return runMain(args, { env: h.env })
+}
+function sidebySpawn(h: FakeHome, args: string[]) {
+  return spawnMain(args, { env: h.env })
 }
 
 function checkSchema(name: string, text: string) {
@@ -92,7 +85,7 @@ describe('Expired Login in the CLI', () => {
   it('doctor warns login.expired, not fixable, and exits 0 on warnings alone', async () => {
     await withFakeHome(async (h) => {
       await seed(h)
-      const r = await sideby(h, ['doctor', 'claude:main', '--json'])
+      const r = await sidebySpawn(h, ['doctor', 'claude:main', '--json'])
       const data = checkSchema('doctor', r.out)
       const findings = (
         data.accounts as { findings: { code: string; level: string; fixable: boolean; hint?: string }[] }[]

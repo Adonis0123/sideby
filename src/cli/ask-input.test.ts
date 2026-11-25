@@ -7,7 +7,7 @@ import { diffSnapshots, fakeHost, readHostLog, snapshot, withFakeHome } from '..
 import { taskWorkDir, writeTask } from '../core/ask.ts'
 import { createRuntime } from '../runtime.ts'
 import { parseArgs } from './args.ts'
-import { cli, MP4_HEAD, PNG_HEAD, shape, ttyInput } from './ask-test-helpers.ts'
+import { cli, cliSpawn, MP4_HEAD, PNG_HEAD, shape, ttyInput } from './ask-test-helpers.ts'
 import { cmdAsk, cmdKey } from './commands.ts'
 
 it("ask --run keeps the account's own arguments, and adds no auto mode, with ask.permissions account (ADR-0070)", async () => {
@@ -414,17 +414,17 @@ it('ask --attach checks the files, lists them with --print, and copies them into
     await writeFile(h.path('notes.png'), 'just text')
     const state = h.path('.local/state/sideby')
 
-    const print = await cli(h, ['ask', 'look', '--attach', shot, `--attach=${clip}`, '--print'])
+    const print = await cliSpawn(h, ['ask', 'look', '--attach', shot, `--attach=${clip}`, '--print'])
     assert.equal(print.code, 0)
     assert.ok(print.out.includes(`Attached files\n- ${shot} (image)\n- ${clip} (video)\n`))
     assert.match(print.out, /ffmpeg/)
     assert.deepEqual(await readdir(state).catch(() => []), [])
 
-    const wrong = await cli(h, ['ask', 'look', '--attach', h.path('notes.png'), '--json'])
+    const wrong = await cliSpawn(h, ['ask', 'look', '--attach', h.path('notes.png'), '--json'])
     assert.equal(wrong.code, 1)
     assert.equal(JSON.parse(wrong.out).code, 'attachment-type')
     assert.ok(!wrong.out.includes('just text'))
-    const many = await cli(h, ['ask', 'x', ...Array(6).fill(['--attach', shot]).flat(), '--print'])
+    const many = await cliSpawn(h, ['ask', 'x', ...Array(6).fill(['--attach', shot]).flat(), '--print'])
     assert.equal(many.code, 1)
     assert.match(many.err, /at most 5/)
 

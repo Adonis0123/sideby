@@ -10,7 +10,7 @@ import {
   snapshot,
   withFakeHome,
 } from '../../testing/index.ts'
-import { checkSchema, codexMain, sideby } from './cli-test-helpers.ts'
+import { checkSchema, codexMain, sideby, sidebySpawn } from './cli-test-helpers.ts'
 
 describe('quota setup through the Runtime (hardening round 2)', () => {
   it('a plugin quota setup that throws is reported as a blocked plan matching the schema', async () => {
@@ -21,11 +21,11 @@ describe('quota setup through the Runtime (hardening round 2)', () => {
         `${dir}/index.ts`,
         `export default { name: 'lab', register(api) { api.family({ id: 'lab', title: 'Lab', bin: 'lab', installUrl: 'https://example.invalid', selectVar: 'LAB_HOME', layout: { main: '.lab', account: '.lab-<name>' }, hijackVars: [], apiVars: [], sharedItems: [], login: { args: null, hint: '' }, quotaSetup: { summary: 's', plan() { throw new Error('cannot plan') }, async apply() { throw new Error('no') }, async teardown() { throw new Error('nope') } } }) } }\n`,
       )
-      const r = await sideby(h, ['quota', 'setup', 'lab', '--json'])
+      const r = await sidebySpawn(h, ['quota', 'setup', 'lab', '--json'])
       assert.equal(r.code, 1)
       const data = checkSchema('quota-setup', r.out) as { plan: { status: string; message: string } }
       assert.deepEqual([data.plan.status, data.plan.message], ['blocked', 'cannot plan'])
-      const down = await sideby(h, ['quota', 'teardown', 'lab', '--json'])
+      const down = await sidebySpawn(h, ['quota', 'teardown', 'lab', '--json'])
       checkSchema('quota-teardown', down.out)
     })
   })
@@ -88,7 +88,7 @@ describe('plugins', () => {
         'db-reader',
         `import { DatabaseSync } from 'node:sqlite'\nprocess.emitWarning('db-reader: something else', 'ExperimentalWarning')\nexport default { name: 'db-reader', register() { void DatabaseSync } }\n`,
       )
-      const r = await sideby(h, ['list', '--json'])
+      const r = await sidebySpawn(h, ['list', '--json'])
       assert.equal(r.code, 0, r.err)
       assert.doesNotMatch(r.err, /SQLite/)
       assert.match(r.err, /ExperimentalWarning: db-reader: something else/)
@@ -386,7 +386,7 @@ describe('model (spec §3.19)', () => {
       const shown = await sideby(h, ['model', 'claude:main'])
       assert.equal(shown.code, 0)
       assert.match(shown.out, /model {3}sonnet {2}\(from the host config\)/)
-      const data = checkSchema('model', (await sideby(h, ['model', 'claude:main', '--json'])).out)
+      const data = checkSchema('model', (await sidebySpawn(h, ['model', 'claude:main', '--json'])).out)
       assert.deepEqual(data.model, { value: 'sonnet', from: 'host' })
       const preview = await sideby(h, ['model', 'claude:main', 'opus', '--effort', 'high'])
       assert.equal(preview.code, 10)
@@ -408,7 +408,7 @@ describe('model (spec §3.19)', () => {
 describe('theme (spec §3.34)', () => {
   it('lists, checks, imports, switches, undoes and removes Themes with --json output that matches its schema', async () => {
     await withFakeHome(async (h) => {
-      const list = checkSchema('theme', (await sideby(h, ['theme', '--json'])).out)
+      const list = checkSchema('theme', (await sidebySpawn(h, ['theme', '--json'])).out)
       assert.deepEqual(
         (list.themes as { id: string; active: boolean }[]).map((t) => [t.id, t.active]),
         [

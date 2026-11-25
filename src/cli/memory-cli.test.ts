@@ -2,27 +2,20 @@
 // and exit 10, the status that reads no account folder while off, and `sideby doctor --fix` folding an account's own
 // memory into the main account (in a fake HOME the emptied folder goes to sideby's state folder, never the real trash).
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
 import { lstat, readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
-import { fileURLToPath } from 'node:url'
 import { Value } from 'typebox/value'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
 import { claudeProjectDirName } from '../families/claude/layout.ts'
+import { runMain, spawnMain } from './cli-test-helpers.ts'
 import { OUTPUT_SCHEMAS } from './json-schemas.ts'
 
-const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url))
-
 function sideby(h: FakeHome, args: string[], cwd: string) {
-  return new Promise<{ code: number | null; out: string; err: string }>((resolve) => {
-    const child = spawn(process.execPath, [MAIN, ...args], { env: h.env as NodeJS.ProcessEnv, cwd })
-    let out = ''
-    let err = ''
-    child.stdout.on('data', (d: Buffer) => (out += d))
-    child.stderr.on('data', (d: Buffer) => (err += d))
-    child.on('exit', (code) => resolve({ code, out, err }))
-  })
+  return runMain(args, { env: h.env, cwd })
+}
+function sidebySpawn(h: FakeHome, args: string[], cwd: string) {
+  return spawnMain(args, { env: h.env, cwd })
 }
 
 function checkSchema(name: string, text: string) {
@@ -62,37 +55,37 @@ describe('sideby memory', () => {
   it('shows the switch, previews a change with exit 10, and makes it with --yes', async () => {
     await withFakeHome(async (h) => {
       const { app, name, config } = await setup(h)
-      const off = await sideby(h, ['memory', '--json'], app)
+      const off = await sidebySpawn(h, ['memory', '--json'], app)
       assert.equal(off.code, 0)
       const st = checkSchema('memory', off.out)
       assert.equal(st.on, false)
       assert.equal(st.projects, undefined)
       assert.equal(st.dir, undefined)
 
-      const preview = await sideby(h, ['memory', 'on', '--json'], app)
+      const preview = await sidebySpawn(h, ['memory', 'on', '--json'], app)
       assert.equal(preview.code, 10)
       assert.equal(checkSchema('memory-set', preview.out).applied, false)
       assert.equal(await exists(config), false)
 
-      const on = await sideby(h, ['memory', 'on', '--yes', '--json'], app)
+      const on = await sidebySpawn(h, ['memory', 'on', '--yes', '--json'], app)
       assert.equal(on.code, 0)
       assert.equal(checkSchema('memory-set', on.out).on, true)
       assert.deepEqual(JSON.parse(await readFile(config, 'utf8')).claude, { shareMemory: true })
 
-      const now = checkSchema('memory', (await sideby(h, ['memory', '--json'], app)).out)
+      const now = checkSchema('memory', (await sidebySpawn(h, ['memory', '--json'], app)).out)
       assert.deepEqual(now.dir, { path: '~/code/app', name, memory: `~/.claude/projects/${name}/memory` })
       assert.deepEqual(now.projects, [
         { name, main: 2, pending: [{ account: 'claude:work', files: 3 }], folded: [] },
       ])
 
-      const again = await sideby(h, ['memory', 'on', '--json'], app)
+      const again = await sidebySpawn(h, ['memory', 'on', '--json'], app)
       assert.equal(again.code, 0)
       assert.equal(checkSchema('memory-set', again.out).changed, false)
 
-      const offPreview = await sideby(h, ['memory', 'off'], app)
+      const offPreview = await sidebySpawn(h, ['memory', 'off'], app)
       assert.equal(offPreview.code, 10)
       assert.match(offPreview.out, /claude\.shareMemory true → false/)
-      assert.equal((await sideby(h, ['memory', 'off', '--yes'], app)).code, 0)
+      assert.equal((await sidebySpawn(h, ['memory', 'off', '--yes'], app)).code, 0)
       assert.equal(JSON.parse(await readFile(config, 'utf8')).claude, undefined)
     })
   })

@@ -1,12 +1,11 @@
 // Codex Same Login by workspace (spec §3.21, ADR-0028): the Login Key groups Accounts and never reaches an output.
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createServer, request as httpRequest } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { describe, it } from 'node:test'
-import { fileURLToPath } from 'node:url'
 import { type FakeHome, fakeHost, withFakeHome } from '../../../testing/index.ts'
+import { runMain } from '../../cli/cli-test-helpers.ts'
 import { quotaStoreFile, writeQuotaStore } from '../../core/quota-store.ts'
 import { LOGIN_KEY_FAMILIES, SAME_LOGIN_FAMILIES } from '../../core/same-login.ts'
 import { createPanelHandler, type PanelState } from '../../panel/handler.ts'
@@ -16,7 +15,6 @@ import { LOGIN_KEY_READERS } from '../login-keys.ts'
 import { codexPlugin } from './index.ts'
 import { codexLoginKey } from './login-key.ts'
 
-const MAIN = fileURLToPath(new URL('../../cli/main.ts', import.meta.url))
 const builtins = [{ plugin: codexPlugin, version: '0.1.0', description: '', defaultEnabled: true }]
 
 // Fake ids only; the shapes Codex writes.
@@ -75,16 +73,7 @@ function assertNoKey(text: string, where: string) {
 }
 
 function sideby(h: FakeHome, args: string[], extraEnv: Record<string, string> = {}) {
-  return new Promise<{ code: number | null; out: string; err: string }>((resolve) => {
-    const child = spawn(process.execPath, [MAIN, ...args], {
-      env: { ...h.env, ...extraEnv } as NodeJS.ProcessEnv,
-    })
-    let out = ''
-    let err = ''
-    child.stdout.on('data', (d: Buffer) => (out += d))
-    child.stderr.on('data', (d: Buffer) => (err += d))
-    child.on('exit', (code) => resolve({ code, out, err }))
-  })
+  return runMain(args, { env: { ...h.env, ...extraEnv } })
 }
 
 const account = (h: FakeHome, dir: string): Account => ({

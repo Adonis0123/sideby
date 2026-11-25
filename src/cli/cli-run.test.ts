@@ -11,7 +11,7 @@ import {
   snapshot,
   withFakeHome,
 } from '../../testing/index.ts'
-import { checkSchema, codexMain, MAIN, sideby } from './cli-test-helpers.ts'
+import { checkSchema, codexMain, MAIN, sideby, sidebySpawn } from './cli-test-helpers.ts'
 
 describe('first run', () => {
   it('explains what to do on an empty machine and lists a main account once it exists', async () => {
@@ -151,14 +151,14 @@ describe('first run with Claude Code', () => {
       await h.write('.claude/settings.json', '{}\n')
       await h.write('.claude.json', JSON.stringify({ oauthAccount: { id: 'x' } }), 0o600)
       await fakeHost(h, 'claude')
-      const r = await sideby(h, [])
+      const r = await sidebySpawn(h, [])
       assert.equal(r.code, 0)
       assert.match(r.out, /claude:main/)
       assert.match(r.out, /sideby new <family> <name>/)
-      const off = await sideby(h, ['quota', 'teardown', 'claude', '--json'])
+      const off = await sidebySpawn(h, ['quota', 'teardown', 'claude', '--json'])
       assert.equal(off.code, 1)
       checkSchema('quota-teardown', off.out)
-      const plan = await sideby(h, ['quota', 'setup', 'claude', '--json'])
+      const plan = await sidebySpawn(h, ['quota', 'setup', 'claude', '--json'])
       checkSchema('quota-setup', plan.out)
     })
   })
@@ -185,7 +185,7 @@ describe('run', () => {
       assert.equal(main.env.CODEX_HOME, undefined)
       assert.deepEqual(main.argv, ['exec', 'hi'])
 
-      await sideby(h, ['login', 'codex:work'])
+      await sidebySpawn(h, ['login', 'codex:work'])
       assert.deepEqual((await readHostLog(h, 'codex'))[2]!.argv, [
         '-c',
         'cli_auth_credentials_store="file"',
@@ -267,7 +267,7 @@ describe('run', () => {
       const { rm } = await import('node:fs/promises')
       await rm(h.path('.codex/config.toml'))
       await rename(h.path('.codex/config.toml.real'), h.path('.codex/config.toml'))
-      const created = await sideby(h, ['new', 'codex', 'relay', '--api', '--json'])
+      const created = await sidebySpawn(h, ['new', 'codex', 'relay', '--api', '--json'])
       checkSchema('new', created.out)
       const secret = h.path('.codex-relay', 'proxy.env')
       assert.equal((await stat(secret)).mode & 0o777, 0o600)

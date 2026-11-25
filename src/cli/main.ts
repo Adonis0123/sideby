@@ -684,7 +684,7 @@ async function jsonNoticeFor(): Promise<object | null> {
  * After a command (spec §3.23): print the Update Notice and the result of an Auto Update, each at most once, and
  * start the next Update Check detached when the last one is a day old. Only on a terminal; never fails the command.
  */
-async function afterCommand(): Promise<void> {
+async function afterCommand(err: (s: string) => void): Promise<void> {
   if (!process.stderr.isTTY) return
   try {
     const u = await import('../core/update.ts')
@@ -698,7 +698,7 @@ async function afterCommand(): Promise<void> {
     const skill = u.skillBehind(await u.skillUpdatePlan(paths.home, current).catch(() => null), current)
     const plan = u.afterCommandPlan(cache, current, config, process.env, new Date(), skill)
     const dim = process.env.NO_COLOR ? (t: string) => t : (t: string) => `\x1b[2m${t}\x1b[22m`
-    for (const l of plan.lines) console.error(dim(l))
+    for (const l of plan.lines) err(dim(l))
     if (plan.record) await u.updateUpdateCache(paths, plan.record)
     if (plan.startCheck) {
       const { spawn } = await import('node:child_process')
@@ -714,7 +714,14 @@ async function afterCommand(): Promise<void> {
   }
 }
 
-export async function main(argv: string[]): Promise<number> {
+export async function main(
+  argv: string[],
+  lines: { out?: (s: string) => void; err?: (s: string) => void } = {},
+): Promise<number> {
+  const io = {
+    out: lines.out ?? ((s: string) => console.log(s)),
+    err: lines.err ?? ((s: string) => console.error(s)),
+  }
   const [first, ...rest] = argv
   // Claude Code runs this on every status-line refresh. It must still launch the original command when Node is
   // older than 22.18, so the check below does not apply here (spec §3.1).
@@ -748,24 +755,23 @@ export async function main(argv: string[]): Promise<number> {
     })
   }
   if (nodeTooOld()) {
-    console.error(
+    io.err(
       `sideby needs Node ${MIN_NODE.join('.')} or newer (you have ${process.versions.node}). Upgrade: https://nodejs.org, or with nvm: \`nvm install 22 && nvm alias default 22\`, then \`npm i -g sideby\` again (each Node version has its own global packages).`,
     )
     return 1
   }
   if (first === '-v' || first === '--version' || first === 'version') {
     const { packageVersion } = await import('../core/version.ts')
-    console.log(packageVersion())
+    io.out(packageVersion())
     return 0
   }
   if (first === '-h' || first === '--help' || first === 'help') {
-    console.log((rest[0] !== undefined && first === 'help' && COMMAND_HELP[rest[0]]) || (await generalHelp()))
+    io.out((rest[0] !== undefined && first === 'help' && COMMAND_HELP[rest[0]]) || (await generalHelp()))
     return 0
   }
   const cmd = first === undefined || first.startsWith('--') ? 'list' : first
   const args = first === undefined || first.startsWith('--') ? argv : rest
   const spec = COMMANDS[cmd]
-  const io = { out: (s: string) => console.log(s), err: (s: string) => console.error(s) }
   const { parseArgs, UsageError } = await import('./args.ts')
   // Only sideby's own options count: arguments after `--` belong to the host.
   const own = args.includes('--') ? args.slice(0, args.indexOf('--')) : args
@@ -803,7 +809,7 @@ export async function main(argv: string[]): Promise<number> {
       }
     }
     if (parsed.flags.has('help')) {
-      console.log(COMMAND_HELP[cmd] ?? (await generalHelp()))
+      io.out(COMMAND_HELP[cmd] ?? (await generalHelp()))
       return 0
     }
     // parseArgs keeps the last value of an option; `ask --attach` may be given several times.
@@ -824,7 +830,7 @@ export async function main(argv: string[]): Promise<number> {
       cmds.setJsonNotice(notice)
     }
     const code = await dispatch(cmd, parsed, io, cmds)
-    if (!offlineDiagnose && !wantsJson && noticeAllowed(cmd, parsed)) await afterCommand()
+    if (!offlineDiagnose && !wantsJson && noticeAllowed(cmd, parsed)) await afterCommand(io.err)
     return code
   } catch (err) {
     const usage = err instanceof UsageError
@@ -834,7 +840,7 @@ export async function main(argv: string[]): Promise<number> {
       const code = usage ? 'usage' : err instanceof UserError && err.code ? err.code : 'error'
       // A Limit Reset that got no final answer names its operation, so a retry reuses it (spec §3.40, ADR-0072).
       const operationId = (err as { operationId?: unknown } | null)?.operationId
-      console.log(
+      io.out(
         JSON.stringify(
           {
             schemaVersion: 1,
@@ -847,8 +853,8 @@ export async function main(argv: string[]): Promise<number> {
           2,
         ),
       )
-    } else console.error(`sideby: ${message}`)
-    if (!usage && process.env.SIDEBY_DEBUG && err instanceof Error) console.error(err.stack)
+    } else io.err(`sideby: ${message}`)
+    if (!usage && process.env.SIDEBY_DEBUG && err instanceof Error) io.err(String(err.stack))
     return usage ? 2 : 1
   } finally {
     await ended?.emitted

@@ -31,6 +31,6 @@
 | Q9 | CI matrix | Unchanged (jobs run in parallel; fewer jobs saves runner minutes, not waiting time) |
 | Q10 | Keep it from growing back | AGENTS.md "Tests": CLI behaviour in-process first; split a test file that takes over about 15 s alone. No CI check |
 
-## Revisit if
+## Follow-up
 
-- CI still takes over 5 minutes after Q5–Q8: do Q7 step 2 (`main()` takes env and io), which needs a spec note and possibly an ADR.
+- CI still took about 5.5 minutes after Q5–Q8, so Q7 step 2 was done: `main()` takes optional output lines, and the CLI test helpers call it in-process (`runMain` in `src/cli/cli-test-helpers.ts`), keeping a subprocess smoke test per command (`sidebySpawn`). Local `pnpm test` went from about 131 s to about 50–85 s depending on load. No ADR: only `src/cli` and its tests changed, and no public contract.

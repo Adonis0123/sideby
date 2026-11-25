@@ -1,36 +1,23 @@
 // `sideby history` (spec §3.33): the four --json outputs match their schemas, errors are JSON with a code, and the exit
 // codes are 1 for an unknown session or project and 2 for a malformed command line.
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
 import { symlink } from 'node:fs/promises'
 import { describe, it } from 'node:test'
-import { fileURLToPath } from 'node:url'
 import { Value } from 'typebox/value'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
 import { UserError } from '../core/errors.ts'
 import { parseArgs, UsageError } from './args.ts'
+import { runMain, spawnMain } from './cli-test-helpers.ts'
 import { cmdHistory } from './commands.ts'
 import { OUTPUT_SCHEMAS } from './json-schemas.ts'
 
-const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url))
 const SID = 'aaaa1111-0000-4000-8000-000000000001'
 
-function sideby(
-  h: FakeHome,
-  args: string[],
-  cwd?: string,
-): Promise<{ code: number | null; out: string; err: string }> {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [MAIN, ...args], {
-      env: h.env as NodeJS.ProcessEnv,
-      ...(cwd ? { cwd } : {}),
-    })
-    let out = ''
-    let err = ''
-    child.stdout.on('data', (d: Buffer) => (out += d))
-    child.stderr.on('data', (d: Buffer) => (err += d))
-    child.on('exit', (code) => resolve({ code, out, err }))
-  })
+function sideby(h: FakeHome, args: string[], cwd?: string) {
+  return runMain(args, { env: h.env, cwd })
+}
+function sidebySpawn(h: FakeHome, args: string[], cwd?: string) {
+  return spawnMain(args, { env: h.env, cwd })
 }
 
 /**
@@ -200,9 +187,9 @@ describe('sideby history --json', () => {
       await seed(h)
       await h.write('.claude-work/settings.json', '{}')
       await symlink(h.path('.claude/projects'), h.path('.claude-work/projects'))
-      const r = checked('history', (await sideby(h, ['history', '--json'])).out)
+      const r = checked('history', (await sidebySpawn(h, ['history', '--json'])).out)
       assert.equal((r.sessions as unknown[]).length, 1)
-      const show = await sideby(h, ['history', 'show', SID.slice(0, 8), '--json'])
+      const show = await sidebySpawn(h, ['history', 'show', SID.slice(0, 8), '--json'])
       assert.equal(show.code, 0, show.out)
     })
   })

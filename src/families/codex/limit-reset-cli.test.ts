@@ -9,6 +9,7 @@ import { listLimitResetRecords } from '../../core/limit-reset.ts'
 import {
   checked,
   cli,
+  cliSpawn,
   consumes,
   hostState,
   SECRET,
@@ -76,7 +77,7 @@ describe('sideby quota reset', () => {
     await withFakeHome(async (h) => {
       await setup(h)
       await setMode(h, 'nothing')
-      const r = await cli(h, ['quota', 'reset', 'codex:main', '--yes', '--json'])
+      const r = await cliSpawn(h, ['quota', 'reset', 'codex:main', '--yes', '--json'])
       assert.equal(r.status, 1)
       const v = checked(r.stdout, 'quota-reset')
       assert.equal(v.outcome, 'nothing-to-reset')

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { describe, it } from 'node:test'
 import { fakeHost, withFakeHome } from '../../testing/index.ts'
-import { checkSchema, sideby } from './cli-test-helpers.ts'
+import { checkSchema, sideby, sidebySpawn } from './cli-test-helpers.ts'
 
 describe('config get|set|unset (spec §3.29)', () => {
   it('previews a change with exit 10, writes it with --yes, and lists every key', async () => {
@@ -59,7 +59,7 @@ describe('config get|set|unset (spec §3.29)', () => {
     await withFakeHome(async (h) => {
       await fakeHost(h, 'claude')
       await h.mkdir('.claude/skills')
-      const order = await sideby(h, [
+      const order = await sidebySpawn(h, [
         'config',
         'set',
         'handoff.families.claude',
@@ -68,13 +68,13 @@ describe('config get|set|unset (spec §3.29)', () => {
       ])
       assert.equal(order.code, 1)
       assert.equal(checkSchema('error', order.out).code, 'unknown-account')
-      const family = await sideby(h, ['config', 'set', 'handoff.familyOrder', '["nope"]'])
+      const family = await sidebySpawn(h, ['config', 'set', 'handoff.familyOrder', '["nope"]'])
       assert.equal(family.code, 1)
       assert.match(family.err, /unknown family "nope"/)
-      const cross = await sideby(h, ['config', 'set', 'handoff.crossOrganization', '["ghost"]'])
+      const cross = await sidebySpawn(h, ['config', 'set', 'handoff.crossOrganization', '["ghost"]'])
       assert.equal(cross.code, 1)
       assert.match(cross.err, /ghost is not an account/)
-      const ok = await sideby(h, ['config', 'set', 'handoff.crossOrganization', '["claude:main"]'])
+      const ok = await sidebySpawn(h, ['config', 'set', 'handoff.crossOrganization', '["claude:main"]'])
       assert.equal(ok.code, 10)
     })
   })
@@ -83,7 +83,7 @@ describe('config get|set|unset (spec §3.29)', () => {
 describe('autostart (spec §3.29)', () => {
   it('reports the state in the schema and refuses or skips without touching launchd', async () => {
     await withFakeHome(async (h) => {
-      const status = checkSchema('autostart', (await sideby(h, ['autostart', '--json'])).out)
+      const status = checkSchema('autostart', (await sidebySpawn(h, ['autostart', '--json'])).out)
       assert.equal(status.state, 'off')
       const supported = process.platform === 'darwin' || process.platform === 'linux'
       assert.equal(status.supported, supported)
@@ -233,7 +233,7 @@ describe('sideby desktop (spec §3.20)', () => {
       await h.write('.pi/agent/AGENTS.md', '# rules\n')
       await h.write('.grok/skills/x.md', 'x\n')
       assert.equal((await sideby(h, ['desktop'])).code, 2)
-      const api = await sideby(h, ['desktop', 'claude:deepseek', '--json'])
+      const api = await sidebySpawn(h, ['desktop', 'claude:deepseek', '--json'])
       assert.equal(api.code, 1)
       assert.equal(checkSchema('error', api.out).code, 'api-account')
       const pi = await sideby(h, ['desktop', 'pi:main'])
@@ -261,7 +261,7 @@ describe('sideby edit (spec §3.30)', () => {
       await h.write('.claude/settings.json', '{}\n')
       await h.write('.claude-empty/CLAUDE.md', '# rules\n')
       assert.equal((await sideby(h, ['edit'])).code, 2)
-      const path = await sideby(h, ['edit', 'claude:main', '--path', '--json'])
+      const path = await sidebySpawn(h, ['edit', 'claude:main', '--path', '--json'])
       assert.equal(path.code, 0)
       const r = checkSchema('edit', path.out)
       assert.equal(r.opened, false)

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
 import { addPendingDecision } from '../core/unattended-pending.ts'
-import { checkSchema, sideby } from './cli-test-helpers.ts'
+import { checkSchema, sideby, sidebySpawn } from './cli-test-helpers.ts'
 import { quotaText } from './format.ts'
 
 describe('sideby sessions (spec §3.32)', () => {
@@ -89,11 +89,11 @@ describe('sideby sessions (spec §3.32)', () => {
       await from(4101, 'orca')
       await from(4102, 'cli')
       await fakeMachine(h, [4101, 4102])
-      const human = await sideby(h, ['sessions'])
+      const human = await sidebySpawn(h, ['sessions'])
       assert.equal(human.code, 0, human.err)
       assert.match(human.out, /cc002 · knip cleanup · 61230c3d · Orca\s+needs you/)
       assert.match(human.out, /cc002 · release notes · 0799701d\s+idle/)
-      const data = checkSchema('sessions', (await sideby(h, ['sessions', '--json'])).out)
+      const data = checkSchema('sessions', (await sidebySpawn(h, ['sessions', '--json'])).out)
       const list = data.sessions as { sessionId: string; startedFrom?: string }[]
       assert.deepEqual(
         list.map((s) => [s.sessionId, s.startedFrom ?? null]).sort(),
@@ -313,7 +313,7 @@ describe('sideby send and messages (spec §3.32 step 2)', () => {
           /^sideby message [0-9a-f]{8} from the user via sideby\nthe tests pass now$/,
         )
 
-        const g = await sideby(h, ['send', 'grok:main', 'read', 'the plan', '--json'], m.env)
+        const g = await sidebySpawn(h, ['send', 'grok:main', 'read', 'the plan', '--json'], m.env)
         assert.equal(g.code, 0, g.err)
         const data = checkSchema('send', g.out)
         const msg = data.message as { status: string; pasteText: string; note: string; id: string }
@@ -327,7 +327,7 @@ describe('sideby send and messages (spec §3.32 step 2)', () => {
           /needs a paste\n {2}Grok Build cannot receive messages directly .*\n {2}Paste this into the tab of grok:main · g · 01a14d11 \(it is on the clipboard\):\n {2}Read the message sideby kept for you at /,
         )
 
-        const list = checkSchema('messages', (await sideby(h, ['messages', '--json'])).out)
+        const list = checkSchema('messages', (await sidebySpawn(h, ['messages', '--json'])).out)
         assert.deepEqual(
           (list.messages as { status: string }[]).map((x) => x.status),
           ['paste-needed', 'paste-needed', 'delivered'],

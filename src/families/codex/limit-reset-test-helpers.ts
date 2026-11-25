@@ -1,11 +1,10 @@
 // Shared by the src/families/codex/limit-reset*.test.ts files. Kept out of dist/ by tsconfig.build.json.
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
 import { readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { Value } from 'typebox/value'
 import { type FakeHome, fakeHost, snapshot } from '../../../testing/index.ts'
+import { runMain, spawnMain } from '../../cli/cli-test-helpers.ts'
 import { OUTPUT_SCHEMAS } from '../../cli/json-schemas.ts'
 import { LimitResetError } from '../../core/limit-reset.ts'
 import { createRuntime } from '../../runtime.ts'
@@ -24,22 +23,15 @@ export const root = process.getuid?.() === 0
 export const EMAIL = 'codex@example.com'
 export const SECRET = 'private-response-must-not-escape'
 export const CONSUME = 'account/rateLimitResetCredit/consume'
-export const MAIN = fileURLToPath(new URL('../../cli/main.ts', import.meta.url))
 
-/** The real command line, as a child process against the fake HOME (async, so the fake Host can answer). */
-export function cli(h: FakeHome, args: string[], env: Env = {}) {
-  return new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(process.execPath, [MAIN, ...args], {
-      env: { ...h.env, ...env } as NodeJS.ProcessEnv,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    let stdout = ''
-    let stderr = ''
-    child.stdout.on('data', (d: Buffer) => (stdout += d))
-    child.stderr.on('data', (d: Buffer) => (stderr += d))
-    child.on('error', reject)
-    child.on('close', (status) => resolve({ status, stdout, stderr }))
-  })
+/** The command line through main() in this process against the fake HOME; `cliSpawn` runs it as a child process. */
+export async function cli(h: FakeHome, args: string[], env: Env = {}) {
+  const r = await runMain(args, { env: { ...h.env, ...env } })
+  return { status: r.code, stdout: r.out, stderr: r.err }
+}
+export async function cliSpawn(h: FakeHome, args: string[], env: Env = {}) {
+  const r = await spawnMain(args, { env: { ...h.env, ...env } })
+  return { status: r.code, stdout: r.out, stderr: r.err }
 }
 /** Parses `--json` output and checks it against the published schema. */
 export function checked(text: string, schema: string) {
