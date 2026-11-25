@@ -112,6 +112,8 @@ function claude { local a; if [ -z "${CLAUDE_CONFIG_DIR-}" ]; then for a in "$@"
 
 这个函数只管在 shell 里敲的、带会话 id 的命令，所以终端管理器新开的窗格仍然不经 sideby 启动宿主，无人值守和 Network Guard 都管不到它。要让每次启动都经过 sideby，把终端管理器里这个宿主的启动命令设成 `sideby resume <family> --`。在 Orca 里：打开 Settings → Agents，展开 Claude，在命令输入框填 `sideby resume claude --`。Orca 1.4.254 会把这条命令放在它自己的参数前面，重开窗格时的 `--resume <id>` 也一样；于是新会话在主账号里带着 sideby 的 hook 启动，恢复的会话在存有它的账号里启动。清空输入框即可恢复原样。
 
+Orca 的子 agent 视图（在 Orca 侧栏点 Claude 子 agent）要靠 Orca 自己的 Claude Code 插件，Orca 用 `ORCA_CLAUDE_AGENT_VIEW_PLUGIN_DIR` 告诉它在哪。Claude 的 `settings.json` 里 `env` 下设了 `CLAUDE_CODE_PLUGIN_DIRS` 时，会盖掉 Orca 写进这个列表的那份，所以 sideby 在 Orca 终端里启动交互式 Claude Code 时（`sideby run` 和账号的短命令、`sideby resume`、Auto Handoff），会自己加上 `--plugin-dir <该目录>`，`"claudeMod": false` 时也加。已经开着的窗格要重新启动才带上。
+
 ## 更新
 
 sideby 每天向 npm registry 查一次自己的最新版本（一次 `GET https://registry.npmjs.org/-/package/sideby/dist-tags`，不带任何关于你或你的账号的信息）。有新版本时：

@@ -3,9 +3,9 @@
 // In the terminal, use Claude Code v2.1.287 or later", code.claude.com/docs/en/plugins/mods/overview, read
 // 2026-10-20); an older Claude Code would load the folder as a plugin it cannot read, so it gets no flag.
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { mkdir, readFile, realpath, stat } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeFileAtomic } from '../../core/fs-safe.ts'
 import type { Env } from '../../types.ts'
@@ -123,5 +123,26 @@ export async function withClaudeMod(
   if (!dir || !opts.bin) return [...args]
   const version = await claudeVersion(opts.bin, opts.env, opts.stateDir, opts.run)
   if (!version || !versionAtLeast(version, MOD_MIN_VERSION)) return [...args]
+  return ['--plugin-dir', dir, ...args]
+}
+
+/** Set by Orca in its terminals: the folder of the plugin through which Claude Code tells Orca about its subagents. */
+export const ORCA_AGENT_VIEW_VAR = 'ORCA_CLAUDE_AGENT_VIEW_PLUGIN_DIR'
+
+/**
+ * `args` with `--plugin-dir <Orca's agent-view plugin>` in front when `env` comes from an Orca terminal (spec §3.32
+ * step 3). Orca also appends the folder to `CLAUDE_CODE_PLUGIN_DIRS`, but an `env.CLAUDE_CODE_PLUGIN_DIRS` in the
+ * Account's settings replaces that value when Claude Code starts, and Orca adds the flag itself only to a command
+ * whose program is `claude`, never to `sideby run`, `sideby resume` or a shell-init function. The caller leaves out
+ * headless runs.
+ */
+export function withOrcaAgentView(args: readonly string[], env: Env): string[] {
+  const dir = env[ORCA_AGENT_VIEW_VAR]
+  if (!dir || !isAbsolute(dir) || args.some((a) => a === dir || a === `--plugin-dir=${dir}`)) return [...args]
+  try {
+    if (!statSync(dir).isDirectory()) return [...args]
+  } catch {
+    return [...args]
+  }
   return ['--plugin-dir', dir, ...args]
 }

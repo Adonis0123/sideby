@@ -9,6 +9,7 @@ import {
   claudeModDir,
   claudeVersion,
   MOD_MIN_VERSION,
+  ORCA_AGENT_VIEW_VAR,
   parseClaudeVersion,
   versionAtLeast,
   withClaudeMod,
@@ -153,6 +154,42 @@ describe('sideby run loads the mod (spec §3.32 step 3)', () => {
     await withFakeHome(async (h) => {
       const rt = await setup(h, '2.1.300')
       assert.ok(!(await rt.prepareLaunch('claude:001', [], 'login')).args.includes('--plugin-dir'))
+    })
+  })
+})
+
+describe("sideby loads Orca's agent-view plugin (spec §3.32 step 3)", () => {
+  async function setup(h: Parameters<Parameters<typeof withFakeHome>[0]>[0], orca: string) {
+    await h.write('.claude/settings.json', '{}')
+    await h.write('.claude-001/settings.json', '{}')
+    await h.write('.config/sideby/config.json', JSON.stringify({ claudeMod: false }))
+    await fakeHost(h, 'claude', { version: '2.1.300 (Claude Code)' })
+    return createRuntime({ env: { ...h.env, [ORCA_AGENT_VIEW_VAR]: orca }, builtins })
+  }
+
+  it("puts an Orca terminal's folder first for an interactive Claude, with the mod off, also on resume", async () => {
+    await withFakeHome(async (h) => {
+      await h.write('orca/agent-view/.claude-plugin/plugin.json', '{}')
+      const dir = h.path('orca/agent-view')
+      const rt = await setup(h, dir)
+      assert.deepEqual((await rt.prepareLaunch('claude:001', ['--', 'hi'], 'run')).args, [
+        '--plugin-dir',
+        dir,
+        '--',
+        'hi',
+      ])
+      assert.deepEqual((await rt.prepareLaunch('claude:001', ['--plugin-dir', dir], 'run')).args, [
+        '--plugin-dir',
+        dir,
+      ])
+      assert.deepEqual((await rt.prepareLaunch('claude:001', ['-cp', 'hi'], 'run')).args, ['-cp', 'hi'])
+      assert.ok(!(await rt.prepareLaunch('claude:001', [], 'login')).args.includes('--plugin-dir'))
+      // `sideby resume claude --` with no session id runs the Host unchanged, outside `prepareLaunch`.
+      assert.deepEqual((await rt.resumeLaunch('claude', [])).launch.args, ['--plugin-dir', dir])
+      for (const other of ['orca/agent-view', h.path('missing')]) {
+        const off = await setup(h, other)
+        assert.deepEqual((await off.prepareLaunch('claude:001', [], 'run')).args, [], other)
+      }
     })
   })
 })

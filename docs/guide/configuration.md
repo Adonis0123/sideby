@@ -112,6 +112,8 @@ function claude { local a; if [ -z "${CLAUDE_CONFIG_DIR-}" ]; then for a in "$@"
 
 The function only sees commands typed into a shell, and only those with a session id, so a new pane a terminal manager opens still runs the Host without sideby: Unattended Mode and Network Guard do not cover it. To send every launch through sideby, set the terminal manager's command for the Host to `sideby resume <family> --`. In Orca, open Settings → Agents, expand Claude and enter `sideby resume claude --` in the command field. Orca 1.4.254 puts this command in front of its own arguments, including `--resume <id>` when it reopens a pane, so a new session starts in the Main Account with sideby's hooks and a resumed one starts in the account that holds it. Clear the field to go back.
 
+Orca's subagent view (clicking a Claude subagent in Orca's sidebar) needs Orca's own Claude Code plugin, which Orca names in `ORCA_CLAUDE_AGENT_VIEW_PLUGIN_DIR`. A `CLAUDE_CODE_PLUGIN_DIRS` set under `env` in a Claude `settings.json` hides Orca's copy of that list, so whenever sideby starts an interactive Claude Code in an Orca terminal (`sideby run` and an account's short command, `sideby resume`, Auto Handoff), it adds `--plugin-dir` with that folder itself, also with `"claudeMod": false`. Panes that were already open get it when they start again.
+
 ## Updates
 
 Once a day sideby asks the npm registry which sideby version is the newest (one `GET` of `https://registry.npmjs.org/-/package/sideby/dist-tags`, carrying nothing about you or your accounts). When there is a newer one:

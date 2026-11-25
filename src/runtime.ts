@@ -227,7 +227,7 @@ import { UNATTENDED_ENV } from './core/unattended-state.ts'
 import { inCi } from './core/update.ts'
 import { packageVersion } from './core/version.ts'
 import { claudeJsonOf } from './families/claude/index.ts'
-import { withClaudeMod } from './families/claude/mod.ts'
+import { withClaudeMod, withOrcaAgentView } from './families/claude/mod.ts'
 import { BUILTIN_PLUGINS } from './families/index.ts'
 import { LOGIN_KEY_READERS } from './families/login-keys.ts'
 import { hasOption } from './families/shared/handoff-args.ts'
@@ -2058,6 +2058,9 @@ export async function createRuntime(
           env: p.env,
           stateDir: paths.stateDir,
         })
+      // Orca's agent-view plugin (spec §3.32 step 3): whatever `claudeMod` says, since Orca's subagent view needs it.
+      if (command === 'run' && p.family.id === 'claude' && !claudeHeadless(p.args))
+        p.args = withOrcaAgentView(p.args, p.env)
       // Network Guard (spec §3.35) and Unattended Mode (§3.37): last, on the environment the Host gets, so the check
       // takes the Host's route.
       await sessionReady(p, command === 'run', opts)
@@ -2117,7 +2120,12 @@ export async function createRuntime(
       const host: HostLaunch = { family, bin: family.bin, args: [...userArgs], env }
       // The Host run unchanged still talks to its vendor: Network Guard checks it as the Main Account (spec §3.35), and
       // it is a session sideby starts, so Unattended Mode covers it (§3.37).
-      const guarded = async (h: HostLaunch): Promise<HostLaunch> => {
+      const guarded = async (start: HostLaunch): Promise<HostLaunch> => {
+        // Orca's agent-view plugin (spec §3.32 step 3): the Host run unchanged never goes through `prepareLaunch`.
+        const h =
+          family.id === 'claude' && !claudeHeadless(start.args)
+            ? { ...start, args: withOrcaAgentView(start.args, start.env) }
+            : start
         const net = !ro.ignoreNetwork && guardOn(config, h.env)
         const unattended = Boolean(ro.unattended) || config.unattended !== undefined
         const progress = validEvery(config.progress?.every) && PROGRESS_FAMILIES.includes(family.id)
