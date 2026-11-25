@@ -4,24 +4,16 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
 import { describe, it } from 'node:test'
-import { fileURLToPath } from 'node:url'
 import { type FakeHome, fakeHost, withFakeHome } from '../../testing/index.ts'
+import { runMain, spawnMain } from '../cli/cli-test-helpers.ts'
 import { resolvePaths } from '../core/paths.ts'
 import { processStartTime } from './background.ts'
 import { isSidebyPanel, panelOwner } from './server.ts'
 
-const MAIN = fileURLToPath(new URL('../cli/main.ts', import.meta.url))
-
-function sideby(env: Record<string, string>, args: string[]) {
-  return new Promise<{ code: number | null; out: string; err: string }>((resolve) => {
-    const child = spawn(process.execPath, [MAIN, ...args], { env })
-    let out = ''
-    let err = ''
-    child.stdout.on('data', (d: Buffer) => (out += d))
-    child.stderr.on('data', (d: Buffer) => (err += d))
-    child.on('exit', (code) => resolve({ code, out, err }))
-  })
-}
+// WHY: a real child process where the test is about it: a launcher that exits while its Panel keeps running, and two
+// launches racing; the other calls run main() in this process.
+const sideby = (env: Record<string, string>, args: string[]) => runMain(args, { env })
+const sidebyChild = (env: Record<string, string>, args: string[]) => spawnMain(args, { env })
 
 const pidFile = (h: FakeHome) => `${resolvePaths(h.env).stateDir}/panel.json`
 
@@ -59,7 +51,7 @@ describe('background panel', () => {
       const port = 30000 + Math.floor(Math.random() * 20000)
       let pid: number | undefined
       try {
-        const first = await sideby(env, ['ui', '--background', '--no-open', '--port', String(port)])
+        const first = await sidebyChild(env, ['ui', '--background', '--no-open', '--port', String(port)])
         assert.equal(first.code, 0, first.err)
         assert.match(first.out, /in the background; stop it with `sideby ui --stop`/)
         const rec = await readPid(h)
@@ -144,7 +136,7 @@ describe('background panel', () => {
       const args = ['ui', '--background', '--no-open', '--port', String(port)]
       let pid: number | undefined
       try {
-        const [a, b] = await Promise.all([sideby(env, args), sideby(env, args)])
+        const [a, b] = await Promise.all([sidebyChild(env, args), sidebyChild(env, args)])
         assert.equal(a.code, 0, a.err)
         assert.equal(b.code, 0, b.err)
         const rec = await readPid(h)

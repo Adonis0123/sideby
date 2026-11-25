@@ -7,11 +7,19 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { promisify } from 'node:util'
 import { type FakeHome, fakeHost, readHostLog, snapshot, withFakeHome } from '../../../testing/index.ts'
+import { runMain } from '../../cli/cli-test-helpers.ts'
 import { quotaStoreFile, readQuotaStore, writeQuotaStore } from '../../core/quota-store.ts'
 import { createPanelHandler, type PanelState } from '../../panel/handler.ts'
 import { createRuntime } from '../../runtime.ts'
 import { codexFamily, codexPlugin } from './index.ts'
 import { limitResetsOf } from './quota.ts'
+
+// WHY: rejects on a non-zero exit, so `assert.rejects(run(…))` below checks the exit code.
+async function cli(h: FakeHome, args: string[]) {
+  const r = await runMain(args, { env: h.env })
+  if (r.code !== 0) throw new Error(`sideby ${args.join(' ')} exited ${r.code}: ${r.err}`)
+  return { stdout: r.out }
+}
 
 const builtins = [{ plugin: codexPlugin, version: '0.1.0', description: '', defaultEnabled: true }]
 const SECRET = 'private-response-must-not-escape'
@@ -132,15 +140,8 @@ describe('Codex fetched quota', () => {
     await withFakeHome(async (h) => {
       await seed(h)
       await host(h, 'ok', result(42))
-      const main = new URL('../../cli/main.ts', import.meta.url).pathname
       const run = async (...args: string[]) =>
-        JSON.parse(
-          (
-            await promisify(execFile)(process.execPath, [main, 'menubar', 'snapshot', '--json', ...args], {
-              env: h.env as NodeJS.ProcessEnv,
-            })
-          ).stdout,
-        )
+        JSON.parse((await cli(h, ['menubar', 'snapshot', '--json', ...args])).stdout)
       const calls = async () => (await readHostLog(h, 'codex').catch(() => [])).filter((r) => r.argv).length
       // Nothing kept yet: a cache-only snapshot asks no Host, so it has no quota to show.
       const before = new Date().toISOString()
@@ -470,9 +471,7 @@ describe('Codex Limit Resets', () => {
         q.limitResets,
       )
 
-      const main = new URL('../../cli/main.ts', import.meta.url).pathname
-      const run = (...args: string[]) =>
-        promisify(execFile)(process.execPath, [main, ...args], { env: h.env as NodeJS.ProcessEnv })
+      const run = (...args: string[]) => cli(h, args)
       const json = JSON.parse((await run('quota', 'codex', '--json')).stdout)
       assert.equal(json.schemaVersion, 1)
       const row = (ref: string) => json.accounts.find((a: { ref: string }) => a.ref === ref).quota
@@ -493,12 +492,7 @@ describe('Codex Limit Resets', () => {
       const rt = await createRuntime({ env: h.env, builtins })
       const q = await rt.quota(await rt.resolve('codex:main'))
       assert.equal(q.status === 'ok' && 'limitResets' in q, false)
-      const main = new URL('../../cli/main.ts', import.meta.url).pathname
-      const text = (
-        await promisify(execFile)(process.execPath, [main, 'quota', 'codex:main'], {
-          env: h.env as NodeJS.ProcessEnv,
-        })
-      ).stdout
+      const text = (await cli(h, ['quota', 'codex:main'])).stdout
       assert.doesNotMatch(text, /reset available/)
     })
   })
@@ -553,22 +547,11 @@ describe('Codex Same Login asks', () => {
       assert.equal(last.env.CODEX_HOME, h.path('.codex-team'))
 
       // The menu's refresh marks no directory as failed because another one asked for it.
-      const main = new URL('../../cli/main.ts', import.meta.url).pathname
-      const snap = JSON.parse(
-        (
-          await promisify(execFile)(process.execPath, [main, 'menubar', 'snapshot', '--json', '--refresh'], {
-            env: h.env as NodeJS.ProcessEnv,
-          })
-        ).stdout,
-      )
+      const snap = JSON.parse((await cli(h, ['menubar', 'snapshot', '--json', '--refresh'])).stdout)
       const rows = [...snap.sections[0].rows, ...(snap.sections[0].more?.rows ?? [])]
       assert.ok(rows.every((r: { refreshFailed?: boolean }) => !r.refreshFailed))
       // The quota line says the Limit Resets once for the login.
-      const text = (
-        await promisify(execFile)(process.execPath, [main, 'quota', 'codex'], {
-          env: h.env as NodeJS.ProcessEnv,
-        })
-      ).stdout
+      const text = (await cli(h, ['quota', 'codex'])).stdout
       assert.equal(text.match(/1 reset available/g)?.length, 2, 'the login once, the other workspace once')
       assert.match(text, /codex:team .*read from codex:main \(same login\)/)
     })
@@ -628,7 +611,7 @@ describe('Panel quota on open', () => {
         assert.deepEqual([...(first.quotaAsking ?? [])].sort(), ['codex:main', 'codex:work'])
         let later = first
         for (let i = 0; i < 40 && later.quotaAsking; i++) {
-          await new Promise((r) => setTimeout(r, 250))
+          await new Promise((r) => setTimeout(r, 50))
           later = await state()
         }
         assert.equal(later.quotaAsking, undefined)

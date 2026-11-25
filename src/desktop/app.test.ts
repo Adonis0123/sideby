@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { inflateSync } from 'node:zlib'
 import { Value } from 'typebox/value'
 import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
+import { runMain } from '../cli/cli-test-helpers.ts'
 import { OUTPUT_SCHEMAS } from '../cli/json-schemas.ts'
 import { MARK_TILE, markDataUri, markPng } from '../core/brand-mark.ts'
 import { UserError } from '../core/errors.ts'
@@ -416,7 +417,8 @@ describe('launcher script', () => {
 })
 
 describe('sideby app (CLI)', () => {
-  function sideby(h: FakeHome, args: string[]) {
+  const sideby = (h: FakeHome, args: string[]) => runMain(args, { env: h.env })
+  function sidebyChild(h: FakeHome, args: string[]) {
     return new Promise<{ code: number | null; out: string }>((resolve) => {
       const child = spawn(process.execPath, [MAIN, ...args], { env: h.env as NodeJS.ProcessEnv })
       let out = ''
@@ -432,7 +434,7 @@ describe('sideby app (CLI)', () => {
       const bad = await sideby(h, ['app', 'install', '--url', 'ftp://x', '--json'])
       assert.equal(bad.code, 1)
       assert.ok(Value.Check(OUTPUT_SCHEMAS.error!, JSON.parse(bad.out)))
-      const un = await sideby(h, ['app', 'uninstall', '--json'])
+      const un = await sidebyChild(h, ['app', 'uninstall', '--json'])
       assert.equal(un.code, 0)
       const data = JSON.parse(un.out) as { removed: string[] }
       assert.ok(Value.Check(OUTPUT_SCHEMAS['app-uninstall']!, data))
