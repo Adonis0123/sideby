@@ -18,6 +18,23 @@
       "type": "string",
       "description": "When this offline diagnosis ran (ISO), not the Guard cache time."
     },
+    "platform": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "darwin"
+        },
+        {
+          "type": "string",
+          "const": "linux"
+        },
+        {
+          "type": "string",
+          "const": "other"
+        }
+      ],
+      "description": "Which system reader ran. On linux the system proxy reports error not-applicable."
+    },
     "system": {
       "type": "object",
       "required": [
@@ -251,6 +268,19 @@
           },
           "error": {
             "type": "string"
+          },
+          "processProxy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "HTTPS_PROXY"
+              },
+              {
+                "type": "string",
+                "const": "ALL_PROXY"
+              }
+            ],
+            "description": "This 127.0.0.1 port is the one the process proxy variable names."
           }
         }
       }
