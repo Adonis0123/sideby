@@ -104,6 +104,15 @@ const hotkeyProps = {
   ),
 }
 const MenubarHotkeyView = Type.Object(hotkeyProps)
+/** `sideby menubar sort` (spec §3.31): how each tool lists its accounts in the menu. */
+const sortProps = {
+  sort: Type.String({
+    enum: ['order', 'room'],
+    description:
+      '`order`: pinned accounts, then the recommended one, then Display Order. `room`: pinned accounts, then the rest by available quota as `sideby next` ranks them.',
+  }),
+  isDefault: Type.Boolean({ description: 'True for `order`, the default.' }),
+}
 
 /** `sideby autostart` and `sideby menubar` (ADR-0029, ADR-0034, ADR-0055): the login item sideby writes. */
 const loginItem = (current: string) =>
@@ -146,6 +155,13 @@ const loginItem = (current: string) =>
     ),
     note: Type.Optional(Str),
     hotkey: Type.Optional(MenubarHotkeyView),
+    sort: Type.Optional(
+      Type.String({
+        enum: ['order', 'room'],
+        description:
+          "How the menu bar item lists each tool's accounts (config `menubar.sort`): `order` (default) or `room`, by available quota.",
+      }),
+    ),
     icon: Type.Optional(
       Type.Object(
         {
@@ -3151,7 +3167,10 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
         columns: Type.Tuple([Type.Union([Str, Type.Null()]), Type.Union([Str, Type.Null()])], {
           description: 'The window names over the two bar columns, such as `5h` and `7d`.',
         }),
-        rows: Type.Array(MenubarRow, { description: 'The recommended account first, then Display Order.' }),
+        rows: Type.Array(MenubarRow, {
+          description:
+            'Pinned accounts first; then, with config `menubar.sort` `order` (default), the recommended account and Display Order, or with `room`, the Handoff ranking (usable, no quota data, over the limit, used up).',
+        }),
         more: Type.Union([Type.Object({ title: Str, rows: Type.Array(MenubarRow) }), Type.Null()], {
           description: 'API key and signed-out accounts behind one submenu; null when there are none.',
         }),
@@ -3170,6 +3189,18 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
           'A running menu bar item was told (a macOS distributed notification); it takes the new shortcut within seconds, without a restart.',
       }),
       hotkey: MenubarHotkeyView,
+    }),
+  ]),
+  'menubar-sort': Type.Union([
+    Type.Object({ schemaVersion: Version, ...sortProps }),
+    Type.Object({
+      schemaVersion: Version,
+      changed: Type.Boolean(),
+      nudged: Type.Boolean({
+        description:
+          'A running menu bar item was told (a macOS distributed notification); it shows the new order within seconds.',
+      }),
+      ...sortProps,
     }),
   ]),
   'menubar-start': Type.Object({

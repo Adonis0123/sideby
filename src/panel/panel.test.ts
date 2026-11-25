@@ -2898,6 +2898,13 @@ describe('start at login and settings in config (spec §3.29)', () => {
         assert.equal(calls.at(-1)?.[0], '/usr/bin/osascript')
         const refused = await post(port, '/api/menubar/hotkey', { keys: 'cmd+q' }, hdr)
         assert.deepEqual([refused.status, refused.body.code], [400, 'hotkey.reserved'])
+        // The account order is written to config and told to the running item the same way.
+        assert.equal((on.body.status as { sort?: string }).sort, 'order')
+        const sorted = await post(port, '/api/menubar/sort', { sort: 'room' }, hdr)
+        assert.deepEqual([sorted.status, sorted.body.sort, sorted.body.nudged], [200, 'room', true])
+        assert.match(await readFile(join(h.home, '.config/sideby/config.json'), 'utf8'), /"sort": "room"/)
+        const badSort = await post(port, '/api/menubar/sort', { sort: 'busiest' }, hdr)
+        assert.deepEqual([badSort.status, badSort.body.code], [400, 'sort.invalid'])
         const gone = await post(port, '/api/menubar', { on: false, confirm: true }, hdr)
         assert.equal(gone.body.applied, true)
         assert.deepEqual(calls.at(-1), ['launchctl', 'bootout', 'gui/501/dev.sideby.menubar'])

@@ -3718,6 +3718,9 @@ async function menubarFamilies(
               kind: x.kind,
               login,
               ...(st?.loginProblem?.kind === 'expired' ? { loginExpired: true as const } : {}),
+              ...(pinnedIn({ name: x.name, sameLogin }, display.pinned?.[id] ?? [])
+                ? { pinned: true as const }
+                : {}),
               quota,
               sameLogin,
               ...(refresh ? { refresh } : {}),
@@ -3768,7 +3771,9 @@ export async function cmdMenubar(a: ParsedArgs, io: Io): Promise<number> {
       throw new UsageError(
         'usage: sideby menubar snapshot [--refresh | --ask <account> | --cached [--refreshing-since <ISO time>]] [--lang en|zh] [--hotkey ok|taken [--hotkey-label <label>]] [--icon visible|hidden] [--json]',
       )
-    const { menubarHotkey, menubarLang, menubarSnapshot } = await import('../menubar/snapshot.ts')
+    const { menubarHotkey, menubarLang, menubarSnapshot, menubarSort } = await import(
+      '../menubar/snapshot.ts'
+    )
     const rt = await createRuntime()
     const hotkey = menubarHotkey(rt.config.menubar?.hotkey)
     // The menu bar script says whether it could register the shortcut; the Panel and `menubar hotkey` show it.
@@ -3813,7 +3818,13 @@ export async function cmdMenubar(a: ParsedArgs, io: Io): Promise<number> {
       rt,
       cached ? { fetch: 'never', since } : { since: refreshedSince, final: true },
     )
-    const snap = menubarSnapshot(families, rt.readContext().now, lang, hotkey)
+    const snap = menubarSnapshot(
+      families,
+      rt.readContext().now,
+      lang,
+      hotkey,
+      menubarSort(rt.config.menubar?.sort),
+    )
     if (wantJson) json(io, snap)
     else {
       io.out(snap.title ? `${snap.title}  ${c.dim(snap.tooltip)}` : snap.tooltip)
@@ -3875,6 +3886,30 @@ export async function cmdMenubar(a: ParsedArgs, io: Io): Promise<number> {
           ? `Menu bar shortcut: ${r.hotkey.label}.${r.nudged ? ' The menu bar item takes it within seconds.' : ''}`
           : 'Menu bar shortcut turned off.',
       )
+    return 0
+  }
+  if (action === 'sort') {
+    if (a.positionals.length > 2) throw new UsageError('usage: sideby menubar sort [order|room] [--json]')
+    const { setMenubarSort, sortView } = await import('../menubar/hotkey.ts')
+    const paths = resolvePaths()
+    const said = (v: { sort: string }) =>
+      v.sort === 'room'
+        ? 'Menu bar account order: by available quota (pinned accounts first, then the ones with the most room).'
+        : 'Menu bar account order: default (pinned accounts first, then the recommended one, then your order).'
+    if (extra === undefined) {
+      const { loadConfig } = await import('../core/config.ts')
+      const v = sortView((await loadConfig(paths.configFile)).menubar?.sort)
+      if (wantJson) json(io, v)
+      else {
+        io.out(said(v))
+        io.out(c.dim('Change it: sideby menubar sort room|order'))
+      }
+      return 0
+    }
+    const r = await setMenubarSort({ configFile: paths.configFile, value: extra, ctx: { home: paths.home } })
+    if (wantJson) json(io, r)
+    else if (!r.changed) io.out('Nothing to change.')
+    else io.out(`${said(r)}${r.nudged ? ' The menu bar item shows it within seconds.' : ''}`)
     return 0
   }
   if (action === 'reset') {
@@ -3961,16 +3996,19 @@ export async function cmdMenubar(a: ParsedArgs, io: Io): Promise<number> {
   if (!action) {
     const s = await autostartStatus(ctx, MENUBAR_AGENT)
     const { hotkeyView, iconView, readMenubarState } = await import('../menubar/hotkey.ts')
+    const { menubarSort } = await import('../menubar/snapshot.ts')
     const { loadConfig } = await import('../core/config.ts')
     const paths = resolvePaths()
     const kept = await readMenubarState(paths.stateDir)
-    const hotkey = hotkeyView((await loadConfig(paths.configFile)).menubar?.hotkey, kept.hotkey ?? null)
+    const menubarConfig = (await loadConfig(paths.configFile)).menubar
+    const hotkey = hotkeyView(menubarConfig?.hotkey, kept.hotkey ?? null)
+    const sort = menubarSort(menubarConfig?.sort)
     const icon = iconView(kept.icon, new Date())
     if (wantJson)
       json(io, {
         ...s,
         path: tilde(s.path, home),
-        ...(s.supported ? { hotkey, ...(s.state === 'on' ? { icon } : {}) } : {}),
+        ...(s.supported ? { hotkey, sort, ...(s.state === 'on' ? { icon } : {}) } : {}),
       })
     else if (!s.supported) io.out('The menu bar item is only available on macOS for now.')
     else if (s.state === 'off')
@@ -4149,6 +4187,11 @@ export async function cmdConfig(a: ParsedArgs, io: Io): Promise<number> {
     ...(argsProblem ? { argsProblem } : {}),
     ...(refs ? { checkHandoff: (before, after) => checkHandoffRefs(refs, before, after) } : {}),
   })
+  // A running menu bar item reads its settings with each snapshot; tell it to take a saved change now (spec §3.31).
+  if (r.changed && yes && top === 'menubar') {
+    const { nudgeMenubar } = await import('../menubar/hotkey.ts')
+    await nudgeMenubar({ home: paths.home }).catch(() => false)
+  }
   const out = {
     action: sub,
     key,

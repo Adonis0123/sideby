@@ -655,7 +655,7 @@
                 }
               }
             },
-            "description": "The recommended account first, then Display Order."
+            "description": "Pinned accounts first; then, with config `menubar.sort` `order` (default), the recommended account and Display Order, or with `room`, the Handoff ranking (usable, no quota data, over the limit, used up)."
           },
           "more": {
             "anyOf": [

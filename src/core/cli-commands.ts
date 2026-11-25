@@ -700,6 +700,14 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
     feature: 'setting.hotkey',
   },
   {
+    id: 'menubar.sort',
+    group: 'panel',
+    usage: 'sideby menubar sort [order|room]',
+    help: 'list menu bar accounts in your order, or by available quota',
+    summary: { en: 'Choose the menu bar account order', zh: '选择状态栏账号顺序' },
+    feature: 'setting.menubar-sort',
+  },
+  {
     id: 'autostart',
     group: 'panel',
     usage: 'sideby autostart [on|off] [--yes]',

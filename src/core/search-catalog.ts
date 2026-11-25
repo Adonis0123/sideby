@@ -193,6 +193,15 @@ const ENTRIES: SearchEntry[] = [
     cliCommand: 'sideby menubar hotkey',
   },
   {
+    id: 'setting.menubar-sort',
+    kind: 'setting',
+    title: { en: 'Menu bar account order', zh: '状态栏账号顺序' },
+    synonyms: ['menu bar sort', 'sort by quota', 'available quota', '状态栏排序', '按可用额度'],
+    panel: at(SET, MENUBAR),
+    target: { settings: 'menubar', find: 'hotkey' },
+    cliCommand: 'sideby menubar sort',
+  },
+  {
     id: 'setting.order',
     kind: 'setting',
     title: { en: 'Account order, pins and hidden', zh: '账号顺序、置顶与隐藏' },

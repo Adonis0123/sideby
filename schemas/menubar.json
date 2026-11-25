@@ -169,6 +169,14 @@
         }
       }
     },
+    "sort": {
+      "type": "string",
+      "enum": [
+        "order",
+        "room"
+      ],
+      "description": "How the menu bar item lists each tool's accounts (config `menubar.sort`): `order` (default) or `room`, by available quota."
+    },
     "icon": {
       "type": "object",
       "required": [

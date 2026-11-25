@@ -8,7 +8,13 @@ import { editConfigPath, loadConfig } from '../core/config.ts'
 import { UserError } from '../core/errors.ts'
 import { writeFileAtomic } from '../core/fs-safe.ts'
 import { MENUBAR_RELOAD } from './script.ts'
-import { DEFAULT_MENUBAR_HOTKEY, type MenubarHotkey, menubarHotkey } from './snapshot.ts'
+import {
+  DEFAULT_MENUBAR_HOTKEY,
+  type MenubarHotkey,
+  type MenubarSort,
+  menubarHotkey,
+  menubarSort,
+} from './snapshot.ts'
 
 /**
  * Combinations macOS or nearly every app already uses, in the order `checkHotkey` writes them; a menu shortcut there
@@ -212,4 +218,35 @@ export async function setMenubarHotkey(opts: {
     nudged,
     hotkey: hotkeyView(config.menubar?.hotkey, await readHotkeyState(opts.stateDir)),
   }
+}
+
+/** The account order as `sideby menubar sort --json` and the Panel show it (config `menubar.sort`, spec §3.31). */
+export interface SortView {
+  sort: MenubarSort
+  isDefault: boolean
+}
+
+export function sortView(configured: string | undefined): SortView {
+  const sort = menubarSort(configured)
+  return { sort, isDefault: sort === 'order' }
+}
+
+/**
+ * `sideby menubar sort <order|room>` and the Panel's choice: writes config `menubar.sort` (removes it for the default
+ * `order`), and tells a running menu bar item, which shows the new order within seconds.
+ */
+export async function setMenubarSort(opts: {
+  configFile: string
+  value: string
+  ctx: AutostartContext
+}): Promise<{ changed: boolean; nudged: boolean } & SortView> {
+  const v = opts.value.trim().toLowerCase()
+  if (v !== 'order' && v !== 'room' && v !== 'default')
+    throw new UserError(
+      `"${opts.value}" is not an account order; use room (by available quota) or order (the default)`,
+      { code: 'sort.invalid' },
+    )
+  const r = await editConfigPath(opts.configFile, 'menubar.sort', v === 'room' ? 'room' : undefined)
+  const nudged = r.changed ? await nudgeMenubar(opts.ctx) : false
+  return { changed: r.changed, nudged, ...sortView((await loadConfig(opts.configFile)).menubar?.sort) }
 }

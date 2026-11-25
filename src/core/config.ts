@@ -268,6 +268,13 @@ export const ConfigSchema = Type.Object(
                 'The shortcut that opens the menu bar item from anywhere, such as `opt+x` (default), or `off`.',
             }),
           ),
+          sort: Type.Optional(
+            Type.String({
+              enum: ['order', 'room'],
+              description:
+                'How each tool lists its accounts in the menu bar item: `order` (default) puts pinned accounts first, then the recommended one, then your order; `room` puts pinned accounts first, then the rest by available quota, as `sideby next` ranks them.',
+            }),
+          ),
         },
         { additionalProperties: false, description: 'The Menu Bar Item on macOS (spec §3.31).' },
       ),

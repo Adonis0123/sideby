@@ -110,7 +110,7 @@ export interface MenubarSection {
   logo: Pick<FamilyLogo, 'path' | 'fillRule' | 'color' | 'gradients'> | null
   /** The window names above the two bar columns, such as `5h` and `7d`; null where no row has that column. */
   columns: [string | null, string | null]
-  /** The recommended account first, then the others in Display Order. */
+  /** In the order config `menubar.sort` asks for (`menubarSort`): pinned accounts always first. */
   rows: MenubarRow[]
   /** API key and signed-out accounts, behind one submenu; null when there are none or nothing else to show. */
   more: { title: string; rows: MenubarRow[] } | null
@@ -185,6 +185,11 @@ export interface MenubarFamilyInput {
     login: LoginState | 'not-needed'
     /** Its sign-in expired (an Expired Login, ADR-0071): marked in its row, never recommended. */
     loginExpired?: true
+    /**
+     * A Pinned Account (spec §3.25), or a directory of a Same Login that is: it leads its group in every sort. Pinned
+     * accounts come in pinned order (the Display Order puts them first).
+     */
+    pinned?: true
     quota: QuotaResult
     /** The other refs of its Same Login: the same subscription, so one quota. */
     sameLogin?: readonly string[]
@@ -199,6 +204,17 @@ export interface MenubarFamilyInput {
      */
     lastUseAt?: string
   }[]
+}
+
+/**
+ * How each group lists its accounts (config `menubar.sort`, spec §3.31): `order`, pinned accounts, then the
+ * recommended one, then Display Order; `room`, pinned accounts, then the rest as the Family's Handoff plan ranks them.
+ */
+export type MenubarSort = 'order' | 'room'
+
+/** Config `menubar.sort` as the menu uses it: `order` unless it says `room`. */
+export function menubarSort(value: string | undefined): MenubarSort {
+  return value === 'room' ? 'room' : 'order'
 }
 
 /** A shortcut as the menu bar script registers it: a macOS virtual key code and Carbon modifier flags. */
@@ -614,7 +630,42 @@ function columns(rows: MenubarRow[]): MenubarSection['columns'] {
   return [at(0), at(1)]
 }
 
-function section(f: MenubarFamilyInput, now: Date, s: MenubarStrings, lang: MenubarLang): MenubarSection {
+/**
+ * The rows on show, in the order `sort` asks for (spec §3.31). Pinned accounts lead either way, in the order they
+ * arrive (pinned order). `order`: the recommended one next, then the rest as they arrive (Display Order). `room`: the
+ * rest by their place in the Family's Handoff plan, the same snapshot the recommendation reads, so usable accounts
+ * come first, then those without Quota data, then the full ones by when they come back; a Same Login row takes the
+ * best place of its directories. Without a plan or any Quota data, `room` is `order`.
+ */
+function ordered<T extends { a: MenubarFamilyInput['accounts'][number]; r: MenubarRow }>(
+  list: readonly T[],
+  f: MenubarFamilyInput,
+  sort: MenubarSort,
+): T[] {
+  const pinned = list.filter((x) => x.a.pinned)
+  const rest = list.filter((x) => !x.a.pinned)
+  const plan = f.plan
+  if (sort !== 'room' || !plan?.hasQuota)
+    return [...pinned, ...rest.filter((x) => x.r.recommended), ...rest.filter((x) => !x.r.recommended)]
+  const place = new Map(plan.accounts.map((e, i) => [e.ref, i]))
+  const at = (x: T) =>
+    Math.min(...[x.a.ref, ...(x.a.sameLogin ?? [])].map((ref) => place.get(ref) ?? Number.POSITIVE_INFINITY))
+  // A stable sort: accounts the plan does not list keep Display Order, after the ones it does.
+  const ranked = rest
+    .map((x, i) => ({ x, i, at: at(x) }))
+    .sort((p, q) => (p.at === q.at ? p.i - q.i : p.at < q.at ? -1 : 1))
+    .map((p) => p.x)
+  // The recommended row leads the unpinned ones, as in the plan; kept explicit for a plan whose pick is not its first.
+  return [...pinned, ...ranked.filter((x) => x.r.recommended), ...ranked.filter((x) => !x.r.recommended)]
+}
+
+function section(
+  f: MenubarFamilyInput,
+  now: Date,
+  s: MenubarStrings,
+  lang: MenubarLang,
+  sort: MenubarSort,
+): MenubarSection {
   const logo = f.logo
     ? {
         path: f.logo.path,
@@ -693,9 +744,7 @@ function section(f: MenubarFamilyInput, now: Date, s: MenubarStrings, lang: Menu
   const head = { family: f.id, title: f.title, logo }
   if (!main.length)
     return { ...head, columns: columns(rest.map((x) => x.r)), rows: rest.map((x) => x.r), more: null }
-  const rows = [...main.filter((x) => x.r.recommended), ...main.filter((x) => !x.r.recommended)].map(
-    (x) => x.r,
-  )
+  const rows = ordered(main, f, sort).map((x) => x.r)
   if (!rest.length) return { ...head, columns: columns(rows), rows, more: null }
   const api = rest.filter((x) => x.a.kind === 'api').length
   const out = rest.filter((x) => x.a.login === 'logged-out' && x.a.kind !== 'api').length
@@ -715,13 +764,14 @@ export function menubarSnapshot(
   now: Date,
   lang: MenubarLang,
   hotkey: MenubarHotkey | null = null,
+  sort: MenubarSort = 'order',
 ): MenubarSnapshot {
   const s = MENUBAR_STRINGS[lang]
   let worst: { use: number; value: number; level: QuotaLevel; ref: string; tool: string } | null = null
   const sections: MenubarSection[] = []
   for (const f of families) {
     if (!f.accounts.length) continue
-    sections.push(section(f, now, s, lang))
+    sections.push(section(f, now, s, lang, sort))
     if (!f.plan?.hasQuota) continue
     // The plan lists the usable accounts first, least used first; past them, the least used of the full ones.
     // A pick without Quota of its own (`unknown`) says nothing about how much is left.

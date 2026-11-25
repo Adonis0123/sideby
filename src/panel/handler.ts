@@ -162,6 +162,8 @@ import {
   openMenuBarSettings,
   readMenubarState,
   setMenubarHotkey,
+  setMenubarSort,
+  sortView,
 } from '../menubar/hotkey.ts'
 import { MENUBAR_SCRIPT } from '../menubar/script.ts'
 import { renderNetworkPage } from '../network/page.ts'
@@ -602,9 +604,13 @@ export function bindPanelAutostart(ctx: Partial<AutostartContext>): () => void {
  * the item last said about its icon.
  */
 async function menubarExtras(rt: Runtime) {
-  const configured = (await loadConfig(rt.paths.configFile).catch(() => rt.config)).menubar?.hotkey
+  const configured = (await loadConfig(rt.paths.configFile).catch(() => rt.config)).menubar
   const kept = await readMenubarState(rt.paths.stateDir)
-  return { hotkey: hotkeyView(configured, kept.hotkey ?? null), icon: iconView(kept.icon, new Date()) }
+  return {
+    hotkey: hotkeyView(configured?.hotkey, kept.hotkey ?? null),
+    sort: sortView(configured?.sort).sort,
+    icon: iconView(kept.icon, new Date()),
+  }
 }
 
 /**
@@ -3345,6 +3351,15 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           ctx: autostartCtx(rt),
         })
         return r
+      },
+    },
+    // How the menu bar item lists accounts (spec §3.31): `sort` as `sideby menubar sort` takes it.
+    '/api/menubar/sort': {
+      async run(body) {
+        const sort = optString(body, 'sort')
+        if (!sort) throw new HttpError(400, '"sort" is required: "order" or "room"')
+        const rt = await getRuntime()
+        return setMenubarSort({ configFile: rt.paths.configFile, value: sort, ctx: autostartCtx(rt) })
       },
     },
     // Undo for the quota setup above; the Runtime turns a teardown that throws into `{ ok: false, message }`.

@@ -2209,6 +2209,21 @@ describe('menubar (spec §3.31)', () => {
       assert.equal((await sideby(h, ['menubar', 'snapshot', '--hotkey', 'maybe'])).code, 2)
     })
   })
+
+  it('changes the account order with no --yes, refuses an unknown one, and default removes the key', async () => {
+    await withFakeHome(async (h) => {
+      await h.write('.claude/settings.json', '{}')
+      const first = checkSchema('menubar-sort', (await sideby(h, ['menubar', 'sort', '--json'])).out)
+      assert.deepEqual([first.sort, first.isDefault], ['order', true])
+      const set = checkSchema('menubar-sort', (await sideby(h, ['menubar', 'sort', 'room', '--json'])).out)
+      assert.deepEqual([set.changed, set.sort, set.isDefault], [true, 'room', false])
+      assert.match(await readFile(h.path('.config/sideby/config.json'), 'utf8'), /"sort": "room"/)
+      const bad = await sideby(h, ['menubar', 'sort', 'busiest', '--json'])
+      assert.deepEqual([bad.code, JSON.parse(bad.out).code], [1, 'sort.invalid'])
+      await sideby(h, ['menubar', 'sort', 'order'])
+      assert.doesNotMatch(await readFile(h.path('.config/sideby/config.json'), 'utf8'), /"sort"/)
+    })
+  })
 })
 
 describe('_notice on --json outputs (spec §3.23)', () => {

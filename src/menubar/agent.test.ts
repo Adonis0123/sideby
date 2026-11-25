@@ -227,3 +227,39 @@ describe('menu bar script', () => {
       assert.ok(restart[1]!.includes(guard), guard)
   })
 })
+
+describe('the menu bar script while the menu is open (ADR-0086)', () => {
+  it('keeps the shown row order and badge, puts new accounts last and drops gone ones', () => {
+    const from = MENUBAR_SCRIPT.indexOf('  function keepOrder(next, shown) {')
+    const to = MENUBAR_SCRIPT.indexOf('  function finishSnapshot() {')
+    assert.ok(from > 0 && to > from, 'keepOrder sits before finishSnapshot in the script')
+    const keepOrder = new Function(`${MENUBAR_SCRIPT.slice(from, to)}; return keepOrder`)() as (
+      next: unknown,
+      shown: unknown,
+    ) => { sections: { family: string; rows: { ref: string; recommended: boolean; p?: number }[] }[] }
+    const row = (ref: string, recommended = false, p = 0) => ({ ref, recommended, p })
+    const shown = { sections: [{ family: 'claude', rows: [row('a', true), row('b'), row('c')] }] }
+    const next = {
+      sections: [
+        { family: 'claude', rows: [row('c', true, 9), row('d'), row('a'), row('b', false, 7)] },
+        { family: 'codex', rows: [row('z')] },
+      ],
+    }
+    const out = keepOrder(next, shown)
+    assert.deepEqual(
+      out.sections[0]!.rows.map((r) => [r.ref, r.recommended, r.p]),
+      [
+        ['a', true, 0],
+        ['b', false, 7],
+        ['c', false, 9],
+        ['d', false, 0],
+      ],
+    )
+    assert.deepEqual(out.sections[1], next.sections[1])
+    const gone = keepOrder({ sections: [{ family: 'claude', rows: [row('b'), row('a')] }] }, shown)
+    assert.deepEqual(
+      gone.sections[0]!.rows.map((r) => r.ref),
+      ['a', 'b'],
+    )
+  })
+})

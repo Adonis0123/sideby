@@ -263,6 +263,7 @@ sideby menubar snapshot [--refresh] [--lang en|zh] [--json]
 sideby menubar start <account> [--json]
 sideby menubar reset <account> [--json]
 sideby menubar hotkey [<keys>|off|default] [--json]
+sideby menubar sort [order|room] [--json]
 
 Show quota in the macOS menu bar: a gauge with one percent, how much the account sideby would pick next has used
 in your tightest tool (orange from 60%, red from 85%). Click it for every account's 5-hour and 7-day quota; click
@@ -275,13 +276,16 @@ start opens an account in your preferred terminal, as clicking it does. reset is
 account runs: it opens the panel on that account's confirmation (Codex) or the vendor's page (Claude Code), and
 never uses a reset itself. hotkey shows or changes the shortcut that
 opens the menu from anywhere (⌥X by default): opt, cmd or ctrl, any of shift, and one letter or digit; off turns
-it off. A running menu bar item takes the new one within seconds, without a restart.
+it off. A running menu bar item takes the new one within seconds, without a restart. sort shows or changes how each
+tool lists its accounts: order (default) puts pinned accounts first, then the recommended one, then your order;
+room puts pinned accounts first, then the rest by available quota, as sideby next ranks them.
 
 Examples:
   sideby menubar on --yes
   sideby menubar snapshot --json
   sideby menubar start claude:work
   sideby menubar hotkey ctrl+opt+s
+  sideby menubar sort room
   sideby menubar off --yes
 Exit: 0 shown, done or nothing to change; 10 a change was shown and waits for --yes; 1 refused (not macOS, sideby
 in the npx cache or a temporary folder, a file that is not sideby's), failed, or the terminal did not open; 2

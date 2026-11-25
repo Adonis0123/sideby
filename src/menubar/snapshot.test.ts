@@ -849,3 +849,78 @@ describe('Limit Resets and per-window age (ADR-0072, ADR-0073)', () => {
     assert.equal('barsStale' in calm!, false)
   })
 })
+
+describe('menubar.sort (spec §3.31)', () => {
+  // Display Order: main (pinned), then a to e; plus an API key account and a signed-out one for the submenu.
+  const accounts: Acc[] = [
+    { ...sub('main', quota(80, 50)), pinned: true },
+    sub('a', quota(40, 10)),
+    sub('b', quota(100, 100, 30)),
+    sub('c', none),
+    sub('d', quota(10, 5)),
+    sub('e', quota(90, 20)),
+    { ...sub('key', none), kind: 'api', login: 'not-needed' },
+    { ...sub('out', none), login: 'logged-out' },
+  ]
+  // As the menu gets it: the plan of a start the user asks for (Last Resorts allowed).
+  const input: MenubarFamilyInput = {
+    id: 'claude',
+    title: 'Claude Code',
+    accounts,
+    plan: planHandoff(
+      'claude',
+      accounts.map((a) => ({ ...a, isMain: a.name === 'main' })),
+      NOW,
+      { lastResort: true },
+    ),
+  }
+  const rows = (sort: 'order' | 'room') =>
+    menubarSnapshot([input], NOW, 'en', null, sort).sections[0]!.rows.map((r) => [r.label, r.recommended])
+
+  it('order: pinned first, then the recommended one, then Display Order', () => {
+    assert.deepEqual(rows('order'), [
+      ['main', false],
+      ['d', true],
+      ['a', false],
+      ['b', false],
+      ['c', false],
+      ['e', false],
+    ])
+  })
+
+  it('room: pinned first, then the plan: room to use, no data, over the limit, used up', () => {
+    assert.deepEqual(rows('room'), [
+      ['main', false],
+      ['d', true],
+      ['a', false],
+      ['c', false],
+      ['e', false],
+      ['b', false],
+    ])
+    // The used-up account stays in the list and says when it comes back.
+    const b = menubarSnapshot([input], NOW, 'en', null, 'room').sections[0]!.rows.find(
+      (r) => r.label === 'b',
+    )!
+    assert.ok(b.resetTime)
+  })
+
+  it('room leaves the submenu alone, and is order without Quota data', () => {
+    const more = (sort: 'order' | 'room') =>
+      menubarSnapshot([input], NOW, 'en', null, sort).sections[0]!.more!.rows.map((r) => r.label)
+    assert.deepEqual(more('room'), more('order'))
+    assert.deepEqual(more('room'), ['key', 'out'])
+    const blind = accounts.map((a) => ({ ...a, quota: none }))
+    const noData = {
+      ...input,
+      accounts: blind,
+      plan: planHandoff(
+        'claude',
+        blind.map((a) => ({ ...a, isMain: a.name === 'main' })),
+        NOW,
+      ),
+    }
+    const labels = (sort: 'order' | 'room') =>
+      menubarSnapshot([noData], NOW, 'en', null, sort).sections[0]!.rows.map((r) => r.label)
+    assert.deepEqual(labels('room'), labels('order'))
+  })
+})

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/menubar-sort.json",
+  "anyOf": [
+    {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "sort",
+        "isDefault"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "sort": {
+          "type": "string",
+          "enum": [
+            "order",
+            "room"
+          ],
+          "description": "`order`: pinned accounts, then the recommended one, then Display Order. `room`: pinned accounts, then the rest by available quota as `sideby next` ranks them."
+        },
+        "isDefault": {
+          "type": "boolean",
+          "description": "True for `order`, the default."
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "changed",
+        "nudged",
+        "sort",
+        "isDefault"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "changed": {
+          "type": "boolean"
+        },
+        "nudged": {
+          "type": "boolean",
+          "description": "A running menu bar item was told (a macOS distributed notification); it shows the new order within seconds."
+        },
+        "sort": {
+          "type": "string",
+          "enum": [
+            "order",
+            "room"
+          ],
+          "description": "`order`: pinned accounts, then the recommended one, then Display Order. `room`: pinned accounts, then the rest by available quota as `sideby next` ranks them."
+        },
+        "isDefault": {
+          "type": "boolean",
+          "description": "True for `order`, the default."
+        }
+      }
+    }
+  ]
+}

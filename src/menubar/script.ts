@@ -53,6 +53,8 @@ function run(argv) {
 
   var out = ObjC.unwrap($.NSTemporaryDirectory()) + 'sideby-menubar-' + $.NSProcessInfo.processInfo.processIdentifier + '.json';
   var snap = null, task = null, handle = null, lastStart = 0, lastOk = 0, failed = false;
+  // The newest snapshot as Node ordered it; while the menu is open, snap keeps the rows in the order it opened with.
+  var latest = null;
   var refs = [], actions = [], footer = null, appearance = '', manual = false;
   // The first words, before any snapshot has said which language to use.
   var zh = /^zh/i.test(lang);
@@ -108,6 +110,39 @@ function run(argv) {
       return next && next.schemaVersion === 1 ? next : null;
     } catch (e) { return null; }
   }
+  // A new snapshot on show (spec §3.31, ADR-0086): while the menu is open, each group keeps the row order and the
+  // recommended badge it opened with, so a row never moves under the pointer; new numbers land in place, and an account
+  // that was not there goes last. The order Node gave is put on show once the menu has closed (tick:).
+  function show(next) {
+    latest = next;
+    snap = menuOpen && snap ? keepOrder(next, snap) : next;
+  }
+  function keepOrder(next, shown) {
+    var copy = {};
+    Object.keys(next).forEach(function (k) { copy[k] = next[k]; });
+    copy.sections = next.sections.map(function (s) {
+      var was = null;
+      shown.sections.forEach(function (o) { if (o.family === s.family) was = o; });
+      if (!was) return s;
+      var at = {}, badge = {};
+      was.rows.forEach(function (r, i) { at[r.ref] = i; badge[r.ref] = r.recommended; });
+      var place = function (r) { return Object.prototype.hasOwnProperty.call(at, r.ref) ? at[r.ref] : was.rows.length; };
+      var rows = s.rows.map(function (r, i) { return { r: r, i: i }; }).sort(function (x, y) {
+        return place(x.r) - place(y.r) || x.i - y.i;
+      }).map(function (x) {
+        if (!Object.prototype.hasOwnProperty.call(badge, x.r.ref) || badge[x.r.ref] === x.r.recommended) return x.r;
+        var r = {};
+        Object.keys(x.r).forEach(function (k) { r[k] = x.r[k]; });
+        r.recommended = badge[x.r.ref];
+        return r;
+      });
+      var out = {};
+      Object.keys(s).forEach(function (k) { out[k] = s[k]; });
+      out.rows = rows;
+      return out;
+    });
+    return copy;
+  }
   function finishSnapshot() {
     var ok = task.terminationStatus === 0;
     task = null;
@@ -117,17 +152,17 @@ function run(argv) {
     // The refresh's own result wins: a cache-only snapshot still running started before it and is dropped.
     stopPeek();
     var next = ok ? readSnapshot(out) : null;
-    if (next) { snap = next; lastOk = now(); failed = false; hotkey(snap.hotkey); build(); return; }
+    if (next) { show(next); lastOk = now(); failed = false; hotkey(snap.hotkey); build(); return; }
     failed = true;
     // A cache-only snapshot may have marked rows as refreshing; nothing is refreshing any more.
-    if (snap) (snap.sections || []).forEach(function (s) {
+    [snap, latest].forEach(function (x) { if (x) (x.sections || []).forEach(function (s) {
       s.rows.concat(s.more ? s.more.rows : []).forEach(function (r) {
         if (!r.refreshing) return;
         var says = snap.lang === 'zh' ? ${JSON.stringify(MENUBAR_STRINGS.zh.rowRefreshFailed)} : ${JSON.stringify(MENUBAR_STRINGS.en.rowRefreshFailed)};
         r.refreshing = false; r.refreshFailed = true; r.reset = r.resetTime = says;
         (r.groups || []).forEach(function (g) { g.reset = g.resetTime = says; });
       });
-    });
+    }); });
     build();
   }
   // While a snapshot asks Hosts, a cache-only snapshot that never asks one: accounts already answered show their new
@@ -140,7 +175,7 @@ function run(argv) {
       peekTask = null;
       closePeek();
       var next = ok && task && manual === peekManual ? readSnapshot(peekOut) : null;
-      if (next) { snap = next; build(); }
+      if (next) { show(next); build(); }
     }
     if (peekTask || !task) return;
     if (manual ? !refreshSince : now() - lastStart < PEEK) return;
@@ -708,6 +743,9 @@ function run(argv) {
           if (task && task.running && now() - lastStart > TIMEOUT) task.terminate;
           if (task && !task.running) finishSnapshot();
           lookAtIcon();
+          // The menu has closed since rows kept their order: show the order Node gave, ready for the next opening.
+          // Not in menuDidClose, which may come before the clicked item's action, and that still reads refs.
+          if (!menuOpen && latest && snap !== latest) { snap = latest; build(); }
           // A shortcut that just registered or failed, and an icon that just showed or went, are told at once.
           if (!task && (forceNext || askDue || now() - lastStart >= SNAPSHOT || hotkeyReport() !== hotkeyReported || iconStable !== iconReported)) startSnapshot();
           // The bars are pictures in the colours of the moment; redraw them when light or dark mode changes.

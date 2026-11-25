@@ -8040,6 +8040,17 @@ const MAIN = String.raw`
       if (hk.custom) body.push(h('div', { class: 'hk-custom', 'data-enter': 'hk-custom' }, hotkeyField(v)))
       if (!BOOT.readOnly && !hk.custom) body.push(h('p', { class: 'small', 'data-enter': 'hk-ai' }, h('button', { class: 'link-btn small', type: 'button', onclick: () => { dlg.el.close(); openAsk({ task: 'hotkey', context: { version: BOOT.version } }) } }, icon('bot'), ' ', t('hk.askAi'))))
     }
+    // How each tool lists its accounts in the menu (config menubar.sort, spec §3.31).
+    if (s && s.sort) {
+      const sort = s.sort === 'room' ? 'room' : 'order'
+      body.push(h('div', { class: 'set-row set-check' },
+        h('div', { class: 'set-text' }, h('span', { class: 'set-label' }, t('mbs.label')),
+          h('span', { class: 'set-hint' }, t(sort === 'room' ? 'mbs.hintRoom' : 'mbs.hintOrder'))),
+        BOOT.readOnly ? h('span', { class: 'chip chip-sm' }, t('mbs.' + sort))
+          : selectMenu({ class: 'hk-select', 'data-key': 'mbs-select', 'aria-label': t('mbs.label'), disabled: mbSort.busy,
+            onchange: (e) => saveMenubarSort(e.target.value) },
+            ['order', 'room'].map((val) => h('option', { value: val, selected: val === sort }, t('mbs.' + val))))))
+    }
     const key = v && v.enabled ? v.label : ''
     body.push(h('h3', { class: 'mb-help-title' }, t('mb.cantSee')),
       h('ol', { class: 'set-help' },
@@ -8154,6 +8165,19 @@ const MAIN = String.raw`
     refreshHotkey()
     refreshSettings()
     if (hk.recording) focusRecorder()
+  }
+
+  const mbSort = { busy: false }
+  async function saveMenubarSort(sort) {
+    mbSort.busy = true
+    refreshHotkey()
+    try {
+      const r = await api('/api/menubar/sort', { sort })
+      if (li.menubar.status) li.menubar.status = { ...li.menubar.status, sort: r.sort }
+      if (r.changed) toast(t('mbs.saved', { order: t('mbs.' + r.sort) }))
+    } catch (e) { toast(e.message, { kind: 'fail' }) }
+    mbSort.busy = false
+    refreshHotkey()
   }
 
   async function autostartAsk(on, k) {
