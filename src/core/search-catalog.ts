@@ -582,7 +582,6 @@ export const COMMON_ENTRIES: readonly string[] = [
 
 export interface SearchHit {
   entry: SearchEntry
-  /** 0 exact, 1 prefix, 2 contains (title before synonym at each level). */
   rank: number
 }
 

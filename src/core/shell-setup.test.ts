@@ -17,7 +17,6 @@ test('setup appends one marked line, keeps every line the user wrote, and undo t
     assert.ok(text.startsWith(`${original}\n`))
     assert.ok(text.endsWith(setupBlock('zsh')))
     assert.match(text, /^eval "\$\(sideby shell-init zsh\)"$/m)
-    // Run again: already loaded, nothing written.
     assert.equal((await applyShellSetup('zsh', h.home, h.env, undefined)).status, 'unchanged')
     assert.equal(await readFile(h.path('.zshrc'), 'utf8'), text)
 

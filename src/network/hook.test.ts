@@ -98,7 +98,16 @@ describe('network hook', () => {
         e.code = 'ECONNREFUSED'
         throw e
       }
-      assert.equal(await runNetworkHook(['claude', 'UserPromptSubmit'], env, err, { fetcher, print: 'p' }), 2)
+      const clock = fakeTime()
+      assert.equal(
+        await runNetworkHook(['claude', 'UserPromptSubmit'], env, err, {
+          fetcher,
+          print: 'p',
+          now: clock.now,
+          sleep: clock.sleep,
+        }),
+        2,
+      )
       const text = err.lines.join('')
       assert.match(text, /http:\/\/127\.0\.0\.1:10809/)
       assert.match(text, /connection was refused/)
@@ -646,6 +655,7 @@ describe('network hook: a prompt the Host made itself (spec §3.35)', () => {
         fetcher: trace('CN'),
         print: 'p',
         input: never,
+        inputWaitMs: 50,
       })
       assert.equal(code, 2)
       assert.match(err.lines.join(''), /中国大陆（CN）/)

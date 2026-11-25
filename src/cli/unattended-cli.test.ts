@@ -15,8 +15,11 @@ import {
   snapshot,
   withFakeHome,
 } from '../../testing/index.ts'
+import { UserError } from '../core/errors.ts'
 import { resolvePaths } from '../core/paths.ts'
 import { addPendingDecision } from '../core/unattended-pending.ts'
+import { parseArgs, UsageError } from './args.ts'
+import { cmdUnattended } from './commands.ts'
 import { OUTPUT_SCHEMAS } from './json-schemas.ts'
 
 const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url))
@@ -29,6 +32,27 @@ function cli(h: FakeHome, args: string[], extra: { input?: string; env?: Record<
     timeout: 30_000,
   })
 }
+
+/**
+ * `sideby unattended <args>` in this process, with the fake HOME as process.env (cmdUnattended builds its own
+ * Runtime). main() exits 2 for the UsageError it may reject with and 1 for any other error.
+ */
+async function inProcess(h: FakeHome, args: string[]): Promise<number> {
+  const env = process.env
+  process.env = { ...h.env } as NodeJS.ProcessEnv
+  try {
+    const parsed = parseArgs(
+      args,
+      ['json', 'all', 'slot-end', 'replied', 'help'],
+      ['for', 'until', 'days', 'from', 'to', 'name', 'at', 'project', 'ids'],
+    )
+    return await cmdUnattended(parsed, { out: () => {}, err: () => {} })
+  } finally {
+    process.env = env
+  }
+}
+
+const usageMatching = (re: RegExp) => (e: unknown) => e instanceof UsageError && re.test(e.message)
 
 function json(h: FakeHome, args: string[], schema = 'unattended', env: Record<string, string> = {}) {
   const r = cli(h, ['unattended', ...args, '--json'], { env })
@@ -71,8 +95,13 @@ describe('sideby unattended', () => {
 
   it('refuses times and options it does not take, saying what to use (exit 2)', async () => {
     await withFakeHome(async (h) => {
+      const r = cli(h, ['unattended', 'on', '--for', '73h', '--json'])
+      assert.equal(r.status, 2, `${r.stdout}${r.stderr}`)
+      const out = JSON.parse(r.stdout)
+      assert.equal(out.schemaVersion, 1)
+      assert.equal(out.code, 'usage')
+      assert.match(out.error, /use|choose|run|add|give|usage/i)
       for (const args of [
-        ['on', '--for', '73h'],
         ['on', '--for', '0h'],
         ['on', '--until', '2020-01-01T00:00:00Z'],
         ['on', '--until', 'not-a-time'],
@@ -91,21 +120,17 @@ describe('sideby unattended', () => {
         ['wait', '121'],
         ['wait', '5m'],
         ['wait', '10', '20'],
-      ]) {
-        const r = cli(h, ['unattended', ...args, '--json'])
-        assert.equal(r.status, 2, `${args.join(' ')}: ${r.stdout}${r.stderr}`)
-        const out = JSON.parse(r.stdout)
-        assert.equal(out.schemaVersion, 1)
-        assert.equal(out.code, 'usage')
-        assert.match(out.error, /use|choose|run|add|give|usage/i, args.join(' '))
-      }
+      ])
+        await assert.rejects(
+          inProcess(h, [...args, '--json']),
+          usageMatching(/use|choose|run|add|give|usage/i),
+          args.join(' '),
+        )
       // A Slot or a decision that is not there is not a malformed command line: exit 1, with what to do.
-      const missing = cli(h, ['unattended', 'pending', 'done', 'abcdefgh', '--json'])
-      assert.equal(missing.status, 1)
-      assert.match(JSON.parse(missing.stdout).error, /pending --all/)
-      const none = cli(h, ['unattended', 'schedule', 'remove', '1'])
-      assert.equal(none.status, 1)
-      assert.match(none.stderr, /schedule add/)
+      const notUsage = (re: RegExp) => (e: unknown) =>
+        e instanceof UserError && !(e instanceof UsageError) && re.test(e.message)
+      await assert.rejects(inProcess(h, ['pending', 'done', 'abcdefgh', '--json']), notUsage(/pending --all/))
+      await assert.rejects(inProcess(h, ['schedule', 'remove', '1']), notUsage(/schedule add/))
     })
   })
 
@@ -332,11 +357,12 @@ describe('sideby unattended', () => {
         ['done'],
         ['done', '--project', 'nope'],
         ['--project', ''],
-      ]) {
-        const r = cli(h, ['unattended', 'pending', ...args])
-        assert.equal(r.status, 2, `${args.join(' ')}: ${r.stdout}${r.stderr}`)
-        assert.match(r.stderr, /usage|project|--ids/)
-      }
+      ])
+        await assert.rejects(
+          inProcess(h, ['pending', ...args]),
+          usageMatching(/usage|project|--ids/),
+          args.join(' '),
+        )
     })
   })
 

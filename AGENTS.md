@@ -28,7 +28,8 @@ Before you commit, read your diff once for these.
 | Task | Command |
 |---|---|
 | Install | `pnpm install --frozen-lockfile` |
-| Full gate (typecheck, biome, tests, leak-check) | `pnpm check` |
+| Full gate (typecheck, biome, tests, leak-check, budget) | `pnpm check` |
+| Comment and test budget (`.budget.json`, totals may only shrink) | `pnpm budget` (`--tighten` locks in a drop; `--raise-tests "<reason>"` for a justified new test) |
 | All tests | `pnpm test` |
 | One test file | `node --test src/core/share-modes.test.ts` |
 | Format and auto-fix | `pnpm format` |
@@ -123,10 +124,13 @@ Shared Item paths must be relative and stay inside the account directory: config
 
 ## Tests
 
+- Add a test only when the user asked for it; it covers money, credits, permissions, data writes or migrations; it reproduces a bug by failing first; or it tests pure logic callable without rendering. Test one behaviour in one layer. `pnpm budget` fails when the test count grows; record the reason with `pnpm budget --raise-tests "<reason>"`.
+- A full-line comment counts against the same budget unless its block carries `WHY:`, `ADR-<n>` or `HACK(<issue>)`. There is no raise flag for comments.
 - Use only `withFakeHome` and `fakeHost` from `testing/`. A test that could touch the real HOME, real Host binaries or the network is wrong; `withFakeHome` fails if it resolves inside the real HOME.
 - One test file per Share Mode and per family. Each "never do" case compares Main Account hashes, symlink targets and credential hashes before and after `--fix`.
 - Write paths: snapshot the fake Host directories before and after (`snapshot`, `diffSnapshots`) and assert no unexpected writes.
 - Fixtures live under `fixtures/` with fake values only; leak-check rejects real credentials, home paths and credential-shaped files elsewhere.
+- Test CLI behaviour in-process first (call the `cmd*` function with parsed arguments against a fake HOME, as `src/cli/sessions-open-run.test.ts` does), with one subprocess smoke test per command for its exit code and `--json` shape. Split a test file that takes more than about 15 s on its own; the CLI files share `src/cli/cli-test-helpers.ts`.
 - Do not run `sideby doctor --fix`, `new`, `login` or `quota setup` against the real HOME. Real-host checks are read-only: `list`, `doctor` without `--fix`, `quota`. For anything else, use a demo HOME (`scripts/demo-home.ts`).
 
 ## Change process

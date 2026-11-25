@@ -185,7 +185,6 @@ export async function pendingOverview(opts: {
   )
   const names = projectNames([...projectOf.values()].filter(Boolean))
 
-  // Open decisions with a session id, by Family and session.
   const bySession = new Map<string, PendingDecision[]>()
   for (const d of opts.decisions)
     if (!d.doneAt && d.sessionId) {
@@ -262,7 +261,6 @@ export async function pendingProjectsNamed(
   return projectsNamed(new Map(paths.map((p) => [p.project, p.projectName])), name.replace(/\/+$/, ''))
 }
 
-/** How many session records are read at once. */
 const READ_AT_ONCE = 4
 
 async function eachAtMost<T>(n: number, items: readonly T[], fn: (item: T) => Promise<void>): Promise<void> {

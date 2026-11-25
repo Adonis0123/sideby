@@ -114,7 +114,7 @@ async function checkFolder(stateDir: string): Promise<{ dir: string; bin: string
 export async function fetchAgyQuota(
   account: Account,
   ctx: QuotaFetchContext,
-  opts: { timeoutMs?: number } = {},
+  opts: { timeoutMs?: number; killAfterMs?: number } = {},
 ): Promise<QuotaResult> {
   if (ctx.signal.aborted) return failed('the quota check was stopped')
   const folder = await checkFolder(ctx.stateDir)
@@ -141,7 +141,7 @@ export async function fetchAgyQuota(
   const stop = () => {
     if (!alive()) return
     child.kill('SIGTERM')
-    killTimer ??= setTimeout(() => alive() && child.kill('SIGKILL'), KILL_AFTER_MS)
+    killTimer ??= setTimeout(() => alive() && child.kill('SIGKILL'), opts.killAfterMs ?? KILL_AFTER_MS)
   }
   let signIn = false
   let timedOut = false

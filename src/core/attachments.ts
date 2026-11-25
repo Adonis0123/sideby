@@ -317,11 +317,11 @@ export async function copyAttachments(
   return out
 }
 
-/** A Panel upload: saved under a random id in the staging folder until `/api/ask` takes it into a task. */
 // One upload at a time per staging folder: the count and the write must not interleave, or two uploads that arrive
 // together both see room for one more and the folder ends up over its limit.
 const stagingLocks = new Map<string, Promise<unknown>>()
 
+/** A Panel upload: saved under a random id in the staging folder until `/api/ask` takes it into a task. */
 export async function stageUpload(
   paths: Pick<Paths, 'stateDir'>,
   source: AsyncIterable<Uint8Array>,

@@ -123,12 +123,17 @@ describe('Local Build switch', () => {
       const paths = resolvePaths(h.env)
       const plist = h.path('Library/LaunchAgents/dev.sideby.panel.plist')
       const calls: string[][] = []
+      // A fake launchd: the job is gone right after `bootout`, so nothing waits for it to wind down.
+      let loaded = true
       const ctx = {
         platform: 'darwin' as const,
         uid: 501,
         loginHome: h.home,
         exec: async (file: string, args: readonly string[]) => {
           calls.push([file, ...args])
+          if (args[0] === 'bootout') loaded = false
+          if (args[0] === 'bootstrap') loaded = true
+          if (args[0] === 'print' && !loaded) return { code: 113, output: '' }
           return { code: 0, output: '' }
         },
       }

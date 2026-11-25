@@ -60,7 +60,6 @@ const CONFIG = '.config/sideby/config.json'
 /** An editor's command line inside a fake app bundle, as macOS has it. */
 const bundled = (h: FakeHome, app: string, rel: string) =>
   h.write(`Applications/${app}.app/${rel}`, '', 0o755)
-/** An editor's command in the fake PATH. */
 async function onPath(h: FakeHome, name: string) {
   const p = join(h.bin, name)
   await writeFile(p, '', { mode: 0o755 })

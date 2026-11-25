@@ -6,7 +6,6 @@ import { codexSignInId } from './codex/browser.ts'
 import { grokSignInId } from './grok/browser.ts'
 
 export type WebsiteDef = FamilyWebsite & {
-  /** The Family id. */
   family: string
 }
 

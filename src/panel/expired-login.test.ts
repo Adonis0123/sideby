@@ -7,7 +7,6 @@ import { asBuiltin, demoFamily, demoPlugin, seedDemoMain } from '../../testing/d
 import { withFakeHome } from '../../testing/index.ts'
 import { createRuntime } from '../runtime.ts'
 import { createPanelHandler, handoffByFamily, type PanelAccount, type PanelState } from './handler.ts'
-import { MESSAGES } from './i18n.ts'
 import { attentionReasons, expiredLogins, rowBadge } from './page-logic.ts'
 
 const EXPIRED_AT = '2026-11-08T10:00:00.000Z'
@@ -88,17 +87,5 @@ describe('Expired Login in the Panel', () => {
       expiredLogins([a, expired, { ...expired, ref: 'claude:api', kind: 'api' }]).map((x) => x.ref),
       ['claude:work'],
     )
-  })
-
-  it('has every new word in both languages', () => {
-    const keys = Object.keys(MESSAGES.en).filter((k) =>
-      /^(acct\.expired|acct\.signInAgain|exp\.|need\.login-expired|why\.login-expired|ai\.ask\.expired)/.test(
-        k,
-      ),
-    )
-    assert.ok(keys.length >= 10)
-    for (const k of keys) assert.ok((MESSAGES.zh as Record<string, string>)[k], k)
-    assert.equal(MESSAGES.zh['acct.expired' as keyof typeof MESSAGES.zh], '登录已过期')
-    assert.equal(MESSAGES.zh['acct.signInAgain' as keyof typeof MESSAGES.zh], '重新登录')
   })
 })

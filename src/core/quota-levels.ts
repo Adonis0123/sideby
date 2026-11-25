@@ -221,7 +221,6 @@ export function windowLevel(w: { label?: string; windowMinutes?: number; usedPer
 
 const LEVEL_RANK: Record<QuotaLevel, number> = { ok: 0, warn: 1, fail: 2 }
 
-/** The more serious of two levels. */
 export function worseLevel(a: QuotaLevel, b: QuotaLevel): QuotaLevel {
   return LEVEL_RANK[b] > LEVEL_RANK[a] ? b : a
 }

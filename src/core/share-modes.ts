@@ -24,7 +24,6 @@ export interface ItemContext {
   item: SharedItemDef
   /** Resolved main-side path. */
   mainPath: string
-  /** Path inside the Account directory. */
   accountPath: string
   /** The Account directory; every repair must stay inside it. */
   accountDir: string
@@ -92,7 +91,6 @@ function realConflict(ctx: ItemContext, what: string): CheckResult {
   }
 }
 
-/** Whether this item may legitimately be a link in this Account. */
 function acceptsLink(ctx: ItemContext): boolean {
   const { item } = ctx
   if (item.noSymlink) return false

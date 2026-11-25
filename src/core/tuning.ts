@@ -217,7 +217,6 @@ export function summarizeModel(rec: ModelRecords, o: SummarizeOptions): TuningMo
   }
 }
 
-/** The value stored under `key`, creating and storing `make()` first when there is none. */
 export function getOrCreate<K, V>(map: Map<K, V>, key: K, make: () => V): V {
   const have = map.get(key)
   if (have !== undefined) return have

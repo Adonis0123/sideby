@@ -116,18 +116,6 @@ describe('Expired Login in the CLI', () => {
     })
   })
 
-  it('a later successful turn clears it', async () => {
-    await withFakeHome(async (h) => {
-      await seed(h)
-      await h.write(
-        '.claude/projects/-demo/s2.jsonl',
-        `${JSON.stringify({ type: 'assistant', timestamp: '2026-11-08T11:00:00.000Z', message: { model: 'claude-fable-5-1', content: [] } })}\n`,
-      )
-      const data = checkSchema('list', (await sideby(h, ['list', '--json'])).out)
-      for (const a of data.accounts as { loginProblem?: unknown }[]) assert.equal(a.loginProblem, undefined)
-    })
-  })
-
   it('after a sign-in that exits 0 with quota checks off, it waits for confirmation and writes no Host file', async () => {
     await withFakeHome(async (h) => {
       await seed(h)

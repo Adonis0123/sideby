@@ -33,10 +33,10 @@ export async function readPickRecords(stateDir: string, now: Date): Promise<Pick
   return list.filter(isRecord).filter((r) => pickRecordFresh(r.at, now))
 }
 
-async function takePickLock(stateDir: string): Promise<ReleaseLock | null> {
+async function takePickLock(stateDir: string, waitMs = WAIT_MS): Promise<ReleaseLock | null> {
   const dir = join(stateDir, DIR)
   await mkdir(dir, { recursive: true, mode: 0o700 })
-  return takeFileLock(join(dir, 'pick.lock'), { ...LOCK, wait: { timeoutMs: WAIT_MS, pollMs: 50 } })
+  return takeFileLock(join(dir, 'pick.lock'), { ...LOCK, wait: { timeoutMs: waitMs, pollMs: 50 } })
 }
 
 /** What a pick that starts something writes: its record, and the records that still count beside it. */
@@ -64,8 +64,9 @@ export async function withPickRecords<T>(
   rank: (picks: readonly PickRecord[], now: Date) => Promise<T>,
   started: (result: T, picks: readonly PickRecord[], now: Date) => PickStart | null,
   written?: (rec: PickRecord) => void,
+  opts: { waitMs?: number } = {},
 ): Promise<T> {
-  const release = record ? await takePickLock(stateDir).catch(() => null) : null
+  const release = record ? await takePickLock(stateDir, opts.waitMs).catch(() => null) : null
   try {
     const now = clock()
     const picks = await readPickRecords(stateDir, now)

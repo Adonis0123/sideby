@@ -594,6 +594,8 @@ describe('Room per Session (spec §3.13 "分摊选号", ADR-0083)', () => {
           true,
           async (picks) => picks.length,
           () => ({ ref: 'claude:b', liveAtPick: 0 }),
+          undefined,
+          { waitMs: 100 },
         )
         assert.equal(got, 1, 'it still picks, from what it read')
         assert.equal(await readFile(file, 'utf8'), before)

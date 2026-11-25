@@ -30,7 +30,6 @@ describe('addConfigAlias', () => {
       assert.equal(text, `${JSON.stringify(expected, null, 2)}\n`)
       assert.deepEqual(Object.keys(JSON.parse(text)), Object.keys(before))
       assert.equal((await stat(h.path(CONFIG))).mode & 0o777, 0o644)
-      // The same alias for the same Account again is a no-op.
       assert.equal((await addConfigAlias(h.path(CONFIG), 'cc008', 'claude:008')).status, 'exists')
       assert.equal(await readFile(h.path(CONFIG), 'utf8'), text)
     })

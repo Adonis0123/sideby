@@ -716,7 +716,7 @@ let localDirsMemo: Promise<import('../core/local-build.ts').LocalDirs | null> | 
 async function localDirsFor(rt: Runtime) {
   const lb = await import('../core/local-build.ts')
   localDirsMemo ??= lb.localDirs(rt.env).then((d) => {
-    if (!d) localDirsMemo = null // ask again next time
+    if (!d) localDirsMemo = null
     return d
   })
   return localDirsMemo
@@ -1302,7 +1302,6 @@ async function buildState(
   const network = accounts.some((a) => (GUARDED_FAMILIES as readonly string[]).includes(a.family))
     ? await rt.networkStatus().catch(() => undefined)
     : undefined
-  // Reads of Accounts that are gone are dropped.
   for (const map of [opts.readings.going, opts.readings.last])
     for (const ref of map.keys()) if (!accounts.some((a) => a.ref === ref)) map.delete(ref)
   const aliases = aliasesByAccount(aliasRefs(rt.config.aliases), accounts)
@@ -1406,7 +1405,6 @@ async function buildState(
       const g = f.brokenBin ? { ...f, brokenBin: tildify(f.brokenBin, ctx.home) } : f
       return { ...g, ...(logo ? { logo } : {}), ...(def ? keyFacts(def, permissions) : {}) }
     }),
-    // Config `ask.permissions: account` (ADR-0070): AI Tasks start with the Account's own arguments.
     ...(permissions === 'account' ? { aiTaskPermissions: 'account' as const } : {}),
     accounts: list,
     pluginErrors: rt.pluginErrors.map((e) => ({ where: e.where, message: e.message })),

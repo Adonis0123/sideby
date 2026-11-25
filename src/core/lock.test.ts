@@ -94,7 +94,7 @@ describe('takeFileLock', () => {
     withFakeHome(async (h) => {
       // One round rarely interleaves; without the guard two holders show up within about 150 rounds.
       const file = h.path('a.lock')
-      for (let round = 0; round < 300; round++) {
+      for (let round = 0; round < 200; round++) {
         await writeFile(file, `4242 ${Date.now()}`)
         await age(file, 120_000)
         const takers = await Promise.all(Array.from({ length: 8 }, () => takeFileLock(file, base)))

@@ -28,7 +28,6 @@ const PARTS = ['progress', 'sessions'] as const
 const KEEP_MS = 24 * 3600_000
 const RECORD_MAX = 4096
 
-/** Whether `v` is an interval sideby takes. */
 export const validEvery = (v: unknown): v is number =>
   typeof v === 'number' && Number.isInteger(v) && v >= PROGRESS_MIN && v <= PROGRESS_MAX
 

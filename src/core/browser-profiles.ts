@@ -32,7 +32,6 @@ export function chromeUserData(home: string): string {
   return join(home, 'Library', 'Application Support', 'Google', 'Chrome')
 }
 
-/** Windows folders sideby needs on WSL, each as a Windows path and as the WSL path it is mounted at. */
 /**
  * `%LOCALAPPDATA%` and the Program Files folders (core/windows-dirs.ts). When cmd.exe fails, the only Windows user
  * with Chrome data under `<mount>/c/Users`; several are not guessed between.

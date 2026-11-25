@@ -46,6 +46,7 @@ export interface NetworkHookDeps {
   input?: AsyncIterable<string | Uint8Array> | string
   /** Whether the Host that started the hook is gone (`ppid` 1 by default): nothing is left to wake. */
   parentGone?: () => boolean
+  inputWaitMs?: number
 }
 
 /** A prompt larger than this is not read: the hook then decides as if it were given nothing. */
@@ -70,7 +71,7 @@ const HELD_MAX_CHARS = 8000
 
 type Decision = 'ok' | 'blocked'
 
-async function readInput(input: NetworkHookDeps['input']): Promise<string> {
+async function readInput(input: NetworkHookDeps['input'], waitMs = STDIN_WAIT_MS): Promise<string> {
   if (input === undefined) return ''
   if (typeof input === 'string') return input
   const read = (async () => {
@@ -92,7 +93,7 @@ async function readInput(input: NetworkHookDeps['input']): Promise<string> {
       // Let go of the stream too: an open stdin would keep the process alive after the hook has decided.
       ;(input as { destroy?: () => unknown }).destroy?.()
       resolve('')
-    }, STDIN_WAIT_MS)
+    }, waitMs)
   })
   try {
     return await Promise.race([read, late])
@@ -104,9 +105,10 @@ async function readInput(input: NetworkHookDeps['input']): Promise<string> {
 /** The prompt and its id when the Host made the prompt itself; undefined for a typed prompt or unreadable input. */
 async function hostMadePrompt(
   input: NetworkHookDeps['input'],
+  waitMs?: number,
 ): Promise<{ id: string; prompt: string } | undefined> {
   try {
-    const v = JSON.parse(await readInput(input)) as { prompt?: unknown; prompt_id?: unknown } | null
+    const v = JSON.parse(await readInput(input, waitMs)) as { prompt?: unknown; prompt_id?: unknown } | null
     if (!v || typeof v.prompt !== 'string' || typeof v.prompt_id !== 'string' || !v.prompt_id)
       return undefined
     return hostMade(v.prompt) ? { id: v.prompt_id, prompt: v.prompt } : undefined
@@ -222,7 +224,7 @@ export async function runNetworkHook(
   }
   const clock = () => (deps.now?.() ?? new Date()).getTime()
   if (event === 'Held') {
-    const made = await hostMadePrompt(deps.input)
+    const made = await hostMadePrompt(deps.input, deps.inputWaitMs)
     if (!made) return 0
     const sleep = deps.sleep ?? delay
     // The hook that checks this prompt says what it decided; no answer in time means it let the prompt through.
@@ -256,7 +258,7 @@ export async function runNetworkHook(
   const moment = MOMENTS[event]
   if (!moment) return 0
   // A prompt the Host made itself is not sent again once blocked: tell `Held` what is decided for it.
-  const made = event === 'UserPromptSubmit' ? await hostMadePrompt(deps.input) : undefined
+  const made = event === 'UserPromptSubmit' ? await hostMadePrompt(deps.input, deps.inputWaitMs) : undefined
   const decided = async (d: Decision) => {
     if (made) await keepDecision(dir, made.id, d, clock())
   }

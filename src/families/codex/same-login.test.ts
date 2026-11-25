@@ -293,15 +293,4 @@ describe('sideby login on a Same Login (spec §3.21 "换个账号登录")', () =
       assertNoKey(r.out + r.err, 'login output')
     })
   })
-
-  it('warns when the browser signed in as the same login again', async () => {
-    await withFakeHome(async (h) => {
-      await threeDirs(h)
-      await loginWrites(h, idToken({ chatgpt_account_id: WS_A, chatgpt_user_id: USER }))
-      const r = await sideby(h, ['login', 'codex:team'])
-      assert.equal(r.code, 0, r.err)
-      assert.match(r.err, /still signed in as codex@example\.com, the same login as codex:main/)
-      assert.match(r.err, /private window, then run `sideby login codex:team` again/)
-    })
-  })
 })

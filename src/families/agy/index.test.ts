@@ -406,7 +406,7 @@ describe('Antigravity CLI quota never opens a browser (ADR-0082)', () => {
           // Never aborts: the check must stop agy by itself.
           signal: new AbortController().signal,
         },
-        { timeoutMs: 500 },
+        { timeoutMs: 500, killAfterMs: 200 },
       )
       assert.ok(Date.now() - started < 8_000)
       assert.equal(q.status, 'unavailable')

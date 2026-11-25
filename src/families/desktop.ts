@@ -5,7 +5,6 @@ import { codexDesktop } from './codex/desktop.ts'
 import { grokBot } from './grok/bot.ts'
 
 export interface DesktopAppDef {
-  /** The Family id. */
   family: string
   /** How messages name the app, for example `Claude Desktop`. */
   title: string

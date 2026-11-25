@@ -482,8 +482,10 @@ describe('Answer Wait: a turn that ended on a question written as text', () => {
       })
       assert.deepEqual([late.code, late.err], [0, ''])
       await screen(h, 'idle', T0)
+      // WHY: with the mode off the hook keeps watching until Claude Code's timeout ends it; `cap` stands in for that.
       const off = await run(h, ['claude', 'StopWait'], stop(ASKED), {
         afterKeep: () => turnOff(h, T0 + 10 * MIN),
+        cap: 15,
       })
       assert.deepEqual([off.code, off.err], [0, ''])
       assert.deepEqual(await pending(h, true), [])

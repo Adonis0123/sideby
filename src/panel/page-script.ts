@@ -287,7 +287,6 @@ const MAIN = String.raw`
   const FAIL = BOOT.fail
   // A Long Window's levels (weekly, a billing period): it warns later than a 5-hour one (spec §3.26).
   const LONG = { warn: BOOT.longWarn, fail: BOOT.longFail }
-  // Quota data older than this is greyed and marked with its age.
   // Findings listed before the rest fold behind a button.
   const FINDINGS_SHOWN = 5
   const NAME_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
@@ -2669,7 +2668,6 @@ const MAIN = String.raw`
           moreButton(m)), (anchor) => accountMenu(m, anchor))
       })))
   }
-  // What a click on a row opens: how it runs (ref, model and effort, a shared login), its tokens and its Health.
   function sameLoginNote(a) {
     if (!a.sameLogin || !a.sameLogin.length || inLogin(a)) return null
     const names = a.sameLogin.map(refName).join(', ')

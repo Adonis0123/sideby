@@ -87,7 +87,6 @@ export async function installedSkills(home: string): Promise<{ dir: string; vers
   return out
 }
 
-/** The command `sideby update` runs to update an installed sideby skill: it keeps the agents it was installed for. */
 /**
  * An installed skill for `installed` (null: from before skills had a version) is behind `target`. A skill for a newer
  * sideby is not: `npx skills update` brings the newest skill, so it is the CLI that is behind (spec §3.23).
@@ -95,6 +94,7 @@ export async function installedSkills(home: string): Promise<{ dir: string; vers
 export const skillIsBehind = (installed: string | null, target: string): boolean =>
   installed !== target && compareVersions(installed ?? '', target) !== 1
 
+/** The command `sideby update` runs to update an installed sideby skill: it keeps the agents it was installed for. */
 export const SKILL_UPDATE = ['npx', '-y', 'skills', 'update', 'sideby', '-g', '-y'] as const
 
 /**

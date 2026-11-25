@@ -379,7 +379,7 @@ describe('Limit Reset operation records', () => {
       for (const e of await readdir(d, { withFileTypes: true })) {
         const p = join(d, e.name)
         if (e.isDirectory()) await walk(p)
-        else if (e.name.endsWith('.ts') && !e.name.endsWith('.test.ts')) files.push(p)
+        else if (e.name.endsWith('.ts') && !/(\.test|-test-helpers)\.ts$/.test(e.name)) files.push(p)
       }
     }
     await walk(src)

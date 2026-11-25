@@ -32,7 +32,6 @@ const DIRS: Record<string, (a: Account) => QuotaWatchDir[]> = {
   ],
 }
 
-/** The folders to watch for `accounts`. */
 export function quotaWatchDirs(accounts: readonly Account[]): QuotaWatchDir[] {
   return accounts.flatMap((a) => (Object.hasOwn(DIRS, a.family) ? DIRS[a.family]!(a) : []))
 }

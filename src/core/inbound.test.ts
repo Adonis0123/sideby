@@ -103,7 +103,6 @@ describe('sideby messages inbound', () => {
         null,
         'no settings.json is created',
       )
-      // A second run has nothing to do.
       assert.equal((await acceptInbound(all, ctx(h))).results.length, 0)
 
       // Someone changes 002 afterwards: undo leaves it alone and puts back only the main file.

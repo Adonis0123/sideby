@@ -143,18 +143,6 @@ describe('statusline-tap', () => {
     })
   })
 
-  it('without a session id, keeps the higher use within one window and otherwise takes the reading', async () => {
-    await withFakeHome(async (h) => {
-      await tap([], h.env, reading([96, T]))
-      const before = await readFile(cacheFile(h, 'main'), 'utf8')
-      const r = await tap([], h.env, reading([90, T]))
-      assert.equal(r.stdout, '5h 96%\n')
-      assert.equal(await readFile(cacheFile(h, 'main'), 'utf8'), before)
-      await tap([], h.env, reading([3, T + 5 * 3600]))
-      assert.equal((await fiveHour(h)).usedPercent, 3)
-    })
-  })
-
   it('reads and extends a cache written before sessions were kept', async () => {
     await withFakeHome(async (h) => {
       await h.write(

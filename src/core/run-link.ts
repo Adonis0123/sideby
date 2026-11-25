@@ -209,7 +209,6 @@ export function byRole(list: readonly RunEntry[]): RunEntry[] {
     .map(({ e }) => e)
 }
 
-/** The checked entries of `sessionId`, in the order it shows them. */
 async function checkedRuns(entries: readonly RunEntry[], check: BoardCheck): Promise<RunEntry[]> {
   const ok = await Promise.all(entries.map((e) => checkedEntry(e, check)))
   return byRole(ok.filter((e): e is RunEntry => e !== undefined))

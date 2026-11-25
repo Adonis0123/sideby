@@ -7,6 +7,9 @@ import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { Value } from 'typebox/value'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
+import { UserError } from '../core/errors.ts'
+import { parseArgs, UsageError } from './args.ts'
+import { cmdHistory } from './commands.ts'
 import { OUTPUT_SCHEMAS } from './json-schemas.ts'
 
 const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url))
@@ -28,6 +31,25 @@ function sideby(
     child.stderr.on('data', (d: Buffer) => (err += d))
     child.on('exit', (code) => resolve({ code, out, err }))
   })
+}
+
+/**
+ * `sideby history <args>` in this process, with the fake HOME as process.env (cmdHistory builds its own Runtime).
+ * main() exits 2 for the UsageError it may reject with and 1 for any other error.
+ */
+async function inProcess(h: FakeHome, args: string[]): Promise<number> {
+  const env = process.env
+  process.env = { ...h.env } as NodeJS.ProcessEnv
+  try {
+    const parsed = parseArgs(
+      args,
+      ['json', 'scripts', 'tools', 'clear', 'help'],
+      ['project', 'category', 'group', 'family', 'account', 'since', 'limit', 'offset', 'before'],
+    )
+    return await cmdHistory(parsed, { out: () => {}, err: () => {} })
+  } finally {
+    process.env = env
+  }
 }
 
 function checked(name: string, text: string): Record<string, unknown> {
@@ -202,42 +224,44 @@ describe('sideby history --json', () => {
   it('exits 1 with an error JSON for an unknown session, project or account', async () => {
     await withFakeHome(async (h) => {
       await seed(h)
+      const r = await sideby(h, ['history', 'show', 'ffff0000-nope', '--json'])
+      assert.equal(r.code, 1, `${r.out}${r.err}`)
+      errorJson(r.out)
       for (const args of [
-        ['history', 'show', 'ffff0000-nope', '--json'],
-        ['history', '--project', 'nope', '--json'],
-        ['history', '--account', 'claude:nope', '--json'],
-        ['history', '--family', 'nope', '--json'],
-      ]) {
-        const r = await sideby(h, args)
-        assert.equal(r.code, 1, `${args.join(' ')}: ${r.out}${r.err}`)
-        errorJson(r.out)
-      }
+        ['--project', 'nope', '--json'],
+        ['--account', 'claude:nope', '--json'],
+        ['--family', 'nope', '--json'],
+      ])
+        await assert.rejects(
+          inProcess(h, args),
+          (e: unknown) => e instanceof UserError && !(e instanceof UsageError),
+          args.join(' '),
+        )
     })
   })
 
   it('exits 2 with an error JSON for a malformed command line', async () => {
     await withFakeHome(async (h) => {
       await seed(h)
+      const r = await sideby(h, ['history', '--since', '3d', '--json'])
+      assert.equal(r.code, 2, `${r.out}${r.err}`)
+      assert.equal(errorJson(r.out).code, 'usage')
       for (const args of [
-        ['history', '--since', '3d', '--json'],
-        ['history', '--limit', '0', '--json'],
-        ['history', '--limit', '501', '--json'],
-        ['history', '--offset', '-1', '--json'],
-        ['history', 'show', '--json'],
-        ['history', 'show', SID, '--before', 'x', '--json'],
-        ['history', 'projects', 'extra', '--json'],
-        ['history', '--nope', '--json'],
-        ['history', '--clear', '--json'],
-        ['history', 'index', '--tools', '--json'],
-        ['history', 'show', SID, '--project', 'x', '--json'],
-        ['history', 'projects', '--since', '3d', '--json'],
-        ['history', '--group', 'week', '--json'],
-        ['history', '--group', 'project', '--tools', '--json'],
-      ]) {
-        const r = await sideby(h, args)
-        assert.equal(r.code, 2, `${args.join(' ')}: ${r.out}${r.err}`)
-        errorJson(r.out)
-      }
+        ['--limit', '0', '--json'],
+        ['--limit', '501', '--json'],
+        ['--offset', '-1', '--json'],
+        ['show', '--json'],
+        ['show', SID, '--before', 'x', '--json'],
+        ['projects', 'extra', '--json'],
+        ['--nope', '--json'],
+        ['--clear', '--json'],
+        ['index', '--tools', '--json'],
+        ['show', SID, '--project', 'x', '--json'],
+        ['projects', '--since', '3d', '--json'],
+        ['--group', 'week', '--json'],
+        ['--group', 'project', '--tools', '--json'],
+      ])
+        await assert.rejects(inProcess(h, args), UsageError, args.join(' '))
     })
   })
 })

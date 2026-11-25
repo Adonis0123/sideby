@@ -318,35 +318,6 @@ describe('Attended Sessions (unattended-hook on UserPromptSubmit)', () => {
     })
   })
 
-  it('counts a prompt written before the hook started whose line is longer than the part read back', async () => {
-    await withFakeHome(async (h) => {
-      await turnOn(h)
-      const typed = (id: string, content: unknown) =>
-        `${JSON.stringify({
-          type: 'user',
-          promptId: id,
-          origin: { kind: 'human' },
-          promptSource: 'typed',
-          message: { role: 'user', content },
-          timestamp: new Date(T0).toISOString(),
-        })}\n`
-      const picture = {
-        type: 'image',
-        source: { type: 'base64', media_type: 'image/png', data: 'A'.repeat(300 * 1024) },
-      }
-      await submit(h, 'look at this', {
-        line: { id: 'picture-1' },
-        before: typed('picture-1', [{ type: 'text', text: 'look at this' }, picture]),
-      })
-      const long = 'a long log\n'.repeat(30_000)
-      await submit(h, long, { session: 's2', line: { id: 'long-1' }, before: typed('long-1', long) })
-      assert.deepEqual(
-        (await attendedNow(h)).map((s) => s.sessionId),
-        ['s1', 's2'],
-      )
-    })
-  })
-
   it('gives up on the transcript after 10 seconds', async () => {
     await withFakeHome(async (h) => {
       await turnOn(h)

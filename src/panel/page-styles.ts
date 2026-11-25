@@ -554,7 +554,6 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
    on every card, pinned or not. Unpinned, it shows only while the card is hovered, as a way to pin it. */
 .card-head .pin-slot, .card-head .pin-mark { position: absolute; left: 17px; top: -6px; z-index: 1; display: inline-grid; place-items: center; width: 16px; height: 16px; margin: 0; border-radius: 50%; background: var(--surface); box-shadow: 0 0 0 1px var(--border-strong); color: var(--muted); }
 .card-head .pin-slot .ic, .card-head .pin-mark .ic { width: 11px; height: 11px; }
-/* Pinned reads as on: the accent, on its soft tint. */
 .card-head .pin-slot.is-on, .card-head .pin-mark { color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, var(--surface)); }
 .card-head .pin-slot:hover, .card-head .pin-slot:focus-visible { background: var(--accent-soft); color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .card-head > .ident-name { flex: 1; min-width: 0; flex-wrap: nowrap; }
@@ -966,7 +965,6 @@ ${UI_CSS}
 .as-details { margin-top: 8px; }
 .as-details summary { color: var(--muted); font-size: 12px; cursor: pointer; }
 .as-details[open] summary { margin-bottom: 8px; }
-/* "More settings…" stays at the bottom of a popover that scrolls. */
 .set-more { margin: 4px -16px -12px; width: calc(100% + 28px); height: 40px; padding: 0 16px 0 16px; border-top: 1px solid var(--border); border-radius: 0 0 var(--radius-xl) var(--radius-xl); }
 .set-more .ic { margin-left: auto; }
 /* The settings dialog: the sections in a list at the side, one section at a time beside it (spec §3.29). */

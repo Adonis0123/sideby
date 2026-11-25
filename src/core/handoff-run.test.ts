@@ -431,7 +431,8 @@ if (process.env.SIDEBY_HANDOFF_DIR) fs.writeFileSync(path.join(process.env.SIDEB
 
   it('leaves a Host that will not exit running and starts nothing else', async () => {
     await withFakeHome(async (h) => {
-      const stubborn = `${READY_ON_FIRST_RUN}\nprocess.removeAllListeners('SIGTERM'); process.on('SIGTERM', () => {})`
+      // WHY: it outlives the 300 ms grace by a margin, then exits on its own instead of running out its 3 s sleep.
+      const stubborn = `${READY_ON_FIRST_RUN}\nprocess.removeAllListeners('SIGTERM'); process.on('SIGTERM', () => setTimeout(() => process.exit(0), 1200))`
       await fakeHost(h, 'claude', { sleep: 3, onStart: stubborn })
       const rt = await setup(h, { auto: true, sameFamily: true, countdownSeconds: 0 })
       const lines: string[] = []

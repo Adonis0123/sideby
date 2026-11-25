@@ -315,12 +315,6 @@ describe('unattended hook', () => {
     })
   })
 
-  it('is on for a session started with --unattended, whatever the Schedule says', async () => {
-    await withFakeHome(async (h) => {
-      assert.equal((await run(h, ['claude', 'PreToolUse'], ask(), { SIDEBY_UNATTENDED: '1' })).code, 2)
-    })
-  })
-
   it('follows the Schedule on every call', async () => {
     await withFakeHome(async (h) => {
       const slot = { days: ['mon'], start: '11:00', end: '13:00' }

@@ -180,7 +180,6 @@ describe('sideby send', () => {
         'a key or credential file was opened',
       )
       assert.ok(opened.length > 0, 'the spy saw no reads at all')
-      // One line, then the connection closed.
       assert.equal(s.got.length, 1)
       assert.deepEqual(s.ended, [true])
       assert.ok(s.got[0]!.endsWith('}\n') && s.got[0]!.split('\n').length === 2)

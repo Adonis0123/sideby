@@ -8,5 +8,5 @@
     "sourceMap": false
   },
   "include": ["src", "testing"],
-  "exclude": ["**/*.test.ts", "**/fixtures/**", "scripts"]
+  "exclude": ["**/*.test.ts", "**/*-test-helpers.ts", "**/fixtures/**", "scripts"]
 }

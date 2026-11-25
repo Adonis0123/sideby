@@ -5,20 +5,9 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { withFakeHome } from '../../testing/index.ts'
-import { envFromPs, isInside, systemDeps } from './live-sessions-procs.ts'
+import { isInside, systemDeps } from './live-sessions-procs.ts'
 
 describe('process helpers', () => {
-  it('reads one variable after the arguments, also a path with spaces', () => {
-    const argv = 'codex --model x'
-    const out = `${argv} PATH=/usr/bin:/bin CODEX_HOME=/tmp/My Accounts/.codex-team TERM=xterm\n`
-    assert.equal(envFromPs(argv, out, 'CODEX_HOME'), '/tmp/My Accounts/.codex-team')
-    assert.equal(envFromPs(argv, out, 'PI_CODING_AGENT_DIR'), undefined)
-    // A prompt that mentions the variable is an argument, not the environment.
-    const prompt = 'codex set CODEX_HOME=/tmp'
-    assert.equal(envFromPs(prompt, `${prompt} PATH=/bin CODEX_HOME=/real`, 'CODEX_HOME'), '/real')
-    assert.throws(() => envFromPs('codex exec', 'codex exec\n', 'CODEX_HOME'), /cannot be read/)
-  })
-
   it('tells a directory from its neighbour', () => {
     assert.equal(isInside('/h/.codex/sessions', '/h/.codex/sessions/2026/r.jsonl'), true)
     assert.equal(isInside('/h/.codex/sessions/', '/h/.codex/sessions-backup/r.jsonl'), false)

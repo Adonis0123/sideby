@@ -142,8 +142,10 @@ export async function handoffStatus(rt: Runtime): Promise<HandoffStatus> {
   }
 }
 
-/** One `handoff` change; fields left out keep their value. The Panel and the CLI send the same shape. */
-/** A `handoff` change; for a single setting, null removes the key so the default applies again. */
+/**
+ * One `handoff` change; fields left out keep their value, and null removes a setting so its default applies again.
+ * The Panel and the CLI send the same shape.
+ */
 export interface HandoffChange {
   auto?: boolean | null
   sameFamily?: boolean | null

@@ -1,7 +1,7 @@
 // The sideby mark (ADR-0064): Sai, the blue buddy with a gold crown and a red cape, painted in ink and watercolour.
 // One source for the Panel header, the empty state, the Portal icon, the favicon, the Menu Bar Item and the app icon.
 // The paintings are PNGs with a transparent background in assets/brand/ (shipped in the package), one per size; each
-// place picks the smallest one that stays sharp at twice its size. Like the old vector mark, it sits on a light tile.
+// place picks the smallest one that stays sharp at twice its size. It sits on a light tile.
 import { readFileSync } from 'node:fs'
 
 /** The sizes painted, in pixels; `assets/brand/sai-painted-<size>.png`. */

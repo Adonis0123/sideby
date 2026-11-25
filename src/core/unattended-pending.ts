@@ -126,7 +126,6 @@ async function readAll(stateDir: string): Promise<PendingDecision[]> {
     .sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.id.localeCompare(b.id))
 }
 
-/** Whole minutes, at most a week. */
 const validWaited = (v: unknown): v is number =>
   typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 7 * 24 * 60
 

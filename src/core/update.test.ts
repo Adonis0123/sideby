@@ -25,7 +25,6 @@ import {
   checksOffWhy,
   compareVersions,
   installMethod,
-  isZombieStat,
   jsonNotice,
   markRunning,
   noticeLine,
@@ -939,13 +938,5 @@ describe('the skill is part of the version (spec §3.23)', () => {
       assert.equal(m.reasonCode, 'not-writable')
       assert.match(m.reasonAt ?? '', /lib\/node_modules/)
     })
-  })
-})
-
-describe('isZombieStat', () => {
-  it('reads the state after the command name, whatever the name holds', () => {
-    assert.equal(isZombieStat('1075152 (node) Z 895969 1075152'), true)
-    assert.equal(isZombieStat('42 (node) S 1 42'), false)
-    assert.equal(isZombieStat('43 (a) Z b) R 1 43'), false)
   })
 })

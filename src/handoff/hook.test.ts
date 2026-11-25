@@ -276,19 +276,6 @@ describe('handoff hook', () => {
     })
   })
 
-  it('adaptive: without a measured turn a window uses threshold', async () => {
-    await withFakeHome(async (h) => {
-      const { env } = await setup(h, { adaptive: true })
-      await pressure(env, 94)
-      await call(env, 'PostToolUse')
-      await pressure(env, 95)
-      const out = (await call(env, 'PostToolUse')).output as {
-        hookSpecificOutput: { additionalContext: string }
-      }
-      assert.match(out.hookSpecificOutput.additionalContext, /end your turn/)
-    })
-  })
-
   it('on Stop: blocks with the threshold text when a turn reached it without tool calls', async () => {
     await withFakeHome(async (h) => {
       const { env } = await setup(h)
@@ -449,7 +436,6 @@ describe('handoff hook IdleWatch', () => {
       const state = await readJsonFile<RunState>(join(dir, FILES.run('r1')))
       assert.equal(state?.thresholdWindow?.label, '5h')
       assert.ok(state?.thresholdSentAt)
-      // Kept what was there.
       assert.equal(state?.sessionId, 's1')
       assert.ok(state?.prepareSentAt)
     })

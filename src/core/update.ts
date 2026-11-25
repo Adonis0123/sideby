@@ -22,7 +22,6 @@ import {
 } from './skill-check.ts'
 import { compareVersions, localBuild, packageVersion, parseLocalBuild, parseVersion } from './version.ts'
 
-export { isZombieStat } from './lock.ts'
 export { compareVersions } from './version.ts'
 
 export const DEFAULT_REGISTRY = 'https://registry.npmjs.org'
@@ -285,7 +284,6 @@ export const updateMachine = (): UpdateDeps => deps()
 /** The lock every install shares (`update-install.lock`), so a Local Build switch never races an Update. */
 export const takeInstallLock = (paths: Paths) => takeLock(paths, 'update-install.lock').catch(() => null)
 
-/** `latest` is newer than `current`. */
 export const isNewer = (latest: string | undefined, current: string): latest is string =>
   latest !== undefined && compareVersions(latest, current) === 1
 

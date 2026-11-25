@@ -2174,7 +2174,6 @@ export function foldSkips(target: { closest(selector: string): unknown }): boole
 /** The Panel's layout bands, widest first; page-styles.ts hangs its narrow-screen rules on them. */
 export type WidthTier = 'wide' | 'medium' | 'narrow' | 'phone'
 
-/** The layout band for a viewport `width` in CSS pixels: up to 560 phone, up to 760 narrow, up to 1100 medium. */
 export function widthTier(width: number): WidthTier {
   return width <= 560 ? 'phone' : width <= 760 ? 'narrow' : width <= 1100 ? 'medium' : 'wide'
 }

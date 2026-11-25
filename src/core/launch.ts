@@ -91,11 +91,6 @@ export async function sidebyBinProblem(env: Env, why: string): Promise<string | 
 }
 
 /**
- * Builds the Host's environment and arguments (spec §3.5):
- * copy the current env, clear Hijack Variables, merge the Secret File, set the select variable,
- * then let `launch.before` hooks adjust or abort. Never touches the caller's environment.
- */
-/**
  * The Account's environment before its Secret File and Plugin hooks: `baseEnv` with the Hijack Variables cleared and
  * the Family's `selectVar` set for every Account but the Main Account.
  */
@@ -152,6 +147,11 @@ function aiTaskArgs(family: FamilyDef, args: string[]): string[] {
   return family.aiTaskArgs ? family.aiTaskArgs(args) : args
 }
 
+/**
+ * Builds the Host's environment and arguments (spec §3.5):
+ * copy the current env, clear Hijack Variables, merge the Secret File, set the select variable,
+ * then let `launch.before` hooks adjust or abort. Never touches the caller's environment.
+ */
 export async function prepareLaunch(
   opts: LaunchCommandOptions & {
     baseEnv: Env
