@@ -2058,7 +2058,7 @@ export async function createRuntime(
           env: p.env,
           stateDir: paths.stateDir,
         })
-      // Orca's agent-view plugin (spec §3.32 step 3): whatever `claudeMod` says, since Orca's subagent view needs it.
+      // WHY: Orca's agent-view plugin (spec §3.32 step 3): whatever `claudeMod` says, since Orca's subagent view needs it.
       if (command === 'run' && p.family.id === 'claude' && !claudeHeadless(p.args))
         p.args = withOrcaAgentView(p.args, p.env)
       // Network Guard (spec §3.35) and Unattended Mode (§3.37): last, on the environment the Host gets, so the check
@@ -2121,7 +2121,7 @@ export async function createRuntime(
       // The Host run unchanged still talks to its vendor: Network Guard checks it as the Main Account (spec §3.35), and
       // it is a session sideby starts, so Unattended Mode covers it (§3.37).
       const guarded = async (start: HostLaunch): Promise<HostLaunch> => {
-        // Orca's agent-view plugin (spec §3.32 step 3): the Host run unchanged never goes through `prepareLaunch`.
+        // WHY: Orca's agent-view plugin (spec §3.32 step 3): the Host run unchanged never goes through `prepareLaunch`.
         const h =
           family.id === 'claude' && !claudeHeadless(start.args)
             ? { ...start, args: withOrcaAgentView(start.args, start.env) }

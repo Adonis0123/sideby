@@ -126,12 +126,12 @@ export async function withClaudeMod(
   return ['--plugin-dir', dir, ...args]
 }
 
-/** Set by Orca in its terminals: the folder of the plugin through which Claude Code tells Orca about its subagents. */
+/** WHY: set by Orca in its terminals: the folder of the plugin through which Claude Code tells Orca about its subagents. */
 export const ORCA_AGENT_VIEW_VAR = 'ORCA_CLAUDE_AGENT_VIEW_PLUGIN_DIR'
 
 /**
  * `args` with `--plugin-dir <Orca's agent-view plugin>` in front when `env` comes from an Orca terminal (spec §3.32
- * step 3). Orca also appends the folder to `CLAUDE_CODE_PLUGIN_DIRS`, but an `env.CLAUDE_CODE_PLUGIN_DIRS` in the
+ * step 3). WHY: Orca also appends the folder to `CLAUDE_CODE_PLUGIN_DIRS`, but an `env.CLAUDE_CODE_PLUGIN_DIRS` in the
  * Account's settings replaces that value when Claude Code starts, and Orca adds the flag itself only to a command
  * whose program is `claude`, never to `sideby run`, `sideby resume` or a shell-init function. The caller leaves out
  * headless runs.

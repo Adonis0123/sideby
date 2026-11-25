@@ -400,7 +400,7 @@
     }
   },
   "tests": {
-    "total": 2138,
+    "total": 2139,
     "files": {
       "mods/claude/hooks/register.test.ts": 7,
       "scripts/budget.test.ts": 5,
@@ -523,7 +523,7 @@
       "src/families/claude/history.test.ts": 7,
       "src/families/claude/index.test.ts": 8,
       "src/families/claude/login-events.test.ts": 10,
-      "src/families/claude/mod.test.ts": 8,
+      "src/families/claude/mod.test.ts": 9,
       "src/families/claude/quota-cache.test.ts": 8,
       "src/families/claude/quota-fetch.test.ts": 10,
       "src/families/claude/quota.test.ts": 5,
@@ -585,6 +585,13 @@
       "src/unattended/hook.test.ts": 35,
       "src/unattended/wait.test.ts": 21
     },
-    "history": []
+    "history": [
+      {
+        "date": "2026-11-25",
+        "reason": "reproduces the Orca agent-view plugin bug fixed in #35 by failing first",
+        "from": 2138,
+        "to": 2139
+      }
+    ]
   }
 }

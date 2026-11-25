@@ -184,7 +184,7 @@ describe("sideby loads Orca's agent-view plugin (spec §3.32 step 3)", () => {
       ])
       assert.deepEqual((await rt.prepareLaunch('claude:001', ['-cp', 'hi'], 'run')).args, ['-cp', 'hi'])
       assert.ok(!(await rt.prepareLaunch('claude:001', [], 'login')).args.includes('--plugin-dir'))
-      // `sideby resume claude --` with no session id runs the Host unchanged, outside `prepareLaunch`.
+      // WHY: `sideby resume claude --` with no session id runs the Host unchanged, outside `prepareLaunch`.
       assert.deepEqual((await rt.resumeLaunch('claude', [])).launch.args, ['--plugin-dir', dir])
       for (const other of ['orca/agent-view', h.path('missing')]) {
         const off = await setup(h, other)
