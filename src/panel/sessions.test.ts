@@ -420,4 +420,43 @@ describe('panel sessions endpoint', () => {
       }
     })
   })
+
+  it('omits orcaSessionId from /api/sessions responses via an explicit allowlist (ADR-0088)', async () => {
+    await withFakeHome(async (h) => {
+      await seedDemoMain(h.write)
+      const runtime = () => createRuntime({ env: h.env, builtins: [asBuiltin(demoPlugin(demoFamily()))] })
+      const home = h.env.HOME!
+      const secretOrcaId = 'orca-chat-secret-99'
+      const list = async () => ({
+        sessions: [
+          session(home, {
+            family: 'agy',
+            account: 'agy:main',
+            startedFrom: 'orca',
+            orcaSessionId: secretOrcaId,
+          }),
+        ],
+        problems: [],
+      })
+      const { server, port, handler } = await serve((p) =>
+        createPanelHandler({
+          runtime,
+          allowedHosts: [`127.0.0.1:${p}`],
+          readOnly: true,
+          ...{ [LIVE_SESSIONS_SOURCE]: { list, copyText: fakeCopy, orca: noOrca } },
+        }),
+      )
+      try {
+        const good = { origin: `http://127.0.0.1:${port}`, 'x-sideby-token': handler.token }
+        const r = await request(port, '/api/sessions', good)
+        assert.equal(r.status, 200)
+        const rows = r.body.sessions as Record<string, unknown>[]
+        assert.equal(rows.length, 1)
+        assert.equal('orcaSessionId' in rows[0]!, false)
+        assert.ok(!JSON.stringify(r.body).includes(secretOrcaId))
+      } finally {
+        await close(server)
+      }
+    })
+  })
 })

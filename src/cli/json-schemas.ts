@@ -1913,7 +1913,13 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
           startedFrom: Type.Optional(
             Type.String({
               description:
-                "Started From: the app the session was started from, as the host's own record says (Claude Code's `entrypoint`). `orca`, `claude-desktop`, `script` (`claude -p`, scripts, the Agent SDK) or the host's value with only letters, digits and `._-`, at most 24 characters. Left out for a plain terminal and for hosts that do not say (Codex, Grok, pi).",
+                "Started From: the app the session was started from, as the host's own record says (Claude Code's `entrypoint`, or `orca` for agy running in an Orca terminal or Chat). `orca`, `claude-desktop`, `script` (`claude -p`, scripts, the Agent SDK) or the host's value with only letters, digits and `._-`, at most 24 characters. Left out for a plain terminal and for hosts that do not say (Codex, Grok, pi).",
+            }),
+          ),
+          orcaSessionId: Type.Optional(
+            Type.String({
+              description:
+                'Confirmed Orca Chat session id for a local Orca `agy acp` Chat (ADR-0088). Exposed by CLI `sideby sessions --json` only; omitted by the browser Panel.',
             }),
           ),
           reference: Type.String({

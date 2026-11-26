@@ -11,7 +11,8 @@ import {
   listLiveSessions,
   shortId,
 } from './live-sessions.ts'
-import type { LiveSessionDeps } from './live-sessions-procs.ts'
+import type { LiveSessionDeps, ProcessInfo } from './live-sessions-procs.ts'
+import { ORCA_SESSION_PREFIX } from './orca-chat.ts'
 import {
   chainIdsMatching,
   type HandoffChain,
@@ -96,6 +97,25 @@ export function pickSession(
   /** The Handoff chains, and the Account label of a session id whose record the Host still has. */
   handoffs: Handoffs = { chains: [] },
 ): PickedSession {
+  // WHY: ADR-0088 dual-ID addressing accepts ONLY exact `orca_session_id:<id>`, never bare Orca UUIDs.
+  if (target.startsWith(ORCA_SESSION_PREFIX)) {
+    const orcaId = target.slice(ORCA_SESSION_PREFIX.length)
+    const matches = orcaId ? sessions.filter((s) => s.orcaSessionId === orcaId) : []
+    if (matches.length === 1) return { session: matches[0]! }
+    if (matches.length > 1) {
+      const rows = matches.map((s) => `  ${next.command(shortId(s.sessionId))}    ${s.label}`).join('\n')
+      throw new UserError(
+        `${target} runs ${matches.length} sessions now; ${next.verb} one by its id:\n${rows}`,
+        {
+          code: 'several-sessions',
+        },
+      )
+    }
+    throw new UserError(
+      `no running session or account named ${target}; run \`sideby sessions\` to see the running sessions`,
+      { code: 'no-session' },
+    )
+  }
   const byId = sessions.filter(
     (s) => s.sessionId === target || (target.length >= 8 && s.sessionId.startsWith(target)),
   )
@@ -134,19 +154,36 @@ export async function selectSession(
   rt: Runtime,
   target: string,
   opts: { next?: SessionNext; deps?: LiveSessionDeps; onListed?: (listed: LiveSessionsResult) => void } = {},
-): Promise<{ session: LiveSession; listed: LiveSessionsResult; handedOverFrom?: string }> {
-  const raw = await listLiveSessions(rt, {}, opts.deps)
+): Promise<{
+  session: LiveSession
+  listed: LiveSessionsResult
+  handedOverFrom?: string
+  processes: readonly ProcessInfo[]
+  targetProcStart?: number
+}> {
+  let processes: readonly ProcessInfo[] = []
+  const raw = await listLiveSessions(
+    rt,
+    {
+      onProcesses: (scanned) => {
+        processes = scanned
+      },
+    },
+    opts.deps,
+  )
   const chains = await readHandoffChains(rt.paths.stateDir)
   const listed = { ...raw, sessions: withHandoffs(chains, raw.sessions) }
   opts.onListed?.(listed)
   let account: { ref: string; label: string } | undefined
-  try {
-    account = { ref: (await rt.resolve(target)).ref, label: target }
-  } catch {
-    // not an Account: a session id
+  if (!target.startsWith(ORCA_SESSION_PREFIX)) {
+    try {
+      account = { ref: (await rt.resolve(target)).ref, label: target }
+    } catch {
+      // not an Account: a session id
+    }
   }
   const handoffs: Handoffs = { chains }
-  if (!account) {
+  if (!account && !target.startsWith(ORCA_SESSION_PREFIX)) {
     // Only when the pick would end at a chain whose later hops all ended: which Account still has the last one.
     const last = endedLastHop(target, listed.sessions, chains)
     if (last) {
@@ -155,7 +192,17 @@ export async function selectSession(
     }
   }
   const picked = pickSession(target, listed.sessions, account, opts.next, handoffs)
-  return { ...picked, listed }
+  const rawStart =
+    picked.session.pid !== undefined
+      ? processes.find((p) => p.pid === picked.session.pid)?.startMs
+      : undefined
+  const targetProcStart = rawStart !== undefined && Number.isFinite(rawStart) ? rawStart : undefined
+  return {
+    ...picked,
+    listed,
+    processes,
+    ...(targetProcStart !== undefined ? { targetProcStart } : {}),
+  }
 }
 
 /** The last hop of the chain `target` names, when neither `target` nor any later hop is a Live Session. */

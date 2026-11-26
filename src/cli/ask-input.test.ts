@@ -499,6 +499,10 @@ it('ask --run gives Antigravity CLI the prompt through --prompt-interactive, wit
       rt.paths,
     )
     assert.equal((await cli(h, ['ask', '--run', id])).code, 0)
-    assert.deepEqual((await readHostLog(h, 'agy'))[0]!.argv, [`--prompt-interactive=${prompt}`])
+    const argv = (await readHostLog(h, 'agy'))[0]!.argv
+    assert.equal(argv.length, 3)
+    assert.equal(argv[0], '--settings')
+    assert.match(argv[1]!, /agy-launch\/launch-.*\.json$/)
+    assert.equal(argv[2], `--prompt-interactive=${prompt}`)
   })
 })

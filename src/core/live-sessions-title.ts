@@ -5,6 +5,7 @@ import { liveSessionReader } from '../families/live-sessions.ts'
 import type { Account } from '../types.ts'
 import { sessionLabel } from './live-sessions.ts'
 import { type LiveSessionDeps, type ProcessInfo, processView, systemDeps } from './live-sessions-procs.ts'
+import { resolvePaths } from './paths.ts'
 
 export const TITLE_EVERY_MS = 10_000
 /** The first look comes sooner: Claude Code writes its session file as it starts. */
@@ -45,9 +46,14 @@ export async function sessionTitleOf(
 ): Promise<string | undefined> {
   const reader = liveSessionReader(o.account.family)
   if (!reader) return undefined
-  const procs = processView(o.deps ?? systemDeps(o.env ?? process.env), signal)
+  const env = o.env ?? process.env
+  const procs = processView(o.deps ?? systemDeps(env), signal)
   const list = await procs.list()
-  const raw = await reader.read(o.account, procs, [])
+  const raw = await reader.read(o.account, procs, [], {
+    stateDir: resolvePaths(env).stateDir,
+    env,
+    ...(o.deps?.orcaAgents ? { orcaAgents: o.deps.orcaAgents } : {}),
+  })
   // A guess is not tied to a process: it may be another tab's session.
   const mine = raw.find((s) => !s.guessed && s.pid !== undefined && under(s.pid, o.pid, list))
   return mine ? clean(`[${sessionLabel(o.accountLabel, mine.title ?? '', mine.sessionId)}]`) : undefined

@@ -5,14 +5,22 @@ import { randomBytes } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, open, readdir, readFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
+import { isPlainAgyId } from '../agy/statusline.ts'
 import { tailLinesWith } from '../families/claude/session-files.ts'
 import { DELIVERERS, type Delivery } from '../families/messaging.ts'
 import type { Runtime } from '../runtime.ts'
-import type { Account } from '../types.ts'
+import type { Account, Env } from '../types.ts'
 import { UserError } from './errors.ts'
 import { ownedFolder, UnsafeFolderError, writeFileAtomic } from './fs-safe.ts'
-import type { LiveSession } from './live-sessions.ts'
+import { type LiveSession, listLiveSessions } from './live-sessions.ts'
 import { type LiveSessionDeps, type ProcessInfo, processView, systemDeps } from './live-sessions-procs.ts'
+import {
+  normalizeOrcaSessionId,
+  ORCA_AGENT_SESSION_VAR,
+  ORCA_SESSION_PREFIX,
+  type OrcaAgentListRunner,
+  type OrcaSendRunner,
+} from './orca-chat.ts'
 import { selectSession } from './session-select.ts'
 
 /**
@@ -77,8 +85,16 @@ export interface MessageDeps {
     verify: () => Promise<string | null>,
   ) => Promise<void>
   timeoutMs?: number
+  /** Grace period before SIGKILL after timeout in tests (ADR-0088). */
+  killGraceMs?: number
   /** How `codex <args>` runs for Codex delivery; resolves to its exit code. */
   runCodex?: (args: readonly string[], env: NodeJS.ProcessEnv, timeoutMs: number) => Promise<number>
+  /** How `orca orchestration send` runs for agy Orca Chat delivery in tests (ADR-0088). */
+  runOrcaSend?: OrcaSendRunner
+  /** How `orca agent list --json` runs for agy delivery verification in tests (ADR-0088). */
+  orcaAgents?: OrcaAgentListRunner
+  /** Live Orca terminal handles for sender verification in tests (ADR-0088). */
+  orcaHandles?: () => Promise<Set<string>>
   /** The wait between delivery tries; a real timer when left out. */
   sleep?: (ms: number) => Promise<void>
 }
@@ -237,6 +253,52 @@ export function senderSession(
   return undefined
 }
 
+/**
+ * WHY: ADR-0088 sender resolution combines parent-PID walk with caller `ANTIGRAVITY_CONVERSATION_ID` and
+ * `ORCA_AGENT_SESSION_ID` fallback against verified non-guessed Live Sessions, failing closed on contradiction.
+ */
+export function resolveSenderSession(
+  pid: number,
+  procs: readonly ProcessInfo[],
+  sessions: readonly LiveSession[],
+  env: Env,
+): { from?: LiveSession; conflict: boolean } {
+  const pidMatch = senderSession(pid, procs, sessions)
+  const rawConv = env.ANTIGRAVITY_CONVERSATION_ID?.trim()
+  const envConvId = isPlainAgyId(rawConv) ? rawConv : undefined
+  const envOrcaId = normalizeOrcaSessionId(env[ORCA_AGENT_SESSION_VAR])
+  const convMatches = envConvId ? sessions.filter((s) => !s.guessed && s.sessionId === envConvId) : []
+  const orcaMatches = envOrcaId ? sessions.filter((s) => !s.guessed && s.orcaSessionId === envOrcaId) : []
+
+  if (pidMatch) {
+    if (envConvId && pidMatch.sessionId !== envConvId) return { conflict: true }
+    if (envOrcaId && pidMatch.orcaSessionId && pidMatch.orcaSessionId !== envOrcaId) return { conflict: true }
+    if (envOrcaId && orcaMatches.length === 1 && orcaMatches[0]!.sessionId !== pidMatch.sessionId)
+      return { conflict: true }
+    return { from: pidMatch, conflict: false }
+  }
+
+  if (envConvId && envOrcaId) {
+    if (convMatches.length === 1 && orcaMatches.length === 1) {
+      return convMatches[0]!.sessionId === orcaMatches[0]!.sessionId
+        ? { from: convMatches[0]!, conflict: false }
+        : { conflict: true }
+    }
+    if (convMatches.length === 1) {
+      const m = convMatches[0]!
+      if (m.orcaSessionId && m.orcaSessionId !== envOrcaId) return { conflict: true }
+      if (m.startedFrom !== 'orca') return { conflict: true }
+      return { from: m, conflict: false }
+    }
+    if (orcaMatches.length === 1 && orcaMatches[0]!.sessionId !== envConvId) return { conflict: true }
+    return { conflict: false }
+  }
+
+  if (envConvId && convMatches.length === 1) return { from: convMatches[0]!, conflict: false }
+  if (envOrcaId && orcaMatches.length === 1) return { from: orcaMatches[0]!, conflict: false }
+  return { conflict: false }
+}
+
 /** The line the user pastes into the target (and keeps for reference when it was delivered). */
 export function pasteLine(id: string, file: string, screenshots: number, lang: 'en' | 'zh'): string {
   if (lang === 'zh')
@@ -328,22 +390,26 @@ async function sendOpened(
 ): Promise<MessageReceipt> {
   const { text, lang } = opts
   const procDeps = deps.procs ?? systemDeps(rt.env)
+  const listDeps =
+    deps.orcaAgents && !procDeps.orcaAgents ? { ...procDeps, orcaAgents: deps.orcaAgents } : procDeps
   const {
     session: to,
     listed,
     handedOverFrom,
+    processes: allProcs,
+    targetProcStart,
   } = await selectSession(rt, target, {
     next: { verb: 'send to', command: (id) => `sideby send ${id} "<text>"` },
-    deps: procDeps,
+    deps: listDeps,
   })
   let from: LiveSession | undefined
+  let senderConflict = false
   if (opts.fromUser) from = undefined
   else if (opts.fromSessionId) from = listed.sessions.find((s) => s.sessionId === opts.fromSessionId)
   else {
-    const all = await processView(procDeps)
-      .list()
-      .catch(() => [] as ProcessInfo[])
-    from = senderSession(deps.selfPid ?? process.pid, all, listed.sessions)
+    const resolved = resolveSenderSession(deps.selfPid ?? process.pid, allProcs, listed.sessions, rt.env)
+    from = resolved.from
+    senderConflict = resolved.conflict
   }
   if (from?.sessionId === to.sessionId)
     throw new UserError(`you are already in ${to.label}; pick another session to send to`, {
@@ -395,9 +461,15 @@ async function sendOpened(
   try {
     const acct = (await rt.accounts()).find((a) => a.ref === to.account)
     result = await deliverWithRetry(
-      () => deliver(rt, to, acct, receipt, text, reply, procDeps, deps),
+      () =>
+        deliver(rt, to, acct, receipt, text, reply, listDeps, deps, {
+          from,
+          fromUser: opts.fromUser,
+          senderConflict,
+          targetProcStart,
+        }),
       to,
-      procDeps,
+      listDeps,
       deps,
     )
   } catch (err) {
@@ -462,7 +534,18 @@ async function deliver(
   reply: string | undefined,
   procDeps: LiveSessionDeps,
   deps: MessageDeps,
+  meta: {
+    from?: LiveSession
+    fromUser: boolean
+    senderConflict: boolean
+    targetProcStart?: number
+  },
 ): Promise<Delivery> {
+  if (meta.senderConflict)
+    return {
+      status: 'paste-needed',
+      note: 'sideby could not verify which session sent this message; paste the line into its tab',
+    }
   if (to.guessed)
     return {
       status: 'paste-needed',
@@ -485,6 +568,11 @@ async function deliver(
     to,
     pid,
     acct,
+    messageId: r.id,
+    ...(meta.from ? { from: meta.from } : {}),
+    fromUser: meta.fromUser,
+    senderConflict: meta.senderConflict,
+    ...(meta.targetProcStart !== undefined ? { targetProcStart: meta.targetProcStart } : {}),
     text: deliveredText(r.id, r.from, text, r.attachments, reply),
     pasteText: r.pasteText,
     // A fresh look at the processes: the screenshots were copied since the listing, and the session may have ended.
@@ -549,7 +637,7 @@ function validReceipt(raw: unknown, dir: string, path: string): Stored | null {
  */
 export async function listMessages(
   rt: Runtime,
-  opts: { to?: string; limit?: number; persist?: boolean } = {},
+  opts: { to?: string; limit?: number; persist?: boolean; deps?: LiveSessionDeps } = {},
 ): Promise<MessageReceipt[]> {
   const stateDir = rt.readContext().stateDir
   const root = await messageFolder(stateDir, [], false)
@@ -581,15 +669,24 @@ export async function listMessages(
   let list = all
   if (opts.to) {
     const t = opts.to
-    let ref: string | undefined
-    try {
-      ref = (await rt.resolve(t)).ref
-    } catch {
-      // a session id
+    if (t.startsWith(ORCA_SESSION_PREFIX)) {
+      // WHY: ADR-0088 resolves a live session for `messages --to` ONLY on an explicit `orca_session_id:<id>` alias.
+      const orcaId = t.slice(ORCA_SESSION_PREFIX.length)
+      const listed = orcaId ? await listLiveSessions(rt, {}, opts.deps) : { sessions: [] }
+      const matched = orcaId ? listed.sessions.find((s) => s.orcaSessionId === orcaId) : undefined
+      list = matched ? all.filter(({ r }) => r.toSessionId === matched.sessionId) : []
+    } else {
+      let ref: string | undefined
+      try {
+        ref = (await rt.resolve(t)).ref
+      } catch {
+        // a session id
+      }
+      list = all.filter(
+        ({ r }) =>
+          r.toSessionId === t || (t.length >= 8 && r.toSessionId.startsWith(t)) || r.toAccount === ref,
+      )
     }
-    list = all.filter(
-      ({ r }) => r.toSessionId === t || (t.length >= 8 && r.toSessionId.startsWith(t)) || r.toAccount === ref,
-    )
   }
   list.sort((a, b) => b.r.sentAt.localeCompare(a.r.sentAt))
   list = list.slice(0, opts.limit ?? 20)

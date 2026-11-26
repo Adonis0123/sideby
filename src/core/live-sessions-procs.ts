@@ -5,6 +5,7 @@ import { open, readFile } from 'node:fs/promises'
 import { basename, isAbsolute, relative, resolve } from 'node:path'
 import type { Env } from '../types.ts'
 import { which } from './launch.ts'
+import type { OrcaAgentListRunner } from './orca-chat.ts'
 
 export interface ProcessInfo {
   pid: number
@@ -31,6 +32,8 @@ export interface LiveSessionDeps {
    * `/proc/<pid>/cmdline`); undefined where only the flattened `ps` line exists (macOS).
    */
   argv?(pid: number, signal?: AbortSignal): Promise<string[] | undefined>
+  /** Optional runner for `orca agent list --json` in tests (ADR-0088). */
+  orcaAgents?: OrcaAgentListRunner
 }
 
 /**

@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url))
 
-/** Entries sideby runs itself, never a person or their AI: the background Update Check. */
-const INTERNAL = new Set(['update-check'])
+/** Entries sideby runs itself, never a person or their AI: the background Update Check and agy helpers (ADR-0088). */
+const INTERNAL = new Set(['update-check', 'agy-statusline', 'agy-title'])
 
 async function skillText(): Promise<string> {
   const dir = join(ROOT, 'skills/sideby')

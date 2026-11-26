@@ -748,6 +748,18 @@ export async function main(
     const { runStatuslineTap } = await import('../quota/statusline-tap.ts')
     return runStatuslineTap(rest, process.env, process.stdin, process.stdout)
   }
+  // WHY: Antigravity CLI runs these on every statusLine/title refresh (ADR-0088); same fast path as statusline-tap.
+  if (first === 'agy-statusline' || first === 'agy-title') {
+    const { runAgyHelper } = await import('../agy/statusline.ts')
+    return runAgyHelper(
+      first === 'agy-title' ? 'title' : 'statusline',
+      rest,
+      process.env,
+      process.stdin,
+      process.stdout,
+      process.stderr,
+    )
+  }
   // The handoff hook runs on every tool call while Auto Handoff is on; like the tap it comes before the Node check,
   // so a Host never gets a version error from its own hook (spec §3.17).
   if (first === 'handoff-hook') {

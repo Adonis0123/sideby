@@ -26,10 +26,15 @@ export interface PreparedLaunch {
   sessionHookArgs?: string[]
   /** The same as `sessionHookArgs`, set when Network Guard's hooks are among them (kept for tools that read it). */
   networkArgs?: string[]
+  /** Best-effort cleanup after the Host exits, such as removing session-scoped settings files (ADR-0088). */
+  cleanup?: (pid?: number) => Promise<void> | void
 }
 
 /** What `runHost` needs: a prepared Account launch, or the Host run unchanged (`sideby resume`). */
-export type HostLaunch = Pick<PreparedLaunch, 'family' | 'bin' | 'args' | 'env' | 'title' | 'notice'> & {
+export type HostLaunch = Pick<
+  PreparedLaunch,
+  'family' | 'bin' | 'args' | 'env' | 'title' | 'notice' | 'cleanup'
+> & {
   /** The Account the Host runs as, when sideby chose one: its Live Session can then grow the title (spec §3.32). */
   account?: Account
 }
@@ -261,6 +266,7 @@ export function spawnHost(p: HostLaunch): { child: ChildProcess; exited: Promise
     child = spawn(p.bin, p.args, { stdio: 'inherit', env: hostEnv(p) as NodeJS.ProcessEnv })
   } catch (err) {
     cleanup()
+    void Promise.resolve(p.cleanup?.()).catch(() => {})
     throw err
   }
   const host = child
@@ -285,12 +291,16 @@ export function spawnHost(p: HostLaunch): { child: ChildProcess; exited: Promise
           ? `${p.family.title} is not installed (\`${p.bin}\` not found on PATH); install it: ${installHint(p.family)}`
           : `could not start ${p.bin}: ${err.message}`
       process.stderr.write(`sideby: ${msg}\n`)
-      resolve(1)
+      void Promise.resolve(p.cleanup?.(host.pid))
+        .catch(() => {})
+        .finally(() => resolve(1))
     })
     host.once('exit', (code, signal) => {
       cleanup()
-      if (signal) resolve(128 + (osConstants.signals[signal] ?? 0))
-      else resolve(code ?? 1)
+      const exitCode = signal ? 128 + (osConstants.signals[signal] ?? 0) : (code ?? 1)
+      void Promise.resolve(p.cleanup?.(host.pid))
+        .catch(() => {})
+        .finally(() => resolve(exitCode))
     })
   })
   return { child: host, exited }

@@ -6,6 +6,7 @@ import type { ProcessView } from '../core/live-sessions-procs.ts'
 import type { MessageDeps, MessageStatus } from '../core/messages.ts'
 import type { Runtime } from '../runtime.ts'
 import type { Account } from '../types.ts'
+import { deliverAgy } from './agy/deliver.ts'
 import { deliverClaude } from './claude/deliver.ts'
 import { deliverCodex } from './codex/deliver.ts'
 
@@ -15,6 +16,16 @@ export interface DeliveryRequest {
   to: LiveSession
   pid: number
   acct: Account
+  /** Short message id kept in the receipt (ADR-0088). */
+  messageId: string
+  /** Verified sender Live Session when sideby identified one (ADR-0088). */
+  from?: LiveSession
+  /** True when sent as the user from the Panel (ADR-0088). */
+  fromUser: boolean
+  /** True when parent-PID and env sender signals contradicted each other (ADR-0088). */
+  senderConflict: boolean
+  /** OS start timestamp (epoch ms) of the target process when it was listed (ADR-0088). */
+  targetProcStart?: number
   /** What the session receives (`deliveredText`). */
   text: string
   /** The line that points at the kept Message file, for a channel that must not carry the text itself. */
@@ -44,6 +55,7 @@ export interface Delivery {
 }
 
 export const DELIVERERS: Readonly<Record<string, (req: DeliveryRequest) => Promise<Delivery>>> = {
+  agy: deliverAgy,
   claude: deliverClaude,
   codex: deliverCodex,
 }

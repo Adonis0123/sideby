@@ -212,4 +212,26 @@ describe('handed-over session ids', () => {
       handedOverFrom: other,
     })
   })
+
+  it('matches exact orca_session_id:<id> aliases and rejects bare Orca UUIDs (ADR-0088)', () => {
+    const agyChat: LiveSession = {
+      ...session(LAST, 'agy:main'),
+      family: 'agy',
+      orcaSessionId: '99998888-7777-4666-8555-444433332222',
+    }
+    assert.deepEqual(
+      pickSession('orca_session_id:99998888-7777-4666-8555-444433332222', [agyChat], undefined),
+      {
+        session: agyChat,
+      },
+    )
+    assert.throws(
+      () => pickSession('99998888-7777-4666-8555-444433332222', [agyChat], undefined),
+      (e: unknown) => e instanceof UserError && e.code === 'no-session',
+    )
+    assert.throws(
+      () => pickSession('orca_session_id:99998888', [agyChat], undefined),
+      (e: unknown) => e instanceof UserError && e.code === 'no-session',
+    )
+  })
 })

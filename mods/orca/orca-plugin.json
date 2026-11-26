@@ -1,0 +1,67 @@
+{
+  "manifestVersion": 2,
+  "id": "sideby-sessions",
+  "name": "sideby Sessions",
+  "version": "0.1.0",
+  "description": "Shows the active sideby Session Label in Orca's status bar and lists running sessions with one-click copy.",
+  "author": {
+    "name": "sideby",
+    "url": "https://github.com/Adonis0123/sideby"
+  },
+  "repository": "https://github.com/Adonis0123/sideby",
+  "license": "MIT",
+  "homepage": "https://github.com/Adonis0123/sideby",
+  "engines": {
+    "orca": ">=1.4.248"
+  },
+  "execution": "trusted-worker",
+  "pluginApi": 1,
+  "main": "src/worker.mjs",
+  "contributes": {
+    "panels": [
+      {
+        "id": "sessions",
+        "title": "sideby Sessions",
+        "icon": "layers",
+        "entry": "src/panel.tsx",
+        "ui": "components"
+      }
+    ],
+    "statusBarItems": [
+      {
+        "id": "current-session",
+        "text": "sideby",
+        "icon": "layers",
+        "tone": "neutral",
+        "tooltip": "sideby Sessions — click to copy current session for AI",
+        "command": "sideby-sessions.copy-current"
+      }
+    ],
+    "commands": [
+      {
+        "id": "sideby-sessions.copy-current",
+        "title": "sideby: Copy current session for AI"
+      },
+      {
+        "id": "sideby-sessions.refresh",
+        "title": "sideby: Refresh live sessions"
+      }
+    ],
+    "events": [
+      {
+        "on": "agent.status.changed"
+      },
+      {
+        "on": "workspace.changed"
+      }
+    ]
+  },
+  "capabilities": [
+    {
+      "kind": "agent:read"
+    },
+    {
+      "kind": "workspace:read"
+    }
+  ]
+}

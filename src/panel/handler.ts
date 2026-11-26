@@ -280,8 +280,8 @@ export interface PanelInboundGroup {
   waits: boolean
 }
 
-/** A Live Session as the Sessions page gets it: the working directory with `~`, and the three texts it can copy. */
-export interface PanelSession extends LiveSession {
+/** A Live Session as the Sessions page gets it: the working directory with `~`, the three texts it can copy, and no server-only Orca ids (ADR-0088). */
+export interface PanelSession extends Omit<LiveSession, 'orcaSessionId'> {
   copy: { reference: string; id: string; resume: string }
   /** True when the Session runs in a live Orca terminal tab the Panel can bring to the front. */
   orca?: true
@@ -2527,9 +2527,26 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const problems = listed.problems
         return {
           sessions: sessions.map(
+            // WHY: explicit field allowlist keeps server-only `orcaSessionId` out of the browser Panel (ADR-0088, ADR-0039 item 7).
             (s): PanelSession => ({
-              ...s,
+              account: s.account,
+              accountLabel: s.accountLabel,
+              family: s.family,
+              sessionId: s.sessionId,
+              title: s.title,
+              label: s.label,
+              status: s.status,
+              ...(s.reason ? { reason: s.reason } : {}),
               ...(s.cwd ? { cwd: tildify(s.cwd, home) } : {}),
+              ...(s.pid !== undefined ? { pid: s.pid } : {}),
+              ...(s.startedAt ? { startedAt: s.startedAt } : {}),
+              ...(s.updatedAt ? { updatedAt: s.updatedAt } : {}),
+              guessed: s.guessed,
+              ...(s.transcript ? { transcript: s.transcript } : {}),
+              ...(s.startedFrom ? { startedFrom: s.startedFrom } : {}),
+              resumeCommand: s.resumeCommand,
+              reference: s.reference,
+              ...(s.handedOverFrom ? { handedOverFrom: s.handedOverFrom } : {}),
               ...(s.run
                 ? {
                     run: {

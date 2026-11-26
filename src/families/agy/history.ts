@@ -84,6 +84,44 @@ function firstFolder(uris: string): string | undefined {
 
 const plainId = (id: unknown): id is string => typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id)
 
+export interface AgySummaryRow {
+  conversationId: string
+  title: string
+  cwd?: string
+  updatedAt?: string
+}
+
+/**
+ * WHY: ADR-0088 Live Session candidate resolution batches all open conversation ids into one read-only
+ * `conversation_summaries.db` query under ADR-0082's WAL/immutable rule, keeping untitled top-level sessions.
+ */
+export async function readAgySummaries(
+  dir: string,
+  ids: readonly string[],
+): Promise<Map<string, AgySummaryRow>> {
+  const valid = [...new Set(ids)].filter(plainId)
+  const out = new Map<string, AgySummaryRow>()
+  if (!valid.length) return out
+  const placeholders = valid.map(() => '?').join(', ')
+  const rows = await readRows(
+    dir,
+    `conversation_id IN (${placeholders}) AND parent_conversation_id = '' AND nesting_depth = 0`,
+    valid,
+  )
+  for (const r of rows) {
+    if (!plainId(r.conversation_id)) continue
+    const cwd = firstFolder(r.workspace_uris)
+    const updatedAt = isoTime(r.last_modified_time)
+    out.set(r.conversation_id, {
+      conversationId: r.conversation_id,
+      title: r.title ? titleFromText(r.title) : '',
+      ...(cwd ? { cwd } : {}),
+      ...(updatedAt ? { updatedAt } : {}),
+    })
+  }
+  return out
+}
+
 export const agyHistory: HistoryReader = {
   family: 'agy',
 

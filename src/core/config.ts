@@ -391,6 +391,12 @@ export const ConfigSchema = Type.Object(
           "Load sideby's Claude Code mod (`--plugin-dir`, Claude Code 2.1.287 or later) when sideby starts a Claude Code account: a band with the Session Label, a toast when a Message arrives and a `/sessions` pane. On by default; false turns it off.",
       }),
     ),
+    agyMod: Type.Optional(
+      Type.Boolean({
+        description:
+          "Show the Session Label in Antigravity CLI's status bar and title via session-scoped `--settings` when sideby starts `agy` interactively (ADR-0088). On by default; false turns it off.",
+      }),
+    ),
     resumeRouting: Type.Optional(
       Type.Boolean({
         description:

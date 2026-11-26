@@ -6,7 +6,7 @@ import type { Runtime } from '../runtime.ts'
 import type { Account } from '../types.ts'
 import { aliasesByAccount } from './accounts.ts'
 import { aliasArgs, aliasRefs } from './config.ts'
-import { type LiveSessionDeps, processView, systemDeps } from './live-sessions-procs.ts'
+import { type LiveSessionDeps, type ProcessInfo, processView, systemDeps } from './live-sessions-procs.ts'
 import type { SessionRun } from './run-link.ts'
 import {
   MESSAGES_LOOKED_AT,
@@ -43,9 +43,11 @@ export interface LiveSession {
   transcript?: string
   /**
    * The app the Session was started from (Started From, spec §3.32), as a stable id: `orca`, `claude-desktop`,
-   * `script`, or the Host's own value cleaned. Left out for a plain terminal. Claude Code only for now.
+   * `script`, or the Host's own value cleaned. Left out for a plain terminal.
    */
   startedFrom?: string
+  /** Confirmed Orca Chat session id for local Orca `agy acp` Chats; CLI `--json` only, omitted by Panel (ADR-0088). */
+  orcaSessionId?: string
   /** The command that resumes the Session in the Account that holds it. */
   resumeCommand: string
   /** The Session Reference in English, as `sessionCopyText(s, 'reference', 'en')` gives it. */
@@ -141,6 +143,7 @@ export function toLiveSession(account: Account, accountLabel: string, raw: RawLi
     guessed: raw.guessed,
     ...(raw.transcript ? { transcript: raw.transcript } : {}),
     ...(raw.startedFrom ? { startedFrom: raw.startedFrom } : {}),
+    ...(raw.orcaSessionId ? { orcaSessionId: raw.orcaSessionId } : {}),
     resumeCommand: resumeCommandFor(account.family, account.ref, raw.sessionId),
   }
   return { ...s, reference: referenceText(s, 'en') }
@@ -167,7 +170,7 @@ export const LIST_DEADLINE_MS = 8_000
  */
 export async function listLiveSessions(
   rt: Runtime,
-  opts: { only?: string; deadlineMs?: number } = {},
+  opts: { only?: string; deadlineMs?: number; onProcesses?: (procs: readonly ProcessInfo[]) => void } = {},
   deps?: LiveSessionDeps,
 ): Promise<LiveSessionsResult> {
   const all = await rt.accounts()
@@ -200,9 +203,12 @@ export async function listLiveSessions(
   const found: LiveSession[] = []
   const pending = new Set(readable.map((a) => a.ref))
   let partial = false
+  const deadlineMs = opts.deadlineMs ?? LIST_DEADLINE_MS
+  const deadlineAtMs = Date.now() + deadlineMs
   const work = (async () => {
     try {
-      await procs.list()
+      const scanned = await procs.list()
+      opts.onProcesses?.(scanned)
     } catch (err) {
       if (ctl.signal.aborted) return
       problems.push(
@@ -212,10 +218,17 @@ export async function listLiveSessions(
       partial = true
       return
     }
+    const readCtx = {
+      stateDir: rt.readContext().stateDir,
+      env: rt.env,
+      now: rt.readContext().now,
+      deadlineAtMs,
+      ...(deps?.orcaAgents ? { orcaAgents: deps.orcaAgents } : {}),
+    }
     await Promise.all(
       readable.map(async (account) => {
         try {
-          const raw = await liveSessionReader(account.family)!.read(account, procs, problems)
+          const raw = await liveSessionReader(account.family)!.read(account, procs, problems, readCtx)
           if (ctl.signal.aborted) return
           found.push(...raw.map((r) => toLiveSession(account, labels.get(account.ref) ?? account.ref, r)))
         } catch (err) {
@@ -228,7 +241,6 @@ export async function listLiveSessions(
       }),
     )
   })()
-  const deadlineMs = opts.deadlineMs ?? LIST_DEADLINE_MS
   let timer: NodeJS.Timeout | undefined
   const late = new Promise<'late'>((resolve) => {
     timer = setTimeout(() => resolve('late'), deadlineMs)

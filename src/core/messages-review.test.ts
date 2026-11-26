@@ -143,8 +143,8 @@ describe('the socket is checked again at delivery', () => {
     })
     await withFakeHome(async (h) => {
       const s = await serve(h, '4102')
-      // Running for the listing and the sender search, gone when sideby is about to deliver.
-      const procs = await machine(h, s.path, (call) => call <= 2)
+      // WHY: running for the shared listing/sender scan (call 1), gone when sideby re-checks right before delivery (call 2, ADR-0088).
+      const procs = await machine(h, s.path, (call) => call <= 1)
       const rt = await createRuntime({ env: h.env })
       const r = await sendMessage(rt, 'cc002', { text: 'x' }, with_(procs, s.root))
       await s.close()

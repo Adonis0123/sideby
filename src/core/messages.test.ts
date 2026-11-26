@@ -29,6 +29,7 @@ import {
   imageType,
   listMessages,
   type MessageDeps,
+  resolveSenderSession,
   senderSession,
   sendMessage,
 } from './messages.ts'
@@ -843,6 +844,241 @@ describe('a receipt that cannot be recorded', () => {
       }
       assert.equal(r.status, 'delivered')
       assert.match(r.note ?? '', /could not save the message status \(EACCES\)/)
+    })
+  })
+
+  it('resolves messages --to orca_session_id:<id> via live sessions while keeping receipt filtering for accounts/ids, and falls back to env sender (ADR-0088)', async () => {
+    await withFakeHome(async (h) => {
+      const s = await socketServer(h, '4102')
+      const procs = await machine(h, s.path, { inbound: 'accept' })
+      const rt = await createRuntime({ env: h.env })
+      try {
+        const sent = await sendMessage(rt, 'cc002', { text: 'kept receipt' }, depsFor(procs, s.root))
+        // WHY: existing receipt filtering still finds exited sessions by account/id/prefix without needing live procs (ADR-0088).
+        const byAccount = await listMessages(rt, { to: 'cc002' })
+        assert.equal(byAccount.length, 1)
+        assert.equal(byAccount[0]!.id, sent.id)
+        const byPrefix = await listMessages(rt, { to: ID_B.slice(0, 8) })
+        assert.equal(byPrefix.length, 1)
+
+        const agyConv = '0f8fad5b-d9cb-469f-a165-70867728950e'
+        const orcaId = 'orca-live-42'
+        await h.write(
+          `.local/state/sideby/messages/${agyConv}/2026-11-26T10-00-00Z-a1b2c3d4.md`,
+          '# sideby message a1b2c3d4\n',
+          0o600,
+        )
+        await h.write(
+          `.local/state/sideby/messages/${agyConv}/2026-11-26T10-00-00Z-a1b2c3d4.json`,
+          JSON.stringify({
+            id: 'a1b2c3d4',
+            to: 'agy:main · Demo · 0f8fad5b',
+            toSessionId: agyConv,
+            toAccount: 'agy:main',
+            status: 'delivered',
+            file: h.path(`.local/state/sideby/messages/${agyConv}/2026-11-26T10-00-00Z-a1b2c3d4.md`),
+            attachments: [],
+            pasteText: 'Read it',
+            sentAt: '2026-11-26T10:00:00.000Z',
+          }),
+          0o600,
+        )
+        await h.mkdir('.gemini/antigravity-cli')
+        await h.write(
+          `.local/state/sideby/agy-live/777.json`,
+          JSON.stringify({
+            version: 1,
+            pid: 777,
+            procStart: START,
+            conversationId: agyConv,
+            title: 'Demo',
+            agentState: 'idle',
+            updatedAt: new Date().toISOString(),
+          }),
+          0o600,
+        )
+        const agyDeps: LiveSessionDeps = {
+          processes: async () => [proc(777, 'agy acp')],
+          envVar: async (pid, name) => {
+            if (pid === 777 && name === 'ORCA_STRUCTURED_SESSION') return '1'
+            if (pid === 777 && name === 'ORCA_AGENT_SESSION_ID') return orcaId
+            return undefined
+          },
+          openFiles: async () => [],
+          orcaAgents: async () => ({
+            exitCode: 0,
+            stdout: JSON.stringify({
+              ok: true,
+              result: { agents: [{ orcaSessionId: orcaId, kind: 'chat', state: 'done' }] },
+            }),
+          }),
+        }
+        const byOrca = await listMessages(rt, { to: `orca_session_id:${orcaId}`, deps: agyDeps })
+        assert.deepEqual(
+          byOrca.map((m) => m.id),
+          ['a1b2c3d4'],
+        )
+        const noOrca = await listMessages(rt, { to: 'orca_session_id:missing', deps: agyDeps })
+        assert.deepEqual(noOrca, [])
+
+        const sessions = [
+          {
+            account: 'agy:main',
+            accountLabel: 'agy:main',
+            family: 'agy',
+            sessionId: agyConv,
+            title: 'Demo',
+            label: 'agy:main · Demo · 0f8fad5b',
+            status: 'idle' as const,
+            pid: 777,
+            guessed: false,
+            startedFrom: 'orca',
+            orcaSessionId: orcaId,
+            resumeCommand: '',
+            reference: '',
+          },
+        ]
+        assert.equal(
+          resolveSenderSession(999, [], sessions, { ANTIGRAVITY_CONVERSATION_ID: agyConv }).from?.sessionId,
+          agyConv,
+        )
+        assert.deepEqual(
+          resolveSenderSession(999, [], sessions, {
+            ANTIGRAVITY_CONVERSATION_ID: agyConv,
+            ORCA_AGENT_SESSION_ID: 'other-orca-id',
+          }),
+          { conflict: true },
+        )
+      } finally {
+        await s.close()
+      }
+    })
+  })
+
+  it('skips direct delivery for Claude, Codex and agy when sender signals conflict, keeping message file without Reply (ADR-0088)', async () => {
+    await withFakeHome(async (h) => {
+      const s = await socketServer(h, '4102')
+      await h.write('.claude/settings.json', '{}')
+      await h.write('.claude-002/settings.json', JSON.stringify({ crossSessionInbound: 'accept' }))
+      await h.write(
+        '.claude-002/sessions/4102.json',
+        JSON.stringify({
+          pid: 4102,
+          sessionId: ID_B,
+          cwd: '/work/b',
+          status: 'idle',
+          procStart: PROC_START,
+          messagingSocketPath: s.path,
+        }),
+      )
+      const codexId = '11112222-3333-4444-8555-666677778888'
+      const rollout = `.codex/sessions/2026/11/26/rollout-2026-11-26T10-00-00-${codexId}.jsonl`
+      await h.write(
+        rollout,
+        `${JSON.stringify({ type: 'session_meta', payload: { id: codexId, cwd: '/work/cx' } })}\n`,
+      )
+      const agySenderId = '7c9e6679-7425-40de-944b-e07fc1f90ae7'
+      const agyTargetId = '0f8fad5b-d9cb-469f-a165-70867728950e'
+      const agyOtherId = '3b1f2c90-1111-4222-8333-444444444444'
+      const nowIso = new Date().toISOString()
+      await h.mkdir('.gemini/antigravity-cli')
+      await h.write(
+        '.local/state/sideby/agy-live/701.json',
+        JSON.stringify({
+          version: 1,
+          pid: 701,
+          procStart: START,
+          conversationId: agySenderId,
+          title: 'Sender agy',
+          agentState: 'working',
+          updatedAt: nowIso,
+        }),
+        0o600,
+      )
+      await h.write(
+        '.local/state/sideby/agy-live/702.json',
+        JSON.stringify({
+          version: 1,
+          pid: 702,
+          procStart: START,
+          conversationId: agyTargetId,
+          title: 'Target agy',
+          agentState: 'idle',
+          updatedAt: nowIso,
+        }),
+        0o600,
+      )
+
+      const procs: LiveSessionDeps = {
+        processes: async () => [
+          proc(4102, 'claude'),
+          proc(4201, 'codex'),
+          proc(701, 'agy acp'),
+          proc(702, 'agy acp'),
+          proc(799, 'node sideby send', 701),
+        ],
+        envVar: async (pid, name) => {
+          if (pid === 701 && name === 'ORCA_STRUCTURED_SESSION') return '1'
+          if (pid === 701 && name === 'ORCA_AGENT_SESSION_ID') return 'orca-sender'
+          if (pid === 702 && name === 'ORCA_STRUCTURED_SESSION') return '1'
+          if (pid === 702 && name === 'ORCA_AGENT_SESSION_ID') return 'orca-target'
+          return undefined
+        },
+        openFiles: async (pid) => (pid === 4201 ? [h.path(rollout)] : []),
+      }
+      const orcaAgents: NonNullable<MessageDeps['orcaAgents']> = async () => ({
+        exitCode: 0,
+        stdout: JSON.stringify({
+          ok: true,
+          result: {
+            agents: [
+              { orcaSessionId: 'orca-sender', kind: 'chat', state: 'working' },
+              { orcaSessionId: 'orca-target', kind: 'chat', state: 'done' },
+            ],
+          },
+        }),
+      })
+      let codexCalls = 0
+      let orcaCalls = 0
+      const rt = await createRuntime({
+        env: {
+          ...h.env,
+          ORCA_STRUCTURED_SESSION: '1',
+          ORCA_AGENT_SESSION_ID: 'orca-sender',
+          ANTIGRAVITY_CONVERSATION_ID: agyOtherId,
+        },
+      })
+      const sharedDeps: MessageDeps = {
+        procs,
+        tempRoots: [s.root],
+        selfPid: 799,
+        orcaAgents,
+        runCodex: async () => {
+          codexCalls++
+          return 0
+        },
+        runOrcaSend: async () => {
+          orcaCalls++
+          return { exitCode: 0, stdout: '{"ok":true}' }
+        },
+      }
+      try {
+        for (const target of [ID_B, codexId, agyTargetId]) {
+          const r = await sendMessage(rt, target, { text: 'conflict check' }, sharedDeps)
+          assert.equal(r.status, 'paste-needed')
+          assert.equal(r.from, undefined)
+          assert.match(r.note!, /could not verify which session sent this message/)
+          assert.match(r.pasteText, new RegExp(`sideby message ${r.id}`))
+          const body = await fsp.readFile(r.file, 'utf8')
+          assert.match(body, /conflict check/)
+          assert.doesNotMatch(body, /^Reply:/m)
+        }
+        assert.equal(s.got.length, 0)
+        assert.equal(codexCalls, 0)
+        assert.equal(orcaCalls, 0)
+      } finally {
+        await s.close()
+      }
     })
   })
 })

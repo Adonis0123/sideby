@@ -228,6 +228,7 @@ import {
 import { UNATTENDED_ENV } from './core/unattended-state.ts'
 import { inCi } from './core/update.ts'
 import { packageVersion } from './core/version.ts'
+import { withAgyMod } from './families/agy/mod.ts'
 import { claudeJsonOf } from './families/claude/index.ts'
 import { withClaudeMod, withOrcaAgentView } from './families/claude/mod.ts'
 import { BUILTIN_PLUGINS } from './families/index.ts'
@@ -2090,6 +2091,7 @@ export async function createRuntime(
         config.ask = fresh.ask
         config.advisor = fresh.advisor
         config.claude = fresh.claude
+        config.agyMod = fresh.agyMod
         // Progress Reminders turned on, off or to another interval reach the next session a chain starts too.
         config.progress = fresh.progress
       }
@@ -2118,6 +2120,18 @@ export async function createRuntime(
       // WHY: Orca's agent-view plugin (spec §3.32 step 3): whatever `claudeMod` says, since Orca's subagent view needs it.
       if (command === 'run' && p.family.id === 'claude' && !claudeHeadless(p.args))
         p.args = withOrcaAgentView(p.args, p.env)
+      // WHY: terminal agy statusLine/title mod via session-scoped `--settings` (ADR-0088).
+      if (command === 'run' && p.family.id === 'agy' && config.agyMod !== false) {
+        const agyMod = await withAgyMod(p.args, {
+          accountDir: p.account.dir,
+          stateDir: paths.stateDir,
+          accountTitle: config.accountTitle === true,
+          now: now(),
+        })
+        p.args = agyMod.args
+        if (agyMod.env) Object.assign(p.env, agyMod.env)
+        if (agyMod.cleanup) p.cleanup = agyMod.cleanup
+      }
       // Network Guard (spec §3.35) and Unattended Mode (§3.37): last, on the environment the Host gets, so the check
       // takes the Host's route.
       await sessionReady(p, command === 'run', opts)
