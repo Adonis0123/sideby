@@ -192,12 +192,24 @@ describe('setup by an agent (spec §3.16)', () => {
         ['claude', 'codex', 'grok', 'pi', 'agy'],
       )
       const agy = (
-        all.families as { id: string; mainOnly?: boolean; selectVar?: string; layout: object }[]
+        all.families as {
+          id: string
+          mainOnly?: boolean
+          noApi?: boolean
+          selectVar?: string
+          selectArgs?: boolean
+          layout: object
+        }[]
       ).find((f) => f.id === 'agy')!
-      assert.equal(agy.mainOnly, true)
+      assert.equal(agy.mainOnly, undefined)
+      assert.equal(agy.noApi, true)
       assert.equal(agy.selectVar, undefined)
-      assert.deepEqual(agy.layout, { main: '.gemini/antigravity-cli' })
-      assert.match((await sideby(h, ['families', 'agy'])).out, /main only: Antigravity CLI keeps one sign-in/)
+      assert.equal(agy.selectArgs, true)
+      assert.deepEqual(agy.layout, {
+        main: '.gemini/antigravity-cli',
+        account: '.gemini/antigravity-cli-<name>',
+      })
+      assert.match((await sideby(h, ['families', 'agy'])).out, /--app_data_dir/)
       const grok = (all.families as { id: string; shared: { path: string; meaning: string }[] }[]).find(
         (f) => f.id === 'grok',
       )!

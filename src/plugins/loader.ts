@@ -419,22 +419,25 @@ export async function loadPlugins(opts: {
 }
 
 /**
- * What is wrong with how a FamilyDef says where its Accounts live (ADR-0047): either `selectVar` and `layout.account`
- * both set, or `mainOnly: true` with both left out. undefined when it is right.
+ * What is wrong with how a FamilyDef says where its Accounts live (ADR-0047, ADR-0090): either `layout.account` with
+ * `selectVar` and/or `selectArgs`, or `mainOnly: true` with `selectVar`, `selectArgs`, `selectEnv` and `layout.account`
+ * left out. undefined when it is right.
  */
 export function mainOnlyProblem(def: {
   mainOnly?: unknown
   selectVar?: unknown
+  selectArgs?: unknown
+  selectEnv?: unknown
   layout?: { account?: unknown } | unknown
 }): string | undefined {
   const layout = (typeof def.layout === 'object' && def.layout !== null ? def.layout : {}) as {
     account?: unknown
   }
-  const hasSelect = def.selectVar !== undefined
+  const hasSelect = def.selectVar !== undefined || def.selectArgs !== undefined || def.selectEnv !== undefined
   const hasAccount = layout.account !== undefined
   if (def.mainOnly === undefined) return undefined
   if (def.mainOnly !== true) return 'mainOnly must be true or left out'
   if (hasSelect || hasAccount)
-    return 'a Main-only Family (mainOnly: true) must leave out selectVar and layout.account'
+    return 'a Main-only Family (mainOnly: true) must leave out selectVar, selectArgs, selectEnv and layout.account'
   return undefined
 }

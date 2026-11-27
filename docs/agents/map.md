@@ -33,7 +33,7 @@ src/
 ├── agy/          the `agy-statusline` and `agy-title` internal helpers (leaf imports only, ADR-0088): Session Label formatting, ancestor PID lookup, and `<state>/agy-live/<pid>.json` writer
 ├── plugins/      loader (trust checks), hook bus, built-in account-script
 ├── families/     claude, codex, grok, pi, agy: each a Family Plugin; index.ts lists built-ins in load order
-│                 agy/ is a Main-only Family (ADR-0047); agy/quota.ts asks `agy -p /usage` for its Quota (ADR-0048); agy/mod.ts, agy/live-sessions.ts and agy/deliver.ts implement terminal `--settings` labels, Live Sessions and optional Orca Chat delivery (ADR-0088)
+│                 agy/ is a multi-account Family via `--app_data_dir` + `AGY_CLI_FORCE_FILE_TOKEN_STORAGE` (ADR-0090, superseding ADR-0047 for agy); agy/quota.ts asks `agy -p /usage` for its Quota (ADR-0048); agy/mod.ts, agy/live-sessions.ts and agy/deliver.ts implement terminal `--settings` labels, per-Account Live Sessions and optional Orca Chat delivery (ADR-0088)
 │                 logos.ts holds the built-in marks each FamilyDef sets as `logo`
 │                 claude/ reads quota from the tap cache and asks `claude -p /usage` for it (quota-fetch.ts, ADR-0063), usage from projects/**/*.jsonl;
 │                 codex/rollout.ts reads quota and usage from sessions/**/rollout-*.jsonl;

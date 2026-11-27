@@ -15,13 +15,13 @@ export function looksLikeBackup(name: string): boolean {
 }
 
 export function mainDirOf(family: FamilyDef, home: string): string {
-  return join(home, family.layout.main)
+  return join(home, ...family.layout.main.split('/'))
 }
 
 export function accountDirOf(family: FamilyDef, home: string, name: string): string {
   if (name === 'main') return mainDirOf(family, home)
   if (!family.layout.account) throw new UserError(mainOnlyMessage(family), { code: 'family-main-only' })
-  return join(home, family.layout.account.replace('<name>', name))
+  return join(home, ...family.layout.account.replace('<name>', name).split('/'))
 }
 
 /** Why a Main-only Family (ADR-0047) has no other Account, and what the user can do instead. */
@@ -29,22 +29,52 @@ export function mainOnlyMessage(family: FamilyDef): string {
   return `${family.title} keeps one sign-in per computer, so sideby supports only its main account for now; run \`sideby run ${family.id}:main\` to use it`
 }
 
-function splitLayout(family: FamilyDef): { prefix: string; suffix: string; rest: string } {
-  const [first, ...rest] = (family.layout.account ?? '').split('/')
-  const at = first!.indexOf('<name>')
-  if (at === -1)
-    throw new Error(`family ${family.id}: layout.account must contain <name> in its first segment`)
-  return { prefix: first!.slice(0, at), suffix: first!.slice(at + '<name>'.length), rest: rest.join('/') }
+/**
+ * Shared validator for `FamilyDef.layout.{main,account}` across plugin validation, discovery and creation
+ * (ADR-0090): uses `/` separators, rejects empty/`.`/`..` segments, and requires one `<name>` when `withName`.
+ */
+export function layoutPathProblem(rel: unknown, opts: { withName?: boolean } = {}): string | undefined {
+  if (typeof rel !== 'string' || !rel.trim()) return 'path must be non-empty'
+  if (rel.includes('\\') || rel.startsWith('/') || /^[A-Za-z]:/.test(rel))
+    return 'path must be relative to HOME using "/" separators'
+  const segs = rel.split('/')
+  if (segs.some((s) => !s || s === '.' || s === '..'))
+    return 'path must not contain empty segments, ".", or ".."'
+  const nameCount = rel.split('<name>').length - 1
+  if (opts.withName && nameCount !== 1) return 'path must contain <name> once'
+  if (!opts.withName && nameCount > 0) return 'path must not contain <name>'
+  return undefined
+}
+
+function splitLayout(family: FamilyDef): {
+  parentRel: string
+  prefix: string
+  suffix: string
+  rest: string
+} {
+  const err = layoutPathProblem(family.layout.account, { withName: true })
+  if (err) throw new Error(`family ${family.id}: layout.account ${err}`)
+  const segs = family.layout.account!.split('/')
+  const idx = segs.findIndex((s) => s.includes('<name>'))
+  const seg = segs[idx]!
+  const at = seg.indexOf('<name>')
+  return {
+    parentRel: segs.slice(0, idx).join('/'),
+    prefix: seg.slice(0, at),
+    suffix: seg.slice(at + '<name>'.length),
+    rest: segs.slice(idx + 1).join('/'),
+  }
 }
 
 /**
  * The Account for this Family and name, read from its directory: the one place an Account is built.
- * Whether it is an API Account follows the Secret File on disk (and the Family's secretFileMeansApi).
+ * Whether it is an API Account follows the Secret File on disk (and `secretFileMeansApi` / `noApi`).
  */
 export async function accountAt(family: FamilyDef, home: string, name: string): Promise<Account> {
   const dir = accountDirOf(family, home, name)
   const secretFile = join(dir, 'proxy.env')
-  const hasSecret = (await lstatOrNull(secretFile)) !== null
+  const allowSecret = !family.noApi
+  const hasSecret = allowSecret && (await lstatOrNull(secretFile)) !== null
   return {
     family: family.id,
     name,
@@ -61,8 +91,11 @@ export async function accountAt(family: FamilyDef, home: string, name: string): 
  * config) is not an Account: it must hold a Secret File or one of the Family's Shared Items, or be empty.
  */
 async function looksLikeAccount(family: FamilyDef, dir: string): Promise<boolean> {
-  for (const p of ['proxy.env', ...(family.markers ?? family.sharedItems.map((i) => i.path))])
-    if (await lstatOrNull(join(dir, p))) return true
+  const markers = [
+    ...(family.noApi ? [] : ['proxy.env']),
+    ...(family.markers ?? family.sharedItems.map((i) => i.path)),
+  ]
+  for (const p of markers) if (await lstatOrNull(join(dir, p))) return true
   // A freshly created Account may have nothing to share yet; another tool's directory is never empty.
   try {
     return (await readdir(dir)).length === 0
@@ -84,10 +117,18 @@ export async function discoverAccounts(
   const main = mainDirOf(family, home)
   if ((await statOrNull(main))?.isDirectory()) out.push(await accountAt(family, home, 'main'))
   if (!family.layout.account) return out
-  const { prefix, suffix, rest } = splitLayout(family)
+  const { parentRel, prefix, suffix, rest } = splitLayout(family)
+  // WHY: every parent directory along a nested `layout.account` (e.g. `~/.gemini`, ADR-0090) must be a real directory.
+  let scanDir = home
+  if (parentRel) {
+    for (const seg of parentRel.split('/')) {
+      scanDir = join(scanDir, seg)
+      if (!(await lstatOrNull(scanDir))?.isDirectory()) return out
+    }
+  }
   let entries: string[] = []
   try {
-    entries = await readdir(home)
+    entries = await readdir(scanDir)
   } catch {
     return out
   }
@@ -99,10 +140,19 @@ export async function discoverAccounts(
     if (ignore.has(`${family.id}:${name}`)) continue
     // A non-main Account must be a real directory at every level: a symlinked `~/.claude-work` pointing at
     // `~/.claude` would make every repair write into the Main Account. Only the Main Account may be a link.
-    const top = join(home, e)
-    const dir = rest ? join(top, rest) : top
-    if (!(await lstatOrNull(top))?.isDirectory()) continue
-    if (rest && !(await lstatOrNull(dir))?.isDirectory()) continue
+    let dir = join(scanDir, e)
+    if (!(await lstatOrNull(dir))?.isDirectory()) continue
+    let nestedOk = true
+    if (rest) {
+      for (const seg of rest.split('/')) {
+        dir = join(dir, seg)
+        if (!(await lstatOrNull(dir))?.isDirectory()) {
+          nestedOk = false
+          break
+        }
+      }
+    }
+    if (!nestedOk) continue
     if (!(await looksLikeAccount(family, dir))) continue
     names.push(name)
   }

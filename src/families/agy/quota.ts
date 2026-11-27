@@ -14,8 +14,12 @@ import { readFile, rm, stat } from 'node:fs/promises'
 import { delimiter, join } from 'node:path'
 import { ownedFolder, writeFileAtomic } from '../../core/fs-safe.ts'
 import type { Account, QuotaFetch, QuotaFetchContext, QuotaResult, QuotaWindow } from '../../types.ts'
+import { AGY_FORCE_FILE_TOKEN_VAR, agySelectArgs } from './layout.ts'
 
 export const AGY_QUOTA_ARGS = ['-p', '/usage', '--output-format', 'json'] as const
+/** WHY: detect upstream removal of `--app_data_dir` without storing or echoing raw stderr (ADR-0048, ADR-0090). */
+const MAX_ERR_PROBE = 512
+const UNSUPPORTED_APP_DIR = /flag provided but not defined|unknown flag|--app_data_dir|-app_data_dir/i
 /** agy answers in about 6 s; anything far larger than its answer is not one. */
 const MAX_OUTPUT = 256 * 1024
 /** agy's own limit, under sideby's `FETCH_TIMEOUT_MS`, so agy is stopped here and has time to exit. */
@@ -125,15 +129,16 @@ export async function fetchAgyQuota(
     )
   if (ctx.signal.aborted) return failed('the quota check was stopped')
   const mark = join(folder.dir, `sign-in-${randomBytes(8).toString('hex')}`)
-  const child = spawn('agy', [...AGY_QUOTA_ARGS], {
+  const child = spawn('agy', [...(ctx.hostArgs ?? agySelectArgs(account)), ...AGY_QUOTA_ARGS], {
     cwd: folder.dir,
     env: {
       ...ctx.hostEnv,
+      ...(account.isMain ? {} : { [AGY_FORCE_FILE_TOKEN_VAR]: '1' }),
       PATH: [folder.bin, ctx.hostEnv.PATH].filter(Boolean).join(delimiter),
       [MARK_VAR]: mark,
     },
-    // stderr holds a sign-in link when signed out: never read.
-    stdio: ['ignore', 'pipe', 'ignore'],
+    // WHY: stderr may carry a sign-in link (never stored or shown, ADR-0048); inspect at most 512 B for removed-flag errors (ADR-0090).
+    stdio: ['ignore', 'pipe', account.isMain ? 'ignore' : 'pipe'],
   })
   const alive = () => child.exitCode === null && child.signalCode === null
   let killTimer: NodeJS.Timeout | undefined
@@ -160,10 +165,18 @@ export async function fetchAgyQuota(
     return await new Promise<QuotaResult>((resolve) => {
       const chunks: Buffer[] = []
       let size = 0
-      child.stdout.on('data', (b: Buffer) => {
+      const errChunks: Buffer[] = []
+      let errSize = 0
+      child.stdout?.on('data', (b: Buffer) => {
         size += b.length
         if (size > MAX_OUTPUT) return stop()
         chunks.push(b)
+      })
+      child.stderr?.on('data', (b: Buffer) => {
+        const room = MAX_ERR_PROBE - errSize
+        if (room <= 0) return
+        errChunks.push(b.length > room ? b.subarray(0, room) : b)
+        errSize += Math.min(b.length, room)
       })
       child.on('error', (err: NodeJS.ErrnoException) =>
         resolve(
@@ -176,7 +189,11 @@ export async function fetchAgyQuota(
       )
       const done = () => {
         // A process agy started may still hold the output open; let go of it so sideby itself can exit.
-        child.stdout.destroy()
+        child.stdout?.destroy()
+        child.stderr?.destroy()
+        const unsupportedFlag =
+          !account.isMain && UNSUPPORTED_APP_DIR.test(Buffer.concat(errChunks).toString('utf8'))
+        errChunks.length = 0
         if (signIn || existsSync(mark)) return resolve(needsSignIn(account))
         if (ctx.signal.aborted) return resolve(failed('the quota check was stopped'))
         let answer: unknown
@@ -187,6 +204,12 @@ export async function fetchAgyQuota(
         }
         const quota = answer === undefined ? null : agyQuota(answer, ctx.now.toISOString())
         if (quota) return resolve(quota)
+        if (unsupportedFlag && answer === undefined)
+          return resolve(
+            failed(
+              'This version of Antigravity CLI no longer accepts --app_data_dir for extra accounts; update sideby or use agy:main',
+            ),
+          )
         if (timedOut)
           return resolve(
             failed(

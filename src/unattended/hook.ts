@@ -23,9 +23,9 @@
 // how a session behaves without the feature (unlike `network-hook`, which blocks when it cannot tell). Once the
 // decision is to refuse, it refuses: keeping the Pending Decision and writing the reason are best effort, and their
 // failure neither allows the call nor adds any output of its own.
-import { constants as fsConstants } from 'node:fs'
+import { constants as fsConstants, type Stats } from 'node:fs'
 import { open, realpath } from 'node:fs/promises'
-import { join, sep } from 'node:path'
+import { isAbsolute, join, resolve, sep } from 'node:path'
 import { lstatOrNull } from '../core/fs-safe.ts'
 import { resolvePaths } from '../core/paths.ts'
 import { hostMade, launchPrompt, sidebyMessage } from '../core/prompt-origin.ts'
@@ -113,6 +113,7 @@ async function readInput(input: AsyncIterable<string | Uint8Array> | string): Pr
 interface Payload {
   tool: string
   input: Record<string, unknown>
+  account?: string
   sessionId?: string
   cwd?: string
   /** Claude Code names the subagent a request comes from. */
@@ -132,20 +133,147 @@ function parseObject(raw: string): Record<string, unknown> | undefined {
   }
 }
 
-/** WHY: Antigravity CLI, Desktop App and IDE share `~/.gemini/config/hooks.json`; only handle CLI payloads (ADR-0089). */
-function isAgyCliPayload(v: Record<string, unknown>, env: Env): boolean {
-  const hint =
-    (typeof v.transcriptPath === 'string' && v.transcriptPath) ||
-    (typeof v.artifactDirectoryPath === 'string' && v.artifactDirectoryPath) ||
-    ''
-  if (hint) return /(?:^|[/\\])antigravity-cli(?:[/\\]|$)/.test(hint)
-  return Boolean(env.SIDEBY_ACCOUNT?.startsWith('agy:') || env[UNATTENDED_ENV] === '1')
+/** WHY: Antigravity CLI, Desktop App and IDE share `~/.gemini/config/hooks.json`; only handle CLI payloads across main and extra Accounts (ADR-0089, ADR-0090). */
+const AGY_ACCOUNT_DIR_RE = /^antigravity-cli(?:-(?!main$)[a-z0-9][a-z0-9-]{0,31})?$/
+const AGY_ACCOUNT_REF_RE = /^agy:(?:main|(?!main$)[a-z0-9][a-z0-9-]{0,31})$/
+const AGY_CONV_ID_RE = /^[A-Za-z0-9_-]{1,128}$/
+
+interface AgyVerifiedPath {
+  account: string
+  realFile?: string
+  lst?: Stats
 }
 
-function parseAgyPayload(raw: string, env: Env): Payload | undefined {
+async function verifyAgyHomePath(
+  rawPath: string,
+  home: string,
+  opts: { isTranscript: boolean; requireFile: boolean; convId?: string },
+): Promise<AgyVerifiedPath | undefined> {
+  if (!rawPath || rawPath.includes('\0') || !isAbsolute(rawPath)) return undefined
+  if (rawPath.split(/[/\\]/).includes('..')) return undefined
+  if (opts.isTranscript && !rawPath.endsWith('.jsonl')) return undefined
+
+  const geminiDir = join(home, '.gemini')
+  const geminiLst = await lstatOrNull(geminiDir)
+  if (!geminiLst?.isDirectory() || geminiLst.isSymbolicLink()) return undefined
+  let realGemini: string
+  try {
+    realGemini = await realpath(geminiDir)
+  } catch {
+    return undefined
+  }
+
+  const lst = await lstatOrNull(rawPath)
+  if (opts.isTranscript && lst && (lst.isSymbolicLink() || !lst.isFile())) return undefined
+  if (opts.requireFile && (!lst || lst.isSymbolicLink() || !lst.isFile())) return undefined
+
+  let rel: string | undefined
+  let realFile: string | undefined
+  if (lst) {
+    try {
+      realFile = await realpath(rawPath)
+    } catch {
+      return undefined
+    }
+    if (!realFile.startsWith(`${realGemini}${sep}`)) return undefined
+    rel = realFile.slice(realGemini.length + sep.length)
+  } else {
+    const resolved = resolve(rawPath)
+    for (const root of [resolve(geminiDir), realGemini]) {
+      if (resolved.startsWith(`${root}${sep}`)) {
+        rel = resolved.slice(root.length + sep.length)
+        break
+      }
+    }
+    if (!rel) return undefined
+  }
+
+  const segs = rel.split(sep).filter(Boolean)
+  const accountSeg = segs[0]
+  if (!accountSeg || !AGY_ACCOUNT_DIR_RE.test(accountSeg) || segs.length < 2) return undefined
+
+  const accountDir = join(geminiDir, accountSeg)
+  const accountLst = await lstatOrNull(accountDir)
+  if (!accountLst?.isDirectory() || (accountSeg !== 'antigravity-cli' && accountLst.isSymbolicLink()))
+    return undefined
+
+  // Walk every intermediate existing segment under accountDir so symlinks cannot redirect outside.
+  let cur = accountDir
+  for (const s of segs.slice(1, opts.isTranscript && lst ? -1 : segs.length)) {
+    cur = join(cur, s)
+    const segLst = await lstatOrNull(cur)
+    if (!segLst) break
+    if (segLst.isSymbolicLink()) return undefined
+  }
+
+  if (opts.isTranscript && opts.convId) {
+    if (segs[1] !== 'brain' || segs[2] !== opts.convId || segs.length < 4) return undefined
+  }
+  const account =
+    accountSeg === 'antigravity-cli' ? 'agy:main' : `agy:${accountSeg.slice('antigravity-cli-'.length)}`
+  return { account, ...(realFile ? { realFile } : {}), ...(lst ? { lst } : {}) }
+}
+
+interface AgyCliContext {
+  account?: string
+  transcript?: { realFile: string; lst: Stats }
+}
+
+async function resolveAgyCliContext(
+  v: Record<string, unknown>,
+  env: Env,
+  home: string,
+  requireTranscriptFile: boolean,
+): Promise<AgyCliContext | undefined> {
+  const rawSideby = text(env.SIDEBY_ACCOUNT, 256)
+  if (rawSideby && !AGY_ACCOUNT_REF_RE.test(rawSideby)) return undefined
+  if (
+    v.conversationId !== undefined &&
+    (typeof v.conversationId !== 'string' || !AGY_CONV_ID_RE.test(v.conversationId))
+  )
+    return undefined
+  const convId = typeof v.conversationId === 'string' ? v.conversationId : undefined
+  const rawTranscript =
+    typeof v.transcriptPath === 'string' && v.transcriptPath ? v.transcriptPath : undefined
+  const rawArtifact =
+    typeof v.artifactDirectoryPath === 'string' && v.artifactDirectoryPath
+      ? v.artifactDirectoryPath
+      : undefined
+
+  if (rawTranscript || rawArtifact) {
+    const tr = rawTranscript
+      ? await verifyAgyHomePath(rawTranscript, home, {
+          isTranscript: true,
+          requireFile: requireTranscriptFile,
+          ...(convId ? { convId } : {}),
+        })
+      : undefined
+    if (rawTranscript && !tr) return undefined
+    const art = rawArtifact
+      ? await verifyAgyHomePath(rawArtifact, home, { isTranscript: false, requireFile: false })
+      : undefined
+    if (rawArtifact && !art) return undefined
+    const verifiedAccount = tr?.account ?? art?.account
+    if (tr && art && tr.account !== art.account) return undefined
+    if (rawSideby && rawSideby !== verifiedAccount) return undefined
+    return {
+      ...(verifiedAccount ? { account: verifiedAccount } : {}),
+      ...(tr?.realFile && tr.lst ? { transcript: { realFile: tr.realFile, lst: tr.lst } } : {}),
+    }
+  }
+
+  if (rawSideby || env[UNATTENDED_ENV] === '1') {
+    return rawSideby ? { account: rawSideby } : {}
+  }
+  return undefined
+}
+
+async function parseAgyPayload(raw: string, env: Env, home: string): Promise<Payload | undefined> {
   const v = parseObject(raw)
   const tc = v?.toolCall
-  if (!v || !isAgyCliPayload(v, env) || !tc || typeof tc !== 'object' || Array.isArray(tc)) return undefined
+  if (!v || !tc || typeof tc !== 'object' || Array.isArray(tc)) return undefined
+  const ctx = await resolveAgyCliContext(v, env, home, false)
+  if (!ctx) return undefined
   const call = tc as Record<string, unknown>
   if (typeof call.name !== 'string') return undefined
   const input =
@@ -157,25 +285,14 @@ function parseAgyPayload(raw: string, env: Env): Payload | undefined {
   return {
     tool: call.name,
     input,
+    ...(ctx.account ? { account: ctx.account } : {}),
     ...(sessionId ? { sessionId } : {}),
     ...(cwd ? { cwd } : {}),
   }
 }
 
-/** WHY: ADR-0089 `agy` Stop omits `lastAssistantMessage`; read only the tail of a regular `.jsonl` inside `~/.gemini/antigravity-cli/` with fd identity checks. */
-async function lastAgyReply(transcriptPath: string, home: string): Promise<string | undefined> {
-  if (!transcriptPath.endsWith('.jsonl')) return undefined
-  const lst = await lstatOrNull(transcriptPath)
-  if (!lst || lst.isSymbolicLink() || !lst.isFile()) return undefined
-  let realHome: string
-  let realFile: string
-  try {
-    ;[realHome, realFile] = await Promise.all([realpath(home), realpath(transcriptPath)])
-  } catch {
-    return undefined
-  }
-  const cliRoot = join(realHome, '.gemini', 'antigravity-cli')
-  if (!realFile.startsWith(`${cliRoot}${sep}`)) return undefined
+/** WHY: ADR-0089 / ADR-0090 `agy` Stop omits `lastAssistantMessage`; read only the tail of a verified `.jsonl` inside `~/.gemini/antigravity-cli[-<name>]/` with fd identity checks. */
+async function readAgyTranscriptTail(realFile: string, lst: Stats): Promise<string | undefined> {
   const flags = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0)
   let fh: Awaited<ReturnType<typeof open>> | undefined
   try {
@@ -634,7 +751,6 @@ async function decide(
           }),
       }
     if (isAgy) {
-      if (!isAgyCliPayload(v, env)) return undefined
       if (v.continuationActive === true) return undefined
       const term = typeof v.terminationReason === 'string' ? v.terminationReason : ''
       if (term && term !== 'NO_TOOL_CALL') return undefined
@@ -644,10 +760,16 @@ async function decide(
           : typeof v.last_assistant_message === 'string' && v.last_assistant_message.trim()
             ? v.last_assistant_message
             : undefined
+      const agyCtx = await resolveAgyCliContext(v, env, paths.home, !direct)
+      if (!agyCtx) return undefined
+      const agyWhere = {
+        ...where,
+        ...(agyCtx.account ? { account: agyCtx.account } : {}),
+      }
       const message =
         direct ??
-        (typeof v.transcriptPath === 'string'
-          ? ((await lastAgyReply(v.transcriptPath, paths.home)) ?? '')
+        (agyCtx.transcript
+          ? ((await readAgyTranscriptTail(agyCtx.transcript.realFile, agyCtx.transcript.lst)) ?? '')
           : '')
       const question = endingQuestion(message)
       if (!question) return undefined
@@ -655,7 +777,7 @@ async function decide(
         json: (reason) => ({ decision: 'continue', reason }),
         reason: (kept) => stopReason(state, now, zh, kept),
         keep: () =>
-          addPendingDecision(paths.stateDir, { kind: 'question', ...where, text: question }, now, {
+          addPendingDecision(paths.stateDir, { kind: 'question', ...agyWhere, text: question }, now, {
             dedupe: true,
           }),
       }
@@ -674,8 +796,9 @@ async function decide(
         }),
     }
   }
-  const payload = family === 'agy' ? parseAgyPayload(raw, env) : parsePayload(raw)
+  const payload = family === 'agy' ? await parseAgyPayload(raw, env, paths.home) : parsePayload(raw)
   if (!payload) return undefined
+  const payloadAccount = payload.account ?? account
   if (permission) {
     // Asked in front of someone (an Attended Session) or while the mode is off: shown, and watched while it waits.
     const shown = state.on ? await attended(payload.sessionId, false) : {}
@@ -718,7 +841,7 @@ async function decide(
           {
             kind: 'question',
             family,
-            ...(account ? { account } : {}),
+            ...(payloadAccount ? { account: payloadAccount } : {}),
             ...(payload.sessionId ? { sessionId: payload.sessionId } : {}),
             ...(payload.cwd ? { cwd: payload.cwd } : {}),
             text: question,

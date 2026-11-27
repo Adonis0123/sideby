@@ -13,7 +13,7 @@ import { clearOrcaAgentCache, ORCA_AGENT_SESSION_VAR, ORCA_STRUCTURED_VAR } from
 import { ORCA_HANDLE_VAR } from '../../panel/orca.ts'
 import { createRuntime } from '../../runtime.ts'
 import { agyPlugin } from './index.ts'
-import { agyTranscriptPath } from './live-sessions.ts'
+import { agyTranscriptPath, procMatchesAgyAccount } from './live-sessions.ts'
 
 const MAIN = '.gemini/antigravity-cli'
 const START = Date.UTC(2026, 10, 26, 10, 0, 0)
@@ -328,6 +328,116 @@ describe('Antigravity CLI Live Sessions (ADR-0088)', () => {
       assert.equal(chatSlow.startedFrom, 'orca')
       assert.equal(chatSlow.orcaSessionId, undefined)
       assert.equal(chatSlow.status, 'unknown')
+    })
+  })
+
+  it('attributes concurrent agy main and extra accounts strictly by --app_data_dir and live account (ADR-0090)', async () => {
+    await withFakeHome(async (h) => {
+      const subDir = '.gemini/antigravity-cli-002'
+      await h.mkdir(MAIN)
+      await h.write(`${subDir}/settings.json`, '{}\n')
+      assert.equal(procMatchesAgyAccount(['agy'], { dir: h.path(MAIN), isMain: true }, h.home), true)
+      assert.equal(procMatchesAgyAccount(['agy'], { dir: h.path(subDir), isMain: false }, h.home), false)
+      assert.equal(
+        procMatchesAgyAccount(
+          ['agy', '--app_data_dir=antigravity-cli-002'],
+          { dir: h.path(subDir), isMain: false },
+          h.home,
+        ),
+        true,
+      )
+      assert.equal(
+        procMatchesAgyAccount(
+          ['agy', '--app_data_dir=antigravity-cli-002'],
+          { dir: h.path(MAIN), isMain: true },
+          h.home,
+        ),
+        false,
+      )
+      assert.equal(
+        procMatchesAgyAccount(
+          ['agy', '--gemini_dir', '.gemini', '--app_data_dir', 'antigravity-cli-002'],
+          { dir: h.path(subDir), isMain: false },
+          h.home,
+        ),
+        true,
+      )
+      assert.equal(
+        procMatchesAgyAccount(
+          ['agy', '--prompt-interactive', 'run with --app_data_dir=antigravity-cli-002'],
+          { dir: h.path(MAIN), isMain: true },
+          h.home,
+        ),
+        true,
+      )
+      assert.equal(
+        procMatchesAgyAccount(
+          ['agy', '--prompt-interactive', 'run with --app_data_dir=antigravity-cli-002'],
+          { dir: h.path(subDir), isMain: false },
+          h.home,
+        ),
+        false,
+      )
+
+      const writeLive = (pid: number, rec: Record<string, unknown>) =>
+        h.write(`.local/state/sideby/${AGY_LIVE_DIR}/${pid}.json`, `${JSON.stringify(rec)}\n`, 0o600)
+      await writeLive(501, {
+        version: 1,
+        pid: 501,
+        procStart: START,
+        conversationId: ID1,
+        account: 'agy:main',
+        title: 'Main work',
+        agentState: 'idle',
+        updatedAt: NOW.toISOString(),
+      })
+      await writeLive(502, {
+        version: 1,
+        pid: 502,
+        procStart: START,
+        conversationId: ID2,
+        account: 'agy:002',
+        title: 'Sub account work',
+        agentState: 'working',
+        updatedAt: NOW.toISOString(),
+      })
+      const rt = await createRuntime({ env: h.env, builtins, now: () => NOW })
+      const listed = await listLiveSessions(
+        rt,
+        {},
+        {
+          processes: async () => [
+            proc(501, 'agy --settings /tmp/m.json'),
+            proc(502, 'agy --settings /tmp/s.json --app_data_dir=antigravity-cli-002'),
+          ],
+          envVar: async () => undefined,
+          openFiles: async () => [],
+        },
+      )
+      assert.equal(listed.sessions.length, 2)
+      const mainSess = listed.sessions.find((s) => s.pid === 501)!
+      const subSess = listed.sessions.find((s) => s.pid === 502)!
+      assert.equal(mainSess.account, 'agy:main')
+      assert.equal(mainSess.sessionId, ID1)
+      assert.equal(subSess.account, 'agy:002')
+      assert.equal(subSess.sessionId, ID2)
+      assert.equal(subSess.transcript, agyTranscriptPath(h.path(subDir), ID2))
+
+      // WHY: ps space-split fallback must trust verified live record account over prompt tokens mentioning --app_data_dir (ADR-0090).
+      const flatListed = await listLiveSessions(
+        rt,
+        {},
+        {
+          processes: async () => [
+            proc(501, 'agy --prompt-interactive check --app_data_dir=antigravity-cli-002'),
+          ],
+          argv: async () => undefined,
+          envVar: async () => undefined,
+          openFiles: async () => [],
+        },
+      )
+      assert.equal(flatListed.sessions.length, 1)
+      assert.equal(flatListed.sessions[0]!.account, 'agy:main')
     })
   })
 })

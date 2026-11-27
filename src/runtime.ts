@@ -187,6 +187,7 @@ import {
 } from './core/same-login.ts'
 import { type SessionHookPart, sessionHookArgs } from './core/session-hooks.ts'
 import { shareMeaning } from './core/share-meaning.ts'
+import { markBlockedExtraShareItem, normalizeShareRelPath, overlapsSharePath } from './core/share-modes.ts'
 import {
   SHELLS,
   type Shell,
@@ -230,6 +231,7 @@ import { type AgyUnattendedSetup, agyUnattendedSetup, agyUnattendedStatus } from
 import { UNATTENDED_ENV } from './core/unattended-state.ts'
 import { inCi } from './core/update.ts'
 import { packageVersion } from './core/version.ts'
+import { agyLaunchDirProblem } from './families/agy/index.ts'
 import { withAgyMod } from './families/agy/mod.ts'
 import { claudeJsonOf } from './families/claude/index.ts'
 import { withClaudeMod, withOrcaAgentView } from './families/claude/mod.ts'
@@ -250,6 +252,7 @@ import type {
   QuotaSetup,
   QuotaSetupPlan,
   ReadContext,
+  SharedItemDef,
   ShareMode,
   TuningResult,
   UnattendedEndedContext,
@@ -342,8 +345,14 @@ export interface FamilyInfo {
   tuning: boolean
   /** The Host's settings file that `sideby edit` opens (spec §3.30), relative to the account directory. */
   settingsFile?: string
+  /** Set when this Family does not support `proxy.env` API key accounts (ADR-0090). */
+  noApi?: true
+  /** Set when this Family does not rank Accounts by Quota in Handoff or Pick Commands (ADR-0090). */
+  noHandoff?: true
   /** Set only for a Main-only Family: sideby knows only its Main Account and creates no other (ADR-0047). */
   mainOnly?: true
+  /** Relative to HOME: `{ main: '.claude', account: '.claude-<name>' }`. */
+  layout?: { main: string; account?: string }
   /** Hidden from the lists (spec §3.25); set by `sideby list` only, absent when shown. */
   hidden?: true
 }
@@ -366,8 +375,10 @@ export interface SharedItemInfo {
 export interface FamilyDetail extends FamilyInfo {
   /** Relative to HOME: `{ main: '.claude', account: '.claude-<name>' }`. */
   layout: { main: string; account?: string }
-  /** Left out for a Main-only Family (ADR-0047). */
+  /** Left out for a Main-only Family (ADR-0047) or one using `selectArgs` (ADR-0090). */
   selectVar?: string
+  /** Set when this Family selects non-main Accounts with Host arguments (ADR-0090). */
+  selectArgs?: true
   /** `args` is null when sign-in happens inside the Host. */
   login: { args: string[] | null; hint: string }
   quota: boolean
@@ -1049,10 +1060,21 @@ export async function createRuntime(
     return f
   }
 
-  // Merge `extraSharedItems` from the config into each Family's list.
+  // Merge `extraSharedItems` from the config into each Family's list; mark overlapping credential paths safely (ADR-0090).
+  const extraConfigItems = new Map<string, Set<SharedItemDef>>()
   for (const [id, extra] of Object.entries(config.extraSharedItems ?? {})) {
     const f = families.get(id)
-    if (f) families.set(id, { ...f, sharedItems: [...f.sharedItems, ...extra] })
+    if (!f) continue
+    const credPaths = [
+      'proxy.env',
+      ...f.sharedItems.filter((i) => i.credential).map((i) => normalizeShareRelPath(i.path)),
+    ]
+    const wrapped = extra.map((item): SharedItemDef => {
+      const overlaps = credPaths.some((c) => overlapsSharePath(normalizeShareRelPath(item.path), c))
+      return overlaps ? markBlockedExtraShareItem({ ...item, credential: true }) : item
+    })
+    extraConfigItems.set(id, new Set(wrapped))
+    families.set(id, { ...f, sharedItems: [...f.sharedItems, ...wrapped] })
   }
 
   /**
@@ -1267,6 +1289,7 @@ export async function createRuntime(
           ...hint,
           ...(Number.isFinite(usedAt) ? { usedAt } : {}),
           local,
+          hostArgs: f.selectArgs && !account.isMain ? f.selectArgs(account) : [],
         },
       )
       return shownQuota(local, kept, off, f.fetchQuota.localFallbackOnly)
@@ -1629,7 +1652,10 @@ export async function createRuntime(
             plugin: loaded.familyOwner.get(f.id) ?? 'unknown',
             tuning: Boolean(f.readTuning),
             ...(hostSettingsFile(f) ? { settingsFile: hostSettingsFile(f) } : {}),
+            ...(f.noApi ? { noApi: true as const } : {}),
+            ...(f.noHandoff ? { noHandoff: true as const } : {}),
             ...(f.mainOnly ? { mainOnly: true as const } : {}),
+            layout: { main: f.layout.main, ...(f.layout.account ? { account: f.layout.account } : {}) },
           }
         }),
       )
@@ -1637,12 +1663,13 @@ export async function createRuntime(
     async familyDetails() {
       const info = new Map((await rt.familyInfo()).map((f) => [f.id, f]))
       return [...families.values()].map((f) => {
-        // The merged list holds the config's own objects, so identity tells which ones came from `extraSharedItems`.
-        const fromConfig = new Set<unknown>(config.extraSharedItems?.[f.id] ?? [])
+        // The merged list holds the wrapped config items, so identity tells which ones came from `extraSharedItems`.
+        const fromConfig = extraConfigItems.get(f.id) ?? new Set<SharedItemDef>()
         return {
           ...info.get(f.id)!,
           layout: { main: f.layout.main, ...(f.layout.account ? { account: f.layout.account } : {}) },
           ...(f.selectVar ? { selectVar: f.selectVar } : {}),
+          ...(f.selectArgs ? { selectArgs: true as const } : {}),
           login: { args: f.login.args ? [...f.login.args] : null, hint: f.login.hint },
           quota: Boolean(f.readQuota || f.fetchQuota),
           usage: Boolean(f.readUsage),
@@ -1953,6 +1980,11 @@ export async function createRuntime(
     },
     async addPickCommand(name, familyId, o = {}) {
       const f = familyOf(familyId)
+      if (f.noHandoff || f.mainOnly)
+        throw new UserError(
+          `${f.title} does not support pick commands; add a short command for a specific account with \`sideby alias add ${name} ${f.id}:<name>\``,
+          { code: 'alias-invalid' },
+        )
       const bad = aliasProblem(name)
       if (bad)
         throw new UserError(`"${name}" ${bad} (it becomes a shell function name)`, { code: 'alias-invalid' })
@@ -1998,6 +2030,13 @@ export async function createRuntime(
       const f = familyOf(family)
       // API Accounts are never picked, also not as the fallback (ADR-0035).
       const subs = (await accounts()).filter((a) => a.family === f.id && a.kind !== 'api')
+      if (f.noHandoff)
+        throw new UserError(
+          `${f.title} quota is per model group rather than per account, so sideby cannot rank its accounts; pick one yourself: ${
+            subs.map((a) => `sideby run ${a.ref}`).join(', ') || `sideby new ${f.id} <name>`
+          }`,
+          { code: 'no-quota-source' },
+        )
       if (!subs.length)
         throw new UserError(
           `no ${f.title} subscription accounts yet; create one with \`sideby new ${f.id} --next\``,
@@ -2039,7 +2078,7 @@ export async function createRuntime(
     },
     async pickSuggestion(familyId, given) {
       const f = families.get(familyId)
-      if (!f) return null
+      if (!f || f.mainOnly || f.noHandoff) return null
       const existing = Object.entries(config.pickCommands ?? {}).find(([, fam]) => fam === f.id)
       if (existing) return { name: existing[0], exists: true }
       const all = given ?? (await accounts())
@@ -2131,10 +2170,16 @@ export async function createRuntime(
       // WHY: Orca's agent-view plugin (spec §3.32 step 3): whatever `claudeMod` says, since Orca's subagent view needs it.
       if (command === 'run' && p.family.id === 'claude' && !claudeHeadless(p.args))
         p.args = withOrcaAgentView(p.args, p.env)
+      // WHY: verify user/account/plugin args did not tamper with agy's managed account dir (ADR-0090).
+      if (p.family.id === 'agy') {
+        const problem = agyLaunchDirProblem(p.account, p.args)
+        if (problem) throw new UserError(problem, { code: 'launch-refused' })
+      }
       // WHY: terminal agy statusLine/title mod via session-scoped `--settings` (ADR-0088).
       if (command === 'run' && p.family.id === 'agy' && config.agyMod !== false) {
         const agyMod = await withAgyMod(p.args, {
           accountDir: p.account.dir,
+          mainDir: mainDirOf(p.family, paths.home),
           stateDir: paths.stateDir,
           accountTitle: config.accountTitle === true,
           now: now(),
@@ -2807,6 +2852,13 @@ export async function createRuntime(
     async handoff(familyId, o = {}) {
       const f = familyOf(familyId)
       const list = (await accounts()).filter((a) => a.family === f.id)
+      if (f.noHandoff)
+        throw new UserError(
+          `${f.title} quota is per model group rather than per account, so sideby cannot rank its accounts; pick one yourself: ${
+            list.map((a) => `sideby run ${a.ref}`).join(', ') || `sideby new ${f.id} <name>`
+          }`,
+          { code: 'no-quota-source' },
+        )
       if (!f.readQuota && !f.fetchQuota)
         throw new UserError(
           `${f.title} has no public quota source, so sideby cannot tell which account has room; pick one yourself: ${

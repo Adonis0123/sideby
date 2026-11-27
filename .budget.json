@@ -401,7 +401,7 @@
     }
   },
   "tests": {
-    "total": 2173,
+    "total": 2174,
     "files": {
       "mods/claude/hooks/register.test.ts": 7,
       "scripts/budget.test.ts": 7,
@@ -524,7 +524,7 @@
       "src/families/agy/deliver.test.ts": 6,
       "src/families/agy/history.test.ts": 5,
       "src/families/agy/index.test.ts": 15,
-      "src/families/agy/live-sessions.test.ts": 4,
+      "src/families/agy/live-sessions.test.ts": 5,
       "src/families/agy/mod.test.ts": 3,
       "src/families/claude/ai-task.test.ts": 3,
       "src/families/claude/handoff.test.ts": 5,
@@ -629,6 +629,12 @@
         "reason": "ADR-0089: Antigravity CLI unattended hooks.json writes, hook protocol, CLI and Panel routes",
         "from": 2166,
         "to": 2173
+      },
+      {
+        "date": "2026-11-27",
+        "reason": "ADR-0090: attribute Antigravity live sessions per account via --app_data_dir",
+        "from": 2173,
+        "to": 2174
       }
     ]
   },

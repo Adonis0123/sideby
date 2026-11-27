@@ -1,6 +1,6 @@
 # ADR-0047: Antigravity CLI is a Main-only Family
 
-Status: accepted
+Status: accepted (superseded for Antigravity CLI by ADR-0090; Main-only Family contract kept)
 Date: 2026-10-21
 
 ## Context

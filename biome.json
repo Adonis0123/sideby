@@ -13,7 +13,8 @@
       "!**/fixtures",
       "!src/panel/ui",
       "!src/panel/ui-css.source.json",
-      "!.agents/skills"
+      "!.agents/skills",
+      "!.worktrees"
     ]
   },
   "formatter": {

@@ -72,6 +72,8 @@ export interface QuotaAskHint {
    * and its Same Login), read when called and only when it can change the interval (`activeEveryMinutes`, ADR-0085).
    */
   lastActive?: () => Promise<number | undefined>
+  /** Host arguments from `FamilyDef.selectArgs` for non-main Accounts (ADR-0090). */
+  hostArgs?: readonly string[]
 }
 
 /** How recent a local use must be for the login to count as in use (`activeEveryMinutes`, ADR-0085). */
@@ -294,7 +296,10 @@ async function runFetch(
   let answer: QuotaResult | undefined
   let error: string | undefined
   try {
-    answer = await Promise.race([fq.fetch(account, { ...ctx, signal: ac.signal, hostEnv }), aborted])
+    answer = await Promise.race([
+      fq.fetch(account, { ...ctx, signal: ac.signal, hostEnv, hostArgs: hint.hostArgs ?? [] }),
+      aborted,
+    ])
   } catch (err) {
     error = ac.signal.aborted
       ? `no answer within ${FETCH_TIMEOUT_MS / 1000} seconds; sideby asks again in ${fq.everyMinutes} minutes`

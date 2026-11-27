@@ -4,8 +4,8 @@
 // ambiguity/collisions with `guessed: true`, and enriches Orca Chat via a short-timeout cached `orca agent list`.
 import { constants } from 'node:fs'
 import { open } from 'node:fs/promises'
-import { basename, isAbsolute, join, relative, resolve } from 'node:path'
-import { AGY_LIVE_DIR, type AgyLiveRecord, isPlainAgyId } from '../../agy/statusline.ts'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { AGY_ACCOUNT_REF_RE, AGY_LIVE_DIR, type AgyLiveRecord, isPlainAgyId } from '../../agy/statusline.ts'
 import { ownedFolder } from '../../core/fs-safe.ts'
 import type { LiveSessionStatus } from '../../core/live-sessions.ts'
 import {
@@ -27,11 +27,12 @@ import {
   orcaAgents,
 } from '../../core/orca-chat.ts'
 import { ORCA_HANDLE_VAR } from '../../panel/orca.ts'
-import type { Env } from '../../types.ts'
+import type { Account, Env } from '../../types.ts'
 import type { LiveSessionReader, RawLiveSession } from '../live-sessions.ts'
 import { titleFromText } from '../shared/history-text.ts'
 import { type AgySummaryRow, readAgySummaries } from './history.ts'
-import { AGY_NON_INTERACTIVE_SUBCOMMANDS, classifyAgyArgs } from './mod.ts'
+import { AGY_APP_DATA_DIR_FLAGS, AGY_GEMINI_DIR_FLAGS } from './layout.ts'
+import { AGY_NON_INTERACTIVE_SUBCOMMANDS, AGY_SKIP_VALUE_FLAGS, classifyAgyArgs } from './mod.ts'
 
 export const AGY_LIVE_FRESH_MS = 120_000
 const LIVE_FILE_MAX_BYTES = 16 * 1024
@@ -56,6 +57,58 @@ function mapOrcaAgentState(state: string | undefined): LiveSessionStatus {
   if (state === 'done') return 'idle'
   if (state === 'waiting' || state === 'blocked') return 'needs-you'
   return 'unknown'
+}
+
+function readFlagValue(
+  a: string,
+  argv: readonly string[],
+  i: number,
+  names: readonly string[],
+): { value: string; step: number } | undefined {
+  for (const name of names) {
+    if (a === name && i + 1 < argv.length) return { value: argv[i + 1]!, step: 1 }
+    if (a.startsWith(`${name}=`)) return { value: a.slice(name.length + 1), step: 0 }
+  }
+  return undefined
+}
+
+/**
+ * WHY: ADR-0090 attribute each running `agy` process strictly to its target `--app_data_dir` / `--gemini_dir`
+ * Account (defaulting to Main when absent) so concurrent `agy` Accounts never cross-list each other's PIDs.
+ */
+export function procMatchesAgyAccount(
+  args: readonly string[],
+  account: Pick<Account, 'dir' | 'isMain'>,
+  home?: string,
+): boolean {
+  let geminiDir: string | undefined
+  let appDataDir: string | undefined
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!
+    if (a === '--') break
+    const g = readFlagValue(a, args, i, AGY_GEMINI_DIR_FLAGS)
+    if (g) {
+      geminiDir = g.value
+      i += g.step
+      continue
+    }
+    const d = readFlagValue(a, args, i, AGY_APP_DATA_DIR_FLAGS)
+    if (d) {
+      appDataDir = d.value
+      i += d.step
+      continue
+    }
+    if (AGY_SKIP_VALUE_FLAGS.has(a)) i++
+  }
+  if (!geminiDir && !appDataDir) return account.isMain
+  const accountDir = resolve(account.dir)
+  if (appDataDir && isAbsolute(appDataDir)) return resolve(appDataDir) === accountDir
+  const baseGemini = geminiDir
+    ? isAbsolute(geminiDir)
+      ? geminiDir
+      : join(home || dirname(dirname(accountDir)), geminiDir)
+    : dirname(accountDir)
+  return resolve(baseGemini, appDataDir || 'antigravity-cli') === accountDir
 }
 
 function isInteractiveOrAcp(argv: readonly string[]): { keep: boolean; isAcp: boolean } {
@@ -90,6 +143,9 @@ async function readLiveRecord(liveDir: string, proc: ProcessInfo): Promise<AgyLi
       pid: proc.pid,
       procStart: parsed.procStart,
       conversationId: parsed.conversationId,
+      ...(typeof parsed.account === 'string' && AGY_ACCOUNT_REF_RE.test(parsed.account)
+        ? { account: parsed.account }
+        : {}),
       ...(typeof parsed.title === 'string' && parsed.title ? { title: parsed.title } : {}),
       ...(typeof parsed.agentState === 'string' && parsed.agentState
         ? { agentState: parsed.agentState }
@@ -179,27 +235,37 @@ export const agyLiveSessions: LiveSessionReader = {
   family: 'agy',
   async read(account, procs, problems, ctx) {
     const allProcs = await procs.list()
-    const agyProcs: { proc: ProcessInfo; isAcp: boolean }[] = []
-    for (const p of allProcs) {
-      if (!runsHost(p.command, 'agy')) continue
-      const exact = await procs.argv(p.pid)
-      const args = exact ?? hostArgs(p.command)
-      const { keep, isAcp } = isInteractiveOrAcp(args)
-      if (keep) agyProcs.push({ proc: p, isAcp })
-    }
-    if (!agyProcs.length) return []
-
     const stateDir = ctx?.stateDir
     const nowMs = (ctx?.now ?? new Date()).getTime()
     const liveDir = stateDir
       ? await ownedFolder(stateDir, [AGY_LIVE_DIR], { create: false }).catch(() => null)
       : null
 
+    const agyProcs: { proc: ProcessInfo; isAcp: boolean; preLive?: AgyLiveRecord }[] = []
+    for (const p of allProcs) {
+      if (!runsHost(p.command, 'agy')) continue
+      const exact = await procs.argv(p.pid)
+      const args = exact ?? hostArgs(p.command)
+      const { keep, isAcp } = isInteractiveOrAcp(args)
+      if (!keep) continue
+      const rawLive = liveDir ? ((await readLiveRecord(liveDir, p)) ?? undefined) : undefined
+      // WHY: on ps fallback (`exact` undefined), verified live-record account beats space-split prompt text (ADR-0090).
+      if (exact) {
+        if (!procMatchesAgyAccount(exact, account, ctx?.env?.HOME)) continue
+      } else if (rawLive?.account) {
+        if (rawLive.account !== account.ref) continue
+      } else if (!procMatchesAgyAccount(args, account, ctx?.env?.HOME)) {
+        continue
+      }
+      agyProcs.push({ proc: p, isAcp, ...(rawLive ? { preLive: rawLive } : {}) })
+    }
+    if (!agyProcs.length) return []
+
     const discovered: DiscoveredProc[] = await mapLimit(
       agyProcs,
       OPEN_FILES_CONCURRENCY,
-      async ({ proc, isAcp }) => {
-        const live = liveDir ? ((await readLiveRecord(liveDir, proc)) ?? undefined) : undefined
+      async ({ proc, isAcp, preLive }) => {
+        const live = preLive && (!preLive.account || preLive.account === account.ref) ? preLive : undefined
         const [structured, agentEnv, termHandle] = await Promise.all([
           procs.envVar(proc.pid, ORCA_STRUCTURED_VAR).catch(() => undefined),
           procs.envVar(proc.pid, ORCA_AGENT_SESSION_VAR).catch(() => undefined),

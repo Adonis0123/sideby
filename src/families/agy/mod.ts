@@ -6,8 +6,9 @@ import { readdir, rm } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AGY_LAUNCH_PID_VAR, AGY_LIVE_DIR, AGY_ORIG_FLAG } from '../../agy/statusline.ts'
-import { lstatOrNull, ownedFolder, readSmallFile, writeFileAtomic } from '../../core/fs-safe.ts'
+import { linksTo, lstatOrNull, ownedFolder, readSmallFile, writeFileAtomic } from '../../core/fs-safe.ts'
 import type { Env } from '../../types.ts'
+import { AGY_DIR_FLAGS } from './layout.ts'
 
 export const AGY_LAUNCH_DIR = 'agy-launch'
 const SETTINGS_MAX_BYTES = 1024 * 1024
@@ -18,8 +19,16 @@ const LIVE_PID_FILE = /^(\d+)\.json$/
 export const AGY_VALUED_FLAGS = new Set([
   '--add-dir',
   '--agent',
+  '--app_data_dir',
+  '-app_data_dir',
+  '--app-data-dir',
+  '-app-data-dir',
   '--conversation',
   '--effort',
+  '--gemini_dir',
+  '-gemini_dir',
+  '--gemini-dir',
+  '-gemini-dir',
   '-i',
   '--prompt-interactive',
   '--input-format',
@@ -36,6 +45,12 @@ export const AGY_VALUED_FLAGS = new Set([
 ])
 
 export const AGY_HEADLESS_FLAGS = new Set(['-p', '--print', '--prompt'])
+/** WHY: valued options (and headless flags taking an inline prompt) whose argument must be skipped when scanning for directory flags (ADR-0090). */
+export const AGY_SKIP_VALUE_FLAGS = new Set(
+  [...AGY_VALUED_FLAGS, ...AGY_HEADLESS_FLAGS].filter(
+    (f) => !(AGY_DIR_FLAGS as readonly string[]).includes(f),
+  ),
+)
 export const AGY_NON_INTERACTIVE_SUBCOMMANDS = new Set([
   'acp',
   'agentapi',
@@ -88,6 +103,7 @@ export function classifyAgyArgs(argv: readonly string[]): AgyArgInfo {
       a.startsWith('--prompt=')
     ) {
       headless = true
+      if (AGY_HEADLESS_FLAGS.has(a)) i++
       continue
     }
     if (a.startsWith('-')) {
@@ -166,8 +182,17 @@ async function pruneStaleFiles(stateDir: string, nowMs: number): Promise<void> {
   }
 }
 
-async function readUserSettings(accountDir: string): Promise<Record<string, unknown>> {
-  const raw = await readSmallFile(join(accountDir, 'settings.json'), SETTINGS_MAX_BYTES)
+async function readUserSettings(accountDir: string, mainDir?: string): Promise<Record<string, unknown>> {
+  const file = join(accountDir, 'settings.json')
+  const st = await lstatOrNull(file)
+  let raw: string | undefined
+  if (st?.isFile() && !st.isSymbolicLink()) {
+    raw = await readSmallFile(file, SETTINGS_MAX_BYTES)
+  } else if (st?.isSymbolicLink() && mainDir) {
+    // WHY: newly created agy extra Accounts link settings.json to Main (link-or-local); follow only that verified link (ADR-0090).
+    const mainFile = join(mainDir, 'settings.json')
+    if (await linksTo(file, mainFile)) raw = await readSmallFile(mainFile, SETTINGS_MAX_BYTES)
+  }
   if (!raw) return {}
   try {
     const parsed: unknown = JSON.parse(raw)
@@ -197,6 +222,7 @@ export async function withAgyMod(
   args: readonly string[],
   opts: {
     accountDir: string
+    mainDir?: string
     stateDir: string
     accountTitle?: boolean
     now?: Date
@@ -214,7 +240,7 @@ export async function withAgyMod(
     return { args: [...args] }
   }
 
-  const user = await readUserSettings(opts.accountDir)
+  const user = await readUserSettings(opts.accountDir, opts.mainDir)
   const userStatus = isPlainObject(user.statusLine) ? user.statusLine : undefined
   const userTitle = isPlainObject(user.title) ? user.title : undefined
   const settings: Record<string, unknown> = {}

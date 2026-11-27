@@ -144,16 +144,39 @@ async function checkAccount(input: DoctorInput, family: FamilyDef, account: Acco
   } else {
     // The Main Account is the source of sharing; only its credential files are checked.
     for (const item of items.filter((i) => i.credential)) {
+      const credName = item.mainPath ?? item.path
       const { mainPath } = itemPaths(input.home, mainDir, account.dir, item)
       const st = await lstatOrNull(mainPath)
-      if (st?.isFile() && permBits(st) !== 0o600)
+      if (item.noSymlink && st?.isSymbolicLink())
         findings.push(
           toFinding(
-            credentialModeFinding(item.mainPath ?? item.path, mainPath, permBits(st)),
+            {
+              level: 'fail',
+              item: credName,
+              code: 'symlink-forbidden',
+              message: `${credName} must not be a link`,
+              hint: `replace the link with a regular credential file for ${account.ref}`,
+            },
             account.ref,
             'core',
           ),
         )
+      else if (st && !st.isSymbolicLink() && !st.isFile())
+        findings.push(
+          toFinding(
+            {
+              level: 'fail',
+              item: credName,
+              code: 'credential.not-file',
+              message: `${credName} must be a regular file`,
+              hint: `move it aside and sign in again for ${account.ref}`,
+            },
+            account.ref,
+            'core',
+          ),
+        )
+      else if (st?.isFile() && permBits(st) !== 0o600)
+        findings.push(toFinding(credentialModeFinding(credName, mainPath, permBits(st)), account.ref, 'core'))
     }
   }
 

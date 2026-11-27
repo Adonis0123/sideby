@@ -31,8 +31,8 @@ export interface FamilyLayout {
   /** Main Account directory relative to HOME, for example `.claude` or `.pi/agent`. */
   main: string
   /**
-   * Other Accounts relative to HOME, with `<name>` in the first path segment: `.claude-<name>`, `.pi-<name>/agent`.
-   * Left out only by a Main-only Family (`mainOnly: true`, ADR-0047).
+   * Other Accounts relative to HOME, with `<name>` in one path segment: `.claude-<name>`, `.pi-<name>/agent`,
+   * `.gemini/antigravity-cli-<name>`. Left out only by a Main-only Family (`mainOnly: true`, ADR-0047, ADR-0090).
    */
   account?: string
 }
@@ -205,14 +205,34 @@ export interface FamilyDef {
   /** The Host's official one-line install command, shown before `installUrl`; sideby never runs it. */
   installCommand?: string
   /**
-   * Environment variable that selects the Account directory. Not set for the Main Account. Left out only by a
-   * Main-only Family (`mainOnly: true`).
+   * Environment variable that selects the Account directory. Not set for the Main Account. Left out by a
+   * Main-only Family (`mainOnly: true`) or a Family that uses `selectArgs` instead (ADR-0090).
    */
   selectVar?: string
   /**
-   * The Host offers no way to run a second Account apart from the first (no variable that moves its configuration
-   * directory, or a login kept in one fixed place): sideby knows only its Main Account and refuses to create others
-   * (ADR-0047). Set it with `selectVar` and `layout.account` both left out; any other combination is rejected.
+   * Host arguments that select a non-main Account directory when the Host uses flags instead of `selectVar`
+   * (ADR-0090). Prepended before `defaultArgs` in every Launch, `login` and `probe`, and passed as `ctx.hostArgs`
+   * to `fetchQuota`.
+   */
+  selectArgs?(account: Account): string[]
+  /**
+   * Extra environment variables that isolate a non-main Account (ADR-0090), applied by `accountEnv` and `prepareLaunch`.
+   */
+  selectEnv?(account: Account): Env
+  /**
+   * Set when this Family does not support `proxy.env` API key accounts (ADR-0090); hides the API option in the Panel.
+   */
+  noApi?: true
+  /**
+   * Set when this Family's Quota has no account-wide window to rank Accounts by (ADR-0090), so `sideby next` and
+   * Pick Commands are refused.
+   */
+  noHandoff?: true
+  /**
+   * The Host offers no way to run a second Account apart from the first (no variable or flags that move its
+   * configuration directory, or a login kept in one fixed place): sideby knows only its Main Account and refuses to
+   * create others (ADR-0047, ADR-0090). Set it with `selectVar`, `selectArgs`, `selectEnv` and `layout.account` left
+   * out; any other combination is rejected.
    */
   mainOnly?: true
   layout: FamilyLayout
@@ -483,6 +503,8 @@ export interface QuotaFetchContext extends ReadContext {
    * cleared, the Family's `selectVar` (if any) set for every Account but the Main Account. Run the Host with this one.
    */
   hostEnv: Env
+  /** Host arguments from `FamilyDef.selectArgs` for non-main Accounts (empty for Main; ADR-0090). */
+  hostArgs?: readonly string[]
 }
 
 export interface QuotaWindow {

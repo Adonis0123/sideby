@@ -924,6 +924,29 @@ describe('agy unattended hook (ADR-0089)', () => {
       })
       assert.deepEqual(await run(h, ['agy', 'PreToolUse'], desktopPayload), { code: 0, err: '' })
 
+      // WHY: AGY-06 reject substring paths outside ~/.gemini and SIDEBY_ACCOUNT mismatches on PreToolUse.
+      const fakeTmpPayload = JSON.stringify({
+        hookEventName: 'PreToolUse',
+        conversationId: 'conv-tmp',
+        transcriptPath: '/tmp/antigravity-cli/fake/transcript.jsonl',
+        toolCall: { id: 'tc-3', name: 'ask_question', args: { questions: [{ question: 'Tmp?' }] } },
+      })
+      assert.deepEqual(await run(h, ['agy', 'PreToolUse'], fakeTmpPayload, { SIDEBY_ACCOUNT: 'agy:main' }), {
+        code: 0,
+        err: '',
+      })
+      const mismatchPayload = JSON.stringify({
+        hookEventName: 'PreToolUse',
+        conversationId: 'conv-mis',
+        artifactDirectoryPath: h.path('.gemini/antigravity-cli/brain/conv-mis'),
+        toolCall: { id: 'tc-4', name: 'ask_question', args: { questions: [{ question: 'Mismatch?' }] } },
+      })
+      await h.mkdir('.gemini/antigravity-cli')
+      assert.deepEqual(await run(h, ['agy', 'PreToolUse'], mismatchPayload, { SIDEBY_ACCOUNT: 'agy:002' }), {
+        code: 0,
+        err: '',
+      })
+
       const pending = await listPendingDecisions(resolvePaths(h.env).stateDir)
       assert.equal(pending.length, 1)
       assert.equal(pending[0]!.family, 'agy')
@@ -988,6 +1011,61 @@ describe('agy unattended hook (ADR-0089)', () => {
       assert.deepEqual(JSON.parse((await run(h, ['agy', 'Stop'], stop({ transcriptPath: linked }))).out!), {
         decision: '',
       })
+
+      // WHY: ADR-0090 non-main agy accounts under ~/.gemini/antigravity-cli-<name>/ are allowed, never -ide or symlinks.
+      const subRel = '.gemini/antigravity-cli-002/brain/conv-sub/.system_generated/logs/transcript.jsonl'
+      await h.write(subRel, `${JSON.stringify({ type: 'PLANNER_RESPONSE', content: ASKED })}\n`)
+      const subOut = JSON.parse(
+        (await run(h, ['agy', 'Stop'], stop({ conversationId: 'conv-sub', transcriptPath: h.path(subRel) })))
+          .out!,
+      ) as { decision: string }
+      assert.equal(subOut.decision, 'continue')
+
+      // WHY: AGY-06 Stop with direct lastAssistantMessage still rejects non-~/.gemini paths and SIDEBY_ACCOUNT mismatch.
+      assert.deepEqual(
+        JSON.parse(
+          (
+            await run(
+              h,
+              ['agy', 'Stop'],
+              stop({
+                lastAssistantMessage: ASKED,
+                transcriptPath: '/tmp/antigravity-cli/brain/conv-2/transcript.jsonl',
+              }),
+              { SIDEBY_ACCOUNT: 'agy:main' },
+            )
+          ).out!,
+        ),
+        { decision: '' },
+      )
+      assert.deepEqual(
+        JSON.parse(
+          (
+            await run(
+              h,
+              ['agy', 'Stop'],
+              stop({ conversationId: 'conv-sub', transcriptPath: h.path(subRel) }),
+              { SIDEBY_ACCOUNT: 'agy:main' },
+            )
+          ).out!,
+        ),
+        { decision: '' },
+      )
+
+      const ideRel = '.gemini/antigravity-ide/brain/conv-ide/transcript.jsonl'
+      await h.write(ideRel, `${JSON.stringify({ type: 'PLANNER_RESPONSE', content: ASKED })}\n`)
+      assert.deepEqual(
+        JSON.parse(
+          (
+            await run(
+              h,
+              ['agy', 'Stop'],
+              stop({ conversationId: 'conv-ide', transcriptPath: h.path(ideRel) }),
+            )
+          ).out!,
+        ),
+        { decision: '' },
+      )
     })
   })
 })

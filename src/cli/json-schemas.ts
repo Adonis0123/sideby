@@ -278,11 +278,30 @@ const FamilyInfo = Type.Object({
       description: "The Host's settings file `sideby edit` opens, relative to the account directory.",
     }),
   ),
+  noApi: Type.Optional(
+    Type.Literal(true, {
+      description: 'The Family does not support proxy.env API key accounts (ADR-0090).',
+    }),
+  ),
+  noHandoff: Type.Optional(
+    Type.Literal(true, {
+      description: 'The Family does not rank Accounts by Quota in Handoff or Pick Commands (ADR-0090).',
+    }),
+  ),
   mainOnly: Type.Optional(
     Type.Literal(true, {
       description:
         'The Host keeps one sign-in per computer, so sideby knows only its Main Account and refuses to create others (ADR-0047).',
     }),
+  ),
+  layout: Type.Optional(
+    Type.Object(
+      { main: Str, account: Type.Optional(Str) },
+      {
+        description:
+          'Relative to HOME, for example `.claude` and `.claude-<name>`. A Main-only Family has no `account`.',
+      },
+    ),
   ),
   hidden: Type.Optional(
     Type.Literal(true, {
@@ -311,7 +330,13 @@ const FamilyDetail = Type.Intersect([
     selectVar: Type.Optional(
       Type.String({
         description:
-          'Environment variable that selects a non-main Account directory. Left out for a Main-only Family.',
+          'Environment variable that selects a non-main Account directory. Left out for a Main-only Family or a Family using selectArgs.',
+      }),
+    ),
+    selectArgs: Type.Optional(
+      Type.Literal(true, {
+        description:
+          'The Family selects non-main Accounts with Host arguments instead of selectVar (ADR-0090).',
       }),
     ),
     login: Type.Object({

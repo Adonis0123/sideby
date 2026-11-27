@@ -30,11 +30,15 @@ export interface HelperProc {
   command: string
 }
 
+export const AGY_ACCOUNT_REF_RE = /^agy:[a-z0-9][a-z0-9-]{0,31}$/
+
 export interface AgyLiveRecord {
   version: 1
   pid: number
   procStart: number
   conversationId: string
+  /** WHY: ADR-0090 per-Account Live Session disambiguation across concurrent `agy` processes. */
+  account?: string
   title?: string
   agentState?: string
   cwd?: string
@@ -331,9 +335,14 @@ export function formatAgyLabel(
 
 /**
  * WHY: dead-PID cleanup runs only in write paths (`agy-statusline` and launch/exit), never during read-only
- * `sideby sessions` or Panel `/api/sessions` (ADR-0088).
+ * `sideby sessions` or Panel `/api/sessions` (ADR-0088). Re-verify mtime/inode before unlinking to avoid racing a
+ * concurrent agy launch (ADR-0090).
  */
-export async function pruneDeadAgyLive(stateDir: string, procs: readonly HelperProc[]): Promise<void> {
+export async function pruneDeadAgyLive(
+  stateDir: string,
+  procs: readonly HelperProc[],
+  snapshotMs?: number,
+): Promise<void> {
   if (!procs.length) return
   let dir: string | null
   try {
@@ -352,18 +361,29 @@ export async function pruneDeadAgyLive(stateDir: string, procs: readonly HelperP
     const st = await lstatOrNull(file)
     if (!st || st.isSymbolicLink() || !st.isFile()) continue
     const proc = byPid.get(pid)
-    let stale = !proc
-    if (proc) {
-      const raw = await readSmallFile(file, 16 * 1024)
+    const raw = await readSmallFile(file, 16 * 1024)
+    let parsed: { procStart?: unknown; updatedAt?: unknown } | null = null
+    let badJson = false
+    if (raw !== undefined) {
       try {
-        const parsed = raw ? (JSON.parse(raw) as { procStart?: unknown }) : null
-        if (typeof parsed?.procStart === 'number' && Math.abs(proc.startMs - parsed.procStart) > 2000)
-          stale = true
+        parsed = JSON.parse(raw) as { procStart?: unknown; updatedAt?: unknown }
       } catch {
-        stale = true
+        badJson = true
       }
     }
-    if (stale) await rm(file, { force: true }).catch(() => {})
+    let stale = !proc
+    if (proc) {
+      stale =
+        badJson || (typeof parsed?.procStart === 'number' && Math.abs(proc.startMs - parsed.procStart) > 2000)
+    } else if (snapshotMs !== undefined) {
+      const updated = typeof parsed?.updatedAt === 'string' ? Date.parse(parsed.updatedAt) : Number.NaN
+      if (st.mtimeMs > snapshotMs || (Number.isFinite(updated) && updated > snapshotMs)) stale = false
+    }
+    if (!stale) continue
+    const st2 = await lstatOrNull(file)
+    if (st2 && !st2.isSymbolicLink() && st2.isFile() && st2.ino === st.ino && st2.mtimeMs === st.mtimeMs) {
+      await rm(file, { force: true }).catch(() => {})
+    }
   }
 }
 
@@ -374,25 +394,32 @@ async function writeLiveCache(
   deps: AgyHelperDeps,
 ): Promise<void> {
   if (!payload.conversationId) return
+  // WHY: add 1ms ceiling over Date.now() truncation so files written just before snapshot (sub-ms mtime) still prune cleanly (ADR-0090).
+  const snapshotMs = Date.now() + 1
   const procs = await (deps.listProcs ?? (() => listUserProcs(env)))().catch(() => [] as HelperProc[])
   if (!procs.length) return
   const owner = resolveOwningAgyProc(deps.selfPid ?? process.pid, procs, env)
   if (!owner) return
   const dir = await ownedFolder(stateDir, [AGY_LIVE_DIR], { create: true, private: true })
   if (!dir) return
+  const account =
+    typeof env.SIDEBY_ACCOUNT === 'string' && AGY_ACCOUNT_REF_RE.test(env.SIDEBY_ACCOUNT)
+      ? env.SIDEBY_ACCOUNT
+      : undefined
   // WHY: keep only non-credential fields; never store email, plan_tier or tokens (ADR-0088).
   const record: AgyLiveRecord = {
     version: 1,
     pid: owner.pid,
     procStart: owner.startMs,
     conversationId: payload.conversationId,
+    ...(account ? { account } : {}),
     ...(payload.title ? { title: payload.title } : {}),
     ...(payload.agentState ? { agentState: payload.agentState } : {}),
     ...(payload.cwd ? { cwd: payload.cwd } : {}),
     updatedAt: (deps.now?.() ?? new Date()).toISOString(),
   }
   await writeFileAtomic(join(dir, `${owner.pid}.json`), `${JSON.stringify(record)}\n`, 0o600)
-  await pruneDeadAgyLive(stateDir, procs)
+  await pruneDeadAgyLive(stateDir, procs, snapshotMs)
 }
 
 export async function runAgyHelper(

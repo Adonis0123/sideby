@@ -9,7 +9,7 @@ import { diffSnapshots, snapshot, withFakeHome } from '../../../testing/index.ts
 import { AGY_LAUNCH_PID_VAR, AGY_LIVE_DIR, AGY_ORIG_FLAG } from '../../agy/statusline.ts'
 import { createRuntime } from '../../runtime.ts'
 import { agyPlugin } from './index.ts'
-import { AGY_LAUNCH_DIR, withAgyMod } from './mod.ts'
+import { AGY_LAUNCH_DIR, classifyAgyArgs, withAgyMod } from './mod.ts'
 
 const MAIN = '.gemini/antigravity-cli'
 const builtins = [{ plugin: agyPlugin, version: '0.1.0', description: '', defaultEnabled: true }]
@@ -36,6 +36,49 @@ describe('Antigravity CLI Launch Mod (ADR-0088)', () => {
       assert.match(content.title.command, /agy-title$/)
       assert.equal(content.theme, undefined)
       assert.deepEqual(diffSnapshots(beforeAgy, await snapshot(h.path(MAIN))), [])
+
+      // WHY: ADR-0090 non-main Accounts still receive --settings mod while keeping --app_data_dir and valued dir flags.
+      await h.write('.gemini/antigravity-cli-002/settings.json', JSON.stringify({ theme: 'light' }))
+      const subLaunch = await rt.prepareLaunch('agy:002', ['--model', 'demo'], 'run')
+      assert.equal(subLaunch.args[0], '--settings')
+      assert.deepEqual(subLaunch.args.slice(2), ['--app_data_dir=antigravity-cli-002', '--model', 'demo'])
+      await subLaunch.cleanup?.()
+
+      // WHY: ADR-0090 extra account linking settings.json to Main must preserve Main's custom settings, never external links.
+      await h.write(
+        `${MAIN}/settings.json`,
+        JSON.stringify({
+          statusLine: { command: 'echo linked-bar', padding: 3, stack_with_default: false },
+          title: { enabled: false },
+        }),
+      )
+      await h.mkdir('.gemini/antigravity-cli-003')
+      await symlink(h.path(`${MAIN}/settings.json`), h.path('.gemini/antigravity-cli-003/settings.json'))
+      const linkedLaunch = await rt.prepareLaunch('agy:003', [], 'run')
+      assert.equal(linkedLaunch.args[0], '--settings')
+      const linkedCfg = JSON.parse(await readFile(linkedLaunch.args[1]!, 'utf8'))
+      assert.equal(linkedCfg.statusLine.padding, 3)
+      assert.equal(linkedCfg.statusLine.stack_with_default, false)
+      assert.ok(linkedCfg.statusLine.command.includes(Buffer.from('echo linked-bar').toString('base64')))
+      assert.equal(linkedCfg.title, undefined)
+      await linkedLaunch.cleanup?.()
+
+      await h.write('outside.json', JSON.stringify({ statusLine: { padding: 9, command: 'echo evil' } }))
+      await h.mkdir('.gemini/antigravity-cli-ext')
+      await symlink(h.path('outside.json'), h.path('.gemini/antigravity-cli-ext/settings.json'))
+      const extLaunch = await rt.prepareLaunch('agy:ext', [], 'run')
+      const extCfg = JSON.parse(await readFile(extLaunch.args[1]!, 'utf8'))
+      assert.equal(extCfg.statusLine.padding, undefined)
+      await extLaunch.cleanup?.()
+
+      assert.deepEqual(
+        classifyAgyArgs(['--app_data_dir', 'acp', '--gemini_dir', 'models', '-p', 'say --settings']),
+        {
+          headless: true,
+          helpOrVersion: false,
+          hasSettings: false,
+        },
+      )
 
       const liveFile = await h.write(
         `.local/state/sideby/${AGY_LIVE_DIR}/54321.json`,

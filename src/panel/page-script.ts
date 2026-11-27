@@ -5676,8 +5676,9 @@ const MAIN = String.raw`
     })
     const ready = fams.filter((f) => familyStatus(f) === 'ready')
     const pick = prefill && ready.some((f) => f.id === prefill.family) ? prefill.family : prefs.family && ready.some((f) => f.id === prefs.family) ? prefs.family : ready.length ? ready[0].id : ''
+    const pickFam = fams.find((f) => f.id === pick)
     // name / alias: what the user typed, or null while the field shows the suggestion (an emptied alias stays empty).
-    nf = { fams, family: pick, api: Boolean(prefill && prefill.api), vendor: '', name: null, alias: null, creating: false, result: null, error: null, els: {} }
+    nf = { fams, family: pick, api: Boolean(prefill && prefill.api && !pickFam?.noApi), vendor: '', name: null, alias: null, creating: false, result: null, error: null, els: {} }
     showDialog('create')
     renderCreate()
     if (nf.els.name) { nf.els.name.focus(); nf.els.name.select() }
@@ -5727,7 +5728,11 @@ const MAIN = String.raw`
     e.aliasHint = h('p', { class: 'field-hint', id: 'nf-alias-hint' })
     e.aliasErr = h('p', { class: 'field-error', id: 'nf-alias-err', role: 'alert' })
     e.api = h('input', { id: 'nf-api', type: 'checkbox', 'aria-label': t('nf.api'), 'aria-controls': 'nf-vendor-field' })
+    const noApi = Boolean(nf.family && family(nf.family).noApi)
+    if (noApi) nf.api = false
     e.api.checked = nf.api
+    e.api.disabled = noApi
+    e.apiHint = h('span', { class: 'muted small' }, noApi ? t('nf.noApi') : t('nf.apiHint'))
     e.vendor = h('input', { id: 'nf-vendor', name: 'vendor', type: 'text', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', placeholder: t('nf.vendorPh'), maxlength: '32', 'aria-describedby': 'nf-vendor-hint' })
     e.vendor.value = nf.vendor
     // Grows in under "API key" when it is ticked; inert while folded, so Tab skips it.
@@ -5761,6 +5766,15 @@ const MAIN = String.raw`
         const typed = e.name.value.trim()
         const untouched = nf.name === null || !typed || typed === suggestionFor(nf.family)
         nf.family = f.id
+        const famNoApi = Boolean(f.noApi)
+        e.api.disabled = famNoApi
+        if (famNoApi && nf.api) {
+          nf.api = false
+          e.api.checked = false
+          e.vendorField.classList.remove('is-open')
+          e.vendorField.inert = true
+        }
+        e.apiHint.textContent = famNoApi ? t('nf.noApi') : t('nf.apiHint')
         if (untouched) { nf.name = null; e.name.value = suggestionFor(f.id); e.name.placeholder = e.name.value || 'work' }
         followAlias()
         validateCreate()
@@ -5782,7 +5796,7 @@ const MAIN = String.raw`
       h('details', { class: 'more-opts', open: nf.api || Boolean(nf.alias) || Boolean(nf.error) || undefined },
         h('summary', null, t('nf.more')),
         h('div', null,
-          h('div', { class: 'check-row' }, h('label', { class: 'check' }, e.api, h('span', null, h('b', null, t('nf.api')), h('span', { class: 'muted small' }, t('nf.apiHint')))), tip('api')),
+          h('div', { class: 'check-row' }, h('label', { class: 'check' }, e.api, h('span', null, h('b', null, t('nf.api')), e.apiHint)), tip('api')),
           e.vendorField),
         h('div', { class: 'field' }, h('label', { class: 'field', for: 'nf-alias' }, h('span', null, t('nf.alias'), ' ', h('span', { class: 'muted small' }, t('nf.optional'))), e.alias), e.aliasHint, e.aliasErr),
         e.preview),
@@ -5830,7 +5844,7 @@ const MAIN = String.raw`
     const name = nf.els.name.value.trim()
     const ok = name && !nameProblem() && nf.family
     const shown = ok ? name : '<' + t('nf.namePh') + '>'
-    const dir = nf.family ? newAccountDir(S.state.accounts, nf.family, shown) : null
+    const dir = nf.family ? newAccountDir(S.state.accounts, nf.family, shown, (family(nf.family) || {}).layout) : null
     const alias = nf.els.alias.value.trim()
     const run = nf.family ? 'sideby run ' + nf.family + ':' + shown : '—'
     setKids(nf.els.preview, [

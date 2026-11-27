@@ -106,6 +106,8 @@ export function accountEnv(family: FamilyDef, account: Account, baseEnv: Env): E
     delete env[family.selectVar]
     if (!account.isMain) env[family.selectVar] = account.dir
   }
+  // WHY: apply extra per-Account isolation env (e.g. forced file credential storage, ADR-0090) after hijackVars.
+  if (!account.isMain && family.selectEnv) Object.assign(env, family.selectEnv(account))
   return env
 }
 
@@ -127,9 +129,11 @@ export interface LaunchCommandOptions {
  */
 export function launchCommand(opts: LaunchCommandOptions): { bin: string; args: string[]; notice?: string } {
   const { account, family } = opts
+  // WHY: Families without `selectVar` isolate non-main Accounts via Host flags (ADR-0090) across login, run, and probe.
+  const select = account.isMain ? [] : (family.selectArgs?.(account) ?? [])
   if (opts.command === 'login') {
     // Family arguments still apply: Codex must store a non-main login in the Account's own file.
-    const base = family.defaultArgs?.(account, []) ?? []
+    const base = [...select, ...(family.defaultArgs?.(account, []) ?? [])]
     return family.login.args
       ? { bin: family.bin, args: [...base, ...family.login.args] }
       : { bin: family.bin, args: base, notice: family.login.hint }
@@ -139,6 +143,7 @@ export function launchCommand(opts: LaunchCommandOptions): { bin: string; args: 
       ? family.keepTitle.args
       : []
   const args = [
+    ...select,
     ...(family.defaultArgs?.(account, opts.userArgs) ?? []),
     ...keep,
     ...opts.accountArgs,
@@ -173,9 +178,11 @@ export async function prepareLaunch(
   const env = accountEnv(family, account, opts.baseEnv)
   // Before the Secret File, so the Account's own proxy.env still decides; a value already in the environment stays.
   if (opts.apiBetasOff) apiBetasEnv(env, family.id, account)
-  if (account.secretFile) Object.assign(env, await readSecretFile(account.secretFile, opts.baseEnv))
+  if (account.secretFile && !family.noApi)
+    Object.assign(env, await readSecretFile(account.secretFile, opts.baseEnv))
   // The Secret File may not move the Account: its directory always wins.
   if (!account.isMain && family.selectVar) env[family.selectVar] = account.dir
+  if (!account.isMain && family.selectEnv) Object.assign(env, family.selectEnv(account))
   // Which Account this is, for a status line, prompt or hook to show (spec §3.5); set for every Launch, so a value
   // inherited from another sideby Launch never leaks through.
   env.SIDEBY_ACCOUNT = account.ref

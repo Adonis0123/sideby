@@ -481,10 +481,16 @@ describe('page logic', () => {
       acct('main', { dir: '/h/.claude' }),
       { ...acct('main'), family: 'pi', ref: 'pi:main', dir: '/h/.pi/agent' },
       { ...acct('work'), family: 'pi', ref: 'pi:work', dir: '/h/.pi-work/agent' },
+      { ...acct('main'), family: 'agy', ref: 'agy:main', dir: '/h/.gemini/antigravity-cli' },
       { ...acct('main'), family: 'odd', ref: 'odd:main', dir: '/h/odd/agent' },
     ]
     assert.equal(newAccountDir(accounts, 'claude', 'lab'), '/h/.claude-lab')
     assert.equal(newAccountDir(accounts, 'pi', 'lab'), '/h/.pi-lab/agent')
+    assert.equal(newAccountDir(accounts, 'agy', '002'), '/h/.gemini/antigravity-cli-002')
+    assert.equal(
+      newAccountDir(accounts, 'odd', 'lab', { main: 'odd/agent', account: 'profiles/odd-<name>/agent' }),
+      '/h/profiles/odd-lab/agent',
+    )
     assert.equal(newAccountDir(accounts, 'odd', 'lab'), null)
     assert.equal(newAccountDir(accounts, 'none', 'lab'), null)
   })
@@ -556,6 +562,8 @@ describe('short command for a new account', () => {
     // pi001 points at pi:main, so it shows no pattern.
     assert.equal(suggestAlias(all, 'pi', '002'), '')
     assert.equal(suggestAlias(all, 'grok', '001'), '')
+    assert.equal(suggestAlias(all, 'agy', '002'), 'agy002')
+    assert.equal(suggestAlias(all, 'agy', 'work'), '')
     assert.equal(suggestAlias(all, 'claude', ''), '')
     // The most common prefix wins.
     const mixed = fam('claude', [

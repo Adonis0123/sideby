@@ -58,10 +58,35 @@
             "type": "string",
             "description": "The Host's settings file `sideby edit` opens, relative to the account directory."
           },
+          "noApi": {
+            "type": "boolean",
+            "const": true,
+            "description": "The Family does not support proxy.env API key accounts (ADR-0090)."
+          },
+          "noHandoff": {
+            "type": "boolean",
+            "const": true,
+            "description": "The Family does not rank Accounts by Quota in Handoff or Pick Commands (ADR-0090)."
+          },
           "mainOnly": {
             "type": "boolean",
             "const": true,
             "description": "The Host keeps one sign-in per computer, so sideby knows only its Main Account and refuses to create others (ADR-0047)."
+          },
+          "layout": {
+            "type": "object",
+            "required": [
+              "main"
+            ],
+            "properties": {
+              "main": {
+                "type": "string"
+              },
+              "account": {
+                "type": "string"
+              }
+            },
+            "description": "Relative to HOME, for example `.claude` and `.claude-<name>`. A Main-only Family has no `account`."
           },
           "hidden": {
             "type": "boolean",

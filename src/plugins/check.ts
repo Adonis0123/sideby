@@ -8,6 +8,7 @@ import { chmod, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promis
 import { basename, isAbsolute, join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { type FakeHome, fakeHost, withFakeHome } from '../../testing/index.ts'
+import { layoutPathProblem } from '../core/accounts.ts'
 import { SHARE_MODES } from '../core/share-mode-names.ts'
 import { BUILTIN_PLUGINS } from '../families/index.ts'
 import { createRuntime } from '../runtime.ts'
@@ -393,22 +394,37 @@ export function defProblems(raw: unknown): PluginProblem[] {
     field(
       'mainOnly',
       shape,
-      'Leave out `mainOnly` when the Host has a variable that moves its config directory; set `mainOnly: true` and leave out `selectVar` and `layout.account` only when it has none (ADR-0047).',
+      'Leave out `mainOnly` when the Host has a variable or flags that move its config directory; set `mainOnly: true` and leave out `selectVar`, `selectArgs`, `selectEnv` and `layout.account` only when it has none (ADR-0047, ADR-0090).',
     )
   else if (mainOnly) {
     // A Main-only Family has neither field to check.
-  } else if (!nonEmpty(def.selectVar))
-    out.push({
-      code: 'select-var.missing',
-      message: `${at}: selectVar is missing, so every Account would share one config directory`,
-      fix: "Set `selectVar` to the environment variable that moves the Host's config directory (its docs or --help).",
-    })
-  else if (!ENV_NAME_RE.test(def.selectVar as string))
-    field(
-      'selectVar',
-      'selectVar is not an environment variable name',
-      'Use letters, digits and "_" only, such as MYTOOL_HOME.',
-    )
+  } else {
+    if (!nonEmpty(def.selectVar)) {
+      if (!(def.selectVar === undefined && typeof def.selectArgs === 'function'))
+        out.push({
+          code: 'select-var.missing',
+          message: `${at}: selectVar is missing, so every Account would share one config directory`,
+          fix: "Set `selectVar` to the environment variable that moves the Host's config directory (its docs or --help).",
+        })
+    } else if (!ENV_NAME_RE.test(def.selectVar as string))
+      field(
+        'selectVar',
+        'selectVar is not an environment variable name',
+        'Use letters, digits and "_" only, such as MYTOOL_HOME.',
+      )
+    if (def.selectArgs !== undefined && typeof def.selectArgs !== 'function')
+      field(
+        'selectArgs',
+        'selectArgs must be a function',
+        'Return Host flags that isolate a non-main Account.',
+      )
+    if (def.selectEnv !== undefined && typeof def.selectEnv !== 'function')
+      field(
+        'selectEnv',
+        'selectEnv must be a function',
+        'Return environment variables that isolate a non-main Account.',
+      )
+  }
 
   const layout = (typeof def.layout === 'object' && def.layout !== null ? def.layout : {}) as Record<
     string,
@@ -416,23 +432,18 @@ export function defProblems(raw: unknown): PluginProblem[] {
   >
   const main = layout.main
   const account = layout.account
-  if (!nonEmpty(main) || !isRelativeInside(main as string))
-    field(
-      'layout',
-      'layout.main must be a path relative to HOME, without ".."',
-      'Set `layout.main` such as ".mytool".',
-    )
-  if (
-    !mainOnly &&
-    (!nonEmpty(account) ||
-      !isRelativeInside(account as string) ||
-      !(account as string).split('/')[0]!.includes('<name>'))
-  )
-    field(
-      'layout',
-      'layout.account must be relative to HOME, without "..", with <name> in its first segment',
-      'Set `layout.account` such as ".mytool-<name>".',
-    )
+  const mainErr = layoutPathProblem(main)
+  if (mainErr)
+    field('layout', `layout.main ${mainErr}`, 'Set `layout.main` such as ".mytool" using "/" separators.')
+  if (!mainOnly) {
+    const acctErr = layoutPathProblem(account, { withName: true })
+    if (acctErr)
+      field(
+        'layout',
+        `layout.account ${acctErr}`,
+        'Set `layout.account` such as ".mytool-<name>" with one <name> placeholder and "/" separators.',
+      )
+  }
 
   for (const key of ['hijackVars', 'apiVars'] as const) {
     const v = def[key]
@@ -582,12 +593,22 @@ async function round(
         : `family ${id}: sideby found no Main Account in ~/${def.layout.main}`,
       fix: 'Check `layout` and `markers`: an Account directory counts when it holds proxy.env, a marker, or nothing at all.',
     })
-  if (accountDir && def.selectVar && refs.includes(ref)) {
+  if (accountDir && (def.selectVar || def.selectArgs) && refs.includes(ref)) {
     const selectVar = def.selectVar
     await step('round.launch', 'preparing a launch', async () => {
       const launch = await rt.prepareLaunch(ref, [], 'run')
-      if (launch.env[selectVar] !== h.path(accountDir))
+      if (selectVar && launch.env[selectVar] !== h.path(accountDir))
         throw new Error(`${selectVar} does not point at the Account directory`)
+      if (def.selectArgs) {
+        const expected = def.selectArgs(launch.account)
+        if (!expected.length || !expected.every((arg) => launch.args.includes(arg)))
+          throw new Error(`selectArgs did not reach the launch arguments for ${ref}`)
+      }
+      if (def.selectEnv) {
+        for (const [k, v] of Object.entries(def.selectEnv(launch.account))) {
+          if (launch.env[k] !== v) throw new Error(`selectEnv ${k} was not set for ${ref}`)
+        }
+      }
     })
   }
   await step('round.doctor', 'doctor', async () => {

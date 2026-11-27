@@ -29,7 +29,7 @@ EMAIL 是账号登录的身份，取自宿主的登录文件（Claude Code、Cod
 | Codex | `AGENTS.md`、`hooks.json`、`plugins`、`rules`、`skills`；订阅账号的 `config.toml` | — | 登录（`auth.json`）、会话、历史；API 账号的 `config.toml` |
 | Grok Build | `skills`、`installed-plugins` | `hooks`、`hooks-paths`，以及订阅账号的 `config.toml`：Grok 不接受这些位置是链接 | 登录（`auth.json`）、`trusted_folders.toml`（复制一次，之后归账号自己）、会话；API 账号的 `config.toml` |
 | pi | `AGENTS.md` | — | 登录（`auth.json`）、会话和其他一切 |
-| Antigravity CLI | —（只支持主账号） | — | 全部；sideby 只支持主账号 |
+| Antigravity CLI | `settings.json`（或账号自己的）、`skills` | — | 登录（`main` 在系统钥匙串，其余账号在 `antigravity-oauth-token`）、会话、历史 |
 
 - **链接**：在主账号改一次，所有账号都生效。
 - **复制或同步**：主账号的改了之后，`sideby doctor --fix` 把副本对齐。
@@ -575,7 +575,7 @@ Claude Code 会话结束这一轮、停下来等后台子代理时也会接力�
 | Codex CLI | `codex` | 0.163.0 | `codex login` | 官方 CLI；本地记录备用 | 本地会话文件 |
 | Grok Build | `grok` | 1.0.60 | `grok login` | 由 `grok` 命令行查询 | 没有公开来源 |
 | pi | `pi` | 1.0.2 | 进入 pi 后执行 `/login` | 没有公开来源 | 没有公开来源 |
-| Antigravity CLI | `agy` | 1.4.4（2026-10-21） | 在 `agy` 里用 Google 登录 | 由 `agy` 命令行查询 | 没有公开来源 |
+| Antigravity CLI | `agy` | 1.5.18（2026-11-27） | 在 `agy` 里用 Google 登录 | 由 `agy` 命令行查询 | 没有公开来源 |
 
 用量由 sideby 自己从 Claude Code 的 `projects/**/*.jsonl` 和 Codex 的 `sessions/**/rollout-*.jsonl` 统计，不需要 ccusage。Grok Build 的额度来自它的命令行，没有用量来源；pi 两者都没有。API 账号只显示用量，不显示额度。宿主没装时，`list` 照常列出它的账号并标注「宿主未安装」，`run` 会告诉你去哪里安装。
 
@@ -584,4 +584,4 @@ Claude Code 会话结束这一轮、停下来等后台子代理时也会接力�
 - **codex**：非 main 账号默认加 `-c cli_auth_credentials_store="file"`，让每个账号的登录存在自己的 `auth.json` 里；你的参数里已经有这个键时不加。
 - **grok**：Grok 的沙箱不允许某些路径是 symlink，所以 `hooks`、`hooks-paths` 用复制而不是链接，`trusted_folders.toml` 和 `config.toml` 是账号自己的文件。doctor 发现问题时会引用宿主的原话。
 - **pi**：账号目录多一层（`~/.pi-<name>/agent`）。`proxy.env` 只用来加载 provider key，不会让 pi 账号变成 API 账号。
-- **agy**（Antigravity CLI）：只支持主账号。agy 把数据放在 `~/.gemini/antigravity-cli`，把 Google 登录放在系统钥匙串里，两者都没有办法挪开，所以第二个账号没法和第一个同时开；`sideby new agy …` 会说明原因，不写任何文件。sideby 用 `agy -p /usage --output-format json` 查额度，最多每 15 分钟一次，不会开启模型对话。每个限额只管一个模型组，所以额度按组显示，不用来挑账号。sideby 从不读取登录信息，登录状态显示为未知；额度查询发现没登录时，会提示运行 `sideby login agy:main`，而且从不打开浏览器：agy 想打开登录页时，sideby 会停掉它，并把登录标成已过期。agy 以前的对话会出现在会话历史里，按标题和项目找（搜不到对话内容）；`sideby history show <id>` 给出继续它的命令。
+- **agy**（Antigravity CLI）：主账号留在 `~/.gemini/antigravity-cli`，沿用与桌面端共享的系统钥匙串登录（`sideby list` 里显示为未知）。副账号（`~/.gemini/antigravity-cli-<name>`，如 `sideby new agy 002 --alias agy002`）在保持真实 `HOME` 不变的前提下，通过 `--app_data_dir=antigravity-cli-<name>` 与 `AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1` 把登录凭据独立存进本目录权限为 600 的 `antigravity-oauth-token`，同时原生共用 `~/.gemini/config/`（MCP、插件、规则和 hooks）。暂不支持 `--api` 账号和自动接力（Handoff）。sideby 用 `agy [selectArgs] -p /usage --output-format json` 分别查各账号额度，最多每 15 分钟一次，不会开启模型对话。每个限额只管一个模型组，所以额度按组显示，不用来挑账号。额度查询发现没登录时，会提示运行 `sideby login agy:<name>`，而且从不打开浏览器：agy 想打开登录页时，sideby 会停掉它，并把登录标成已过期。agy 的会话历史按账号隔离，会出现在会话历史里按标题和项目找（搜不到对话内容）；`sideby history show <id>` 给出继续它的命令。

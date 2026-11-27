@@ -14,7 +14,7 @@ import {
 } from './fs-safe.ts'
 import { installHint } from './launch.ts'
 import { secretFileTemplate } from './secret-file.ts'
-import { itemPaths } from './share-modes.ts'
+import { credentialShareProblem, itemPaths } from './share-modes.ts'
 
 export interface CreateStep {
   item: string
@@ -108,6 +108,11 @@ export async function createAccount(opts: {
 
   const steps: CreateStep[] = []
   for (const item of family.sharedItems) {
+    const credProblem = credentialShareProblem(item)
+    if (credProblem) {
+      steps.push({ item: item.path, action: 'skipped', ok: false, message: credProblem })
+      continue
+    }
     const { mainPath, accountPath } = itemPaths(home, mainDir, dir, item)
     const action = actionFor(item, api)
     if (action === 'skip') continue

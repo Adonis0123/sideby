@@ -814,7 +814,7 @@ export function familyPlans(
     const list = accounts.filter((a) => a.family === id && !a.pending)
     const subs = list.filter((a) => a.kind === 'subscription')
     const logins = subs.filter((a, i) => !subs.slice(0, i).some((b) => a.sameLogin?.includes(b.ref))).length
-    if ((!f.readQuota && !f.fetchQuota) || logins < 1) continue
+    if (f.noHandoff || (!f.readQuota && !f.fetchQuota) || logins < 1) continue
     const plan = planHandoff(
       id,
       list.map((a) => ({

@@ -3194,7 +3194,7 @@ export async function cmdFamilies(a: ParsedArgs, io: Io): Promise<number> {
     io.out(
       f.mainOnly
         ? `  Accounts   ~/${f.layout.main} (main only: ${f.title} keeps one sign-in per computer)`
-        : `  Accounts   ~/${f.layout.main} (main), ~/${f.layout.account}; selected with ${f.selectVar}`,
+        : `  Accounts   ~/${f.layout.main} (main), ~/${f.layout.account}; selected with ${f.selectVar ?? (f.id === 'agy' ? '--app_data_dir and AGY_CLI_FORCE_FILE_TOKEN_STORAGE' : 'Host arguments')}`,
     )
     io.out(
       `  Sign in    sideby login ${f.id}:${f.mainOnly ? 'main' : '<name>'}  ${c.dim(f.login.args ? `(runs ${[f.bin, ...f.login.args].join(' ')})` : `(${f.login.hint})`)}`,

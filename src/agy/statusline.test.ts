@@ -64,16 +64,30 @@ describe('agy statusline & title helper (ADR-0088)', () => {
       const r = await invoke(
         'statusline',
         [],
-        { ...h.env, SIDEBY_LABEL: 'agy:main', [AGY_LAUNCH_PID_VAR]: '1000' },
+        {
+          ...h.env,
+          SIDEBY_ACCOUNT: 'agy:002',
+          SIDEBY_LABEL: 'agy002',
+          [AGY_LAUNCH_PID_VAR]: '1000',
+        },
         payload,
         {
           selfPid: 4000,
           now: () => new Date('2026-11-26T10:05:00.000Z'),
-          listProcs: async () => procs,
+          listProcs: async () => {
+            // WHY: simulate a concurrent account launching after snapshotMs before prune runs (ADR-0090).
+            await h.write(
+              `.local/state/sideby/${AGY_LIVE_DIR}/2999.json`,
+              `${JSON.stringify({ version: 1, pid: 2999, procStart: START + 50, conversationId: CONV, account: 'agy:003', updatedAt: new Date(Date.now() + 5_000).toISOString() })}\n`,
+              0o600,
+            )
+            return procs
+          },
         },
       )
       assert.equal(r.code, 0)
-      assert.equal(r.stdout, 'agy:main · Fix login redirect · 0f8fad5b\n')
+      assert.equal(r.stdout, 'agy002 · Fix login redirect · 0f8fad5b\n')
+      assert.ok((await stat(join(stateDir, AGY_LIVE_DIR, '2999.json'))).isFile())
 
       const file = join(stateDir, AGY_LIVE_DIR, '2000.json')
       assert.equal((await stat(file)).mode & 0o777, 0o600)
@@ -84,6 +98,7 @@ describe('agy statusline & title helper (ADR-0088)', () => {
         pid: 2000,
         procStart: START,
         conversationId: CONV,
+        account: 'agy:002',
         title: 'Fix login redirect',
         agentState: 'reviewing',
         cwd: '/work/app',

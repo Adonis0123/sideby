@@ -312,6 +312,35 @@ export function credentialModeFinding(item: string, path: string, mode: number):
   }
 }
 
+const blockedExtraItems = new WeakSet<SharedItemDef>()
+
+/** WHY: prevent config `extraSharedItems` from overriding or reading credential items via any mode (ADR-0090). */
+export function markBlockedExtraShareItem(item: SharedItemDef): SharedItemDef {
+  blockedExtraItems.add(item)
+  return item
+}
+
+export function normalizeShareRelPath(p: string): string {
+  return p
+    .replaceAll('\\', '/')
+    .replace(/^(?:\.\/)+/, '')
+    .replace(/\/+$/, '')
+}
+
+export function overlapsSharePath(a: string, b: string): boolean {
+  return !a || a === '.' || a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)
+}
+
+/** WHY: block config extras from copying, linking, or comparing credentials such as antigravity-oauth-token or proxy.env (ADR-0090). */
+export function credentialShareProblem(item: SharedItemDef): string | null {
+  const norm = normalizeShareRelPath(item.path)
+  if (!norm || norm === '.' || norm === 'proxy.env') return 'shared item path cannot be "." or "proxy.env"'
+  if (blockedExtraItems.has(item)) return 'credential item cannot be shared across accounts'
+  if (item.credential && item.mode !== 'info' && item.mode !== 'json-key')
+    return 'credential item cannot be shared across accounts'
+  return null
+}
+
 export async function checkItem(ctx: ItemContext): Promise<ItemCheck> {
   const { item } = ctx
   const out: CheckResult[] = []
@@ -325,6 +354,20 @@ export async function checkItem(ctx: ItemContext): Promise<ItemCheck> {
           code: 'path.invalid',
           message: `shared item path ${item.path} must be relative and stay inside the account directory`,
           hint: 'fix the path in the sideby config or the plugin that defines it',
+        },
+      ],
+    }
+  const credProblem = credentialShareProblem(item)
+  if (credProblem)
+    return {
+      counted: false,
+      results: [
+        {
+          level: 'fail',
+          item: item.path,
+          code: 'path.invalid',
+          message: `shared item ${item.path}: ${credProblem}`,
+          hint: 'remove it from extraSharedItems in the sideby config',
         },
       ],
     }
@@ -359,6 +402,17 @@ export async function checkItem(ctx: ItemContext): Promise<ItemCheck> {
           code: 'symlink-forbidden',
           message: `${item.path} must not be a link${hostNote(item)}`,
           hint: `sideby does not copy credentials. Replace the link with the account's own file, e.g. log in again with \`sideby login ${ctx.account.ref}\``,
+        },
+        false,
+      )
+    if (item.credential && st && !st.isSymbolicLink() && !st.isFile())
+      return done(
+        {
+          level: 'fail',
+          item: item.path,
+          code: 'credential.not-file',
+          message: `${item.path} must be a regular file`,
+          hint: `move it aside and sign in again with \`sideby login ${ctx.account.ref}\``,
         },
         false,
       )

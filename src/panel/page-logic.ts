@@ -533,7 +533,12 @@ export function aliasArgsOf(a: LogicAccount, name: string): string[] | null {
  * `…/.claude-<name>`, `…/.pi-work/agent` gives `…/.pi-<name>/agent`), or from a Main Account directory that is a
  * single dot folder (`…/.codex` gives `…/.codex-<name>`). Null when neither tells.
  */
-export function newAccountDir(accounts: LogicAccount[], family: string, name: string): string | null {
+export function newAccountDir(
+  accounts: LogicAccount[],
+  family: string,
+  name: string,
+  layout?: string | { main?: string; account?: string },
+): string | null {
   for (const a of accounts) {
     if (a.family !== family || a.isMain || !a.dir) continue
     const needle = `-${a.name}`
@@ -545,10 +550,23 @@ export function newAccountDir(accounts: LogicAccount[], family: string, name: st
       i = a.dir.lastIndexOf(needle, i - 1)
     }
   }
+  const acctLayout = typeof layout === 'string' ? layout : layout?.account
+  const mainLayout = typeof layout === 'object' && layout ? layout.main : undefined
   const main = accounts.find((a) => a.family === family && a.isMain && a.dir)
+  if (acctLayout && acctLayout.includes('<name>')) {
+    const rendered = acctLayout.replace('<name>', name)
+    if (main?.dir && mainLayout) {
+      const normDir = main.dir.replaceAll('\\', '/')
+      const normMain = `/${mainLayout.replaceAll('\\', '/')}`
+      if (normDir.endsWith(normMain))
+        return `${main.dir.slice(0, main.dir.length - mainLayout.length)}${rendered}`
+    }
+    return `~/${rendered}`
+  }
   if (main?.dir) {
     const seg = main.dir.split(/[\\/]/).pop() || ''
-    if (/^\.[A-Za-z0-9_-]+$/.test(seg)) return `${main.dir}-${name}`
+    if (/^\.[A-Za-z0-9_-]+$/.test(seg) || /[/\\]\.gemini[/\\]antigravity-cli$/.test(main.dir))
+      return `${main.dir}-${name}`
   }
   return null
 }
@@ -885,7 +903,10 @@ export function aliasPrefix(accounts: LogicAccount[], family: string): string {
 export function suggestAlias(accounts: LogicAccount[], family: string, name: string): string {
   if (!name) return ''
   const prefix = aliasPrefix(accounts, family)
-  return prefix ? prefix + name : ''
+  if (prefix) return prefix + name
+  // WHY: ADR-0090 offer `agy002` for numbered agy accounts before any alias exists, never hijacking bare `agy`.
+  if (family === 'agy' && /^[0-9]+$/.test(name)) return `agy${name}`
+  return ''
 }
 
 /**
