@@ -21,7 +21,7 @@ It is read-only: sideby reads the hosts' own session files and the running progr
 
 ## Copy one for another AI
 
-Run `sideby sessions copy <account|session-id> --json` yourself. It puts the text on the clipboard and returns it in `text`:
+Run `sideby sessions copy <account|session-id> --json` yourself, or `sideby sessions copy --self --json` to copy the current session (when the user says "复制当前会话 ID", "copy this session id", or `/id`). It puts the text on the clipboard and returns it in `text`:
 
 - default `--as reference`: the Session Reference, one sentence such as "cc002's session 61230c3d (knip cleanup), working directory /work/repo, record at …. Read its record for the context." It points at the record by path and never copies the conversation itself. It follows the user's locale; `--lang zh` or `--lang en` chooses.
 - `--as id`: the bare session id. `--as resume`: the command that resumes it (`sideby resume claude -- --resume <id>`), which starts the account that holds it.

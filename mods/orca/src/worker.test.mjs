@@ -50,6 +50,7 @@ const SAMPLE_RAW = [
 test('projects only minimal panel fields and stays on session count without host focus confirmation', async () => {
   main.setWorkerDepsForTest({
     readSessions: async () => ({ sessions: [SAMPLE_RAW[0]], error: null }),
+    readOrcaCliAgents: async () => [],
     copyText: async () => true,
     pollIntervalMs: 0,
   })
@@ -82,19 +83,25 @@ test('projects only minimal panel fields and stays on session count without host
   assert.equal(snapshot.error, null)
   assert.equal(snapshot.sessions.length, 1)
   assert.deepEqual(Object.keys(snapshot.sessions[0]).sort(), [
+    'account',
     'cwd',
     'guessed',
+    'inWorkspace',
     'isCurrent',
     'label',
     'reference',
     'sessionId',
+    'shortId',
     'startedFrom',
     'status',
+    'title',
   ])
   assert.equal('orcaSessionId' in snapshot.sessions[0], false)
   assert.equal('transcript' in snapshot.sessions[0], false)
   assert.equal('pid' in snapshot.sessions[0], false)
   assert.equal(snapshot.sessions[0].isCurrent, false)
+  assert.equal(snapshot.sessions[0].title, 'Fix login')
+  assert.equal(snapshot.sessions[0].shortId, '61230c3d')
 
   const statusUpdates = host.callsOf('statusBar.update')
   assert.ok(statusUpdates.length >= 1)
@@ -102,7 +109,7 @@ test('projects only minimal panel fields and stays on session count without host
   assert.equal(lastUpdate.id, 'current-session')
   assert.equal(lastUpdate.text, 'sideby · 1 session')
   assert.equal(lastUpdate.tone, 'neutral')
-  assert.match(lastUpdate.tooltip, /sidebar panel/i)
+  assert.match(lastUpdate.tooltip, /open the sideby Sessions panel/i)
 
   const focusedBar = main.buildStatusBarUpdate({
     sessions: [{ ...snapshot.sessions[0], isCurrent: true }],
@@ -118,6 +125,18 @@ test('falls back to session count when no Chat matches and handles sideby errors
   main.setWorkerDepsForTest({
     readSessions: async () =>
       failing ? { sessions: [], error: 'Could not run sideby.' } : { sessions: SAMPLE_RAW, error: null },
+    readOrcaCliAgents: async () => [
+      {
+        orcaSessionId: 'sleep-chat-9999',
+        kind: 'chat',
+        agent: 'antigravity',
+        state: 'done',
+        hostId: 'local',
+        worktreeId: 'ws-2::/work/other-repo',
+        workspace: 'other-repo',
+        title: 'Sleeping chat tab',
+      },
+    ],
     copyText: async () => true,
     pollIntervalMs: 0,
   })
@@ -140,7 +159,17 @@ test('falls back to session count when no Chat matches and handles sideby errors
     true,
   )
   const idleUpdate = host.callsOf('statusBar.update').at(-1)
-  assert.equal(idleUpdate.text, 'sideby · 2 sessions')
+  assert.equal(idleUpdate.text, 'sideby · 3 sessions')
+  const sleeping = snapshot.sessions.find((s) => s.status === 'sleeping')
+  assert.ok(sleeping)
+  assert.equal(sleeping.title, 'Sleeping chat tab')
+  assert.equal('orcaSessionId' in sleeping, false)
+  const copySleeping = await activeWorker.request('sessions.copy', {
+    sessionId: sleeping.sessionId,
+    as: 'id',
+  })
+  assert.equal(copySleeping.ok, true)
+  assert.equal(copySleeping.text, 'orca_session_id:sleep-chat-9999')
 
   failing = true
   const errSnapshot = await activeWorker.request('sessions.refresh')
@@ -151,15 +180,21 @@ test('falls back to session count when no Chat matches and handles sideby errors
   assert.deepEqual(activeWorker.refusals, [])
 })
 
-test('copies reference or id through worker and supports copy-current command', async () => {
+test('copies reference or id through worker and opens panel when no single focused Chat is confirmed', async () => {
   const copiedValues = []
+  let openPanelCalls = 0
   let clipboardAvailable = true
   let currentSessions = SAMPLE_RAW
   main.setWorkerDepsForTest({
     readSessions: async () => ({ sessions: currentSessions, error: null }),
+    readOrcaCliAgents: async () => [],
     copyText: async (text) => {
       copiedValues.push(text)
       return clipboardAvailable
+    },
+    openPanel: async () => {
+      openPanelCalls++
+      return true
     },
     pollIntervalMs: 0,
   })
@@ -210,7 +245,8 @@ test('copies reference or id through worker and supports copy-current command', 
   currentSessions = [SAMPLE_RAW[0]]
   await activeWorker.request('sessions.refresh')
   const cmdOut = await activeWorker.command('sideby-sessions.copy-current')
-  assert.match(String(cmdOut), /sidebar panel/i)
+  assert.match(String(cmdOut), /Opened sideby Sessions/i)
+  assert.equal(openPanelCalls, 1)
   assert.equal(copiedValues.length, 2)
   assert.equal(
     main.findCurrentSessionId([SAMPLE_RAW[0]], [{ sessionId: 'orca-chat-1', state: 'done' }]),
@@ -242,10 +278,16 @@ test('copies reference or id through worker and supports copy-current command', 
 
 test('does not guess current Chat when a workspace has both an active and an idle session', async () => {
   const copiedValues = []
+  let openPanelCalls = 0
   main.setWorkerDepsForTest({
     readSessions: async () => ({ sessions: SAMPLE_RAW, error: null }),
+    readOrcaCliAgents: async () => [],
     copyText: async (text) => {
       copiedValues.push(text)
+      return true
+    },
+    openPanel: async () => {
+      openPanelCalls++
       return true
     },
     pollIntervalMs: 0,
@@ -289,7 +331,7 @@ test('does not guess current Chat when a workspace has both an active and an idl
   )
   const bar = host.callsOf('statusBar.update').at(-1)
   assert.equal(bar.text, 'sideby · 2 sessions')
-  assert.match(bar.tooltip, /sidebar panel/i)
+  assert.match(bar.tooltip, /open the sideby Sessions panel/i)
 
   await activeWorker.emit('agent.status.changed', {
     workspaceId: 'ws-1',
@@ -301,7 +343,8 @@ test('does not guess current Chat when a workspace has both an active and an idl
   assert.equal(host.callsOf('statusBar.update').at(-1).text, 'sideby · 2 sessions')
 
   const cmdOut = await activeWorker.command('sideby-sessions.copy-current')
-  assert.match(String(cmdOut), /sidebar panel/i)
+  assert.match(String(cmdOut), /Opened sideby Sessions/i)
+  assert.equal(openPanelCalls, 1)
   assert.deepEqual(copiedValues, [])
 
   host.respond('workspace.readContext', {
@@ -334,7 +377,8 @@ test('does not guess current Chat when a workspace has both an active and an idl
   // status bar stays at session count rather than risking copying A while the user views B (ADR-0088).
   assert.equal(host.callsOf('statusBar.update').at(-1).text, 'sideby · 2 sessions')
   const stillNoCopy = await activeWorker.command('sideby-sessions.copy-current')
-  assert.match(String(stillNoCopy), /sidebar panel/i)
+  assert.match(String(stillNoCopy), /Opened sideby Sessions/i)
+  assert.equal(openPanelCalls, 2)
   assert.deepEqual(copiedValues, [])
   assert.deepEqual(activeWorker.refusals, [])
 })

@@ -2,7 +2,7 @@
 
 An Orca plugin that surfaces your running [sideby](https://github.com/Adonis0123/sideby) Live Sessions inside Orca:
 
-- **Status bar**: displays the Session Label of the focused Chat only when Orca explicitly confirms a single focused agent matching one running session (for example `agy:main · Fix login · 61230c3d`), or a short running count (`sideby · 2 sessions`) when focus cannot be confirmed so it never copies the wrong tab. Clicking it copies the confirmed session's Session Reference for another AI, or prompts you to pick one in the sidebar panel.
+- **Status bar**: displays the Session Label of the focused Chat only when Orca explicitly confirms a single focused agent matching one running session (for example `agy:main · Fix login · 61230c3d`), or a short running count (`sideby · 2 sessions`) when focus cannot be confirmed so it never copies the wrong tab. Clicking it copies the confirmed session's Session Reference for another AI, or opens the `sideby Sessions` right sidebar panel directly.
 - **Sidebar panel (`sideby Sessions`)**: lists every running Live Session across accounts with its status, working directory, `Started From` badge, and one-click **Copy for AI** and **Copy session id** actions.
 
 ## Requirements

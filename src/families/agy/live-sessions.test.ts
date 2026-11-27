@@ -186,7 +186,7 @@ describe('Antigravity CLI Live Sessions (ADR-0088)', () => {
     })
   })
 
-  it('marks multi-candidate processes and two-process collisions as guessed without claiming an exact transcript', async () => {
+  it('prefers open conversation db over historical brain refs, and marks multi-db or two-process collisions as guessed', async () => {
     await withFakeHome(async (h) => {
       await seedSummaryDb(h, [
         { id: ID1, title: 'Older chat', updatedAt: '2026-11-26 09:00:00+00:00', workspaces: ['/work/a'] },
@@ -195,17 +195,28 @@ describe('Antigravity CLI Live Sessions (ADR-0088)', () => {
       ])
       const rt = await createRuntime({ env: h.env, builtins, now: () => NOW })
       const deps: LiveSessionDeps = {
-        processes: async () => [proc(301, 'agy acp'), proc(302, 'agy'), proc(303, 'agy')],
+        processes: async () => [
+          proc(300, 'agy acp'),
+          proc(301, 'agy acp'),
+          proc(302, 'agy'),
+          proc(303, 'agy'),
+        ],
         envVar: async () => undefined,
         openFiles: async (pid) => {
-          if (pid === 301)
+          if (pid === 300)
             return [h.path(`${MAIN}/conversations/${ID1}.db`), h.path(`${MAIN}/brain/${ID2}/x`)]
+          if (pid === 301)
+            return [h.path(`${MAIN}/conversations/${ID1}.db`), h.path(`${MAIN}/conversations/${ID2}.db`)]
           if (pid === 302 || pid === 303) return [h.path(`${MAIN}/conversations/${ID3}.db`)]
           return []
         },
       }
       const listed = await listLiveSessions(rt, {}, deps)
-      assert.equal(listed.sessions.length, 3)
+      assert.equal(listed.sessions.length, 4)
+      const exactDb = listed.sessions.find((s) => s.pid === 300)!
+      assert.equal(exactDb.sessionId, ID1)
+      assert.equal(exactDb.guessed, false)
+      assert.equal(exactDb.transcript, agyTranscriptPath(h.path(MAIN), ID1))
       const multi = listed.sessions.find((s) => s.pid === 301)!
       assert.equal(multi.sessionId, ID2)
       assert.equal(multi.guessed, true)
@@ -247,7 +258,16 @@ describe('Antigravity CLI Live Sessions (ADR-0088)', () => {
             exitCode: 0,
             stdout: JSON.stringify({
               ok: true,
-              result: { agents: [{ orcaSessionId: ORCA_CHAT, kind: 'chat', state: 'working' }] },
+              result: {
+                agents: [
+                  {
+                    orcaSessionId: ORCA_CHAT,
+                    kind: 'chat',
+                    state: 'working',
+                    title: 'Fix login from Orca sidebar',
+                  },
+                ],
+              },
             }),
           }),
         },
@@ -259,6 +279,7 @@ describe('Antigravity CLI Live Sessions (ADR-0088)', () => {
       assert.equal(chat.startedFrom, 'orca')
       assert.equal(chat.orcaSessionId, ORCA_CHAT)
       assert.equal(chat.status, 'busy')
+      assert.equal(chat.title, 'Fix login from Orca sidebar')
 
       const down = await listLiveSessions(
         rt,

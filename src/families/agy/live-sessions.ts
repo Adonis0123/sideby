@@ -29,6 +29,7 @@ import {
 import { ORCA_HANDLE_VAR } from '../../panel/orca.ts'
 import type { Env } from '../../types.ts'
 import type { LiveSessionReader, RawLiveSession } from '../live-sessions.ts'
+import { titleFromText } from '../shared/history-text.ts'
 import { type AgySummaryRow, readAgySummaries } from './history.ts'
 import { AGY_NON_INTERACTIVE_SUBCOMMANDS, classifyAgyArgs } from './mod.ts'
 
@@ -103,19 +104,36 @@ async function readLiveRecord(liveDir: string, proc: ProcessInfo): Promise<AgyLi
   }
 }
 
-export function extractAgyCandidateIds(accountDir: string, files: readonly string[]): string[] {
-  const seen = new Set<string>()
+// WHY: active SQLite `conversations/<id>.db` handles identify the running conversation much more reliably than
+// `brain/<id>` directory/file references (which stay open for older sessions whose artifacts were read, ADR-0088).
+export function extractAgyCandidates(
+  accountDir: string,
+  files: readonly string[],
+): { dbIds: string[]; brainIds: string[] } {
+  const dbIds = new Set<string>()
+  const brainIds = new Set<string>()
   const base = resolve(accountDir)
   for (const f of files) {
     if (!isInside(base, f)) continue
     const rel = relative(base, resolve(f)).replaceAll('\\', '/')
-    const id = CONV_DB.exec(rel)?.[1] ?? BRAIN_ENTRY.exec(rel)?.[1]
-    if (id && isPlainAgyId(id)) {
-      seen.add(id)
-      if (seen.size >= MAX_CANDIDATES_PER_PROC) break
+    const dbId = CONV_DB.exec(rel)?.[1]
+    if (dbId && isPlainAgyId(dbId)) {
+      dbIds.add(dbId)
+      if (dbIds.size + brainIds.size >= MAX_CANDIDATES_PER_PROC) break
+      continue
+    }
+    const brainId = BRAIN_ENTRY.exec(rel)?.[1]
+    if (brainId && isPlainAgyId(brainId)) {
+      brainIds.add(brainId)
+      if (dbIds.size + brainIds.size >= MAX_CANDIDATES_PER_PROC) break
     }
   }
-  return [...seen]
+  return { dbIds: [...dbIds], brainIds: [...brainIds] }
+}
+
+export function extractAgyCandidateIds(accountDir: string, files: readonly string[]): string[] {
+  const { dbIds, brainIds } = extractAgyCandidates(accountDir, files)
+  return [...new Set([...dbIds, ...brainIds])]
 }
 
 interface DiscoveredProc {
@@ -124,7 +142,8 @@ interface DiscoveredProc {
   live?: AgyLiveRecord
   startedFrom?: 'orca'
   rawOrcaSessionId?: string
-  candidates: string[]
+  dbCandidates: string[]
+  brainCandidates: string[]
 }
 
 const ORCA_DEADLINE_MARGIN_MS = 400
@@ -189,21 +208,22 @@ export const agyLiveSessions: LiveSessionReader = {
         const rawOrcaSessionId = isAcp && structured === '1' ? normalizeOrcaSessionId(agentEnv) : undefined
         const startedFrom: 'orca' | undefined =
           rawOrcaSessionId || (structured !== '1' && Boolean(termHandle)) ? 'orca' : undefined
-        const candidates = live
-          ? [live.conversationId]
-          : extractAgyCandidateIds(account.dir, await procs.openFiles(proc.pid))
+        const { dbIds, brainIds } = live
+          ? { dbIds: [live.conversationId], brainIds: [] }
+          : extractAgyCandidates(account.dir, await procs.openFiles(proc.pid))
         return {
           proc,
           isAcp,
           ...(live ? { live } : {}),
           ...(startedFrom ? { startedFrom } : {}),
           ...(rawOrcaSessionId ? { rawOrcaSessionId } : {}),
-          candidates,
+          dbCandidates: dbIds,
+          brainCandidates: brainIds,
         }
       },
     )
 
-    const allCandidateIds = [...new Set(discovered.flatMap((d) => d.candidates))]
+    const allCandidateIds = [...new Set(discovered.flatMap((d) => [...d.dbCandidates, ...d.brainCandidates]))]
     const needOrca = discovered.some((d) => Boolean(d.rawOrcaSessionId))
     const orcaBudgetMs = needOrca ? orcaEnrichBudgetMs(ctx?.deadlineAtMs) : 0
     const [summaries, confirmedAgents] = await Promise.all([
@@ -249,15 +269,18 @@ export const agyLiveSessions: LiveSessionReader = {
         sessionId = d.live.conversationId
         dbRow = summaries.get(sessionId)
       } else {
-        const topRows = d.candidates
+        const topDbRows = d.dbCandidates
           .map((id) => summaries.get(id))
           .filter((r): r is AgySummaryRow => Boolean(r))
+        const topRows = topDbRows.length
+          ? topDbRows
+          : d.brainCandidates.map((id) => summaries.get(id)).filter((r): r is AgySummaryRow => Boolean(r))
         if (!topRows.length) continue
         if (topRows.length === 1) {
           dbRow = topRows[0]!
           sessionId = dbRow.conversationId
         } else {
-          // WHY: multiple top-level open handles without a stronger identity signal must be marked guessed (ADR-0088).
+          // WHY: multiple open top-level conversation handles without a stronger identity signal must be marked guessed (ADR-0088).
           topRows.sort(
             (a, b) =>
               (Date.parse(b.updatedAt ?? '') || 0) - (Date.parse(a.updatedAt ?? '') || 0) ||
@@ -281,7 +304,9 @@ export const agyLiveSessions: LiveSessionReader = {
       }
 
       const cwd = d.live?.cwd ?? dbRow?.cwd
-      const title = d.live?.title || dbRow?.title || (cwd ? basename(cwd) : undefined)
+      // WHY: prefer Orca's own displayed Chat title when matched so Live Sessions match Orca's sidebar 1-to-1 (ADR-0088).
+      const orcaTitle = orcaEntry?.title ? titleFromText(orcaEntry.title) : ''
+      const title = d.live?.title || orcaTitle || dbRow?.title || (cwd ? basename(cwd) : undefined)
       const startedAt = isoOf(d.proc.startMs)
       const updatedAt = d.live?.updatedAt ?? dbRow?.updatedAt
 

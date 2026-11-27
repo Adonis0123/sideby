@@ -10,16 +10,18 @@ import { which } from './launch.ts'
 export const ORCA_STRUCTURED_VAR = 'ORCA_STRUCTURED_SESSION'
 export const ORCA_AGENT_SESSION_VAR = 'ORCA_AGENT_SESSION_ID'
 export const ORCA_SESSION_PREFIX = 'orca_session_id:'
-export const ORCA_AGENT_LIST_TIMEOUT_MS = 1_500
-export const ORCA_AGENT_CACHE_MS = 2_000
+export const ORCA_AGENT_LIST_TIMEOUT_MS = 4_500
+export const ORCA_AGENT_CACHE_MS = 5_000
 export const ORCA_SEND_TIMEOUT_MS = 20_000
 const KILL_GRACE_MS = 2_000
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024
+const GENERIC_ORCA_TITLE = /^antigravity\s+chat$/i
 
 export interface OrcaAgentEntry {
   orcaSessionId: string
   kind?: string
   state?: string
+  title?: string
 }
 
 export type OrcaAgentListRunner = (
@@ -87,10 +89,13 @@ export function parseOrcaAgentList(stdout: string, exitCode: number): Map<string
     if (!id) continue
     const kind = typeof a.kind === 'string' ? a.kind : undefined
     const state = typeof a.state === 'string' ? a.state : typeof a.status === 'string' ? a.status : undefined
+    const rawTitle = typeof a.title === 'string' ? a.title.replace(/\s+/g, ' ').trim() : ''
+    const title = rawTitle && !GENERIC_ORCA_TITLE.test(rawTitle) ? rawTitle : undefined
     out.set(id, {
       orcaSessionId: id,
       ...(kind ? { kind } : {}),
       ...(state ? { state } : {}),
+      ...(title ? { title } : {}),
     })
   }
   return out
