@@ -1,13 +1,13 @@
-// ADR-0088: Orca TSX components sidebar panel for sideby Live Sessions. Persists the last
-// snapshot so reloads never flash blank, highlights a prominent Quick Copy dock for the
-// focused workspace at the top, includes sleeping Orca Chats, supports instant search and
-// workspace/attention tabs, and updates copy buttons in-place without layout jumps.
+// ADR-0088: Orca TSX components sidebar panel for sideby Live Sessions. Uses a compact,
+// hairline-separated list that matches Orca's native sidebar density, persists the last
+// snapshot to avoid blank reloads, supports workspace/attention tabs and live search, and
+// confirms copy actions in-place without layout shift.
 import {
   atom,
   Badge,
+  Box,
   Button,
   Callout,
-  Card,
   Code,
   EmptyState,
   Heading,
@@ -18,6 +18,7 @@ import {
   RelativeTime,
   Row,
   read,
+  Separator,
   Skeleton,
   Stack,
   set,
@@ -89,18 +90,12 @@ const activeTabAtom = atom<FilterTab | null>(null)
 const copiedKeyAtom = atom<string | null>(null)
 const copyNoticeAtom = atom<CopyNotice | null>(null)
 
-function statusLabel(status: SessionStatus): string {
-  if (status === 'needs-you') return 'Needs you'
-  if (status === 'busy') return 'Working'
-  if (status === 'idle') return 'Idle'
-  if (status === 'sleeping') return 'Sleeping'
-  return 'Running'
-}
-
-function statusTone(status: SessionStatus): 'warning' | 'accent' | 'neutral' {
-  if (status === 'needs-you') return 'warning'
-  if (status === 'busy') return 'accent'
-  return 'neutral'
+function statusMeta(status: SessionStatus): { text: string; tone?: 'warning' | 'accent'; muted?: boolean } {
+  if (status === 'needs-you') return { text: '● Needs you', tone: 'warning' }
+  if (status === 'busy') return { text: '● Working', tone: 'accent' }
+  if (status === 'idle') return { text: '○ Idle', muted: true }
+  if (status === 'sleeping') return { text: '○ Sleeping', muted: true }
+  return { text: '○ Running', muted: true }
 }
 
 function shortPath(cwd: string): string {
@@ -209,11 +204,10 @@ export function setup(ctx: PanelContext): void {
   void loadSessions('sessions.list')
 }
 
-function renderSessionCards(
+function renderSessionList(
   list: readonly PanelSession[],
   copiedKey: string | null,
   showFolder: boolean,
-  emphasizePrimary: boolean,
   emptyTitle: string,
   emptyDescription: string,
   hasQuery: boolean,
@@ -231,8 +225,8 @@ function renderSessionCards(
   }
 
   return (
-    <Stack gap="sm">
-      {list.map((s) => {
+    <Box border radius="md" background="card" gap="none">
+      {list.map((s, idx) => {
         const refKey = `reference:${s.sessionId}`
         const idKey = `id:${s.sessionId}`
         const refCopied = copiedKey === refKey
@@ -240,25 +234,15 @@ function renderSessionCards(
         const account = displayAccount(s)
         const shortId = displayShortId(s)
         const title = displayTitle(s)
-        const primarySolid = refCopied || emphasizePrimary || s.isCurrent
+        const st = statusMeta(s.status)
+        const subtitle = [shortId, account, s.guessed ? 'guessed' : ''].filter(Boolean).join(' · ')
         return (
-          <Card key={s.sessionId}>
-            <Stack gap="xs">
-              <Text weight="semibold" size="sm">
+          <Stack key={s.sessionId} gap="none">
+            {idx > 0 ? <Separator /> : null}
+            <Box paddingX="sm" paddingY="sm" gap="xs" background={s.isCurrent ? 'accent' : 'none'}>
+              <Text weight="medium" size="sm">
                 {title}
               </Text>
-
-              <Row gap="xs" align="center" wrap>
-                <Badge tone={statusTone(s.status)}>{statusLabel(s.status)}</Badge>
-                {s.isCurrent ? <Badge tone="accent">This chat</Badge> : null}
-                <Code>{shortId}</Code>
-                {account ? (
-                  <Text muted size="xs">
-                    {account}
-                  </Text>
-                ) : null}
-                {s.guessed ? <Badge tone="warning">Guessed</Badge> : null}
-              </Row>
 
               {showFolder && s.cwd ? (
                 <Text muted size="xs" truncate>
@@ -266,33 +250,45 @@ function renderSessionCards(
                 </Text>
               ) : null}
 
-              <Row gap="xs" wrap>
-                <Button
-                  size="sm"
-                  variant={primarySolid ? 'solid' : 'outline'}
-                  tone={refCopied ? 'success' : primarySolid ? 'accent' : undefined}
-                  icon={refCopied ? 'check' : 'copy'}
-                  tooltip="Copy a ready-to-paste reference so another AI can read or message this session"
-                  onPress={() => void copySession(s.sessionId, 'reference')}
-                >
-                  {refCopied ? 'Copied!' : 'Copy for AI'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant={idCopied ? 'outline' : 'ghost'}
-                  tone={idCopied ? 'success' : undefined}
-                  icon={idCopied ? 'check' : 'copy'}
-                  tooltip="Copy the session id"
-                  onPress={() => void copySession(s.sessionId, 'id')}
-                >
-                  {idCopied ? 'Copied!' : 'Copy ID'}
-                </Button>
+              <Row justify="between" align="center" gap="xs" wrap>
+                <Row gap="xs" align="center" wrap>
+                  <Text size="xs" weight="medium" tone={st.tone} muted={st.muted}>
+                    {st.text}
+                  </Text>
+                  {s.isCurrent ? <Badge tone="accent">This chat</Badge> : null}
+                  <Text muted size="xs">
+                    {subtitle}
+                  </Text>
+                </Row>
+
+                <Row gap="xs" align="center">
+                  <Button
+                    size="xs"
+                    variant={refCopied ? 'solid' : 'outline'}
+                    tone={refCopied ? 'success' : undefined}
+                    icon={refCopied ? 'check' : 'copy'}
+                    tooltip="Copy for AI — paste into another chat to reference or message this session"
+                    onPress={() => void copySession(s.sessionId, 'reference')}
+                  >
+                    {refCopied ? 'Copied' : 'Copy'}
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant={idCopied ? 'outline' : 'ghost'}
+                    tone={idCopied ? 'success' : undefined}
+                    icon={idCopied ? 'check' : undefined}
+                    tooltip="Copy bare session ID"
+                    onPress={() => void copySession(s.sessionId, 'id')}
+                  >
+                    {idCopied ? 'Copied' : 'ID'}
+                  </Button>
+                </Row>
               </Row>
-            </Stack>
-          </Card>
+            </Box>
+          </Stack>
         )
       })}
-    </Stack>
+    </Box>
   )
 }
 
@@ -335,17 +331,21 @@ export default function SidebySessionsPanel() {
     : `Here (${workspaceSessions.length})`
 
   return (
-    <Stack gap="md">
+    <Stack gap="sm">
       <Row justify="between" align="center" gap="xs">
         <Row gap="xs" align="center">
-          <Heading level={2}>sideby Sessions</Heading>
-          {loaded || sessions.length > 0 ? <Badge tone="neutral">{String(sessions.length)}</Badge> : null}
+          <Heading level={3}>sideby Sessions</Heading>
+          {loaded || sessions.length > 0 ? (
+            <Text muted size="xs">
+              {String(sessions.length)}
+            </Text>
+          ) : null}
         </Row>
         <IconButton
           icon="refresh"
           label="Refresh sessions"
           tooltip="Refresh sessions"
-          size="sm"
+          size="xs"
           variant="ghost"
           disabled={loading}
           onPress={() => void loadSessions('sessions.refresh')}
@@ -396,7 +396,7 @@ export default function SidebySessionsPanel() {
           description="Start an account with sideby run, or open a local Agent Chat in Orca, and it will appear here."
         >
           <Button
-            size="sm"
+            size="xs"
             variant="outline"
             icon="refresh"
             onPress={() => void loadSessions('sessions.refresh')}
@@ -413,7 +413,7 @@ export default function SidebySessionsPanel() {
             label="Filter sessions"
             labelHidden
             value={query}
-            placeholder="Search by title, folder, account, or id…"
+            placeholder="Search title, folder, or id…"
             onChange={(value) => set(queryAtom, value)}
           />
 
@@ -425,23 +425,21 @@ export default function SidebySessionsPanel() {
             >
               {hasWorkspaceGroup ? (
                 <Tab value="workspace" label={workspaceTabLabel}>
-                  {renderSessionCards(
+                  {renderSessionList(
                     filteredWorkspace,
                     copiedKey,
                     false,
-                    true,
                     'No matching sessions here',
-                    'Try another search term or switch to All.',
+                    'Try another keyword or switch to All.',
                     hasQuery,
                   )}
                 </Tab>
               ) : null}
               <Tab value="all" label={`All (${sessions.length})`}>
-                {renderSessionCards(
+                {renderSessionList(
                   filteredAll,
                   copiedKey,
                   true,
-                  false,
                   'No matching sessions',
                   'Try a different keyword or clear the search box.',
                   hasQuery,
@@ -449,11 +447,10 @@ export default function SidebySessionsPanel() {
               </Tab>
               {hasNeedsYouGroup ? (
                 <Tab value="needs-you" label={`Needs you (${needsYouSessions.length})`}>
-                  {renderSessionCards(
+                  {renderSessionList(
                     filteredNeedsYou,
                     copiedKey,
                     true,
-                    false,
                     'Nothing needs your attention',
                     'Sessions waiting for input appear here.',
                     hasQuery,
@@ -462,10 +459,9 @@ export default function SidebySessionsPanel() {
               ) : null}
             </Tabs>
           ) : (
-            renderSessionCards(
+            renderSessionList(
               filteredAll,
               copiedKey,
-              true,
               true,
               'No matching sessions',
               'Try a different keyword or clear the search box.',
@@ -478,7 +474,7 @@ export default function SidebySessionsPanel() {
       {(loaded || sessions.length > 0) && sessions.length > 0 ? (
         <Row justify="between" align="center" gap="xs" wrap>
           <Text muted size="xs">
-            Paste "Copy for AI" into another chat, or type /id inside a chat to copy itself.
+            Paste Copy into another chat, or type /id inside any chat.
           </Text>
           {updatedAt ? <RelativeTime at={updatedAt} muted /> : null}
         </Row>

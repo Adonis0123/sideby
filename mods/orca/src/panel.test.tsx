@@ -94,18 +94,18 @@ test('renders workspace tabs, copies reference in-place, and falls back when cli
   panel = await mount(panelModule, { host })
 
   assert.ok(panel.find({ text: 'Fix login' }))
-  assert.ok(panel.find({ text: '61230c3d' }))
+  assert.ok(panel.find({ text: '61230c3d · agy:main' }))
   assert.ok(panel.find({ text: 'This chat' }))
 
-  const copyRefButtons = panel.findAll({ role: 'button', text: 'Copy for AI' })
+  const copyRefButtons = panel.findAll({ role: 'button', text: 'Copy' })
   assert.ok(copyRefButtons.length >= 1)
   await panel.press(copyRefButtons[0])
   assert.deepEqual(calls[0], { sessionId: SESSIONS[0].sessionId, as: 'reference' })
   // WHY: successful copy updates the button in-place without inserting a top Callout that shifts layout.
   assert.equal(panel.find({ type: 'Callout' }), null)
-  assert.ok(panel.find({ role: 'button', text: 'Copied!' }))
+  assert.ok(panel.find({ role: 'button', text: 'Copied' }))
 
-  const copyIdButtons = panel.findAll({ role: 'button', text: 'Copy ID' })
+  const copyIdButtons = panel.findAll({ role: 'button', text: 'ID' })
   await panel.press(copyIdButtons[0])
   assert.deepEqual(calls[1], { sessionId: SESSIONS[0].sessionId, as: 'id' })
   assert.equal(panel.find({ type: 'Callout' })?.props.title, 'Copy manually (no clipboard tool found)')

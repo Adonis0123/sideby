@@ -3,6 +3,7 @@
 // using read-only host/CLI APIs, updates the status bar, opens the sidebar panel on click, and
 // forwards only minimal display/copy fields (never `orcaSessionId`, `pid`, or `transcript`).
 import { execFile, spawn } from 'node:child_process'
+import { stat } from 'node:fs/promises'
 
 const STATUS_BAR_ID = 'current-session'
 const PLUGIN_KEY = 'local.sideby-sessions'
@@ -209,26 +210,28 @@ export function findCurrentSessionId(rawSessions, agents) {
   return matched.length === 1 ? matched[0].sessionId : null
 }
 
-function statusRank(status) {
-  if (status === 'needs-you') return 0
-  if (status === 'busy') return 1
-  if (status === 'idle') return 2
-  if (status === 'sleeping') return 3
-  return 4
-}
-
-function sortSessions(sessions, activityById) {
+function sortSessions(sessions, orderById) {
   return [...sessions].sort((a, b) => {
     if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1
     if (a.inWorkspace !== b.inWorkspace) return a.inWorkspace ? -1 : 1
     const aSleep = a.status === 'sleeping'
     const bSleep = b.status === 'sleeping'
     if (aSleep !== bSleep) return aSleep ? 1 : -1
-    const aAt = activityById.get(a.sessionId) ?? 0
-    const bAt = activityById.get(b.sessionId) ?? 0
-    if (aAt !== bAt) return bAt - aAt
-    return statusRank(a.status) - statusRank(b.status)
+    const aAt = orderById.get(a.sessionId) ?? Number.MAX_SAFE_INTEGER
+    const bAt = orderById.get(b.sessionId) ?? Number.MAX_SAFE_INTEGER
+    if (aAt !== bAt) return aAt - bAt
+    return a.sessionId.localeCompare(b.sessionId)
   })
+}
+
+async function readFileCreatedMs(filePath) {
+  if (typeof filePath !== 'string' || !filePath) return 0
+  try {
+    const st = await stat(filePath)
+    return Number.isFinite(st.birthtimeMs) && st.birthtimeMs > 0 ? st.birthtimeMs : st.ctimeMs || 0
+  } catch {
+    return 0
+  }
 }
 
 export function buildStatusBarUpdate(snapshot) {
@@ -550,41 +553,34 @@ export default function activate(orca) {
     const currentId = findCurrentSessionId(rawSessions, orcaCtx.agents)
     const nextCopyTargets = new Map()
     const liveOrcaIds = new Set()
-    const activityById = new Map()
-    const cliAgentByOrcaId = new Map()
-    if (Array.isArray(cliAgents)) {
-      for (const a of cliAgents) {
-        const id = stripOrcaPrefix(a?.orcaSessionId)
-        if (id) cliAgentByOrcaId.set(id, a)
-      }
-    }
+    const orderById = new Map()
 
-    const mapped = rawSessions
-      .filter((s) => typeof s?.sessionId === 'string' && s.sessionId.length > 0)
-      .map((s) => {
-        const oid = stripOrcaPrefix(s.orcaSessionId)
-        if (oid) liveOrcaIds.add(oid)
-        const cliAgent = oid ? cliAgentByOrcaId.get(oid) : undefined
-        const panelSession = toPanelSession(s, {
-          isCurrent: currentId !== null && s.sessionId === currentId,
-          inWorkspace: isInWorkspacePath(s.cwd, orcaCtx.workspacePath),
-          agentTitle: findMatchedAgentTitle(s, orcaCtx.agents),
-        })
-        const activityMs =
-          (typeof cliAgent?.updatedAt === 'number' && Number.isFinite(cliAgent.updatedAt)
-            ? cliAgent.updatedAt
-            : 0) ||
-          Date.parse(s.updatedAt ?? '') ||
-          Date.parse(s.startedAt ?? '') ||
-          0
-        activityById.set(panelSession.sessionId, activityMs)
-        nextCopyTargets.set(panelSession.sessionId, {
-          idText: panelSession.sessionId,
-          referenceText: panelSession.reference,
-          label: panelSession.label,
-        })
-        return panelSession
+    const validRaw = rawSessions.filter((s) => typeof s?.sessionId === 'string' && s.sessionId.length > 0)
+    const transcriptTimes = await Promise.all(validRaw.map((s) => readFileCreatedMs(s.transcript)))
+
+    const mapped = validRaw.map((s, idx) => {
+      const oid = stripOrcaPrefix(s.orcaSessionId)
+      if (oid) liveOrcaIds.add(oid)
+      const panelSession = toPanelSession(s, {
+        isCurrent: currentId !== null && s.sessionId === currentId,
+        inWorkspace: isInWorkspacePath(s.cwd, orcaCtx.workspacePath),
+        agentTitle: findMatchedAgentTitle(s, orcaCtx.agents),
       })
+      // WHY: sort by conversation creation time ascending (matching left-to-right tab opening order)
+      // so rows never jump around while background chats produce output (ADR-0088).
+      const createdMs =
+        transcriptTimes[idx] ||
+        Date.parse(s.startedAt ?? '') ||
+        Date.parse(s.updatedAt ?? '') ||
+        Number.MAX_SAFE_INTEGER
+      orderById.set(panelSession.sessionId, createdMs)
+      nextCopyTargets.set(panelSession.sessionId, {
+        idText: panelSession.sessionId,
+        referenceText: panelSession.reference,
+        label: panelSession.label,
+      })
+      return panelSession
+    })
 
     // WHY: Orca sleeps idle Antigravity Chat `agy acp` processes while keeping the tab open in `orca agent list`.
     // Include local sleeping Chats so open tabs stay visible and copyable even before sending a wake-up message (ADR-0088).
@@ -604,15 +600,16 @@ export default function activate(orca) {
         const entry = sleepingChatToPanelEntry(a, { workspacePath: wsPath, inWorkspace: inWs })
         if (!entry) continue
         mapped.push(entry.panelSession)
-        activityById.set(
-          entry.panelSession.sessionId,
-          typeof a?.updatedAt === 'number' && Number.isFinite(a.updatedAt) ? a.updatedAt : 0,
-        )
+        const sleepCreated =
+          typeof a?.updatedAt === 'number' && Number.isFinite(a.updatedAt)
+            ? a.updatedAt
+            : Number.MAX_SAFE_INTEGER
+        orderById.set(entry.panelSession.sessionId, sleepCreated)
         nextCopyTargets.set(entry.panelSession.sessionId, entry.copyTarget)
       }
     }
 
-    const sessions = sortSessions(mapped, activityById)
+    const sessions = sortSessions(mapped, orderById)
     copyTargets = nextCopyTargets
     const snapshot = {
       sessions,
