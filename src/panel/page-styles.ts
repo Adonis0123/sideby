@@ -1490,6 +1490,11 @@ input.ua-time::placeholder { color: var(--faint); }
 .ua-item-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: flex-start; gap: 12px; }
 .ua-cover { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--muted); }
 .ua-cover li::before { content: "·"; margin-right: 8px; color: var(--faint); }
+.ua-cover-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 8px; }
+.ua-cover-row::before { margin-right: 0; }
+.ua-cover-row .btn { margin-left: 4px; }
+.ua-agy-preview { max-width: 720px; margin-top: 10px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px; }
+.ua-agy-preview .diff { margin: 0; max-height: 220px; overflow: auto; }
 .ua-here-list { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow); }
 .ua-here-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; padding: 12px 16px; border-top: 1px solid var(--border); }
 .ua-here-row:first-child { border-top: 0; }

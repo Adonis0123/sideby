@@ -2030,7 +2030,7 @@ async function runSetup(
   a: ParsedArgs,
   io: Io,
   rt: Runtime,
-  command: 'quota' | 'handoff',
+  command: 'quota' | 'handoff' | 'unattended',
   sub: 'setup' | 'teardown',
   familyId: string,
   setup: ReturnType<Runtime['quotaSetup']>,
@@ -4403,18 +4403,45 @@ async function sessionsOpenRun(a: ParsedArgs, args: string[], io: Io, runtime?: 
 }
 
 async function sessionsCopy(a: ParsedArgs, args: string[], io: Io, runtime?: Runtime): Promise<number> {
+  const self = a.flags.has('self')
   const [target, ...extra] = args
-  if (!target || extra.length || a.rest.length)
-    throw new UsageError('usage: sideby sessions copy <account|session-id> [--as reference|id|resume]')
+  if ((self && target) || (!self && !target) || extra.length || a.rest.length)
+    throw new UsageError(
+      'usage: sideby sessions copy <account|session-id> [--as reference|id|resume] | sideby sessions copy --self [--as reference|id|resume]',
+    )
   const as = (a.flags.get('as') ?? 'reference') as string
   if (as !== 'reference' && as !== 'id' && as !== 'resume')
     throw new UsageError('--as takes reference, id or resume')
   const rt = runtime ?? (await createRuntime())
   const lang = copyLang(a, rt.env)
-  const { sessionCopyText } = await import('../core/live-sessions.ts')
+  const { listLiveSessions, sessionCopyText } = await import('../core/live-sessions.ts')
   const { copyToClipboard } = await import('../core/live-sessions-copy.ts')
-  const { selectSession } = await import('../core/session-select.ts')
-  const { session: s, handedOverFrom } = await selectSession(rt, target, { onListed: listedProblems(a, io) })
+  let s: import('../core/live-sessions.ts').LiveSession
+  let handedOverFrom: string | undefined
+  if (self) {
+    const { UserError } = await import('../core/errors.ts')
+    const { resolveSenderSession } = await import('../core/messages.ts')
+    let processes: readonly import('../core/live-sessions-procs.ts').ProcessInfo[] = []
+    const listed = await listLiveSessions(rt, {
+      onProcesses: (scanned) => {
+        processes = scanned
+      },
+    })
+    listedProblems(a, io)(listed)
+    const { from, conflict } = resolveSenderSession(process.pid, processes, listed.sessions, rt.env)
+    if (conflict || !from) {
+      throw new UserError(
+        'sideby could not identify the current session; run `sideby sessions` to pick one by id',
+        { code: 'no-session' },
+      )
+    }
+    s = from
+  } else {
+    const { selectSession } = await import('../core/session-select.ts')
+    const picked = await selectSession(rt, target!, { onListed: listedProblems(a, io) })
+    s = picked.session
+    handedOverFrom = picked.handedOverFrom
+  }
   const text = sessionCopyText(s, as, lang)
   const program = await copyToClipboard(text, rt.env)
   if (a.flags.has('json')) {
@@ -5411,6 +5438,7 @@ function deferFamily(env: NodeJS.ProcessEnv): string {
   if (ref?.includes(':')) return ref.slice(0, ref.indexOf(':'))
   if (env.CLAUDE_CODE_SESSION_ID || env.CLAUDECODE) return 'claude'
   if (env.CODEX_THREAD_ID) return 'codex'
+  if (env.ANTIGRAVITY_CONVERSATION_ID) return 'agy'
   return 'unknown'
 }
 
@@ -5483,9 +5511,24 @@ function printUnattended(
   else
     io.out(
       c.dim(
-        'Covers Claude sessions sideby starts (questions, permission prompts and MCP forms), and questions in Codex sessions once you trust both `unattended-hook` entries in /hooks; Codex approval prompts still wait. Not Grok, pi, desktop apps or sessions started without sideby.',
+        'Covers Claude sessions sideby starts (questions, permission prompts and MCP forms), and questions in Codex sessions once you trust both `unattended-hook` entries in /hooks; Codex approval prompts still wait. Not Grok, pi, desktop apps or Claude/Codex sessions started without sideby.',
       ),
     )
+  if (s.agySetup) {
+    if (s.agySetup.status === 'enabled')
+      io.out(
+        c.dim(
+          `Antigravity CLI: covered for questions (every local agy session via ${s.agySetup.file}; remove with \`sideby unattended teardown agy\`).`,
+        ),
+      )
+    else if (s.agySetup.status === 'ready')
+      io.out(
+        c.dim(
+          'Antigravity CLI: not set up yet. Run `sideby unattended setup agy` (shows the change first) to cover agy questions.',
+        ),
+      )
+    else io.out(c.yellow(`Antigravity CLI: ${s.agySetup.message}`))
+  }
 }
 
 /**
@@ -5836,6 +5879,7 @@ export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
   const rt = await createRuntime()
   const families = [...rt.families.keys()]
   const paths = rt.paths
+  const env = rt.readContext().env
   const now = () => rt.readContext().now
   const { checkUnattendedEnded } = await import('../core/unattended-ended.ts')
   // Turning it off or on may end a stretch: notice it now, not at the next command (spec §3.37).
@@ -5881,7 +5925,7 @@ export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
       now(),
     )
     if ('error' in r) throw new UsageError(r.error)
-    const change = await u.turnUnattendedOn({ paths, families, until: r.until, now: now() })
+    const change = await u.turnUnattendedOn({ paths, families, until: r.until, env, now: now() })
     await noticeEnd()
     return show(change, `Unattended Mode is on until ${clock2(new Date(r.until).toISOString(), now())}.`)
   }
@@ -5889,7 +5933,7 @@ export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
   if (sub === 'off') {
     allow()
     if (rest.length) throw new UsageError('usage: sideby unattended off [--json]')
-    const change = await u.turnUnattendedOff({ paths, families, now: now() })
+    const change = await u.turnUnattendedOff({ paths, families, env, now: now() })
     await noticeEnd()
     const s = change.status
     return show(
@@ -5908,6 +5952,18 @@ export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
             : 'Unattended Mode is paused until you turn it on: your Schedule covers every hour, so it has no end.'
           : 'Unattended Mode is off.',
     )
+  }
+
+  if (sub === 'setup' || sub === 'teardown') {
+    allow(...(sub === 'setup' ? ['yes'] : []))
+    if (rest.length !== 1)
+      throw new UsageError(
+        `usage: sideby unattended ${sub} <family>${sub === 'setup' ? ' [--yes]' : ''} [--json] (for example: sideby unattended ${sub} agy)`,
+      )
+    const familyId = rest[0]!
+    if (!rt.unattendedSetup)
+      throw new UserError('Unattended Mode setup is not supported by this runtime', { code: 'no-setup' })
+    return runSetup(a, io, rt, 'unattended', sub, familyId, rt.unattendedSetup(familyId))
   }
 
   if (sub === 'schedule') {
@@ -5941,7 +5997,13 @@ export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
         throw new UsageError(
           '--at takes a position such as 1 (the first Slot); leave it out to add at the end',
         )
-      const change = await u.addUnattendedSlot({ paths, families, slot, ...(at ? { at: Number(at) } : {}) })
+      const change = await u.addUnattendedSlot({
+        paths,
+        families,
+        slot,
+        env,
+        ...(at ? { at: Number(at) } : {}),
+      })
       await noticeEnd()
       return show(change, change.changed ? 'Added the Slot.' : 'That Slot is already in the Schedule.')
     }
@@ -5952,7 +6014,7 @@ export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
         throw new UsageError(
           'usage: sideby unattended schedule remove <number>, the number `sideby unattended` shows (1 is the first)',
         )
-      const change = await u.removeUnattendedSlot({ paths, families, n: Number(n) })
+      const change = await u.removeUnattendedSlot({ paths, families, n: Number(n), env })
       await noticeEnd()
       return show(change, `Removed Slot ${n}.`)
     }
@@ -5963,7 +6025,7 @@ export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
         throw new UsageError(
           `usage: sideby unattended schedule preset weeknights (Monday to Friday, 23:00 to 08:00)`,
         )
-      const change = await u.addUnattendedSlot({ paths, families, slot: preset })
+      const change = await u.addUnattendedSlot({ paths, families, slot: preset, env })
       await noticeEnd()
       return show(
         change,
@@ -5991,7 +6053,7 @@ export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
     }
     const minutes = raw === 'off' || raw === 'never' ? null : /^\d{1,3}$/.test(raw) ? Number(raw) : Number.NaN
     if (minutes !== null && !(minutes >= 1 && minutes <= 120)) throw new UsageError(usage)
-    const change = await u.setAnswerWait({ paths, families, minutes, now: now() })
+    const change = await u.setAnswerWait({ paths, families, minutes, env, now: now() })
     const said =
       minutes === null
         ? 'Questions shown in Claude sessions now wait for you, however long.'
@@ -6200,14 +6262,15 @@ export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
     const text = rest.join(' ').trim()
     if (!text) throw new UsageError('usage: sideby unattended defer "<one sentence on what was left undone>"')
     const { addPendingDecision } = await import('../core/unattended-pending.ts')
-    const env = process.env
-    const sessionId = env.CLAUDE_CODE_SESSION_ID || env.CODEX_THREAD_ID
+    const deferEnv = process.env
+    const sessionId =
+      deferEnv.CLAUDE_CODE_SESSION_ID || deferEnv.CODEX_THREAD_ID || deferEnv.ANTIGRAVITY_CONVERSATION_ID
     const decision = await addPendingDecision(
       paths.stateDir,
       {
         kind: 'deferred',
-        family: deferFamily(env),
-        ...(env.SIDEBY_ACCOUNT ? { account: env.SIDEBY_ACCOUNT } : {}),
+        family: deferFamily(deferEnv),
+        ...(deferEnv.SIDEBY_ACCOUNT ? { account: deferEnv.SIDEBY_ACCOUNT } : {}),
         ...(sessionId ? { sessionId } : {}),
         cwd: process.cwd(),
         text,
@@ -6223,7 +6286,7 @@ export async function cmdUnattended(a: ParsedArgs, io: Io): Promise<number> {
   }
 
   throw new UsageError(
-    'usage: sideby unattended [status|on|off|schedule|wait|pending|defer]; run `sideby unattended --help`',
+    'usage: sideby unattended [status|on|off|setup|teardown|schedule|wait|pending|defer]; run `sideby unattended --help`',
   )
 }
 

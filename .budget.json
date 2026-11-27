@@ -401,7 +401,7 @@
     }
   },
   "tests": {
-    "total": 2166,
+    "total": 2173,
     "files": {
       "mods/claude/hooks/register.test.ts": 7,
       "scripts/budget.test.ts": 7,
@@ -435,7 +435,7 @@
       "src/cli/sessions-open-run.test.ts": 4,
       "src/cli/skill-coverage.test.ts": 1,
       "src/cli/trust-cli.test.ts": 2,
-      "src/cli/unattended-cli.test.ts": 9,
+      "src/cli/unattended-cli.test.ts": 10,
       "src/core/advisor.test.ts": 27,
       "src/core/aliases.test.ts": 15,
       "src/core/app-profiles.test.ts": 10,
@@ -511,6 +511,7 @@
       "src/core/themes.test.ts": 8,
       "src/core/tuning-apply.test.ts": 11,
       "src/core/tuning.test.ts": 17,
+      "src/core/unattended-agy.test.ts": 3,
       "src/core/unattended-attended.test.ts": 11,
       "src/core/unattended-ended.test.ts": 11,
       "src/core/unattended-followup.test.ts": 6,
@@ -580,7 +581,7 @@
       "src/panel/portal-refresh.test.ts": 6,
       "src/panel/send.test.ts": 11,
       "src/panel/sessions.test.ts": 6,
-      "src/panel/unattended.test.ts": 8,
+      "src/panel/unattended.test.ts": 9,
       "src/plugins/check.test.ts": 13,
       "src/plugins/plugins.test.ts": 19,
       "src/plugins/scaffold.test.ts": 2,
@@ -589,7 +590,7 @@
       "src/quota/statusline-tap.test.ts": 10,
       "src/runtime.test.ts": 7,
       "src/unattended/attended.test.ts": 11,
-      "src/unattended/hook.test.ts": 35,
+      "src/unattended/hook.test.ts": 37,
       "src/unattended/wait.test.ts": 21
     },
     "history": [
@@ -622,6 +623,12 @@
         "reason": "ADR-0088 review R1 fixes tests",
         "from": 2162,
         "to": 2166
+      },
+      {
+        "date": "2026-11-26",
+        "reason": "ADR-0089: Antigravity CLI unattended hooks.json writes, hook protocol, CLI and Panel routes",
+        "from": 2166,
+        "to": 2173
       }
     ]
   },

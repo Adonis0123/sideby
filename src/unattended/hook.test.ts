@@ -893,6 +893,105 @@ describe('unattended hook after a turn failed for a passing reason (Turn Retry)'
   })
 })
 
+describe('agy unattended hook (ADR-0089)', () => {
+  it('denies ask_question with JSON on stdout while on, and stays silent while off', async () => {
+    await withFakeHome(async (h) => {
+      const payload = JSON.stringify({
+        hookEventName: 'PreToolUse',
+        conversationId: 'conv-1',
+        cwd: '/tmp/proj',
+        toolCall: {
+          id: 'tc-1',
+          name: 'ask_question',
+          args: { questions: [{ question: 'Pick a color?', options: ['(Recommended) Blue', 'Green'] }] },
+        },
+      })
+      await h.write('.config/sideby/config.json', '{"unattended":{}}')
+      assert.deepEqual(await run(h, ['agy', 'PreToolUse'], payload), { code: 0, err: '' })
+
+      await turnOn(h)
+      const r = await run(h, ['agy', 'PreToolUse'], payload, { SIDEBY_ACCOUNT: 'agy:main' })
+      assert.equal(r.code, 0)
+      assert.equal(r.err, '')
+      const out = JSON.parse(r.out!) as { decision: string; reason: string }
+      assert.equal(out.decision, 'deny')
+      assert.match(out.reason, /Unattended Mode is on/)
+      const desktopPayload = JSON.stringify({
+        hookEventName: 'PreToolUse',
+        conversationId: 'conv-desk',
+        transcriptPath: h.path('.gemini/antigravity/brain/conv-desk/transcript.jsonl'),
+        toolCall: { id: 'tc-2', name: 'ask_question', args: { questions: [{ question: 'Desktop?' }] } },
+      })
+      assert.deepEqual(await run(h, ['agy', 'PreToolUse'], desktopPayload), { code: 0, err: '' })
+
+      const pending = await listPendingDecisions(resolvePaths(h.env).stateDir)
+      assert.equal(pending.length, 1)
+      assert.equal(pending[0]!.family, 'agy')
+      assert.equal(pending[0]!.sessionId, 'conv-1')
+      assert.equal(pending[0]!.cwd, '/tmp/proj')
+      assert.match(pending[0]!.text, /Pick a color\?/)
+    })
+  })
+
+  it('continues agy Stop once from transcript PLANNER_RESPONSE and rejects symlinks or outside paths', async () => {
+    await withFakeHome(async (h) => {
+      await turnOn(h)
+      const rel = '.gemini/antigravity-cli/brain/conv-2/.system_generated/logs/transcript.jsonl'
+      await h.write(
+        rel,
+        `${JSON.stringify({ type: 'PLANNER_RESPONSE', content: ASKED })}\n${JSON.stringify({ type: 'GENERIC', content: 'ignored' })}\n`,
+      )
+      const transcriptPath = h.path(rel)
+      const stop = (extra: Record<string, unknown> = {}) =>
+        JSON.stringify({
+          hookEventName: 'Stop',
+          conversationId: 'conv-2',
+          cwd: '/tmp/proj',
+          terminationReason: 'NO_TOOL_CALL',
+          continuationActive: false,
+          transcriptPath,
+          ...extra,
+        })
+
+      const r = await run(h, ['agy', 'Stop'], stop())
+      assert.equal(r.code, 0)
+      const out = JSON.parse(r.out!) as { decision: string; reason: string }
+      assert.equal(out.decision, 'continue')
+      assert.match(out.reason, /Unattended Mode/)
+
+      assert.deepEqual(JSON.parse((await run(h, ['agy', 'Stop'], stop({ continuationActive: true }))).out!), {
+        decision: '',
+      })
+      assert.deepEqual(
+        JSON.parse((await run(h, ['agy', 'Stop'], stop({ terminationReason: 'USER_CANCELED' }))).out!),
+        { decision: '' },
+      )
+
+      const emptyTailRel = '.gemini/antigravity-cli/brain/conv-3/.system_generated/logs/transcript.jsonl'
+      await h.write(
+        emptyTailRel,
+        `${JSON.stringify({ type: 'PLANNER_RESPONSE', content: ASKED })}\n${JSON.stringify({ type: 'PLANNER_RESPONSE', content: '   ' })}\n`,
+      )
+      assert.deepEqual(
+        JSON.parse((await run(h, ['agy', 'Stop'], stop({ transcriptPath: h.path(emptyTailRel) }))).out!),
+        { decision: '' },
+      )
+
+      const outside = h.path('outside.jsonl')
+      await h.write('outside.jsonl', `${JSON.stringify({ type: 'PLANNER_RESPONSE', content: ASKED })}\n`)
+      assert.deepEqual(JSON.parse((await run(h, ['agy', 'Stop'], stop({ transcriptPath: outside }))).out!), {
+        decision: '',
+      })
+
+      const linked = h.path('.gemini/antigravity-cli/brain/conv-2/.system_generated/logs/link.jsonl')
+      await symlink(transcriptPath, linked)
+      assert.deepEqual(JSON.parse((await run(h, ['agy', 'Stop'], stop({ transcriptPath: linked }))).out!), {
+        decision: '',
+      })
+    })
+  })
+})
+
 describe('unattended hook imports', () => {
   it('reaches only leaf modules: never the Runtime, a Family index or core/accounts.ts', async () => {
     const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')

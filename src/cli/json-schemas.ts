@@ -2507,8 +2507,21 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
         Type.Union([Type.Literal('covered'), Type.Literal('needs-trust'), Type.Literal('not-covered')]),
         {
           description:
-            'Per family: covered (sessions sideby starts get the hook), needs-trust (Codex runs it once the user trusts it in /hooks), not-covered (no hook sideby can add, or the feature was never used).',
+            'Per family: covered (sessions get the hook), needs-trust (Codex runs it once the user trusts it in /hooks), not-covered (no hook sideby can add, not yet set up for agy, or the feature was never used).',
         },
+      ),
+      agySetup: Type.Optional(
+        Type.Object(
+          {
+            status: Type.Union([Type.Literal('enabled'), Type.Literal('ready'), Type.Literal('blocked')]),
+            file: Str,
+            message: Str,
+          },
+          {
+            description:
+              'Antigravity CLI global hooks.json status (ADR-0089): enabled once `sideby unattended setup agy --yes` added `sideby-unattended`, ready when it can be added, blocked with what to fix.',
+          },
+        ),
       ),
       slotEnd: Type.Optional(
         Type.String({
@@ -2545,6 +2558,14 @@ export const OUTPUT_SCHEMAS: Record<string, TSchema> = {
       ),
     },
     { title: 'sideby unattended [on|off|schedule …|wait …] --json' },
+  ),
+  'unattended-setup': Type.Object(
+    { schemaVersion: Version, family: Str, applied: Type.Boolean(), plan: QuotaSetupPlan },
+    { title: 'sideby unattended setup --json' },
+  ),
+  'unattended-teardown': Type.Object(
+    { schemaVersion: Version, family: Str, ok: Type.Boolean(), message: Str, diff: Type.Optional(Str) },
+    { title: 'sideby unattended teardown --json' },
   ),
   'unattended-pending': Type.Object(
     {

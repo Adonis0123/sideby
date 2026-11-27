@@ -1380,9 +1380,11 @@ async function buildState(
   const shellSt = await shellSetupStatus(userShell(rt.env), ctx.home, rt.env, rt.config.shellInitFile)
   const browser = await browserReport(rt, accounts).catch(() => undefined)
   // The Panel's own status leaves out a `--unattended` session the server itself may run in: it shows the computer.
+  const { SIDEBY_UNATTENDED: _uaEnv, ...panelEnv } = rt.env
   const unattended = await unattendedStatus({
     paths: rt.paths,
     families: [...rt.families.keys()],
+    env: panelEnv,
     now: ctx.now,
     readOnly: opts.readOnly,
   })
@@ -1492,6 +1494,11 @@ async function panelChange(c: UnattendedChange, stateDir: string): Promise<Panel
   return { changed: c.changed, status: await withPendingIds(c.status, stateDir), ...(undo ? { undo } : {}) }
 }
 
+function panelHostEnv(rt: Runtime): Record<string, string | undefined> {
+  const { SIDEBY_UNATTENDED: _uaEnv, ...rest } = rt.readContext().env
+  return rest
+}
+
 async function unattendedView(
   rt: Runtime,
   readOnly: boolean,
@@ -1499,7 +1506,7 @@ async function unattendedView(
 ): Promise<PanelUnattended> {
   const families = [...rt.families.keys()]
   const [status, decisions, accounts] = await Promise.all([
-    unattendedStatus({ paths: rt.paths, families, readOnly }),
+    unattendedStatus({ paths: rt.paths, families, env: panelHostEnv(rt), readOnly }),
     listPendingDecisions(rt.paths.stateDir, { prune: !readOnly, all: true }),
     rt.accounts(),
   ])
@@ -2958,6 +2965,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           paths: rt.paths,
           families: [...rt.families.keys()],
           until: r.until,
+          env: panelHostEnv(rt),
           now,
         })
         await noticeUnattendedEnd(rt)
@@ -2968,7 +2976,11 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
     '/api/unattended/off': {
       async run() {
         const rt = await getRuntime()
-        const change = await turnUnattendedOff({ paths: rt.paths, families: [...rt.families.keys()] })
+        const change = await turnUnattendedOff({
+          paths: rt.paths,
+          families: [...rt.families.keys()],
+          env: panelHostEnv(rt),
+        })
         await noticeUnattendedEnd(rt)
         return panelChange(change, rt.paths.stateDir)
       },
@@ -2982,6 +2994,7 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
           paths: rt.paths,
           families: [...rt.families.keys()],
           schedule: body.schedule,
+          env: panelHostEnv(rt),
         })
         await noticeUnattendedEnd(rt)
         return {
@@ -3002,12 +3015,64 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
             'bad-wait',
           )
         const rt = await getRuntime()
-        const r = await setAnswerWait({ paths: rt.paths, families: [...rt.families.keys()], minutes })
+        const r = await setAnswerWait({
+          paths: rt.paths,
+          families: [...rt.families.keys()],
+          minutes,
+          env: panelHostEnv(rt),
+        })
         return {
           changed: r.changed,
           status: await withPendingIds(r.status, rt.paths.stateDir),
           before: r.before,
         }
+      },
+    },
+    // WHY: ADR-0089 Antigravity CLI global hooks.json setup preview (without `confirm`) and apply (`confirm: true`).
+    '/api/unattended/setup': {
+      writes: (body) => body.confirm === true,
+      async run(body) {
+        const family = optString(body, 'family')
+        if (!family) throw new HttpError(400, '"family" is required')
+        const rt = await getRuntime()
+        if (!rt.unattendedSetup) throw new HttpError(501, 'Unattended setup is not supported by this runtime')
+        const setup = rt.unattendedSetup(family)
+        if (body.confirm !== true) return { family, applied: false, changed: false, plan: await setup.plan() }
+        const after = await setup.apply()
+        const status = await withPendingIds(
+          await unattendedStatus({
+            paths: rt.paths,
+            families: [...rt.families.keys()],
+            env: panelHostEnv(rt),
+          }),
+          rt.paths.stateDir,
+        )
+        return {
+          family,
+          applied: after.status === 'enabled',
+          changed: Boolean(after.changed),
+          plan: after,
+          status,
+        }
+      },
+    },
+    // WHY: ADR-0089 undo / remove for Antigravity CLI Unattended Mode hook.
+    '/api/unattended/teardown': {
+      async run(body) {
+        const family = optString(body, 'family')
+        if (!family) throw new HttpError(400, '"family" is required')
+        const rt = await getRuntime()
+        if (!rt.unattendedSetup) throw new HttpError(501, 'Unattended setup is not supported by this runtime')
+        const result = await rt.unattendedSetup(family).teardown()
+        const status = await withPendingIds(
+          await unattendedStatus({
+            paths: rt.paths,
+            families: [...rt.families.keys()],
+            env: panelHostEnv(rt),
+          }),
+          rt.paths.stateDir,
+        )
+        return { family, changed: Boolean(result.changed), result, status }
       },
     },
     // Marks one Pending Decision done (or every open one with `all`, or the `ids` the page showed: a Project's replied

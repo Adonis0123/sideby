@@ -140,6 +140,7 @@ Exit: 0 opened, brought to the front or removed; 1 not macOS, no desktop app for
 installed, a bad window name, or the app did not open; 10 --remove without --yes; 2 malformed command line.`,
   sessions: `sideby sessions [<account>|<family>] [--json]
        sideby sessions copy <account|session-id> [--as reference|id|resume] [--lang en|zh] [--json]
+       sideby sessions copy --self [--as reference|id|resume] [--lang en|zh] [--json]
        sideby sessions open-run <account|session-id> [--json]
 
 List the sessions every account runs now (Claude Code, Codex, Grok Build, pi): each row shows the Session Label
@@ -374,6 +375,8 @@ no country allowed; 2 malformed command line.`,
   unattended: `sideby unattended [status] [--json]
        sideby unattended on [--for <n>h|<n>m | --until <HH:MM|date and time> | --slot-end] [--json]
        sideby unattended off [--json]
+       sideby unattended setup <family> [--yes] [--json]
+       sideby unattended teardown <family> [--json]
        sideby unattended schedule [add --days <days> --from HH:MM --to HH:MM [--name <name>] [--at <n>]] [--json]
        sideby unattended schedule remove <n> | preset weeknights [--json]
        sideby unattended wait [<minutes>|off] [--json]
@@ -405,9 +408,11 @@ hours), or for one session started with \`--unattended\` (\`sideby run <account>
 short commands and pick commands). \`off\` outside a Slot turns it off; during a Slot it pauses until that Slot ends.
 
 It covers Claude and Codex sessions sideby starts after the first use (sideby adds its hooks to them; nothing is
-written into the account folders). Codex runs the hooks once you trust both \`unattended-hook\` entries in /hooks.
-Grok, pi, desktop apps and sessions started without sideby are not covered. Pending Decisions stay on this computer;
-\`pending done\` marks them done, and they are deleted 30 days later. \`defer\` keeps a line from inside a session ("deploy left for the user").
+written into the account folders), plus all local Antigravity CLI sessions once you run \`sideby unattended setup agy --yes\`
+(adds one named key to ~/.gemini/config/hooks.json; undo with \`sideby unattended teardown agy\`). Codex runs the hooks
+once you trust both \`unattended-hook\` entries in /hooks. Grok, pi, desktop apps and Claude/Codex sessions started
+without sideby are not covered. Pending Decisions stay on this computer; \`pending done\` marks them done, and they are
+deleted 30 days later. \`defer\` keeps a line from inside a session ("deploy left for the user").
 
 \`pending\` lists them by project (the repository of the folder the session worked in; a worktree counts as its
 repository), untouched ones first. "You wrote in the session afterwards" means you typed in that session after it
@@ -426,8 +431,9 @@ Examples:
   sideby unattended pending
   sideby unattended pending --project shop
   sideby unattended pending reopen <id>
+  sideby unattended setup agy
   sideby unattended defer "deleting the old branch is left for the user"
-Exit: 0 shown or done; 1 no such Slot or Pending Decision; 2 a time or option it does not take (the message says
+Exit: 0 shown or done; 10 setup preview waits for --yes; 1 no such Slot or Pending Decision, or blocked setup; 2 a time or option it does not take (the message says
 which to use).`,
   progress: `sideby progress [status] [--json]
        sideby progress on [--every <minutes>] [--json]
@@ -602,7 +608,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   next: { flags: ['dry-run', 'include-api', 'json', 'ignore-network', 'unattended'] },
   network: { flags: ['json', 'yes'] },
   unattended: {
-    flags: ['json', 'all', 'slot-end', 'replied'],
+    flags: ['json', 'all', 'slot-end', 'replied', 'yes'],
     valued: ['for', 'until', 'days', 'from', 'to', 'name', 'at', 'project', 'ids'],
   },
   progress: { flags: ['json'], valued: ['every'] },
@@ -623,7 +629,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   ui: { flags: ['no-open', 'background', 'stop', 'serve-detached', 'wait'], valued: ['port'] },
   app: { flags: ['json'], valued: ['url'] },
   desktop: { flags: ['json', 'remove', 'yes'] },
-  sessions: { flags: ['json'], valued: ['as', 'lang'] },
+  sessions: { flags: ['json', 'self'], valued: ['as', 'lang'] },
   history: {
     flags: ['json', 'scripts', 'tools', 'clear'],
     valued: ['project', 'category', 'group', 'family', 'account', 'since', 'limit', 'offset', 'before'],

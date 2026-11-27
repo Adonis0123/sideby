@@ -6587,7 +6587,7 @@ const MAIN = String.raw`
   const UA_MS = 15000
   const UA_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
   const UA_PRESET = { name: 'Weeknights', days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '23:00', end: '08:00' }
-  const ua = { data: null, error: null, loading: null, at: 0, nextAt: 0, inflight: new Map(), opening: false, choosing: false, choice: null, time: '08:00', timeInit: '08:00', busy: false, local: null, saves: 0, rows: [], seq: 0, gone: {}, open: {}, batch: 0, showReplied: {}, showDone: false, firstUse: false, focus: null, wait: undefined, waitSaves: 0 }
+  const ua = { data: null, error: null, loading: null, at: 0, nextAt: 0, inflight: new Map(), opening: false, choosing: false, choice: null, time: '08:00', timeInit: '08:00', busy: false, local: null, saves: 0, rows: [], seq: 0, gone: {}, open: {}, batch: 0, showReplied: {}, showDone: false, firstUse: false, focus: null, wait: undefined, waitSaves: 0, agyPlan: null, agyBusy: false }
   let uaSaving = Promise.resolve()
   function uaStatusNow() { return (S.state && S.state.unattended) || null }
   // The latest status's count, less the ones being marked done right now (the page shows them gone already).
@@ -7186,13 +7186,81 @@ const MAIN = String.raw`
       })))]
   }
 
+  async function uaAgyPreview() {
+    if (ua.agyBusy) return
+    if (ua.agyPlan) { ua.agyPlan = null; renderUaPage(); return }
+    ua.agyBusy = true
+    renderUaPage()
+    try {
+      const r = await api('/api/unattended/setup', { family: 'agy' })
+      if (r.plan?.status === 'ready') ua.agyPlan = r.plan
+      else toast(r.plan?.message || t('ua.agySetupFailed', { msg: 'blocked' }), { kind: r.plan?.status === 'enabled' ? 'ok' : 'fail' })
+    } catch (e) { toast(t('ua.agySetupFailed', { msg: e.message }), { kind: 'fail' }) }
+    ua.agyBusy = false
+    renderUaPage()
+  }
+  async function uaAgyApply(undone) {
+    if (ua.agyBusy) return
+    ua.agyBusy = true
+    renderUaPage()
+    try {
+      const r = await api('/api/unattended/setup', { family: 'agy', confirm: true })
+      if (r.status) uaKeepStatus(r.status)
+      if (r.applied) {
+        ua.agyPlan = null
+        const canUndo = !undone && r.changed !== false
+        toast(undone ? t('ua.undone') : t('ua.agyEnabledToast'), canUndo ? { key: 'ua-agy', action: { label: t('toast.undo'), run: () => uaAgyTeardown(true) }, duration: 10000 } : { key: 'ua-agy' })
+      } else toast(r.plan?.message || t('ua.agySetupFailed', { msg: 'blocked' }), { kind: 'fail' })
+    } catch (e) { toast(t('ua.agySetupFailed', { msg: e.message }), { kind: 'fail' }) }
+    ua.agyBusy = false
+    uaRedraw()
+  }
+  async function uaAgyTeardown(undone) {
+    if (ua.agyBusy) return
+    ua.agyBusy = true
+    renderUaPage()
+    try {
+      const r = await api('/api/unattended/teardown', { family: 'agy' })
+      if (r.status) uaKeepStatus(r.status)
+      if (r.result?.ok) {
+        ua.agyPlan = null
+        const canUndo = !undone && r.changed !== false
+        toast(undone ? t('ua.undone') : t('ua.agyRemovedToast'), canUndo ? { key: 'ua-agy', action: { label: t('toast.undo'), run: () => uaAgyApply(true) }, duration: 10000 } : { key: 'ua-agy' })
+      } else toast(r.result?.message || t('ua.agySetupFailed', { msg: 'failed' }), { kind: 'fail' })
+    } catch (e) { toast(t('ua.agySetupFailed', { msg: e.message }), { kind: 'fail' }) }
+    ua.agyBusy = false
+    uaRedraw()
+  }
   function uaCoverage(st) {
     const have = new Set(S.state.accounts.map((a) => a.family))
     const lines = [h('li', null, t('ua.coverLine'))]
     if (have.has('codex') && st.coverage.codex !== 'covered') lines.push(h('li', { 'data-key': 'ua-cov-codex' }, tx('ua.codexTrust', { cmd: h('code', null, '/hooks') })))
-    const other = [...have].filter((f) => f !== 'claude' && f !== 'codex').map((f) => family(f).title)
+    const agy = st.agySetup
+    if (have.has('agy') && agy) {
+      const canEdit = !BOOT.readOnly
+      if (agy.status === 'enabled') {
+        lines.push(h('li', { class: 'ua-cover-row', 'data-key': 'ua-cov-agy', 'data-patch': '' },
+          h('span', null, tx('ua.agyCovered', { file: h('code', null, agy.file) })),
+          canEdit ? h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'ua-agy-remove', disabled: ua.agyBusy, onclick: () => uaAgyTeardown(false) }, t('ua.agyRemove')) : null))
+      } else if (agy.status === 'ready') {
+        lines.push(h('li', { class: 'ua-cover-row', 'data-key': 'ua-cov-agy', 'data-patch': '' },
+          h('span', null, t('ua.agyReady')),
+          canEdit ? h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'ua-agy-setup', disabled: ua.agyBusy, onclick: uaAgyPreview }, ua.agyBusy ? spinner() : null, t('ua.agySetup')) : null))
+      } else {
+        lines.push(h('li', { 'data-key': 'ua-cov-agy' }, t('ua.agyBlocked', { msg: agy.message })))
+      }
+    }
+    const other = [...have].filter((f) => f !== 'claude' && f !== 'codex' && f !== 'agy').map((f) => family(f).title)
     if (other.length) lines.push(h('li', { 'data-key': 'ua-cov-other' }, t('ua.notSupported', { hosts: other.join(t('ua.listSep')) })))
-    return [h('h3', { class: 'page-sec' }, t('ua.cover')), h('ul', { class: 'ua-cover', 'data-patch': '' }, lines)]
+    const preview = ua.agyPlan
+      ? h('div', { class: 'ua-agy-preview', 'data-key': 'ua-agy-preview', 'data-ua': 'agy-preview', 'data-patch': '' },
+        h('p', { class: 'small' }, tx('ua.agyPreviewNote', { file: h('code', null, agy ? agy.file : '~/.gemini/config/hooks.json') })),
+        h('pre', { class: 'diff' }, ua.agyPlan.diff),
+        h('div', { class: 'row-actions' },
+          h('button', { class: 'btn btn-primary btn-sm', type: 'button', 'data-key': 'ua-agy-confirm', disabled: ua.agyBusy, onclick: () => uaAgyApply(false) }, ua.agyBusy ? spinner() : null, t('ua.agyConfirm')),
+          h('button', { class: 'btn btn-sm', type: 'button', 'data-key': 'ua-agy-cancel', disabled: ua.agyBusy, onclick: () => { ua.agyPlan = null; renderUaPage() } }, t('btn.cancel'))))
+      : null
+    return [h('h3', { class: 'page-sec' }, t('ua.cover')), h('ul', { class: 'ua-cover', 'data-patch': '' }, lines), preview]
   }
   function uaChooser(st) {
     const now = Date.now()

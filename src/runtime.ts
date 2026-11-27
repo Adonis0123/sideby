@@ -217,6 +217,7 @@ import {
   undoTune,
 } from './core/tuning-apply.ts'
 import {
+  agyUnattendedNeedSetupLine,
   codexUnattendedTrustLine,
   UNATTENDED_FAMILIES,
   type UnattendedStatus,
@@ -225,6 +226,7 @@ import {
   unattendedSettingsLine,
   unattendedStatus,
 } from './core/unattended.ts'
+import { type AgyUnattendedSetup, agyUnattendedSetup, agyUnattendedStatus } from './core/unattended-agy.ts'
 import { UNATTENDED_ENV } from './core/unattended-state.ts'
 import { inCi } from './core/update.ts'
 import { packageVersion } from './core/version.ts'
@@ -540,6 +542,8 @@ export interface Runtime {
    * which Families' sessions it covers. Read fresh on every call.
    */
   unattendedStatus(): Promise<UnattendedStatus>
+  /** Plan, apply and teardown for a Family that installs Unattended Mode into its global hooks file (ADR-0089). */
+  unattendedSetup?(family: string): AgyUnattendedSetup
   /**
    * Runs every Plugin's `unattended.ended` hook for one stretch that ended; a failing Plugin affects only itself and is
    * returned with its error.
@@ -924,6 +928,13 @@ export async function createRuntime(
   const unattendedPrepared = async (p: PreparedLaunch, asked: boolean): Promise<SessionHookPart | null> => {
     if (asked) p.env[UNATTENDED_ENV] = '1'
     if (!asked && config.unattended === undefined) return null
+    if (p.family.id === 'agy') {
+      if (asked) {
+        const st = await agyUnattendedStatus({ home: paths.home, stateDir: paths.stateDir, env })
+        if (st.status !== 'enabled') addNotice(p, [agyUnattendedNeedSetupLine(p.env)])
+      }
+      return null
+    }
     if (!UNATTENDED_FAMILIES.includes(p.family.id)) {
       if (asked) addNotice(p, [unattendedFamilyLine(p.family.id, p.env)])
       return null
@@ -2147,6 +2158,15 @@ export async function createRuntime(
     },
     async unattendedStatus() {
       return unattendedStatus({ paths, families: [...families.keys()], env, now: now() })
+    },
+    unattendedSetup(familyId) {
+      familyOf(familyId)
+      if (familyId !== 'agy')
+        throw new UserError(
+          `\`sideby unattended setup\` is only needed for agy (Claude and Codex get hooks automatically when sideby starts them)`,
+          { code: 'no-setup' },
+        )
+      return agyUnattendedSetup({ home: paths.home, stateDir: paths.stateDir, env })
     },
     async unattendedEnded(ctx) {
       return (await bus.runIsolated('unattended.ended', '', ctx))

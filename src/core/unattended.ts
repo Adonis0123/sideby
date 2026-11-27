@@ -10,6 +10,7 @@ import { UserError } from './errors.ts'
 import { ownedFolder, writeFileAtomic } from './fs-safe.ts'
 import type { Paths } from './paths.ts'
 import { type SessionHookPart, sidebyHookCommand } from './session-hooks.ts'
+import { type AgyUnattendedSummary, agyUnattendedStatus } from './unattended-agy.ts'
 import { ATTENDED_HOOK_TIMEOUT_S, type AttendedSession, listAttended } from './unattended-attended.ts'
 import { listPendingDecisions } from './unattended-pending.ts'
 import { RETRY_HOOK_TIMEOUT_S } from './unattended-retry.ts'
@@ -63,6 +64,8 @@ export interface UnattendedStatus extends UnattendedState {
    */
   attended: AttendedSession[]
   coverage: Record<string, UnattendedCoverage>
+  /** Antigravity CLI global hook setup status when `agy` is a known Family (ADR-0089). */
+  agySetup?: AgyUnattendedSummary
   /** When `on --slot-end` would end: the end of the current or next Slot, when that is within 72 hours. */
   slotEnd?: string
   /** The manual state in effect now: on until, or paused until. */
@@ -105,20 +108,29 @@ function activeManual(o: UnattendedOverride | undefined, now: number): Unattende
   return Date.parse(o.at) <= now && now < end ? o : undefined
 }
 
-function coverageOf(families: readonly string[], configured: boolean): Record<string, UnattendedCoverage> {
+function coverageOf(
+  families: readonly string[],
+  configured: boolean,
+  agyEnabled = false,
+): Record<string, UnattendedCoverage> {
   const out: Record<string, UnattendedCoverage> = {}
   for (const f of families)
-    out[f] = !configured
-      ? 'not-covered'
-      : f === 'claude'
-        ? 'covered'
-        : f === 'codex'
-          ? 'needs-trust'
+    out[f] =
+      f === 'agy'
+        ? agyEnabled
+          ? 'covered'
           : 'not-covered'
+        : !configured
+          ? 'not-covered'
+          : f === 'claude'
+            ? 'covered'
+            : f === 'codex'
+              ? 'needs-trust'
+              : 'not-covered'
   return out
 }
 
-/** The full status. `env` matters only for a session started with `--unattended`. */
+/** The full status. `env` matters only for a session started with `--unattended` and `agy` PATH checks (ADR-0089). */
 export async function unattendedStatus(opts: {
   paths: Paths
   families: readonly string[]
@@ -137,6 +149,13 @@ export async function unattendedStatus(opts: {
     () => undefined,
     (err: Error) => err.message,
   )
+  const agySetup = opts.families.includes('agy')
+    ? await agyUnattendedStatus({
+        home: opts.paths.home,
+        stateDir: opts.paths.stateDir,
+        env: opts.env ?? process.env,
+      })
+    : undefined
   return {
     ...state,
     configured,
@@ -144,7 +163,8 @@ export async function unattendedStatus(opts: {
     answerWait,
     pending: (await listPendingDecisions(opts.paths.stateDir, { now, prune: !opts.readOnly })).length,
     attended: await listAttended(opts.paths.stateDir, now, { prune: !opts.readOnly }),
-    coverage: coverageOf(opts.families, configured),
+    coverage: coverageOf(opts.families, configured, agySetup?.status === 'enabled'),
+    ...(agySetup ? { agySetup } : {}),
     ...(end !== undefined && end - now.getTime() <= MAX_MANUAL_MS
       ? { slotEnd: new Date(end).toISOString() }
       : {}),
@@ -257,6 +277,7 @@ export async function turnUnattendedOn(opts: {
   paths: Paths
   families: readonly string[]
   until: number
+  env?: Env
   now?: Date
 }): Promise<UnattendedChange> {
   const now = opts.now ?? new Date()
@@ -284,6 +305,7 @@ export async function turnUnattendedOn(opts: {
 export async function turnUnattendedOff(opts: {
   paths: Paths
   families: readonly string[]
+  env?: Env
   now?: Date
 }): Promise<UnattendedChange> {
   const now = opts.now ?? new Date()
@@ -328,6 +350,7 @@ export async function addUnattendedSlot(opts: {
   families: readonly string[]
   slot: UnattendedSlot
   at?: number
+  env?: Env
   now?: Date
 }): Promise<UnattendedChange> {
   let index = -1
@@ -352,6 +375,7 @@ export async function removeUnattendedSlot(opts: {
   paths: Paths
   families: readonly string[]
   n: number
+  env?: Env
   now?: Date
 }): Promise<UnattendedChange> {
   let removed: UnattendedSlot | undefined
@@ -382,6 +406,7 @@ export async function setUnattendedSchedule(opts: {
   paths: Paths
   families: readonly string[]
   schedule: readonly unknown[]
+  env?: Env
   now?: Date
 }): Promise<UnattendedChange & { previous: UnattendedSlot[] }> {
   const schedule = opts.schedule.map((value, i) => {
@@ -414,6 +439,7 @@ export async function setAnswerWait(opts: {
   paths: Paths
   families: readonly string[]
   minutes: number | null
+  env?: Env
   now?: Date
 }): Promise<UnattendedChange & { before: number | null }> {
   if (opts.minutes !== null && !validAnswerWait(opts.minutes))
@@ -523,11 +549,18 @@ export function unattendedSettingsLine(env: Env): string {
     : 'sideby: `--settings` is already given, so Unattended Mode does not cover this session (its hook goes in through `--settings`).'
 }
 
-/** The line a Launch prints when `--unattended` asks for a Family Unattended Mode does not cover. */
+/** The line a Launch prints when `--unattended` asks for a Family Unattended Mode does not cover (ADR-0089). */
 export function unattendedFamilyLine(family: string, env: Env): string {
   return prefersChinese(env)
-    ? `sideby：无人值守只管 Claude 和 Codex 会话，这个 ${family} 会话不受影响。`
-    : `sideby: Unattended Mode covers Claude and Codex sessions only; this ${family} session is not covered.`
+    ? `sideby：无人值守只管 Claude、Codex 和 Antigravity CLI 会话，这个 ${family} 会话不受影响。`
+    : `sideby: Unattended Mode covers Claude, Codex and Antigravity CLI sessions only; this ${family} session is not covered.`
+}
+
+/** The line an `agy --unattended` Launch prints when `~/.gemini/config/hooks.json` is not set up yet (ADR-0089). */
+export function agyUnattendedNeedSetupLine(env: Env): string {
+  return prefersChinese(env)
+    ? 'sideby：Antigravity CLI 还没装无人值守 hook；先运行 `sideby unattended setup agy` 安装后，无人值守才会对 agy 会话生效。'
+    : 'sideby: Antigravity CLI Unattended Mode is not set up yet; run `sideby unattended setup agy` so Unattended Mode covers agy sessions.'
 }
 
 /**

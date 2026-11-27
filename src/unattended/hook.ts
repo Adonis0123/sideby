@@ -23,6 +23,10 @@
 // how a session behaves without the feature (unlike `network-hook`, which blocks when it cannot tell). Once the
 // decision is to refuse, it refuses: keeping the Pending Decision and writing the reason are best effort, and their
 // failure neither allows the call nor adds any output of its own.
+import { constants as fsConstants } from 'node:fs'
+import { open, realpath } from 'node:fs/promises'
+import { join, sep } from 'node:path'
+import { lstatOrNull } from '../core/fs-safe.ts'
 import { resolvePaths } from '../core/paths.ts'
 import { hostMade, launchPrompt, sidebyMessage } from '../core/prompt-origin.ts'
 import {
@@ -62,11 +66,14 @@ import { lastLook, type ScreenMark, waitedMinutes, watchScreen } from '../core/u
 
 export const UNATTENDED_HOOK_COMMAND = 'sideby unattended-hook'
 
-/** The tool each Host's model asks the user with. */
+/** The tool each Host's model asks the user with (ADR-0058, ADR-0089). */
 export const ASK_TOOLS: Readonly<Record<string, string>> = {
   claude: 'AskUserQuestion',
   codex: 'request_user_input',
+  agy: 'ask_question',
 }
+
+const AGY_TRANSCRIPT_TAIL = 2 * 1024 * 1024
 
 const STDIN_MAX = 8 * 1024 * 1024
 
@@ -122,6 +129,88 @@ function parseObject(raw: string): Record<string, unknown> | undefined {
     return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined
   } catch {
     return undefined
+  }
+}
+
+/** WHY: Antigravity CLI, Desktop App and IDE share `~/.gemini/config/hooks.json`; only handle CLI payloads (ADR-0089). */
+function isAgyCliPayload(v: Record<string, unknown>, env: Env): boolean {
+  const hint =
+    (typeof v.transcriptPath === 'string' && v.transcriptPath) ||
+    (typeof v.artifactDirectoryPath === 'string' && v.artifactDirectoryPath) ||
+    ''
+  if (hint) return /(?:^|[/\\])antigravity-cli(?:[/\\]|$)/.test(hint)
+  return Boolean(env.SIDEBY_ACCOUNT?.startsWith('agy:') || env[UNATTENDED_ENV] === '1')
+}
+
+function parseAgyPayload(raw: string, env: Env): Payload | undefined {
+  const v = parseObject(raw)
+  const tc = v?.toolCall
+  if (!v || !isAgyCliPayload(v, env) || !tc || typeof tc !== 'object' || Array.isArray(tc)) return undefined
+  const call = tc as Record<string, unknown>
+  if (typeof call.name !== 'string') return undefined
+  const input =
+    call.args && typeof call.args === 'object' && !Array.isArray(call.args)
+      ? (call.args as Record<string, unknown>)
+      : {}
+  const sessionId = text(v.conversationId, 256)
+  const cwd = text(v.cwd) ?? (Array.isArray(v.workspacePaths) ? text(v.workspacePaths[0]) : undefined)
+  return {
+    tool: call.name,
+    input,
+    ...(sessionId ? { sessionId } : {}),
+    ...(cwd ? { cwd } : {}),
+  }
+}
+
+/** WHY: ADR-0089 `agy` Stop omits `lastAssistantMessage`; read only the tail of a regular `.jsonl` inside `~/.gemini/antigravity-cli/` with fd identity checks. */
+async function lastAgyReply(transcriptPath: string, home: string): Promise<string | undefined> {
+  if (!transcriptPath.endsWith('.jsonl')) return undefined
+  const lst = await lstatOrNull(transcriptPath)
+  if (!lst || lst.isSymbolicLink() || !lst.isFile()) return undefined
+  let realHome: string
+  let realFile: string
+  try {
+    ;[realHome, realFile] = await Promise.all([realpath(home), realpath(transcriptPath)])
+  } catch {
+    return undefined
+  }
+  const cliRoot = join(realHome, '.gemini', 'antigravity-cli')
+  if (!realFile.startsWith(`${cliRoot}${sep}`)) return undefined
+  const flags = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0)
+  let fh: Awaited<ReturnType<typeof open>> | undefined
+  try {
+    fh = await open(realFile, flags)
+    const st = await fh.stat()
+    if (!st.isFile() || st.dev !== lst.dev || st.ino !== lst.ino) return undefined
+    const len = Math.min(st.size, AGY_TRANSCRIPT_TAIL)
+    if (len <= 0) return undefined
+    const buf = Buffer.alloc(len)
+    const { bytesRead } = await fh.read(buf, 0, len, st.size - len)
+    const chunk = buf.subarray(0, bytesRead).toString('utf8')
+    let last: string | undefined
+    for (const rawLine of chunk.split('\n')) {
+      const line = rawLine.trim()
+      if (!line.startsWith('{')) continue
+      try {
+        const obj = JSON.parse(line) as unknown
+        if (
+          obj &&
+          typeof obj === 'object' &&
+          !Array.isArray(obj) &&
+          (obj as Record<string, unknown>).type === 'PLANNER_RESPONSE' &&
+          typeof (obj as Record<string, unknown>).content === 'string'
+        ) {
+          last = ((obj as Record<string, unknown>).content as string).trim()
+        }
+      } catch {
+        // WHY: ignore a partial first line after tail seek or malformed JSONL line (ADR-0089).
+      }
+    }
+    return last || undefined
+  } catch {
+    return undefined
+  } finally {
+    await fh?.close().catch(() => {})
   }
 }
 
@@ -523,10 +612,12 @@ async function decide(
   if (stop || elicitation) {
     const v = parseObject(raw)
     if (!v) return undefined
-    const sessionId = text(v.session_id, 256)
+    const isAgy = family === 'agy'
+    const sessionId = isAgy ? text(v.conversationId, 256) : text(v.session_id, 256)
     const here = await attended(sessionId, stop)
     if (here) return here.answer
-    const cwd = text(v.cwd)
+    const cwd =
+      text(v.cwd) ?? (isAgy && Array.isArray(v.workspacePaths) ? text(v.workspacePaths[0]) : undefined)
     const where = {
       family,
       ...(account ? { account } : {}),
@@ -542,6 +633,33 @@ async function decide(
             dedupe: true,
           }),
       }
+    if (isAgy) {
+      if (!isAgyCliPayload(v, env)) return undefined
+      if (v.continuationActive === true) return undefined
+      const term = typeof v.terminationReason === 'string' ? v.terminationReason : ''
+      if (term && term !== 'NO_TOOL_CALL') return undefined
+      const direct =
+        typeof v.lastAssistantMessage === 'string' && v.lastAssistantMessage.trim()
+          ? v.lastAssistantMessage
+          : typeof v.last_assistant_message === 'string' && v.last_assistant_message.trim()
+            ? v.last_assistant_message
+            : undefined
+      const message =
+        direct ??
+        (typeof v.transcriptPath === 'string'
+          ? ((await lastAgyReply(v.transcriptPath, paths.home)) ?? '')
+          : '')
+      const question = endingQuestion(message)
+      if (!question) return undefined
+      return {
+        json: (reason) => ({ decision: 'continue', reason }),
+        reason: (kept) => stopReason(state, now, zh, kept),
+        keep: () =>
+          addPendingDecision(paths.stateDir, { kind: 'question', ...where, text: question }, now, {
+            dedupe: true,
+          }),
+      }
+    }
     // Once per stop: a turn the hook already kept going ends as the model leaves it.
     if (v.stop_hook_active !== false) return undefined
     const message = typeof v.last_assistant_message === 'string' ? v.last_assistant_message : ''
@@ -556,7 +674,7 @@ async function decide(
         }),
     }
   }
-  const payload = parsePayload(raw)
+  const payload = family === 'agy' ? parseAgyPayload(raw, env) : parsePayload(raw)
   if (!payload) return undefined
   if (permission) {
     // Asked in front of someone (an Attended Session) or while the mode is off: shown, and watched while it waits.
@@ -592,6 +710,7 @@ async function decide(
   if (payload.tool === askTool) {
     const question = questionText(payload.input)
     return {
+      ...(family === 'agy' ? { json: (reason: string) => ({ decision: 'deny', reason }) } : {}),
       reason: (kept) => questionReason(state, now, zh, kept),
       keep: () =>
         addPendingDecision(
@@ -651,14 +770,25 @@ export async function runUnattendedHook(
       return 0
     }
   }
+  const agyStop = argv[0] === 'agy' && argv[1] === 'Stop'
+  const allowStop = () => {
+    if (agyStop) {
+      try {
+        io.out.write('{"decision":""}\n')
+      } catch {
+        // WHY: best effort on closed stdout (ADR-0089).
+      }
+    }
+    return 0
+  }
   let refusal: Refusal | undefined
   const now = deps.now ? deps.now() : new Date()
   try {
     refusal = await decide(argv, env, input, now, deps)
   } catch {
-    return 0
+    return allowStop()
   }
-  if (!refusal) return 0
+  if (!refusal) return allowStop()
   let kept = true
   if (refusal.keep)
     try {

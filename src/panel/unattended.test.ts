@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { runInNewContext } from 'node:vm'
 import { asBuiltin, demoFamily, demoPlugin, seedDemoMain } from '../../testing/demo.ts'
-import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../testing/index.ts'
+import { diffSnapshots, type FakeHome, fakeHost, snapshot, withFakeHome } from '../../testing/index.ts'
 import type { LiveSession } from '../core/live-sessions.ts'
 import { addPendingDecision } from '../core/unattended-pending.ts'
 import { createRuntime } from '../runtime.ts'
@@ -69,9 +69,13 @@ function call(
   })
 }
 
-async function panel(h: FakeHome, readOnly = false) {
+async function panel(h: FakeHome, readOnly = false, useBuiltins = false) {
   await seedDemoMain(h.write)
-  const runtime = () => createRuntime({ env: h.env, builtins: [asBuiltin(demoPlugin(demoFamily()))] })
+  const runtime = () =>
+    createRuntime({
+      env: h.env,
+      ...(useBuiltins ? {} : { builtins: [asBuiltin(demoPlugin(demoFamily()))] }),
+    })
   const home = h.env.HOME!
   let handler: ReturnType<typeof createPanelHandler> | undefined
   const server = createServer((req, res) => void handler!(req, res))
@@ -472,6 +476,8 @@ describe('the Unattended page (spec §3.37)', () => {
           ['/api/unattended/schedule', { schedule: [] }],
           ['/api/unattended/wait', { minutes: 5 }],
           ['/api/unattended/pending', { all: true }],
+          ['/api/unattended/setup', { family: 'agy', confirm: true }],
+          ['/api/unattended/teardown', { family: 'agy' }],
         ] as const) {
           const r = await ro.post(path, body)
           assert.equal(r.status, 403, path)
@@ -480,6 +486,31 @@ describe('the Unattended page (spec §3.37)', () => {
         assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [])
       } finally {
         await close(ro.server)
+      }
+    })
+  })
+
+  it('previews, applies and tears down agy hooks via /api/unattended/setup and /teardown (ADR-0089)', async () => {
+    await withFakeHome(async (h) => {
+      await fakeHost(h, 'sideby')
+      const rw = await panel(h, false, true)
+      try {
+        const preview = await rw.post('/api/unattended/setup', { family: 'agy' })
+        assert.equal(preview.status, 200)
+        assert.equal(preview.body.applied, false)
+        assert.equal((preview.body.plan as { status: string }).status, 'ready')
+
+        const applied = await rw.post('/api/unattended/setup', { family: 'agy', confirm: true })
+        assert.equal(applied.status, 200)
+        assert.equal(applied.body.applied, true)
+        assert.equal((applied.body.status as { coverage: Record<string, string> }).coverage.agy, 'covered')
+
+        const torn = await rw.post('/api/unattended/teardown', { family: 'agy' })
+        assert.equal(torn.status, 200)
+        assert.equal((torn.body.result as { ok: boolean }).ok, true)
+        assert.equal((torn.body.status as { coverage: Record<string, string> }).coverage.agy, 'not-covered')
+      } finally {
+        await close(rw.server)
       }
     })
   })

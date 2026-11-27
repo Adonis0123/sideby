@@ -483,4 +483,29 @@ describe('--unattended', () => {
       assert.ok(!third!.argv.includes('--settings'))
     })
   })
+
+  it('previews (exit 10), applies (--yes), and tears down agy Unattended Mode hooks (ADR-0089)', async () => {
+    await withFakeHome(async (h) => {
+      await fakeHost(h, 'sideby')
+      const preview = await cli(h, ['unattended', 'setup', 'agy', '--json'])
+      assert.equal(preview.status, 10, preview.stderr)
+      const pBody = JSON.parse(preview.stdout) as { applied: boolean; plan: { status: string } }
+      assert.equal(pBody.applied, false)
+      assert.equal(pBody.plan.status, 'ready')
+
+      const applied = await cli(h, ['unattended', 'setup', 'agy', '--yes', '--json'])
+      assert.equal(applied.status, 0, applied.stderr)
+      assert.equal(JSON.parse(applied.stdout).applied, true)
+
+      const st = await json(h, ['status'])
+      assert.equal((st.coverage as Record<string, string>).agy, 'covered')
+      assert.equal((st.agySetup as { status: string }).status, 'enabled')
+
+      const torn = await cli(h, ['unattended', 'teardown', 'agy', '--json'])
+      assert.equal(torn.status, 0, torn.stderr)
+      assert.equal(JSON.parse(torn.stdout).ok, true)
+      const after = await json(h, ['status'])
+      assert.equal((after.coverage as Record<string, string>).agy, 'not-covered')
+    })
+  })
 })

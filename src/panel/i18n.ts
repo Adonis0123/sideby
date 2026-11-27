@@ -2099,6 +2099,18 @@ const en = {
     'Only in Claude Code and Codex sessions that sideby starts. Running claude or codex yourself is not covered.',
   'ua.codexTrust':
     'Codex: only its questions. Open {cmd} in Codex once and trust both of sideby’s hooks; Codex’s own approval prompts still wait for you.',
+  'ua.agyCovered': 'Antigravity CLI: covered for questions across all local agy sessions (via {file}).',
+  'ua.agyReady':
+    'Antigravity CLI: questions can be covered across all local agy sessions after a one-time hook setup.',
+  'ua.agyBlocked': 'Antigravity CLI: cannot set up hook ({msg}).',
+  'ua.agySetup': 'Set up',
+  'ua.agyPreviewNote':
+    'Adds one named entry (“sideby-unattended”) to {file} so Unattended Mode covers questions in every local Antigravity CLI session. You can remove it any time.',
+  'ua.agyConfirm': 'Apply change',
+  'ua.agyRemove': 'Remove',
+  'ua.agyEnabledToast': 'Antigravity CLI is now covered by Unattended Mode.',
+  'ua.agyRemovedToast': 'Removed sideby’s hook from Antigravity CLI.',
+  'ua.agySetupFailed': 'Could not update Antigravity CLI hooks: {msg}',
   'ua.notSupported': '{hosts}: not supported yet.',
   'ua.listSep': ', ',
   'ua.readOnly': 'Read-only view. Use sideby unattended to change it.',
@@ -4135,6 +4147,17 @@ const zh: Record<MessageKey, string> = {
   'ua.coverLine': '只对 sideby 启动的 Claude、Codex 会话生效；直接运行 claude 或 codex 的会话不受影响。',
   'ua.codexTrust':
     'Codex：只管提问。在 Codex 里打开一次 {cmd}，信任 sideby 的两个 hook；Codex 自己的批准提示仍会等你。',
+  'ua.agyCovered': 'Antigravity CLI：已覆盖本机所有 agy 会话的提问（通过 {file}）。',
+  'ua.agyReady': 'Antigravity CLI：一次性安装 hook 后，即可覆盖本机所有 agy 会话的提问。',
+  'ua.agyBlocked': 'Antigravity CLI：暂时无法安装 hook（{msg}）。',
+  'ua.agySetup': '启用',
+  'ua.agyPreviewNote':
+    '将在 {file} 中添加独立键“sideby-unattended”，让无人值守覆盖本机所有 Antigravity CLI 会话的提问，可随时移除。',
+  'ua.agyConfirm': '确认写入',
+  'ua.agyRemove': '移除',
+  'ua.agyEnabledToast': '已为 Antigravity CLI 启用无人值守。',
+  'ua.agyRemovedToast': '已从 Antigravity CLI 移除无人值守 hook。',
+  'ua.agySetupFailed': '没能更新 Antigravity CLI 的 hooks：{msg}',
   'ua.notSupported': '{hosts}：暂不支持。',
   'ua.listSep': '、',
   'ua.readOnly': '只读视图。修改请用 sideby unattended 命令。',

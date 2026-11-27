@@ -640,9 +640,21 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
     id: 'unattended',
     group: 'health',
     usage: 'sideby unattended [on|off]',
-    help: 'nobody is here: sessions sideby starts do not stop to ask; on takes --for 4h, --until 07:30 or --slot-end (schedule add|remove|preset weeknights, pending [--project <name>] [done <id>|--ids|--all|--replied] [reopen <id>], defer "<text>"); run --unattended for one session',
+    help: 'nobody is here: sessions sideby starts (and agy after `setup agy`) do not stop to ask; on takes --for 4h, --until 07:30 or --slot-end (setup|teardown agy, schedule add|remove|preset weeknights, pending [--project <name>] [done <id>|--ids|--all|--replied] [reopen <id>], defer "<text>"); run --unattended for one session',
     summary: { en: 'Nobody is here: sessions do not stop to ask', zh: '无人值守：会话不停下来问你' },
     example: 'sideby unattended on --until 07:30',
+    feature: 'page.unattended',
+  },
+  {
+    id: 'unattended.setup',
+    group: 'health',
+    usage: 'sideby unattended setup|teardown agy [--yes]',
+    help: 'preview and add (or remove) sideby-unattended in ~/.gemini/config/hooks.json so Unattended Mode covers Antigravity CLI questions',
+    summary: {
+      en: 'Set up or remove Unattended Mode for Antigravity CLI',
+      zh: '为 Antigravity CLI 启用或移除无人值守',
+    },
+    example: 'sideby unattended setup agy',
     feature: 'page.unattended',
   },
   {
