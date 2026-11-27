@@ -401,7 +401,7 @@
     }
   },
   "tests": {
-    "total": 2145,
+    "total": 2153,
     "files": {
       "mods/claude/hooks/register.test.ts": 7,
       "scripts/budget.test.ts": 7,
@@ -493,6 +493,7 @@
       "src/core/remote-control.test.ts": 8,
       "src/core/remove.test.ts": 4,
       "src/core/resume.test.ts": 13,
+      "src/core/run-board.test.ts": 5,
       "src/core/run-link.test.ts": 11,
       "src/core/safety.test.ts": 28,
       "src/core/same-login.test.ts": 11,
@@ -574,6 +575,7 @@
       "src/panel/page-script-scope.test.ts": 3,
       "src/panel/panel.test.ts": 61,
       "src/panel/portal-refresh.test.ts": 6,
+      "src/panel/runs.test.ts": 3,
       "src/panel/send.test.ts": 11,
       "src/panel/sessions.test.ts": 5,
       "src/panel/unattended.test.ts": 8,
@@ -606,6 +608,18 @@
         "reason": "Account removal moves account directories to trash and mutates config/aliases (data writes, ADR-0087)",
         "from": 2141,
         "to": 2145
+      },
+      {
+        "date": "2026-11-26",
+        "reason": "pure-logic run-board stream/autoSteps/pointer tests and Panel /runs HTTP route tests",
+        "from": 2145,
+        "to": 2151
+      },
+      {
+        "date": "2026-11-26",
+        "reason": "regression tests for live Run Board F1-F8 review fixes (outward asks, live resync, runs open verification/TOCTOU, long transcript task correlation)",
+        "from": 2151,
+        "to": 2153
       }
     ]
   },

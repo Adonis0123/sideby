@@ -109,7 +109,7 @@ describe('Launch', () => {
       const file = p.args[at + 1]!
       assert.ok(file.startsWith(rt.paths.stateDir))
       const hooks = JSON.parse(await readFile(file, 'utf8')).hooks
-      assert.deepEqual(Object.keys(hooks).sort(), ['PreToolUse', 'UserPromptSubmit'])
+      assert.deepEqual(Object.keys(hooks).sort(), ['PreToolUse', 'SessionStart', 'UserPromptSubmit'])
       assert.match(hooks.UserPromptSubmit[0].hooks[0].command, /network-hook claude UserPromptSubmit$/)
       // Claude Code's own 30-second default for prompts is shorter than the check's retries, and lets the prompt through.
       assert.equal(hooks.UserPromptSubmit[0].hooks[0].timeout, 60)
@@ -232,7 +232,13 @@ describe('Launch', () => {
       const official = await rt.prepareLaunch('claude:official', [], 'run')
       assert.deepEqual(asked, [])
       assert.equal(official.networkArgs, undefined)
-      assert.ok(!official.args.includes('--settings'))
+      const officialAt = official.args.indexOf('--settings')
+      assert.deepEqual(
+        officialAt >= 0
+          ? Object.keys(JSON.parse(await readFile(official.args[officialAt + 1]!, 'utf8')).hooks)
+          : [],
+        ['SessionStart'],
+      )
       const ci = await createRuntime({
         env: { ...h.env, CI: '1' },
         builtins,

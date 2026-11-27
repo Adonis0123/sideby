@@ -1,0 +1,604 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/runs-detail.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "id",
+    "objective",
+    "state",
+    "paused",
+    "dir",
+    "steps",
+    "autoSteps",
+    "asks",
+    "lanes",
+    "waits",
+    "outputs",
+    "decisions",
+    "grants",
+    "fingerprint"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "id": {
+      "type": "string"
+    },
+    "objective": {
+      "type": "string"
+    },
+    "state": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "active"
+        },
+        {
+          "type": "string",
+          "const": "closed"
+        }
+      ]
+    },
+    "paused": {
+      "type": "boolean"
+    },
+    "dir": {
+      "type": "string"
+    },
+    "createdAt": {
+      "type": "string"
+    },
+    "updatedAt": {
+      "type": "string"
+    },
+    "coordinator": {
+      "type": "string"
+    },
+    "coordinatorSession": {
+      "type": "string"
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "title",
+          "state"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "queued"
+              },
+              {
+                "type": "string",
+                "const": "working"
+              },
+              {
+                "type": "string",
+                "const": "done"
+              },
+              {
+                "type": "string",
+                "const": "blocked"
+              }
+            ]
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "autoSteps": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "source",
+            "items"
+          ],
+          "properties": {
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "agy"
+                },
+                {
+                  "type": "string",
+                  "const": "claude"
+                }
+              ]
+            },
+            "updatedAt": {
+              "type": "string"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "title",
+                  "state"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "queued"
+                      },
+                      {
+                        "type": "string",
+                        "const": "working"
+                      },
+                      {
+                        "type": "string",
+                        "const": "done"
+                      },
+                      {
+                        "type": "string",
+                        "const": "blocked"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "asks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "state",
+          "question"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "open"
+              },
+              {
+                "type": "string",
+                "const": "answered"
+              }
+            ]
+          },
+          "question": {
+            "type": "string"
+          },
+          "recommend": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "blocks": {
+            "type": "string"
+          },
+          "lane": {
+            "type": "string"
+          },
+          "outward": {
+            "type": "boolean"
+          },
+          "recipient": {
+            "type": "string"
+          },
+          "recipientTruncated": {
+            "type": "boolean"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "channelTruncated": {
+            "type": "boolean"
+          },
+          "draft": {
+            "type": "string"
+          },
+          "draftTruncated": {
+            "type": "boolean"
+          },
+          "answer": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "answeredAt": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "lanes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "round",
+          "ledgerState",
+          "liveState",
+          "streamEnded",
+          "streamFailed",
+          "waitingOn",
+          "openAsks"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "account": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "worktree": {
+            "type": "string"
+          },
+          "round": {
+            "type": "integer"
+          },
+          "ledgerState": {
+            "type": "string"
+          },
+          "liveState": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "done"
+              },
+              {
+                "type": "string",
+                "const": "failed"
+              },
+              {
+                "type": "string",
+                "const": "stopped"
+              },
+              {
+                "type": "string",
+                "const": "needs-you"
+              },
+              {
+                "type": "string",
+                "const": "attention"
+              },
+              {
+                "type": "string",
+                "const": "finished"
+              },
+              {
+                "type": "string",
+                "const": "queued"
+              },
+              {
+                "type": "string",
+                "const": "working"
+              }
+            ]
+          },
+          "activity": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "streamEnded": {
+            "type": "boolean"
+          },
+          "streamFailed": {
+            "type": "boolean"
+          },
+          "streamMtimeMs": {
+            "type": "number"
+          },
+          "tokens": {
+            "type": "object",
+            "required": [
+              "input",
+              "output"
+            ],
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              }
+            }
+          },
+          "costUsd": {
+            "type": "number"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "sessionStatus": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "busy"
+              },
+              {
+                "type": "string",
+                "const": "idle"
+              },
+              {
+                "type": "string",
+                "const": "needs-you"
+              },
+              {
+                "type": "string",
+                "const": "unknown"
+              }
+            ]
+          },
+          "sessionLabel": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "endedAt": {
+            "type": "string"
+          },
+          "elapsedMs": {
+            "type": "number"
+          },
+          "waitingOn": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "openAsks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "waits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "state"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "log": {
+            "type": "string"
+          },
+          "lastLine": {
+            "type": "string"
+          },
+          "logMtimeMs": {
+            "type": "number"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "title"
+        ],
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "lane"
+              },
+              {
+                "type": "string",
+                "const": "artifact"
+              },
+              {
+                "type": "string",
+                "const": "commit"
+              }
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "meta": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "what",
+          "choice"
+        ],
+        "properties": {
+          "what": {
+            "type": "string"
+          },
+          "choice": {
+            "type": "string"
+          },
+          "why": {
+            "type": "string"
+          },
+          "options": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "grants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "scope"
+        ],
+        "properties": {
+          "scope": {
+            "type": "string"
+          },
+          "words": {
+            "type": "string"
+          },
+          "outward": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "fingerprint": {
+      "type": "string"
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  }
+}

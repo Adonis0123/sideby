@@ -466,7 +466,7 @@ describe('--unattended', () => {
       assert.equal(rec?.env.SIDEBY_UNATTENDED, '1')
       const at = rec!.argv.indexOf('--settings')
       assert.ok(at >= 0)
-      assert.match(rec!.argv[at + 1]!, /\/unattended\/claude-settings\.json$/)
+      assert.match(rec!.argv[at + 1]!, /\/unattended\/claude-settings-runs\.json$/)
       assert.ok(!rec!.argv.includes('--unattended'))
       assert.ok(rec!.argv.includes('hello'))
       assert.deepEqual(diffSnapshots(before, await snapshot(h.path('.claude-001'))), [])
@@ -480,7 +480,8 @@ describe('--unattended', () => {
       assert.equal((await cli(h, ['run', 'claude:001'])).status, 0)
       const third = (await readHostLog(h, 'claude'))[2]
       assert.equal(third?.env.SIDEBY_UNATTENDED, undefined)
-      assert.ok(!third!.argv.includes('--settings'))
+      const thirdAt = third!.argv.indexOf('--settings')
+      assert.ok(thirdAt === -1 || third!.argv[thirdAt + 1]?.endsWith('/runs/claude-settings.json'))
     })
   })
 })

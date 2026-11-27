@@ -185,7 +185,7 @@ import {
   sameLoginGroups,
   sharedQuota,
 } from './core/same-login.ts'
-import { type SessionHookPart, sessionHookArgs } from './core/session-hooks.ts'
+import { runsHookPart, type SessionHookPart, sessionHookArgs } from './core/session-hooks.ts'
 import { shareMeaning } from './core/share-meaning.ts'
 import {
   SHELLS,
@@ -1003,11 +1003,28 @@ export async function createRuntime(
   /** Puts every session hook into the Launch's arguments: one `--settings` for Claude, `-c hooks.*` for Codex. */
   const addSessionHooks = async (p: PreparedLaunch, list: readonly (SessionHookPart | null)[]) => {
     const parts = list.filter((x): x is SessionHookPart => x !== null)
-    const args = await sessionHookArgs(p.family.id, paths.stateDir, parts)
+    let active = parts
+    let args: string[]
+    try {
+      args = await sessionHookArgs(p.family.id, paths.stateDir, parts)
+    } catch (err) {
+      // WHY: The optional Run recovery hook must never prevent Claude from starting when its state directory is unwritable.
+      if (!parts.some((x) => x.id === 'runs')) throw err
+      active = parts.filter((x) => x.id !== 'runs')
+      args = await sessionHookArgs(p.family.id, paths.stateDir, active)
+      addNotice(p, [`skipped Run recovery hook (${err instanceof Error ? err.message : String(err)})`])
+    }
     if (!args.length) return
     p.sessionHookArgs = args
-    if (parts.some((x) => x.id === 'network')) p.networkArgs = args
+    if (active.some((x) => x.id === 'network')) p.networkArgs = args
     p.args = beforeDashes(p.args, args)
+  }
+
+  // WHY: Always attach the compact-only `runs-hook` for interactive Claude launches so a session that initializes its first Run
+  // mid-session still recovers its pointer after compaction; skips `-p`/`--print` headless calls and exits 0 silently when idle.
+  const runsPrepared = (p: PreparedLaunch): SessionHookPart | null => {
+    if (p.family.id !== 'claude' || claudeHeadless(p.args) || hasOption(p.args, ['--settings'])) return null
+    return runsHookPart()
   }
 
   /**
@@ -1023,6 +1040,7 @@ export async function createRuntime(
     if (!o.ignoreNetwork) parts.push(await guardPrepared(p, session))
     if (session) parts.push(await unattendedPrepared(p, Boolean(o.unattended)))
     if (session) parts.push(progressPrepared(p))
+    if (session) parts.push(runsPrepared(p))
     // Last: its file name says which Project's folder it holds.
     if (session) parts.push(await memoryPrepared(p))
     await addSessionHooks(p, parts)

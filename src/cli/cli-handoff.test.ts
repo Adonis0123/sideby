@@ -34,7 +34,13 @@ describe('resume (spec §3.15)', () => {
       const [rec] = await readHostLog(h, 'claude')
       assert.equal(rec!.env.CLAUDE_CONFIG_DIR, h.path('.claude-work'))
       assert.equal(rec!.env.ANTHROPIC_API_KEY, undefined)
-      assert.deepEqual(rec!.argv, ['--model', 'opus', '--resume', ID])
+      const dropRunsSettings = (argv: readonly string[]) => {
+        const i = argv.indexOf('--settings')
+        return i >= 0 && argv[i + 1]?.endsWith('/runs/claude-settings.json')
+          ? [...argv.slice(0, i), ...argv.slice(i + 2)]
+          : [...argv]
+      }
+      assert.deepEqual(dropRunsSettings(rec!.argv), ['--model', 'opus', '--resume', ID])
 
       // A new session: the Host runs exactly as typed, keeping the environment.
       const plain = await sideby(h, ['resume', 'claude', '--', '-p', 'hi'], { ANTHROPIC_API_KEY: 'kept' })
@@ -63,7 +69,12 @@ describe('resume (spec §3.15)', () => {
       assert.match(r.err, new RegExp(`session ${ID} was never saved; starting a new session in claude:work`))
       const [rec] = await readHostLog(h, 'claude')
       assert.equal(rec!.env.CLAUDE_CONFIG_DIR, h.path('.claude-work'))
-      assert.deepEqual(rec!.argv, ['--dangerously-skip-permissions'])
+      const at = rec!.argv.indexOf('--settings')
+      const stripped =
+        at >= 0 && rec!.argv[at + 1]?.endsWith('/runs/claude-settings.json')
+          ? [...rec!.argv.slice(0, at), ...rec!.argv.slice(at + 2)]
+          : rec!.argv
+      assert.deepEqual(stripped, ['--dangerously-skip-permissions'])
     })
   })
 
@@ -138,7 +149,12 @@ describe('resume (spec §3.15)', () => {
         })
         const [routed, picked, plain] = await readHostLog(h, 'claude')
         assert.equal(routed!.env.CLAUDE_CONFIG_DIR, h.path('.claude-work'))
-        assert.deepEqual(routed!.argv, ['--dangerously-skip-permissions', '--resume', ID])
+        const at = routed!.argv.indexOf('--settings')
+        const routedStripped =
+          at >= 0 && routed!.argv[at + 1]?.endsWith('/runs/claude-settings.json')
+            ? [...routed!.argv.slice(0, at), ...routed!.argv.slice(at + 2)]
+            : routed!.argv
+        assert.deepEqual(routedStripped, ['--dangerously-skip-permissions', '--resume', ID])
         assert.equal(picked!.env.CLAUDE_CONFIG_DIR, '/picked')
         assert.deepEqual(picked!.argv, ['--dangerously-skip-permissions', '--resume', ID])
         assert.deepEqual(plain!.argv, ['--dangerously-skip-permissions', '-p', 'hi'])

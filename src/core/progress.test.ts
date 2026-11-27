@@ -42,8 +42,8 @@ describe('Progress Reminders at launch', () => {
     await withFakeHome(async (h) => {
       const rt = await setup(h, {})
       const p = await rt.prepareLaunch('claude:001', [], 'run')
-      assert.deepEqual(p.args, [])
-      assert.equal(p.sessionHookArgs, undefined)
+      const { hooks } = await settingsOf(p.args)
+      assert.deepEqual(Object.keys(hooks), ['SessionStart'])
       assert.equal(p.env.SIDEBY_PROGRESS_EVERY, undefined)
       assert.deepEqual(rt.progressView(), {
         on: false,
@@ -61,8 +61,8 @@ describe('Progress Reminders at launch', () => {
       const main = await snapshot(h.path('.claude'))
       const p = await rt.prepareLaunch('claude:001', [], 'run')
       const { file, hooks } = await settingsOf(p.args)
-      assert.match(file, /progress\/claude-settings\.json$/)
-      assert.deepEqual(Object.keys(hooks).sort(), ['Stop', 'UserPromptSubmit'])
+      assert.match(file, /progress\/claude-settings-runs\.json$/)
+      assert.deepEqual(Object.keys(hooks).sort(), ['SessionStart', 'Stop', 'UserPromptSubmit'])
       const stop = hooks.Stop[0].hooks[0]
       assert.match(stop.command, /progress-hook claude Stop$/)
       assert.equal(stop.asyncRewake, true)
@@ -87,7 +87,7 @@ describe('Progress Reminders at launch', () => {
       })
       const p = await rt.prepareLaunch('claude:001', [], 'run')
       const own = await settingsOf(p.args)
-      assert.match(own.file, /network\/claude-settings-unattended-progress\.json$/)
+      assert.match(own.file, /network\/claude-settings-unattended-progress-runs\.json$/)
       const handoff = await h.write(
         'state/handoff.json',
         JSON.stringify({
@@ -121,13 +121,17 @@ describe('Progress Reminders at launch', () => {
       await h.write('.config/sideby/config.json', JSON.stringify({ progress: { every: 5 } }))
       const on = await rt.prepareLaunch('claude:001', [], 'run')
       assert.equal(on.env.SIDEBY_PROGRESS_EVERY, '5')
-      assert.deepEqual(Object.keys((await settingsOf(on.args)).hooks).sort(), ['Stop', 'UserPromptSubmit'])
+      assert.deepEqual(Object.keys((await settingsOf(on.args)).hooks).sort(), [
+        'SessionStart',
+        'Stop',
+        'UserPromptSubmit',
+      ])
       await h.write('.config/sideby/config.json', JSON.stringify({ progress: { every: 30 } }))
       assert.equal((await rt.prepareLaunch('claude:001', [], 'run')).env.SIDEBY_PROGRESS_EVERY, '30')
       await h.write('.config/sideby/config.json', '{}')
       const off = await rt.prepareLaunch('claude:001', [], 'run')
       assert.equal(off.env.SIDEBY_PROGRESS_EVERY, undefined)
-      assert.deepEqual(off.args, [])
+      assert.deepEqual(Object.keys((await settingsOf(off.args)).hooks), ['SessionStart'])
     })
   })
 

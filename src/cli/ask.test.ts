@@ -20,7 +20,13 @@ it('ask --run passes one prompt argument, cwd, Host exit code, and login argumen
     const prompt = 'quotes \'" $(do-not-run) `also-not`\nsecond line'
     const id = await writeTask({ kind: 'prompt', account: 'claude:main', prompt, cwd }, rt.paths)
     assert.equal((await cli(h, ['ask', '--run', id])).code, 7)
-    assert.deepEqual((await readHostLog(h, 'claude'))[0]!.argv, ['--permission-mode', 'auto', prompt])
+    const firstArgv = (await readHostLog(h, 'claude'))[0]!.argv
+    const at = firstArgv.indexOf('--settings')
+    const stripped =
+      at >= 0 && firstArgv[at + 1]?.endsWith('/runs/claude-settings.json')
+        ? [...firstArgv.slice(0, at), ...firstArgv.slice(at + 2)]
+        : firstArgv
+    assert.deepEqual(stripped, ['--permission-mode', 'auto', prompt])
     assert.equal(await readFile(h.path('cwd.txt'), 'utf8'), cwd)
     const login = await writeTask({ kind: 'login', account: 'claude:main', cwd }, rt.paths)
     assert.equal((await cli(h, ['ask', '--run', login])).code, 7)

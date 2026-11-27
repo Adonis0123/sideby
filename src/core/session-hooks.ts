@@ -186,3 +186,20 @@ export async function withClaudeSessionHooks(
     more,
   )
 }
+
+// WHY: Registers `runs-hook` on Claude's `SessionStart` (`compact` matcher only) through sideby's own `--settings` file
+// so compacted coordinator sessions automatically recover a <=3-line Run pointer without touching Host directories.
+export function runsHookPart(): SessionHookPart {
+  return {
+    id: 'runs',
+    claude: {
+      SessionStart: [
+        {
+          matcher: 'compact',
+          hooks: [{ type: 'command', command: sidebyHookCommand('runs-hook', 'claude', 'SessionStart') }],
+        },
+      ],
+    },
+    codex: {},
+  }
+}

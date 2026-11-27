@@ -249,7 +249,12 @@ describe('next (Handoff, spec §3.13)', () => {
       )
       const [, , three, four] = await readHostLog(h, 'claude')
       assert.equal(three?.env.CLAUDE_CONFIG_DIR, h.path('.claude-work'))
-      assert.deepEqual(three?.argv.slice(-2), ['--resume', sid])
+      const threeAt = three?.argv.indexOf('--settings') ?? -1
+      const threeStripped =
+        three && threeAt >= 0 && three.argv[threeAt + 1]?.endsWith('/runs/claude-settings.json')
+          ? [...three.argv.slice(0, threeAt), ...three.argv.slice(threeAt + 2)]
+          : (three?.argv ?? [])
+      assert.deepEqual(threeStripped.slice(-2), ['--resume', sid])
       assert.equal(four?.env.CLAUDE_CONFIG_DIR, undefined)
       assert.deepEqual(four?.argv.slice(-2), ['--print', 'hi'])
       assert.ok(!four?.argv.includes(unsaved))

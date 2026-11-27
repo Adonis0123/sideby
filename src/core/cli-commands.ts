@@ -535,6 +535,39 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
     },
   },
   {
+    id: 'runs',
+    group: 'sessions',
+    usage: 'sideby runs [<id>]',
+    help: 'list active and recent orchestrated runs, or inspect one run live (with stream activity and auto-synced steps)',
+    summary: {
+      en: 'List orchestrated runs or inspect one run live',
+      zh: '列出所有派发任务或实时查看单个任务进度',
+    },
+    example: 'sideby runs',
+  },
+  {
+    id: 'runs.open',
+    group: 'sessions',
+    usage: 'sideby runs open <id>',
+    help: 'open the live Run Board in the local Panel (or its static board fallback)',
+    summary: {
+      en: 'Open the live Run Board for one run in the Panel',
+      zh: '在本地面板打开任务的实时看板',
+    },
+    example: 'sideby runs open demo-run',
+  },
+  {
+    id: 'runs.pointer',
+    group: 'sessions',
+    usage: 'sideby runs pointer [--session <id>] [--cwd <dir>]',
+    help: 'print a short post-compaction recovery pointer for active runs matching a session or folder',
+    summary: {
+      en: 'Print a compact recovery pointer for active runs',
+      zh: '输出进行中任务的简短恢复指针',
+    },
+    example: 'sideby runs pointer',
+  },
+  {
     id: 'history',
     group: 'sessions',
     usage: 'sideby history [<words>...]',

@@ -503,7 +503,12 @@ if (process.env.SIDEBY_HANDOFF_DIR) fs.writeFileSync(path.join(process.env.SIDEB
       const starts = (await readHostLog(h, 'claude')).filter((r) => r.argv)
       assert.equal(starts.length, 2)
       assert.equal(starts[1]!.env.CLAUDE_CONFIG_DIR, h.path('.claude-001'))
-      assert.deepEqual(starts[1]!.argv.slice(-2), ['--resume', 's1'])
+      const at = starts[1]!.argv.indexOf('--settings')
+      const stripped =
+        at >= 0 && starts[1]!.argv[at + 1]?.endsWith('/runs/claude-settings.json')
+          ? [...starts[1]!.argv.slice(0, at), ...starts[1]!.argv.slice(at + 2)]
+          : starts[1]!.argv
+      assert.deepEqual(stripped.slice(-2), ['--resume', 's1'])
       assert.equal(starts[1]!.env.SIDEBY_HANDOFF_RUN, undefined)
     })
   })

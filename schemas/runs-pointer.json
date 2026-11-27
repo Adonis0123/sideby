@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sideby/runs-pointer.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "runs",
+    "text"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "objective",
+          "dir",
+          "panelUrl",
+          "stepsDone",
+          "stepsTotal",
+          "activeLanes",
+          "openAsks"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "dir": {
+            "type": "string"
+          },
+          "panelUrl": {
+            "type": "string"
+          },
+          "stepsDone": {
+            "type": "integer"
+          },
+          "stepsTotal": {
+            "type": "integer"
+          },
+          "currentStep": {
+            "type": "string"
+          },
+          "activeLanes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "title",
+                "liveState"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "liveState": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "openAsks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "question"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "text": {
+      "type": "string"
+    },
+    "_notice": {
+      "type": "object",
+      "properties": {
+        "update": {
+          "type": "object",
+          "required": [
+            "current",
+            "latest",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "current": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "Run it after the user agrees: it shows the plan and exits 10; then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "required": [
+            "installed",
+            "current",
+            "command",
+            "message"
+          ],
+          "properties": {
+            "installed": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The skill's version; null when it has none."
+            },
+            "current": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "description": "`sideby update`, which updates the skill with sideby: run it after the user agrees; it shows the plan and exits 10, then --yes."
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Not the answer to the task: mention it briefly afterwards and offer to update."
+    }
+  }
+}

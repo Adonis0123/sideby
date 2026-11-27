@@ -10,6 +10,13 @@ import { parseArgs } from './args.ts'
 import { cli, cliSpawn, MP4_HEAD, PNG_HEAD, shape, ttyInput } from './ask-test-helpers.ts'
 import { cmdAsk, cmdKey } from './commands.ts'
 
+const dropRunsSettings = (argv: readonly string[]) => {
+  const i = argv.indexOf('--settings')
+  return i >= 0 && argv[i + 1]?.endsWith('/runs/claude-settings.json')
+    ? [...argv.slice(0, i), ...argv.slice(i + 2)]
+    : [...argv]
+}
+
 it("ask --run keeps the account's own arguments, and adds no auto mode, with ask.permissions account (ADR-0070)", async () => {
   await withFakeHome(async (h) => {
     await h.write('.claude/settings.json', '{}')
@@ -28,7 +35,7 @@ it("ask --run keeps the account's own arguments, and adds no auto mode, with ask
     // The default, also when written out: the checks stay on.
     await h.write('.config/sideby/config.json', JSON.stringify({ accounts, ask: { permissions: 'checked' } }))
     await start('claude:main')
-    assert.deepEqual((await readHostLog(h, 'claude'))[0]!.argv, [
+    assert.deepEqual(dropRunsSettings((await readHostLog(h, 'claude'))[0]!.argv), [
       '--permission-mode',
       'auto',
       '--model',
@@ -38,7 +45,7 @@ it("ask --run keeps the account's own arguments, and adds no auto mode, with ask
     await h.write('.config/sideby/config.json', JSON.stringify({ accounts, ask: { permissions: 'account' } }))
     await start('claude:main')
     await start('codex:main')
-    assert.deepEqual((await readHostLog(h, 'claude'))[1]!.argv, [...claude, 'hi'])
+    assert.deepEqual(dropRunsSettings((await readHostLog(h, 'claude'))[1]!.argv), [...claude, 'hi'])
     assert.deepEqual((await readHostLog(h, 'codex'))[0]!.argv, [...codex, 'hi'])
   })
 })
@@ -399,7 +406,11 @@ it('ask --run gives Codex each attached image as --image=<path> before the promp
       rt.paths,
     )
     assert.equal((await cli(h, ['ask', '--run', claude])).code, 0)
-    assert.deepEqual((await readHostLog(h, 'claude'))[0]!.argv, ['--permission-mode', 'auto', prompt])
+    assert.deepEqual(dropRunsSettings((await readHostLog(h, 'claude'))[0]!.argv), [
+      '--permission-mode',
+      'auto',
+      prompt,
+    ])
   })
 })
 

@@ -42,8 +42,7 @@ describe('shared memory at Launch', () => {
     await withFakeHome(async (h) => {
       const rt = await setup(h, {})
       const p = await rt.prepareLaunch('claude:work', [], 'run')
-      assert.equal(p.args.includes('--settings'), false)
-      assert.equal(p.sessionHookArgs, undefined)
+      assert.equal((await settingsFiles(p.args))[0]?.autoMemoryDirectory, undefined)
     })
   })
 
@@ -51,7 +50,7 @@ describe('shared memory at Launch', () => {
     await withFakeHome(async (h) => {
       const rt = await setup(h, { claude: { shareMemory: true } })
       const p = await rt.prepareLaunch('claude:work', ['--model', 'opus'], 'run')
-      assert.deepEqual(await settingsFiles(p.args), [{ autoMemoryDirectory: memoryOf(h, 'code/app') }])
+      assert.equal((await settingsFiles(p.args))[0]?.autoMemoryDirectory, memoryOf(h, 'code/app'))
       // Kept as sideby's own session settings, so Auto Handoff never takes it for the user's `--settings`.
       assert.deepEqual(
         p.sessionHookArgs,
@@ -61,7 +60,7 @@ describe('shared memory at Launch', () => {
       const other = await setup(h, { claude: { shareMemory: true } }, 'code/other')
       const q = await other.prepareLaunch('claude:work', [], 'run')
       assert.notEqual(q.sessionHookArgs![1], p.sessionHookArgs![1])
-      assert.deepEqual(await settingsFiles(q.args), [{ autoMemoryDirectory: memoryOf(h, 'code/other') }])
+      assert.equal((await settingsFiles(q.args))[0]?.autoMemoryDirectory, memoryOf(h, 'code/other'))
     })
   })
 
@@ -102,7 +101,7 @@ describe('shared memory at Launch', () => {
       await withFakeHome(async (h) => {
         const rt = await setup(h, { claude: { shareMemory: true } })
         const p = await rt.prepareLaunch(ref, [...args], command)
-        assert.deepEqual(await settingsFiles(p.args), [])
+        assert.equal((await settingsFiles(p.args))[0]?.autoMemoryDirectory, undefined)
         assert.equal(p.notice, undefined)
       })
     })
@@ -113,7 +112,7 @@ describe('shared memory at Launch', () => {
       await h.write('code/super/lib/.git', 'gitdir: ../.git/modules/lib\n')
       const rt = await setup(h, { claude: { shareMemory: true } }, 'code/super/lib')
       const p = await rt.prepareLaunch('claude:work', [], 'run')
-      assert.deepEqual(await settingsFiles(p.args), [])
+      assert.equal((await settingsFiles(p.args))[0]?.autoMemoryDirectory, undefined)
       assert.match(
         p.notice ?? '',
         /own memory instead of the shared one \(~\/code\/super\/lib\/\.git is not a linked worktree/,

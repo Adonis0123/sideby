@@ -44,7 +44,12 @@ it("ask --run finds and runs a task the Panel wrote under another state folder, 
     assert.equal((await cli(h, ['ask', '--run', id], terminalEnv)).code, 1, 'not found without the folder')
     assert.equal((await cli(h, ['ask', '--run', id, '--state-dir', rt.paths.stateDir], terminalEnv)).code, 3)
     const record = (await readHostLog(h, 'claude'))[0]!
-    assert.deepEqual(record.argv, ['--permission-mode', 'auto', 'hi'])
+    const at = record.argv.indexOf('--settings')
+    const stripped =
+      at >= 0 && record.argv[at + 1]?.endsWith('/runs/claude-settings.json')
+        ? [...record.argv.slice(0, at), ...record.argv.slice(at + 2)]
+        : record.argv
+    assert.deepEqual(stripped, ['--permission-mode', 'auto', 'hi'])
     assert.equal(record.env.HOME, h.home)
     assert.equal(record.env.XDG_STATE_HOME, h.path('panel-state'))
   })

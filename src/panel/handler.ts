@@ -174,6 +174,7 @@ import { type OrcaDeps, orcaTabs, switchOrcaTab, systemOrca } from './orca.ts'
 import { renderPage } from './page.ts'
 import { AI_TASK_KINDS, networkDiagnoseTaskFacts } from './page-logic.ts'
 import { tokenStyles } from './page-styles.ts'
+import { createRunsRoutes } from './runs.ts'
 import { type PanelTheme, type ResolvedTheme, resolveTheme } from './theme.ts'
 import { BUILTIN_THEMES, DEFAULT_THEME_ID } from './themes.ts'
 
@@ -1872,6 +1873,42 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
   })
   const sessionsSource = (opts as { [LIVE_SESSIONS_SOURCE]?: LiveSessionsSource })[LIVE_SESSIONS_SOURCE]
   const liveSessions = sessionsSource?.list ?? listLiveSessions
+  const runsRoutes = createRunsRoutes({
+    getRuntime,
+    liveSessions,
+    basePath,
+    lang,
+    resolvePageTheme: async (req, method) => {
+      const panel =
+        method === 'HEAD' || view === 'network'
+          ? undefined
+          : await getRuntime().then(
+              (rt) => rt.config.panel,
+              () => undefined,
+            )
+      const preview = new URL(req.url ?? '/', 'http://x').searchParams.get('theme') === 'preview'
+      const colors =
+        method === 'HEAD' || view === 'network'
+          ? undefined
+          : await getRuntime().then(
+              async (rt) =>
+                (preview ? await previewColors(rt.paths) : undefined) ??
+                (rt.config.panel?.colorTheme && rt.config.panel.colorTheme !== NO_THEME
+                  ? await resolveColors(rt.paths, rt.config.panel.colorTheme)
+                  : undefined),
+              () => undefined,
+            )
+      return {
+        pageTheme: colors ? layerTheme(colors, theme) : theme,
+        ...(panel?.theme ? { panelTheme: panel.theme } : {}),
+        ...(panel?.language ? { panelLang: panel.language } : {}),
+      }
+    },
+    sendJson: (res, status, body) => send(res, status, body),
+    onHttpError: (status, message, code) => {
+      throw new HttpError(status, message, code)
+    },
+  })
   // A change from this page can end a stretch of Unattended Mode: the plugins hear of it now, as after the CLI. The
   // answer waits for that (two small reads when nothing ended), but at most 1 s; a slower plugin finishes on its own.
   const noticeUnattendedEnd = (rt: Runtime) =>
@@ -3613,6 +3650,14 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
             }),
           )
           return true
+        }
+        if (
+          sub === '/runs' ||
+          sub.startsWith('/runs/') ||
+          sub === '/api/runs' ||
+          sub.startsWith('/api/runs/')
+        ) {
+          if (await runsRoutes.handleGet(req, res, sub, method)) return true
         }
         if (Object.hasOwn(routes, sub) || Object.hasOwn(uploads, sub)) throw new HttpError(405, 'use POST')
         throw new HttpError(404, 'not found')

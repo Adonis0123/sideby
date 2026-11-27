@@ -143,15 +143,22 @@ export async function backgroundPanelPort(p: Paths): Promise<number | null> {
   return (await checkPanel(rec)).status === 'ours' ? rec.port : null
 }
 
-/** URL of a running background Panel, or of any sideby Panel on `port`; removes a stale pid file. */
-export async function findRunningPanel(p: Paths, port: number): Promise<string | undefined> {
+// WHY: Never trust the raw `url` string stored in `panel.json`: verify the Panel on loopback via `checkPanel`/`isSidebyPanel`
+// and construct the URL solely from the verified loopback port.
+export async function findRunningPanelPort(p: Paths, port: number): Promise<number | undefined> {
   const rec = await readPidFile(p)
   if (rec) {
     const check = await checkPanel(rec)
-    if (check.status === 'ours') return rec.url
+    if (check.status === 'ours' && rec.port >= 1 && rec.port <= 65535) return rec.port
     if (check.status === 'stale') await rm(pidFilePath(p), { force: true })
   }
-  return (await isSidebyPanel(port, panelOwner(p.home))) ? `http://127.0.0.1:${port}/` : undefined
+  return (await isSidebyPanel(port, panelOwner(p.home))) ? port : undefined
+}
+
+/** URL of a running background Panel, or of any sideby Panel on `port`; removes a stale pid file. */
+export async function findRunningPanel(p: Paths, port: number): Promise<string | undefined> {
+  const verified = await findRunningPanelPort(p, port)
+  return verified !== undefined ? `http://127.0.0.1:${verified}/` : undefined
 }
 
 /**

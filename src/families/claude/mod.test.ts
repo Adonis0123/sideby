@@ -125,19 +125,28 @@ describe('sideby run loads the mod (spec §3.32 step 3)', () => {
     return createRuntime({ env: h.env, builtins })
   }
 
+  const dropRunsSettings = (argv: readonly string[]) => {
+    const i = argv.indexOf('--settings')
+    return i >= 0 && argv[i + 1]?.endsWith('/runs/claude-settings.json')
+      ? [...argv.slice(0, i), ...argv.slice(i + 2)]
+      : [...argv]
+  }
+
   it('gives a Claude Code that runs mods the mod folder, and writes nothing into an Account', async () => {
     await withFakeHome(async (h) => {
       const rt = await setup(h, '2.1.300')
       const before = await snapshot(h.home)
       const launch = await rt.prepareLaunch('claude:001', ['--', 'hello'], 'run')
-      assert.deepEqual(launch.args, ['--plugin-dir', claudeModDir(), '--', 'hello'])
-      // Only sideby's own version cache appears, in its state folder.
+      assert.deepEqual(dropRunsSettings(launch.args), ['--plugin-dir', claudeModDir(), '--', 'hello'])
+      // Only sideby's own version cache and session settings appear, in its state folder.
       assert.deepEqual(diffSnapshots(before, await snapshot(h.home)), [
         '.local',
         '.local/state',
         '.local/state/sideby',
         '.local/state/sideby/cache',
         '.local/state/sideby/cache/claude-version.json',
+        '.local/state/sideby/runs',
+        '.local/state/sideby/runs/claude-settings.json',
       ])
     })
   })
@@ -145,11 +154,11 @@ describe('sideby run loads the mod (spec §3.32 step 3)', () => {
   it('leaves it out for an older Claude Code, under config claudeMod false, and for sign-in', async () => {
     await withFakeHome(async (h) => {
       const old = await setup(h, '2.1.286')
-      assert.deepEqual((await old.prepareLaunch('claude:001', [], 'run')).args, [])
+      assert.deepEqual(dropRunsSettings((await old.prepareLaunch('claude:001', [], 'run')).args), [])
     })
     await withFakeHome(async (h) => {
       const off = await setup(h, '2.1.300', { claudeMod: false })
-      assert.deepEqual((await off.prepareLaunch('claude:001', [], 'run')).args, [])
+      assert.deepEqual(dropRunsSettings((await off.prepareLaunch('claude:001', [], 'run')).args), [])
     })
     await withFakeHome(async (h) => {
       const rt = await setup(h, '2.1.300')
@@ -159,6 +168,12 @@ describe('sideby run loads the mod (spec §3.32 step 3)', () => {
 })
 
 describe("sideby loads Orca's agent-view plugin (spec §3.32 step 3)", () => {
+  const dropRunsSettings = (argv: readonly string[]) => {
+    const i = argv.indexOf('--settings')
+    return i >= 0 && argv[i + 1]?.endsWith('/runs/claude-settings.json')
+      ? [...argv.slice(0, i), ...argv.slice(i + 2)]
+      : [...argv]
+  }
   async function setup(h: Parameters<Parameters<typeof withFakeHome>[0]>[0], orca: string) {
     await h.write('.claude/settings.json', '{}')
     await h.write('.claude-001/settings.json', '{}')
@@ -172,23 +187,23 @@ describe("sideby loads Orca's agent-view plugin (spec §3.32 step 3)", () => {
       await h.write('orca/agent-view/.claude-plugin/plugin.json', '{}')
       const dir = h.path('orca/agent-view')
       const rt = await setup(h, dir)
-      assert.deepEqual((await rt.prepareLaunch('claude:001', ['--', 'hi'], 'run')).args, [
+      assert.deepEqual(dropRunsSettings((await rt.prepareLaunch('claude:001', ['--', 'hi'], 'run')).args), [
         '--plugin-dir',
         dir,
         '--',
         'hi',
       ])
-      assert.deepEqual((await rt.prepareLaunch('claude:001', ['--plugin-dir', dir], 'run')).args, [
-        '--plugin-dir',
-        dir,
-      ])
+      assert.deepEqual(
+        dropRunsSettings((await rt.prepareLaunch('claude:001', ['--plugin-dir', dir], 'run')).args),
+        ['--plugin-dir', dir],
+      )
       assert.deepEqual((await rt.prepareLaunch('claude:001', ['-cp', 'hi'], 'run')).args, ['-cp', 'hi'])
       assert.ok(!(await rt.prepareLaunch('claude:001', [], 'login')).args.includes('--plugin-dir'))
       // WHY: `sideby resume claude --` with no session id runs the Host unchanged, outside `prepareLaunch`.
       assert.deepEqual((await rt.resumeLaunch('claude', [])).launch.args, ['--plugin-dir', dir])
       for (const other of ['orca/agent-view', h.path('missing')]) {
         const off = await setup(h, other)
-        assert.deepEqual((await off.prepareLaunch('claude:001', [], 'run')).args, [], other)
+        assert.deepEqual(dropRunsSettings((await off.prepareLaunch('claude:001', [], 'run')).args), [], other)
       }
     })
   })

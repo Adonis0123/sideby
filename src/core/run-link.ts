@@ -5,7 +5,7 @@
 import { constants } from 'node:fs'
 import { lstat, open, realpath } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { Runtime } from '../runtime.ts'
 import type { Env } from '../types.ts'
 import { openWithDefault } from './edit-settings.ts'
@@ -328,4 +328,30 @@ export async function openRunBoard(
       { code: 'board-changed' },
     )
   return { board: first.board, command: await openWithDefault(rt, first.board, { text: false }) }
+}
+
+// WHY: Reuses `boardsCheck`, `inspectEntry`, and `stillTheBoard` so `sideby runs open`'s static-board fallback enforces
+// the exact same real-directory, non-symlink, ownership, and TOCTOU (dev/ino) checks as `openRunBoard`.
+export async function openCheckedStaticBoard(
+  rt: Runtime,
+  runId: string,
+  opts: { beforeOpen?: () => Promise<void> } = {},
+): Promise<{ board: string; command: string[] } | undefined> {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(runId)) return undefined
+  const check = await boardsCheck(rt.env, rt.paths.home)
+  if (!check) return undefined
+  const board = join(check.boardsDir, `${runId}.html`)
+  const url = pathToFileURL(board).href
+  const inspected = await inspectEntry({ title: runId, board, url }, check)
+  if (!inspected) return undefined
+  if (opts.beforeOpen) await opts.beforeOpen()
+  if (!(await stillTheBoard(inspected.entry.board, check, inspected.id)))
+    throw new UserError(
+      'The board file changed while sideby checked it; ask the coordinating AI to show the board again',
+      { code: 'board-changed' },
+    )
+  return {
+    board: inspected.entry.board,
+    command: await openWithDefault(rt, inspected.entry.board, { text: false }),
+  }
 }

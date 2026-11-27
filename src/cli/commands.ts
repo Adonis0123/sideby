@@ -6316,3 +6316,187 @@ export function cmdCommands(a: ParsedArgs, io: Io): number {
   )
   return 0
 }
+
+export interface CmdRunsDeps {
+  findPanelPort?: () => Promise<number | undefined>
+  defaultPort?: number
+  probeLiveBoard?: (url: string) => Promise<boolean>
+  beforeOpenStatic?: () => Promise<void>
+}
+
+async function probeLiveRunBoard(url: string): Promise<boolean> {
+  const probe = async (method: 'HEAD' | 'GET') => {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 2000).unref()
+    try {
+      const res = await fetch(url, { method, signal: ctrl.signal, redirect: 'manual' })
+      const ct = (res.headers.get('content-type') ?? '').toLowerCase()
+      return { status: res.status, html: ct.includes('text/html') }
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  try {
+    const head = await probe('HEAD')
+    if (head.status === 200 && head.html) return true
+    if (head.status === 405) {
+      const get = await probe('GET')
+      return get.status === 200 && get.html
+    }
+    return false
+  } catch {
+    return false
+  }
+}
+
+export async function cmdRuns(
+  a: ParsedArgs,
+  io: Io,
+  runtime?: Runtime,
+  deps: CmdRunsDeps = {},
+): Promise<number> {
+  const [first, second, ...extra] = a.positionals
+  if (extra.length || a.rest.length)
+    throw new UsageError(
+      'usage: sideby runs [--json] | sideby runs <id> [--json] | sideby runs open <id> [--json] | sideby runs pointer [--session <id>] [--cwd <dir>] [--json]',
+    )
+  const rt = runtime ?? (await createRuntime())
+  const { findRunSummary, isValidRunId, listRuns, readLiveRun, runCompactPointer } = await import(
+    '../core/run-board.ts'
+  )
+  const asJson = a.flags.has('json')
+
+  if (first === 'pointer') {
+    if (second) throw new UsageError('usage: sideby runs pointer [--session <id>] [--cwd <dir>] [--json]')
+    const sessionId = a.flags.get('session')
+    const cwd = a.flags.get('cwd')
+    const res = await runCompactPointer(rt.env, rt.paths.home, {
+      ...(typeof sessionId === 'string' ? { sessionId } : {}),
+      ...(typeof cwd === 'string' ? { cwd } : {}),
+    })
+    if (asJson) {
+      json(io, res)
+      return 0
+    }
+    if (res.text) io.out(res.text)
+    return 0
+  }
+
+  if (first === 'open') {
+    if (!second) throw new UsageError('usage: sideby runs open <id> [--json]')
+    if (!isValidRunId(second)) throw new UserError(`invalid run id "${second}"`, { code: 'invalid-run-id' })
+    const summary = await findRunSummary(rt.env, rt.paths.home, second)
+    const { findRunningPanelPort } = await import('../panel/background.ts')
+    const { DEFAULT_PANEL_PORT } = await import('../panel/server.ts')
+    const { openCheckedStaticBoard } = await import('../core/run-link.ts')
+    const { openWithDefault } = await import('../core/edit-settings.ts')
+    if (summary) {
+      const panelPort = deps.findPanelPort
+        ? await deps.findPanelPort()
+        : await findRunningPanelPort(rt.paths, deps.defaultPort ?? DEFAULT_PANEL_PORT)
+      const probe = deps.probeLiveBoard ?? probeLiveRunBoard
+      if (panelPort !== undefined && Number.isInteger(panelPort) && panelPort >= 1 && panelPort <= 65535) {
+        const liveUrl = `http://127.0.0.1:${panelPort}/runs/${encodeURIComponent(second)}`
+        if (await probe(liveUrl)) {
+          try {
+            await openWithDefault(rt, liveUrl, { text: false })
+          } catch (err) {
+            const detail = err instanceof Error ? err.message : String(err)
+            throw new UserError(`could not open ${liveUrl} (${detail}); open it in your browser manually`, {
+              code: 'open-failed',
+            })
+          }
+          if (asJson) {
+            json(io, { id: second, url: liveUrl, source: 'panel', opened: true })
+            return 0
+          }
+          io.out(`opened ${liveUrl}`)
+          return 0
+        }
+      }
+    }
+    const staticRes = await openCheckedStaticBoard(rt, second, {
+      ...(deps.beforeOpenStatic ? { beforeOpen: deps.beforeOpenStatic } : {}),
+    })
+    if (!staticRes) {
+      if (!summary)
+        throw new UserError(`run "${second}" was not found; run \`sideby runs\` to see available runs`, {
+          code: 'not-found',
+        })
+      throw new UserError(
+        `cannot open run board for "${second}": no running Panel serves /runs/${second} and no valid static board file was found; start the Panel with \`sideby ui --background\` and try again`,
+        { code: 'board-unavailable' },
+      )
+    }
+    if (asJson) {
+      json(io, { id: second, url: staticRes.board, source: 'static', opened: true })
+      return 0
+    }
+    io.out(`opened ${staticRes.board}`)
+    return 0
+  }
+
+  if (first) {
+    if (second) throw new UsageError('usage: sideby runs <id> [--json]')
+    if (!isValidRunId(first)) throw new UserError(`invalid run id "${first}"`, { code: 'invalid-run-id' })
+    const { listLiveSessions } = await import('../core/live-sessions.ts')
+    const sessions = await listLiveSessions(rt, { deadlineMs: 1500 }).then(
+      (r) => r.sessions,
+      () => [],
+    )
+    const view = await readLiveRun(rt.env, rt.paths.home, first, { sessions })
+    if (!view)
+      throw new UserError(`run "${first}" was not found; run \`sideby runs\` to see available runs`, {
+        code: 'not-found',
+      })
+    if (asJson) {
+      json(io, view)
+      return 0
+    }
+    io.out(`${c.bold(view.id)} [${view.state}] ${view.objective}`)
+    const effectiveSteps = view.autoSteps?.items.length ? view.autoSteps.items : view.steps
+    if (effectiveSteps.length) {
+      const done = effectiveSteps.filter((s) => s.state === 'done').length
+      const src = view.autoSteps?.items.length ? ` (${view.autoSteps.source} auto-synced)` : ''
+      io.out(`Steps: ${done}/${effectiveSteps.length}${src}`)
+      for (const s of effectiveSteps) io.out(`  [${s.state}] ${s.title}`)
+    }
+    if (view.lanes.length) {
+      io.out('Lanes:')
+      for (const l of view.lanes) {
+        const extraInfo = [l.sessionStatus, l.activity ?? l.summary ?? l.note].filter(Boolean).join(' · ')
+        io.out(`  ${l.id} [${l.liveState}] ${l.title}${extraInfo ? ` — ${extraInfo}` : ''}`)
+      }
+    }
+    const openAsks = view.asks.filter((ask) => ask.state === 'open')
+    if (openAsks.length) {
+      io.out('Open asks:')
+      for (const ask of openAsks) io.out(`  ${ask.id}: ${ask.question}`)
+    }
+    io.out(c.dim(`Open live board: sideby runs open ${view.id}`))
+    return 0
+  }
+
+  const runs = await listRuns(rt.env, rt.paths.home)
+  if (asJson) {
+    json(io, { runs })
+    return 0
+  }
+  if (!runs.length) {
+    io.out('No runs found.')
+    return 0
+  }
+  const now = rt.readContext().now
+  const rows = runs.map((r) => [
+    c.bold(r.id),
+    r.state,
+    `${r.activeLanes}/${r.totalLanes}`,
+    r.stepsTotal ? `${r.stepsDone}/${r.stepsTotal}` : '-',
+    r.openAsks ? String(r.openAsks) : '-',
+    r.updatedAt ? clock(r.updatedAt, now) : '',
+    truncate(r.objective, 48),
+  ])
+  io.out(table(rows, ['RUN', 'STATE', 'LANES', 'STEPS', 'ASKS', 'UPDATED', 'OBJECTIVE']))
+  io.out(c.dim('Inspect one: sideby runs <id>  |  Open live board: sideby runs open <id>'))
+  return 0
+}

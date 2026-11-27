@@ -77,6 +77,13 @@ describe('resumedSession', () => {
   })
 })
 
+const dropRunsSettings = (argv: readonly string[]) => {
+  const i = argv.indexOf('--settings')
+  return i >= 0 && argv[i + 1]?.endsWith('/runs/claude-settings.json')
+    ? [...argv.slice(0, i), ...argv.slice(i + 2)]
+    : [...argv]
+}
+
 describe('resumeLaunch', () => {
   it('starts the non-main Claude Account that holds the session as run would', async () => {
     await withFakeHome(async (h) => {
@@ -92,7 +99,7 @@ describe('resumeLaunch', () => {
       assert.equal(r.sessionId, ID)
       assert.equal(r.launch.env.CLAUDE_CONFIG_DIR, h.path('.claude-work'))
       assert.equal(r.launch.env.ANTHROPIC_API_KEY, undefined)
-      assert.deepEqual(r.launch.args, ['--model', 'opus', '--resume', ID])
+      assert.deepEqual(dropRunsSettings(r.launch.args), ['--model', 'opus', '--resume', ID])
     })
   })
 
@@ -161,7 +168,7 @@ describe('resumeLaunch', () => {
       assert.equal(r.sessionId, ID)
       assert.equal(r.launch.env.CLAUDE_CONFIG_DIR, h.path('.claude-work'))
       assert.equal(r.launch.env.ANTHROPIC_API_KEY, undefined)
-      assert.deepEqual(r.launch.args, ['--model', 'opus', '--dangerously-skip-permissions'])
+      assert.deepEqual(dropRunsSettings(r.launch.args), ['--model', 'opus', '--dangerously-skip-permissions'])
     })
   })
 
@@ -192,7 +199,7 @@ describe('resumeLaunch', () => {
       const saved = await rt.resumeLaunch('claude', ['--resume', ID])
       assert.equal(saved.account?.ref, 'claude:a')
       assert.equal(saved.newSession, undefined)
-      assert.deepEqual(saved.launch.args, ['--resume', ID])
+      assert.deepEqual(dropRunsSettings(saved.launch.args), ['--resume', ID])
     })
   })
 

@@ -163,6 +163,21 @@ Examples:
   sideby sessions open-run cc002
 Exit: 0 listed, copied or opened; 1 no such account or running session, several to choose from, or the session is
 in no run (or its report changed or did not open); 2 malformed command line.`,
+  runs: `sideby runs [--json]
+       sideby runs <id> [--json]
+       sideby runs open <id> [--json]
+       sideby runs pointer [--session <id>] [--cwd <dir>] [--json]
+
+List active and recent orchestrated runs, inspect one run live (reading lane .jsonl streams and auto-synced
+coordinator steps out of band), open its live board in the local Panel (/runs/<id>), or print a compact
+post-compaction recovery pointer (<=3 lines per active run, empty when none match).
+
+Examples:
+  sideby runs --json
+  sideby runs demo-run --json
+  sideby runs open demo-run
+  sideby runs pointer --cwd .
+Exit: 0 done; 1 invalid id or run not found; 2 malformed command line.`,
   history: `sideby history [<words>...] [--project <path|name>] [--category <name>] [--family <id>]
                 [--account <account>] [--since today|7d|30d|all] [--group project|category|account|family|day|none]
                 [--scripts] [--tools] [--limit <n>] [--offset <n>] [--json]
@@ -624,6 +639,7 @@ const COMMANDS: Record<string, { flags: string[]; valued?: string[] }> = {
   app: { flags: ['json'], valued: ['url'] },
   desktop: { flags: ['json', 'remove', 'yes'] },
   sessions: { flags: ['json'], valued: ['as', 'lang'] },
+  runs: { flags: ['json'], valued: ['session', 'cwd'] },
   history: {
     flags: ['json', 'scripts', 'tools', 'clear'],
     valued: ['project', 'category', 'group', 'family', 'account', 'since', 'limit', 'offset', 'before'],
@@ -663,6 +679,7 @@ function noticeAllowed(cmd: string, parsed: import('./args.ts').ParsedArgs): boo
   if (cmd === 'ask' && (parsed.flags.has('print') || parsed.flags.has('run'))) return false
   if (cmd === 'ui' && parsed.flags.has('serve-detached')) return false
   if (cmd === 'handoff' && parsed.positionals[0] === 'ready') return false
+  if (cmd === 'runs' && parsed.positionals[0] === 'pointer') return false
   return true
 }
 
@@ -771,6 +788,13 @@ export async function main(
     const { runProgressHook } = await import('../progress/hook.ts')
     return runProgressHook(rest, process.env, process.stdin.isTTY ? '' : process.stdin, {
       err: process.stderr,
+    })
+  }
+  // WHY: Compact pointer hook runs on Claude SessionStart (compact) before the Node version gate, same fast path.
+  if (first === 'runs-hook') {
+    const { runRunsHook } = await import('../runs/hook.ts')
+    return runRunsHook(rest, process.env, process.stdin.isTTY ? '' : process.stdin, {
+      out: process.stdout,
     })
   }
   if (nodeTooOld()) {
@@ -942,6 +966,8 @@ async function dispatch(
       return await cmds.cmdDesktop(parsed, io)
     case 'sessions':
       return await cmds.cmdSessions(parsed, io)
+    case 'runs':
+      return await cmds.cmdRuns(parsed, io)
     case 'history':
       return await cmds.cmdHistory(parsed, io)
     case 'send':

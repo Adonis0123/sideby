@@ -55,8 +55,7 @@ describe('Launch', () => {
     await withFakeHome(async (h) => {
       const rt = await setup(h, {})
       const p = await rt.prepareLaunch('claude:001', [], 'run')
-      assert.deepEqual(p.args, [])
-      assert.equal(p.sessionHookArgs, undefined)
+      assert.deepEqual(Object.keys((await settingsOf(p.args)).hooks), ['SessionStart'])
       assert.equal(p.env.SIDEBY_UNATTENDED, undefined)
       assert.equal(p.env.SIDEBY_LAUNCH_PROMPTS, undefined)
       assert.equal(hostEnv(p), p.env)
@@ -83,6 +82,7 @@ describe('Launch', () => {
         'Elicitation',
         'StopFailure',
         'UserPromptSubmit',
+        'SessionStart',
       ])
       // `async`: the prompt never waits for it, and nothing it prints reaches the session.
       assert.equal(hooks.UserPromptSubmit.length, 1)
@@ -159,11 +159,12 @@ describe('Launch', () => {
       const p = await rt.prepareLaunch('claude:001', [], 'run')
       assert.equal(p.args.filter((a) => a === '--settings').length, 1)
       const { file, hooks } = await settingsOf(p.args)
-      assert.match(file, /network\/claude-settings-unattended\.json$/)
+      assert.match(file, /network\/claude-settings-unattended-runs\.json$/)
       assert.deepEqual(Object.keys(hooks).sort(), [
         'Elicitation',
         'PermissionRequest',
         'PreToolUse',
+        'SessionStart',
         'Stop',
         'StopFailure',
         'UserPromptSubmit',
@@ -194,11 +195,12 @@ describe('Launch', () => {
       )
       const args = await withClaudeSessionHooks(['--settings', handoff], p.sessionHookArgs!)
       const { file, hooks } = await settingsOf(args)
-      assert.match(file, /claude-settings-unattended-handoff\.json$/)
+      assert.match(file, /claude-settings-unattended-runs-handoff\.json$/)
       assert.deepEqual(Object.keys(hooks).sort(), [
         'Elicitation',
         'PermissionRequest',
         'PreToolUse',
+        'SessionStart',
         'Stop',
         'StopFailure',
         'UserPromptSubmit',

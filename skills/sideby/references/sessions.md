@@ -14,6 +14,15 @@ Run `sideby sessions --json` (or `sideby sessions <account|family> --json` for o
 
 - `run` (only some sessions): the Run a local orchestrator such as the `agent-dispatch` skill gave this session, `{ title, laneTitle, role, board, url, others }`. For "cc002 在哪个任务里" / "which run is cc002 working on", answer with `title` (and `laneTitle`, the part it does; `others` lists further Runs it also works for) and give `board`, the Run Board's file on this computer; to open it for the user ("打开它的任务看板", "open cc002's run report"), run `sideby sessions open-run <account|session-id> --json` yourself: it opens the board with the default program, as the chip on the Panel's Sessions page does, and returns `{ opened, board, sessionId, label }`. It exits 1 with code `no-run` when the session is in no Run (or its board file is gone: ask the coordinating AI to show the board again), `board-changed` when the file changed while sideby checked it, and `several-sessions` like `copy` below. No `run` means no orchestrator claims the session, not an error.
 
+## Live Run Board (`sideby runs`)
+
+When a local orchestrator tracks multi-agent Runs under its state folder (`runs.json` and each Run's `run.json`), the local Panel serves a live, auto-updating board at `http://127.0.0.1:17420/runs` and `http://127.0.0.1:17420/runs/<id>` (watching `run.json`, lane `.jsonl` output streams, wait logs, and the coordinator's own transcript for auto-synced steps without spending coordinator LLM context).
+
+- `sideby runs --json` lists active Runs first (newest first), then up to 50 recent closed Runs, with `activeLanes`, `totalLanes`, `openAsks`, `runningWaits`, `stepsDone`, `stepsTotal`.
+- `sideby runs <id> --json` returns the live enriched Run view, including each lane's latest `.jsonl` activity, live sideby session status, running wait log tail, `autoSteps` (out-of-band coordinator steps from Antigravity CLI `update_steps` or Claude Code `TodoWrite`/`TaskCreate`/`TaskUpdate`), and a `fingerprint` used by the Panel for flicker-free updates.
+- `sideby runs open <id> --json` opens `http://127.0.0.1:17420/runs/<id>` when the Panel is running, or falls back to the static board file when available.
+- `sideby runs pointer [--session <id>] [--cwd <dir>] --json` returns active Run(s) matching the session or directory and a compact `text` pointer (at most 3 lines per active Run; empty when none match) for fast post-compaction recovery.
+
 `problems` lists accounts sideby could not read and what to do; the rest of the list is still right. An empty list means nothing is running: the user starts an account with `sideby run <account>`.
 
 It is read-only: sideby reads the hosts' own session files and the running programs, never a credential, and never changes or ends a session.
