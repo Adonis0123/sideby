@@ -1,7 +1,22 @@
 // `sideby sessions copy` (spec §3.32): the system clipboard.
 import { spawn } from 'node:child_process'
+import { basename } from 'node:path'
 import type { Env } from '../types.ts'
 import { which } from './launch.ts'
+
+const UTF8_LOCALE = /utf-?8/i
+
+/** WHY: macOS `pbcopy` falls back to MacRoman under GUI/launchd environments lacking a UTF-8 locale, garbling non-ASCII text. */
+export function clipboardEnv(bin: string, env: Env): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = { ...env }
+  if (basename(bin) !== 'pbcopy') return out
+  const effective = out.LC_ALL || out.LC_CTYPE || out.LANG || ''
+  if (UTF8_LOCALE.test(effective)) return out
+  if (out.LC_ALL && !UTF8_LOCALE.test(out.LC_ALL)) out.LC_ALL = 'en_US.UTF-8'
+  out.LC_CTYPE = 'UTF-8'
+  if (!out.LANG || !UTF8_LOCALE.test(out.LANG)) out.LANG = 'en_US.UTF-8'
+  return out
+}
 
 /** The clipboard programs to try, in order, on this system. */
 export function clipboardPrograms(platform: NodeJS.Platform, env: Env): [string, string[]][] {
@@ -33,7 +48,10 @@ export async function copyToClipboard(
 function writeTo(bin: string, args: string[], text: string, env: Env, timeoutMs: number): Promise<boolean> {
   return new Promise((resolve) => {
     let done = false
-    const child = spawn(bin, args, { stdio: ['pipe', 'ignore', 'ignore'], env: env as NodeJS.ProcessEnv })
+    const child = spawn(bin, args, {
+      stdio: ['pipe', 'ignore', 'ignore'],
+      env: clipboardEnv(bin, env),
+    })
     const finish = (ok: boolean) => {
       if (done) return
       done = true

@@ -381,4 +381,18 @@ test('does not guess current Chat when a workspace has both an active and an idl
   assert.equal(openPanelCalls, 2)
   assert.deepEqual(copiedValues, [])
   assert.deepEqual(activeWorker.refusals, [])
+
+  // WHY: GUI-launched Orca workers on macOS often have no LANG/LC_CTYPE; pbcopy needs UTF-8 to avoid MacRoman mojibake.
+  const bare = main.clipboardEnv('pbcopy', { PATH: '/usr/bin' })
+  assert.equal(bare.LC_CTYPE, 'UTF-8')
+  assert.equal(bare.LANG, 'en_US.UTF-8')
+  assert.equal(bare.LC_ALL, undefined)
+  const cLocale = main.clipboardEnv('/usr/bin/pbcopy', { LC_ALL: 'C' })
+  assert.equal(cLocale.LC_ALL, 'en_US.UTF-8')
+  assert.equal(cLocale.LC_CTYPE, 'UTF-8')
+  const alreadyUtf8 = main.clipboardEnv('pbcopy', { LANG: 'zh_CN.UTF-8' })
+  assert.equal(alreadyUtf8.LANG, 'zh_CN.UTF-8')
+  assert.equal(alreadyUtf8.LC_CTYPE, undefined)
+  const linux = main.clipboardEnv('wl-copy', { PATH: '/usr/bin' })
+  assert.equal(linux.LC_CTYPE, undefined)
 })

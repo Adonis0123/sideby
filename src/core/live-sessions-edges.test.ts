@@ -2,7 +2,7 @@
 // cannot be checked, a prompt that looks like a subcommand, a neighbouring directory, an unreadable session folder,
 // a clipboard program that misbehaves, and a title check that is still running when the Host ends.
 import assert from 'node:assert/strict'
-import { chmod, writeFile } from 'node:fs/promises'
+import { chmod, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
@@ -211,6 +211,21 @@ describe('clipboard programs that misbehave', () => {
 
   it('gives up on a program that hangs, within the timeout', { timeout: 10_000 }, async () => {
     await withFakeHome(async (h) => {
+      const envOut = join(h.bin, 'pbcopy-env.json')
+      await writeFile(
+        join(h.bin, 'pbcopy'),
+        script(
+          `let d='';process.stdin.on('data',(c)=>d+=c).on('end',()=>{require('node:fs').writeFileSync(${JSON.stringify(envOut)},JSON.stringify({LC_CTYPE:process.env.LC_CTYPE,LANG:process.env.LANG,LC_ALL:process.env.LC_ALL,d}))})`,
+        ),
+        { mode: 0o755 },
+      )
+      assert.equal(await copyToClipboard('联网搜索 agy00x', { PATH: h.bin, LC_ALL: 'C' }, 'darwin'), 'pbcopy')
+      const seen = JSON.parse(await readFile(envOut, 'utf8')) as Record<string, string>
+      assert.equal(seen.LC_CTYPE, 'UTF-8')
+      assert.equal(seen.LANG, 'en_US.UTF-8')
+      assert.equal(seen.LC_ALL, 'en_US.UTF-8')
+      assert.equal(seen.d, '联网搜索 agy00x')
+
       await writeFile(join(h.bin, 'pbcopy'), script('setInterval(() => {}, 1000)'), { mode: 0o755 })
       const t = Date.now()
       assert.equal(await copyToClipboard('hello', { PATH: h.bin }, 'darwin', 300), null)

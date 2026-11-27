@@ -4,6 +4,7 @@
 // forwards only minimal display/copy fields (never `orcaSessionId`, `pid`, or `transcript`).
 import { execFile, spawn } from 'node:child_process'
 import { stat } from 'node:fs/promises'
+import { basename } from 'node:path'
 
 const STATUS_BAR_ID = 'current-session'
 const PLUGIN_KEY = 'local.sideby-sessions'
@@ -364,12 +365,30 @@ function clipboardPrograms() {
   return process.env.WAYLAND_DISPLAY ? [wayland, x11] : [x11, wayland]
 }
 
+const UTF8_LOCALE = /utf-?8/i
+
+// WHY: macOS `pbcopy` decodes stdin as MacRoman under GUI/Electron processes lacking a UTF-8 locale,
+// garbling non-ASCII titles (e.g. Chinese) copied from the Orca sidebar.
+export function clipboardEnv(bin, env = process.env) {
+  const out = { ...env }
+  if (basename(bin) !== 'pbcopy') return out
+  const effective = out.LC_ALL || out.LC_CTYPE || out.LANG || ''
+  if (UTF8_LOCALE.test(effective)) return out
+  if (out.LC_ALL && !UTF8_LOCALE.test(out.LC_ALL)) out.LC_ALL = 'en_US.UTF-8'
+  out.LC_CTYPE = 'UTF-8'
+  if (!out.LANG || !UTF8_LOCALE.test(out.LANG)) out.LANG = 'en_US.UTF-8'
+  return out
+}
+
 function writeWithProgram(bin, args, text) {
   return new Promise((resolve) => {
     let done = false
     let child
     try {
-      child = spawn(bin, args, { stdio: ['pipe', 'ignore', 'ignore'] })
+      child = spawn(bin, args, {
+        stdio: ['pipe', 'ignore', 'ignore'],
+        env: clipboardEnv(bin, process.env),
+      })
     } catch {
       resolve(false)
       return
