@@ -148,8 +148,8 @@ async function handoff() {
 }
 const handover = await handoff()
 
-// The Panel on the demo HOME, in headless Chrome.
-const panelUrl = await startPanel(env, 17421)
+// The Panel on a clean demo HOME (with the quota-answering claude stub), in headless Chrome.
+const panelUrl = await startPanel(demoHome(join(work, 'demo-panel')), 17421)
 const { page, evaluate, until, screenshot, close } = await openChrome(work)
 
 // Dark Panel at twice the pixels, so the zoom stays sharp.

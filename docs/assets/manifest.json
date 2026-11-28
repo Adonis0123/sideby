@@ -71,13 +71,13 @@
       "files": ["docs/assets/banner.jpg"],
       "watch": ["src/core/brand-mark.ts"],
       "retake": "Codex image generation, 1920×960 JPEG, painted scene with the brand characters",
-      "checked": "34e3eed"
+      "checked": "fdc8b59"
     },
     {
       "id": "intro-video",
       "kind": "creative",
       "url": "https://github.com/user-attachments/assets/d1d7e8dd-1df1-4881-ac88-e468c2dd4a1d",
-      "checked": "34e3eed",
+      "checked": "fdc8b59",
       "watch": ["src/core/brand-mark.ts"],
       "retake": "painted-animation skill, in the intro film's own project (kept outside this repository); English captions in README.md, Chinese captions in README.zh-CN.md (https://github.com/user-attachments/assets/51d9f96f-7723-4410-8c5f-136b2a66a50e)"
     }

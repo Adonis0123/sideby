@@ -195,11 +195,11 @@ Claude 的重置恢复哪一部分额度，是 Anthropic 的规则，不是 side
 
 每个数字都带读取时间和来源：在面板里悬停额度条，在状态栏里悬停账号，或者看 `sideby quota` 每行末尾的时间（`--json` 里是 `observedAt` 和 `source`）。某个模型自己的每周窗口（比如 Claude Code 的 Fable 周额度）可能比旁边的 5 小时和每周数字旧，因为 status line 只报后两个；这样的窗口带自己的 `observedAt`，新旧也按它自己的时间算。
 
-- 数字比 sideby 查询的间隔旧（Claude Code、Codex、Grok Build、Antigravity CLI 都是 15 分钟）才在旁边写出年龄。查询失败会立刻标出。
+- 数字比 sideby 查询的间隔旧（Claude Code、Codex、Grok Build 都是 15 分钟；Antigravity CLI 活跃时为 30–45 分钟）才在旁边写出年龄。查询失败会立刻标出。
 - 超过 1 小时的数字标为旧数据，除非读到之后这台电脑没再用过这个登录；网页和其他电脑上的用量看不到。
-- 窗口过了工具给出的重置时间，sideby 会马上再问一次，不用等满 15 分钟，所以刚恢复的账号很快就显示有余量。每个重置时间只多问一次；这次没问到，就按平时的节奏继续。
+- 窗口过了工具给出的重置时间，sideby 会马上再问一次，不用等满常规间隔，所以刚恢复的账号很快就显示有余量（空闲的 Antigravity CLI 账号会等到本地有活动或手动刷新后再查）。每个重置时间只多问一次；这次没问到，就按平时的节奏继续。
 - 同一登录的账号是同一份额度，所以 sideby 只问其中一个（按你的顺序第一个已登录的），答案显示在所有目录上。同时最多问 4 个工具：先问你置顶的账号，再问快用完的，然后按最近使用的先后。
-- 面板和状态栏先显示手头已有的数字，哪个账号的答案回来了就更新哪个；「刷新」仍然把所有账号重新问一遍。
+- 面板和状态栏先显示手头已有的数字，哪个账号的答案回来了就更新哪个；「刷新」仍然把所有账号重新问一遍，账号 `…` 菜单里的「刷新额度」可以单独刷新这一个账号。
 
 ## Grok 额度
 
@@ -584,4 +584,4 @@ Claude Code 会话结束这一轮、停下来等后台子代理时也会接力�
 - **codex**：非 main 账号默认加 `-c cli_auth_credentials_store="file"`，让每个账号的登录存在自己的 `auth.json` 里；你的参数里已经有这个键时不加。
 - **grok**：Grok 的沙箱不允许某些路径是 symlink，所以 `hooks`、`hooks-paths` 用复制而不是链接，`trusted_folders.toml` 和 `config.toml` 是账号自己的文件。doctor 发现问题时会引用宿主的原话。
 - **pi**：账号目录多一层（`~/.pi-<name>/agent`）。`proxy.env` 只用来加载 provider key，不会让 pi 账号变成 API 账号。
-- **agy**（Antigravity CLI）：主账号留在 `~/.gemini/antigravity-cli`，沿用与桌面端共享的系统钥匙串登录（`sideby list` 里显示为未知）。副账号（`~/.gemini/antigravity-cli-<name>`，如 `sideby new agy 002 --alias agy002`）在保持真实 `HOME` 不变的前提下，通过 `--app_data_dir=antigravity-cli-<name>` 与 `AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1` 把登录凭据独立存进本目录权限为 600 的 `antigravity-oauth-token`，同时原生共用 `~/.gemini/config/`（MCP、插件、规则和 hooks）。暂不支持 `--api` 账号和会话中途自动接力（Auto Handoff），但支持 `sideby next agy`、自动选号命令（默认建议 `ag`）和面板推荐，按主模型组排序（配置 `agy.pickGroup`，默认 `Gemini Models`）。终端按 ID 恢复（`--resume` / `--conversation` / `-r`）会自动回到存有 `conversations/<id>.db` 的账号；通过 Orca Chat 启动 `agy acp` 时会按 `ORCA_AGENT_SESSION_ID` 绑定所属账号，休眠唤醒后仍回到原账号。sideby 用 `agy [selectArgs] -p /usage --output-format json` 分别查各账号额度，最多每 15 分钟一次，不会开启模型对话。额度查询发现没登录时，会提示运行 `sideby login agy:<name>`，而且从不打开浏览器：agy 想打开登录页时，sideby 会停掉它，并把登录标成已过期。agy 的会话历史按账号隔离，会出现在会话历史里按标题和项目找（搜不到对话内容）；`sideby history show <id>` 给出继续它的命令。
+- **agy**（Antigravity CLI）：主账号留在 `~/.gemini/antigravity-cli`，沿用与桌面端共享的系统钥匙串登录（`sideby list` 里显示为未知）。副账号（`~/.gemini/antigravity-cli-<name>`，如 `sideby new agy 002 --alias agy002`）在保持真实 `HOME` 不变的前提下，通过 `--app_data_dir=antigravity-cli-<name>` 与 `AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1` 把登录凭据独立存进本目录权限为 600 的 `antigravity-oauth-token`，同时原生共用 `~/.gemini/config/`（MCP、插件、规则和 hooks）。暂不支持 `--api` 账号和会话中途自动接力（Auto Handoff），但支持 `sideby next agy`、自动选号命令（默认建议 `ag`）和面板推荐，按主模型组排序（配置 `agy.pickGroup`，默认 `Gemini Models`）。终端按 ID 恢复（`--resume` / `--conversation` / `-r`）会自动回到存有 `conversations/<id>.db` 的账号；通过 Orca Chat 启动 `agy acp` 时会按 `ORCA_AGENT_SESSION_ID` 绑定所属账号，休眠唤醒后仍回到原账号。sideby 用 `agy [selectArgs] -p /usage --output-format json` 分别查各账号额度，不会开启模型对话。自动查询只在检测到该账号本地有对话活动后触发，按 30–45 分钟随机间隔错开，多账号串行查询并间隔 3–5 秒；空闲账号保留上次读数，直到再次使用或手动刷新（`sideby quota agy --refresh`，或在面板账号 `…` 菜单点**刷新额度**）。额度查询发现没登录时，会提示运行 `sideby login agy:<name>`，而且从不打开浏览器：agy 想打开登录页时，sideby 会停掉它，并把登录标成已过期。agy 的会话历史按账号隔离，会出现在会话历史里按标题和项目找（搜不到对话内容）；`sideby history show <id>` 给出继续它的命令。
