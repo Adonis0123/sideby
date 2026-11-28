@@ -1058,8 +1058,22 @@ test('onlyWhenActive, jitterMinutes, and serialGapMs pause idle checks, spread i
   assert.equal(fetchJitterMs('agy:main', iso(0), 0), 0)
 
   await withFakeHome(async (h) => {
-    const a1: Account = { family: 'agy', name: 'main', ref: 'agy:main', dir: h.path('.agy'), isMain: true }
-    const a2: Account = { family: 'agy', name: '002', ref: 'agy:002', dir: h.path('.agy-002'), isMain: false }
+    const a1: Account = {
+      family: 'agy',
+      name: 'main',
+      ref: 'agy:main',
+      dir: h.path('.agy'),
+      isMain: true,
+      kind: 'subscription',
+    }
+    const a2: Account = {
+      family: 'agy',
+      name: '002',
+      ref: 'agy:002',
+      dir: h.path('.agy-002'),
+      isMain: false,
+      kind: 'subscription',
+    }
     const file1 = quotaStoreFile(ctxAt(h, 0).stateDir, 'agy', 'main')
     let asks = 0
     let activeNow = 0
