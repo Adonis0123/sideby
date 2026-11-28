@@ -498,6 +498,24 @@ export const ConfigSchema = Type.Object(
         },
       ),
     ),
+    agy: Type.Optional(
+      Type.Object(
+        {
+          pickGroup: Type.Optional(
+            Type.String({
+              minLength: 1,
+              maxLength: 60,
+              description:
+                'Which Antigravity CLI quota model group sideby ranks when picking an account (`sideby next agy`, pick commands, and the Panel recommendation; ADR-0091). Default: `Gemini Models`.',
+            }),
+          ),
+        },
+        {
+          additionalProperties: false,
+          description: 'Antigravity CLI launches and account picking (ADR-0091).',
+        },
+      ),
+    ),
     unattended: Type.Optional(
       Type.Object(
         {

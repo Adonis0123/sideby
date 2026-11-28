@@ -3,7 +3,12 @@
 import { blocked, type HandoffPlan } from './handoff.ts'
 
 /** The name offered for a built-in Family when its Aliases follow no pattern; pi gets none (`pi` is the Host). */
-export const DEFAULT_PICK_NAMES: Readonly<Record<string, string>> = { claude: 'cc', codex: 'cx', grok: 'gk' }
+export const DEFAULT_PICK_NAMES: Readonly<Record<string, string>> = {
+  claude: 'cc',
+  codex: 'cx',
+  grok: 'gk',
+  agy: 'ag',
+}
 
 /**
  * The Pick Command name offered for a Family: the letters its numbered Aliases share (cc001, cc008 → cc), else the
@@ -18,7 +23,8 @@ export function suggestPickName(
     familyAliases.map((a) => /^([A-Za-z][A-Za-z_-]*?)-?\d+$/.exec(a)?.[1]).filter((p): p is string => !!p),
   )
   const fromAliases = prefixes.size === 1 ? [...prefixes][0]! : undefined
-  const name = fromAliases ?? DEFAULT_PICK_NAMES[family]
+  // WHY: fall back to the built-in default when numbered aliases use the Host binary prefix (e.g. agy001 → ag, ADR-0091).
+  const name = fromAliases && fromAliases !== bin ? fromAliases : DEFAULT_PICK_NAMES[family]
   return name && name !== bin ? name : null
 }
 

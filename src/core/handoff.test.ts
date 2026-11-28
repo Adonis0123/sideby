@@ -66,6 +66,9 @@ describe('quotaPressure', () => {
     assert.equal(quotaPressure(named, NOW), 20)
     if (named.status === 'ok') named.windows[0]!.name = 'Cursor models'
     assert.equal(quotaPressure(named, NOW), null, 'only named windows: no pressure to tell')
+    assert.equal(quotaPressure(named, NOW, 'Cursor models'), 20)
+    assert.equal(quotaPressure(named, NOW, 'other models'), 90)
+    assert.equal(quotaPressure(named, NOW, 'Missing group'), null)
   })
 
   it('matches the Panel copy for every case', () => {

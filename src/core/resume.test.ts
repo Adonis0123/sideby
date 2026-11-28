@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { utimes } from 'node:fs/promises'
 import { describe, it } from 'node:test'
 import { type FakeHome, withFakeHome } from '../../testing/index.ts'
+import { agyFamily, agyPlugin } from '../families/agy/index.ts'
 import { claudeFamily, claudePlugin } from '../families/claude/index.ts'
 import { codexFamily, codexPlugin } from '../families/codex/index.ts'
 import { grokFamily, grokPlugin } from '../families/grok/index.ts'
@@ -10,7 +11,7 @@ import { piFamily, piPlugin } from '../families/pi/index.ts'
 import { createRuntime } from '../runtime.ts'
 
 const ID = '0a4964a7-fb75-40c0-a9eb-f0755cc54449'
-const builtins = [claudePlugin, codexPlugin, grokPlugin, piPlugin].map((plugin) => ({
+const builtins = [claudePlugin, codexPlugin, grokPlugin, piPlugin, agyPlugin].map((plugin) => ({
   plugin,
   version: '0.1.0',
   description: '',
@@ -43,6 +44,14 @@ describe('resumedSession', () => {
       assert.equal(f.resumedSession!(['--continue']), undefined)
       assert.equal(f.resumedSession!(['--', '--resume', ID]), undefined)
     }
+    assert.equal(agyFamily.resumedSession!(['--conversation', ID]), ID)
+    assert.equal(agyFamily.resumedSession!([`--conversation=${ID}`]), ID)
+    assert.equal(agyFamily.resumedSession!(['--resume', ID]), ID)
+    assert.equal(agyFamily.resumedSession!(['-r', ID]), ID)
+    assert.equal(agyFamily.resumedSession!(['--', '--conversation', ID]), undefined)
+    assert.deepEqual(agyFamily.withoutResume!(['--dangerously-skip-permissions', '--conversation', ID]), [
+      '--dangerously-skip-permissions',
+    ])
   })
 
   it('reads the first UUID after the resume subcommand for Codex', () => {
@@ -143,6 +152,13 @@ describe('resumeLaunch', () => {
       const grok = await rt.resumeLaunch('grok', ['--resume', ID])
       assert.equal(grok.account?.ref, 'grok:lab')
       assert.equal(grok.launch.env.GROK_HOME, h.path('.grok-lab'))
+      await h.mkdir('.gemini/antigravity-cli')
+      await h.write(`.gemini/antigravity-cli-002/conversations/${ID}.db`, 'sqlite')
+      const agyRt = await createRuntime({ env: h.env, builtins })
+      const agy = await agyRt.resumeLaunch('agy', ['--conversation', ID])
+      assert.equal(agy.account?.ref, 'agy:002')
+      assert.ok(agy.launch.args.includes('--app_data_dir=antigravity-cli-002'))
+      assert.equal(agy.launch.env.AGY_CLI_FORCE_FILE_TOKEN_STORAGE, '1')
     })
   })
 

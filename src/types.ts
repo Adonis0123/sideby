@@ -229,6 +229,11 @@ export interface FamilyDef {
    */
   noHandoff?: true
   /**
+   * Default model-group window name (`QuotaWindow.name`) ranked for Families whose Quota has only per-group windows
+   * (ADR-0091), such as Antigravity CLI (`Gemini Models`). Public contract, additive only.
+   */
+  defaultQuotaGroup?: string
+  /**
    * The Host offers no way to run a second Account apart from the first (no variable or flags that move its
    * configuration directory, or a login kept in one fixed place): sideby knows only its Main Account and refuses to
    * create others (ADR-0047, ADR-0090). Set it with `selectVar`, `selectArgs`, `selectEnv` and `layout.account` left

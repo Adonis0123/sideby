@@ -13,29 +13,53 @@ const options = (args: readonly string[]) => {
 }
 
 /** The id after `--resume <id>`, `--resume=<id>` or `-r <id>`; Claude Code and Grok Build share this form. */
-export function resumeFlagSession(args: readonly string[]): string | undefined {
+export function resumeFlagSession(
+  args: readonly string[],
+  flags: readonly string[] = ['--resume', '-r'],
+): string | undefined {
   const opts = options(args)
   for (let i = 0; i < opts.length; i++) {
     const a = opts[i]!
-    const id = a.startsWith('--resume=')
-      ? a.slice('--resume='.length)
-      : a === '--resume' || a === '-r'
-        ? opts[i + 1]
-        : undefined
+    let id: string | undefined
+    for (const f of flags) {
+      if (a.startsWith(`${f}=`)) {
+        id = a.slice(f.length + 1)
+        break
+      }
+      if (a === f) {
+        id = opts[i + 1]
+        break
+      }
+    }
     if (isSessionId(id)) return id
   }
   return undefined
 }
 
 /** The arguments without the by-id resume `resumeFlagSession` reads; the rest keep their order (ADR-0009). */
-export function withoutResumeFlag(args: readonly string[]): string[] {
+export function withoutResumeFlag(
+  args: readonly string[],
+  flags: readonly string[] = ['--resume', '-r'],
+): string[] {
   const end = args.indexOf('--')
   const opts = end === -1 ? args : args.slice(0, end)
   const kept: string[] = []
   for (let i = 0; i < opts.length; i++) {
     const a = opts[i]!
-    if (a.startsWith('--resume=') && isSessionId(a.slice('--resume='.length))) continue
-    if ((a === '--resume' || a === '-r') && isSessionId(opts[i + 1])) {
+    let matchedInline = false
+    let matchedNext = false
+    for (const f of flags) {
+      if (a.startsWith(`${f}=`) && isSessionId(a.slice(f.length + 1))) {
+        matchedInline = true
+        break
+      }
+      if (a === f && isSessionId(opts[i + 1])) {
+        matchedNext = true
+        break
+      }
+    }
+    if (matchedInline) continue
+    if (matchedNext) {
       i++
       continue
     }

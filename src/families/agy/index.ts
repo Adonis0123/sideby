@@ -1,7 +1,9 @@
+import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { lstatOrNull } from '../../core/fs-safe.ts'
 import type { Account, FamilyDef, LoginState, Plugin } from '../../types.ts'
 import { BUILTIN_LOGOS } from '../logos.ts'
+import { resumeFlagSession, withoutResumeFlag } from '../shared/sessions.ts'
 import {
   AGY_ACCOUNT_LAYOUT,
   AGY_FORCE_FILE_TOKEN_VAR,
@@ -12,9 +14,24 @@ import {
   findAgyDirFlag,
 } from './layout.ts'
 import { AGY_SKIP_VALUE_FLAGS } from './mod.ts'
-import { agyQuotaFetch } from './quota.ts'
+import { AGY_DEFAULT_PICK_GROUP, agyQuotaFetch } from './quota.ts'
 
 export { AGY_FORCE_FILE_TOKEN_VAR, AGY_OAUTH_TOKEN_FILE, agyAppDataRelDir, agySelectArgs } from './layout.ts'
+export { AGY_DEFAULT_PICK_GROUP } from './quota.ts'
+
+const AGY_RESUME_FLAGS = ['--conversation', '--resume', '-r'] as const
+
+const agyResumedSession = (args: readonly string[]) => resumeFlagSession(args, AGY_RESUME_FLAGS)
+const agyWithoutResume = (args: readonly string[]) => withoutResumeFlag(args, AGY_RESUME_FLAGS)
+
+async function agySessionWrittenAt(account: Account, sessionId: string): Promise<number | undefined> {
+  try {
+    const st = await stat(join(account.dir, 'conversations', `${sessionId}.db`))
+    return st.isFile() ? st.mtimeMs : undefined
+  } catch {
+    return undefined
+  }
+}
 
 /** Lets agy run without asking before each tool call; an AI Task must keep those checks (ADR-0031). */
 const SKIP_PERMISSIONS = '--dangerously-skip-permissions'
@@ -48,7 +65,7 @@ export const agyFamily: FamilyDef = {
   installUrl: 'https://antigravity.google/docs/getting-started?tab=cli',
   installCommand: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
   noApi: true,
-  noHandoff: true,
+  defaultQuotaGroup: AGY_DEFAULT_PICK_GROUP,
   layout: { main: AGY_MAIN_DIR, account: AGY_ACCOUNT_LAYOUT },
   selectArgs: agySelectArgs,
   selectEnv: (account: Account) => (account.isMain ? {} : { [AGY_FORCE_FILE_TOKEN_VAR]: '1' }),
@@ -105,6 +122,9 @@ export const agyFamily: FamilyDef = {
     return {}
   },
   fetchQuota: agyQuotaFetch,
+  resumedSession: agyResumedSession,
+  sessionWrittenAt: agySessionWrittenAt,
+  withoutResume: agyWithoutResume,
 }
 
 export const agyPlugin: Plugin = {

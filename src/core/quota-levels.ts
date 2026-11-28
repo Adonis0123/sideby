@@ -254,8 +254,9 @@ export function limitUse(
   quota: QuotaResult | undefined,
   now: Date,
   limits: TakeoverLimits,
+  quotaGroup?: string,
 ): { percent: number; window: QuotaWindow | null } | null {
-  const windows = openWindows(quota, now)
+  const windows = openWindows(quota, now, quotaGroup)
   if (windows === null) return null
   let best: { percent: number; window: QuotaWindow | null } = { percent: 0, window: null }
   for (const w of windows) {
@@ -265,20 +266,27 @@ export function limitUse(
   return best
 }
 
-/** True once a window's reset time has passed; an unreadable time never counts as reset. */
+/** WHY: true once a real reset time has passed; unreadable or Unix-epoch-0 (unstarted) timestamps never count as reset. */
 export function windowReset(resetsAt: string, now: Date): boolean {
   const t = Date.parse(resetsAt)
-  return Number.isFinite(t) && t <= now.getTime()
+  return Number.isFinite(t) && t > 0 && t <= now.getTime()
+}
+
+/** WHY: shared matcher so unnamed plan-wide windows stay default while per-group Families rank one primary group (ADR-0091). */
+export function matchesQuotaWindow(w: { name?: string }, quotaGroup?: string): boolean {
+  const wanted = quotaGroup?.trim().toLowerCase()
+  if (!wanted) return !w.name
+  return typeof w.name === 'string' && w.name.trim().toLowerCase() === wanted
 }
 
 /**
  * Quota Pressure: the used percent of the fullest window that has not reset yet (0 when all have reset),
- * or null when the Account has no Quota. A window with a `name` covers only some models and never counts (spec
- * §3.26). The Panel keeps its own copy (`quotaPressure` in page-logic.ts, -1 for null) because page-logic helpers
- * must be self-contained; a test keeps the two equal.
+ * or null when the Account has no Quota. A window with a `name` covers only some models and never counts unless
+ * `quotaGroup` selects that group (spec §3.26, ADR-0091). The Panel keeps its own copy (`quotaPressure` in
+ * page-logic.ts, -1 for null) because page-logic helpers must be self-contained; a test keeps the two equal.
  */
-export function quotaPressure(quota: QuotaResult | undefined, now: Date): number | null {
-  const windows = openWindows(quota, now)
+export function quotaPressure(quota: QuotaResult | undefined, now: Date, quotaGroup?: string): number | null {
+  const windows = openWindows(quota, now, quotaGroup)
   if (windows === null) return null
   let max = 0
   for (const w of windows) max = Math.max(max, w.usedPercent)
@@ -287,11 +295,15 @@ export function quotaPressure(quota: QuotaResult | undefined, now: Date): number
 
 /**
  * The windows that count toward Quota Pressure and have not reset, with `usedPercent` clamped to 0–100; null when
- * the Account has no Quota or no window that counts (spec §3.26).
+ * the Account has no Quota or no window that counts (spec §3.26, ADR-0091).
  */
-export function openWindows(quota: QuotaResult | undefined, now: Date): QuotaWindow[] | null {
+export function openWindows(
+  quota: QuotaResult | undefined,
+  now: Date,
+  quotaGroup?: string,
+): QuotaWindow[] | null {
   if (quota?.status !== 'ok') return null
-  const windows = quota.windows.filter((w) => !w.name)
+  const windows = quota.windows.filter((w) => matchesQuotaWindow(w, quotaGroup))
   if (windows.length === 0) return null
   return windows
     .filter((w) => !windowReset(w.resetsAt, now))

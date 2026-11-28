@@ -6,6 +6,7 @@ import {
   isLongWindow,
   limitOf,
   limitUse,
+  matchesQuotaWindow,
   openWindows,
   quotaPressure,
   type TakeoverLimits,
@@ -142,12 +143,22 @@ const resetTime = (e: HandoffEntry) => (e.resetsAt ? Date.parse(e.resetsAt) : Nu
  * The latest reset among the counted windows at or above their `level` that have not reset yet: when the Account is
  * under it again.
  */
-function lastReset(quota: QuotaResult, now: Date, level: (w: QuotaWindow) => number): number | undefined {
+function lastReset(
+  quota: QuotaResult,
+  now: Date,
+  level: (w: QuotaWindow) => number,
+  quotaGroup?: string,
+): number | undefined {
   let last: number | undefined
   if (quota.status === 'ok')
     for (const w of quota.windows) {
       const t = Date.parse(w.resetsAt)
-      if (!w.name && w.usedPercent >= level(w) && !windowReset(w.resetsAt, now) && Number.isFinite(t))
+      if (
+        matchesQuotaWindow(w, quotaGroup) &&
+        w.usedPercent >= level(w) &&
+        !windowReset(w.resetsAt, now) &&
+        Number.isFinite(t)
+      )
         last = Math.max(last ?? t, t)
     }
   return last
@@ -166,10 +177,11 @@ function entry(
   limits: TakeoverLimits,
   lastResort: boolean,
   liveSessions: number,
+  quotaGroup?: string,
 ): HandoffEntry {
-  const pressure = quotaPressure(c.quota, now)
-  const use = limitUse(c.quota, now, limits)
-  const open = openWindows(c.quota, now)
+  const pressure = quotaPressure(c.quota, now, quotaGroup)
+  const use = limitUse(c.quota, now, limits, quotaGroup)
+  const open = openWindows(c.quota, now, quotaGroup)
   const base = {
     ref: c.ref,
     kind: c.kind,
@@ -199,7 +211,7 @@ function entry(
   }
   if (c.kind === 'api') return { ...base, state: 'api' }
   if (c.login === 'logged-out') return { ...base, state: 'logged-out' }
-  return withSkip(c, stateOfQuota(c, base, pressure, now, limits, lastResort))
+  return withSkip(c, stateOfQuota(c, base, pressure, now, limits, lastResort, quotaGroup))
 }
 
 function withSkip(c: HandoffCandidate, e: HandoffEntry): HandoffEntry {
@@ -215,11 +227,12 @@ function stateOfQuota(
   now: Date,
   limits: TakeoverLimits,
   lastResort: boolean,
+  quotaGroup?: string,
 ): HandoffEntry {
   if (pressure === null) return { ...base, state: 'unknown' }
   // Full once any window reaches its own Takeover Limit: 85 for a Short Window, 95 for a Long one by default.
   const level = (w: QuotaWindow) => limitOf(w, limits)
-  const open = openWindows(c.quota, now)
+  const open = openWindows(c.quota, now, quotaGroup)
   if (!open?.some((w) => w.usedPercent >= level(w))) {
     const roomy = open?.every((w) => level(w) - w.usedPercent >= EXPIRING_MIN_ROOM) ?? false
     const soon = roomy ? open?.filter((w) => isLongWindow(w) && expiresSoon(w.resetsAt, now)) : []
@@ -234,7 +247,7 @@ function stateOfQuota(
   }
   // Usable again only when every full window has reset: the latest of their reset times. For a Last Resort a window
   // used up is what stops an Account, so its reset is when it can start again.
-  const last = lastReset(c.quota, now, lastResort && pressure >= 100 ? () => 100 : level)
+  const last = lastReset(c.quota, now, lastResort && pressure >= 100 ? () => 100 : level, quotaGroup)
   return { ...base, state: 'full', ...(last === undefined ? {} : { resetsAt: new Date(last).toISOString() }) }
 }
 
@@ -334,6 +347,8 @@ export function planHandoff(
     lastResort?: boolean
     picks?: readonly PickRecord[]
     live?: LiveCounts
+    /** WHY: select a primary model-group window for Families without account-wide windows (ADR-0091). */
+    quotaGroup?: string
   } = {},
 ): HandoffPlan {
   const limits = opts.limits ?? DEFAULT_TAKEOVER_LIMITS
@@ -352,7 +367,7 @@ export function planHandoff(
   const rank = (e: HandoffEntry) => (opts.lastResort && lastResortOk(e) ? 1.5 : ORDER[e.state])
   const accounts = candidates
     .map((c) => {
-      const e = entry(c, now, limits, Boolean(opts.lastResort), load(c))
+      const e = entry(c, now, limits, Boolean(opts.lastResort), load(c), opts.quotaGroup)
       return current?.sameLogin?.includes(c.ref) ? { ...e, sameLoginAs: current.ref } : e
     })
     .sort(

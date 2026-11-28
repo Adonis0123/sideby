@@ -25,6 +25,7 @@ import {
   canLeaveLocal,
   categoryOrder,
   codeSwapOutcome,
+  columnWindows,
   dateFormatter,
   dotsKeepKeyboard,
   enableOutcome,
@@ -204,6 +205,11 @@ describe('page logic', () => {
     assert.equal(windowState(w(60), NOW, 60, 85).level, 'warn')
     assert.equal(windowState(w(85), NOW, 60, 85).level, 'fail')
     assert.deepEqual(windowState(w(97, -1), NOW, 60, 85), { pct: 0, passed: true, level: 'reset' })
+    assert.deepEqual(windowState({ usedPercent: 0, resetsAt: '1970-01-01T00:00:00.000Z' }, NOW, 60, 85), {
+      pct: 0,
+      passed: false,
+      level: 'ok',
+    })
     assert.equal(windowState(w(140), NOW, 60, 85).pct, 100)
   })
 
@@ -232,6 +238,21 @@ describe('page logic', () => {
     assert.equal(bindingWindow([w('7d', 40), w('5h', 100, -1)], NOW, 60, 85)?.label, '7d')
     assert.equal(bindingWindow([w('5h', 30), w('7d', 30)], NOW, 60, 85)?.label, '5h')
     assert.equal(bindingWindow([], NOW, 60, 85), undefined)
+    assert.deepEqual(
+      columnWindows(
+        [
+          { name: 'Gemini Models', label: '7d', windowMinutes: 10080 },
+          { name: 'Claude and GPT models', label: '5h', windowMinutes: 300 },
+          { name: 'Gemini Models', label: '5h', windowMinutes: 300 },
+        ],
+        'Gemini Models',
+      ).map((x) => x.label),
+      ['5h', '7d'],
+    )
+    assert.deepEqual(
+      columnWindows([{ label: '7d' }, { label: '5h' }], '5h').map((x) => x.label),
+      ['5h'],
+    )
   })
 
   it('marks a window whose reset passed with the time its data was last seen, and skips it as the next reset', () => {
@@ -243,6 +264,7 @@ describe('page logic', () => {
     assert.deepEqual(passedWindow(passed, undefined, NOW), { since: passed.resetsAt })
     assert.deepEqual(passedWindow(passed, 'garbage', NOW), { since: passed.resetsAt })
     assert.equal(passedWindow({ resetsAt: 'garbage' }, at(-1), NOW), null)
+    assert.equal(passedWindow({ resetsAt: '1970-01-01T00:00:00.000Z' }, at(-1), NOW), null)
     // codex:002 shape: only a passed 7d window. It is not the header's next reset; a live one elsewhere is.
     const stale = acct('002', {
       family: 'codex',

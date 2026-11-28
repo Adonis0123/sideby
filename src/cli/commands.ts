@@ -195,6 +195,7 @@ async function runAccountNow(
   )
   if (handed !== null) return handed
   const prepared = await rt.prepareLaunch(ref, args, 'run', opts)
+  await rt.recordOrcaChatAccount(prepared.account, args).catch(() => {})
   if (prepared.notice) io.err(c.cyan(prepared.notice))
   const code = await runHost(prepared)
   if ((io.stdin ?? process.stdin).isTTY) {
@@ -890,6 +891,11 @@ async function runPick(
       ),
     )
     return runAccount(rt, target.account.ref, target.args, io, opts)
+  }
+  const bound = pickFamily === undefined ? null : await rt.orcaChatAccount(pickFamily, args)
+  if (bound) {
+    io.err(c.dim(`sideby: Orca chat ${bound.orcaSessionId} is in ${bound.account.ref}; starting it there`))
+    return runAccount(rt, bound.account.ref, args, io, opts)
   }
   const { choice, family } = await rt.pickChoice(name, { record: true })
   if (choice.ref === null) {

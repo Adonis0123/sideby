@@ -504,6 +504,7 @@ const en = {
   'quota.unitUsed': 'used',
   'quota.unitLeft': 'left',
   'quota.resetShort': 'reset',
+  'quota.notStarted': 'Starts on next use',
   'quota.missing': 'No {label} window right now; it shows once that window starts.',
   'quota.waiting': 'Waiting for the first status line… open a {host} session and send a message.',
   'col.account': 'Account',
@@ -873,6 +874,10 @@ const en = {
   'pk.why.tight':
     'every account is past its limit ({limit}% of a 5-hour window, {longLimit}% of a weekly one); this one has the most left, {w}{n}% used',
   'pk.why.noData': 'no quota data yet',
+  'pk.groupLabel': 'Quota group to rank by',
+  'pk.groupHint':
+    'Antigravity CLI tracks quota per model group; sideby compares this group when picking an account.',
+  'pk.groupSaved': 'Antigravity CLI now ranks accounts by {group}.',
   'login.opened': 'Opened {terminal}: sign in to {ref} there.',
   'login.failed': 'Could not open a terminal. Copied: paste it into your terminal and press Return.',
   'login.automation':
@@ -2657,6 +2662,7 @@ const zh: Record<MessageKey, string> = {
   'quota.unitUsed': '已用',
   'quota.unitLeft': '剩余',
   'quota.resetShort': '已重置',
+  'quota.notStarted': '下次使用时开始计时',
   'quota.missing': '暂无 {label} 窗口，窗口开始后显示。',
   'quota.waiting': '等待第一次状态栏刷新…打开 {host} 会话并发一条消息。',
   'col.account': '账号',
@@ -3003,6 +3009,9 @@ const zh: Record<MessageKey, string> = {
   'pk.why.tight':
     '所有账号都已到上限（5 小时窗口 {limit}%，每周窗口 {longLimit}%）；这个剩得最多，{w}已用 {n}%',
   'pk.why.noData': '还没有额度数据',
+  'pk.groupLabel': '选号参考的模型组',
+  'pk.groupHint': 'Antigravity CLI 按模型组分别计算额度，自动选号时按这个组剩余额度排序。',
+  'pk.groupSaved': 'Antigravity CLI 现已改为按 {group} 额度排序。',
   'login.opened': '已打开 {terminal}，请在那里登录 {ref}。',
   'login.failed': '终端没打开，命令已复制：粘贴到你的终端，按回车。',
   'login.automation':

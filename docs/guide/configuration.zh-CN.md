@@ -41,7 +41,8 @@
 | `ignore` | 看起来像账号、其实不是的账号引用（`<family>:<name>`）。名字里有 `bak`、`backup`、`old`、`tmp` 时，doctor 会给一条 warn，建议加到这里。 |
 | `pluginDirs` | 额外的插件目录，只接受绝对路径或以 `~/` 开头的路径。 |
 | `plugins.<name>` | 单个插件的设置；`enabled` 控制开关，内置家族也适用。 |
-| `pickCommands` | 自动选号命令：短名到家族的映射（`{ "cc": "claude" }`）。每次运行启动这个家族额度最多的账号，都没有额度数据时启动主账号。与 `aliases` 共用一套名字；用 `sideby alias add <短名> --pick <family>` 添加。 |
+| `pickCommands` | 自动选号命令：短名到家族的映射（`{ "cc": "claude", "ag": "agy" }`）。每次运行启动这个家族额度最多的账号，都没有额度数据时启动主账号。与 `aliases` 共用一套名字；用 `sideby alias add <短名> --pick <family>` 添加。 |
+| `agy.pickGroup` | Antigravity CLI 自动选号时参考的模型组（`sideby next agy`、自动选号命令和面板推荐）。默认 `"Gemini Models"`。 |
 | `shellInitFile` | 可选，`{ "zsh": …, "bash": … }`，绝对路径或以 `~/` 开头。sideby 每次新增账号、新增或删除别名（`sideby new`、`sideby alias`、面板）后，都用 `sideby shell-init <shell>` 的输出重写这些文件，source 它的 shell 就能用上新命令。不是 `shell-init` 写的文件，它不会覆盖。 |
 | `accountTitle` | 可选，默认关。设为 `true` 时，启动账号会把终端标签页标题设成 `[<短命令或 ref>]`，并用 `-c tui.terminal_title=[]` 启动 Codex，让它保留这个标题（你的参数里自己设了 `tui.terminal_title` 时不加）。其他宿主可能换成自己的标题；见[在会话里显示是哪个账号](usage.zh-CN.md#在会话里显示是哪个账号)。 |
 | `ask.permissions` | 可选，默认 `"checked"`。AI Task（面板的「让 AI 帮我」、`sideby ask`）怎样启动账号：`"checked"` 去掉跳过宿主权限检查的参数，Claude Code 用 auto 模式启动；`"account"` 像 `sideby run` 一样用账号自己的参数，包括你放进去的跳过权限检查的参数。用 `sideby ask --permissions account` 改（先显示改动，加 `--yes` 才保存）。见[让 AI 帮我](panel.zh-CN.md#让-ai-帮我)。 |

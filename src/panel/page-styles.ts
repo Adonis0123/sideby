@@ -445,6 +445,13 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .quota { display: grid; grid-template-columns: repeat(var(--qr, var(--qn)), minmax(0, 1fr)); column-gap: var(--col-gap); row-gap: 4px; min-width: 0; }
 .row > .quota { grid-template-columns: repeat(var(--qn), var(--q-w)); }
 .meter { min-width: 0; }
+.meter-stack { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ms-head { color: var(--muted); font-size: 12px; font-weight: 600; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-win { color: var(--muted); font-size: 11px; font-weight: 600; min-width: 18px; font-variant-numeric: tabular-nums; }
+.meter-sub .m-top { gap: 2px 6px; }
+.meter-sub .m-pct { font-size: 12px; }
+.meter-sub .m-reset { font-size: 11px; }
+.meter-sub .bar { height: 4px; margin-top: 3px; }
 /* The countdown never ends in an ellipsis: where the line is too short it wraps to a line of its own, at the right. */
 .m-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 12px; line-height: 1.35; white-space: nowrap; min-width: 0; }
 .m-label { color: var(--muted); font-weight: 600; }
@@ -499,7 +506,7 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .health .dot { width: 6px; height: 6px; }
 
 /* In the wide list the column titles name the windows; elsewhere each meter carries its label. */
-.rows .m-label, .rows .m-unit { display: none; }
+.rows .m-label, .rows .m-unit, .rows .ms-head { display: none; }
 
 .badge { flex: none; display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: var(--radius-xl); color: var(--on-badge); font-weight: 600; font-size: 12px; letter-spacing: .02em; }
 .badge-logo { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
@@ -568,9 +575,10 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .card .quota { gap: 12px 24px; }
 .card .meter { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; column-gap: 8px; row-gap: 4px; }
 .card .m-top { display: contents; }
-.card .m-label { grid-area: 1 / 1; white-space: nowrap; }
+.card .m-label, .card .m-win { grid-area: 1 / 1; white-space: nowrap; }
 .card .m-pct { grid-area: 1 / 2; white-space: nowrap; }
 .card .bar { grid-area: 2 / 1 / 3 / 3; height: 6px; }
+.card .meter-sub .bar { height: 4px; }
 .card .m-reset { grid-area: 3 / 1 / 4 / 3; margin-left: 0; }
 .card .m-none { grid-area: 1 / 2; }
 .card-br { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -1081,6 +1089,7 @@ ${UI_CSS}
 
   .row > .quota { grid-template-columns: repeat(var(--qr, var(--qn)), minmax(0, 1fr)); }
   .rows .m-label, .rows .m-unit, .rows .u-unit { display: inline; }
+  .rows .ms-head { display: block; }
   .rows .usage { justify-content: flex-start; }
   .row > .last { display: none; }
   .last-inline { display: flex; flex: none; gap: 8px; color: var(--muted); font-size: 12px; white-space: nowrap; margin-top: 0; }

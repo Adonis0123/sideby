@@ -21,11 +21,11 @@ import {
   attentionReasons,
   attentionWhy,
   autostartNote,
-  bindingWindow,
   cacheHitRate,
   canLeaveLocal,
   categoryOrder,
   codeSwapOutcome,
+  columnWindows,
   dateFormatter,
   dotsKeepKeyboard,
   enableOutcome,
@@ -252,7 +252,7 @@ const LOGIC = [
   widthFollower,
   widthTier,
   windowState,
-  bindingWindow,
+  columnWindows,
   withPinned,
   uaWhen,
   uaStatusParts,
@@ -1594,7 +1594,9 @@ const MAIN = String.raw`
   function pickLeft(a, now) {
     const q = a && a.quota
     if (!q || q.status !== 'ok') return t('stat.pickNoData')
-    const wins = (q.windows || []).filter((w) => !w.name).slice().sort((x, y) => (Number(x.windowMinutes) || 0) - (Number(y.windowMinutes) || 0))
+    const grp = family(a.family).pickGroup
+    const want = grp ? grp.trim().toLowerCase() : null
+    const wins = (q.windows || []).filter((w) => want ? String(w.name || '').trim().toLowerCase() === want : !w.name).slice().sort((x, y) => (Number(x.windowMinutes) || 0) - (Number(y.windowMinutes) || 0))
     if (!wins.length) return t('stat.pickNoData')
     return wins.map((w) => passedWindow(w, q.observedAt, now) ? t('stat.pickReset', { w: winShort(w.label) }) : t('stat.pickLeft', { w: winShort(w.label), n: String(Math.max(0, 100 - Math.round(Number(w.usedPercent) || 0))) })).join(' · ')
   }
@@ -1711,28 +1713,34 @@ const MAIN = String.raw`
   // A window's cell: percent and countdown on one line, the bar under them. The label shows where no column
   // header does (cards, narrow screens).
   // age: this window's own read time and whether its number is old (windowAge, ADR-0073).
-  function meter(w, now, age, withLength) {
+  function meter(w, now, age, stacked) {
     const stale = age.stale
     const observedAt = age.observedAt
     const st = windowState(w, now, WARN, FAIL, LONG)
     const passed = passedWindow(w, observedAt, now)
+    const resetAt = Date.parse(w.resetsAt)
+    const unstarted = Number.isFinite(resetAt) && resetAt <= 0
     const left = prefs.quota === 'left'
     const shown = left ? 100 - st.pct : st.pct
-    // When and where this number was read is always in the hover text, old or not.
     const asOf = [Number.isFinite(Date.parse(observedAt)) ? t('quota.readAt', { at: clock(observedAt), ago: ago(observedAt) }) : t('quota.readUnknown'), age.source ? t('quota.source', { source: age.source }) : ''].filter(Boolean).join(' · ')
-    // The same words as the menu bar and the CLI (spec §3.31): a countdown under a day, then tomorrow, a weekday, a date.
-    const reset = passed ? t('quota.resetShort') : t('quota.resetsIn', { d: resetWhen(w.resetsAt, now, lang) })
-    // The wide list's column says only the model group, so the hover names which of its limits this is.
-    const title = [withLength ? winTitle(w.label) : '', passed ? t('quota.resetNoData', { date: day(passed.since) }) : t('quota.resetsAt', { at: clock(w.resetsAt) }), asOf].filter(Boolean).join(' · ')
-    return h('div', { class: 'meter lvl-' + st.level + (stale || passed ? ' lvl-stale' : ''), title },
+    let reset = '?'
+    if (passed) reset = t('quota.resetShort')
+    else if (unstarted) reset = '—'
+    else if (Number.isFinite(resetAt)) reset = t('quota.resetsIn', { d: resetWhen(w.resetsAt, now, lang) })
+    let resetTip = t('quota.resetsAt', { at: clock(w.resetsAt) })
+    if (passed) resetTip = t('quota.resetNoData', { date: day(passed.since) })
+    else if (unstarted) resetTip = t('quota.notStarted')
+    const title = [stacked ? winTitle(w.label) : '', resetTip, asOf].filter(Boolean).join(' · ')
+    const ariaLabel = t(left ? 'quota.meterLeft' : 'quota.meterUsed', { label: winTitle(winKey(w)) + (stacked ? ' · ' + winTitle(w.label) : '') })
+    return h('div', { class: 'meter lvl-' + st.level + (stale || passed ? ' lvl-stale' : '') + (stacked ? ' meter-sub' : ''), title },
       h('div', { class: 'm-top' },
-        // Cards show the short window name ("5 小时"); the list and its column titles keep the full one.
-        // withLength: the group has other limits too, so name which one this is ("Gemini Models · 5-hour").
-        h('span', { class: 'm-label' }, h('span', { class: 'm-full' }, winTitle(winKey(w)) + (withLength ? ' · ' + winTitle(w.label) : '')), h('span', { class: 'm-short' }, winShort(winKey(w)) + (withLength ? ' · ' + winShort(w.label) : ''))),
+        stacked
+          ? h('span', { class: 'm-win' }, w.label)
+          : h('span', { class: 'm-label' }, h('span', { class: 'm-full' }, winTitle(winKey(w))), h('span', { class: 'm-short' }, winShort(winKey(w)))),
         h('span', { class: 'm-pct' }, shown + '%', h('span', { class: 'm-unit' }, ' ' + t(left ? 'quota.unitLeft' : 'quota.unitUsed')),
           null),
-        h('span', { class: 'm-reset' + (passed ? ' m-passed' : '') }, Number.isFinite(Date.parse(w.resetsAt)) || passed ? reset : '?')),
-      h('div', { class: 'bar', role: 'meter', 'aria-label': t(left ? 'quota.meterLeft' : 'quota.meterUsed', { label: winTitle(winKey(w)) }), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(shown), 'aria-valuetext': t(left ? 'quota.pctLeft' : 'quota.pctUsed', { n: shown }) }, h('span', { css: { width: shown + '%' } })))
+        h('span', { class: 'm-reset' + (passed ? ' m-passed' : '') }, reset)),
+      h('div', { class: 'bar', role: 'meter', 'aria-label': ariaLabel, 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(shown), 'aria-valuetext': t(left ? 'quota.pctLeft' : 'quota.pctUsed', { n: shown }) }, h('span', { css: { width: shown + '%' } })))
   }
   // A column whose window this account does not report right now, such as a 5h window that has not started.
   function noMeter(label, short) {
@@ -1809,10 +1817,14 @@ const MAIN = String.raw`
     // widest Family's, for the wide list's shared columns).
     return h('div', { class: 'quota' + (stale ? ' is-stale' : '') + (ui.resetRef === a.ref ? ' is-resetting' : ''), title, css: wins.length ? { '--qr': String(cols.length) } : null },
       wins.length ? cols.map((c) => {
-        // A model group with several limits (Antigravity's 5-hour and weekly) shows the one that binds first.
-        const same = wins.filter((x) => winKey(x) === c)
-        const w = bindingWindow(same, now, WARN, FAIL, LONG)
-        return w ? meter(w, now, windowAge(q, w, now, lastUse, every), same.length > 1) : noMeter(winTitle(c), winShort(c))
+        // WHY: a model group with both 5-hour and weekly limits stacks every window in its column, shortest first (spec §3.26).
+        const same = columnWindows(wins, c)
+        if (!same.length) return noMeter(winTitle(c), winShort(c))
+        if (same.length === 1) return meter(same[0], now, windowAge(q, same[0], now, lastUse, every), false)
+        const head = winTitle(c)
+        return h('div', { class: 'meter-stack' },
+          h('div', { class: 'ms-head', title: head }, head),
+          same.map((w) => meter(w, now, windowAge(q, w, now, lastUse, every), true)))
       }) : h('div', { class: 'q-note' }, t('quota.noWindows')),
       // Old numbers keep their colours and say their age once, under the bars, next to the Limit Resets the account holds.
       asOf || resets || resetBtn ? h('div', { class: 'q-foot' }, asOf, resets, resetBtn) : null)
@@ -9608,6 +9620,39 @@ const MAIN = String.raw`
         replaces ? h('button', { class: 'btn btn-sm btn-ghost', type: 'button', disabled: pk.busy, onclick: () => { delete pk.renaming[fam]; delete pk.drafts[fam]; renderPick() } }, t('btn.cancel')) : null),
     ]
   }
+  async function agyPickGroupSave(group) {
+    pk.busy = true
+    pk.error = null
+    renderPick()
+    try {
+      await api('/api/agy/pick-group', { group })
+      toast(t('pk.groupSaved', { group }))
+      await load({ silent: true })
+    } catch (e) { pk.error = e }
+    if (!pk) return
+    pk.busy = false
+    if (dlg.kind === 'pick') renderPick()
+  }
+  function agyGroupEditor(fam, info) {
+    if (fam !== 'agy' || !info.pickGroup) return null
+    const seen = new Set(['Gemini Models', 'Claude and GPT models', info.pickGroup])
+    for (const a of S.state.accounts || []) {
+      if (a.family !== fam || a.quota?.status !== 'ok') continue
+      for (const w of a.quota.windows || []) if (w.name) seen.add(w.name)
+    }
+    const groups = [...seen]
+    if (BOOT.readOnly) return h('p', { class: 'muted small' }, t('pk.groupLabel') + colon() + info.pickGroup)
+    const id = 'pk-group-' + fam
+    const sel = selectMenu(
+      { id, disabled: pk.busy, 'aria-label': t('pk.groupLabel') },
+      groups.map((g) => h('option', { value: g, selected: g === info.pickGroup ? '' : null }, g)),
+    )
+    sel.value = info.pickGroup
+    sel.addEventListener('change', () => { if (sel.value && sel.value !== info.pickGroup) agyPickGroupSave(sel.value) })
+    return h('div', { class: 'pk-group' },
+      h('label', { class: 'field', for: id }, h('span', null, t('pk.groupLabel')), sel),
+      h('p', { class: 'field-hint' }, t('pk.groupHint')))
+  }
   function renderPick() {
     if (!pk) return
     const body = [h('p', { class: 'muted small' }, t('pk.intro'))]
@@ -9620,8 +9665,9 @@ const MAIN = String.raw`
       const info = family(fam)
       const name = pickOf(fam)
       const head = h('div', { class: 'title-logo' }, badge(fam, 'sm'), h('b', null, info.title))
+      const groupPick = agyGroupEditor(fam, info)
       if (name && pk.renaming[fam] && !BOOT.readOnly) {
-        body.push(h('div', { class: 'pk-row' }, head, nameEditor(fam, info, name, name)))
+        body.push(h('div', { class: 'pk-row' }, head, nameEditor(fam, info, name, name), groupPick))
         continue
       }
       if (name) {
@@ -9630,11 +9676,12 @@ const MAIN = String.raw`
           h('div', { class: 'actions' },
             h('button', { class: 'btn btn-sm', type: 'button', disabled: pk.busy, onclick: () => startPick(name) }, icon('terminal'), pickStartLabel(), h('code', { class: 'mono' }, name)),
             BOOT.readOnly ? null : h('button', { class: 'btn btn-sm btn-ghost', type: 'button', disabled: pk.busy, onclick: () => { pk.renaming[fam] = true; renderPick(); const el = document.getElementById('pk-name-' + fam); if (el) el.focus() } }, t('pk.rename')),
-            BOOT.readOnly ? null : h('button', { class: 'btn btn-sm btn-ghost', type: 'button', disabled: pk.busy, onclick: () => pickRemove(name) }, t('pk.remove')))))
+            BOOT.readOnly ? null : h('button', { class: 'btn btn-sm btn-ghost', type: 'button', disabled: pk.busy, onclick: () => pickRemove(name) }, t('pk.remove'))),
+          groupPick))
         continue
       }
       if (BOOT.readOnly) continue
-      body.push(h('div', { class: 'pk-row' }, head, nameEditor(fam, info, S.state.pickOffers[fam].name, null)))
+      body.push(h('div', { class: 'pk-row' }, head, nameEditor(fam, info, S.state.pickOffers[fam].name, null), groupPick))
     }
     if (fams.length && !setupFirst) body.push(shellSetupNote() || h('p', { class: 'muted small' }, t('pk.newShell')))
     if (pk.error) body.push(errorNote(pk.error, null))

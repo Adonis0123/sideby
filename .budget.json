@@ -401,7 +401,7 @@
     }
   },
   "tests": {
-    "total": 2174,
+    "total": 2176,
     "files": {
       "mods/claude/hooks/register.test.ts": 7,
       "scripts/budget.test.ts": 7,
@@ -523,7 +523,7 @@
       "src/desktop/app.test.ts": 13,
       "src/families/agy/deliver.test.ts": 6,
       "src/families/agy/history.test.ts": 5,
-      "src/families/agy/index.test.ts": 15,
+      "src/families/agy/index.test.ts": 17,
       "src/families/agy/live-sessions.test.ts": 5,
       "src/families/agy/mod.test.ts": 3,
       "src/families/claude/ai-task.test.ts": 3,
@@ -635,6 +635,12 @@
         "reason": "ADR-0090: attribute Antigravity live sessions per account via --app_data_dir",
         "from": 2173,
         "to": 2174
+      },
+      {
+        "date": "2026-11-28",
+        "reason": "ADR-0091 agy primary-group quota ranking, Panel pick-group API, and Orca Chat sticky account binding writes",
+        "from": 2174,
+        "to": 2176
       }
     ]
   },

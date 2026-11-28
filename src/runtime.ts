@@ -349,6 +349,8 @@ export interface FamilyInfo {
   noApi?: true
   /** Set when this Family does not rank Accounts by Quota in Handoff or Pick Commands (ADR-0090). */
   noHandoff?: true
+  /** Primary quota model group ranked for this Family when its Quota has only per-group windows (ADR-0091). */
+  pickGroup?: string
   /** Set only for a Main-only Family: sideby knows only its Main Account and creates no other (ADR-0047). */
   mainOnly?: true
   /** Relative to HOME: `{ main: '.claude', account: '.claude-<name>' }`. */
@@ -584,6 +586,18 @@ export interface Runtime {
    * out; null when they resume nothing by id, the Family cannot route, or no Account has the session.
    */
   resumeTarget(familyId: string, userArgs: readonly string[]): Promise<ResumeTarget | null>
+  /** Primary model group ranked for a Family whose Quota only reports per-group windows (ADR-0091). */
+  quotaGroup(familyId: string): string | undefined
+  /**
+   * The existing Account previously bound to this Orca structured Chat (`ORCA_AGENT_SESSION_ID`), or null when
+   * unbound, outside an Orca `agy acp` launch, or when the bound Account no longer exists (ADR-0091).
+   */
+  orcaChatAccount(
+    familyId: string,
+    userArgs: readonly string[],
+  ): Promise<{ orcaSessionId: string; account: Account } | null>
+  /** Records the Account serving an Orca structured `agy acp` Chat for future wakes (ADR-0091). */
+  recordOrcaChatAccount(account: Account, userArgs: readonly string[]): Promise<void>
   /**
    * The Account's Quota. For an Account of a Same Login (spec §3.21) it is the group's freshest reading, with `from`
    * naming the Account it was read from when that is another one.
@@ -1654,6 +1668,7 @@ export async function createRuntime(
             ...(hostSettingsFile(f) ? { settingsFile: hostSettingsFile(f) } : {}),
             ...(f.noApi ? { noApi: true as const } : {}),
             ...(f.noHandoff ? { noHandoff: true as const } : {}),
+            ...(rt.quotaGroup(f.id) ? { pickGroup: rt.quotaGroup(f.id) } : {}),
             ...(f.mainOnly ? { mainOnly: true as const } : {}),
             layout: { main: f.layout.main, ...(f.layout.account ? { account: f.layout.account } : {}) },
           }
@@ -2282,6 +2297,13 @@ export async function createRuntime(
       }
       // A select variable already set means an Account was chosen on purpose: run the Host as it is.
       if (family.selectVar && env[family.selectVar]) return { launch: await guarded(host) }
+      // WHY: agy selects accounts via --app_data_dir / AGY_CLI_FORCE_FILE_TOKEN_STORAGE rather than selectVar (ADR-0091).
+      if (family.id === 'agy') {
+        const { AGY_FORCE_FILE_TOKEN_VAR, findAgyDirFlag } = await import('./families/agy/layout.ts')
+        const { AGY_SKIP_VALUE_FLAGS } = await import('./families/agy/mod.ts')
+        if (env[AGY_FORCE_FILE_TOKEN_VAR] || findAgyDirFlag(userArgs, AGY_SKIP_VALUE_FLAGS))
+          return { launch: await guarded(host) }
+      }
       const route = await findResumeRoute(family, await accounts(), userArgs)
       const id = route.sessionId ? { sessionId: route.sessionId } : {}
       // In the Main Account with Auto Handoff on, start it as `sideby run` would (ADR-0059).
@@ -2319,6 +2341,27 @@ export async function createRuntime(
         args: family.withoutResume(userArgs),
         newSession: true,
       }
+    },
+    quotaGroup(familyId) {
+      const f = families.get(familyId)
+      if (!f) return undefined
+      if (f.id === 'agy' && config.agy?.pickGroup?.trim()) return config.agy.pickGroup.trim()
+      return f.defaultQuotaGroup
+    },
+    async orcaChatAccount(familyId, userArgs) {
+      const { orcaChatSessionId, readOrcaChatBinding } = await import('./core/orca-chat-bindings.ts')
+      const id = orcaChatSessionId(env, familyId, userArgs)
+      if (!id) return null
+      const ref = await readOrcaChatBinding(paths.stateDir, id, familyId)
+      if (!ref) return null
+      const account = (await accounts()).find((a) => a.family === familyId && a.ref === ref)
+      return account ? { orcaSessionId: id, account } : null
+    },
+    async recordOrcaChatAccount(account, userArgs) {
+      const { orcaChatSessionId, writeOrcaChatBinding } = await import('./core/orca-chat-bindings.ts')
+      const id = orcaChatSessionId(env, account.family, userArgs)
+      if (!id) return
+      await writeOrcaChatBinding(paths.stateDir, id, account.ref, account.family, now())
     },
     async quota(account, o = {}) {
       const peers = await peersOf(account)
@@ -2896,11 +2939,13 @@ export async function createRuntime(
       // A start the user asks for may still go past them (a Last Resort, spec §3.13); Auto Handoff never does.
       const limits = takeoverLimits(handoffSettings(config).threshold)
       const { picks: mode, recorded, ...rest } = o
+      const quotaGroup = rt.quotaGroup(f.id)
       const plan = (list: typeof candidates, picks?: readonly PickRecord[]) =>
         planHandoff(f.id, list, readContext().now, {
           ...rest,
           limits,
           lastResort: true,
+          ...(quotaGroup ? { quotaGroup } : {}),
           ...(from ? { from } : {}),
           ...(picks ? { picks } : {}),
         })

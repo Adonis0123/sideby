@@ -449,6 +449,19 @@
       "additionalProperties": false,
       "description": "Claude Code launches (spec §3.41, ADR-0074; `carryTrust`: spec §3.43, ADR-0078; `shareMemory`: spec §3.44, ADR-0081)."
     },
+    "agy": {
+      "type": "object",
+      "properties": {
+        "pickGroup": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Which Antigravity CLI quota model group sideby ranks when picking an account (`sideby next agy`, pick commands, and the Panel recommendation; ADR-0091). Default: `Gemini Models`."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Antigravity CLI launches and account picking (ADR-0091)."
+    },
     "unattended": {
       "type": "object",
       "properties": {

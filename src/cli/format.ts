@@ -94,12 +94,12 @@ function windowText(w: QuotaWindow, now: Date): string {
   // A window that covers only some models goes by their name (spec §3.26), with its length, since one group may have
   // a 5-hour and a weekly limit (Antigravity CLI).
   const label = w.name ? `${w.name} ${w.label}` : w.label
-  if (Date.parse(w.resetsAt) <= now.getTime()) return `${label} reset`
+  const resetAt = Date.parse(w.resetsAt)
+  if (Number.isFinite(resetAt) && resetAt > 0 && resetAt <= now.getTime()) return `${label} reset`
   const pct = Math.round(w.usedPercent)
-  // Each window by its own levels: a weekly window warns at 85% and turns red at 95% (spec §3.26).
   const level = windowLevel({ ...w, usedPercent: pct })
   const color = level === 'fail' ? c.red : level === 'warn' ? c.yellow : c.green
-  // The same words as the menu bar and the Panel (spec §3.31): a countdown under a day, then tomorrow, a weekday, a date.
+  if (!(resetAt > 0)) return `${label} ${color(`${pct}%`)}`
   return `${label} ${color(`${pct}%`)} ${c.dim(`resets ${resetWhen(w.resetsAt, now.getTime(), 'en')}`)}`
 }
 

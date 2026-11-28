@@ -815,6 +815,7 @@ export function familyPlans(
     const subs = list.filter((a) => a.kind === 'subscription')
     const logins = subs.filter((a, i) => !subs.slice(0, i).some((b) => a.sameLogin?.includes(b.ref))).length
     if (f.noHandoff || (!f.readQuota && !f.fetchQuota) || logins < 1) continue
+    const quotaGroup = rt.quotaGroup?.(id) ?? f.defaultQuotaGroup
     const plan = planHandoff(
       id,
       list.map((a) => ({
@@ -833,6 +834,7 @@ export function familyPlans(
       {
         limits: takeoverLimits(rt.handoffSettings().threshold),
         lastResort: true,
+        ...(quotaGroup ? { quotaGroup } : {}),
         // Counted over every Account, also one still being read, so a Same Login partner's sessions count.
         ...(load ? { picks: load.picks, live: load.live } : {}),
       },
@@ -2319,6 +2321,17 @@ export function createPanelHandler(opts: PanelHandlerOptions): PanelHandler {
         const rt = await getRuntime()
         if (rt.pickCommandFamily(name) === undefined) throw new HttpError(400, `no pick command "${name}"`)
         return rt.removeAlias(name)
+      },
+    },
+    // WHY: switch which Antigravity CLI quota model group sideby ranks for pick commands and recommendations (ADR-0091).
+    '/api/agy/pick-group': {
+      async run(body) {
+        const group = optString(body, 'group')?.trim()
+        if (!group || group.length > 60)
+          throw new HttpError(400, 'choose a model group name (1-60 characters)')
+        const rt = await getRuntime()
+        const r = await editConfigPath(rt.paths.configFile, 'agy.pickGroup', group)
+        return { group, changed: r.changed }
       },
     },
     // An Alias for one Account: add one, or give one a new name (`replaces`); the page names the Account by ref.

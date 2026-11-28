@@ -288,6 +288,12 @@ const FamilyInfo = Type.Object({
       description: 'The Family does not rank Accounts by Quota in Handoff or Pick Commands (ADR-0090).',
     }),
   ),
+  pickGroup: Type.Optional(
+    Type.String({
+      description:
+        'Primary model-group quota window ranked for this Family when its Quota has only per-group windows (ADR-0091).',
+    }),
+  ),
   mainOnly: Type.Optional(
     Type.Literal(true, {
       description:

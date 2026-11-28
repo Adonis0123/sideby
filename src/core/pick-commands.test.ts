@@ -11,6 +11,10 @@ test('the offered name follows the Family’s numbered short commands, else the 
   assert.equal(suggestPickName('grok', 'grok', ['fast']), 'gk')
   // Two patterns: no guess, the default.
   assert.equal(suggestPickName('codex', 'codex', ['cx001', 'codex2']), 'cx')
+  // WHY: numbered aliases using the Host binary prefix fall back to the built-in default (ADR-0091).
+  assert.equal(suggestPickName('codex', 'codex', ['codex001', 'codex002']), 'cx')
+  assert.equal(suggestPickName('agy', 'agy', ['agy001', 'agy002']), 'ag')
+  assert.equal(suggestPickName('agy', 'agy', []), 'ag')
   // Never the Host's own command: `pi` would hide pi itself.
   assert.equal(suggestPickName('pi', 'pi', ['pi001', 'pi002']), null)
   assert.equal(suggestPickName('pi', 'pi', []), null)

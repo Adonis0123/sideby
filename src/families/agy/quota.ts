@@ -17,6 +17,8 @@ import type { Account, QuotaFetch, QuotaFetchContext, QuotaResult, QuotaWindow }
 import { AGY_FORCE_FILE_TOKEN_VAR, agySelectArgs } from './layout.ts'
 
 export const AGY_QUOTA_ARGS = ['-p', '/usage', '--output-format', 'json'] as const
+/** WHY: default primary model group ranked by `sideby next agy`, pick commands, and Panel recommendations (ADR-0091). */
+export const AGY_DEFAULT_PICK_GROUP = 'Gemini Models'
 /** WHY: detect upstream removal of `--app_data_dir` without storing or echoing raw stderr (ADR-0048, ADR-0090). */
 const MAX_ERR_PROBE = 512
 const UNSUPPORTED_APP_DIR = /flag provided but not defined|unknown flag|--app_data_dir|-app_data_dir/i

@@ -1,9 +1,18 @@
 import assert from 'node:assert/strict'
-import { access, lstat, readFile, stat, symlink, writeFile } from 'node:fs/promises'
+import { access, lstat, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
-import { diffSnapshots, type FakeHome, snapshot, withFakeHome } from '../../../testing/index.ts'
+import {
+  diffSnapshots,
+  type FakeHome,
+  fakeHost,
+  readHostLog,
+  snapshot,
+  withFakeHome,
+} from '../../../testing/index.ts'
+import { sideby } from '../../cli/cli-test-helpers.ts'
 import { discoverAccounts } from '../../core/accounts.ts'
+import { orcaChatBindingsFile, orcaChatSessionId } from '../../core/orca-chat-bindings.ts'
 import { defProblems } from '../../plugins/check.ts'
 import { mainOnlyProblem } from '../../plugins/loader.ts'
 import { createRuntime } from '../../runtime.ts'
@@ -245,19 +254,14 @@ describe('Antigravity CLI family (ADR-0090)', () => {
       )
       assert.deepEqual(promptOk.args, ['-p', '--app_data_dir=antigravity-cli-work'])
 
-      await assert.rejects(
-        rt.handoff('agy'),
-        (err: Error & { code?: string }) => err.code === 'no-quota-source',
-      )
-      await assert.rejects(
-        rt.familyPick('agy'),
-        (err: Error & { code?: string }) => err.code === 'no-quota-source',
-      )
-      await assert.rejects(
-        rt.addPickCommand('gk', 'agy', { yes: true }),
-        (err: Error & { code?: string }) => err.code === 'alias-invalid',
-      )
-      assert.equal(await rt.pickSuggestion('agy'), null)
+      // WHY: ADR-0091 opens pick commands (`ag` default) and primary-group ranking for agy while keeping Auto Handoff off.
+      const offer = await rt.pickSuggestion('agy')
+      assert.equal(offer?.name, 'ag')
+      assert.equal(offer?.exists, false)
+      const pickAdded = await rt.addPickCommand('ag', 'agy', { yes: true })
+      assert.equal(pickAdded.ok, true)
+      assert.equal(pickAdded.status, 'added')
+      assert.equal(agyFamily.handoff, undefined)
 
       await h.write(`${MAIN}/${AGY_OAUTH_TOKEN_FILE}`, 'main-secret-must-never-leak', 0o600)
       await h.write(
@@ -688,6 +692,188 @@ describe('Antigravity CLI quota never opens a browser (ADR-0082)', () => {
       assert.equal(q.loginExpired, undefined)
       const pid = Number(await readFile(pidFile, 'utf8'))
       assert.throws(() => process.kill(pid, 0), /ESRCH/, 'agy is still running')
+    })
+  })
+})
+
+describe('Antigravity CLI pick commands, primary quota group, and Orca Chat routing (ADR-0091)', () => {
+  const FUTURE = '2099-12-31T00:00:00.000Z'
+  const OBSERVED = '2026-11-28T09:00:00.000Z'
+  const SID = '5404a5ea-8f90-4bc4-ad82-79d27c3c43da'
+  const CONV_ID = '6780ebe9-1657-443d-a2d6-3f72e0b1fa42'
+
+  async function seedQuota(
+    h: FakeHome,
+    entries: Record<string, { gemini7d: number; gemini5h: number; claude7d: number; claude5h: number }>,
+  ) {
+    for (const [name, q] of Object.entries(entries)) {
+      const entry = {
+        version: 1,
+        attemptedAt: OBSERVED,
+        quota: {
+          status: 'ok',
+          observedAt: OBSERVED,
+          source: 'agy /usage',
+          windows: [
+            {
+              label: '7d',
+              name: 'Gemini Models',
+              windowMinutes: 10080,
+              usedPercent: q.gemini7d,
+              resetsAt: FUTURE,
+            },
+            {
+              label: '5h',
+              name: 'Gemini Models',
+              windowMinutes: 300,
+              usedPercent: q.gemini5h,
+              resetsAt: FUTURE,
+            },
+            {
+              label: '7d',
+              name: 'Claude and GPT models',
+              windowMinutes: 10080,
+              usedPercent: q.claude7d,
+              resetsAt: FUTURE,
+            },
+            {
+              label: '5h',
+              name: 'Claude and GPT models',
+              windowMinutes: 300,
+              usedPercent: q.claude5h,
+              resetsAt: FUTURE,
+            },
+          ],
+        },
+      }
+      await h.write(`.local/state/sideby/quota/agy/${name}.fetched.json`, `${JSON.stringify(entry)}\n`)
+    }
+  }
+
+  it('ranks agy accounts by Gemini Models by default and follows agy.pickGroup when switched', async () => {
+    await withFakeHome(async (h) => {
+      await h.write(`${MAIN}/settings.json`, '{}\n')
+      await h.write(`.gemini/antigravity-cli-002/${AGY_OAUTH_TOKEN_FILE}`, 'tok', 0o600)
+      await fakeHost(h, 'agy')
+      await h.write(
+        '.config/sideby/config.json',
+        `${JSON.stringify({ quota: { check: { agy: false } }, pickCommands: { ag: 'agy' } })}\n`,
+      )
+      await seedQuota(h, {
+        main: { gemini7d: 60, gemini5h: 10, claude7d: 10, claude5h: 0 },
+        '002': { gemini7d: 5, gemini5h: 2, claude7d: 80, claude5h: 0 },
+      })
+
+      const defNext = await sideby(h, ['next', 'agy', '--json'])
+      assert.equal(defNext.code, 0, defNext.err)
+      assert.equal(JSON.parse(defNext.out).pick, 'agy:002')
+
+      const setGroup = await sideby(h, ['config', 'set', 'agy.pickGroup', 'Claude and GPT models', '--yes'])
+      assert.equal(setGroup.code, 0, setGroup.err)
+
+      const switched = await sideby(h, ['next', 'agy', '--json'])
+      assert.equal(switched.code, 0, switched.err)
+      assert.equal(JSON.parse(switched.out).pick, 'agy:main')
+
+      // WHY: verify the Panel endpoint switches agy.pickGroup and exposes updated pickNow/pickGroup (ADR-0091).
+      const { createPanelHandler } = await import('../../panel/handler.ts')
+      const { createServer } = await import('node:http')
+      let panel!: ReturnType<typeof createPanelHandler>
+      const srv = createServer((req, res) => {
+        void panel(req, res)
+      })
+      await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r))
+      try {
+        const port = (srv.address() as { port: number }).port
+        panel = createPanelHandler({
+          runtime: () => createRuntime({ env: h.env }),
+          allowedHosts: [`127.0.0.1:${port}`],
+          updates: false,
+        })
+        const base = `http://127.0.0.1:${port}`
+        const post = await fetch(`${base}/api/agy/pick-group`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            origin: base,
+            'x-sideby-token': panel.token,
+          },
+          body: JSON.stringify({ group: 'Gemini Models' }),
+        })
+        assert.equal(post.status, 200)
+        const stateRes = await fetch(`${base}/api/state`, {
+          headers: { 'x-sideby-token': panel.token },
+        })
+        const state = (await stateRes.json()) as {
+          families: { id: string; pickGroup?: string }[]
+          handoff?: Record<string, string>
+          pickNow?: Record<string, { pick: string | null }>
+        }
+        assert.equal(state.families.find((f) => f.id === 'agy')?.pickGroup, 'Gemini Models')
+        assert.equal(state.handoff?.agy, 'agy:002')
+        assert.equal(state.pickNow?.agy?.pick, 'agy:002')
+      } finally {
+        await new Promise<void>((r) => srv.close(() => r()))
+      }
+    })
+  })
+
+  it('routes terminal resume flags to the owning agy account and pins Orca acp chats by ORCA_AGENT_SESSION_ID', async () => {
+    await withFakeHome(async (h) => {
+      await h.write(`${MAIN}/settings.json`, '{}\n')
+      await h.write(`.gemini/antigravity-cli-002/${AGY_OAUTH_TOKEN_FILE}`, 'tok', 0o600)
+      await h.write(`${MAIN}/conversations/${CONV_ID}.db`, 'sqlite')
+      await fakeHost(h, 'agy')
+      await h.write(
+        '.config/sideby/config.json',
+        `${JSON.stringify({ quota: { check: { agy: false } }, pickCommands: { ag: 'agy' } })}\n`,
+      )
+      await seedQuota(h, {
+        main: { gemini7d: 75, gemini5h: 20, claude7d: 50, claude5h: 0 },
+        '002': { gemini7d: 5, gemini5h: 0, claude7d: 10, claude5h: 0 },
+      })
+
+      // WHY: terminal --conversation must override quota and route to the account holding the .db (ADR-0091).
+      const resumed = await sideby(h, ['run', 'ag', '--', '--conversation', CONV_ID])
+      assert.equal(resumed.code, 0, resumed.err)
+      assert.match(resumed.err, new RegExp(`session ${CONV_ID} is in agy:main; starting it there`))
+      assert.equal((await readHostLog(h, 'agy'))[0]?.env.SIDEBY_ACCOUNT, 'agy:main')
+
+      // WHY: non-acp commands run inside an Orca Chat inherit ORCA_AGENT_SESSION_ID and must never bind (ADR-0091).
+      const orcaEnv = { ORCA_STRUCTURED_SESSION: '1', ORCA_AGENT_SESSION_ID: SID }
+      assert.equal(orcaChatSessionId(orcaEnv, 'agy', ['-p', 'hi']), null)
+      assert.equal(orcaChatSessionId(orcaEnv, 'agy', ['acp', '--dangerously-skip-permissions']), SID)
+
+      const firstChat = await sideby(h, ['run', 'ag', '--', 'acp', '--dangerously-skip-permissions'], orcaEnv)
+      assert.equal(firstChat.code, 0, firstChat.err)
+      assert.match(firstChat.err, /ag → agy:002/)
+      const runs1 = await readHostLog(h, 'agy')
+      assert.equal(runs1[1]?.env.SIDEBY_ACCOUNT, 'agy:002')
+      assert.ok(runs1[1]?.argv.includes('--app_data_dir=antigravity-cli-002'))
+
+      // Flip quota so agy:main has far more room; waking the same Orca Chat must still return to agy:002.
+      await seedQuota(h, {
+        main: { gemini7d: 2, gemini5h: 0, claude7d: 5, claude5h: 0 },
+        '002': { gemini7d: 90, gemini5h: 80, claude7d: 90, claude5h: 0 },
+      })
+      const woken = await sideby(h, ['run', 'ag', '--', 'acp', '--dangerously-skip-permissions'], orcaEnv)
+      assert.equal(woken.code, 0, woken.err)
+      assert.match(woken.err, new RegExp(`Orca chat ${SID} is in agy:002; starting it there`))
+      assert.equal((await readHostLog(h, 'agy'))[2]?.env.SIDEBY_ACCOUNT, 'agy:002')
+
+      // A shell command inside that Orca Chat (no `acp`) still picks by current quota (agy:main).
+      const insideShell = await sideby(h, ['run', 'ag', '--', '-p', 'hi'], orcaEnv)
+      assert.equal(insideShell.code, 0, insideShell.err)
+      assert.match(insideShell.err, /ag → agy:main/)
+      assert.equal((await readHostLog(h, 'agy'))[3]?.env.SIDEBY_ACCOUNT, 'agy:main')
+
+      // Removing the bound account makes the next wake pick fresh and rebind cleanly.
+      await rm(h.path('.gemini/antigravity-cli-002'), { recursive: true, force: true })
+      const rebound = await sideby(h, ['run', 'ag', '--', 'acp', '--dangerously-skip-permissions'], orcaEnv)
+      assert.equal(rebound.code, 0, rebound.err)
+      assert.match(rebound.err, /ag → agy:main/)
+      const saved = JSON.parse(await readFile(orcaChatBindingsFile(h.path('.local/state/sideby')), 'utf8'))
+      assert.equal(saved.bindings[SID].account, 'agy:main')
     })
   })
 })

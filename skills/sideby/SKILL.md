@@ -34,7 +34,7 @@ Do every step you can yourself. Only browser sign-in, secrets and interactive se
 
 ## What do you want to do
 
-Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique. Families: `claude`, `codex`, `grok`, `pi`, `agy` (Antigravity CLI). `agy:main` lives at `~/.gemini/antigravity-cli` (system keychain login); extra `agy` accounts (`sideby new agy <name> --alias agy002`) live at `~/.gemini/antigravity-cli-<name>`, keep real `HOME` and share `~/.gemini/config/`, and isolate via `--app_data_dir` and `AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1`. Never pass `--api` for `agy` (refused) and do not include `agy` in Handoff / Auto Handoff; its quota comes from `agy [selectArgs] -p /usage` per model group.
+Account refs are `<family>:<name>`; a bare `<name>` works only when it is unique. Families: `claude`, `codex`, `grok`, `pi`, `agy` (Antigravity CLI). `agy:main` lives at `~/.gemini/antigravity-cli` (system keychain login); extra `agy` accounts (`sideby new agy <name> --alias agy002`) live at `~/.gemini/antigravity-cli-<name>`, keep real `HOME` and share `~/.gemini/config/`, and isolate via `--app_data_dir` and `AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1`. Never pass `--api` for `agy` (refused) and do not enable mid-session Auto Handoff for `agy`; its quota comes from `agy [selectArgs] -p /usage` per model group, and `sideby next agy` / pick commands (default `ag`) rank by `agy.pickGroup` (default `Gemini Models`).
 
 | The user wants to | Run | Then read |
 |---|---|---|

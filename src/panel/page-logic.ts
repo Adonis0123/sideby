@@ -178,12 +178,27 @@ export function windowState(
   long?: { warn: number; fail: number },
 ): { pct: number; passed: boolean; level: string } {
   const reset = Date.parse(w.resetsAt)
-  const passed = Number.isFinite(reset) && reset <= now
+  const passed = Number.isFinite(reset) && reset > 0 && reset <= now
   const raw = Math.max(0, Math.min(100, Math.round(Number(w.usedPercent) || 0)))
   const pct = passed ? 0 : raw
   const lv = long && longWindow(w) ? long : { warn, fail }
   const level = passed ? 'reset' : pct >= lv.fail ? 'fail' : pct >= lv.warn ? 'warn' : 'ok'
   return { pct, passed, level }
+}
+
+/** WHY: a model group with both 5-hour and weekly limits renders every window in its column, shortest first (spec §3.26). */
+export function columnWindows<W extends { label?: string; name?: string; windowMinutes?: number }>(
+  list: readonly W[],
+  col: string,
+): W[] {
+  const mins = (w: W) => {
+    const n = Number(w.windowMinutes)
+    if (Number.isFinite(n) && n > 0) return n
+    const m = /^(\d+(?:\.\d+)?)\s*([mhdw])$/i.exec(String(w.label ?? '').trim())
+    const units: Record<string, number> = { m: 1, h: 60, d: 1440, w: 10080 }
+    return m ? Number(m[1]) * units[m[2]!.toLowerCase()]! : Number.MAX_SAFE_INTEGER
+  }
+  return list.filter((w) => (w.name || w.label || '') === col).sort((x, y) => mins(x) - mins(y))
 }
 
 /**
@@ -211,7 +226,7 @@ export function passedWindow(
   now: number,
 ): { since: string } | null {
   const reset = Date.parse(w.resetsAt)
-  if (!(Number.isFinite(reset) && reset <= now)) return null
+  if (!(Number.isFinite(reset) && reset > 0 && reset <= now)) return null
   const seen = Date.parse(observedAt || '')
   return { since: Number.isFinite(seen) ? new Date(seen).toISOString() : w.resetsAt }
 }

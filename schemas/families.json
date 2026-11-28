@@ -68,6 +68,10 @@
                 "const": true,
                 "description": "The Family does not rank Accounts by Quota in Handoff or Pick Commands (ADR-0090)."
               },
+              "pickGroup": {
+                "type": "string",
+                "description": "Primary model-group quota window ranked for this Family when its Quota has only per-group windows (ADR-0091)."
+              },
               "mainOnly": {
                 "type": "boolean",
                 "const": true,
