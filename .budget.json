@@ -401,7 +401,7 @@
     }
   },
   "tests": {
-    "total": 2176,
+    "total": 2178,
     "files": {
       "mods/claude/hooks/register.test.ts": 7,
       "scripts/budget.test.ts": 7,
@@ -488,7 +488,7 @@
       "src/core/progress.test.ts": 7,
       "src/core/project-categories.test.ts": 4,
       "src/core/prompt-origin.test.ts": 6,
-      "src/core/quota-fetch.test.ts": 28,
+      "src/core/quota-fetch.test.ts": 29,
       "src/core/quota-levels.test.ts": 10,
       "src/core/quota-store.test.ts": 4,
       "src/core/remote-control.test.ts": 8,
@@ -523,7 +523,7 @@
       "src/desktop/app.test.ts": 13,
       "src/families/agy/deliver.test.ts": 6,
       "src/families/agy/history.test.ts": 5,
-      "src/families/agy/index.test.ts": 17,
+      "src/families/agy/index.test.ts": 18,
       "src/families/agy/live-sessions.test.ts": 5,
       "src/families/agy/mod.test.ts": 3,
       "src/families/claude/ai-task.test.ts": 3,
@@ -641,6 +641,12 @@
         "reason": "ADR-0091 agy primary-group quota ranking, Panel pick-group API, and Orca Chat sticky account binding writes",
         "from": 2174,
         "to": 2176
+      },
+      {
+        "date": "2026-11-28",
+        "reason": "pure logic tests for onlyWhenActive, jitterMinutes, serialGapMs, and agyLastActivityAt (ADR-0092)",
+        "from": 2176,
+        "to": 2178
       }
     ]
   },

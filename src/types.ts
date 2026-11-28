@@ -495,6 +495,26 @@ export interface QuotaFetch {
    */
   localFallbackOnly?: boolean
   /**
+   * WHY: spread automatic asks across a deterministic per-reading window `[everyMinutes, everyMinutes + jitterMinutes]`
+   * (ADR-0092) so background checks never fire on a robotic fixed cadence or collapse under repeated polls.
+   */
+  jitterMinutes?: number
+  /**
+   * WHY: once a reading exists, skip automatic and passed-reset asks while the Account has no local activity since that
+   * reading (nor within the recent grace window); manual refresh (`mode: 'force'`) still asks at once (ADR-0092).
+   */
+  onlyWhenActive?: boolean
+  /**
+   * WHY: lightweight local activity timestamp (real ms) for Families without `readUsage` (e.g. Antigravity CLI
+   * conversation files), used by `onlyWhenActive` / `activeEveryMinutes` without reading credentials (ADR-0092).
+   */
+  lastActivityAt?(account: Account): Promise<number | undefined>
+  /**
+   * WHY: serialize fetches within the same Family across processes and space consecutive Accounts by at least this
+   * many milliseconds plus a small spread, preventing concurrent multi-account hits from one host/IP (ADR-0092).
+   */
+  serialGapMs?: number
+  /**
    * The Account's Quota now. An error, or an `unavailable` result, keeps the last good answer on show. Stop when
    * `ctx.signal` aborts (after 20 seconds).
    */

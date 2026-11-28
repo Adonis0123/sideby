@@ -789,6 +789,9 @@ export interface QuotaCheckInfo {
   title: string
   summary: string
   everyMinutes: number
+  /** WHY: optional spread upper bound and active-only flag for Panel Settings hints (ADR-0092). */
+  jitterMinutes?: number
+  onlyWhenActive?: boolean
   /** False when config `quota.check.<family>` is false. */
   on: boolean
   /** Why no fetch happens even though it is on (CI), or undefined. */
@@ -1202,17 +1205,25 @@ export async function createRuntime(
         : {}),
       // While the login is in use on this computer, a Family may be asked more often (ADR-0085): the newest local
       // Usage activity of this Account and its Same Login, the source ADR-0051 also goes by.
-      ...(families.get(account.family)?.fetchQuota?.activeEveryMinutes
+      ...(families.get(account.family)?.fetchQuota?.activeEveryMinutes ||
+      families.get(account.family)?.fetchQuota?.onlyWhenActive
         ? {
             lastActive: async () => {
               const f = familyOf(account.family)
+              const readAt = f.fetchQuota?.lastActivityAt
               const others = peers.length
                 ? (await discoverAccounts(f, paths.home, ignore)).filter((a) => peers.includes(a.ref))
                 : []
               let newest: number | undefined
               for (const a of [account, ...others]) {
-                const u = await rt.usage(a).catch(() => null)
-                const at = u?.status === 'ok' ? Date.parse(u.lastActivityAt ?? '') : Number.NaN
+                let at = Number.NaN
+                if (readAt) {
+                  const t = await readAt(a).catch(() => undefined)
+                  if (typeof t === 'number' && Number.isFinite(t)) at = t
+                } else {
+                  const u = await rt.usage(a).catch(() => null)
+                  if (u?.status === 'ok') at = Date.parse(u.lastActivityAt ?? '')
+                }
                 if (Number.isFinite(at) && (newest === undefined || at > newest)) newest = at
               }
               return newest
@@ -2668,6 +2679,8 @@ export async function createRuntime(
           title: f.title,
           summary: f.fetchQuota!.summary,
           everyMinutes: f.fetchQuota!.everyMinutes,
+          ...(f.fetchQuota!.jitterMinutes ? { jitterMinutes: f.fetchQuota!.jitterMinutes } : {}),
+          ...(f.fetchQuota!.onlyWhenActive ? { onlyWhenActive: true } : {}),
           on: config.quota?.check?.[f.id] !== false,
           ...(ci ? { blocked: ci } : {}),
         }))

@@ -236,8 +236,33 @@ export async function fetchAgyQuota(
   }
 }
 
+const AGY_ACTIVITY_PATHS = [
+  'conversation_summaries.db',
+  'conversation_summaries.db-wal',
+  'conversations',
+] as const
+
+/** WHY: agy -p /usage touches only logs/cache; conversation files update only on real turns, giving a zero-cost activity signal (ADR-0092). */
+export async function agyLastActivityAt(account: Pick<Account, 'dir'>): Promise<number | undefined> {
+  const times = await Promise.all(
+    AGY_ACTIVITY_PATHS.map((p) =>
+      stat(join(account.dir, p)).then(
+        (s) => s.mtimeMs,
+        () => Number.NaN,
+      ),
+    ),
+  )
+  const valid = times.filter(Number.isFinite)
+  return valid.length ? Math.max(...valid) : undefined
+}
+
 export const agyQuotaFetch: QuotaFetch = {
-  everyMinutes: 15,
-  summary: 'Antigravity CLI asks Google for its quota, at most every 15 minutes',
+  everyMinutes: 30,
+  jitterMinutes: 15,
+  onlyWhenActive: true,
+  serialGapMs: 3_000,
+  lastActivityAt: agyLastActivityAt,
+  summary:
+    'Antigravity CLI asks Google for its quota only after local activity (every 30–45 minutes, one account at a time) or on manual refresh',
   fetch: fetchAgyQuota,
 }

@@ -18,7 +18,7 @@ import { mainOnlyProblem } from '../../plugins/loader.ts'
 import { createRuntime } from '../../runtime.ts'
 import type { FamilyDef } from '../../types.ts'
 import { AGY_FORCE_FILE_TOKEN_VAR, AGY_OAUTH_TOKEN_FILE, agyFamily, agyPlugin } from './index.ts'
-import { AGY_QUOTA_ARGS, agyQuota, fetchAgyQuota } from './quota.ts'
+import { AGY_QUOTA_ARGS, agyLastActivityAt, agyQuota, agyQuotaFetch, fetchAgyQuota } from './quota.ts'
 
 const builtins = [{ plugin: agyPlugin, version: '0.1.0', description: '', defaultEnabled: true }]
 const MAIN = '.gemini/antigravity-cli'
@@ -516,6 +516,26 @@ describe('Antigravity CLI quota (ADR-0048)', () => {
     })
     assert.doesNotMatch(JSON.stringify(q), /Gemini Flash|description/)
     assert.equal(agyQuota(signedOut, '2026-10-21T08:00:00.000Z'), null)
+    assert.equal(agyQuotaFetch.onlyWhenActive, true)
+    assert.equal(agyQuotaFetch.everyMinutes, 30)
+    assert.equal(agyQuotaFetch.jitterMinutes, 15)
+    assert.equal(agyQuotaFetch.serialGapMs, 3_000)
+  })
+
+  it('detects local agy activity from conversation files only, ignoring logs and cache (ADR-0092)', async () => {
+    await withFakeHome(async (h) => {
+      const dir = h.path(MAIN)
+      await h.write(`${MAIN}/last_check.timestamp`, '')
+      await h.write(`${MAIN}/log/cli.log`, 'usage\n')
+      assert.equal(await agyLastActivityAt({ dir }), undefined)
+      await h.write(`${MAIN}/conversation_summaries.db`, 'x')
+      const t1 = await agyLastActivityAt({ dir })
+      assert.ok(typeof t1 === 'number' && Number.isFinite(t1))
+      await new Promise((r) => setTimeout(r, 20))
+      await h.write(`${MAIN}/conversation_summaries.db-wal`, 'wal')
+      const t2 = await agyLastActivityAt({ dir })
+      assert.ok(typeof t2 === 'number' && t2 >= t1)
+    })
   })
 
   it('asks agy /usage with the launch environment, isolates extra accounts via --app_data_dir, and fails explicitly if upstream drops the flag', async () => {

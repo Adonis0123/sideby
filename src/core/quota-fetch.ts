@@ -5,7 +5,7 @@
 // one fetch per Account at a time, in this process and across processes, at most four fetches on the machine at once,
 // 20 seconds each; the newer of the kept answer and the local reading is shown, except that a newer local window lower
 // than the kept one of the same window loses to it.
-import { mkdir } from 'node:fs/promises'
+import { mkdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type {
   Account,
@@ -17,6 +17,7 @@ import type {
   QuotaWindow,
   ReadContext,
 } from '../types.ts'
+import { writeFileAtomic } from './fs-safe.ts'
 import { takeFileLock } from './lock.ts'
 import { windowLevel } from './quota-levels.ts'
 import {
@@ -78,6 +79,46 @@ export interface QuotaAskHint {
 
 /** How recent a local use must be for the login to count as in use (`activeEveryMinutes`, ADR-0085). */
 export const IN_USE_MS = 5 * 60_000
+/** WHY: recent-activity grace window for `onlyWhenActive` so an ongoing turn started just before a check still refreshes (ADR-0092). */
+export const ACTIVE_GRACE_MS = 10 * 60_000
+
+/**
+ * WHY: deterministic per-reading jitter in `[0, jitterMinutes]` hashed from `(ref, attemptedAt)` so repeated 20 s
+ * polls never collapse the spread and each new fetch picks a fresh offset (ADR-0092).
+ */
+export function fetchJitterMs(ref: string, attemptedAt: string | undefined, jitterMinutes?: number): number {
+  if (
+    !attemptedAt ||
+    !(typeof jitterMinutes === 'number' && Number.isFinite(jitterMinutes) && jitterMinutes > 0)
+  )
+    return 0
+  const maxMs = Math.round(jitterMinutes * 60_000)
+  if (maxMs <= 0) return 0
+  const input = `${ref}\0${attemptedAt}`
+  let h = 2166136261
+  for (let i = 0; i < input.length; i++) h = Math.imul(h ^ input.charCodeAt(i), 16777619)
+  return (h >>> 0) % (maxMs + 1)
+}
+
+/**
+ * WHY: an `onlyWhenActive` Family skips automatic checks once a reading exists and no local activity happened after
+ * `kept.attemptedAt` (nor within `ACTIVE_GRACE_MS`), avoiding 24/7 idle background polling (ADR-0092).
+ */
+export async function activeForFetch(
+  fq: Pick<QuotaFetch, 'onlyWhenActive'>,
+  kept: QuotaStoreEntry | null,
+  hint: QuotaAskHint,
+  now: Date,
+): Promise<boolean> {
+  if (!fq.onlyWhenActive || !kept) return true
+  if (!hint.lastActive) return false
+  const used = await hint.lastActive().catch(() => undefined)
+  if (used === undefined || !Number.isFinite(used)) return false
+  const keptAt = Date.parse(kept.attemptedAt)
+  if (Number.isFinite(keptAt) && used > keptAt) return true
+  const since = now.getTime() - used
+  return since >= -60_000 && since <= ACTIVE_GRACE_MS
+}
 
 /**
  * `fq` with the interval this read goes by (ADR-0085): `activeEveryMinutes` while the login was used within
@@ -241,6 +282,39 @@ function queued<T>(rank: number, usedAt: number, fn: () => Promise<T>): Promise<
       pump()
     }, GATHER_MS)
   })
+}
+
+/**
+ * WHY: serialize fetches within one Family across processes and space consecutive Accounts by `gapMs` plus a small
+ * deterministic spread so multi-account queries never hit the vendor concurrently (ADR-0092).
+ */
+async function takeFamilyTurn(
+  stateDir: string,
+  family: string,
+  gapMs: number,
+  ref: string,
+): Promise<(() => Promise<void>) | null> {
+  const dir = join(stateDir, 'quota', 'asking')
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  const lock = await takeFileLock(join(dir, `family-${family}.lock`), {
+    ...LOCK,
+    wait: { timeoutMs: SLOT_WAIT_MS, pollMs: 100 },
+  }).catch(() => null)
+  if (!lock) return null
+  const stampFile = join(dir, `family-${family}.last`)
+  const lastMs = await stat(stampFile).then(
+    (s) => s.mtimeMs,
+    () => Number.NaN,
+  )
+  if (Number.isFinite(lastMs)) {
+    const spreadMs = fetchJitterMs(ref, String(Math.floor(lastMs)), Math.min(gapMs, 2_000) / 60_000)
+    const waitMs = gapMs + spreadMs - (Date.now() - lastMs)
+    if (waitMs > 0) await new Promise<void>((r) => setTimeout(r, waitMs))
+  }
+  return async () => {
+    await writeFileAtomic(stampFile, `${Date.now()}\n`, 0o600).catch(() => {})
+    await lock()
+  }
 }
 
 /** One of the machine's `MAX_ASKS` places (lock files in sideby's state directory), or null when none came free. */
@@ -418,7 +492,7 @@ async function askOnce(
     // Judged again under the lock: another process that was due for the same reset instant marked it and asked while
     // this one waited. `attemptedAt` does not tell, because what its ask brought may not have been kept. The instant
     // had its one ask, so the kept answer shows on until the regular ask of `everyMinutes` is due.
-    if (extra && kept && !due.length && !olderThanInterval(fq, kept, ctx.now)) return kept
+    if (extra && kept && !due.length && !olderThanInterval(fq, kept, ctx.now, account.ref)) return kept
     if (kept && due.length) {
       const marked = await writeQuotaStore(file, {
         ...kept,
@@ -436,12 +510,21 @@ async function askOnce(
         return noted(file, kept)
       }
     }
-    const slot = await takeSlot(ctx.stateDir, SLOT_WAIT_MS)
-    if (!slot) return readQuotaStore(file)
+    const familyTurn =
+      fq.serialGapMs && fq.serialGapMs > 0
+        ? await takeFamilyTurn(ctx.stateDir, account.family, fq.serialGapMs, account.ref)
+        : async () => {}
+    if (!familyTurn) return readQuotaStore(file)
     try {
-      return await runFetch(fq, account, ctx, hostEnv, file, hint)
+      const slot = await takeSlot(ctx.stateDir, SLOT_WAIT_MS)
+      if (!slot) return readQuotaStore(file)
+      try {
+        return await runFetch(fq, account, ctx, hostEnv, file, hint)
+      } finally {
+        await slot()
+      }
     } finally {
-      await slot()
+      await familyTurn()
     }
   } finally {
     await lock()
@@ -449,17 +532,19 @@ async function askOnce(
 }
 
 /**
- * Whether the regular ask is due: nothing is kept, or it was last asked `everyMinutes` ago or longer. A time in the
- * future (a changed clock) counts as old, so it cannot stop every later fetch.
+ * Whether the regular ask is due: nothing is kept, or it was last asked `everyMinutes` (+ optional jitter) ago or
+ * longer. A time in the future (a changed clock) counts as old, so it cannot stop every later fetch.
  */
 function olderThanInterval(
-  fq: Pick<QuotaFetch, 'everyMinutes'>,
+  fq: Pick<QuotaFetch, 'everyMinutes' | 'jitterMinutes'>,
   kept: QuotaStoreEntry | null,
   now: Date,
+  ref = '',
 ): boolean {
   const at = kept ? Date.parse(kept.attemptedAt) : Number.NaN
   const age = now.getTime() - at
-  return !kept || !Number.isFinite(at) || age < -60_000 || age >= fq.everyMinutes * 60_000
+  const intervalMs = fq.everyMinutes * 60_000 + fetchJitterMs(ref, kept?.attemptedAt, fq.jitterMinutes)
+  return !kept || !Number.isFinite(at) || age < -60_000 || age >= intervalMs
 }
 
 /** Whether a kept answer has a window that counts toward Quota Pressure at or over its warning level. */
@@ -486,7 +571,11 @@ export async function fetchedQuota(
   const fq = mode === 'force' ? family : await pacedFetch(family, kept, hint.local, hint, ctx.now)
   // A local reading that is newer than the Family asks, and shows all the kept answer holds, spares the Host.
   if (mode !== 'force' && localCovers(fq, hint.local, kept, ctx.now)) return kept
-  const stale = olderThanInterval(fq, kept, ctx.now)
+  if (mode !== 'force' && !(await activeForFetch(fq, kept, hint, ctx.now))) {
+    unmarked.delete(file)
+    return kept
+  }
+  const stale = olderThanInterval(fq, kept, ctx.now, account.ref)
   if (mode !== 'force' && !stale && passedResets(kept, ctx.now, await peersOf(hint)).length === 0) {
     // Nothing is due, so no extra ask is waiting for its mark any more.
     unmarked.delete(file)

@@ -314,7 +314,7 @@ const MAIN = String.raw`
     silent: false, lastTry: 0, pending: false, fastUntil: 0, fastFamily: null,
   }
   // View state that is not saved: the search text, the attention filter, the Health check filter.
-  const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, desktopRef: null, browserRef: null, appBusy: null, appRemove: null, copied: null, resetRef: null, appNew: null, highlight: null, fade: true, loginRefs: new Map(), order: { families: [], units: {} }, drag: null, arrange: null }
+  const ui = { query: '', attention: false, allFindings: false, healthRef: null, checkingRef: null, desktopRef: null, browserRef: null, appBusy: null, appRemove: null, copied: null, resetRef: null, refreshRef: null, appNew: null, highlight: null, fade: true, loginRefs: new Map(), order: { families: [], units: {} }, drag: null, arrange: null }
   const $ = (id) => document.getElementById(id)
   // The change feed (spec §3.45, ADR-0084): seq, the server's count of Quota file changes this page has seen; ctl, the
   // held request; watching, whether the server watches any file; retryAt, when to ask again after a failure or while
@@ -1343,7 +1343,7 @@ const MAIN = String.raw`
     const items = [pinItem(a), ...hideItems(a),
       opens.length ? '-' : null, opens.length ? { header: t('menu.groupOpen') } : null, ...opens,
       '-', { header: t('menu.groupCopy') }, run, ...(fold ? [fold] : more),
-      '-', { header: t('menu.groupManage') }, resetItem(a), signInItem, key, aliasItem(a), ...dirTools(a), likeItem(a), rm ? '-' : null, rm,
+      '-', { header: t('menu.groupManage') }, refreshQuotaItem(a), resetItem(a), signInItem, key, aliasItem(a), ...dirTools(a), likeItem(a), rm ? '-' : null, rm,
       ...(dirs.length ? ['-', { header: t('menu.groupOtherDirs') }, ...dirs.map((d) => d.item)] : [])]
     back.sub = items
     for (const d of dirs) d.up.sub = items
@@ -1815,7 +1815,7 @@ const MAIN = String.raw`
     const resetBtn = resetButton(a, q, now)
     // --qr: this row's own number of windows, so a narrow list can split the width between them alone (--qn is the
     // widest Family's, for the wide list's shared columns).
-    return h('div', { class: 'quota' + (stale ? ' is-stale' : '') + (ui.resetRef === a.ref ? ' is-resetting' : ''), title, css: wins.length ? { '--qr': String(cols.length) } : null },
+    return h('div', { class: 'quota' + (stale ? ' is-stale' : '') + (ui.resetRef === a.ref || ui.refreshRef === a.ref ? ' is-resetting' : ''), title, css: wins.length ? { '--qr': String(cols.length) } : null },
       wins.length ? cols.map((c) => {
         // WHY: a model group with both 5-hour and weekly limits stacks every window in its column, shortest first (spec §3.26).
         const same = columnWindows(wins, c)
@@ -1865,6 +1865,26 @@ const MAIN = String.raw`
     }
     const why = [offer.tight.length ? t('reset.page.tight', { list: offer.tight.map((i) => resetWindowName(q.windows[i]) + ' ' + Math.round(q.windows[i].usedPercent) + '%').join(', ') }) : '', offer.expiring && q.limitResets.nextExpiresAt ? t('reset.expires', { at: clock(q.limitResets.nextExpiresAt) }) : '', t('reset.useHint')].filter(Boolean).join('\n')
     return h('button', { class: cls, type: 'button', disabled: busy, title: why, onclick: (e) => { e.stopPropagation(); openReset(a) } }, t('reset.use'))
+  }
+  function refreshQuotaItem(a) {
+    if (BOOT.readOnly || a.kind === 'api' || a.login === 'logged-out' || !family(a.family).quotaRefresh) return null
+    const chk = checkOf(a.family)
+    if (chk && (!chk.on || chk.blocked)) return null
+    return { icon: 'refresh', label: t('menu.refreshQuota'), disabled: ui.refreshRef === a.ref, run: () => refreshAccountQuota(a) }
+  }
+  async function refreshAccountQuota(a) {
+    if (ui.refreshRef === a.ref) return
+    ui.refreshRef = a.ref
+    renderAccounts()
+    try {
+      await api('/api/quota/refresh', { account: a.ref })
+      await load({ silent: true })
+      toast(t('toast.quotaRefreshed', { ref: a.ref }))
+    } catch (e) {
+      toast(t('quota.refreshFailed', { msg: e.message }), { kind: 'fail' })
+    }
+    ui.refreshRef = null
+    renderAccounts()
   }
   // The same action in the row's menu, also when the row shows no button. A Host that says an account holds none has
   // no item; one that cannot tell (Claude Code) always has the link.
@@ -2474,7 +2494,7 @@ const MAIN = String.raw`
   }
   // What a row or card shows depends on more than the account (health, view preferences, language); the
   // fingerprint covers what its click handlers use.
-  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref, ui.browserRef === a.ref, ui.resetRef === a.ref, ui.copied === a.ref, browserFor(a), prefs.hideEmail, isOpen(a), loginLead(a), isPinned(a), isHidden(a), famHidden(a.family)]) }
+  function rowSig(a) { return sig([a, healthOf(a.ref), isNext(a), ui.desktopRef === a.ref, ui.browserRef === a.ref, ui.resetRef === a.ref, ui.refreshRef === a.ref, ui.copied === a.ref, browserFor(a), prefs.hideEmail, isOpen(a), loginLead(a), isPinned(a), isHidden(a), famHidden(a.family)]) }
   // Whether the row sits in a login group (spec §3.21): its first row then shows the quota for all of them.
   function inLogin(a) { return ui.loginRefs.has(a.ref) }
   // The group's first row, which shows the quota for all of them.
@@ -7729,13 +7749,15 @@ const MAIN = String.raw`
     const checks = []
     let every = 15
     if (secs.includes('checks')) {
+      const mins = S.state.quotaChecks.map((c) => c.everyMinutes).filter((n) => Number.isFinite(n) && n > 0)
+      if (mins.length) every = Math.min(...mins)
       for (const c of S.state.quotaChecks) {
-        every = c.everyMinutes
         const label = t('set.quotaCheck', { host: c.title })
         // The first row is where the palette takes the user.
         const mark = checks.length ? (el) => el : (el) => fm('checks', el)
+        const note = c.blocked || (c.onlyWhenActive ? t('set.quotaCheckActive', { min: c.everyMinutes, max: c.everyMinutes + (c.jitterMinutes || 0) }) : '')
         checks.push(mark(h('div', { class: 'set-row' + (c.blocked ? ' set-check' : '') },
-          h('div', { class: 'set-text' }, h('span', { class: 'set-label' }, c.title), c.blocked ? h('span', { class: 'set-hint' }, c.blocked) : null),
+          h('div', { class: 'set-text' }, h('span', { class: 'set-label' }, c.title), note ? h('span', { class: 'set-hint' }, note) : null),
           BOOT.readOnly ? h('span', { class: 'chip chip-sm' + (c.on ? ' chip-ok' : '') }, c.on ? t('ah.on') : t('ah.off'))
             : h('div', { class: 'seg', role: 'group', 'aria-label': label }, [[true, t('ah.on')], [false, t('ah.off')]].map(([v, text]) =>
               h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(v === c.on), onclick: () => { if (v !== c.on) { leave(false); setCheck(c.family, v) } } }, text))))))

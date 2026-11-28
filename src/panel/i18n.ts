@@ -308,6 +308,7 @@ const en = {
   'quota.fetchedFrom': '{host} asked for this quota {ago}',
   'quota.lastCheckFailed': 'The latest check failed: {why}',
   'quota.refreshFailed': 'Could not ask for the newest quota: {msg}',
+  'toast.quotaRefreshed': 'Refreshed quota for {ref}',
   'quota.checkOnToast': '{host} quota check is on',
   'quota.checkOffToast': '{host} quota check is off',
   'quota.checkFailed': 'Could not change the setting: {msg}',
@@ -1004,6 +1005,7 @@ const en = {
   'menu.copyDir': 'Copy folder path',
   'menu.copyEmail': 'Copy email',
   'menu.check': 'Check this account',
+  'menu.refreshQuota': 'Refresh quota',
   'menu.editSettings': 'Open {file}',
   'edit.opened': 'Opened {ref}’s {file} with your default program.',
   'edit.shared': 'This file is shared: a change also applies to {names}.',
@@ -1695,6 +1697,8 @@ const en = {
   'set.g.ai': 'Let AI help',
   'set.quotaChecksHint':
     'Each tool asks for its own quota, at most every {n} minutes per account; Claude Code every 5 minutes while the account is in use. sideby does not read their sign-ins.',
+  'set.quotaCheckActive':
+    'Checks only after local use (every {min}–{max} min, one account at a time) or manual refresh.',
   'set.ahHint': 'When an account is about to run out, the task moves on to another account by itself.',
   'net.title': 'Network check',
   'net.hint':
@@ -2477,6 +2481,7 @@ const zh: Record<MessageKey, string> = {
   'quota.fetchedFrom': '{host} {ago}查询的额度',
   'quota.lastCheckFailed': '最近一次查询失败：{why}',
   'quota.refreshFailed': '没能查询最新额度：{msg}',
+  'toast.quotaRefreshed': '已刷新 {ref} 额度',
   'quota.checkOnToast': '已打开 {host} 额度查询',
   'quota.checkOffToast': '已关闭 {host} 额度查询',
   'quota.checkFailed': '设置没有改成：{msg}',
@@ -3131,6 +3136,7 @@ const zh: Record<MessageKey, string> = {
   'menu.copyDir': '复制目录路径',
   'menu.copyEmail': '复制邮箱',
   'menu.check': '检查这个账号',
+  'menu.refreshQuota': '刷新额度',
   'menu.editSettings': '打开 {file}',
   'edit.opened': '已用默认程序打开 {ref} 的 {file}。',
   'edit.shared': '这个文件是共用的，改动对 {names} 也生效。',
@@ -3777,6 +3783,7 @@ const zh: Record<MessageKey, string> = {
   'set.g.ai': '让 AI 帮我',
   'set.quotaChecksHint':
     '各工具自己查询每个账号的额度，最多每 {n} 分钟一次；Claude Code 账号在用时每 5 分钟一次。sideby 不读它们的登录信息。',
+  'set.quotaCheckActive': '仅本机活跃后（每 {min}–{max} 分钟、单账号串行）或手动刷新时查询。',
   'set.ahHint': '账号额度快用完时，任务自己换到另一个账号接着做。',
   'net.title': '网络检查',
   'net.hint': '请求要从你没允许的国家或地区发出时（比如代理断了），拦下 Claude 和 Codex。',

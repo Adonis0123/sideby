@@ -6,7 +6,9 @@ import { type FakeHome, withFakeHome } from '../../testing/index.ts'
 import type { Account, QuotaFetch, QuotaResult, QuotaWindow } from '../types.ts'
 import { takeFileLock } from './lock.ts'
 import {
+  activeForFetch,
   fetchedQuota,
+  fetchJitterMs,
   localCovers,
   loginProblemOf,
   pacedFetch,
@@ -1045,5 +1047,79 @@ test('a login in use is asked again after 5 minutes, an idle one after 15', asyn
     await fetchedQuota(fq, a, ctxAt(h, 7), {}, 'wait', busy)
     assert.equal(asks, 1, 'in use: 7 minutes is past 5')
     assert.equal((await readQuotaStore(file))?.quota?.observedAt, iso(7))
+  })
+})
+
+test('onlyWhenActive, jitterMinutes, and serialGapMs pause idle checks, spread intervals, and serialize same-family accounts (ADR-0092)', async () => {
+  const j1 = fetchJitterMs('agy:main', iso(0), 15)
+  const j2 = fetchJitterMs('agy:main', iso(0), 15)
+  assert.equal(j1, j2)
+  assert.ok(j1 >= 0 && j1 <= 15 * 60_000)
+  assert.equal(fetchJitterMs('agy:main', iso(0), 0), 0)
+
+  await withFakeHome(async (h) => {
+    const a1: Account = { family: 'agy', name: 'main', ref: 'agy:main', dir: h.path('.agy'), isMain: true }
+    const a2: Account = { family: 'agy', name: '002', ref: 'agy:002', dir: h.path('.agy-002'), isMain: false }
+    const file1 = quotaStoreFile(ctxAt(h, 0).stateDir, 'agy', 'main')
+    let asks = 0
+    let activeNow = 0
+    let maxConcurrent = 0
+    const ends: number[] = []
+    const starts: number[] = []
+    const fq: QuotaFetch = {
+      everyMinutes: 30,
+      jitterMinutes: 15,
+      onlyWhenActive: true,
+      serialGapMs: 40,
+      summary: 'test',
+      fetch: async () => {
+        asks++
+        activeNow++
+        maxConcurrent = Math.max(maxConcurrent, activeNow)
+        starts.push(Date.now())
+        await new Promise((r) => setTimeout(r, 25))
+        ends.push(Date.now())
+        activeNow--
+        return {
+          status: 'ok',
+          windows: [resetting('5h', 60)],
+          observedAt: iso(120),
+          source: 'agy /usage',
+        }
+      },
+    }
+
+    assert.equal(await activeForFetch(fq, null, {}, new Date(T0)), true)
+    await writeQuotaStore(file1, {
+      version: 1,
+      attemptedAt: iso(0),
+      quota: { status: 'ok', windows: [resetting('5h', 10)], observedAt: iso(0), source: 'agy /usage' },
+    })
+    const idleHint = { lastActive: async () => T0 - 30 * 60_000 }
+    await fetchedQuota(fq, a1, ctxAt(h, 120), {}, 'wait', idleHint)
+    assert.equal(asks, 0, 'idle skips both interval and passed-reset asks')
+
+    await writeQuotaStore(file1, {
+      version: 1,
+      attemptedAt: iso(0),
+      quota: { status: 'ok', windows: [resetting('5h', 600)], observedAt: iso(0), source: 'agy /usage' },
+    })
+    const activeHint = { lastActive: async () => T0 + 5 * 60_000 }
+    const dueMin = Math.ceil((30 * 60_000 + j1) / 60_000)
+    await fetchedQuota(fq, a1, ctxAt(h, dueMin - 1), {}, 'wait', activeHint)
+    assert.equal(asks, 0, 'waits for deterministic jitter window')
+    await fetchedQuota(fq, a1, ctxAt(h, dueMin), {}, 'wait', activeHint)
+    assert.equal(asks, 1, 'fetches once active and past jittered interval')
+
+    starts.length = 0
+    ends.length = 0
+    maxConcurrent = 0
+    await Promise.all([
+      fetchedQuota(fq, a1, ctxAt(h, 120), {}, 'force', idleHint),
+      fetchedQuota(fq, a2, ctxAt(h, 120), {}, 'force', idleHint),
+    ])
+    assert.equal(asks, 3, 'force bypasses idle skip for both accounts')
+    assert.equal(maxConcurrent, 1, 'serializes same-family accounts')
+    assert.ok(starts[1]! - ends[0]! >= 35, `expected stagger gap >= 35ms, got ${starts[1]! - ends[0]!}`)
   })
 })
