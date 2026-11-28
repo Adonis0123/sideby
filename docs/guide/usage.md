@@ -575,9 +575,9 @@ Tested on 2026-10-05 with the versions below. sideby starts the official binary 
 | Codex CLI | `codex` | 0.163.0 | `codex login` | official CLI; local fallback | local session files |
 | Grok Build | `grok` | 1.0.60 | `grok login` | asked from the `grok` CLI | no public source |
 | pi | `pi` | 1.0.2 | `/login` inside pi | no public source | no public source |
-| Antigravity CLI | `agy` | 1.5.18 (2026-11-27) | sign in with Google inside `agy` | asked from the `agy` CLI | no public source |
+| Antigravity CLI | `agy` | 1.5.19 (2026-11-28) | sign in with Google inside `agy` | asked from the `agy` CLI | local conversation databases |
 
-sideby counts usage itself from Claude Code's `projects/**/*.jsonl` and Codex's `sessions/**/rollout-*.jsonl`; you do not need ccusage. Grok Build's quota comes from its CLI; it has no usage source, and pi has neither. API accounts show usage but no quota. If a Host is not installed, `list` still shows its accounts and marks the Host as missing; `run` tells you where to install it.
+sideby counts usage itself from Claude Code's `projects/**/*.jsonl`, Codex's `sessions/**/rollout-*.jsonl` and Antigravity CLI's `conversations/*.db`; you do not need ccusage. Grok Build's quota comes from its CLI; it has no usage source, and pi has neither. API accounts show usage but no quota. If a Host is not installed, `list` still shows its accounts and marks the Host as missing; `run` tells you where to install it.
 
 Host-specific notes:
 

@@ -54,7 +54,7 @@ A window with a `name` (a plugin's Cursor "Other models") covers only some model
 
 Colors depend on the window's length (ADR-0062): a 5-hour (or any one-day-or-shorter) window is yellow from 60% and red from 85%; a weekly or longer window is yellow from 85% and red from 95%. One full 5-hour window costs only about a fifth of a week, so a week at 87% still leaves several 5-hour windows of work. When the user asks why a weekly 87% is not red, or why such an account was still picked, say that.
 
-Usage (7-day tokens) is read by sideby itself from Claude Code and Codex local records; no ccusage is needed. Grok and pi have no usage source; pi has no quota either.
+Usage (7-day tokens) is read by sideby itself from Claude Code, Codex, and Antigravity CLI (`conversations/*.db`) local records; no ccusage is needed. Grok and pi have no usage source; pi has no quota either.
 
 ## Quota checks and refresh
 

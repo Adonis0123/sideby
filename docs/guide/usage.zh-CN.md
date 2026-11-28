@@ -575,9 +575,9 @@ Claude Code 会话结束这一轮、停下来等后台子代理时也会接力�
 | Codex CLI | `codex` | 0.163.0 | `codex login` | 官方 CLI；本地记录备用 | 本地会话文件 |
 | Grok Build | `grok` | 1.0.60 | `grok login` | 由 `grok` 命令行查询 | 没有公开来源 |
 | pi | `pi` | 1.0.2 | 进入 pi 后执行 `/login` | 没有公开来源 | 没有公开来源 |
-| Antigravity CLI | `agy` | 1.5.18（2026-11-27） | 在 `agy` 里用 Google 登录 | 由 `agy` 命令行查询 | 没有公开来源 |
+| Antigravity CLI | `agy` | 1.5.19（2026-11-28） | 在 `agy` 里用 Google 登录 | 由 `agy` 命令行查询 | 本地对话数据库 |
 
-用量由 sideby 自己从 Claude Code 的 `projects/**/*.jsonl` 和 Codex 的 `sessions/**/rollout-*.jsonl` 统计，不需要 ccusage。Grok Build 的额度来自它的命令行，没有用量来源；pi 两者都没有。API 账号只显示用量，不显示额度。宿主没装时，`list` 照常列出它的账号并标注「宿主未安装」，`run` 会告诉你去哪里安装。
+用量由 sideby 自己从 Claude Code 的 `projects/**/*.jsonl`、Codex 的 `sessions/**/rollout-*.jsonl` 和 Antigravity CLI 的 `conversations/*.db` 统计，不需要 ccusage。Grok Build 的额度来自它的命令行，没有用量来源；pi 两者都没有。API 账号只显示用量，不显示额度。宿主没装时，`list` 照常列出它的账号并标注「宿主未安装」，`run` 会告诉你去哪里安装。
 
 各宿主的差异：
 

@@ -15,6 +15,7 @@ import {
 } from './layout.ts'
 import { AGY_SKIP_VALUE_FLAGS } from './mod.ts'
 import { AGY_DEFAULT_PICK_GROUP, agyQuotaFetch } from './quota.ts'
+import { readAgyUsage } from './usage.ts'
 
 export { AGY_FORCE_FILE_TOKEN_VAR, AGY_OAUTH_TOKEN_FILE, agyAppDataRelDir, agySelectArgs } from './layout.ts'
 export { AGY_DEFAULT_PICK_GROUP } from './quota.ts'
@@ -122,6 +123,7 @@ export const agyFamily: FamilyDef = {
     return {}
   },
   fetchQuota: agyQuotaFetch,
+  readUsage: readAgyUsage,
   resumedSession: agyResumedSession,
   sessionWrittenAt: agySessionWrittenAt,
   withoutResume: agyWithoutResume,

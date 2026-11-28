@@ -401,7 +401,7 @@
     }
   },
   "tests": {
-    "total": 2178,
+    "total": 2182,
     "files": {
       "mods/claude/hooks/register.test.ts": 7,
       "scripts/budget.test.ts": 7,
@@ -526,6 +526,7 @@
       "src/families/agy/index.test.ts": 18,
       "src/families/agy/live-sessions.test.ts": 5,
       "src/families/agy/mod.test.ts": 3,
+      "src/families/agy/usage.test.ts": 4,
       "src/families/claude/ai-task.test.ts": 3,
       "src/families/claude/handoff.test.ts": 5,
       "src/families/claude/history.test.ts": 7,
@@ -647,6 +648,12 @@
         "reason": "pure logic tests for onlyWhenActive, jitterMinutes, serialGapMs, and agyLastActivityAt (ADR-0092)",
         "from": 2176,
         "to": 2178
+      },
+      {
+        "date": "2026-11-28",
+        "reason": "ADR-0093 agy conversation database usage parser and memo tests",
+        "from": 2178,
+        "to": 2182
       }
     ]
   },
